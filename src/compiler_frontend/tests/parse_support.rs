@@ -19,6 +19,7 @@ use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
+use crate::compiler_frontend::symbols::identity::FileId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
@@ -59,7 +60,7 @@ pub(crate) fn parse_single_file_ast_build_result(
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        None,
+        Some(FileId(0)),
     )?;
 
     let output =

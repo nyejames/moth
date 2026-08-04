@@ -44,7 +44,7 @@ use crate::compiler_frontend::hir::reachability::{
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::module_dependencies::SortedHeaders;
 use crate::compiler_frontend::module_metadata::HirLoweringResult;
-use crate::compiler_frontend::paths::const_paths::StructuralProviderReference;
+use crate::compiler_frontend::paths::const_paths::RetainedProviderReference;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::public_interface::{
@@ -883,13 +883,13 @@ impl ModuleSyntaxDiscovery<'_> {
         &mut self.string_table
     }
 
-    /// Prepare one selected source and return the structural provider references parsed from the
+    /// Prepare one selected source and return the retained provider references parsed from the
     /// same retained header output.
     pub(super) fn prepare_source(
         &mut self,
         source_order: usize,
         source: &PreparedSourceInput,
-    ) -> Result<Vec<StructuralProviderReference>, CompilerMessages> {
+    ) -> Result<Vec<RetainedProviderReference>, CompilerMessages> {
         self.contains_moth_template |= source.is_moth_template();
         let entry_file_id = self
             .source_files

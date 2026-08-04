@@ -81,7 +81,9 @@ pub(crate) use export_projection::{
     build_direct_export_seed, build_public_source_nominal_origin_index,
     build_public_source_trait_origin_index,
 };
-pub(crate) use import_bindings::{SourceProviderImport, SourceProviderImportSet};
+pub(crate) use import_bindings::{
+    ProviderImportKind, ProviderInterfaceId, SourceProviderImport, SourceProviderImportSet,
+};
 #[cfg(test)]
 pub(crate) use model::LocalPublicInterface;
 #[cfg(test)]

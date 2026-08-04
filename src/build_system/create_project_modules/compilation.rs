@@ -14,7 +14,9 @@ use crate::compiler_frontend::compiler_messages::source_location::SourceLocation
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
-use crate::compiler_frontend::public_interface::{SourceProviderImport, SourceProviderImportSet};
+use crate::compiler_frontend::public_interface::{
+    ProviderImportKind, SourceProviderImport, SourceProviderImportSet,
+};
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
@@ -27,17 +29,16 @@ use crate::builder_surface::{BuilderSurface, SourceFileKind};
 use crate::compiler_frontend::source_packages::root_file::file_name_is_normal_module_root_file;
 use crate::projects::settings::{Config, LANGUAGE_SOURCE_EXTENSION};
 
-use std::collections::BTreeSet;
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::compiled_boundary::{
-    BlockedModule, BlockedProvider, CompiledGraphBoundary, CompiledSourcePackage, DiagnosedModule,
-    ProjectFrontendCompilation,
+    BlockedModule, BlockedProvider, CompiledGraphBoundary, CompiledSourcePackage,
+    CompletedSourcePackageRegistry, DiagnosedModule, PackageBoundaryId, ProjectFrontendCompilation,
 };
 use super::frontend_orchestration::{
     FrontendModuleBuildContext, ModuleCompilationOutcome, ModulePreparationContext,
@@ -504,8 +505,7 @@ struct DirectoryModuleCompileContext<'a> {
     provider_binding_index: &'a FxHashMap<(ModuleId, ImportShellId), usize>,
     source_package_imports: &'a [ResolvedSourcePackageImport],
     source_package_import_index: &'a FxHashMap<(ModuleId, ImportShellId), usize>,
-    completed_source_packages: &'a [CompiledSourcePackage],
-    completed_package_by_prefix: &'a FxHashMap<&'a str, usize>,
+    completed_packages: &'a CompletedSourcePackageRegistry,
 }
 
 struct SourcePackageModuleInventory {
@@ -531,12 +531,7 @@ pub(crate) fn build_provider_binding_index(
 ) -> Result<FxHashMap<(ModuleId, ImportShellId), usize>, CompilerError> {
     let mut index = FxHashMap::default();
     for (binding_index, binding) in provider_bindings.iter().enumerate() {
-        let import_shell_id = binding.provider.import_shell_id.ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "ModuleId {} produced a provider edge without a retained import shell identity",
-                binding.consumer_module_id.index()
-            ))
-        })?;
+        let import_shell_id = binding.provider.import_shell_id;
         let key = (binding.consumer_module_id, import_shell_id);
         if index.insert(key, binding_index).is_some() {
             return Err(CompilerError::compiler_error(format!(
@@ -557,12 +552,7 @@ pub(crate) fn build_source_package_import_index(
 ) -> Result<FxHashMap<(ModuleId, ImportShellId), usize>, CompilerError> {
     let mut index = FxHashMap::default();
     for (import_index, package_import) in source_package_imports.iter().enumerate() {
-        let import_shell_id = package_import.provider.import_shell_id.ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "ModuleId {} produced a source-package import without a retained import shell identity",
-                package_import.consumer_module_id.index()
-            ))
-        })?;
+        let import_shell_id = package_import.provider.import_shell_id;
         let key = (package_import.consumer_module_id, import_shell_id);
         if provider_binding_index.contains_key(&key) {
             return Err(CompilerError::compiler_error(format!(
@@ -583,22 +573,40 @@ pub(crate) fn build_source_package_import_index(
     Ok(index)
 }
 
-/// Index completed source packages once by import prefix.
-pub(crate) fn build_completed_package_index(
-    completed_source_packages: &[CompiledSourcePackage],
-) -> Result<FxHashMap<&str, usize>, CompilerError> {
-    let mut index = FxHashMap::default();
-    for (package_index, package) in completed_source_packages.iter().enumerate() {
-        let prefix = package.import_prefix();
-        if index.insert(prefix, package_index).is_some() {
-            return Err(CompilerError::compiler_error(format!(
-                "source package @{} completed more than once",
-                prefix
-            )));
-        }
+/// Index every consumer module's direct package dependencies once per boundary.
+///
+/// WHAT: resolves each resolved source-package import to its dense [`PackageBoundaryId`] and
+///       groups the IDs by consumer module, deduplicated and sorted in package order.
+/// WHY: readiness checks must walk only the current module's package dependencies. Building
+///      the grouped index once per boundary keeps that walk proportional to direct imports.
+pub(crate) fn build_module_package_dependency_index(
+    source_package_imports: &[ResolvedSourcePackageImport],
+    completed_packages: &CompletedSourcePackageRegistry,
+) -> Result<FxHashMap<ModuleId, Vec<PackageBoundaryId>>, CompilerError> {
+    let mut dependencies: FxHashMap<ModuleId, Vec<PackageBoundaryId>> = FxHashMap::default();
+
+    for package_import in source_package_imports {
+        let package_id = completed_packages
+            .by_prefix(package_import.import_prefix.as_str())
+            .ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "ModuleId {} depends on unindexed source package @{}",
+                    package_import.consumer_module_id.index(),
+                    package_import.import_prefix
+                ))
+            })?;
+        dependencies
+            .entry(package_import.consumer_module_id)
+            .or_default()
+            .push(package_id);
     }
 
-    Ok(index)
+    for package_ids in dependencies.values_mut() {
+        package_ids.sort_unstable();
+        package_ids.dedup();
+    }
+
+    Ok(dependencies)
 }
 
 impl<'a> DirectoryModuleCompileContext<'a> {
@@ -623,7 +631,7 @@ impl<'a> DirectoryModuleCompileContext<'a> {
             for import in file_imports {
                 if let Some(binding_index) = self
                     .provider_binding_index
-                    .get(&(consumer_module_id, import.import_shell_id))
+                    .get(&(consumer_module_id, import.provider.import_shell_id))
                 {
                     let binding = &self.provider_bindings[*binding_index];
                     let interface = self
@@ -638,9 +646,9 @@ impl<'a> DirectoryModuleCompileContext<'a> {
                         })?;
 
                     imports.push(SourceProviderImport {
-                        import_shell_id: Some(import.import_shell_id),
-                        import_prefix: None,
-                        implicit_template_scope: false,
+                        kind: ProviderImportKind::Authored {
+                            shell_id: import.provider.import_shell_id,
+                        },
                         interface,
                     });
                     continue;
@@ -648,14 +656,14 @@ impl<'a> DirectoryModuleCompileContext<'a> {
 
                 let Some(package_index) = self
                     .source_package_import_index
-                    .get(&(consumer_module_id, import.import_shell_id))
+                    .get(&(consumer_module_id, import.provider.import_shell_id))
                 else {
                     continue;
                 };
                 let package_import = &self.source_package_imports[*package_index];
-                let package_index = self
-                    .completed_package_by_prefix
-                    .get(package_import.import_prefix.as_str())
+                let package_id = self
+                    .completed_packages
+                    .by_prefix(package_import.import_prefix.as_str())
                     .ok_or_else(|| {
                         CompilerError::compiler_error(format!(
                             "ModuleId {} started semantic binding before source package @{} completed",
@@ -663,12 +671,12 @@ impl<'a> DirectoryModuleCompileContext<'a> {
                             package_import.import_prefix
                         ))
                     })?;
-                let completed_package = &self.completed_source_packages[*package_index];
+                let completed_package = self.completed_packages.package(package_id)?;
 
                 imports.push(SourceProviderImport {
-                    import_shell_id: Some(import.import_shell_id),
-                    import_prefix: None,
-                    implicit_template_scope: false,
+                    kind: ProviderImportKind::Authored {
+                        shell_id: import.provider.import_shell_id,
+                    },
                     interface: completed_package.root_interface()?,
                 });
             }
@@ -679,7 +687,7 @@ impl<'a> DirectoryModuleCompileContext<'a> {
         // builder surface; generic orchestration must not infer it from a package-name list.
         if prepared.contains_moth_template {
             let implicit_provider_imports: Vec<SourceProviderImport<'a>> = self
-                .completed_source_packages
+                .completed_packages
                 .iter()
                 .filter(|package| {
                     self.builder_surface
@@ -689,9 +697,9 @@ impl<'a> DirectoryModuleCompileContext<'a> {
                 .map(|package| {
                     let interface = package.root_interface()?;
                     Ok(SourceProviderImport {
-                        import_shell_id: None,
-                        import_prefix: Some(package.import_prefix()),
-                        implicit_template_scope: true,
+                        kind: ProviderImportKind::ImplicitTemplate {
+                            package_prefix: package.import_prefix(),
+                        },
                         interface,
                     })
                 })
@@ -700,7 +708,7 @@ impl<'a> DirectoryModuleCompileContext<'a> {
             imports.extend(implicit_provider_imports);
         }
 
-        Ok(SourceProviderImportSet::new(imports))
+        SourceProviderImportSet::new(imports)
     }
 
     fn compile(
@@ -756,7 +764,7 @@ impl<'a> DirectoryModuleCompileContext<'a> {
                 source_provider_materialisations: &SourceProviderMaterialisationSet::new(
                     self.provider_store
                         .materialisation_contexts()
-                        .chain(self.completed_source_packages.iter().flat_map(|package| {
+                        .chain(self.completed_packages.iter().flat_map(|package| {
                             package.boundary.modules.materialisation_contexts()
                         }))
                         .collect(),
@@ -806,12 +814,12 @@ fn compile_module_waves(
     module_waves: Vec<Vec<module_inventory::ModuleCompilationJob>>,
     provider_bindings: &[ResolvedDependencyEdge],
     source_package_imports: &[ResolvedSourcePackageImport],
-    completed_source_packages: &[CompiledSourcePackage],
+    completed_packages: &CompletedSourcePackageRegistry,
     string_table: &mut StringTable,
 ) -> Result<CompiledGraphBoundary, CompilerMessages> {
     let mut provider_store = ModuleArtifactStore::new(graph.nodes().len());
     let mut generated_store = BoundaryGeneratedFunctionStore::default();
-    for package in completed_source_packages {
+    for package in completed_packages.iter() {
         generated_store
             .import_completed_summaries(&package.boundary.generated)
             .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
@@ -824,8 +832,13 @@ fn compile_module_waves(
     let source_package_import_index =
         build_source_package_import_index(&provider_binding_index, source_package_imports)
             .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-    let completed_package_by_prefix = build_completed_package_index(completed_source_packages)
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+
+    // Index each consumer module's direct package dependencies once per boundary so readiness
+    // walks only the packages that module actually imports and never filters the full import
+    // vector for every job.
+    let module_package_dependencies =
+        build_module_package_dependency_index(source_package_imports, completed_packages)
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
     let mut diagnosed = Vec::new();
     let mut blocked = Vec::new();
@@ -859,24 +872,13 @@ fn compile_module_waves(
                 }
             }
 
-            if blocked_provider.is_none() {
-                for package_import in source_package_imports
-                    .iter()
-                    .filter(|source_import| source_import.consumer_module_id == job.module_id)
-                {
-                    let package_index = completed_package_by_prefix
-                        .get(package_import.import_prefix.as_str())
-                        .ok_or_else(|| {
-                            CompilerMessages::from_error_ref(
-                                CompilerError::compiler_error(format!(
-                                    "ModuleId {} became ready before source package @{} completed",
-                                    job.module_id.index(),
-                                    package_import.import_prefix
-                                )),
-                                string_table,
-                            )
-                        })?;
-                    let package = &completed_source_packages[*package_index];
+            if blocked_provider.is_none()
+                && let Some(package_ids) = module_package_dependencies.get(&job.module_id)
+            {
+                for package_id in package_ids {
+                    let package = completed_packages
+                        .package(*package_id)
+                        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
                     match package
                         .root_slot()
@@ -933,8 +935,7 @@ fn compile_module_waves(
                     provider_binding_index: &provider_binding_index,
                     source_package_imports,
                     source_package_import_index: &source_package_import_index,
-                    completed_source_packages,
-                    completed_package_by_prefix: &completed_package_by_prefix,
+                    completed_packages,
                 };
                 compile_context.compile(job, generated_store.session())
             };
@@ -993,7 +994,7 @@ fn compile_module_waves(
         .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
     let diagnosed_provider_exists = !diagnosed.is_empty()
-        || completed_source_packages
+        || completed_packages
             .iter()
             .any(|package| !package.boundary.diagnosed.is_empty());
     if !blocked.is_empty() && !diagnosed_provider_exists {
@@ -1021,65 +1022,122 @@ fn order_source_package_inventories(
     inventories: Vec<SourcePackageModuleInventory>,
     string_table: &StringTable,
 ) -> Result<Vec<SourcePackageModuleInventory>, CompilerMessages> {
-    let known_prefixes = inventories
+    let import_prefixes = inventories
         .iter()
         .map(|inventory| inventory.import_prefix.clone())
-        .collect::<BTreeSet<_>>();
-    let mut remaining = inventories.into_iter().map(Some).collect::<Vec<_>>();
-    let mut completed_prefixes = BTreeSet::new();
-    let mut ordered = Vec::with_capacity(remaining.len());
-
-    while ordered.len() < remaining.len() {
-        let mut next_index = None;
-
-        for (index, inventory) in remaining.iter().enumerate() {
-            let Some(inventory) = inventory else {
-                continue;
-            };
-            let dependencies = inventory
+        .collect::<Vec<_>>();
+    let dependency_prefixes = inventories
+        .iter()
+        .map(|inventory| {
+            inventory
                 .source_package_imports
                 .iter()
-                .map(|dependency| dependency.import_prefix.as_str())
-                .collect::<BTreeSet<_>>();
+                .map(|dependency| dependency.import_prefix.clone())
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
 
-            if let Some(unknown) = dependencies
-                .iter()
-                .find(|dependency| !known_prefixes.contains(**dependency))
-            {
-                let error = CompilerError::compiler_error(format!(
-                    "Source package @{} depends on unindexed source package @{}",
-                    inventory.import_prefix, unknown
-                ));
-                return Err(CompilerMessages::from_error_ref(error, string_table));
-            }
+    let order = order_packages_by_dependency(&import_prefixes, &dependency_prefixes)
+        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    let mut remaining = inventories.into_iter().map(Some).collect::<Vec<_>>();
+    let ordered = order
+        .into_iter()
+        .map(|index| {
+            remaining[index]
+                .take()
+                .expect("each package index is selected exactly once")
+        })
+        .collect();
 
-            if dependencies
-                .iter()
-                .all(|dependency| completed_prefixes.contains(*dependency))
-            {
-                next_index = Some(index);
-                break;
+    Ok(ordered)
+}
+
+/// Order packages by their direct provider dependencies using one deterministic dense schedule.
+///
+/// WHAT: builds the package dependency graph once over dense indices, then runs a Kahn schedule
+///       whose ready set leaves a min-heap in input order. The returned indices are the package
+///       positions in dependency-first order.
+/// WHY: package readiness and publication need one deterministic order without rebuilding
+///      dependency sets per pass; the dense schedule also detects unknown providers and cycles.
+pub(crate) fn order_packages_by_dependency(
+    import_prefixes: &[String],
+    dependency_prefixes: &[Vec<String>],
+) -> Result<Vec<usize>, CompilerError> {
+    let package_count = import_prefixes.len();
+    if dependency_prefixes.len() != package_count {
+        return Err(CompilerError::compiler_error(format!(
+            "package dependency schedule received {} packages but {} dependency rows",
+            package_count,
+            dependency_prefixes.len()
+        )));
+    }
+
+    let mut index_by_prefix: FxHashMap<&str, usize> = FxHashMap::default();
+    for (index, prefix) in import_prefixes.iter().enumerate() {
+        if index_by_prefix.insert(prefix.as_str(), index).is_some() {
+            return Err(CompilerError::compiler_error(format!(
+                "source package @{} appears more than once in the package inventory",
+                prefix
+            )));
+        }
+    }
+
+    // Build the deterministic dense dependency graph once: package -> direct consumers and the
+    // indegree of each package over its provider edges.
+    let mut consumer_lists: Vec<Vec<usize>> = vec![Vec::new(); package_count];
+    let mut indegree: Vec<usize> = vec![0; package_count];
+    for (index, dependencies) in dependency_prefixes.iter().enumerate() {
+        let mut seen_providers: FxHashSet<usize> = FxHashSet::default();
+        for dependency in dependencies {
+            let provider_index = index_by_prefix
+                .get(dependency.as_str())
+                .copied()
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(format!(
+                        "Source package @{} depends on unindexed source package @{}",
+                        import_prefixes[index], dependency
+                    ))
+                })?;
+            if seen_providers.insert(provider_index) {
+                consumer_lists[provider_index].push(index);
+                indegree[index] += 1;
             }
         }
+    }
 
-        let Some(next_index) = next_index else {
-            let blocked = remaining
-                .iter()
-                .flatten()
-                .map(|inventory| format!("@{}", inventory.import_prefix))
-                .collect::<Vec<_>>()
-                .join(", ");
-            let error = CompilerError::compiler_error(format!(
-                "Source package dependency cycle detected; no package is ready among {blocked}"
-            ));
-            return Err(CompilerMessages::from_error_ref(error, string_table));
-        };
+    // Deterministic Kahn schedule: ready packages leave the heap in lexicographic prefix order,
+    // and consumer lists are visited in the same deterministic discovery order.
+    let mut ready: std::collections::BinaryHeap<std::cmp::Reverse<(&str, usize)>> =
+        std::collections::BinaryHeap::new();
+    for (index, package_indegree) in indegree.iter().enumerate() {
+        if *package_indegree == 0 {
+            ready.push(std::cmp::Reverse((import_prefixes[index].as_str(), index)));
+        }
+    }
 
-        let inventory = remaining[next_index]
-            .take()
-            .expect("selected source-package inventory is present");
-        completed_prefixes.insert(inventory.import_prefix.clone());
-        ordered.push(inventory);
+    let mut ordered = Vec::with_capacity(package_count);
+    while let Some(std::cmp::Reverse((_, index))) = ready.pop() {
+        ordered.push(index);
+        for consumer_index in &consumer_lists[index] {
+            indegree[*consumer_index] -= 1;
+            if indegree[*consumer_index] == 0 {
+                ready.push(std::cmp::Reverse((
+                    import_prefixes[*consumer_index].as_str(),
+                    *consumer_index,
+                )));
+            }
+        }
+    }
+
+    if ordered.len() != package_count {
+        let blocked = (0..package_count)
+            .filter(|index| !ordered.contains(index))
+            .map(|index| format!("@{}", import_prefixes[index]))
+            .collect::<Vec<_>>();
+        return Err(CompilerError::compiler_error(format!(
+            "Source package dependency cycle detected; no package is ready among {}",
+            blocked.join(", ")
+        )));
     }
 
     Ok(ordered)
@@ -1219,7 +1277,7 @@ pub(crate) fn compile_directory_frontend(
     // their immutable facade interfaces. Each boundary owns independent dense IDs, graphs and
     // provider stores; only the stable public interface crosses into a consuming boundary.
     let module_compile_batch_start = crate::timing::start_pipeline_timing();
-    let mut completed_source_packages = Vec::new();
+    let mut completed_source_packages = CompletedSourcePackageRegistry::new();
     for inventory in source_package_inventories {
         let SourcePackageModuleInventory {
             package_identity,
@@ -1229,7 +1287,7 @@ pub(crate) fn compile_directory_frontend(
             module_waves,
             provider_bindings,
             source_package_imports,
-            ..
+            import_prefix: _,
         } = inventory;
         let boundary = compile_module_waves(
             config,
@@ -1245,12 +1303,25 @@ pub(crate) fn compile_directory_frontend(
             &completed_source_packages,
             string_table,
         )?;
-        completed_source_packages.push(CompiledSourcePackage {
-            package_identity,
-            root_module_id,
-            boundary,
-        });
+        let dependency_prefixes = source_package_imports
+            .iter()
+            .map(|dependency| dependency.import_prefix.clone())
+            .collect::<Vec<_>>();
+        completed_source_packages
+            .publish(
+                CompiledSourcePackage {
+                    package_identity,
+                    root_module_id,
+                    boundary,
+                },
+                &dependency_prefixes,
+            )
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
     }
+
+    completed_source_packages
+        .validate_dependency_edges()
+        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
     let (project_module_waves, project_provider_bindings, project_source_package_imports) =
         module_waves.into_parts();
@@ -1277,6 +1348,6 @@ pub(crate) fn compile_directory_frontend(
 
     Ok(ProjectFrontendCompilation::new(
         project_boundary,
-        completed_source_packages,
+        completed_source_packages.into_packages(),
     ))
 }

@@ -38,7 +38,7 @@ use crate::compiler_frontend::semantic_identity::{
     ExportBinding, ModuleRootRole, OriginDeclarationId, OriginFunctionId, OriginTraitId,
     OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity, StablePackageIdentity,
 };
-use crate::compiler_frontend::symbols::identity::ImportShellId;
+use crate::compiler_frontend::symbols::identity::{FileId, ImportShellId};
 
 fn empty_summary() -> PublicCallSummary {
     PublicCallSummary {
@@ -288,11 +288,12 @@ fn rejects_binding_target_with_wrong_symbol_category_on_consumer_admission() {
         category: ExternalSymbolCategory::Type,
     });
     let provider_imports = SourceProviderImportSet::new(vec![SourceProviderImport {
-        import_shell_id: Some(ImportShellId::new(None, 0)),
-        import_prefix: None,
-        implicit_template_scope: false,
+        kind: crate::compiler_frontend::public_interface::ProviderImportKind::Authored {
+            shell_id: ImportShellId::new(FileId(0), 0),
+        },
         interface: &interface,
-    }]);
+    }])
+    .expect("one authored provider should register");
 
     let error = provider_imports
         .validate_binding_targets(&ExternalPackageRegistry::new())
@@ -686,11 +687,12 @@ fn closes_provider_reexport_over_nested_nominal_without_adding_a_public_binding(
         ),
     ];
     let provider_imports = SourceProviderImportSet::new(vec![SourceProviderImport {
-        import_shell_id: None,
-        import_prefix: None,
-        implicit_template_scope: false,
+        kind: crate::compiler_frontend::public_interface::ProviderImportKind::Authored {
+            shell_id: ImportShellId::new(FileId(0), 0),
+        },
         interface: &provider,
-    }]);
+    }])
+    .expect("one authored provider should register");
 
     let facade = PublicSemanticInterface::close_from_local(
         local_interface(facade_bindings, Vec::new(), Vec::new()),

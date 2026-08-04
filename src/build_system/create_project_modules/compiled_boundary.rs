@@ -19,6 +19,8 @@ use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
+use rustc_hash::{FxHashMap, FxHashSet};
+
 use super::generated_worklist::BoundaryGeneratedFunctionStore;
 use super::module_artifact_store::{ModuleArtifactStore, ProviderSlot};
 use super::module_identity::ModuleId;
@@ -130,6 +132,184 @@ impl CompiledSourcePackage {
                     self.import_prefix()
                 ))
             })
+    }
+}
+
+/// Dense build-local identity of one completed source-package boundary.
+///
+/// WHAT: an operation-local handle into [`CompletedSourcePackageRegistry`]. It never enters a
+///       compiled artefact or public semantic identity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) struct PackageBoundaryId(usize);
+
+impl PackageBoundaryId {
+    pub(crate) fn index(self) -> usize {
+        self.0
+    }
+}
+
+/// One incrementally maintained registry of completed source-package boundaries.
+///
+/// WHAT: stores completed packages contiguously, resolves import prefixes to dense
+///       [`PackageBoundaryId`] values, and records the package dependency graph (provider and
+///       consumer edges) exactly once when each package publishes.
+/// WHY: every boundary compilation and module readiness check previously rebuilt prefix maps or
+///      filtered the full import vector per module; one registry keeps package indexing and
+///      dependency adjacency in a single build-owned owner.
+/// MUST NOT: store project modules, merge package artefacts into one vector, or expose
+/// package-local dense handles as cross-boundary semantic identities.
+pub(crate) struct CompletedSourcePackageRegistry {
+    packages: Vec<CompiledSourcePackage>,
+    by_prefix: FxHashMap<String, PackageBoundaryId>,
+    provider_packages: Vec<Vec<PackageBoundaryId>>,
+    consumer_packages: Vec<Vec<PackageBoundaryId>>,
+}
+
+impl CompletedSourcePackageRegistry {
+    pub(crate) fn new() -> Self {
+        Self {
+            packages: Vec::new(),
+            by_prefix: FxHashMap::default(),
+            provider_packages: Vec::new(),
+            consumer_packages: Vec::new(),
+        }
+    }
+
+    /// Publish one completed package boundary with its direct provider packages.
+    ///
+    /// WHAT: resolves every dependency prefix once, rejects unknown or duplicate prefixes, and
+    ///       records both dependency directions beside the package row.
+    /// WHY: packages compile in dependency order, so every provider prefix must already have a
+    ///      registry entry; a missing entry is a proven scheduling invariant failure.
+    pub(crate) fn publish(
+        &mut self,
+        package: CompiledSourcePackage,
+        dependency_prefixes: &[String],
+    ) -> Result<PackageBoundaryId, CompilerError> {
+        let prefix = package.import_prefix().to_owned();
+        if self.by_prefix.contains_key(prefix.as_str()) {
+            return Err(CompilerError::compiler_error(format!(
+                "source package @{} completed more than once",
+                prefix
+            )));
+        }
+
+        let package_id = PackageBoundaryId(self.packages.len());
+        self.packages.push(package);
+        self.provider_packages.push(Vec::new());
+        self.consumer_packages.push(Vec::new());
+        self.by_prefix.insert(prefix.clone(), package_id);
+
+        let mut seen_providers: FxHashSet<PackageBoundaryId> = FxHashSet::default();
+        for dependency_prefix in dependency_prefixes {
+            let provider_id = self
+                .by_prefix
+                .get(dependency_prefix.as_str())
+                .copied()
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(format!(
+                        "source package @{} depends on unindexed source package @{}",
+                        prefix, dependency_prefix
+                    ))
+                })?;
+            if !seen_providers.insert(provider_id) {
+                continue;
+            }
+            self.provider_packages[package_id.0].push(provider_id);
+            self.consumer_packages[provider_id.0].push(package_id);
+        }
+
+        Ok(package_id)
+    }
+
+    pub(crate) fn by_prefix(&self, import_prefix: &str) -> Option<PackageBoundaryId> {
+        self.by_prefix.get(import_prefix).copied()
+    }
+
+    pub(crate) fn package(
+        &self,
+        package_id: PackageBoundaryId,
+    ) -> Result<&CompiledSourcePackage, CompilerError> {
+        self.packages.get(package_id.0).ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "completed source package registry has no package for boundary id {}",
+                package_id.0
+            ))
+        })
+    }
+
+    /// Direct provider packages of one completed package, in dependency resolution order.
+    pub(crate) fn provider_packages(
+        &self,
+        package_id: PackageBoundaryId,
+    ) -> Result<&[PackageBoundaryId], CompilerError> {
+        self.provider_packages
+            .get(package_id.0)
+            .map(Vec::as_slice)
+            .ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "completed source package registry has no provider edges for boundary id {}",
+                    package_id.0
+                ))
+            })
+    }
+
+    /// Direct consumers of one completed package, in publication order.
+    pub(crate) fn consumer_packages(
+        &self,
+        package_id: PackageBoundaryId,
+    ) -> Result<&[PackageBoundaryId], CompilerError> {
+        self.consumer_packages
+            .get(package_id.0)
+            .map(Vec::as_slice)
+            .ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "completed source package registry has no consumer edges for boundary id {}",
+                    package_id.0
+                ))
+            })
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &CompiledSourcePackage> {
+        self.packages.iter()
+    }
+
+    /// Validate that every recorded dependency edge follows publication order.
+    ///
+    /// WHAT: each package's provider edges must point at earlier package IDs and its consumer
+    ///       edges at later package IDs, proving the dense schedule published dependencies
+    ///       before dependants.
+    /// WHY: the registry records package dependency adjacency exactly once; this invariant
+    ///       check keeps the recorded graph usable without re-deriving it from import vectors.
+    pub(crate) fn validate_dependency_edges(&self) -> Result<(), CompilerError> {
+        for package_id in 0..self.packages.len() {
+            let package_id = PackageBoundaryId(package_id);
+            for provider_id in self.provider_packages(package_id)? {
+                if provider_id.index() >= package_id.index() {
+                    return Err(CompilerError::compiler_error(format!(
+                        "source package @{} lists provider package {} that did not publish first",
+                        self.package(package_id)?.import_prefix(),
+                        self.package(*provider_id)?.import_prefix()
+                    )));
+                }
+            }
+            for consumer_id in self.consumer_packages(package_id)? {
+                if consumer_id.index() <= package_id.index() {
+                    return Err(CompilerError::compiler_error(format!(
+                        "source package @{} lists consumer package {} that published before it",
+                        self.package(package_id)?.import_prefix(),
+                        self.package(*consumer_id)?.import_prefix()
+                    )));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Consume the registry, returning the completed packages in publication order.
+    pub(crate) fn into_packages(self) -> Vec<CompiledSourcePackage> {
+        self.packages
     }
 }
 

@@ -24,10 +24,10 @@ ACTIVE_PLAN: docs/roadmap/plans/canonical-module-compilation-and-scoped-packages
 WORK_ID: R5-closeout
 WORK_SOURCE: parent in-depth review of the implemented R5C1-R5C3 checkpoint
 BASE_REVISION: 85199889194ba6b3a378d9d25a4bd72f74a57ed4 (implementation checkpoint reviewed; later main commits are unrelated docs/benchmark work)
-STATUS: blocked - R5C2/R5C3 correction train required before R5C4
+STATUS: active - R5C2A checkpointed; R5C3A next
 CURRENT_SLICE: R5C2A - exact provider identity, valid import states and one package registry
 LAST_ACCEPTED_COMMIT: 6750c9a57238203ba83b2a31d74d6a19ecf36d70 (R5C1); R5C2/R5C3 remain implemented on main but their acceptance is reopened by this review
-WORKTREE: committed main; this replacement is plan-only
+WORKTREE: committed main; coordinator-owned edits begin after this record
 REQUIRED_RELOADS: AGENTS.md, this plan, compiler-design-overview.md, build-system-design.md, compilation.rs, compiled_boundary.rs, module_artifact_store.rs, source_discovery.rs, headers/file_imports.rs, public_interface/import_bindings.rs, public_interface/interface_view.rs, public_interface/interface_closure.rs and headers/import_environment/
 RELEVANT_CONTEXT_NOW:
 - R5C1 retained project/package graph boundaries, dense ModuleId-to-artefact mappings, generated lanes and diagnosed/blocked outcomes
@@ -40,14 +40,14 @@ ACCEPTANCE_CRITERIA:
 - equal module origins with differing interface contents fail deterministically
 - completed source packages and per-consumer package dependencies are indexed once
 - package ordering uses one deterministic dense dependency graph rather than repeated whole-set scans
-VALIDATION_STATE: the 851998891 checkpoint passed cargo fmt --all and full just validate; correction slices have not been implemented or validated
+VALIDATION_STATE: R5C2A passes cargo fmt --all, cargo test -p moth (4010 lib + 17 + 581 workspace), cargo run tests --terse (1817/1817), moth docs check, and moth clippy -D warnings; full just validate blocked by unrelated in-progress benchmark work in xtask (parallel owner)
 DOCS_IMPACT: active plan only unless implementation exposes architecture-doc drift
 BLOCKERS_OR_OPEN_DECISIONS: none for R5C2A; stop if exact provider identity cannot be introduced without another durable semantic identity
-AUDIT_STATE: parent architecture review completed and reopened R5C2/R5C3; run a fresh focused audit after R5C2A and a full provider/closure audit after R5C3B
-DELEGATION_DECISION: use the preferred implementation worker for bounded slices and a separate read-only auditor at the named review gates
-NEXT_WORKER_ORDER: R5C2A -> review -> R5C3A -> R5C3B -> parent review -> R5C4
-STOP_REASON: the reviewed R5C3 checkpoint leaves first-provider-wins evidence, cache identity drift and repeated header-binding projection
-NEXT_RESUME_ACTION: implement R5C2A only, run full validation and stop for review
+AUDIT_STATE: focused R5C2A audit reported two low findings (config FileId placeholder comment, missing unstamped-shell guard test); both corrected and validated. Audit run itself returned workspace_conflict because the parallel benchmark owner mutated the worktree mid-run; verification of corrections folds into the next focused audit after R5C3A. Full provider/closure audit still required after R5C3B.
+DELEGATION_DECISION: coordinator-owned implementation for the R5C2A correction train; separate read-only auditors at the named review gates
+NEXT_WORKER_ORDER: R5C2A -> audit -> R5C3A -> R5C3B -> audit -> R5C4 -> R5C5 -> R5C6 -> R5C7 -> R5C8 -> R5C9 -> R6 -> R7 -> R8
+STOP_REASON: none active; user requested continuation through plan completion
+NEXT_RESUME_ACTION: begin R5C3A (one-time provider projection in header binding); focused audit after R5C3A covers R5C2A corrections
 ```
 
 Keep this block current and concise. Git history is the durable implementation history. Do not append worker transcripts or complete validation logs.

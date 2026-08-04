@@ -4,12 +4,13 @@
 //! WHY: import shells and their local names must be known before declaration headers are built,
 //! but full visibility and public-surface validation remain later header-stage responsibilities.
 
+use crate::compiler_frontend::compiler_errors::{CompilerError, compiler_error_to_diagnostic};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::headers::file_state::HeaderFileParseState;
 use crate::compiler_frontend::headers::imports::normalize_import_dependency_path;
 use crate::compiler_frontend::headers::types::{FileImport, HeaderExportMode, HeaderParseContext};
 use crate::compiler_frontend::paths::const_paths::{
-    StructuralProviderReference, parse_import_clause_items,
+    RetainedProviderReference, ScannedProviderReference, parse_import_clause_items,
 };
 use crate::compiler_frontend::symbols::identity::{FileId, ImportShellId};
 use crate::compiler_frontend::symbols::string_interning::StringId;
@@ -23,8 +24,8 @@ use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation};
 type FileImportResult<T> = Result<T, Box<CompilerDiagnostic>>;
 
 struct ImportItemRecord {
-    provider: StructuralProviderReference,
-    authored_provider: StructuralProviderReference,
+    provider: ScannedProviderReference,
+    authored_provider: ScannedProviderReference,
     alias: Option<StringId>,
     location: SourceLocation,
     alias_location: Option<SourceLocation>,
@@ -106,14 +107,21 @@ fn parse_and_record_import_clause(
             context.string_table,
         )?;
 
+        let file_id = token_stream.file_id.ok_or_else(|| {
+            Box::new(compiler_error_to_diagnostic(
+                &CompilerError::compiler_error(
+                    "header import shell cannot be stamped without a retained source file identity",
+                ),
+            ))
+        })?;
+
         record_import_item(
             state,
-            token_stream.file_id,
+            file_id,
             ImportItemRecord {
-                provider: StructuralProviderReference {
+                provider: ScannedProviderReference {
                     path: normalized_path,
                     path_location: item.provider.path_location,
-                    import_shell_id: None,
                     from_grouped: item.from_grouped,
                 },
                 authored_provider,
@@ -137,11 +145,7 @@ fn parse_and_record_import_clause(
 /// import record.
 /// WHY: a module root may repeat an import as a re-export, or import and re-export the same symbol
 /// under the same local name. Normalization avoids duplicate records while preserving visibility.
-fn record_import_item(
-    state: &mut HeaderFileParseState,
-    file_id: Option<FileId>,
-    record: ImportItemRecord,
-) {
+fn record_import_item(state: &mut HeaderFileParseState, file_id: FileId, record: ImportItemRecord) {
     let local_name = record.alias.or_else(|| record.provider.path.name());
     if let Some(name) = local_name {
         state
@@ -158,12 +162,19 @@ fn record_import_item(
         // The ordinal is the next retained shell index in this file, so duplicates that collapse
         // into an existing record keep the earlier shell identity.
         let import_shell_id = ImportShellId::new(file_id, state.file_imports.len() as u32);
-        let mut provider = record.provider;
-        provider.import_shell_id = Some(import_shell_id);
-        let mut authored_provider = record.authored_provider;
-        authored_provider.import_shell_id = Some(import_shell_id);
-        state.file_imports.push(FileImport {
+        let provider = RetainedProviderReference {
+            path: record.provider.path,
+            path_location: record.provider.path_location,
+            from_grouped: record.provider.from_grouped,
             import_shell_id,
+        };
+        let authored_provider = RetainedProviderReference {
+            path: record.authored_provider.path,
+            path_location: record.authored_provider.path_location,
+            from_grouped: record.authored_provider.from_grouped,
+            import_shell_id,
+        };
+        state.file_imports.push(FileImport {
             provider,
             authored_provider,
             alias: record.alias,

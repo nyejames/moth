@@ -565,7 +565,11 @@ fn discover_modules_serial_provider_capable(
                 }
 
                 let resolved = directory_import_resolution
-                    .resolve_import(&provider, input.source_path(), syntax.string_table_mut())
+                    .resolve_import(
+                        provider.path_view(),
+                        input.source_path(),
+                        syntax.string_table_mut(),
+                    )
                     .map_err(|diagnostic| {
                         CompilerMessages::from_diagnostics(
                             vec![diagnostic],

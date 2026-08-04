@@ -307,13 +307,17 @@ fn prepare_config_file(
 
     // The caller already interned the file's scope identity, so tokenization reuses it directly
     // without a second `InternedPath::try_from_filesystem_path` round-trip.
+    // Config is one self-contained file and never participates in provider binding, so the
+    // placeholder file identity only stamps shells that are rejected as
+    // `ConfigImportUnsupported` immediately after preparation. It is intentionally isolated
+    // from every module/package identity space.
     let mut token_stream = match tokenize(
         &source,
         &scope,
         TokenizerEntryMode::SourceFile,
         services.style_directives,
         string_table,
-        None,
+        Some(crate::compiler_frontend::symbols::identity::FileId(0)),
     ) {
         Ok(tokens) => tokens,
         Err(error) => {

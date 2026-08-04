@@ -19,16 +19,16 @@ pub struct FileId(pub u32);
 ///       Stage 0 edges and header import shells join by identity instead of path text.
 /// WHY: provider binding must not compare path components or suffixes; the header preparation
 ///      pass assigns one ID per retained shell and the graph keeps that exact ID on its edges.
-///      `source` is `None` only in synthetic test contexts that parse headers without a
-///      `SourceFileTable`; every production module shell carries a real file identity.
+///      Every retained shell carries a real file identity; synthetic tests obtain a real test
+///      `FileId` from test support.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ImportShellId {
-    pub source: Option<FileId>,
+    pub source: FileId,
     pub ordinal: u32,
 }
 
 impl ImportShellId {
-    pub fn new(source: Option<FileId>, ordinal: u32) -> Self {
+    pub fn new(source: FileId, ordinal: u32) -> Self {
         Self { source, ordinal }
     }
 }

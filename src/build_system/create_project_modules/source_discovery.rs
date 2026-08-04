@@ -19,7 +19,9 @@ use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
-use crate::compiler_frontend::paths::const_paths::StructuralProviderReference;
+use crate::compiler_frontend::paths::const_paths::{
+    ProviderImportPathView, RetainedProviderReference, ScannedProviderReference,
+};
 use crate::compiler_frontend::paths::path_normalization::join_and_normalize_path;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -82,7 +84,7 @@ pub(super) enum StructuralProviderAction {
 /// Directory module scheduling calls this with provider references retained by header syntax.
 /// It never scans tokens or source text.
 pub(super) fn resolve_structural_provider_reference(
-    provider: &StructuralProviderReference,
+    provider: &RetainedProviderReference,
     canonical_file: &Path,
     project_path_resolver: &ProjectPathResolver,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
@@ -136,7 +138,7 @@ pub(super) struct ReachableSourceInventory {
 pub(crate) struct ResolvedDependencyEdge {
     pub(super) provider_module_id: ModuleId,
     pub(super) consumer_module_id: ModuleId,
-    pub(super) provider: StructuralProviderReference,
+    pub(super) provider: RetainedProviderReference,
     pub(super) graph_location: SourceLocation,
 }
 
@@ -145,7 +147,7 @@ pub(crate) struct ResolvedDependencyEdge {
 pub(crate) struct ResolvedSourcePackageImport {
     pub(super) consumer_module_id: ModuleId,
     pub(super) import_prefix: String,
-    pub(super) provider: StructuralProviderReference,
+    pub(super) provider: RetainedProviderReference,
 }
 
 /// Reachable discovery output pairing the file inventory with direct dependency edges.
@@ -431,7 +433,7 @@ impl<'a, 'b> ImportPolicy<'a, 'b> {
 
 /// Result of scanning one `.moth` file during traversal.
 struct ScannedMothSource {
-    imports: Vec<StructuralProviderReference>,
+    imports: Vec<ScannedProviderReference>,
     fresh_read: bool,
     source_byte_count: usize,
 }
@@ -580,7 +582,7 @@ fn traverse_reachable_source_files(
                         queue: &mut queue,
                     };
                     let result = resolve_and_queue_local_import(
-                        provider,
+                        provider.path_view(),
                         &canonical_file,
                         project_path_resolver,
                         string_table,
@@ -655,7 +657,7 @@ pub(super) fn discover_reachable_source_files(
 /// WHY: one owner keeps indexed resolution, same-module queuing and graph-edge retention aligned.
 ///      A graph edge is retained only when indexed resolution crosses project module roots.
 fn resolve_and_queue_local_import(
-    provider: &StructuralProviderReference,
+    provider: ProviderImportPathView<'_>,
     canonical_file: &Path,
     project_path_resolver: &ProjectPathResolver,
     string_table: &mut StringTable,
@@ -677,14 +679,14 @@ fn resolve_and_queue_local_import(
 /// the original resolver path. No dependency edges are collected because there is no project
 /// module graph to populate.
 fn resolve_and_queue_via_filesystem(
-    provider: &StructuralProviderReference,
+    provider: ProviderImportPathView<'_>,
     canonical_file: &Path,
     project_path_resolver: &ProjectPathResolver,
     string_table: &mut StringTable,
     reachable_queue: &mut ReachableQueue<'_>,
 ) -> Result<(), SourceDiscoveryError> {
     let resolved = project_path_resolver
-        .resolve_import_to_source_file(&provider.path, canonical_file, string_table)
+        .resolve_import_to_source_file(provider.path, canonical_file, string_table)
         .map_err(SourceDiscoveryError::from)?;
 
     let resolved_source_file = resolved_source_file(&resolved.path, resolved.kind);

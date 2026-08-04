@@ -405,18 +405,19 @@ fn provider_reexport_preserves_alias_and_provider_provenance() {
         concrete_call_summaries: Vec::new(),
     };
     let provider_imports = SourceProviderImportSet::new(vec![SourceProviderImport {
-        import_shell_id: Some(ImportShellId::new(None, 0)),
-        import_prefix: None,
-        implicit_template_scope: false,
+        kind: crate::compiler_frontend::public_interface::ProviderImportKind::Authored {
+            shell_id: ImportShellId::new(FileId(0), 0),
+        },
         interface: &provider_interface,
-    }]);
+    }])
+    .expect("one authored provider should register");
     fixture.module_symbols.module_root_public_exports.insert(
         fixture.module_root.clone(),
         [PublicExportEntry {
             export_name: fixture.string_table.intern("PublicImported"),
             target: PublicExportTarget::Source {
                 path: target_path,
-                import_shell_id: Some(ImportShellId::new(None, 0)),
+                import_shell_id: Some(ImportShellId::new(FileId(0), 0)),
             },
         }]
         .into_iter()
@@ -1006,8 +1007,9 @@ fn public_source_nominal_origin_index_rejects_missing_file_id() {
         header.tokens.file_id = Some(active_file_id);
         headers.push(header);
     }
-    for header in imported_output.headers {
+    for mut header in imported_output.headers {
         // Deliberately keep file_id = None on the imported header.
+        header.tokens.file_id = None;
         headers.push(header);
     }
 
@@ -1656,7 +1658,10 @@ fn public_source_trait_origin_index_rejects_missing_file_id() {
         &file_path,
         &mut string_table,
     );
-    let headers: Vec<Header> = output.headers;
+    let mut headers: Vec<Header> = output.headers;
+    for header in &mut headers {
+        header.tokens.file_id = None;
+    }
     let source_files = SourceFileTable::build(
         std::iter::once(file_path.clone()),
         &file_path,

@@ -6,7 +6,7 @@
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::paths::const_paths::{
-    StructuralProviderReference, collect_provider_references_from_tokens,
+    ScannedProviderReference, collect_provider_references_from_tokens,
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
@@ -21,14 +21,14 @@ use super::source_loading::extract_source_code;
 
 /// Import scan output that keeps the already-read source available to Stage 0.
 ///
-/// WHAT: pairs structural provider references with the Moth source text used to discover
+/// WHAT: pairs scanned provider references with the Moth source text used to discover
 ///      them.
 /// WHY: reachable-file discovery consumes the references directly, using `path` for current
 ///      resolution while retaining `path_location` for the graph boundary, and reuses the source
 ///      when assembling `PreparedSourceInput` values instead of reading each scanned `.moth` file again.
 #[derive(Clone)]
 pub(super) struct ScannedImportSource {
-    pub(super) imports: Vec<StructuralProviderReference>,
+    pub(super) imports: Vec<ScannedProviderReference>,
     pub(super) source_code: String,
     /// Exact token stream from the single Stage 0 lexical pass over this Moth file.
     ///

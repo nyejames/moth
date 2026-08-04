@@ -27,6 +27,7 @@ use crate::compiler_frontend::headers::types::HeaderExportMode;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
+use crate::compiler_frontend::symbols::identity::FileId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
@@ -63,7 +64,7 @@ pub(crate) fn prepare_single_file(
         TokenizerEntryMode::SourceFile,
         &style_directives,
         string_table,
-        None,
+        Some(FileId(0)),
     )
     .expect("tokenization should succeed");
 
@@ -87,7 +88,7 @@ fn prepare_test_source_file(
         TokenizerEntryMode::SourceFile,
         context.style_directives,
         string_table,
-        None,
+        Some(FileId(0)),
     ) {
         Ok(file_tokens) => file_tokens,
         Err(diagnostic) => {
@@ -106,6 +107,46 @@ fn prepare_test_source_file(
         const_template_offset,
         runtime_fragment_offset,
     )
+}
+
+#[test]
+fn import_shell_without_retained_file_identity_fails_preparation() {
+    let mut string_table = StringTable::new();
+    let file_path = PathBuf::from("src/@page.moth");
+    let interned_path = InternedPath::try_from_filesystem_path(&file_path, &mut string_table)
+        .expect("test path should be UTF-8");
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let file_tokens = tokenize(
+        "import @core/math\n",
+        &interned_path,
+        TokenizerEntryMode::SourceFile,
+        &style_directives,
+        &mut string_table,
+        None,
+    )
+    .expect("tokenization should succeed");
+
+    let error = match prepare_file_from_tokens(
+        file_tokens,
+        &file_path,
+        &HeaderParseOptions::default(),
+        &mut string_table,
+        0,
+        0,
+    ) {
+        Ok(_) => panic!("an import shell without a retained file identity must fail preparation"),
+        Err(error) => error,
+    };
+
+    assert!(
+        matches!(
+            &error.diagnostic.payload,
+            DiagnosticPayload::InfrastructureError { msg, .. }
+                if msg.contains("cannot be stamped without a retained source file identity")
+        ),
+        "unexpected diagnostic payload: {:?}",
+        error.diagnostic.payload
+    );
 }
 
 fn prepare_active_root_with_role(
@@ -224,7 +265,7 @@ fn parse_single_file_headers_with_entry(
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        None,
+        Some(FileId(0)),
     )
     .expect("tokenization should succeed");
 
@@ -2554,7 +2595,7 @@ fn retained_import_shells_get_deterministic_ordinals_and_collapse_duplicates() {
     );
 
     let grouped = &output.file_imports[0];
-    assert_eq!(grouped.import_shell_id.ordinal, 0);
+    assert_eq!(grouped.provider.import_shell_id.ordinal, 0);
     assert!(grouped.from_grouped);
     assert_eq!(
         grouped.export_mode,
@@ -2562,24 +2603,17 @@ fn retained_import_shells_get_deterministic_ordinals_and_collapse_duplicates() {
         "the duplicate public occurrence must upgrade the collapsed shell without replacing it"
     );
     assert_eq!(
-        grouped.provider.import_shell_id,
-        Some(grouped.import_shell_id),
+        grouped.provider.import_shell_id, grouped.authored_provider.import_shell_id,
         "the normalized provider reference must keep the exact shell identity"
     );
     assert_eq!(
-        grouped.authored_provider.import_shell_id,
-        Some(grouped.import_shell_id),
+        grouped.authored_provider.import_shell_id, grouped.provider.import_shell_id,
         "the authored provider reference must keep the exact shell identity"
     );
 
     let bare = &output.file_imports[1];
-    assert_eq!(bare.import_shell_id.ordinal, 1);
+    assert_eq!(bare.provider.import_shell_id.ordinal, 1);
     assert!(!bare.from_grouped);
-    assert_eq!(
-        bare.provider.import_shell_id,
-        Some(bare.import_shell_id),
-        "bare imports receive their own shell identity"
-    );
 }
 
 #[test]

@@ -16,6 +16,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{
     bind_module_headers, prepare_file_from_tokens, prepare_header_syntax,
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
+use crate::compiler_frontend::symbols::identity::FileId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
@@ -45,7 +46,7 @@ fn parse_module_headers(
             TokenizerEntryMode::SourceFile,
             &style_directives,
             &mut string_table,
-            None,
+            Some(FileId(0)),
         )
         .expect("tokenization should succeed");
 
@@ -351,7 +352,7 @@ fn capacity_reference_same_file_forward_reference_is_rejected() {
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        None,
+        Some(FileId(0)),
     )
     .expect("tokenization should succeed");
 

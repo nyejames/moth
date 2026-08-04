@@ -401,12 +401,12 @@ fn resolve_public_export_import_or_provider(
     string_table: &mut StringTable,
 ) -> PublicExportDataResult<PublicExportTarget> {
     if source_provider_imports
-        .resolve(import.import_shell_id)
+        .resolve(import.provider.import_shell_id)
         .is_some()
     {
         return Ok(PublicExportTarget::Source {
             path: import.provider.path.clone(),
-            import_shell_id: Some(import.import_shell_id),
+            import_shell_id: Some(import.provider.import_shell_id),
         });
     }
 

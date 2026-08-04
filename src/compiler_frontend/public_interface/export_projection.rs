@@ -45,12 +45,11 @@
 //! (export-capable roots versus the active module root alone); this module's projection is
 //! narrower because imported-module-root headers belong to another module's component.
 
-use super::SourceProviderImportSet;
 use super::interface_view::InterfaceView;
 use super::model::{
     PublicBindingExport, PublicDiagnosticLocation, PublicExportDiagnosticProvenance,
-    PublicSemanticInterface,
 };
+use super::{ProviderInterfaceId, SourceProviderImportSet};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::module_symbols::{
@@ -276,9 +275,8 @@ fn collect_binding_exports<'a>(
     }
 
     let mut exports = Vec::new();
-    // One transient binding view per completed interface for this operation.
-    let mut binding_views: FxHashMap<&'a StableModuleOriginIdentity, InterfaceView<'a>> =
-        FxHashMap::default();
+    // One transient binding view per provider interface for this operation.
+    let mut binding_views: FxHashMap<ProviderInterfaceId, InterfaceView<'a>> = FxHashMap::default();
     for entry in entries {
         let target = match &entry.target {
             PublicExportTarget::External(symbol_id) => external_registry
@@ -293,7 +291,7 @@ fn collect_binding_exports<'a>(
                 path: target_path,
                 import_shell_id: Some(import_shell_id),
             } => {
-                let Some(provider_interface) =
+                let Some(provider_id) =
                     source_provider_imports.resolve_reexport(*import_shell_id)
                 else {
                     continue;
@@ -304,7 +302,8 @@ fn collect_binding_exports<'a>(
                         target_path
                     ))
                 })?;
-                let view = interface_view_for(&mut binding_views, provider_interface)?;
+                let view =
+                    interface_view_for(&mut binding_views, source_provider_imports, provider_id)?;
                 let Some(binding) = view.binding_export(imported_name) else {
                     continue;
                 };
@@ -831,8 +830,7 @@ fn collect_reexport_bindings(
     }
 
     let mut bindings = Vec::new();
-    let mut binding_views: FxHashMap<&StableModuleOriginIdentity, InterfaceView<'_>> =
-        FxHashMap::default();
+    let mut binding_views: FxHashMap<ProviderInterfaceId, InterfaceView<'_>> = FxHashMap::default();
     let context = ReexportBindingContext {
         source_module_origins,
         module_origin,
@@ -939,7 +937,7 @@ fn collect_one_reexport_binding<'a>(
     bindings: &mut Vec<ReexportBinding>,
     entry: &PublicExportEntry,
     context: &ReexportBindingContext<'a>,
-    binding_views: &mut FxHashMap<&'a StableModuleOriginIdentity, InterfaceView<'a>>,
+    binding_views: &mut FxHashMap<ProviderInterfaceId, InterfaceView<'a>>,
 ) -> Result<(), CompilerError> {
     let PublicExportTarget::Source {
         path: target_path,
@@ -953,17 +951,18 @@ fn collect_one_reexport_binding<'a>(
     // Cross-module re-exports resolve through the immutable provider interface selected by
     // Stage 0. The origin remains provider-owned while this module owns the public alias.
     if let Some(import_shell_id) = import_shell_id
-        && let Some(provider_interface) = context
+        && let Some(provider_id) = context
             .source_provider_imports
             .resolve_reexport(*import_shell_id)
     {
+        let provider_interface = context.source_provider_imports.interface(provider_id)?;
         let imported_name = target_path.name_str(context.string_table).ok_or_else(|| {
             CompilerError::compiler_error(format!(
                 "re-export binding construction: a provider target has no resolvable imported name (path: {:?})",
                 target_path
             ))
         })?;
-        let view = interface_view_for(binding_views, provider_interface)?;
+        let view = interface_view_for(binding_views, context.source_provider_imports, provider_id)?;
         let Some(provider_origin) = view.exported_origin(imported_name).cloned() else {
             if view.binding_export(imported_name).is_some() {
                 return Ok(());
@@ -1184,18 +1183,20 @@ fn declaration_category_rank(origin: &OriginDeclarationId) -> u8 {
     }
 }
 
-/// Get or build the one operation-scoped binding view for a completed interface.
+/// Get or build the one operation-scoped binding view for a provider interface.
 ///
-/// WHAT: builds each view at most once per re-export binding operation so repeated public-name
-///       lookups against the same provider interface stay direct.
+/// WHAT: builds each view at most once per re-export binding operation, keyed by the dense
+///       [`ProviderInterfaceId`], so repeated public-name lookups against the same provider
+///       interface stay direct and never depend on module origins or raw pointer identity.
 fn interface_view_for<'a, 'v>(
-    views: &'v mut FxHashMap<&'a StableModuleOriginIdentity, InterfaceView<'a>>,
-    interface: &'a PublicSemanticInterface,
+    views: &'v mut FxHashMap<ProviderInterfaceId, InterfaceView<'a>>,
+    source_provider_imports: &SourceProviderImportSet<'a>,
+    provider_id: ProviderInterfaceId,
 ) -> Result<&'v InterfaceView<'a>, CompilerError> {
-    Ok(match views.entry(&interface.module_origin) {
+    Ok(match views.entry(provider_id) {
         std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
-        std::collections::hash_map::Entry::Vacant(entry) => {
-            entry.insert(InterfaceView::build(interface)?)
-        }
+        std::collections::hash_map::Entry::Vacant(entry) => entry.insert(InterfaceView::build(
+            source_provider_imports.interface(provider_id)?,
+        )?),
     })
 }

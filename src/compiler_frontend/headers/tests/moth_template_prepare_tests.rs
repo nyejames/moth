@@ -46,7 +46,7 @@ use crate::compiler_frontend::semantic_identity::{
     StablePackageIdentity,
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::identity::SourceFileTable;
+use crate::compiler_frontend::symbols::identity::{FileId, SourceFileTable};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
@@ -342,11 +342,13 @@ impl MothTemplateScopeFixture {
     ) -> Result<(Ast, StringTable), Box<CompilerDiagnostic>> {
         let html_interface = empty_provider_interface("html");
         let provider_imports = SourceProviderImportSet::new(vec![SourceProviderImport {
-            import_shell_id: None,
-            import_prefix: Some("html"),
-            implicit_template_scope: true,
+            kind:
+                crate::compiler_frontend::public_interface::ProviderImportKind::ImplicitTemplate {
+                    package_prefix: "html",
+                },
             interface: &html_interface,
-        }]);
+        }])
+        .expect("one implicit template provider should register");
         self.compile_module_ast_with_providers(prepared_relative_paths, &provider_imports)
     }
 
@@ -431,11 +433,13 @@ impl MothTemplateScopeFixture {
     > {
         let html_interface = empty_provider_interface("html");
         let provider_imports = SourceProviderImportSet::new(vec![SourceProviderImport {
-            import_shell_id: None,
-            import_prefix: Some("html"),
-            implicit_template_scope: true,
+            kind:
+                crate::compiler_frontend::public_interface::ProviderImportKind::ImplicitTemplate {
+                    package_prefix: "html",
+                },
             interface: &html_interface,
-        }]);
+        }])
+        .expect("one implicit template provider should register");
         self.prepare_and_bind_headers_with_providers(prepared_relative_paths, &provider_imports)
     }
 
@@ -647,7 +651,7 @@ fn prepare_moth_source(
         TokenizerEntryMode::SourceFile,
         &style_directives,
         string_table,
-        None,
+        Some(FileId(0)),
     )
     .expect("Moth source should tokenize");
 
@@ -1152,20 +1156,22 @@ fn moth_template_sees_capability_selected_provider_constants_without_provider_he
         concrete_call_summaries: Vec::new(),
     };
 
-    let provider_imports = SourceProviderImportSet::new(vec![
+    let provider_imports =
+        SourceProviderImportSet::new(vec![
         SourceProviderImport {
-            import_shell_id: None,
-            import_prefix: Some("html"),
-            implicit_template_scope: true,
+            kind: crate::compiler_frontend::public_interface::ProviderImportKind::ImplicitTemplate {
+                package_prefix: "html",
+            },
             interface: &html_interface,
         },
         SourceProviderImport {
-            import_shell_id: None,
-            import_prefix: Some("custom"),
-            implicit_template_scope: true,
+            kind: crate::compiler_frontend::public_interface::ProviderImportKind::ImplicitTemplate {
+                package_prefix: "custom",
+            },
             interface: &custom_interface,
         },
-    ]);
+    ])
+        .expect("two distinct implicit template providers should register");
 
     let (ast, string_table) = fixture
         .compile_moth_template_ast_with_providers(
@@ -1227,11 +1233,12 @@ fn provider_interface_collision_remaps_authored_declaration_location() {
         concrete_call_summaries: Vec::new(),
     };
     let provider_imports = SourceProviderImportSet::new(vec![SourceProviderImport {
-        import_shell_id: None,
-        import_prefix: Some("html"),
-        implicit_template_scope: true,
+        kind: crate::compiler_frontend::public_interface::ProviderImportKind::ImplicitTemplate {
+            package_prefix: "html",
+        },
         interface: &html_interface,
-    }]);
+    }])
+    .expect("one implicit template provider should register");
 
     let (diagnostic, diagnostic_string_table) = match fixture
         .prepare_and_bind_headers_with_providers_with_table(

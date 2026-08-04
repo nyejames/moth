@@ -8,6 +8,7 @@
 
 use crate::builder_surface::SourceFileKind;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
+use crate::compiler_frontend::compiler_errors::compiler_error_to_diagnostic;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, ImportPublicSurfaceType};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::external_packages::ExternalSymbolCategory;
@@ -713,7 +714,7 @@ impl<'a> ImportEnvironmentBuilder<'a> {
         let mut implicit_constants = Vec::new();
 
         // Layer 1: exported constants from every builder-declared source-backed package surface.
-        self.collect_implicit_template_scope_constants(&mut implicit_constants);
+        self.collect_implicit_template_scope_constants(&mut implicit_constants)?;
 
         // Layer 2: exported constants from the exact same-directory module public surface. Both
         // layers pass through the same visible-name registry, so equal spellings are diagnosed
@@ -787,13 +788,16 @@ impl<'a> ImportEnvironmentBuilder<'a> {
     fn collect_implicit_template_scope_constants(
         &mut self,
         implicit_constants: &mut Vec<(StringId, InternedPath, SourceLocation)>,
-    ) {
-        let providers: Vec<_> = self
+    ) -> BuilderResult<()> {
+        for (prefix, provider_id) in self
             .source_provider_imports
-            .implicit_template_scope_interfaces()
-            .collect();
+            .implicit_template_scope_providers()
+        {
+            let interface = self
+                .source_provider_imports
+                .interface(provider_id)
+                .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
 
-        for (prefix, interface) in providers {
             // When a source-package root is prepared in the current module (test fixtures), the
             // header-built public-export map contains the entries. Production packages expose
             // the same surface through a completed provider interface.
@@ -843,6 +847,8 @@ impl<'a> ImportEnvironmentBuilder<'a> {
                 implicit_constants.push((name_id, synthetic_path, location));
             }
         }
+
+        Ok(())
     }
 
     fn collect_same_directory_public_export_constants(
@@ -1074,7 +1080,14 @@ impl<'a> ImportEnvironmentBuilder<'a> {
         source_file: &InternedPath,
         importable_symbol_paths: &FxHashSet<InternedPath>,
     ) -> BuilderResult<()> {
-        if let Some(interface) = self.source_provider_imports.resolve(import.import_shell_id) {
+        if let Some(provider_id) = self
+            .source_provider_imports
+            .resolve(import.provider.import_shell_id)
+        {
+            let interface = self
+                .source_provider_imports
+                .interface(provider_id)
+                .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
             return self.register_source_provider_import(
                 file_visibility,
                 registry,
@@ -1276,7 +1289,14 @@ impl<'a> ImportEnvironmentBuilder<'a> {
             )));
         }
 
-        if let Some(interface) = self.source_provider_imports.resolve(import.import_shell_id) {
+        if let Some(provider_id) = self
+            .source_provider_imports
+            .resolve(import.provider.import_shell_id)
+        {
+            let interface = self
+                .source_provider_imports
+                .interface(provider_id)
+                .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
             return self.register_source_provider_namespace_import(
                 file_visibility,
                 registry,

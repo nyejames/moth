@@ -16,10 +16,10 @@ use crate::compiler_frontend::declaration_syntax::signature_members::{
 };
 use crate::compiler_frontend::headers::import_environment::HeaderImportEnvironment;
 use crate::compiler_frontend::headers::module_symbols::ModuleSymbols;
-use crate::compiler_frontend::paths::const_paths::StructuralProviderReference;
+use crate::compiler_frontend::paths::const_paths::RetainedProviderReference;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
-use crate::compiler_frontend::symbols::identity::{FileId, ImportShellId};
+use crate::compiler_frontend::symbols::identity::FileId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation};
@@ -233,7 +233,7 @@ impl HeaderExportMode {
 /// versus virtual or provider bindings. Stage 3 alone resolves retained local hints into
 /// sortable graph edges after binding has canonicalized or dropped import-spelled hints.
 /// MUST NOT: carry alias, export, or provider classification; that metadata stays on
-/// `FileImport` and `StructuralProviderReference`.
+/// `FileImport` and `RetainedProviderReference`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct LocalDeclarationOrderingHint {
     /// The conservative referenced path: an import spelling or a same-file spelling.
@@ -496,28 +496,20 @@ impl Header {
 
 #[derive(Clone, Debug)]
 pub struct FileImport {
-    /// Build-local identity of this retained import shell inside its source file.
-    ///
-    /// WHAT: Stage 0 assigns one ordinal per retained shell during header preparation and keeps
-    ///       the same `ImportShellId` on graph edges, so provider binding is a direct lookup
-    ///       rather than a path-component or suffix comparison.
-    /// WHY: the authored and normalized spellings of one shell may differ; only the shell
-    ///       identity is stable across both representations.
-    pub import_shell_id: ImportShellId,
     /// Structural provider reference: the normalized import path and its exact source location.
     ///
     /// WHAT: carries the provider path Stage 0 resolves today plus the `path_location` retained
     /// for the graph boundary, type-distinct from the alias/export metadata below.
-    /// WHY: structural provider references and imported-symbol bindings are separate data
-    /// classes; embedding the shared `StructuralProviderReference` keeps one authority for the
-    /// provider path and its location across Stage 0 scanning and retained import shells.
-    pub provider: StructuralProviderReference,
+    /// WHY: retained provider references and imported-symbol bindings are separate data
+    /// classes; embedding the shared retained reference keeps one authority for the provider
+    /// path, its location and the stamped import shell.
+    pub provider: RetainedProviderReference,
     /// The exact authored structural path before module-root normalization.
     ///
     /// Stage 0 resolves topology and provider classes from this spelling so obsolete relative
     /// source imports and provider prefixes retain their authored diagnostics. Semantic binding
     /// continues to consume `provider`, whose path is normalized for module-local lookup.
-    pub authored_provider: StructuralProviderReference,
+    pub authored_provider: RetainedProviderReference,
     pub alias: Option<StringId>,
     /// Location of the `import` clause that introduced this record.
     pub location: SourceLocation,

@@ -15,25 +15,28 @@ use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
 /// header parsing propagate diagnostics directly while Stage 0 adapts once to its discovery error.
 type ImportClauseResult<T> = Result<T, Box<CompilerDiagnostic>>;
 
-/// WHAT: one parsed provider path paired with its exact source location.
-/// WHY: Stage 0 reachable discovery and retained header import shells both need the provider
-///      path and the source position that introduced it. Keeping them in one type-distinct value
-///      separates structural provider references from imported-symbol alias/export metadata at
-///      the shared import-clause syntax boundary, so Stage 0 can carry the graph boundary
-///      location alongside the path it resolves today.
+/// The shared path facts of one parsed provider reference.
+///
+/// WHAT: a borrowed view of the path, location and grouped shape that both provider reference
+///       phases expose. Namespace resolution needs only these facts, so it never depends on
+///       whether the reference was produced by raw scanning or retained header preparation.
+/// WHY: keeping one narrow view lets the namespace owner serve both phases without a
+///      compatibility wrapper or a duplicated resolution path.
+#[derive(Clone, Copy, Debug)]
+pub struct ProviderImportPathView<'a> {
+    pub path: &'a InternedPath,
+    pub path_location: &'a SourceLocation,
+    pub from_grouped: bool,
+}
+
+/// WHAT: one provider path paired with its exact source location, produced by the raw Stage 0
+///       token scan before header preparation has stamped an import shell.
+/// WHY: raw scanning and retained header syntax are two typed phases. The scanned form has no
+///       shell identity, so the `Option<ImportShellId>` state cannot exist on the retained form.
 #[derive(Clone, Debug, PartialEq)]
-pub struct StructuralProviderReference {
+pub struct ScannedProviderReference {
     pub path: InternedPath,
     pub path_location: SourceLocation,
-    /// The retained import shell identity assigned by header preparation, when this reference
-    /// was produced by the retained-header path rather than the raw Stage 0 token scan.
-    ///
-    /// WHAT: lets Stage 0 graph edges and header binding join by shell identity instead of
-    ///       re-comparing path components between the authored and normalized spellings.
-    /// WHY: header preparation stamps one `ImportShellId` per retained import shell; the raw
-    ///       token scan that precedes preparation has no shell yet, so the field stays `None`
-    ///       there and the reference is resolved by path alone.
-    pub import_shell_id: Option<ImportShellId>,
     /// Whether the last path component is an imported item rather than part of the provider.
     ///
     /// WHAT: grouped syntax such as `@helper { greet }` is tokenized as the complete path
@@ -44,7 +47,38 @@ pub struct StructuralProviderReference {
     pub from_grouped: bool,
 }
 
-impl StructuralProviderReference {
+impl ScannedProviderReference {
+    pub fn path_view(&self) -> ProviderImportPathView<'_> {
+        ProviderImportPathView {
+            path: &self.path,
+            path_location: &self.path_location,
+            from_grouped: self.from_grouped,
+        }
+    }
+}
+
+/// WHAT: one provider path paired with its exact source location and the retained import shell
+///       identity stamped by header preparation.
+/// WHY: Stage 0 graph edges and header binding join by shell identity instead of re-comparing
+///      path components between the authored and normalized spellings. The shell is always
+///      present, so a partially stamped retained reference is unrepresentable.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RetainedProviderReference {
+    pub path: InternedPath,
+    pub path_location: SourceLocation,
+    pub from_grouped: bool,
+    pub import_shell_id: ImportShellId,
+}
+
+impl RetainedProviderReference {
+    pub fn path_view(&self) -> ProviderImportPathView<'_> {
+        ProviderImportPathView {
+            path: &self.path,
+            path_location: &self.path_location,
+            from_grouped: self.from_grouped,
+        }
+    }
+
     /// Remap the interned path and source location into a merged string table.
     ///
     /// WHAT: shifts the `InternedPath` and `SourceLocation` string IDs after a string-table merge.
@@ -59,8 +93,8 @@ impl StructuralProviderReference {
 
 #[derive(Clone, Debug)]
 pub struct ParsedImportItem {
-    /// Structural provider reference carrying the parsed path and its source location.
-    pub provider: StructuralProviderReference,
+    /// Scanned provider reference carrying the parsed path and its source location.
+    pub provider: ScannedProviderReference,
     pub alias: Option<StringId>,
     pub alias_location: Option<SourceLocation>,
     pub from_grouped: bool,
@@ -177,10 +211,9 @@ fn parse_path_clause_items(
     let parsed_items = items
         .iter()
         .map(|item| ParsedImportItem {
-            provider: StructuralProviderReference {
+            provider: ScannedProviderReference {
                 path: item.path.clone(),
                 path_location: item.path_location.clone(),
-                import_shell_id: None,
                 from_grouped: item.from_grouped,
             },
             alias: item.alias.or(trailing_alias),
@@ -195,16 +228,16 @@ fn parse_path_clause_items(
     Ok((parsed_items, index))
 }
 
-/// Collect structural provider references from every top-level import clause in a token stream.
+/// Collect scanned provider references from every top-level import clause in a token stream.
 ///
 /// WHAT: walks authored tokens, skips imports inside an `export:` block, and returns one
-/// `StructuralProviderReference` per parsed import path with its exact source location.
+/// `ScannedProviderReference` per parsed import path with its exact source location.
 /// WHY: Stage 0 reachable discovery consumes these values directly, using `path` for current
 ///      resolution while retaining `path_location` for the graph boundary. Header import
 ///      preparation uses `parse_import_clause_items` when it also needs alias metadata.
 pub fn collect_provider_references_from_tokens(
     tokens: &[Token],
-) -> ImportClauseResult<Vec<StructuralProviderReference>> {
+) -> ImportClauseResult<Vec<ScannedProviderReference>> {
     let mut references = Vec::new();
     let mut index = 0usize;
 

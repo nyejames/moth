@@ -1,6 +1,12 @@
+use super::compiled_boundary::{
+    CompiledGraphBoundary, CompiledSourcePackage, CompletedSourcePackageRegistry,
+};
+use super::generated_worklist::BoundaryGeneratedFunctionStore;
+use super::module_artifact_store::ModuleArtifactStore;
 use super::module_identity::ModuleId;
 use super::prepared_source::PreparedSourceInput;
 use super::prepared_source_store::PreparedSourceStore;
+use super::project_module_graph::ProjectModuleGraph;
 use super::source_discovery::{ResolvedDependencyEdge, ResolvedSourcePackageImport};
 use super::*;
 use crate::build_system::build::BackendBuilder;
@@ -29,12 +35,12 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::external_packages::{ExternalFunctionId, ExternalTypeId};
-use crate::compiler_frontend::paths::const_paths::StructuralProviderReference;
+use crate::compiler_frontend::paths::const_paths::RetainedProviderReference;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity;
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::identity::ImportShellId;
+use crate::compiler_frontend::symbols::identity::{FileId, ImportShellId};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_tests::test_support::temp_dir;
 use std::collections::HashSet;
@@ -309,21 +315,24 @@ fn with_namespace_resolution(
     body(&resolution, &mut string_table);
 }
 
-/// Build a grouped `StructuralProviderReference` whose interned path is the provider prefix plus
+/// Build a grouped `RetainedProviderReference` whose interned path is the provider prefix plus
 /// the requested item, matching how the tokenizer expands grouped import syntax.
 fn grouped_provider(
     path_segments: &[&str],
     string_table: &mut StringTable,
-) -> StructuralProviderReference {
+) -> RetainedProviderReference {
     let mut path = crate::compiler_frontend::symbols::interned_path::InternedPath::new();
     for segment in path_segments {
         path.push_str(segment, string_table);
     }
-    StructuralProviderReference {
+    RetainedProviderReference {
         path,
         path_location: SourceLocation::default(),
-        import_shell_id: None,
         from_grouped: true,
+        import_shell_id: crate::compiler_frontend::symbols::identity::ImportShellId::new(
+            crate::compiler_frontend::symbols::identity::FileId(0),
+            0,
+        ),
     }
 }
 
@@ -366,7 +375,7 @@ fn grouped_import_resolves_same_module_item_file() {
         |resolution, string_table| {
             let provider = grouped_provider(&["choices", "Response"], string_table);
             let resolved = resolution
-                .resolve_import(&provider, &importer, string_table)
+                .resolve_import(provider.path_view(), &importer, string_table)
                 .expect("a grouped same-module item file should resolve");
             match resolved {
                 ResolvedImport::SameModuleSource { canonical_path, .. } => {
@@ -423,7 +432,7 @@ fn grouped_import_resolves_cross_module_child_facade() {
         |resolution, string_table| {
             let provider = grouped_provider(&["child", "greet"], string_table);
             let resolved = resolution
-                .resolve_import(&provider, &importer, string_table)
+                .resolve_import(provider.path_view(), &importer, string_table)
                 .expect("a grouped child-module facade should resolve");
             match resolved {
                 ResolvedImport::CrossModule { root_file, .. } => {
@@ -485,7 +494,7 @@ fn grouped_import_resolves_source_package_facade() {
         |resolution, string_table| {
             let provider = grouped_provider(&["helper", "add"], string_table);
             let resolved = resolution
-                .resolve_import(&provider, &importer, string_table)
+                .resolve_import(provider.path_view(), &importer, string_table)
                 .expect("a grouped source-package facade should resolve");
             match resolved {
                 ResolvedImport::SourcePackageSurface { root_file, .. } => {
@@ -6029,54 +6038,28 @@ fn indexed_namespace_rejects_direct_nested_child_root_import() {
 }
 
 #[test]
-fn provider_binding_index_rejects_edges_without_shell_identity() {
-    let edge = ResolvedDependencyEdge {
-        provider_module_id: ModuleId::from_index(1),
-        consumer_module_id: ModuleId::from_index(0),
-        provider: StructuralProviderReference {
-            path: crate::compiler_frontend::symbols::interned_path::InternedPath::new(),
-            path_location: SourceLocation::default(),
-            import_shell_id: None,
-            from_grouped: false,
-        },
-        graph_location: SourceLocation::default(),
-    };
-
-    let error = super::compilation::build_provider_binding_index(&[edge])
-        .expect_err("an unstamped edge is malformed graph metadata");
-
-    assert!(
-        error
-            .msg
-            .contains("without a retained import shell identity"),
-        "unexpected error: {}",
-        error.msg
-    );
-}
-
-#[test]
 fn provider_binding_index_rejects_duplicate_shell_edges() {
-    let shell = ImportShellId::new(None, 0);
+    let shell = ImportShellId::new(FileId(0), 0);
     let edges = vec![
         ResolvedDependencyEdge {
             provider_module_id: ModuleId::from_index(1),
             consumer_module_id: ModuleId::from_index(0),
-            provider: StructuralProviderReference {
+            provider: RetainedProviderReference {
                 path: crate::compiler_frontend::symbols::interned_path::InternedPath::new(),
                 path_location: SourceLocation::default(),
-                import_shell_id: Some(shell),
                 from_grouped: false,
+                import_shell_id: shell,
             },
             graph_location: SourceLocation::default(),
         },
         ResolvedDependencyEdge {
             provider_module_id: ModuleId::from_index(2),
             consumer_module_id: ModuleId::from_index(0),
-            provider: StructuralProviderReference {
+            provider: RetainedProviderReference {
                 path: crate::compiler_frontend::symbols::interned_path::InternedPath::new(),
                 path_location: SourceLocation::default(),
-                import_shell_id: Some(shell),
                 from_grouped: false,
+                import_shell_id: shell,
             },
             graph_location: SourceLocation::default(),
         },
@@ -6094,15 +6077,15 @@ fn provider_binding_index_rejects_duplicate_shell_edges() {
 
 #[test]
 fn source_package_import_index_rejects_cross_category_or_duplicate_shells() {
-    let shell = ImportShellId::new(None, 0);
+    let shell = ImportShellId::new(FileId(0), 0);
     let provider_edge = ResolvedDependencyEdge {
         provider_module_id: ModuleId::from_index(1),
         consumer_module_id: ModuleId::from_index(0),
-        provider: StructuralProviderReference {
+        provider: RetainedProviderReference {
             path: crate::compiler_frontend::symbols::interned_path::InternedPath::new(),
             path_location: SourceLocation::default(),
-            import_shell_id: Some(shell),
             from_grouped: false,
+            import_shell_id: shell,
         },
         graph_location: SourceLocation::default(),
     };
@@ -6112,11 +6095,11 @@ fn source_package_import_index_rejects_cross_category_or_duplicate_shells() {
     let package_import = ResolvedSourcePackageImport {
         consumer_module_id: ModuleId::from_index(0),
         import_prefix: "markdown".to_owned(),
-        provider: StructuralProviderReference {
+        provider: RetainedProviderReference {
             path: crate::compiler_frontend::symbols::interned_path::InternedPath::new(),
             path_location: SourceLocation::default(),
-            import_shell_id: Some(shell),
             from_grouped: false,
+            import_shell_id: shell,
         },
     };
 
@@ -6133,28 +6116,223 @@ fn source_package_import_index_rejects_cross_category_or_duplicate_shells() {
         "unexpected error: {}",
         error.msg
     );
+}
 
-    // A source-package import without a shell identity is equally malformed.
-    let unstamped = ResolvedSourcePackageImport {
-        consumer_module_id: ModuleId::from_index(0),
-        import_prefix: "markdown".to_owned(),
-        provider: StructuralProviderReference {
+// ---------------------------------------------------------------------------
+// R5C2A package ordering and registry invariants
+// ---------------------------------------------------------------------------
+
+fn compiled_package(prefix: &str) -> CompiledSourcePackage {
+    use crate::compiler_frontend::semantic_identity::{
+        ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
+    };
+
+    let package_identity = StablePackageIdentity::source_package(
+        crate::builder_surface::PackageOrigin::ProjectLocal,
+        prefix,
+    );
+    let origin = StableModuleOriginIdentity::from_portable_path(
+        package_identity.clone(),
+        format!("{prefix}/@mod.moth"),
+        ModuleRootRole::Normal,
+    );
+    let root_path = PathBuf::from(format!("{prefix}/@mod.moth"));
+    let graph =
+        ProjectModuleGraph::from_normal_roots(vec![(origin, PathBuf::from(prefix), root_path)]);
+    let root_module_id = graph
+        .entry_modules()
+        .first()
+        .copied()
+        .expect("one entry module");
+
+    CompiledSourcePackage {
+        package_identity,
+        root_module_id,
+        boundary: CompiledGraphBoundary {
+            structure: graph,
+            modules: ModuleArtifactStore::new(1),
+            generated: BoundaryGeneratedFunctionStore::default(),
+            diagnosed: Vec::new(),
+            blocked: Vec::new(),
+        },
+    }
+}
+
+fn dependency_prefixes(dependencies: &[&[&str]]) -> Vec<Vec<String>> {
+    dependencies
+        .iter()
+        .map(|row| row.iter().map(|prefix| (*prefix).to_owned()).collect())
+        .collect()
+}
+
+#[test]
+fn package_ordering_is_deterministic_across_reversed_discovery_order() {
+    let prefixes = vec!["a".to_owned(), "b".to_owned()];
+    let dependencies = dependency_prefixes(&[&[], &["a"]]);
+    let order = super::compilation::order_packages_by_dependency(&prefixes, &dependencies)
+        .expect("acyclic package graph orders");
+    assert_eq!(order, vec![0, 1]);
+    let prefixes_in_order = order
+        .iter()
+        .map(|index| prefixes[*index].as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(prefixes_in_order, vec!["a", "b"]);
+
+    // The same graph presented in reversed discovery order must yield the same prefix sequence.
+    let prefixes = vec!["b".to_owned(), "a".to_owned()];
+    let dependencies = dependency_prefixes(&[&["a"], &[]]);
+    let order = super::compilation::order_packages_by_dependency(&prefixes, &dependencies)
+        .expect("acyclic package graph orders");
+    assert_eq!(order, vec![1, 0]);
+    let prefixes_in_order = order
+        .iter()
+        .map(|index| prefixes[*index].as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(prefixes_in_order, vec!["a", "b"]);
+
+    // Independent packages tie-break by prefix, so reversed discovery order still yields the
+    // same prefix sequence.
+    let prefixes = vec!["a".to_owned(), "b".to_owned()];
+    let dependencies = dependency_prefixes(&[&[], &[]]);
+    let order = super::compilation::order_packages_by_dependency(&prefixes, &dependencies)
+        .expect("independent package graph orders");
+    assert_eq!(order, vec![0, 1]);
+
+    let prefixes = vec!["b".to_owned(), "a".to_owned()];
+    let dependencies = dependency_prefixes(&[&[], &[]]);
+    let order = super::compilation::order_packages_by_dependency(&prefixes, &dependencies)
+        .expect("independent package graph orders");
+    assert_eq!(order, vec![1, 0]);
+}
+
+#[test]
+fn package_ordering_tie_breaks_by_discovery_prefix_order() {
+    let prefixes = vec!["z".to_owned(), "a".to_owned(), "m".to_owned()];
+    let dependencies = dependency_prefixes(&[&[], &[], &[]]);
+    let order = super::compilation::order_packages_by_dependency(&prefixes, &dependencies)
+        .expect("independent packages order");
+    assert_eq!(order, vec![1, 2, 0], "ready packages leave in prefix order");
+}
+
+#[test]
+fn package_ordering_orders_diamond_dependencies_once() {
+    let prefixes = vec![
+        "a".to_owned(),
+        "b".to_owned(),
+        "c".to_owned(),
+        "d".to_owned(),
+    ];
+    let dependencies = dependency_prefixes(&[&[], &["a"], &["a"], &["b", "c"]]);
+    let order = super::compilation::order_packages_by_dependency(&prefixes, &dependencies)
+        .expect("diamond package graph orders");
+    assert_eq!(order, vec![0, 1, 2, 3]);
+}
+
+#[test]
+fn package_ordering_rejects_cycles_and_unknown_prefixes() {
+    let prefixes = vec!["a".to_owned(), "b".to_owned()];
+    let dependencies = dependency_prefixes(&[&["b"], &["a"]]);
+    let error = super::compilation::order_packages_by_dependency(&prefixes, &dependencies)
+        .expect_err("a package dependency cycle is malformed graph metadata");
+    assert!(error.msg.contains("dependency cycle"));
+
+    let prefixes = vec!["a".to_owned()];
+    let dependencies = dependency_prefixes(&[&["missing"]]);
+    let error = super::compilation::order_packages_by_dependency(&prefixes, &dependencies)
+        .expect_err("an unknown provider prefix is malformed graph metadata");
+    assert!(error.msg.contains("unindexed source package @missing"));
+}
+
+#[test]
+fn completed_package_registry_rejects_duplicate_prefix() {
+    let mut registry = CompletedSourcePackageRegistry::new();
+    registry
+        .publish(compiled_package("markdown"), &[])
+        .expect("first package publishes");
+
+    let error = registry
+        .publish(compiled_package("markdown"), &[])
+        .expect_err("one prefix must index exactly one completed package");
+    assert!(error.msg.contains("completed more than once"));
+}
+
+#[test]
+fn completed_package_registry_records_direct_dependency_edges_once() {
+    let mut registry = CompletedSourcePackageRegistry::new();
+    let a = registry
+        .publish(compiled_package("a"), &[])
+        .expect("provider package publishes");
+    let b = registry
+        .publish(compiled_package("b"), &["a".to_owned()])
+        .expect("consumer package publishes");
+
+    registry
+        .validate_dependency_edges()
+        .expect("dependency-first publication order is valid");
+    assert_eq!(
+        registry.provider_packages(b).expect("b has provider edges"),
+        &[a]
+    );
+    assert_eq!(
+        registry.consumer_packages(a).expect("a has consumer edges"),
+        &[b]
+    );
+    assert_eq!(registry.by_prefix("a"), Some(a));
+    assert_eq!(registry.by_prefix("b"), Some(b));
+    assert_eq!(registry.by_prefix("missing"), None);
+}
+
+#[test]
+fn completed_package_registry_rejects_dependency_edges_out_of_order() {
+    let mut registry = CompletedSourcePackageRegistry::new();
+    registry
+        .publish(compiled_package("a"), &["a".to_owned()])
+        .expect("a self-dependency publishes because the prefix already resolves");
+
+    let error = registry
+        .validate_dependency_edges()
+        .expect_err("a provider edge that did not publish first violates the schedule");
+    assert!(error.msg.contains("did not publish first"));
+}
+
+#[test]
+fn module_package_dependency_index_walks_only_direct_dependencies() {
+    let mut registry = CompletedSourcePackageRegistry::new();
+    let a = registry
+        .publish(compiled_package("a"), &[])
+        .expect("provider package publishes");
+    let b = registry
+        .publish(compiled_package("b"), &["a".to_owned()])
+        .expect("consumer package publishes");
+
+    let consumer_module_id = ModuleId::from_index(5);
+    let shell = ImportShellId::new(FileId(0), 0);
+    let imports = vec![ResolvedSourcePackageImport {
+        consumer_module_id,
+        import_prefix: "b".to_owned(),
+        provider: RetainedProviderReference {
             path: crate::compiler_frontend::symbols::interned_path::InternedPath::new(),
             path_location: SourceLocation::default(),
-            import_shell_id: None,
             from_grouped: false,
+            import_shell_id: shell,
         },
-    };
-    let error = super::compilation::build_source_package_import_index(
-        &provider_binding_index,
-        &[unstamped],
-    )
-    .expect_err("an unstamped package import is malformed graph metadata");
+    }];
+
+    let index = super::compilation::build_module_package_dependency_index(&imports, &registry)
+        .expect("direct dependencies index");
+    assert_eq!(
+        index.len(),
+        1,
+        "readiness must only visit direct package dependencies"
+    );
+    assert_eq!(
+        index.get(&consumer_module_id),
+        Some(&vec![b]),
+        "the module depends on package b, not on transitive provider a"
+    );
+    assert!(a != b);
     assert!(
-        error
-            .msg
-            .contains("without a retained import shell identity"),
-        "unexpected error: {}",
-        error.msg
+        !index.contains_key(&ModuleId::from_index(6)),
+        "modules without package imports must not appear in the readiness index"
     );
 }

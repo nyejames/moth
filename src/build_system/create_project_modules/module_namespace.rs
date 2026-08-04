@@ -30,6 +30,7 @@ use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidImportPathReason};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::paths::const_paths::ProviderImportPathView;
 use crate::compiler_frontend::paths::path_normalization::{
     import_contains_dotdot, is_relative_import_path,
 };
@@ -219,7 +220,7 @@ impl<'a> DirectoryImportResolution<'a> {
 
     pub(crate) fn resolve_import(
         self,
-        provider: &crate::compiler_frontend::paths::const_paths::StructuralProviderReference,
+        provider: ProviderImportPathView<'_>,
         importing_canonical_path: &Path,
         string_table: &mut StringTable,
     ) -> Result<ResolvedImport, CompilerDiagnostic> {
@@ -318,15 +319,15 @@ impl ModuleNamespaceSet {
     /// indexed facts.
     pub(crate) fn resolve_import(
         &self,
-        provider: &crate::compiler_frontend::paths::const_paths::StructuralProviderReference,
+        provider: ProviderImportPathView<'_>,
         importing_canonical_path: &Path,
         source_tree_index: &SourceTreeIndex,
         boundary: NamespaceBoundary,
         package_prefix: Option<&str>,
         string_table: &mut StringTable,
     ) -> Result<ResolvedImport, CompilerDiagnostic> {
-        let import_path = &provider.path;
-        let import_location = &provider.path_location;
+        let import_path = provider.path;
+        let import_location = provider.path_location;
         reject_invalid_path_components(import_path, import_location, string_table)?;
         reject_direct_special_file_import(provider, string_table)?;
         reject_explicit_source_extension(import_path, import_location, string_table)?;
@@ -623,7 +624,7 @@ impl ModuleNamespaceSet {
 /// provider prefix returned here selects a module, source-package or binding-package facade.
 /// Non-grouped paths are already provider paths and are returned unchanged.
 fn structural_provider_components(
-    provider: &crate::compiler_frontend::paths::const_paths::StructuralProviderReference,
+    provider: ProviderImportPathView<'_>,
 ) -> &[crate::compiler_frontend::symbols::string_interning::StringId] {
     let components = provider.path.as_components();
     if provider.from_grouped {
@@ -926,11 +927,11 @@ fn resolve_entry(
 
 /// Reject direct support-root and config paths before namespace absence can change the diagnostic.
 fn reject_direct_special_file_import(
-    provider: &crate::compiler_frontend::paths::const_paths::StructuralProviderReference,
+    provider: ProviderImportPathView<'_>,
     string_table: &StringTable,
 ) -> Result<(), CompilerDiagnostic> {
-    if import_path_references_support_root_file(&provider.path, provider.from_grouped, string_table)
-        || import_path_references_config_file(&provider.path, provider.from_grouped, string_table)
+    if import_path_references_support_root_file(provider.path, provider.from_grouped, string_table)
+        || import_path_references_config_file(provider.path, provider.from_grouped, string_table)
     {
         return Err(CompilerDiagnostic::direct_special_file_import(
             provider.path.clone(),

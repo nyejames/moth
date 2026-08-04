@@ -25,7 +25,7 @@ use crate::compiler_frontend::semantic_identity::{
     ExportBinding, ModuleRootRole, OriginDeclarationId, OriginFunctionId, OriginTraitId,
     OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity, StablePackageIdentity,
 };
-use crate::compiler_frontend::symbols::identity::ImportShellId;
+use crate::compiler_frontend::symbols::identity::{FileId, ImportShellId};
 
 fn provider_origin(module_name: &str) -> StableModuleOriginIdentity {
     StableModuleOriginIdentity::from_portable_path(
@@ -175,14 +175,16 @@ fn close(
     let provider_imports = SourceProviderImportSet::new(
         providers
             .into_iter()
-            .map(|interface| SourceProviderImport {
-                import_shell_id: Some(ImportShellId::new(None, 0)),
-                import_prefix: None,
-                implicit_template_scope: false,
+            .enumerate()
+            .map(|(index, interface)| SourceProviderImport {
+                kind: crate::compiler_frontend::public_interface::ProviderImportKind::Authored {
+                    shell_id: ImportShellId::new(FileId(0), index as u32),
+                },
                 interface,
             })
             .collect(),
-    );
+    )
+    .expect("distinct provider shells should register");
 
     PublicSemanticInterface::close_from_local(
         local_interface(bindings),
@@ -419,7 +421,6 @@ fn closure_output_is_independent_of_provider_import_order() {
 #[test]
 fn disagreeing_provider_declarations_fail_deterministically() {
     let module = provider_origin("shared");
-    let origin = function_origin(&module, "make_card");
     let first = provider_interface(
         &module,
         vec![function_record(&module, "make_card", 1)],
@@ -433,18 +434,26 @@ fn disagreeing_provider_declarations_fail_deterministically() {
         Vec::new(),
     );
 
-    let error = close(
-        vec![ExportBinding::new(
-            provider_origin("facade"),
-            "make_card".to_owned(),
-            OriginDeclarationId::Function(origin),
-        )],
-        vec![&first, &second],
-    )
+    let error = SourceProviderImportSet::new(vec![
+        SourceProviderImport {
+            kind: crate::compiler_frontend::public_interface::ProviderImportKind::Authored {
+                shell_id: ImportShellId::new(FileId(0), 0),
+            },
+            interface: &first,
+        },
+        SourceProviderImport {
+            kind: crate::compiler_frontend::public_interface::ProviderImportKind::Authored {
+                shell_id: ImportShellId::new(FileId(0), 1),
+            },
+            interface: &second,
+        },
+    ])
     .expect_err("two providers cannot publish different contents for one origin");
 
     assert!(
-        error.msg.contains("disagree on declaration origin"),
+        error
+            .msg
+            .contains("disagrees with an equal-origin provider interface"),
         "unexpected error: {}",
         error.msg
     );
@@ -476,18 +485,26 @@ fn disagreeing_provider_summaries_fail_deterministically() {
         Vec::new(),
     );
 
-    let error = close(
-        vec![ExportBinding::new(
-            provider_origin("facade"),
-            "make_card".to_owned(),
-            OriginDeclarationId::Function(origin),
-        )],
-        vec![&first, &second],
-    )
+    let error = SourceProviderImportSet::new(vec![
+        SourceProviderImport {
+            kind: crate::compiler_frontend::public_interface::ProviderImportKind::Authored {
+                shell_id: ImportShellId::new(FileId(0), 0),
+            },
+            interface: &first,
+        },
+        SourceProviderImport {
+            kind: crate::compiler_frontend::public_interface::ProviderImportKind::Authored {
+                shell_id: ImportShellId::new(FileId(0), 1),
+            },
+            interface: &second,
+        },
+    ])
     .expect_err("two providers cannot publish different summaries for one callable");
 
     assert!(
-        error.msg.contains("disagree on concrete call summary"),
+        error
+            .msg
+            .contains("disagrees with an equal-origin provider interface"),
         "unexpected error: {}",
         error.msg
     );
