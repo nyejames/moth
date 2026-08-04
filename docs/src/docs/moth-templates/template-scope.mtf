@@ -11,7 +11,7 @@ Exported compile-time constants and const records from the same-directory module
     ;
 ]
 
-[codeblock, $code("text"):
+[codeblock, $code("md"):
     -- docs/intro.mtf
     # Welcome to [site_name]
 ]

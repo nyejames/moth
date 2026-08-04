@@ -38,17 +38,17 @@
 
   /* Code block colours (language-neutral role palette) */
   --moth-code-comment: #8e8e8e;
-  --moth-code-keyword: #fdbe82;
+  --moth-code-keyword: #eeb159;
   --moth-code-literal: #f78c6c;
   --moth-code-string: #64d721;
-  --moth-code-number: #c09eea;
+  --moth-code-number: #c6c2f6;
   --moth-code-operator: #a6a9fd;
   --moth-code-nominal: #fca1e7;
   --moth-code-type: #46ceff;
-  --moth-code-delimiter: #dece74;
+  --moth-code-delimiter: #c6b760;
   --moth-code-function: #82aaff;
-  --moth-code-directive: #c3e88d;
-  --moth-code-contract: #f07178;
+  --moth-code-directive: #bcde8a;
+  --moth-code-contract: #f5646b;
 }
 
 /* where: is used here for less specificity, allowing easier overriding */
@@ -739,11 +739,11 @@ td {
 
 
 
-        <p>A <code>.mtf</code> file is Markdown that lives inside Moth&#39;s template world.</p><h3>Write prose directly</h3><pre style=""><code class='codeblock'># Getting started
+        <p>A <code>.mtf</code> file is Markdown that lives inside Moth&#39;s template world.</p><h3>Write prose directly</h3><pre style=""><code class='codeblock'><span class='moth-code-keyword'>#</span> Getting started
 
-This is **bold** text.
+This is <span class='moth-code-operator'>*</span><span class='moth-code-operator'>*</span>bold<span class='moth-code-operator'>*</span><span class='moth-code-operator'>*</span> text.
 
-[p: This paragraph is styled by the @html builder helper.]</code></pre><p>No imports, no declarations, no frontmatter. Content only.</p><h3>Import the result</h3><pre style=""><code class='codeblock'><span class='moth-code-keyword'>import</span> <span class='moth-code-string'>@docs/intro</span> <span class='moth-code-delimiter'>{</span>content <span class='moth-code-keyword'>as</span> intro<span class='moth-code-delimiter'>}</span>
+<span class='moth-code-delimiter'>[</span>p<span class='moth-code-operator'>:</span> This paragraph is styled by the <span class='moth-code-operator'>@</span>html builder helper.<span class='moth-code-delimiter'>]</span></code></pre><p>No imports, no declarations, no frontmatter. Content only.</p><h3>Import the result</h3><pre style=""><code class='codeblock'><span class='moth-code-keyword'>import</span> <span class='moth-code-string'>@docs/intro</span> <span class='moth-code-delimiter'>{</span>content <span class='moth-code-keyword'>as</span> intro<span class='moth-code-delimiter'>}</span>
 
 <span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-delimiter'>[</span>intro<span class='moth-code-delimiter'>]</span> <span class='moth-code-delimiter'>]</span></code></pre><p>The <code>content</code> constant is the only thing a <code>.mtf</code> file exports.</p>
 </div>
@@ -930,16 +930,16 @@ This is **bold** text.
         <p>A <code>.mtf</code> file sees exported compile-time constants from its same-directory module root and compile-time helpers supplied by <code>@html</code>.</p><h3>A constant capture</h3><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- docs/@docs.moth</span>
 <span class='moth-code-keyword'>export</span><span class='moth-code-delimiter'>:</span>
     site_name <span class='moth-code-operator'>#=</span> <span class='moth-code-string'>&quot;Moth&quot;</span>
-<span class='moth-code-delimiter'>;</span></code></pre><pre style=""><code class='codeblock'>-- docs/intro.mtf
-# Welcome to [site_name]</code></pre><p>The compile-time constant is inserted into the Markdown at that position.</p><h3>A nested $raw override</h3><pre style=""><code class='codeblock'>[$raw: &lt;div&gt;Raw HTML here&lt;/div&gt;]</code></pre><p>Nested templates default to <code>$md</code>, but an explicit directive overrides that.</p>
+<span class='moth-code-delimiter'>;</span></code></pre><pre style=""><code class='codeblock'><span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span> docs<span class='moth-code-operator'>/</span>intro.mtf
+<span class='moth-code-keyword'>#</span> Welcome to <span class='moth-code-delimiter'>[</span>site_name<span class='moth-code-delimiter'>]</span></code></pre><p>The compile-time constant is inserted into the Markdown at that position.</p><h3>A nested $raw override</h3><pre style=""><code class='codeblock'>[$raw: &lt;div&gt;Raw HTML here&lt;/div&gt;]</code></pre><p>Nested templates default to <code>$md</code>, but an explicit directive overrides that.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
     <p>A <code>.mtf</code> file sees a small compile-time scope. The implicit template body can access constants from its module root and builder-provided helpers.</p><h3>Same-directory module root constants</h3><p>Exported compile-time constants and const records from the same-directory module root are visible inside a <code>.mtf</code> file. This is the primary way to parameterise moth template content.</p><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- docs/@docs.moth</span>
 <span class='moth-code-keyword'>export</span><span class='moth-code-delimiter'>:</span>
     site_name <span class='moth-code-operator'>#=</span> <span class='moth-code-string'>&quot;Moth&quot;</span>
-<span class='moth-code-delimiter'>;</span></code></pre><pre style=""><code class='codeblock'>-- docs/intro.mtf
-# Welcome to [site_name]</code></pre><h3>Builder-provided compile-time helpers</h3><p>Exported compile-time constants and const records from <code>@html</code> are visible flat inside a <code>.mtf</code> file. This includes helpers such as <code>p</code>, <code>codeblock</code> and other HTML builder constants.</p><pre style=""><code class='codeblock'>-- docs/intro.mtf
+<span class='moth-code-delimiter'>;</span></code></pre><pre style=""><code class='codeblock'><span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span> docs<span class='moth-code-operator'>/</span>intro.mtf
+<span class='moth-code-keyword'>#</span> Welcome to <span class='moth-code-delimiter'>[</span>site_name<span class='moth-code-delimiter'>]</span></code></pre><h3>Builder-provided compile-time helpers</h3><p>Exported compile-time constants and const records from <code>@html</code> are visible flat inside a <code>.mtf</code> file. This includes helpers such as <code>p</code>, <code>codeblock</code> and other HTML builder constants.</p><pre style=""><code class='codeblock'>-- docs/intro.mtf
 [p: This paragraph uses the @html p helper.]
 
 [codeblock, $code(&quot;moth&quot;): value = 42]</code></pre><h3>Collision semantics</h3><p><code>@html</code> constants and same-directory module root constants don&#39;t shadow each other. If both surfaces expose the same visible name, compilation fails with a visible-name collision diagnostic. The collision identifies both sources where location data is available.</p><p>Authors resolve collisions by renaming the module-root export.</p><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- docs/@docs.moth</span>

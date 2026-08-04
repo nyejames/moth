@@ -101,4 +101,56 @@ import @html { codeblock }
             value.to_string()
         }
     ]
+
+    [codeblock, $code("html"):
+        <!-- note -->
+        <div class="card">text</div>
+    ]
+
+    [codeblock, $code("md"):
+        # Title
+
+        Use `code` now.
+    ]
+
+    [codeblock, $code("toml"):
+        # config
+        [server]
+        host = "localhost"
+        enabled = true
+    ]
+
+    [codeblock, $code("json"):
+        {"name": "Priya", "age": 30, "active": true}
+    ]
+
+    [codeblock, $code("yaml"):
+        # config
+        name: Priya
+        servers:
+          - host: localhost
+        active: true
+        ---
+    ]
+
+    [codeblock, $code("css"):
+        /* note */
+        @media screen {
+            color: red;
+        }
+    ]
+
+    [codeblock, $code("c"):
+        #include <stdio.h>
+        int main(void) {
+            // note
+            printf("hi");
+            return 0;
+        }
+    ]
+
+    [codeblock, $code("sql"):
+        SELECT name, COUNT(*) FROM users
+        WHERE active = true; -- note
+    ]
 ]

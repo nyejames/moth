@@ -770,17 +770,297 @@ fn generic_profile_has_no_language_word_vocabulary() {
 }
 
 #[test]
-fn html_and_markdown_aliases_use_the_generic_profile() {
+fn html_markdown_and_toml_aliases_select_dedicated_profiles() {
+    assert_eq!(CodeLanguage::from_alias("html"), Some(CodeLanguage::Html));
+    assert_eq!(CodeLanguage::from_alias("md"), Some(CodeLanguage::Markdown));
     assert_eq!(
-        CodeLanguage::from_alias("html"),
-        Some(CodeLanguage::Generic),
-        "html fragments must fall back to syntax-only highlighting"
+        CodeLanguage::from_alias("markdown"),
+        Some(CodeLanguage::Markdown)
     );
+    assert_eq!(CodeLanguage::from_alias("toml"), Some(CodeLanguage::Toml));
+    assert_eq!(CodeLanguage::from_alias("json"), Some(CodeLanguage::Json));
+    assert_eq!(CodeLanguage::from_alias("yaml"), Some(CodeLanguage::Yaml));
+    assert_eq!(CodeLanguage::from_alias("yml"), Some(CodeLanguage::Yaml));
+    assert_eq!(CodeLanguage::from_alias("css"), Some(CodeLanguage::Css));
+    assert_eq!(CodeLanguage::from_alias("c"), Some(CodeLanguage::C));
+    assert_eq!(CodeLanguage::from_alias("sql"), Some(CodeLanguage::Sql));
+}
+
+#[test]
+fn json_profile_highlights_keys_literals_and_numbers() {
+    let small = highlight_code_html(r#"{"name": "Priya"}"#, CodeLanguage::Json);
     assert_eq!(
-        CodeLanguage::from_alias("md"),
-        Some(CodeLanguage::Generic),
-        "markdown fragments must fall back to syntax-only highlighting"
+        small,
+        "<span class='moth-code-delimiter'>{</span><span class='moth-code-nominal'>&quot;name&quot;</span><span class='moth-code-operator'>:</span> <span class='moth-code-string'>&quot;Priya&quot;</span><span class='moth-code-delimiter'>}</span>",
+        "a quoted key must be nominal and a value must stay a string, got: {small}"
     );
+
+    let values = highlight_code_html(
+        r#"{"age": 30, "active": true, "note": null}"#,
+        CodeLanguage::Json,
+    );
+    assert!(values.contains("<span class='moth-code-number'>30</span>"));
+    assert!(values.contains("<span class='moth-code-literal'>true</span>"));
+    assert!(values.contains("<span class='moth-code-literal'>null</span>"));
+}
+
+#[test]
+fn yaml_profile_highlights_keys_literals_markers_and_comments() {
+    let yaml = highlight_code_html(
+        r#"# config
+name: Priya
+- host: localhost
+active: yes
+---
+..."#,
+        CodeLanguage::Yaml,
+    );
+    assert!(yaml.contains("<span class='moth-code-comment'># config</span>"));
+    assert!(
+        yaml.contains(
+            "<span class='moth-code-nominal'>name</span><span class='moth-code-operator'>:</span>"
+        ),
+        "a line-start mapping key must be nominal, got: {yaml}"
+    );
+    assert!(
+        yaml.contains("<span class='moth-code-nominal'>host</span>"),
+        "a list-item mapping key must be nominal, got: {yaml}"
+    );
+    assert!(yaml.contains("<span class='moth-code-literal'>yes</span>"));
+    assert!(yaml.contains("<span class='moth-code-keyword'>---</span>"));
+    assert!(yaml.contains("<span class='moth-code-keyword'>...</span>"));
+
+    let quoted = highlight_code_html(r#""key": value"#, CodeLanguage::Yaml);
+    assert!(
+        quoted.contains("<span class='moth-code-nominal'>&quot;key&quot;</span>"),
+        "a quoted line-start key must be nominal, got: {quoted}"
+    );
+}
+
+#[test]
+fn css_profile_highlights_comments_at_rules_and_properties() {
+    let css = highlight_code_html(
+        r#"/* note */
+@media screen {
+  color: red;
+}"#,
+        CodeLanguage::Css,
+    );
+    assert!(css.contains("<span class='moth-code-comment'>/* note */</span>"));
+    assert!(css.contains("<span class='moth-code-keyword'>@media</span>"));
+    assert!(
+        css.contains(
+            "<span class='moth-code-nominal'>color</span><span class='moth-code-operator'>:</span>"
+        ),
+        "a property inside a declaration block must be nominal, got: {css}"
+    );
+    assert!(
+        !css.contains("<span class='moth-code-nominal'>screen</span>"),
+        "selector words must stay plain, got: {css}"
+    );
+}
+
+#[test]
+fn c_profile_highlights_preprocessor_types_functions_and_comments() {
+    let c = highlight_code_html(
+        r#"#include <stdio.h>
+int main(void) {
+  // note
+  printf("hi");
+  return 0;
+}"#,
+        CodeLanguage::C,
+    );
+    assert!(c.contains("<span class='moth-code-keyword'>#include</span>"));
+    assert!(c.contains("<span class='moth-code-type'>int</span>"));
+    assert!(c.contains("<span class='moth-code-function'>main</span>"));
+    assert!(c.contains("<span class='moth-code-comment'>// note</span>"));
+    assert!(c.contains("<span class='moth-code-function'>printf</span>"));
+    assert!(c.contains("<span class='moth-code-string'>&quot;hi&quot;</span>"));
+    assert!(c.contains("<span class='moth-code-keyword'>return</span>"));
+
+    let block = highlight_code_html("/* block */", CodeLanguage::C);
+    assert_eq!(block, "<span class='moth-code-comment'>/* block */</span>");
+
+    let nominal = highlight_code_html("Person", CodeLanguage::C);
+    assert!(nominal.contains("<span class='moth-code-nominal'>Person</span>"));
+}
+
+#[test]
+fn sql_profile_highlights_keywords_functions_literals_and_comments() {
+    let sql = highlight_code_html(
+        "SELECT name, COUNT(*) FROM users WHERE active = true; -- note",
+        CodeLanguage::Sql,
+    );
+    assert!(sql.contains("<span class='moth-code-keyword'>SELECT</span>"));
+    assert!(sql.contains("<span class='moth-code-function'>COUNT</span>"));
+    assert!(sql.contains("<span class='moth-code-keyword'>FROM</span>"));
+    assert!(sql.contains("<span class='moth-code-keyword'>WHERE</span>"));
+    assert!(sql.contains("<span class='moth-code-literal'>true</span>"));
+    assert!(sql.contains("<span class='moth-code-comment'>-- note</span>"));
+
+    let lowercase = highlight_code_html("select name from users", CodeLanguage::Sql);
+    assert!(lowercase.contains("<span class='moth-code-keyword'>select</span>"));
+    assert!(lowercase.contains("<span class='moth-code-keyword'>from</span>"));
+}
+
+#[test]
+fn html_profile_highlights_comments_declarations_and_tags() {
+    let comment = highlight_code_html("<!-- note -->", CodeLanguage::Html);
+    assert_eq!(
+        comment, "<span class='moth-code-comment'>&lt;!-- note --&gt;</span>",
+        "an HTML comment must be one comment span, got: {comment}"
+    );
+
+    let declaration = highlight_code_html("<!DOCTYPE html>", CodeLanguage::Html);
+    assert_eq!(
+        declaration, "<span class='moth-code-keyword'>&lt;!DOCTYPE html&gt;</span>",
+        "a declaration must be one keyword span, got: {declaration}"
+    );
+
+    let tag = highlight_code_html("<div class=\"card\">text</div>", CodeLanguage::Html);
+    assert_eq!(
+        tag,
+        "<span class='moth-code-delimiter'>&lt;</span><span class='moth-code-type'>div</span> <span class='moth-code-nominal'>class</span><span class='moth-code-operator'>=</span><span class='moth-code-string'>&quot;card&quot;</span><span class='moth-code-delimiter'>&gt;</span>text<span class='moth-code-delimiter'>&lt;/</span><span class='moth-code-type'>div</span><span class='moth-code-delimiter'>&gt;</span>",
+        "tag parts must use the shared palette, got: {tag}"
+    );
+
+    let prose = highlight_code_html("Hello!", CodeLanguage::Html);
+    assert_eq!(
+        prose, "Hello!",
+        "HTML prose must keep `!` plain, got: {prose}"
+    );
+}
+
+#[test]
+fn markdown_profile_highlights_headings_and_inline_code() {
+    let heading = highlight_code_html("# Title\nbody", CodeLanguage::Markdown);
+    assert_eq!(
+        heading, "<span class='moth-code-keyword'>#</span> Title\nbody",
+        "an ATX heading marker must be a keyword, got: {heading}"
+    );
+
+    let code = highlight_code_html("use `code` now", CodeLanguage::Markdown);
+    assert_eq!(
+        code, "use <span class='moth-code-string'>`code`</span> now",
+        "an inline code span must be a string, got: {code}"
+    );
+
+    let unclosed = highlight_code_html("`oops", CodeLanguage::Markdown);
+    assert_eq!(
+        unclosed, "<span class='moth-code-operator'>`</span>oops",
+        "an unclosed backtick must stay an operator, got: {unclosed}"
+    );
+}
+
+#[test]
+fn toml_profile_highlights_comments_tables_keys_and_values() {
+    let comment = highlight_code_html("# config", CodeLanguage::Toml);
+    assert_eq!(comment, "<span class='moth-code-comment'># config</span>");
+
+    let table = highlight_code_html("[server]", CodeLanguage::Toml);
+    assert_eq!(
+        table, "<span class='moth-code-keyword'>[server]</span>",
+        "a table header must be one keyword span, got: {table}"
+    );
+
+    let array_table = highlight_code_html("[[items]]", CodeLanguage::Toml);
+    assert_eq!(
+        array_table, "<span class='moth-code-keyword'>[[items]]</span>",
+        "an array-of-tables header must be one keyword span, got: {array_table}"
+    );
+
+    let pair = highlight_code_html("host = \"localhost\"", CodeLanguage::Toml);
+    assert_eq!(
+        pair,
+        "<span class='moth-code-nominal'>host</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;localhost&quot;</span>",
+        "a key, operator and string value must use the shared palette, got: {pair}"
+    );
+
+    let boolean = highlight_code_html("enabled = true", CodeLanguage::Toml);
+    assert_eq!(
+        boolean,
+        "<span class='moth-code-nominal'>enabled</span> <span class='moth-code-operator'>=</span> <span class='moth-code-literal'>true</span>",
+        "a boolean value must be a literal, got: {boolean}"
+    );
+
+    let dotted = highlight_code_html("a.b = 1", CodeLanguage::Toml);
+    assert_eq!(
+        dotted,
+        "<span class='moth-code-nominal'>a</span>.<span class='moth-code-nominal'>b</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span>",
+        "dotted key segments must be nominal, got: {dotted}"
+    );
+}
+
+#[test]
+fn prose_like_profiles_keep_ordinary_words_plain() {
+    for (language, source) in [
+        (CodeLanguage::Html, "Hello world"),
+        (CodeLanguage::Markdown, "Hello world"),
+        (CodeLanguage::Toml, "Hello world"),
+        (CodeLanguage::Json, "Hello world"),
+        (CodeLanguage::Yaml, "Hello world"),
+        (CodeLanguage::Css, "Hello world"),
+        (CodeLanguage::Sql, "Hello world"),
+    ] {
+        let highlighted = highlight_code_html(source, language);
+        assert!(
+            !highlighted.contains("moth-code-nominal"),
+            "{language:?} must not colour prose words nominal, got: {highlighted}"
+        );
+    }
+}
+
+#[test]
+fn new_language_profiles_preserve_every_source_byte_exactly_once() {
+    let cases = [
+        (
+            CodeLanguage::Html,
+            r#"<div class="card">text</div>
+<!-- note -->"#,
+        ),
+        (
+            CodeLanguage::Markdown,
+            r#"# Title
+use `code` now
+`oops"#,
+        ),
+        (
+            CodeLanguage::Toml,
+            r#"[server]
+host = "localhost"
+enabled = true
+# note"#,
+        ),
+        (CodeLanguage::Json, r#"{"name": "Priya", "age": 30}"#),
+        (
+            CodeLanguage::Yaml,
+            r#"name: Priya
+active: yes
+---"#,
+        ),
+        (
+            CodeLanguage::Css,
+            r#"/* note */
+.card { color: red; }"#,
+        ),
+        (
+            CodeLanguage::C,
+            r#"#include <stdio.h>
+int main(void) { return 0; }"#,
+        ),
+        (CodeLanguage::Sql, "SELECT name FROM users; -- note"),
+    ];
+
+    for (language, source) in cases {
+        let highlighted = highlight_code_html(source, language);
+        let stripped = strip_role_spans(&highlighted);
+        let expected = escape_source_for_comparison(source);
+        assert_eq!(
+            stripped, expected,
+            "span-free output must equal escaped input for {language:?} {source:?}\ngot: {stripped}\nhighlighted: {highlighted}"
+        );
+    }
 }
 
 #[test]

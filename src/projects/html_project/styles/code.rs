@@ -160,15 +160,28 @@ pub(crate) enum CodeLanguage {
     Python,
     Rust,
     Shell,
+    Html,
+    Markdown,
+    Toml,
+    Json,
+    Yaml,
+    Css,
+    C,
+    Sql,
 }
 
 impl CodeLanguage {
     pub(crate) fn from_alias(alias: &str) -> Option<Self> {
         match alias {
             "txt" | "text" => Some(Self::Text),
-            // HTML and Markdown fragments have no language vocabulary; the
-            // Generic profile keeps their syntax-only highlighting.
-            "html" | "md" => Some(Self::Generic),
+            "html" => Some(Self::Html),
+            "md" | "markdown" => Some(Self::Markdown),
+            "toml" => Some(Self::Toml),
+            "json" => Some(Self::Json),
+            "yaml" | "yml" => Some(Self::Yaml),
+            "css" => Some(Self::Css),
+            "c" => Some(Self::C),
+            "sql" => Some(Self::Sql),
             "moth" => Some(Self::Moth),
             "js" | "javascript" => Some(Self::JavaScript),
             "ts" | "typescript" => Some(Self::TypeScript),
@@ -180,18 +193,30 @@ impl CodeLanguage {
     }
 
     pub(crate) fn supported_aliases() -> &'static str {
-        "\"txt\"/\"text\", \"html\"/\"md\", \"moth\", \"js\"/\"javascript\", \"ts\"/\"typescript\", \"py\"/\"python\", \"rs\"/\"rust\", \"bash\"/\"sh\"/\"shell\""
+        "\"txt\"/\"text\", \"html\", \"md\"/\"markdown\", \"toml\", \"json\", \"yaml\"/\"yml\", \"css\", \"c\", \"sql\", \"moth\", \"js\"/\"javascript\", \"ts\"/\"typescript\", \"py\"/\"python\", \"rs\"/\"rust\", \"bash\"/\"sh\"/\"shell\""
     }
 
     fn comment_prefix(self) -> Option<&'static str> {
         match self {
-            Self::Text => None,
-            Self::Generic => Some("//"),
+            Self::Text | Self::Html | Self::Markdown | Self::Css => None,
+            Self::Generic | Self::Json | Self::C => Some("//"),
             Self::Moth => Some("--"),
             Self::JavaScript | Self::TypeScript | Self::Rust => Some("//"),
-            Self::Python => Some("#"),
-            Self::Shell => Some("#"),
+            Self::Python | Self::Shell | Self::Toml | Self::Yaml => Some("#"),
+            Self::Sql => Some("--"),
         }
+    }
+
+    /// True when capitalized words receive the nominal fallback role.
+    ///
+    /// WHY: code languages use the fallback to surface type-like names, while
+    ///      prose-bearing profiles (HTML, Markdown, TOML) keep ordinary words
+    ///      plain so content stays readable.
+    fn has_nominal_fallback(self) -> bool {
+        matches!(
+            self,
+            Self::JavaScript | Self::TypeScript | Self::Python | Self::Rust | Self::Shell | Self::C
+        )
     }
 }
 
@@ -300,6 +325,7 @@ struct CodeScanner<'source> {
     generic_declaration: bool,
     in_loop_header: bool,
     in_pipe_group: bool,
+    css_brace_depth: usize,
     expected_word_role: Option<ExpectedWordRole>,
 }
 
@@ -315,6 +341,7 @@ impl<'source> CodeScanner<'source> {
             generic_declaration: false,
             in_loop_header: false,
             in_pipe_group: false,
+            css_brace_depth: 0,
             expected_word_role: None,
         }
     }
@@ -335,6 +362,9 @@ impl<'source> CodeScanner<'source> {
     fn scan_ascii_byte(&mut self, byte: u8, output: &mut String) {
         match byte {
             b'"' | b'\'' => self.scan_quoted_run(output),
+            b'[' if self.language == CodeLanguage::Toml && self.toml_table_header_starts_here() => {
+                self.scan_toml_table_header(output);
+            }
             b'(' | b')' | b'[' | b']' | b'{' | b'}' => self.scan_delimiter(output),
             b'0'..=b'9' => self.scan_number(output),
             b'a'..=b'z' | b'A'..=b'Z' | b'_' => self.scan_word(output),
@@ -343,6 +373,81 @@ impl<'source> CodeScanner<'source> {
                 // `//` become one comment run instead of two operator tokens.
                 if self.matches_comment_prefix() {
                     self.scan_line_comment(output);
+                    return;
+                }
+
+                if self.language == CodeLanguage::Html
+                    && byte == b'<'
+                    && self.html_markup_starts_here()
+                {
+                    self.scan_html_markup(output);
+                    return;
+                }
+
+                if self.language == CodeLanguage::Markdown {
+                    if byte == b'#' && self.at_line_start() {
+                        self.scan_markdown_heading(output);
+                        return;
+                    }
+
+                    if byte == b'`' && self.scan_markdown_backtick_run(output) {
+                        return;
+                    }
+                }
+
+                // Block comments cover CSS and multi-line C/SQL comments.
+                if matches!(
+                    self.language,
+                    CodeLanguage::Css | CodeLanguage::C | CodeLanguage::Sql
+                ) && self.bytes[self.index..].starts_with(b"/*")
+                {
+                    self.scan_block_comment(output);
+                    return;
+                }
+
+                if self.language == CodeLanguage::C
+                    && byte == b'#'
+                    && self.at_line_start()
+                    && self
+                        .bytes
+                        .get(self.index + 1)
+                        .is_some_and(|next| next.is_ascii_alphabetic() || *next == b'_')
+                {
+                    self.scan_c_preprocessor(output);
+                    return;
+                }
+
+                if self.language == CodeLanguage::Css
+                    && byte == b'@'
+                    && self.bytes.get(self.index + 1).is_some_and(|next| {
+                        next.is_ascii_alphabetic() || matches!(next, b'-' | b'_')
+                    })
+                {
+                    self.scan_css_at_rule(output);
+                    return;
+                }
+
+                if self.language == CodeLanguage::Yaml
+                    && self.at_line_start()
+                    && (self.bytes[self.index..].starts_with(b"---")
+                        || self.bytes[self.index..].starts_with(b"..."))
+                {
+                    self.emit_highlighted_range(
+                        output,
+                        self.index,
+                        self.index + 3,
+                        CodeHighlightRole::Keyword,
+                    );
+                    return;
+                }
+
+                if self.language == CodeLanguage::Yaml && byte == b'~' {
+                    self.emit_highlighted_range(
+                        output,
+                        self.index,
+                        self.index + 1,
+                        CodeHighlightRole::Literal,
+                    );
                     return;
                 }
 
@@ -382,7 +487,11 @@ impl<'source> CodeScanner<'source> {
                     }
                 }
 
-                if self.operator_length().is_some() {
+                // HTML prose keeps `!` plain outside declarations; it only has
+                // markup meaning inside `<!DOCTYPE ...>`.
+                if self.operator_length().is_some()
+                    && !(self.language == CodeLanguage::Html && byte == b'!')
+                {
                     self.scan_operator(output);
                     return;
                 }
@@ -523,6 +632,32 @@ impl<'source> CodeScanner<'source> {
             return Some(expected.role);
         }
 
+        // TOML bare and dotted keys are nominal when `=` or `.` follows them.
+        if self.language == CodeLanguage::Toml
+            && matches!(
+                self.next_non_horizontal_whitespace_byte(word_end),
+                Some(b'=') | Some(b'.')
+            )
+        {
+            return Some(CodeHighlightRole::Nominal);
+        }
+
+        // YAML mapping keys are nominal when a colon follows at a key position.
+        if self.language == CodeLanguage::Yaml
+            && self.next_non_horizontal_whitespace_byte(word_end) == Some(b':')
+            && self.yaml_key_starts_line(word_start)
+        {
+            return Some(CodeHighlightRole::Nominal);
+        }
+
+        // CSS property names are nominal inside declaration blocks.
+        if self.language == CodeLanguage::Css
+            && self.css_brace_depth > 0
+            && self.next_non_horizontal_whitespace_byte(word_end) == Some(b':')
+        {
+            return Some(CodeHighlightRole::Nominal);
+        }
+
         let class = classify_non_moth_word(self.language, word);
         if let Some(next_role) = class.next_identifier_role
             && let Some(next_start) = self.next_identifier_start(word_end)
@@ -533,8 +668,15 @@ impl<'source> CodeScanner<'source> {
             });
         }
 
+        if class.role.is_none()
+            && matches!(self.language, CodeLanguage::C | CodeLanguage::Sql)
+            && self.next_non_horizontal_whitespace_byte(word_end) == Some(b'(')
+        {
+            return Some(CodeHighlightRole::Function);
+        }
+
         class.role.or_else(|| {
-            (self.language != CodeLanguage::Generic
+            (self.language.has_nominal_fallback()
                 && word.chars().next().is_some_and(|ch| ch.is_uppercase()))
             .then_some(CodeHighlightRole::Nominal)
         })
@@ -824,12 +966,33 @@ impl<'source> CodeScanner<'source> {
         }
 
         self.expected_word_role = None;
-        self.emit_highlighted_range(output, run_start, end, CodeHighlightRole::String);
+
+        // JSON and YAML quoted mapping keys keep the key role when a colon
+        // follows; every other quoted run stays a string.
+        let role = if matches!(self.language, CodeLanguage::Json | CodeLanguage::Yaml)
+            && self.next_non_horizontal_whitespace_byte(end) == Some(b':')
+            && (self.language == CodeLanguage::Json || self.yaml_key_starts_line(run_start))
+        {
+            CodeHighlightRole::Nominal
+        } else {
+            CodeHighlightRole::String
+        };
+        self.emit_highlighted_range(output, run_start, end, role);
     }
 
     fn scan_delimiter(&mut self, output: &mut String) {
         let run_start = self.index;
         let end = self.index + 1;
+
+        // CSS braces track declaration blocks so property names can be told
+        // apart from selectors.
+        if self.language == CodeLanguage::Css {
+            match self.bytes[self.index] {
+                b'{' => self.css_brace_depth += 1,
+                b'}' => self.css_brace_depth = self.css_brace_depth.saturating_sub(1),
+                _ => {}
+            }
+        }
 
         if self.language == CodeLanguage::Moth {
             self.reset_declaration_context();
@@ -866,6 +1029,253 @@ impl<'source> CodeScanner<'source> {
 
         self.expected_word_role = None;
         self.emit_highlighted_range(output, run_start, end, CodeHighlightRole::String);
+    }
+
+    /// True when the cursor sits at the first byte of a line.
+    fn at_line_start(&self) -> bool {
+        self.index == 0 || self.bytes[self.index - 1] == b'\n'
+    }
+
+    /// True when `<` begins an HTML comment, declaration or tag.
+    fn html_markup_starts_here(&self) -> bool {
+        matches!(
+            self.bytes.get(self.index + 1),
+            Some(b'/') | Some(b'!') | Some(b'a'..=b'z') | Some(b'A'..=b'Z')
+        )
+    }
+
+    /// Scans one HTML comment, declaration or tag and emits its role spans.
+    ///
+    /// WHAT: comments and declarations get one whole-run span; tags get
+    ///       delimiter, type, nominal, operator and string spans for their
+    ///       parts.
+    /// WHY: basic markup highlighting reuses the shared palette without
+    ///      building a nested HTML tokenizer.
+    fn scan_html_markup(&mut self, output: &mut String) {
+        if self.bytes[self.index..].starts_with(b"<!--") {
+            let run_start = self.index;
+            let end = self.bytes[self.index + 4..]
+                .windows(3)
+                .position(|window| window == b"-->")
+                .map(|offset| self.index + 4 + offset + 3)
+                .unwrap_or(self.bytes.len());
+            self.emit_highlighted_range(output, run_start, end, CodeHighlightRole::Comment);
+            return;
+        }
+
+        if self.bytes.get(self.index + 1) == Some(&b'!') {
+            let run_start = self.index;
+            let end = self
+                .find_same_line_byte(self.index + 2, b'>')
+                .map(|position| position + 1)
+                .unwrap_or(self.bytes.len());
+            self.emit_highlighted_range(output, run_start, end, CodeHighlightRole::Keyword);
+            return;
+        }
+
+        let closing_tag = self.bytes.get(self.index + 1) == Some(&b'/');
+        let open_len = if closing_tag { 2 } else { 1 };
+        self.emit_highlighted_range(
+            output,
+            self.index,
+            self.index + open_len,
+            CodeHighlightRole::Delimiter,
+        );
+
+        let name_end = self.word_end(self.index);
+        if name_end > self.index {
+            self.emit_highlighted_range(output, self.index, name_end, CodeHighlightRole::Type);
+        }
+
+        loop {
+            while self.index < self.bytes.len() && matches!(self.bytes[self.index], b' ' | b'\t') {
+                self.index += 1;
+            }
+
+            if self.index >= self.bytes.len() {
+                break;
+            }
+
+            match self.bytes[self.index] {
+                b'>' => {
+                    self.emit_highlighted_range(
+                        output,
+                        self.index,
+                        self.index + 1,
+                        CodeHighlightRole::Delimiter,
+                    );
+                    break;
+                }
+                b'/' if self.bytes.get(self.index + 1) == Some(&b'>') => {
+                    self.emit_highlighted_range(
+                        output,
+                        self.index,
+                        self.index + 2,
+                        CodeHighlightRole::Delimiter,
+                    );
+                    break;
+                }
+                b'"' | b'\'' => self.scan_quoted_run(output),
+                b'=' => {
+                    self.emit_highlighted_range(
+                        output,
+                        self.index,
+                        self.index + 1,
+                        CodeHighlightRole::Operator,
+                    );
+                }
+                byte if byte.is_ascii_alphanumeric() || byte == b'_' => {
+                    let attribute_end = self.word_end(self.index);
+                    self.emit_highlighted_range(
+                        output,
+                        self.index,
+                        attribute_end,
+                        CodeHighlightRole::Nominal,
+                    );
+                }
+                _ => self.index += 1,
+            }
+        }
+    }
+
+    /// Returns the first `target` byte before the end of the current line.
+    fn find_same_line_byte(&self, from: usize, target: u8) -> Option<usize> {
+        let mut index = from;
+        while index < self.bytes.len() && self.bytes[index] != b'\n' {
+            if self.bytes[index] == target {
+                return Some(index);
+            }
+            index += 1;
+        }
+        None
+    }
+
+    /// Scans a Markdown ATX heading marker run (`#` to `######`).
+    fn scan_markdown_heading(&mut self, output: &mut String) {
+        let run_start = self.index;
+        let mut end = self.index;
+        while end < self.bytes.len() && self.bytes[end] == b'#' {
+            end += 1;
+        }
+        self.emit_highlighted_range(output, run_start, end, CodeHighlightRole::Keyword);
+    }
+
+    /// Scans one Markdown inline code span when its closing run is on the same
+    /// line.
+    ///
+    /// WHY: an unclosed or fenced opening run stays ordinary source instead of
+    ///      swallowing the rest of the block.
+    fn scan_markdown_backtick_run(&mut self, output: &mut String) -> bool {
+        let run_start = self.index;
+        let delimiter_len = self.bytes[self.index..]
+            .iter()
+            .take_while(|&&byte| byte == b'`')
+            .count();
+        let delimiter = &self.bytes[run_start..run_start + delimiter_len];
+
+        let mut end = self.index + delimiter_len;
+        while end < self.bytes.len() && self.bytes[end] != b'\n' {
+            if self.bytes[end] == b'`' && self.bytes[end..].starts_with(delimiter) {
+                end += delimiter_len;
+                self.emit_highlighted_range(output, run_start, end, CodeHighlightRole::String);
+                return true;
+            }
+            end += 1;
+        }
+
+        false
+    }
+
+    /// True when `[` opens a TOML table header at the start of a line.
+    fn toml_table_header_starts_here(&self) -> bool {
+        self.at_line_start()
+    }
+
+    /// Scans one TOML `[table]` or `[[array-of-tables]]` header.
+    ///
+    /// WHY: the whole header is one keyword span so dotted and quoted names do
+    ///      not need a second parser; a header without a closing bracket falls
+    ///      back to ordinary delimiter scanning.
+    fn scan_toml_table_header(&mut self, output: &mut String) {
+        let run_start = self.index;
+        let double_bracket = self.bytes.get(self.index + 1) == Some(&b'[');
+        let mut end = self.index + if double_bracket { 2 } else { 1 };
+
+        while end < self.bytes.len() && self.bytes[end] != b'\n' {
+            if !double_bracket && self.bytes[end] == b']' {
+                self.emit_highlighted_range(output, run_start, end + 1, CodeHighlightRole::Keyword);
+                return;
+            }
+
+            if double_bracket && self.bytes[end] == b']' && self.bytes.get(end + 1) == Some(&b']') {
+                self.emit_highlighted_range(output, run_start, end + 2, CodeHighlightRole::Keyword);
+                return;
+            }
+
+            end += 1;
+        }
+
+        self.scan_delimiter(output);
+    }
+
+    /// Scans one `/* ... */` block comment through the first `*/`.
+    fn scan_block_comment(&mut self, output: &mut String) {
+        let run_start = self.index;
+        let end = self.bytes[self.index + 2..]
+            .windows(2)
+            .position(|window| window == b"*/")
+            .map(|offset| self.index + 2 + offset + 2)
+            .unwrap_or(self.bytes.len());
+
+        self.expected_word_role = None;
+        self.emit_highlighted_range(output, run_start, end, CodeHighlightRole::Comment);
+    }
+
+    /// Scans one C preprocessor directive name after `#`.
+    fn scan_c_preprocessor(&mut self, output: &mut String) {
+        let run_start = self.index;
+        let mut end = self.index + 1;
+
+        while end < self.bytes.len()
+            && (self.bytes[end].is_ascii_alphanumeric() || self.bytes[end] == b'_')
+        {
+            end += 1;
+        }
+
+        self.emit_highlighted_range(output, run_start, end, CodeHighlightRole::Keyword);
+    }
+
+    /// Scans one CSS at-rule name after `@`.
+    fn scan_css_at_rule(&mut self, output: &mut String) {
+        let run_start = self.index;
+        let mut end = self.index + 1;
+
+        while end < self.bytes.len()
+            && (self.bytes[end].is_ascii_alphanumeric() || matches!(self.bytes[end], b'-' | b'_'))
+        {
+            end += 1;
+        }
+
+        self.emit_highlighted_range(output, run_start, end, CodeHighlightRole::Keyword);
+    }
+
+    /// True when `word_start` begins a YAML mapping key position: the start of
+    /// a line, optionally after a `- ` list marker.
+    fn yaml_key_starts_line(&self, word_start: usize) -> bool {
+        let mut index = word_start;
+
+        while index > 0 && matches!(self.bytes[index - 1], b' ' | b'\t') {
+            index -= 1;
+        }
+
+        if index > 0 && self.bytes[index - 1] == b'-' {
+            index -= 1;
+            while index > 0 && matches!(self.bytes[index - 1], b' ' | b'\t') {
+                index -= 1;
+            }
+        }
+
+        index == 0 || self.bytes[index - 1] == b'\n'
     }
 
     fn scan_number(&mut self, output: &mut String) {
@@ -1295,11 +1705,156 @@ fn classify_non_moth_word(language: CodeLanguage, word: &str) -> NonMothWordClas
             }
             _ => {}
         },
-        CodeLanguage::Generic | CodeLanguage::Text | CodeLanguage::Moth => {}
+        CodeLanguage::Toml => match word {
+            "true" | "false" => role = Some(CodeHighlightRole::Literal),
+            _ => {}
+        },
+        CodeLanguage::Json => match word {
+            "true" | "false" | "null" => role = Some(CodeHighlightRole::Literal),
+            _ => {}
+        },
+        CodeLanguage::Yaml => {
+            if is_yaml_literal(word) {
+                role = Some(CodeHighlightRole::Literal);
+            }
+        }
+        CodeLanguage::Css => {}
+        CodeLanguage::C => match word {
+            "if" | "else" | "for" | "while" | "do" | "switch" | "case" | "default" | "break"
+            | "continue" | "return" | "goto" | "sizeof" | "struct" | "union" | "enum"
+            | "typedef" | "static" | "const" | "extern" | "volatile" | "register" | "signed"
+            | "unsigned" | "long" | "short" | "inline" => {
+                role = Some(CodeHighlightRole::Keyword);
+            }
+            "int" | "char" | "float" | "double" | "void" | "bool" | "size_t" | "ssize_t"
+            | "int8_t" | "int16_t" | "int32_t" | "int64_t" | "uint8_t" | "uint16_t"
+            | "uint32_t" | "uint64_t" => {
+                role = Some(CodeHighlightRole::Type);
+            }
+            "true" | "false" | "NULL" => role = Some(CodeHighlightRole::Literal),
+            _ => {}
+        },
+        CodeLanguage::Sql => role = sql_word_role(word),
+        CodeLanguage::Generic
+        | CodeLanguage::Text
+        | CodeLanguage::Moth
+        | CodeLanguage::Html
+        | CodeLanguage::Markdown => {}
     }
 
     NonMothWordClass {
         role,
         next_identifier_role,
     }
+}
+
+/// True for YAML boolean and null scalar spellings, case-insensitively.
+fn is_yaml_literal(word: &str) -> bool {
+    ["true", "false", "yes", "no", "on", "off", "null"]
+        .iter()
+        .any(|candidate| word.eq_ignore_ascii_case(candidate))
+}
+
+/// Classifies one SQL word case-insensitively into the shared roles.
+fn sql_word_role(word: &str) -> Option<CodeHighlightRole> {
+    const KEYWORDS: &[&str] = &[
+        "select",
+        "from",
+        "where",
+        "insert",
+        "into",
+        "values",
+        "update",
+        "set",
+        "delete",
+        "create",
+        "table",
+        "database",
+        "index",
+        "drop",
+        "alter",
+        "add",
+        "column",
+        "join",
+        "inner",
+        "left",
+        "right",
+        "full",
+        "outer",
+        "on",
+        "group",
+        "by",
+        "order",
+        "having",
+        "limit",
+        "offset",
+        "and",
+        "or",
+        "not",
+        "primary",
+        "key",
+        "foreign",
+        "references",
+        "unique",
+        "default",
+        "check",
+        "constraint",
+        "as",
+        "distinct",
+        "union",
+        "all",
+        "exists",
+        "between",
+        "like",
+        "in",
+        "is",
+        "case",
+        "when",
+        "then",
+        "else",
+        "end",
+        "begin",
+        "commit",
+        "rollback",
+        "transaction",
+    ];
+    const TYPES: &[&str] = &[
+        "int",
+        "integer",
+        "bigint",
+        "smallint",
+        "tinyint",
+        "real",
+        "float",
+        "double",
+        "numeric",
+        "decimal",
+        "text",
+        "varchar",
+        "char",
+        "boolean",
+        "date",
+        "time",
+        "timestamp",
+        "blob",
+    ];
+
+    if ["true", "false", "null"]
+        .iter()
+        .any(|candidate| word.eq_ignore_ascii_case(candidate))
+    {
+        return Some(CodeHighlightRole::Literal);
+    }
+
+    if TYPES
+        .iter()
+        .any(|candidate| word.eq_ignore_ascii_case(candidate))
+    {
+        return Some(CodeHighlightRole::Type);
+    }
+
+    KEYWORDS
+        .iter()
+        .any(|candidate| word.eq_ignore_ascii_case(candidate))
+        .then_some(CodeHighlightRole::Keyword)
 }

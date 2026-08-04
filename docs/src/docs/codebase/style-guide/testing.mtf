@@ -137,7 +137,7 @@ baseline protects harness and target invariants. It is not the case's authored s
 Use `success_contract = "acceptance_only"` only when that backend has no stronger case-specific
 semantic, artifact, golden, absence or expected-warning assertion.
 
-[codeblock, $code("text"):
+[codeblock, $code("toml"):
     [backends.html]
     mode = "success"
     warnings = "forbid"
@@ -201,7 +201,7 @@ Canonical fixture shape:
 
 Manifest entry shape:
 
-[codeblock, $code("text"):
+[codeblock, $code("toml"):
     [[case]]
     id = "borrow_conflict_resolved_by_reordering"
     path = "borrow_conflict_resolved_by_reordering"
@@ -279,7 +279,7 @@ Choose the narrowest field that owns the behaviour:
 - `rendered_output_contains` and `rendered_output_not_contains` protect required and forbidden
   fragments when complete output isn't the contract.
 
-[codeblock, $code("text"):
+[codeblock, $code("toml"):
     [backends.html]
     mode = "success"
     warnings = "forbid"
@@ -304,7 +304,7 @@ over generated JavaScript text or a whole-page golden when execution is the real
 - Do not use full rendered diagnostic snapshots when a stable code and structured assertion are sufficient.
 - Do not weaken a diagnostic case into a generic "must fail" assertion.
 
-[codeblock, $code("text"):
+[codeblock, $code("toml"):
     [backends.html]
     mode = "failure"
     warnings = "forbid"
@@ -316,7 +316,7 @@ remapping is part of the contract. Each table selects one diagnostic by stable c
 occurrence. A unique code may omit `occurrence`. Repeat the code in `diagnostic_codes` to preserve
 its exact multiplicity.
 
-[codeblock, $code("text"):
+[codeblock, $code("toml"):
     [[backends.html.diagnostic_assertions]]
     code = "MOTH-RULE-0057"
     reason = "invalid_generic_instantiation.recursive_function_instantiation"
@@ -343,7 +343,7 @@ additional diagnostics part of the accepted current behaviour. Every contains-mo
 substantive `diagnostic_match_reason`. The suite audit reports the reason and treats a missing or
 blank reason as a hard policy finding.
 
-[codeblock, $code("text"):
+[codeblock, $code("toml"):
     diagnostic_match = "contains"
     diagnostic_match_reason = "Independent recovery may emit additional diagnostics from another source unit."
 ]
@@ -356,7 +356,7 @@ Warnings use a separate backend-local contract:
 - `warnings = "exact"` requires `warning_codes` as an exact unordered multiset. Repeat duplicate
   codes to preserve their required count.
 
-[codeblock, $code("text"):
+[codeblock, $code("toml"):
     [backends.html]
     mode = "success"
     warnings = "exact"
@@ -368,7 +368,7 @@ Warnings use a separate backend-local contract:
 
 Use one `expect.toml` per case with backend-specific assertion blocks.
 
-[codeblock, $code("text"):
+[codeblock, $code("toml"):
     entry = "."
 
     [backends.html]

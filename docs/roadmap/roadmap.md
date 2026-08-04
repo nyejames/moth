@@ -65,8 +65,8 @@ work remains in the
 ## Code-block highlighting follow-ups
 
 The built-in `$code` formatter now supports generic and plain-text blocks plus Moth,
-JavaScript, TypeScript, Python, Rust and shell profiles on one shared role palette. The current
-baseline includes:
+JavaScript, TypeScript, Python, Rust, shell, HTML, Markdown, TOML, JSON, YAML, CSS, C and
+SQL profiles on one shared role palette. The current baseline includes:
 
 - an allocation-conscious single-pass byte-slice scanner
 - compiler-owned Moth source-word classification
@@ -80,16 +80,12 @@ keyword/type rules, supported-values diagnostic and focused formatter tests.
 
 Suggested extension order:
 
-1. TOML and JSON, because they are common in project configuration, manifests and generated-data
-   examples throughout the codebase.
-2. YAML, HTML, CSS and Markdown for common configuration, web and documentation examples.
-3. SQL, C, C++, Go and Java when real documentation needs justify maintaining their highlighting
+1. C++, Go and Java when real documentation needs justify maintaining their highlighting
    profiles.
 
-Prefer the conventional short and long aliases where both are widely used, such as `yaml`/`yml`,
-`markdown`/`md` and `cpp`/`c++`. Only add a profile when its language-specific rules improve on the
-generic formatter; preserve HTML escaping and add tests for aliases, comments, keywords and the
-rendered span classes.
+Prefer the conventional short and long aliases where both are widely used, such as `cpp`/`c++`.
+Only add a profile when its language-specific rules improve on the generic formatter; preserve
+HTML escaping and add tests for aliases, comments, keywords and the rendered span classes.
 
 Stateful Moth template-body-aware highlighting remains deferred. Full semantic or editor grammar
 parity stays owned by editor tooling, not the compile-time formatter. The built-in formatter never

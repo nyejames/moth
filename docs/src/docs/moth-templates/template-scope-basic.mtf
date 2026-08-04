@@ -10,7 +10,7 @@ module root and compile-time helpers supplied by `@html`.
     ;
 ]
 
-[codeblock, $code("text"):
+[codeblock, $code("md"):
     -- docs/intro.mtf
     # Welcome to [site_name]
 ]

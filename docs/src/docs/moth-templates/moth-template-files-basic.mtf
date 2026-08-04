@@ -2,7 +2,7 @@ A `.mtf` file is Markdown that lives inside Moth's template world.
 
 ### Write prose directly
 
-[codeblock, $code("text"):
+[codeblock, $code("md"):
     # Getting started
 
     This is **bold** text.
