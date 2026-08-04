@@ -18,7 +18,7 @@ return greet(visitor)
 
 with ordered runtime work in HIR spirit:
 
-[codeblock, $code("text"):
+[codeblock, $code("moth"):
     tmp0 = load visitor
     tmp1 = call greet(tmp0)
     return tmp1

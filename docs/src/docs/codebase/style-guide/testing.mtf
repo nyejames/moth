@@ -214,7 +214,7 @@ Manifest entry shape:
 
 Use the canonical case ID and retained metadata for local iteration:
 
-[codeblock, $code("text"):
+[codeblock, $code("bash"):
     cargo run --quiet -- tests --case arithmetic_operator_precedence --backend html
     cargo run --quiet -- tests --tag borrows --tag diagnostics --backend html
     cargo run --quiet -- tests --contract <contract-id>

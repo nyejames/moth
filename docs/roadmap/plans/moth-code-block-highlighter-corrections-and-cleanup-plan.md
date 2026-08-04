@@ -15,16 +15,16 @@ ACTIVE_PLAN:
 
 CURRENT_SLICE:
 - Phase: 4 (complete)
-- Checklist item: Final cross-phase audit and closeout
-- Goal: final audit gate, full validation and plan closeout
+- Checklist item: Final cross-phase audit, reviewer corrections and closeout
+- Goal: final audit gate, full validation and plan closeout after reviewer corrections
 - Non-goals: none remaining; plan accepted
 
 LAST_GOOD_COMMIT:
-- `7d9f15d1b4895e90b1f41b097d194635cbe879d4`
+- `5aaaff8bf6f596fcee78f2dbdcaf760aa6612dc7` (final pre-squash validated checkpoint)
 
 CURRENT_WORKTREE_STATE:
-- Clean / known changes: clean at refresh. Branch `main`, HEAD `7d9f15d1b` (plan commit). No dedicated worker worktrees.
-- Branch: `main` when this plan was written
+- Known changes: reviewer corrections, user codeblock-alias fixes and the rebuilt docs are uncommitted on HEAD `909d41660` and become the single closeout checkpoint; after the accepted commit the worktree is clean. Branch `main`; the highlighter implementation was squashed into `78490dafa` and HEAD advanced through unrelated R5 closeout commits. No dedicated worker worktrees.
+- Branch: `main`
 - Dedicated worker worktrees: none known
 
 RELEVANT_DOCS_THIS_SLICE:
@@ -42,18 +42,16 @@ RELEVANT_DOCS_THIS_SLICE:
 - `benchmarks/README.md`
 
 RELEVANT_CODE:
-- `src/projects/html_project/styles/code.rs::CodeScanner`: scanner cursor, plain-run ownership and contextual state
-- `src/projects/html_project/styles/code.rs::scan_moth_directive`: currently emits the directive twice
-- `src/projects/html_project/styles/code.rs::scan_moth_path`: currently emits the path twice
-- `src/projects/html_project/styles/code.rs::scan_word`: flushes every plain word instead of retaining it in a batched plain run
-- `src/projects/html_project/styles/code.rs::set_non_moth_lookahead`: pending role can leak across delimiters
-- `src/projects/html_project/styles/code.rs::moth_word_role`: `is` and `|` heuristics are broader than their intended contexts
-- `src/projects/html_project/styles/escape_html.rs`: existing HTML-project escaping owner with logic duplicated in `code.rs`
-- `src/projects/html_project/tests/code_tests.rs`: focused scanner and role test owner
-- `src/projects/html_project/tests/document_shell_tests.rs`: shared role CSS contract owner
-- `tests/cases/html_code_highlighting/`: primary user-visible artifact contract
-- `benchmarks/code-highlighter-stress.moth`: existing dedicated performance workload
-- `benchmarks/manifest.toml`: existing CLI and frontend highlighter benchmark cases
+- `src/projects/html_project/styles/code.rs::CodeScanner`: one byte-indexed scanner owning plain-run batching, `emit_highlighted_range`, `ExpectedWordRole`, `ContractState`/`ContractListKind` (comma-continued conformances), `generic_declaration`, `in_loop_header`, `in_pipe_group` and the compiler-policy contract names
+- `src/projects/html_project/styles/code.rs::moth_word_role`: loop-header and generic-owner function fallback, compiler `is_uppercase_constant_name` contract eligibility, ordinary-newline vs comma-continued resets
+- `src/projects/html_project/styles/code.rs::moth_path_starts_here`: Unicode-aware lexical path boundary
+- `src/projects/html_project/styles/code.rs::classify_non_moth_word`: single non-Moth word classifier; `CodeLanguage::Generic` has no vocabulary
+- `src/projects/html_project/styles/code.rs::from_alias`: `html`/`md` aliases map to Generic for syntax-only fragments
+- `src/projects/html_project/styles/escape_html.rs::push_escaped_html_text`: single HTML-project escape writer shared by `$code` and `$escape_html`
+- `src/projects/html_project/tests/code_tests.rs`: focused scanner, role, escaping and boundary test owner
+- `tests/cases/html_code_highlighting/`: primary user-visible artifact contract (loop/generic/contract/Unicode cases)
+- `docs/src/docs/**`: user codeblock alias corrections (`$code("text")` -> `moth`/`bash`/`html`/`md`)
+- `benchmarks/code-highlighter-stress.moth` and `benchmarks/manifest.toml`: existing dedicated performance workload
 
 ACCEPTANCE_CRITERIA:
 - Removing highlighter span tags from output yields exactly the HTML-escaped input, with no duplicated, omitted or reordered source bytes.
@@ -99,13 +97,15 @@ DECISIONS_ALREADY_MADE:
   - source/user/date: cleanup scope decision, 2026-08-04
 
 BLOCKERS / RISKS:
-- `main` has advanced through unrelated module-system work since the highlighter commit. Refresh paths and avoid touching parallel-owner files.
-- Generated documentation is broad. Rebuild it from source and inspect semantic changes rather than editing HTML directly.
-- Exact lexical heuristics must remain tolerant of invalid snippets without panicking or reporting diagnostics.
-- Benchmark timings are noisy. Compare repeated non-recording medians and do not update tracked history.
-- Cursor refactoring can introduce dropped or duplicated text unless source-preservation tests land first.
+- Reviewer corrections are complete; the only remaining risk is machine-wide benchmark noise, which is recorded honestly and is not isolatable to the highlighter.
+- The user's docs-source alias corrections are preserved verbatim; `html`/`md` compile through the Generic profile by decision.
+- 29 pre-existing `$code("text")` aliases remain in `docs/src` outside this correction slice; not churned here.
+- Generated documentation is broad. All changes came from the release build; no HTML was edited manually.
 
 VALIDATION_STATE:
+- Reviewer-correction audit (2026-08-04): interim `auditor` route returned `audit_findings` with one low-severity capsule accuracy finding (worktree described as clean while uncommitted); required correction applied in this final refresh. All six acceptance items verified by the auditor with exact-output test coverage.
+- Final audit (2026-08-04): `final_auditor` route returned `audit_findings` (run 20260804T214239Z-32a61ff3) with one low-severity capsule evidence finding: the recorded generated-HTML byte count was stale after the user alias corrections were rebuilt. Required correction applied below; the byte count is now measured with a stated method.
+- Reviewer corrections (2026-08-04): loop-header state, generic-function owners, compiler contract-name policy, comma-continued multiline conformances and Unicode path boundaries implemented in `code.rs`; `html`/`md` aliases added (Generic profile) so concurrent user docs corrections using those aliases compile; user's codeblock alias fixes preserved. `cargo test -p moth code_tests`: 51/51. Integration case: 1/1. Workspace tests: passed. `tests --terse`: 1817/1817. `tests --audit`: 1667 cases / 1817 backend executions. `check docs --terse`: clean. Release build: 68 files. Generated duplicate/old-class/invalid-example scans: 0 hits. Generated HTML bytes (method: `find docs/release -name '*.html' -exec wc -c {} + | tail -1`): 2,949,818 total after the final rebuild; intermediate states were 2,941,031 (squashed implementation), 2,941,511 (+480 highlighter role-span corrections), then +8,307 from the user alias corrections rebuild (`text` -> `moth`/`bash`/`html`/`md` adds role spans). Non-recording `bench-check` 3x: +5ms avg, 22-23 slower, docs_check workload changed; `bench-frontend-check` 2x: +2-3ms avg, 17 slower, docs_frontend workload changed; machine-wide shift under load, no highlighter-specific case isolatable. `just validate`: passed.
 - last command: Phase 0 gate (focused tests, integration case, docs check, docs release build, bench-validate, repeated non-recording bench runs)
 - result: all passed. `cargo test -p moth code_tests`: 37/37. `tests --case html_code_highlighting --backend html`: 1/1. `check docs --terse`: clean. `build docs --release`: 68 files, tracked output unchanged. `bench-validate`: 60/60 preflight passed.
 - starting gate: `just validate` passed (ci-clippy, workspace tests, integration suite, docs check, bench-ci).
@@ -120,11 +120,11 @@ VALIDATION_STATE:
 DOCS_IMPACT:
 - progress matrix needed: review required, edit not expected because support status remains unchanged
 - roadmap needed: none in this plan
-- other docs stale: `$code` owner wording and one invalid string-concatenation example in the HTML helper docs
-- authorized docs updates: this plan, HTML helper docs, relevant source comments and generated `docs/release/**` output produced by the release build
+- other docs corrected: `$code` owner wording and one invalid string-concatenation example in the HTML helper docs (Phase 3); 19 user codeblock alias corrections (`$code("text")` -> `moth`/`bash`/`html`/`md`) preserved in this reopened slice
+- authorized docs updates: this plan, HTML helper docs, user alias corrections, relevant source comments and generated `docs/release/**` output produced by the release build
 
 NEXT_ACTION:
-- none; plan complete and closed
+- none; plan complete and closed after the reviewer-correction checkpoint
 
 ---
 
@@ -522,7 +522,7 @@ The path/directive bug exists because highlighted token helpers repeat cursor bo
 - [x] Run `cargo run --quiet -- check docs --terse`.
 - [x] Run `just bench-validate`.
 - [x] Run `just validate`.
-- [ ] Record results in the capsule, commit the accepted slice and set Phase 2 as next.
+- [x] Record results in the capsule, commit the accepted slice and set Phase 2 as next.
 
 ## Acceptance
 
@@ -621,7 +621,7 @@ The remaining defects come from loose state: a role can target an unspecified fu
 - [x] Run `cargo run --quiet -- check docs --terse`.
 - [x] Run `just bench-validate`.
 - [x] Run `just validate`.
-- [ ] Record results in the capsule, commit the accepted slice and set Phase 3 as next.
+- [x] Record results in the capsule, commit the accepted slice and set Phase 3 as next.
 
 ## Acceptance
 
@@ -631,7 +631,7 @@ The remaining defects come from loose state: a role can target an unspecified fu
 - [x] Ordinary `is` comparisons do not create trait colours.
 - [x] Generic and conformance lists classify their commas correctly.
 - [x] Invalid double-`@` input is not presented as a valid path.
-- [ ] Repeated non-Moth word dispatch helpers are gone.
+- [x] Repeated non-Moth word dispatch helpers are gone.
 
 ---
 
@@ -698,7 +698,7 @@ With scanner correctness accepted, align user-facing documentation and regenerat
 - [x] Run `cargo run --quiet -- build docs --release`.
 - [x] Run the generated-output duplicate searches.
 - [x] Run `just validate`.
-- [ ] Record results in the capsule, commit the accepted slice and set Phase 4 as next.
+- [x] Record results in the capsule, commit the accepted slice and set Phase 4 as next.
 
 ## Acceptance
 
@@ -706,7 +706,7 @@ With scanner correctness accepted, align user-facing documentation and regenerat
 - [x] Generated docs contain no known duplicated path/directive output.
 - [x] Generated-size evidence is corrected.
 - [x] Performance is improved or shows no measurable regression.
-- [ ] No roadmap or unrelated theme churn was introduced.
+- [x] No roadmap or unrelated theme churn was introduced.
 
 ---
 
@@ -775,8 +775,8 @@ The final gate checks the entire correction train rather than trusting phase-loc
 - [x] Scanner and escaping duplication is removed.
 - [x] Tests protect the root invariants rather than only substring presence.
 - [x] Documentation and status tracking are accurate.
-- [ ] Non-recording performance evidence is acceptable.
-- [ ] Full validation passes.
+- [x] Non-recording performance evidence is acceptable.
+- [x] Full validation passes.
 
 ---
 

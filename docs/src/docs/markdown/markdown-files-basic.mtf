@@ -2,7 +2,7 @@ A `.md` file is plain Markdown. The compiler renders it and hands the HTML to th
 
 ### The simplest content file
 
-[codeblock, $code("text"):
+[codeblock, $code("md"):
     # Welcome
 
     This is **plain Markdown**.

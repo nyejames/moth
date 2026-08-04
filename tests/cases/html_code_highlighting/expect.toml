@@ -31,6 +31,13 @@ must_contain = [
     "<span class='moth-code-keyword'>cast!</span>",
     "<span class='moth-code-delimiter'>|</span>",
     "<span class='moth-code-nominal'>E</span>",
+    "<span class='moth-code-keyword'>loop</span> items <span class='moth-code-delimiter'>|</span>item<span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>",
+    "<span class='moth-code-function'>get_items</span>",
+    "<span class='moth-code-function'>identity</span> <span class='moth-code-keyword'>type</span>",
+    "<span class='moth-code-function'>render</span> <span class='moth-code-keyword'>type</span>",
+    "<span class='moth-code-contract'>A</span> <span class='moth-code-keyword'>must</span>",
+    "<span class='moth-code-contract'>TRAIT2</span>",
+    "<span class='moth-code-contract'>SECOND</span>",
     "group_value <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span>",
     "io <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;plain variable&quot;</span>",
 ]
@@ -48,6 +55,9 @@ must_not_contain = [
     "<span class='moth-code-keyword'>group</span>",
     "<span class='moth-code-keyword'>into</span>",
     "<span class='moth-code-keyword'>where</span>",
+    "<span class='moth-code-function'>items</span>",
+    "<span class='moth-code-function'>collection</span>",
+    "π<span class='moth-code-string'>@core/io</span>",
 ]
 must_contain_in_order = [
     "<span class='moth-code-contract'>DISPLAY_TEXT</span>",

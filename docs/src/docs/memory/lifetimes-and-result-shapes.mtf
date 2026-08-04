@@ -21,7 +21,7 @@ Every runtime allocation has exactly one semantic lifetime owner. Multiple bindi
 
 An object may retain a reference only when the referenced allocation belongs to the same lifetime region or to a region statically known to outlive the retaining object.
 
-[codeblock, $code("text"):
+[codeblock, $code("moth"):
     R_value >= R_container
 ]
 

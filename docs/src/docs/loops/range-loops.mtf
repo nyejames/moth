@@ -8,7 +8,7 @@ A range loop generates numeric values directly from its loop header.
 
 ### Forms
 
-[codeblock, $code("text"):
+[codeblock, $code("moth"):
     loop start to end:
         ...
 

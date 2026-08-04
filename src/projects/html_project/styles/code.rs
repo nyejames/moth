@@ -33,6 +33,7 @@ use crate::compiler_frontend::keywords::{
     SourceWordClass, attached_bang_keyword_token_kind, classify_source_word,
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveArgumentValue;
+use crate::compiler_frontend::symbols::identifier_policy::is_uppercase_constant_name;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::styles::escape_html::push_escaped_html_text;
 use std::sync::Arc;
@@ -95,14 +96,19 @@ enum ContractListKind {
 
 /// Bounded contract-list state for the Moth heuristic.
 ///
-/// WHAT: remembers whether the next ALL_CAPS identifier is a contract name and
-///       which kind of list expects it.
-/// WHY: ALL_CAPS casing alone must never decide the Contract role, so the
-///      scanner needs a tiny expectation that structural boundaries reset.
+/// WHAT: remembers whether the next uppercase-constant identifier is a
+///       contract name and which kind of list expects it. An expectation
+///       armed by a conformance comma survives a newline; every other
+///       expectation dies at declaration boundaries.
+/// WHY: casing alone must never decide the Contract role, so the scanner
+///      needs a tiny expectation that structural boundaries reset.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ContractState {
     None,
-    ExpectName(ContractListKind),
+    ExpectName {
+        kind: ContractListKind,
+        continued_after_comma: bool,
+    },
     AfterName(ContractListKind),
 }
 
@@ -160,6 +166,9 @@ impl CodeLanguage {
     pub(crate) fn from_alias(alias: &str) -> Option<Self> {
         match alias {
             "txt" | "text" => Some(Self::Text),
+            // HTML and Markdown fragments have no language vocabulary; the
+            // Generic profile keeps their syntax-only highlighting.
+            "html" | "md" => Some(Self::Generic),
             "moth" => Some(Self::Moth),
             "js" | "javascript" => Some(Self::JavaScript),
             "ts" | "typescript" => Some(Self::TypeScript),
@@ -171,7 +180,7 @@ impl CodeLanguage {
     }
 
     pub(crate) fn supported_aliases() -> &'static str {
-        "\"txt\"/\"text\", \"moth\", \"js\"/\"javascript\", \"ts\"/\"typescript\", \"py\"/\"python\", \"rs\"/\"rust\", \"bash\"/\"sh\"/\"shell\""
+        "\"txt\"/\"text\", \"html\"/\"md\", \"moth\", \"js\"/\"javascript\", \"ts\"/\"typescript\", \"py\"/\"python\", \"rs\"/\"rust\", \"bash\"/\"sh\"/\"shell\""
     }
 
     fn comment_prefix(self) -> Option<&'static str> {
@@ -289,6 +298,7 @@ struct CodeScanner<'source> {
     language: CodeLanguage,
     contract_state: ContractState,
     generic_declaration: bool,
+    in_loop_header: bool,
     in_pipe_group: bool,
     expected_word_role: Option<ExpectedWordRole>,
 }
@@ -303,6 +313,7 @@ impl<'source> CodeScanner<'source> {
             language,
             contract_state: ContractState::None,
             generic_declaration: false,
+            in_loop_header: false,
             in_pipe_group: false,
             expected_word_role: None,
         }
@@ -376,14 +387,18 @@ impl<'source> CodeScanner<'source> {
                     return;
                 }
 
-                // Structural Moth boundaries end declaration context.
-                if self.language == CodeLanguage::Moth
-                    && matches!(
+                // Structural Moth boundaries end declaration context. Newlines
+                // reset everything except a conformance continuation that a
+                // comma explicitly armed.
+                if self.language == CodeLanguage::Moth {
+                    if byte == b'\n' {
+                        self.reset_after_newline();
+                    } else if matches!(
                         byte,
-                        b'\n' | b'=' | b'<' | b'>' | b'(' | b')' | b'[' | b']' | b'{' | b'}'
-                    )
-                {
-                    self.reset_declaration_context();
+                        b'=' | b'<' | b'>' | b'(' | b')' | b'[' | b']' | b'{' | b'}'
+                    ) {
+                        self.reset_declaration_context();
+                    }
                 }
 
                 // Plain punctuation stays in the batched plain run; horizontal
@@ -550,16 +565,33 @@ impl<'source> CodeScanner<'source> {
                     self.generic_declaration = true;
                     self.contract_state = ContractState::None;
                 }
+                "loop" => {
+                    // A collection or range loop keeps its source/projection
+                    // unclassified until the header ends at `:` or a newline.
+                    self.in_loop_header = true;
+                    self.contract_state = ContractState::None;
+                }
                 "must" => {
                     self.generic_declaration = false;
-                    self.contract_state = ContractState::ExpectName(ContractListKind::Conformance);
+                    self.contract_state = ContractState::ExpectName {
+                        kind: ContractListKind::Conformance,
+                        continued_after_comma: false,
+                    };
                 }
                 "not"
-                    if self.contract_state
-                        == ContractState::ExpectName(ContractListKind::Conformance) => {}
+                    if matches!(
+                        self.contract_state,
+                        ContractState::ExpectName {
+                            kind: ContractListKind::Conformance,
+                            ..
+                        }
+                    ) => {}
                 "is" => {
                     self.contract_state = if self.generic_declaration {
-                        ContractState::ExpectName(ContractListKind::GenericBound)
+                        ContractState::ExpectName {
+                            kind: ContractListKind::GenericBound,
+                            continued_after_comma: false,
+                        }
                     } else {
                         ContractState::None
                     };
@@ -568,7 +600,10 @@ impl<'source> CodeScanner<'source> {
                     let ContractState::AfterName(kind) = self.contract_state else {
                         unreachable!("guarded by the match arm above");
                     };
-                    self.contract_state = ContractState::ExpectName(kind);
+                    self.contract_state = ContractState::ExpectName {
+                        kind,
+                        continued_after_comma: false,
+                    };
                 }
                 _ => self.contract_state = ContractState::None,
             }
@@ -587,21 +622,28 @@ impl<'source> CodeScanner<'source> {
             return Some(CodeHighlightRole::Type);
         }
 
-        if is_all_caps_word(word) {
+        // Contract names follow the compiler's uppercase-constant policy so
+        // single letters, digits and underscores classify exactly as traits do
+        // in Moth. The policy applies only in contract context; ordinary `A`,
+        // `E` and digit-bearing constants keep their nominal/plain fallback.
+        if is_uppercase_constant_name(word) {
             let in_contract_context = self.contract_state != ContractState::None
                 || self.all_caps_followed_by_must(word_end);
-            self.contract_state = if in_contract_context {
+            if in_contract_context {
                 let kind = match self.contract_state {
-                    ContractState::ExpectName(kind) | ContractState::AfterName(kind) => kind,
-                    // An ALL_CAPS name followed by `must` declares a trait.
+                    ContractState::ExpectName { kind, .. } | ContractState::AfterName(kind) => kind,
+                    // An uppercase-constant name followed by `must` declares a trait.
                     ContractState::None => ContractListKind::Conformance,
                 };
-                ContractState::AfterName(kind)
-            } else {
-                ContractState::None
-            };
+                self.contract_state = ContractState::AfterName(kind);
 
-            return in_contract_context.then_some(CodeHighlightRole::Contract);
+                return Some(CodeHighlightRole::Contract);
+            }
+
+            // Outside contract context the compiler policy does not apply:
+            // `A` and `E` keep their nominal fallback below, while all-caps
+            // constants such as `PI` and `MAX_SIZE` stay plain.
+            self.contract_state = ContractState::None;
         }
 
         if is_pascal_case_word(word) {
@@ -609,33 +651,78 @@ impl<'source> CodeScanner<'source> {
             return Some(CodeHighlightRole::Nominal);
         }
 
-        // Ordinary identifiers become functions only before `(` or a pipe that
-        // opens a new group; identifiers inside `|...|` stay plain.
+        // Ordinary identifiers become functions before `(`, before a pipe that
+        // opens a new group, or when they own a generic declaration
+        // (`name type T ...`). Loop sources and projections are not
+        // declarations even though a binding pipe follows, and identifiers
+        // inside `|...|` stay plain.
         self.contract_state = ContractState::None;
         match self.next_non_horizontal_whitespace_byte(word_end) {
             Some(b'(') => Some(CodeHighlightRole::Function),
-            Some(b'|') if !self.in_pipe_group => Some(CodeHighlightRole::Function),
+            Some(b'|') if !self.in_pipe_group && !self.in_loop_header => {
+                Some(CodeHighlightRole::Function)
+            }
+            _ if !self.in_pipe_group && self.next_word_is(word_end, "type") => {
+                Some(CodeHighlightRole::Function)
+            }
             _ => None,
         }
     }
 
-    /// Resets contract-list and generic-declaration context at structural
-    /// boundaries so later source cannot inherit stale expectations.
+    /// Resets contract-list, generic-declaration and loop-header context at
+    /// structural boundaries so later source cannot inherit stale expectations.
     fn reset_declaration_context(&mut self) {
         self.contract_state = ContractState::None;
         self.generic_declaration = false;
+        self.in_loop_header = false;
+    }
+
+    /// Resets declaration context at a newline, preserving only a conformance
+    /// continuation that a comma explicitly armed.
+    ///
+    /// WHY: `Label must FIRST,\n SECOND` stays one conformance list, while an
+    ///      ordinary newline ends every declaration expectation.
+    fn reset_after_newline(&mut self) {
+        self.in_loop_header = false;
+        self.generic_declaration = false;
+
+        if !matches!(
+            self.contract_state,
+            ContractState::ExpectName {
+                kind: ContractListKind::Conformance,
+                continued_after_comma: true,
+            }
+        ) {
+            self.contract_state = ContractState::None;
+        }
     }
 
     /// Continues a conformance list after a comma or ends a generic bound list
     /// so the next word can be a new generic parameter.
     fn transition_after_comma(&mut self) {
         self.contract_state = match self.contract_state {
-            ContractState::AfterName(ContractListKind::Conformance) => {
-                ContractState::ExpectName(ContractListKind::Conformance)
-            }
+            ContractState::AfterName(ContractListKind::Conformance) => ContractState::ExpectName {
+                kind: ContractListKind::Conformance,
+                continued_after_comma: true,
+            },
             ContractState::AfterName(ContractListKind::GenericBound) => ContractState::None,
             _ => self.contract_state,
         };
+    }
+
+    /// True when the next word after horizontal whitespace is exactly
+    /// `expected`.
+    ///
+    /// WHY: a generic function owner is recognised by its `name type T ...`
+    ///      shape, but only when `type` is the immediate next word.
+    fn next_word_is(&self, from: usize, expected: &str) -> bool {
+        let mut index = from;
+        while index < self.bytes.len() && matches!(self.bytes[index], b' ' | b'\t') {
+            index += 1;
+        }
+
+        let end = self.word_end(index);
+        end > index && self.source[index..end] == *expected
     }
 
     /// Returns the start of the next identifier after horizontal whitespace, or
@@ -987,12 +1074,40 @@ impl<'source> CodeScanner<'source> {
             return false;
         }
 
-        // A path may start only at a lexical boundary: not directly after another
-        // `@` and not after a path or identifier continuation byte. This keeps
-        // invalid doubled prefixes such as `@@name` visible as plain source.
-        !(self.index > 0
-            && (self.bytes[self.index - 1] == b'@'
-                || is_moth_path_byte(self.bytes[self.index - 1])))
+        // A path may start only at a lexical boundary: not directly after
+        // another `@` and not after a path or identifier continuation byte,
+        // including a Unicode identifier continuation. This keeps invalid
+        // doubled prefixes such as `@@name` and attached forms such as
+        // `π@core/io` visible as plain source.
+        self.index == 0 || !self.previous_scalar_continues_path_or_word()
+    }
+
+    /// True when the scalar immediately before the cursor is a path or
+    /// identifier continuation.
+    ///
+    /// WHY: ASCII continuation bytes are checked directly, while a non-ASCII
+    ///      previous byte must be decoded so a Unicode identifier such as `π`
+    ///      blocks an attached `@path`.
+    fn previous_scalar_continues_path_or_word(&self) -> bool {
+        let before = self.index - 1;
+        let byte = self.bytes[before];
+
+        if byte.is_ascii() {
+            return byte == b'@' || is_moth_path_byte(byte);
+        }
+
+        // Walk back from the previous byte over UTF-8 continuation bytes to
+        // the scalar's leading byte, then reject when that scalar continues
+        // an identifier.
+        let mut scalar_start = before;
+        while scalar_start > 0 && self.bytes[scalar_start] & 0xC0 == 0x80 {
+            scalar_start -= 1;
+        }
+
+        self.source[scalar_start..self.index]
+            .chars()
+            .next()
+            .is_some_and(|ch| ch.is_alphanumeric() || ch == '_')
     }
 
     fn all_caps_followed_by_must(&self, word_end: usize) -> bool {
@@ -1048,6 +1163,10 @@ fn is_moth_path_byte(byte: u8) -> bool {
 ///
 /// WHY: single uppercase letters act as generic parameter names and stay
 ///      nominal, while `PI`, `TAU` and `DISPLAY_TEXT` use the all-caps shape.
+///      This is the presentation split for the nominal fallback; contract
+///      eligibility reuses the compiler's `is_uppercase_constant_name`
+///      policy, so `A`, `TRAIT2` and `HTTP_2` classify as traits in contract
+///      context.
 fn is_all_caps_word(word: &str) -> bool {
     let mut letter_count = 0usize;
 

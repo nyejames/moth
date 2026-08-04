@@ -16,7 +16,7 @@ Analysis reasons about **places** (locations), **storage roots** and **alias roo
 
 Side example, then back to greetings:
 
-[codeblock, $code("text"):
+[codeblock, $code("moth"):
     -- conceptual: two shared readers of message
     -- then an exclusive write through ~message while a reader still needs the old value
 ]

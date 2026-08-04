@@ -1,6 +1,6 @@
 Explicit casts target compiler-supported builtin types:
 
-[codeblock, $code("text"):
+[codeblock, $code("moth"):
     Bool
     Int
     String

@@ -6,7 +6,7 @@
 
 Exported compile-time constants from `@html` are visible inside `.mtf` files without an explicit import. This is the primary way authors use the helpers.
 
-[codeblock, $code("text"):
+[codeblock, $code("moth"):
     -- docs/intro.mtf
     [p: A paragraph built from the @html p helper.]
 

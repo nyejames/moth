@@ -286,7 +286,7 @@ page_head #= language_theme_head
 
     Terse diagnostics have a stable compact shape:
 
-    [codeblock, $code("text"):
+    [codeblock, $code("bash"):
         E|type|src/@page.moth|4:12|Expected Bool, found Int|help=Use a Bool expression here.
         W|identifier_naming_convention|src/button.moth|1:1|Import alias case mismatch
     ]

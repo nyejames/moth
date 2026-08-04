@@ -16,7 +16,7 @@ Slots let one template receive content from another.
 
 The default and named forms are:
 
-[codeblock, $code("text"):
+[codeblock, $code("moth"):
     [$slot]                 -- default slot
     [$slot("name")]         -- named slot
     [$insert("name"): ...]  -- contribution to named slot

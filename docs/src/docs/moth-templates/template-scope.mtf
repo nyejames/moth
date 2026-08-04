@@ -85,7 +85,7 @@ Child templates are opaque barriers to the parent formatter. A child template's 
 
 To output literal template delimiters, use string insertion:
 
-[codeblock, $code("text"):
+[codeblock, $code("moth"):
     ["["]
     ["]"]
     ["[literal]"]

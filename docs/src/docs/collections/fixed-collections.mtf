@@ -13,7 +13,7 @@ Fixed capacity is semantic type identity.
 
 These are distinct incompatible types:
 
-[codeblock, $code("text"):
+[codeblock, $code("moth"):
     {Int}
     {4 Int}
     {8 Int}

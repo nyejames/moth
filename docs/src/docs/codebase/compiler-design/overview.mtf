@@ -44,7 +44,7 @@ visitor = "Priya"
 
 The final fragment the series aims at:
 
-[codeblock, $code("text"):
+[codeblock, $code("html"):
 <p>Hello, Priya!</p>
 ]
 

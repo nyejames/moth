@@ -62,7 +62,7 @@ capture when `else =>` is omitted.
 
 ### Relational patterns
 
-[codeblock, $code("text"):
+[codeblock, $code("moth"):
     < value
     <= value
     > value

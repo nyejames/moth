@@ -4,7 +4,7 @@ A non-config file whose name starts with `@` and ends with `.moth` is the module
 
 The filename after `@` has no language-level semantic role. These are all equivalent module root spellings:
 
-[codeblock, $code("text"):
+[codeblock, $code("moth"):
     @page.moth
     @mod.moth
     @api.moth

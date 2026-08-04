@@ -4,7 +4,7 @@ Every earlier stage produced records. The HTML builder's job is to turn the righ
 
 This is the last primary stop on the chronological route. The fragment at the end is still:
 
-[codeblock, $code("text"):
+[codeblock, $code("html"):
 <p>Hello, Priya!</p>
 ]
 
@@ -99,7 +99,7 @@ output/
 
 Open the HTML. Find the fragment:
 
-[codeblock, $code("text"):
+[codeblock, $code("html"):
 <p>Hello, Priya!</p>
 ]
 

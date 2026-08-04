@@ -63,6 +63,26 @@ import @html { codeblock }
         if option is |value|
         value is MAX_SIZE
 
+        -- loop sources are not function declarations
+        loop items |item|:
+        loop collection.items |item|:
+        loop get_items() |item|:
+
+        -- generic function declarations
+        identity type A |value A| -> A:
+        render type Item is DISPLAY_TEXT |item Item| -> String:
+
+        -- contract names follow the compiler uppercase policy
+        A must:
+        Label must TRAIT2
+
+        -- conformance lists continue after a comma across newlines
+        Label must FIRST,
+            SECOND
+
+        -- Unicode path boundaries stay visible when attached to identifiers
+        π@core/io
+
         -- builtin namespace, Error, attached bangs
         io.line("hello")
         io = "plain variable"

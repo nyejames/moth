@@ -770,6 +770,20 @@ fn generic_profile_has_no_language_word_vocabulary() {
 }
 
 #[test]
+fn html_and_markdown_aliases_use_the_generic_profile() {
+    assert_eq!(
+        CodeLanguage::from_alias("html"),
+        Some(CodeLanguage::Generic),
+        "html fragments must fall back to syntax-only highlighting"
+    );
+    assert_eq!(
+        CodeLanguage::from_alias("md"),
+        Some(CodeLanguage::Generic),
+        "markdown fragments must fall back to syntax-only highlighting"
+    );
+}
+
+#[test]
 fn moth_pipe_groups_keep_captures_and_parameters_plain() {
     let declaration = highlight_code_html("render |value|", CodeLanguage::Moth);
     assert_eq!(
@@ -843,6 +857,129 @@ fn moth_conformance_and_generic_commas_classify_differently() {
     assert!(
         generic.contains("<span class='moth-code-contract'>SECOND</span>"),
         "SECOND must be a contract after the second is, got: {generic}"
+    );
+}
+
+#[test]
+fn moth_loop_sources_are_not_function_declarations() {
+    let plain = highlight_code_html("loop items |item|:", CodeLanguage::Moth);
+    assert_eq!(
+        plain,
+        "<span class='moth-code-keyword'>loop</span> items <span class='moth-code-delimiter'>|</span>item<span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>",
+        "loop source must stay plain, got: {plain}"
+    );
+
+    let projection = highlight_code_html("loop collection.items |item|:", CodeLanguage::Moth);
+    assert!(
+        !projection.contains("<span class='moth-code-function'>collection</span>")
+            && !projection.contains("<span class='moth-code-function'>items</span>"),
+        "loop projections must stay plain, got: {projection}"
+    );
+
+    let call = highlight_code_html("loop get_items() |item|:", CodeLanguage::Moth);
+    assert!(
+        call.contains("<span class='moth-code-function'>get_items</span>"),
+        "the loop source call must keep its function role, got: {call}"
+    );
+    assert!(
+        !call.contains("<span class='moth-code-function'>item</span>"),
+        "the loop binding must stay plain, got: {call}"
+    );
+
+    // The header state must end at `:` so a later declaration is unaffected.
+    let following = highlight_code_html("loop items |item|:\nrender |value|", CodeLanguage::Moth);
+    assert!(
+        following.contains("<span class='moth-code-function'>render</span>"),
+        "loop header state must reset at the colon, got: {following}"
+    );
+}
+
+#[test]
+fn moth_generic_function_owners_are_functions() {
+    let free = highlight_code_html("identity type A |value A| -> A:", CodeLanguage::Moth);
+    assert!(
+        free.contains("<span class='moth-code-function'>identity</span>"),
+        "generic free-function owner must be a function, got: {free}"
+    );
+
+    let method = highlight_code_html(
+        "render type Item is DISPLAY_TEXT |item Item| -> String:",
+        CodeLanguage::Moth,
+    );
+    assert!(
+        method.contains("<span class='moth-code-function'>render</span>"),
+        "generic declaration owner must be a function, got: {method}"
+    );
+    assert!(
+        method.contains("<span class='moth-code-contract'>DISPLAY_TEXT</span>"),
+        "generic bound must stay a contract, got: {method}"
+    );
+}
+
+#[test]
+fn moth_contract_names_use_compiler_uppercase_policy() {
+    let single = highlight_code_html("A must:", CodeLanguage::Moth);
+    assert!(
+        single.contains("<span class='moth-code-contract'>A</span>"),
+        "single-letter trait name must be a contract, got: {single}"
+    );
+
+    let conformance = highlight_code_html("Label must A", CodeLanguage::Moth);
+    assert!(
+        conformance.contains("<span class='moth-code-contract'>A</span>"),
+        "single-letter conformance name must be a contract, got: {conformance}"
+    );
+
+    for name in ["TRAIT2", "HTTP_2"] {
+        let highlighted = highlight_code_html(&format!("Label must {name}"), CodeLanguage::Moth);
+        assert!(
+            highlighted.contains(&format!("<span class='moth-code-contract'>{name}</span>")),
+            "{name} must be a contract under the compiler naming policy, got: {highlighted}"
+        );
+    }
+}
+
+#[test]
+fn moth_conformance_lists_survive_comma_continued_newlines() {
+    let continued = highlight_code_html("Label must FIRST,\n    SECOND", CodeLanguage::Moth);
+    assert!(
+        continued.contains("<span class='moth-code-contract'>SECOND</span>"),
+        "comma-continued conformance must survive the newline, got: {continued}"
+    );
+
+    let reset = highlight_code_html("Label must FIRST\n    SECOND", CodeLanguage::Moth);
+    assert!(
+        !reset.contains("<span class='moth-code-contract'>SECOND</span>"),
+        "newline without a preceding comma must reset conformance state, got: {reset}"
+    );
+}
+
+#[test]
+fn moth_path_boundaries_are_unicode_aware() {
+    assert_eq!(
+        highlight_code_html("π@core/io", CodeLanguage::Moth),
+        "π<span class='moth-code-operator'>@</span>core<span class='moth-code-operator'>/</span>io",
+        "a path must not start after a Unicode identifier continuation"
+    );
+    assert_eq!(
+        highlight_code_html("name@core/io", CodeLanguage::Moth),
+        "name<span class='moth-code-operator'>@</span>core<span class='moth-code-operator'>/</span>io",
+        "a path must not start after an ASCII identifier continuation"
+    );
+    assert_eq!(
+        highlight_code_html("@@core/io", CodeLanguage::Moth),
+        "<span class='moth-code-operator'>@</span><span class='moth-code-operator'>@</span>core<span class='moth-code-operator'>/</span>io",
+        "a doubled @ must not present a valid-looking path"
+    );
+    assert_eq!(
+        highlight_code_html("(@core/io)", CodeLanguage::Moth),
+        "<span class='moth-code-delimiter'>(</span><span class='moth-code-string'>@core/io</span><span class='moth-code-delimiter'>)</span>",
+        "a path after a delimiter must highlight"
+    );
+    assert_eq!(
+        highlight_code_html("import @core/io", CodeLanguage::Moth),
+        "<span class='moth-code-keyword'>import</span> <span class='moth-code-string'>@core/io</span>",
+        "a path after whitespace must highlight"
     );
 }
 
