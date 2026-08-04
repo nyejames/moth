@@ -19,52 +19,32 @@ use crate::compiler_frontend::semantic_identity::{OriginDeclarationId, OriginFun
 
 use rustc_hash::FxHashMap;
 
-/// One operation-scoped index over a completed interface.
+fn view_error(detail: impl Into<String>) -> CompilerError {
+    CompilerError::compiler_error(format!("public semantic interface view: {}", detail.into()))
+}
+
+/// One operation-scoped record view over an interface used by recursive closure.
 ///
-/// The view validates duplicate keys while it builds, so a malformed successful interface
-/// fails through the internal `CompilerError` lane before any consumer can observe it.
-pub(crate) struct InterfaceView<'a> {
+/// WHAT: indexes only the declaration, concrete summary and reusable evidence records closure
+///       needs, with duplicate-key validation while it builds.
+/// WHY: closure walks many interfaces; a narrow record view keeps lookups direct without
+///      carrying binding-only export maps into the closure operation.
+pub(crate) struct ClosureRecordView<'a> {
     interface: &'a PublicSemanticInterface,
-    export_by_name: FxHashMap<String, usize>,
-    binding_export_by_name: FxHashMap<String, usize>,
     declaration_by_origin: FxHashMap<OriginDeclarationId, usize>,
     summary_by_origin: FxHashMap<OriginFunctionId, usize>,
     evidence_by_identity: FxHashMap<CanonicalEvidenceIdentity, usize>,
-    provenance_by_name: FxHashMap<String, usize>,
 }
 
-impl<'a> InterfaceView<'a> {
+impl<'a> ClosureRecordView<'a> {
     pub(crate) fn build(interface: &'a PublicSemanticInterface) -> Result<Self, CompilerError> {
         let mut view = Self {
             interface,
-            export_by_name: FxHashMap::default(),
-            binding_export_by_name: FxHashMap::default(),
             declaration_by_origin: FxHashMap::default(),
             summary_by_origin: FxHashMap::default(),
             evidence_by_identity: FxHashMap::default(),
-            provenance_by_name: FxHashMap::default(),
         };
 
-        for (index, binding) in interface.export_bindings.iter().enumerate() {
-            Self::insert_unique(
-                interface,
-                &mut view.export_by_name,
-                binding.public_name().to_owned(),
-                index,
-                "export name",
-                || binding.public_name().to_owned(),
-            )?;
-        }
-        for (index, binding) in interface.binding_exports.iter().enumerate() {
-            Self::insert_unique(
-                interface,
-                &mut view.binding_export_by_name,
-                binding.public_name.clone(),
-                index,
-                "binding export name",
-                || binding.public_name.clone(),
-            )?;
-        }
         for (index, declaration) in interface.declarations.iter().enumerate() {
             Self::insert_unique(
                 interface,
@@ -95,16 +75,6 @@ impl<'a> InterfaceView<'a> {
                 || format!("{:?}", evidence.identity),
             )?;
         }
-        for (index, entry) in interface.export_diagnostic_provenance.iter().enumerate() {
-            Self::insert_unique(
-                interface,
-                &mut view.provenance_by_name,
-                entry.public_name.clone(),
-                index,
-                "export diagnostic provenance",
-                || entry.public_name.clone(),
-            )?;
-        }
 
         Ok(view)
     }
@@ -126,18 +96,6 @@ impl<'a> InterfaceView<'a> {
         }
 
         Ok(())
-    }
-
-    pub(crate) fn exported_origin(&self, public_name: &str) -> Option<&OriginDeclarationId> {
-        self.export_by_name
-            .get(public_name)
-            .map(|index| self.interface.export_bindings[*index].origin())
-    }
-
-    pub(crate) fn binding_export(&self, public_name: &str) -> Option<&PublicBindingExport> {
-        self.binding_export_by_name
-            .get(public_name)
-            .map(|index| &self.interface.binding_exports[*index])
     }
 
     pub(crate) fn declaration(
@@ -167,23 +125,10 @@ impl<'a> InterfaceView<'a> {
             .map(|index| &self.interface.reusable_evidence[*index])
     }
 
-    pub(crate) fn export_diagnostic_provenance(
-        &self,
-        public_name: &str,
-    ) -> Option<&PublicDiagnosticLocation> {
-        self.provenance_by_name
-            .get(public_name)
-            .map(|index| &self.interface.export_diagnostic_provenance[*index].location)
-    }
-
     /// The completed interface this view indexes.
     pub(crate) fn interface(&self) -> &'a PublicSemanticInterface {
         self.interface
     }
-}
-
-fn view_error(detail: impl Into<String>) -> CompilerError {
-    CompilerError::compiler_error(format!("public semantic interface view: {}", detail.into()))
 }
 
 /// One operation-scoped binding view over a completed provider interface.

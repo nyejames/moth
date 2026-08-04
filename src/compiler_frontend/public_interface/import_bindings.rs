@@ -192,6 +192,16 @@ impl<'a> ProviderInterfaceTable<'a> {
         self.interfaces.iter().copied()
     }
 
+    /// Iterate every unique provider with its dense provider ID.
+    pub(crate) fn providers(
+        &self,
+    ) -> impl Iterator<Item = (ProviderInterfaceId, &'a PublicSemanticInterface)> + '_ {
+        self.interfaces
+            .iter()
+            .enumerate()
+            .map(|(index, interface)| (ProviderInterfaceId(index), *interface))
+    }
+
     pub(crate) fn is_empty(&self) -> bool {
         self.interfaces.is_empty()
     }
@@ -214,8 +224,16 @@ impl<'a> SourceProviderImportSet<'a> {
     }
 
     /// Iterate every unique provider interface in registration order.
+    #[cfg(test)]
     pub(crate) fn interfaces(&self) -> impl Iterator<Item = &'a PublicSemanticInterface> + '_ {
         self.table.interfaces()
+    }
+
+    /// Iterate every unique provider with its dense provider ID.
+    pub(crate) fn providers(
+        &self,
+    ) -> impl Iterator<Item = (ProviderInterfaceId, &'a PublicSemanticInterface)> + '_ {
+        self.table.providers()
     }
 
     /// Admit immutable provider interfaces only when every binding target resolves locally.

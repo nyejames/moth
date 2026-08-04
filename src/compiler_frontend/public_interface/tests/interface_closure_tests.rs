@@ -9,12 +9,14 @@
 use super::super::model::{ConcreteCallSummaryRecord, PublicAliasSemantics, PublicFieldTypeSlot};
 use super::super::{
     LocalPublicInterface, PublicDeclarationRecord, PublicDeclarationSemantics,
-    PublicEvidenceOwnership, PublicEvidenceRecord, PublicFunctionCategory, PublicFunctionSemantics,
-    PublicInterfaceDraft, PublicParameterTypeSlot, PublicSemanticInterface, PublicStructSemantics,
-    PublicTraitSemantics, SourceProviderImport, SourceProviderImportSet,
+    PublicEvidenceOwnership, PublicEvidenceRecord, PublicEvidenceRequirementMapping,
+    PublicFunctionCategory, PublicFunctionSemantics, PublicInterfaceDraft, PublicParameterTypeSlot,
+    PublicSemanticInterface, PublicStructSemantics, PublicTraitSemantics, SourceProviderImport,
+    SourceProviderImportSet,
 };
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalEvidenceIdentity, CanonicalTraitIdentity, CanonicalTypeIdentity,
+    StableTraitRequirementIdentity,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -535,5 +537,101 @@ fn duplicate_keys_in_one_interface_fail_at_view_construction() {
         error.msg.contains("duplicate declaration origin"),
         "unexpected error: {}",
         error.msg
+    );
+}
+
+#[test]
+fn disagreeing_evidence_records_fail_in_both_provider_orders() {
+    let alpha = provider_origin("alpha");
+    let beta = provider_origin("beta");
+    let card = type_origin(&alpha, "Card");
+    let trait_id = CanonicalTraitIdentity::Source(trait_origin(&alpha, "DISPLAY_TEXT"));
+    let first = evidence_record(card.clone(), trait_id.clone());
+    let mut second = evidence_record(card.clone(), trait_id.clone());
+    second
+        .requirement_mappings
+        .push(PublicEvidenceRequirementMapping {
+            requirement_identity: StableTraitRequirementIdentity::new(
+                trait_id.clone(),
+                "show".to_owned(),
+            ),
+            method_origin: function_origin(&alpha, "show"),
+        });
+
+    let alpha_provider = provider_interface(
+        &alpha,
+        vec![
+            struct_record(&alpha, "Card", Vec::new()),
+            trait_record(&alpha, "DISPLAY_TEXT"),
+        ],
+        Vec::new(),
+        vec![first],
+    );
+    let beta_provider = provider_interface(
+        &beta,
+        vec![struct_record(&beta, "Card", Vec::new())],
+        Vec::new(),
+        vec![second],
+    );
+    let bindings = vec![ExportBinding::new(
+        provider_origin("facade"),
+        "Card".to_owned(),
+        OriginDeclarationId::Type(card),
+    )];
+
+    for providers in [
+        vec![&alpha_provider, &beta_provider],
+        vec![&beta_provider, &alpha_provider],
+    ] {
+        let error = close(bindings.clone(), providers)
+            .expect_err("differing evidence records with one identity must fail in either order");
+        assert!(
+            error.msg.contains("disagree on reusable evidence identity"),
+            "unexpected error: {}",
+            error.msg
+        );
+    }
+}
+
+#[test]
+fn equal_repeated_evidence_materialises_once() {
+    let alpha = provider_origin("alpha");
+    let beta = provider_origin("beta");
+    let card = type_origin(&alpha, "Card");
+    let evidence = evidence_record(
+        card.clone(),
+        CanonicalTraitIdentity::Source(trait_origin(&alpha, "DISPLAY_TEXT")),
+    );
+    let alpha_provider = provider_interface(
+        &alpha,
+        vec![
+            struct_record(&alpha, "Card", Vec::new()),
+            trait_record(&alpha, "DISPLAY_TEXT"),
+        ],
+        Vec::new(),
+        vec![evidence.clone()],
+    );
+    let beta_provider = provider_interface(
+        &beta,
+        vec![struct_record(&beta, "Card", Vec::new())],
+        Vec::new(),
+        vec![evidence.clone()],
+    );
+    let bindings = vec![ExportBinding::new(
+        provider_origin("facade"),
+        "Card".to_owned(),
+        OriginDeclarationId::Type(card),
+    )];
+
+    let closed = close(bindings, vec![&alpha_provider, &beta_provider])
+        .expect("equal repeated evidence records should agree");
+    assert_eq!(
+        closed
+            .reusable_evidence
+            .iter()
+            .filter(|record| record.identity == evidence.identity)
+            .count(),
+        1,
+        "equal repeated evidence must materialise exactly once"
     );
 }
