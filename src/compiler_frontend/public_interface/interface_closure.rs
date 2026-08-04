@@ -5,10 +5,9 @@
 //! type, trait and reusable evidence fact reachable from that surface.
 //! WHY: consumers bind from one provider interface only. A facade must carry the closed semantic
 //! facts behind its aliases instead of forcing consumers to reopen transitive providers. Closure
-//! runs against one transient indexed view per completed interface and a declaration/evidence
-//! work queue, so it never scans every provider for each selected fact.
+//! runs against one transient combined index over every completed interface and a
+//! declaration/evidence work queue, so it never scans every provider for each selected fact.
 
-use super::interface_view::ClosureRecordView;
 use super::model::{
     ConcreteCallSummaryRecord, LocalPublicInterface, PublicChoiceSemantics,
     PublicDeclarationRecord, PublicDeclarationSemantics, PublicEvidenceRecord,
@@ -110,12 +109,12 @@ struct RecordRef {
 ///
 /// Combined origin and identity maps are built once over the direct interface and every unique
 /// provider. Agreement checks stay O(k) for the few interfaces that publish the same key, and
-/// every lookup is direct instead of a per-provider linear scan. Keeping the state separate
-/// from the mutable queues lets closure steps borrow records from the state while enqueuing new
-/// work.
+/// every record access goes straight through the retained source vector index without a second
+/// map lookup. Keeping the state separate from the mutable queues lets closure steps borrow
+/// records from the state while enqueuing new work.
 struct ClosureIndex<'direct, 'provider> {
-    direct_view: ClosureRecordView<'direct>,
-    provider_views: Vec<ClosureRecordView<'provider>>,
+    direct: &'direct PublicSemanticInterface,
+    providers: Vec<&'provider PublicSemanticInterface>,
     declarations_by_origin: FxHashMap<OriginDeclarationId, Vec<RecordRef>>,
     summaries_by_origin: FxHashMap<OriginFunctionId, Vec<RecordRef>>,
     evidence_by_identity: FxHashMap<CanonicalEvidenceIdentity, Vec<RecordRef>>,
@@ -127,11 +126,10 @@ impl<'direct, 'provider> ClosureIndex<'direct, 'provider> {
         direct: &'direct PublicSemanticInterface,
         providers: &[(ProviderInterfaceId, &'provider PublicSemanticInterface)],
     ) -> Result<Self, CompilerError> {
-        let direct_view = ClosureRecordView::build(direct)?;
-        let mut provider_views = Vec::with_capacity(providers.len());
-        for (_, provider) in providers {
-            provider_views.push(ClosureRecordView::build(provider)?);
-        }
+        let providers = providers
+            .iter()
+            .map(|(_, provider)| *provider)
+            .collect::<Vec<_>>();
 
         let mut declarations_by_origin: FxHashMap<OriginDeclarationId, Vec<RecordRef>> =
             FxHashMap::default();
@@ -166,21 +164,21 @@ impl<'direct, 'provider> ClosureIndex<'direct, 'provider> {
             );
         }
 
-        for (provider_index, view) in provider_views.iter().enumerate() {
-            let source = provider_index + 1;
-            for (record, declaration) in view.interface().declarations.iter().enumerate() {
+        for (source, interface) in providers.iter().enumerate() {
+            let source = source + 1;
+            for (record, declaration) in interface.declarations.iter().enumerate() {
                 declarations_by_origin
                     .entry(declaration.origin.clone())
                     .or_default()
                     .push(RecordRef { source, record });
             }
-            for (record, summary) in view.interface().concrete_call_summaries.iter().enumerate() {
+            for (record, summary) in interface.concrete_call_summaries.iter().enumerate() {
                 summaries_by_origin
                     .entry(summary.origin.clone())
                     .or_default()
                     .push(RecordRef { source, record });
             }
-            for (record, evidence) in view.interface().reusable_evidence.iter().enumerate() {
+            for (record, evidence) in interface.reusable_evidence.iter().enumerate() {
                 index_evidence(
                     evidence,
                     source,
@@ -192,8 +190,8 @@ impl<'direct, 'provider> ClosureIndex<'direct, 'provider> {
         }
 
         Ok(Self {
-            direct_view,
-            provider_views,
+            direct,
+            providers,
             declarations_by_origin,
             summaries_by_origin,
             evidence_by_identity,
@@ -201,42 +199,80 @@ impl<'direct, 'provider> ClosureIndex<'direct, 'provider> {
         })
     }
 
-    fn declaration(
+    fn declaration_at(
         &self,
-        source: usize,
-        origin: &OriginDeclarationId,
-    ) -> Option<&PublicDeclarationRecord> {
-        if source == 0 {
-            self.direct_view.declaration(origin)
+        reference: RecordRef,
+    ) -> Result<&PublicDeclarationRecord, CompilerError> {
+        let interface = if reference.source == 0 {
+            Some(self.direct)
         } else {
-            self.provider_views[source - 1].declaration(origin)
+            self.providers.get(reference.source - 1).copied()
         }
+        .ok_or_else(|| {
+            closure_error(format!(
+                "closure index references missing source interface {}",
+                reference.source
+            ))
+        })?;
+        interface.declarations.get(reference.record).ok_or_else(|| {
+            closure_error(format!(
+                "closure index references missing declaration row {} in source {}",
+                reference.record, reference.source
+            ))
+        })
     }
 
-    fn summary(&self, source: usize, origin: &OriginFunctionId) -> Option<&PublicCallSummary> {
-        if source == 0 {
-            self.direct_view.concrete_call_summary(origin)
+    fn summary_at(&self, reference: RecordRef) -> Result<&PublicCallSummary, CompilerError> {
+        let interface = if reference.source == 0 {
+            Some(self.direct)
         } else {
-            self.provider_views[source - 1].concrete_call_summary(origin)
+            self.providers.get(reference.source - 1).copied()
         }
+        .ok_or_else(|| {
+            closure_error(format!(
+                "closure index references missing source interface {}",
+                reference.source
+            ))
+        })?;
+        interface
+            .concrete_call_summaries
+            .get(reference.record)
+            .map(|record| &record.summary)
+            .ok_or_else(|| {
+                closure_error(format!(
+                    "closure index references missing summary row {} in source {}",
+                    reference.record, reference.source
+                ))
+            })
     }
 
-    fn evidence(
-        &self,
-        source: usize,
-        identity: &CanonicalEvidenceIdentity,
-    ) -> Option<&PublicEvidenceRecord> {
-        if source == 0 {
-            self.direct_view.evidence(identity)
+    fn evidence_at(&self, reference: RecordRef) -> Result<&PublicEvidenceRecord, CompilerError> {
+        let interface = if reference.source == 0 {
+            Some(self.direct)
         } else {
-            self.provider_views[source - 1].evidence(identity)
+            self.providers.get(reference.source - 1).copied()
         }
+        .ok_or_else(|| {
+            closure_error(format!(
+                "closure index references missing source interface {}",
+                reference.source
+            ))
+        })?;
+        interface
+            .reusable_evidence
+            .get(reference.record)
+            .ok_or_else(|| {
+                closure_error(format!(
+                    "closure index references missing evidence row {} in source {}",
+                    reference.record, reference.source
+                ))
+            })
     }
 
     /// Find one declaration record across the direct interface and providers.
     ///
-    /// All publishers of one origin must agree; the record is borrowed through the indexed view
-    /// and moved or cloned once at finalization.
+    /// All publishers of one origin must agree; the record is borrowed through the exact source
+    /// vector index and moved or cloned once at finalization.
     fn find_declaration(
         &self,
         origin: &OriginDeclarationId,
@@ -247,22 +283,10 @@ impl<'direct, 'provider> ClosureIndex<'direct, 'provider> {
                 origin
             ))
         })?;
-        let first_record = self
-            .declaration(references[0].source, origin)
-            .ok_or_else(|| {
-                closure_error(format!(
-                    "declaration view lost origin {:?} during index construction",
-                    origin
-                ))
-            })?;
+        let first_record = self.declaration_at(references[0])?;
 
         for reference in &references[1..] {
-            let candidate = self.declaration(reference.source, origin).ok_or_else(|| {
-                closure_error(format!(
-                    "declaration view lost origin {:?} during index construction",
-                    origin
-                ))
-            })?;
+            let candidate = self.declaration_at(*reference)?;
             if first_record != candidate {
                 return Err(closure_error(format!(
                     "provider interfaces disagree on declaration origin {:?}",
@@ -282,20 +306,10 @@ impl<'direct, 'provider> ClosureIndex<'direct, 'provider> {
                 origin
             ))
         })?;
-        let first = self.summary(references[0].source, origin).ok_or_else(|| {
-            closure_error(format!(
-                "summary view lost origin {:?} during index construction",
-                origin
-            ))
-        })?;
+        let first = self.summary_at(references[0])?;
 
         for reference in &references[1..] {
-            let candidate = self.summary(reference.source, origin).ok_or_else(|| {
-                closure_error(format!(
-                    "summary view lost origin {:?} during index construction",
-                    origin
-                ))
-            })?;
+            let candidate = self.summary_at(*reference)?;
             if first != candidate {
                 return Err(closure_error(format!(
                     "provider interfaces disagree on concrete call summary {:?}",
@@ -318,22 +332,10 @@ impl<'direct, 'provider> ClosureIndex<'direct, 'provider> {
                 identity
             ))
         })?;
-        let first = self
-            .evidence(references[0].source, identity)
-            .ok_or_else(|| {
-                closure_error(format!(
-                    "evidence view lost identity {:?} during index construction",
-                    identity
-                ))
-            })?;
+        let first = self.evidence_at(references[0])?;
 
         for reference in &references[1..] {
-            let candidate = self.evidence(reference.source, identity).ok_or_else(|| {
-                closure_error(format!(
-                    "evidence view lost identity {:?} during index construction",
-                    identity
-                ))
-            })?;
+            let candidate = self.evidence_at(*reference)?;
             if first != candidate {
                 return Err(closure_error(format!(
                     "provider interfaces disagree on reusable evidence identity {:?}",
@@ -598,7 +600,7 @@ impl<'direct, 'provider> InterfaceClosure<'direct, 'provider> {
     fn into_selection(self) -> ClosureSelection<'provider> {
         let InterfaceClosure { state, work } = self;
         let ClosureIndex {
-            provider_views,
+            providers,
             declarations_by_origin,
             summaries_by_origin,
             evidence_by_identity,
@@ -612,7 +614,7 @@ impl<'direct, 'provider> InterfaceClosure<'direct, 'provider> {
         } = work;
 
         ClosureSelection {
-            provider_views,
+            provider_sources: providers,
             declarations_by_origin,
             summaries_by_origin,
             evidence_by_identity,
@@ -625,10 +627,10 @@ impl<'direct, 'provider> InterfaceClosure<'direct, 'provider> {
 
 /// Owned selection facts used to materialize the final closed interface.
 ///
-/// The direct view is dropped with the closure so the owned direct interface can be moved from;
-/// provider records stay reachable through these borrowed views.
+/// The direct interface is dropped with the closure so the owned direct records can move out;
+/// provider records stay reachable through the retained borrowed source vector.
 struct ClosureSelection<'provider> {
-    provider_views: Vec<ClosureRecordView<'provider>>,
+    provider_sources: Vec<&'provider PublicSemanticInterface>,
     declarations_by_origin: FxHashMap<OriginDeclarationId, Vec<RecordRef>>,
     summaries_by_origin: FxHashMap<OriginFunctionId, Vec<RecordRef>>,
     evidence_by_identity: FxHashMap<CanonicalEvidenceIdentity, Vec<RecordRef>>,
@@ -670,12 +672,22 @@ impl<'provider> ClosureSelection<'provider> {
                         origin
                     ))
                 })?;
-            declarations.push(
-                self.provider_views[reference.source - 1]
-                    .interface()
-                    .declarations[reference.record]
-                    .clone(),
-            );
+            let source = self
+                .provider_sources
+                .get(reference.source - 1)
+                .ok_or_else(|| {
+                    closure_error(format!(
+                        "selected declaration origin {:?} references missing source {}",
+                        origin, reference.source
+                    ))
+                })?;
+            let record = source.declarations.get(reference.record).ok_or_else(|| {
+                closure_error(format!(
+                    "selected declaration origin {:?} references missing row {}",
+                    origin, reference.record
+                ))
+            })?;
+            declarations.push(record.clone());
         }
         declarations.sort_by(|left, right| left.origin.cmp(&right.origin));
 
@@ -703,12 +715,25 @@ impl<'provider> ClosureSelection<'provider> {
                         identity
                     ))
                 })?;
-            reusable_evidence.push(
-                self.provider_views[reference.source - 1]
-                    .interface()
-                    .reusable_evidence[reference.record]
-                    .clone(),
-            );
+            let source = self
+                .provider_sources
+                .get(reference.source - 1)
+                .ok_or_else(|| {
+                    closure_error(format!(
+                        "selected evidence identity {:?} references missing source {}",
+                        identity, reference.source
+                    ))
+                })?;
+            let record = source
+                .reusable_evidence
+                .get(reference.record)
+                .ok_or_else(|| {
+                    closure_error(format!(
+                        "selected evidence identity {:?} references missing row {}",
+                        identity, reference.record
+                    ))
+                })?;
+            reusable_evidence.push(record.clone());
         }
         reusable_evidence.sort_by(|left, right| left.identity.cmp(&right.identity));
 
@@ -736,11 +761,25 @@ impl<'provider> ClosureSelection<'provider> {
                         origin
                     ))
                 })?;
-            let summary = self.provider_views[reference.source - 1]
-                .interface()
-                .concrete_call_summaries[reference.record]
-                .summary
-                .clone();
+            let source = self
+                .provider_sources
+                .get(reference.source - 1)
+                .ok_or_else(|| {
+                    closure_error(format!(
+                        "selected summary origin {:?} references missing source {}",
+                        origin, reference.source
+                    ))
+                })?;
+            let record = source
+                .concrete_call_summaries
+                .get(reference.record)
+                .ok_or_else(|| {
+                    closure_error(format!(
+                        "selected summary origin {:?} references missing row {}",
+                        origin, reference.record
+                    ))
+                })?;
+            let summary = record.summary.clone();
             concrete_call_summaries.push(ConcreteCallSummaryRecord {
                 origin: origin.clone(),
                 summary,

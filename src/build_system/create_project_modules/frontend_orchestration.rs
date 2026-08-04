@@ -267,7 +267,10 @@ pub(super) struct SourceProviderMaterialisationSet<'a> {
 }
 
 enum DeclaringMaterialisation<'a> {
-    Published(&'a crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext),
+    Published {
+        context: &'a crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext,
+        template_index: usize,
+    },
     Preparing(
         &'a crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationPreparation,
     ),
@@ -288,29 +291,35 @@ impl<'a> SourceProviderMaterialisationSet<'a> {
         &self,
         identity: &GeneratedDeclarationIdentity,
         requester_context: &'a crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationPreparation,
-    ) -> Option<DeclaringMaterialisation<'a>> {
+    ) -> Result<Option<DeclaringMaterialisation<'a>>, CompilerError> {
         if let Some(project_contexts) = self.project_contexts
-            && let Ok(Some(context)) = project_contexts.materialisation_context_for(identity)
+            && let Some(location) = project_contexts.materialisation_context_for(identity)?
         {
-            return Some(DeclaringMaterialisation::Published(context));
+            let context = project_contexts.materialisation_context_at(location)?;
+            return Ok(Some(DeclaringMaterialisation::Published {
+                context,
+                template_index: location.template_index,
+            }));
         }
 
-        if let Some(completed_packages) = self.completed_packages {
-            for package in completed_packages.iter() {
-                if let Ok(Some(context)) = package
-                    .boundary
-                    .modules
-                    .materialisation_context_for(identity)
-                {
-                    return Some(DeclaringMaterialisation::Published(context));
-                }
-            }
+        if let Some(completed_packages) = self.completed_packages
+            && let Some(location) = completed_packages.materialisation_location_for(identity)
+        {
+            let package = completed_packages.package(location.package_id)?;
+            let context = package
+                .boundary
+                .modules
+                .materialisation_context_at(location.location)?;
+            return Ok(Some(DeclaringMaterialisation::Published {
+                context,
+                template_index: location.location.template_index,
+            }));
         }
 
-        requester_context
+        Ok(requester_context
             .template_for_identity(identity)
             .is_some()
-            .then_some(DeclaringMaterialisation::Preparing(requester_context))
+            .then_some(DeclaringMaterialisation::Preparing(requester_context)))
     }
 }
 
@@ -1689,6 +1698,7 @@ impl FrontendModuleBuildContext<'_> {
         let declaring_context = self
             .source_provider_materialisations
             .context_for(request.identity.declaration(), requester_context)
+            .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?
             .ok_or_else(|| {
                 CompilerMessages::from_error_ref(
                     CompilerError::compiler_error(format!(
@@ -1699,8 +1709,12 @@ impl FrontendModuleBuildContext<'_> {
                 )
             })?;
         let materialised = match declaring_context {
-            DeclaringMaterialisation::Published(context) => {
-                context.materialise_ast(ModuleMaterialisationInput {
+            DeclaringMaterialisation::Published {
+                context,
+                template_index,
+            } => context.materialise_ast_at(
+                template_index,
+                ModuleMaterialisationInput {
                     identity: &request.identity,
                     requester_context,
                     requester_call_location: &request.diagnostic_location,
@@ -1714,8 +1728,8 @@ impl FrontendModuleBuildContext<'_> {
                     template_const_loop_iteration_limit: self
                         .config
                         .template_const_loop_iteration_limit,
-                })
-            }
+                },
+            ),
             DeclaringMaterialisation::Preparing(context) => context.materialise_ast(
                 &request.identity,
                 requester_context,

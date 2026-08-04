@@ -561,12 +561,15 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
 
     let generated_store =
         super::super::generated_worklist::BoundaryGeneratedFunctionStore::default();
+    let imported_generated =
+        super::super::generated_worklist::CompletedGeneratedFunctionView::new(std::iter::empty())
+            .expect("empty generated view");
     let draft = compile_context
         .compile_module_semantic(
             prepared,
             &canonical_entry,
             module_label,
-            generated_store.session(),
+            generated_store.session(&imported_generated),
         )
         .expect("semantic compilation should succeed");
 
@@ -700,8 +703,16 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
     };
     let generated_store =
         super::super::generated_worklist::BoundaryGeneratedFunctionStore::default();
+    let imported_generated =
+        super::super::generated_worklist::CompletedGeneratedFunctionView::new(std::iter::empty())
+            .expect("empty generated view");
     let outcome = compile_context
-        .compile_module_semantic(prepared, &canonical_entry, None, generated_store.session())
+        .compile_module_semantic(
+            prepared,
+            &canonical_entry,
+            None,
+            generated_store.session(&imported_generated),
+        )
         .expect("API-only semantic compilation should not fail internally");
     let draft = match outcome {
         super::ModuleCompilationOutcome::Success(draft) => draft,

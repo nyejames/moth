@@ -7,8 +7,8 @@
 //! MUST NOT: register external package symbols or build namespace records.
 
 use super::{
-    FileVisibility, ImportEnvironmentBuilder, SourceDeclarationTarget, SourceImportAccess,
-    VisibleNameBinding, VisibleNameRegistry,
+    FileVisibility, ImportEnvironmentBuilder, ImportEnvironmentError, SourceDeclarationTarget,
+    SourceImportAccess, VisibleNameBinding, VisibleNameRegistry,
 };
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidReceiverDeclarationReason,
@@ -24,7 +24,7 @@ use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 /// WHAT: gives source import registration one small error boundary.
 /// WHY: local-name derivation is already boxed, so registration can propagate it directly
 ///      and adapt the plain visible-name registry once.
-type SourceImportResult<T> = Result<T, Box<CompilerDiagnostic>>;
+type SourceImportResult<T> = Result<T, ImportEnvironmentError>;
 
 impl<'a> ImportEnvironmentBuilder<'a> {
     /// Auto-import receiver methods for a nominal type from the file where it is declared.
@@ -152,7 +152,8 @@ impl<'a> ImportEnvironmentBuilder<'a> {
             return Err(Box::new(CompilerDiagnostic::invalid_receiver_declaration(
                 InvalidReceiverDeclarationReason::ReceiverMethodImportOrExportNotAllowed,
                 import.location.clone(),
-            )));
+            ))
+            .into());
         }
 
         // Check export requirement after the source receiver-method guard so explicit method
@@ -166,7 +167,8 @@ impl<'a> ImportEnvironmentBuilder<'a> {
                 return Err(Box::new(diagnostics::not_exported_by_source_file(
                     symbol_path,
                     import.location.clone(),
-                )));
+                ))
+                .into());
             }
         }
 

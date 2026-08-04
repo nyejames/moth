@@ -11,9 +11,9 @@
 
 use super::public_export_resolution::effective_module_boundary_path;
 use super::{
-    FileVisibility, ImportEnvironmentBuilder, NamespaceRecord, NamespaceRecordSource,
-    NamespaceTypeMember, NamespaceValueMember, ResolvedNamespaceTarget, SourceDeclarationTarget,
-    SourceImportAccess, VisibleNameBinding, VisibleNameRegistry,
+    FileVisibility, ImportEnvironmentBuilder, ImportEnvironmentError, NamespaceRecord,
+    NamespaceRecordSource, NamespaceTypeMember, NamespaceValueMember, ResolvedNamespaceTarget,
+    SourceDeclarationTarget, SourceImportAccess, VisibleNameBinding, VisibleNameRegistry,
 };
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, ImportPublicSurfaceType};
 use crate::compiler_frontend::external_packages::{ExternalSymbolId, ExternalSymbolPath};
@@ -33,7 +33,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 /// WHAT: gives namespace registration and recursive record construction one small error boundary.
 /// WHY: record insertion and privacy checks propagate structured diagnostics through the
 ///      same connected family without carrying the large value inline at every return.
-type NamespaceImportResult<T> = Result<T, Box<CompilerDiagnostic>>;
+type NamespaceImportResult<T> = Result<T, ImportEnvironmentError>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SymbolKind {
@@ -84,13 +84,14 @@ impl<'a> ExternalNamespaceRecordInserter<'a> {
                 || record.value_members.contains_key(&name_id)
                 || record.type_members.contains_key(&name_id)
             {
-                return Err(Box::new(
-                    CompilerDiagnostic::duplicate_import_surface_member(
+                return Err(
+                    Box::new(CompilerDiagnostic::duplicate_import_surface_member(
                         child_surface_path,
                         name_id,
                         self.location.clone(),
-                    ),
-                ));
+                    ))
+                    .into(),
+                );
             }
 
             match symbol_id {
@@ -124,13 +125,14 @@ impl<'a> ExternalNamespaceRecordInserter<'a> {
         // a value or type member at the same level.
         if record.value_members.contains_key(&name_id) || record.type_members.contains_key(&name_id)
         {
-            return Err(Box::new(
-                CompilerDiagnostic::duplicate_import_surface_member(
+            return Err(
+                Box::new(CompilerDiagnostic::duplicate_import_surface_member(
                     child_surface_path.clone(),
                     name_id,
                     self.location.clone(),
-                ),
-            ));
+                ))
+                .into(),
+            );
         }
 
         let child_source = record.record_source.clone();
@@ -456,7 +458,8 @@ impl<'a> ImportEnvironmentBuilder<'a> {
                     public_surface_name_id,
                     ImportPublicSurfaceType::SourcePackage,
                     import.location.clone(),
-                )));
+                ))
+                .into());
             }
         }
 
@@ -486,13 +489,15 @@ impl<'a> ImportEnvironmentBuilder<'a> {
             return Err(Box::new(diagnostics::cross_module_import_not_exported(
                 &import.provider.path,
                 import.location.clone(),
-            )));
+            ))
+            .into());
         }
 
         Err(Box::new(diagnostics::missing_module_root_public_surface(
             &import.provider.path,
             import.location.clone(),
-        )))
+        ))
+        .into())
     }
 
     fn module_root_public_surface_file(&self, module_root: &InternedPath) -> Option<InternedPath> {
@@ -519,12 +524,11 @@ impl<'a> ImportEnvironmentBuilder<'a> {
                     .unwrap_or_default();
                 let stem = stem.strip_suffix(".js").unwrap_or(&stem);
                 if stem.is_empty() || !is_valid_identifier(stem) {
-                    return Err(Box::new(
-                        CompilerDiagnostic::invalid_namespace_default_name(
-                            import.provider.path.clone(),
-                            import.location.clone(),
-                        ),
-                    ));
+                    return Err(Box::new(CompilerDiagnostic::invalid_namespace_default_name(
+                        import.provider.path.clone(),
+                        import.location.clone(),
+                    ))
+                    .into());
                 }
                 Ok(self.string_table.intern(stem))
             }
@@ -779,13 +783,14 @@ impl<'a> ImportEnvironmentBuilder<'a> {
     ) -> NamespaceImportResult<()> {
         for name in value_members.keys() {
             if type_members.contains_key(name) {
-                return Err(Box::new(
-                    CompilerDiagnostic::duplicate_import_surface_member(
+                return Err(
+                    Box::new(CompilerDiagnostic::duplicate_import_surface_member(
                         surface_path.clone(),
                         *name,
                         location.clone(),
-                    ),
-                ));
+                    ))
+                    .into(),
+                );
             }
         }
         Ok(())

@@ -24,30 +24,32 @@ ACTIVE_PLAN: docs/roadmap/plans/canonical-module-compilation-and-scoped-packages
 WORK_ID: R5-closeout
 WORK_SOURCE: parent in-depth review of the implemented R5C1-R5C3 checkpoint
 BASE_REVISION: 85199889194ba6b3a378d9d25a4bd72f74a57ed4 (implementation checkpoint reviewed; later main commits are unrelated docs/benchmark work)
-STATUS: active - R5C5 checkpointed; R5C6 next
-CURRENT_SLICE: R5C6 - dependency-driven call-summary convergence
-LAST_ACCEPTED_COMMIT: 6750c9a57238203ba83b2a31d74d6a19ecf36d70 (R5C1); R5C2/R5C3 remain implemented on main but their acceptance is reopened by this review
-WORKTREE: committed main; coordinator-owned edits begin after this record
+STATUS: active - correction train audited and checkpointed; stop for review before R5C6
+CURRENT_SLICE: R5C3C-R5C5A correction checkpoint
+LAST_ACCEPTED_COMMIT: f0e05ea0fafe8723ee76a53a327b3192a87f9e87 (parent review baseline)
+WORKTREE: coordinator-owned correction edits uncommitted on main
 REQUIRED_RELOADS: AGENTS.md, this plan, compiler-design-overview.md, build-system-design.md, compilation.rs, compiled_boundary.rs, module_artifact_store.rs, source_discovery.rs, headers/file_imports.rs, public_interface/import_bindings.rs, public_interface/interface_view.rs, public_interface/interface_closure.rs and headers/import_environment/
 RELEVANT_CONTEXT_NOW:
 - R5C1 retained project/package graph boundaries, dense ModuleId-to-artefact mappings, generated lanes and diagnosed/blocked outcomes
-- R5C2 replaced path/suffix provider joins with ImportShellId lookup, but retained invalid optional shell states and repeated package dependency/index work
-- R5C3 added InterfaceView and indexed closure work, but header binding still performs repeated full-interface projection and closure still has evidence agreement, exact-interface identity and duplicate-index gaps
-- no donor compilation, path fallback or consumer-local generic materialisation has returned
+- R5C2A exact provider and package indexes accepted
+- R5C3A one-time provider projection accepted; R5C3C reopens provider declaration/summary agreement and closure index completion
+- R5C4 frozen canonical token buffers accepted; R5C4A reopens the exhaustive string-ID walker
+- R5C5 direct generated registries accepted; R5C5A reopens cross-boundary materialisation lookup, unified generated records and exact template rows
+- corrections now implemented: insert_agreed provider facts, exact-reference provider registration, direct RecordRef closure access, canonical TokenKind string-ID walker, project/package materialisation registry with exact template rows, unified CompletedGeneratedFunction records, retained CompletedSourcePackageRegistry and boundary invariant validation
 ACCEPTANCE_CRITERIA:
 - retained import shells have non-optional identities and invalid provider-import state combinations are unrepresentable
 - one exact build-local provider interface ID is used for caches and shell bindings
 - equal module origins with differing interface contents fail deterministically
 - completed source packages and per-consumer package dependencies are indexed once
 - package ordering uses one deterministic dense dependency graph rather than repeated whole-set scans
-VALIDATION_STATE: R5C2A-R5C5 pass moth gates: workspace tests 4024+17+581+595, integration 1817/1817, clippy clean
+VALIDATION_STATE: correction work passes just validate: workspace tests 4031+17+596, integration 1817/1817, clippy clean, docs clean, bench sanity passed
 DOCS_IMPACT: active plan only unless implementation exposes architecture-doc drift
-BLOCKERS_OR_OPEN_DECISIONS: none for R5C2A; stop if exact provider identity cannot be introduced without another durable semantic identity
-AUDIT_STATE: R5C4 focused audit findings corrected and validated. R5C5 implemented: boundary-owned GeneratedDeclarationIdentity->context index with duplicate publication validation, borrowed SourceProviderMaterialisationSet view over the project store and package registry, delta-only sessions borrowing known summaries, request records owning display name and diagnostic location, materialisation no longer searches a parallel request list; focused worklist tests added (session delta-only, request facts). Interim audit for R5C5 scheduled with the R5C6 gate.
+BLOCKERS_OR_OPEN_DECISIONS: none; parent-mandated stop before R5C6 scheduling
+AUDIT_STATE: combined interim audit clean after one low-severity comment correction; evidence-identity agreement test added; all parent acceptance requirements verified
 DELEGATION_DECISION: coordinator-owned implementation for the R5C2A correction train; separate read-only auditors at the named review gates
-NEXT_WORKER_ORDER: R5C2A -> audit -> R5C3A -> R5C3B -> audit -> R5C4 -> R5C5 -> R5C6 -> R5C7 -> R5C8 -> R5C9 -> R6 -> R7 -> R8
-STOP_REASON: none active; user requested continuation through plan completion
-NEXT_RESUME_ACTION: implement R5C6 dependency-driven call-summary convergence with instrumentation, then run the R5C5+R5C6 interim audit
+NEXT_WORKER_ORDER: R5C6A instrumentation and dependency modelling only after parent review resumes the plan
+STOP_REASON: parent review requires a stop before R5C6 scheduling work
+NEXT_RESUME_ACTION: create the checkpoint commit, then hand off for parent review before R5C6
 ```
 
 Keep this block current and concise. Git history is the durable implementation history. Do not append worker transcripts or complete validation logs.

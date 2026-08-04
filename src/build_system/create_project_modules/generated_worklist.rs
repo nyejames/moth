@@ -65,26 +65,53 @@ pub(super) enum GeneratedRequestEntry {
     Recursive,
 }
 
+/// Dense index of one completed generated function inside a boundary store.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) struct GeneratedFunctionId(usize);
+
+impl GeneratedFunctionId {
+    fn index(self) -> usize {
+        self.0
+    }
+}
+
+/// One completed generated function with its exact identity, summary and sidecar.
+///
+/// WHAT: keeps the three facts one coherent record so a boundary can never align a summary with
+///       the wrong sidecar or leave one of them orphaned.
+/// WHY: generated summaries and sidecars are published transactionally; storing them as one row
+///      removes separate publication paths and later reconstruction of the generated owner.
+pub(crate) struct CompletedGeneratedFunction {
+    pub(crate) identity: GeneratedFunctionIdentity,
+    pub(crate) summary: PublicCallSummary,
+    pub(crate) sidecar: GeneratedFunctionSidecar,
+}
+
 /// Transactional request worklist for one module compilation.
 ///
 /// Existing boundary summaries seed the session, while newly produced sidecars stay local until
 /// the containing module has completed and its string IDs have been merged.
 pub(super) struct GeneratedFunctionWorklist<'a> {
-    known_summaries: &'a FxHashMap<GeneratedFunctionIdentity, PublicCallSummary>,
+    known: &'a BoundaryGeneratedFunctionStore,
+    imported: &'a CompletedGeneratedFunctionView<'a>,
     records: Vec<GeneratedRequestRecord>,
     ids_by_identity: FxHashMap<GeneratedFunctionIdentity, GeneratedRequestId>,
-    completed_summaries: FxHashMap<GeneratedFunctionIdentity, PublicCallSummary>,
-    sidecars: Vec<GeneratedFunctionSidecar>,
+    completed_records: Vec<CompletedGeneratedFunction>,
+    completed_by_identity: FxHashMap<GeneratedFunctionIdentity, GeneratedFunctionId>,
 }
 
 impl<'a> GeneratedFunctionWorklist<'a> {
-    fn new(known_summaries: &'a FxHashMap<GeneratedFunctionIdentity, PublicCallSummary>) -> Self {
+    fn new(
+        known: &'a BoundaryGeneratedFunctionStore,
+        imported: &'a CompletedGeneratedFunctionView<'a>,
+    ) -> Self {
         Self {
-            known_summaries,
+            known,
+            imported,
             records: Vec::new(),
             ids_by_identity: FxHashMap::default(),
-            completed_summaries: FxHashMap::default(),
-            sidecars: Vec::new(),
+            completed_records: Vec::new(),
+            completed_by_identity: FxHashMap::default(),
         }
     }
 
@@ -124,7 +151,10 @@ impl<'a> GeneratedFunctionWorklist<'a> {
 
         let mut request_ids = Vec::with_capacity(requests.len());
         for request in requests {
-            if self.known_summaries.contains_key(&request.identity) {
+            if self.known.by_identity.contains_key(&request.identity)
+                || self.imported.by_identity.contains_key(&request.identity)
+                || self.completed_by_identity.contains_key(&request.identity)
+            {
                 continue;
             }
 
@@ -232,18 +262,22 @@ impl<'a> GeneratedFunctionWorklist<'a> {
                 "Generated sidecar identity disagrees with its worklist request",
             ));
         }
-        if self
-            .completed_summaries
-            .insert(record.identity.clone(), summary)
-            .is_some()
-        {
+        if self.completed_by_identity.contains_key(&record.identity) {
             return Err(CompilerError::compiler_error(format!(
                 "Generated request {:?} completed more than once",
                 record.identity
             )));
         }
         record.state = GeneratedRequestState::Complete;
-        self.sidecars.push(sidecar);
+        let identity = record.identity.clone();
+        let generated_id = GeneratedFunctionId(self.completed_records.len());
+        self.completed_records.push(CompletedGeneratedFunction {
+            identity,
+            summary,
+            sidecar,
+        });
+        self.completed_by_identity
+            .insert(record.identity.clone(), generated_id);
         Ok(())
     }
 
@@ -251,30 +285,45 @@ impl<'a> GeneratedFunctionWorklist<'a> {
         &self,
         identity: &GeneratedFunctionIdentity,
     ) -> Option<&PublicCallSummary> {
-        self.completed_summaries
+        self.completed_by_identity
             .get(identity)
-            .or_else(|| self.known_summaries.get(identity))
+            .and_then(|id| self.completed_records.get(id.index()))
+            .map(|record| &record.summary)
+            .or_else(|| self.known.summary(identity))
+            .or_else(|| self.imported.summary(identity))
     }
 
     pub(super) fn completed_summaries(
         &self,
     ) -> FxHashMap<GeneratedFunctionIdentity, PublicCallSummary> {
-        let mut summaries = self.known_summaries.clone();
-        summaries.extend(self.completed_summaries.clone());
+        let mut summaries = FxHashMap::default();
+        for record in &self.completed_records {
+            summaries.insert(record.identity.clone(), record.summary.clone());
+        }
+        for record in &self.known.records {
+            summaries.insert(record.identity.clone(), record.summary.clone());
+        }
+        for record in &self.imported.records {
+            summaries.insert(record.identity.clone(), record.summary.clone());
+        }
         summaries
     }
 
-    pub(super) fn sidecars_mut(&mut self) -> &mut [GeneratedFunctionSidecar] {
-        &mut self.sidecars
+    pub(super) fn sidecars_mut(
+        &mut self,
+    ) -> impl Iterator<Item = &mut GeneratedFunctionSidecar> + '_ {
+        self.completed_records
+            .iter_mut()
+            .map(|record| &mut record.sidecar)
     }
 
     pub(super) fn sidecar_count(&self) -> usize {
-        self.sidecars.len()
+        self.completed_records.len()
     }
 
     pub(super) fn remap_sidecars_from(&mut self, first_sidecar: usize, remap: &StringIdRemap) {
-        for sidecar in &mut self.sidecars[first_sidecar..] {
-            sidecar.remap_string_ids(remap);
+        for record in &mut self.completed_records[first_sidecar..] {
+            record.sidecar.remap_string_ids(remap);
         }
     }
 
@@ -283,11 +332,12 @@ impl<'a> GeneratedFunctionWorklist<'a> {
         identity: &GeneratedFunctionIdentity,
         summary: PublicCallSummary,
     ) -> Result<bool, CompilerError> {
-        let current = self.completed_summaries.get_mut(identity).ok_or_else(|| {
+        let record_id = self.completed_by_identity.get(identity).ok_or_else(|| {
             CompilerError::compiler_error(format!(
                 "Generated worklist cannot update unknown completed request {identity:?}"
             ))
         })?;
+        let current = &mut self.completed_records[record_id.index()].summary;
         let changed = *current != summary;
         *current = summary;
         Ok(changed)
@@ -321,22 +371,20 @@ impl<'a> GeneratedFunctionWorklist<'a> {
             )));
         }
         Ok(GeneratedFunctionWorklistDelta {
-            summaries: self.completed_summaries,
-            sidecars: self.sidecars,
+            records: self.completed_records,
         })
     }
 }
 
 /// Successful new work produced while compiling one module.
 pub(crate) struct GeneratedFunctionWorklistDelta {
-    summaries: FxHashMap<GeneratedFunctionIdentity, PublicCallSummary>,
-    sidecars: Vec<GeneratedFunctionSidecar>,
+    records: Vec<CompletedGeneratedFunction>,
 }
 
 impl GeneratedFunctionWorklistDelta {
     pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        for sidecar in &mut self.sidecars {
-            sidecar.remap_string_ids(remap);
+        for record in &mut self.records {
+            record.sidecar.remap_string_ids(remap);
         }
     }
 }
@@ -344,59 +392,113 @@ impl GeneratedFunctionWorklistDelta {
 /// One project/package boundary's exact generated summaries and explicit sidecar lane.
 #[derive(Default)]
 pub(crate) struct BoundaryGeneratedFunctionStore {
-    summaries: FxHashMap<GeneratedFunctionIdentity, PublicCallSummary>,
-    sidecars: Vec<GeneratedFunctionSidecar>,
+    records: Vec<CompletedGeneratedFunction>,
+    by_identity: FxHashMap<GeneratedFunctionIdentity, GeneratedFunctionId>,
 }
 
 impl BoundaryGeneratedFunctionStore {
-    pub(super) fn import_completed_summaries(
-        &mut self,
-        completed: &BoundaryGeneratedFunctionStore,
-    ) -> Result<(), CompilerError> {
-        for (identity, summary) in &completed.summaries {
-            if let Some(existing) = self.summaries.insert(identity.clone(), summary.clone())
-                && existing != *summary
-            {
-                return Err(CompilerError::compiler_error(format!(
-                    "Generated identity {identity:?} has conflicting completed summaries across source-package boundaries"
-                )));
-            }
-        }
-        Ok(())
+    fn summary(&self, identity: &GeneratedFunctionIdentity) -> Option<&PublicCallSummary> {
+        self.by_identity
+            .get(identity)
+            .and_then(|id| self.records.get(id.index()))
+            .map(|record| &record.summary)
     }
 
-    pub(super) fn session(&self) -> GeneratedFunctionWorklist<'_> {
-        GeneratedFunctionWorklist::new(&self.summaries)
+    pub(super) fn session<'a>(
+        &'a self,
+        imported: &'a CompletedGeneratedFunctionView<'a>,
+    ) -> GeneratedFunctionWorklist<'a> {
+        GeneratedFunctionWorklist::new(self, imported)
     }
 
     pub(super) fn publish(
         &mut self,
         delta: GeneratedFunctionWorklistDelta,
     ) -> Result<(), CompilerError> {
-        let GeneratedFunctionWorklistDelta {
-            summaries,
-            sidecars,
-        } = delta;
-        for (identity, summary) in summaries {
-            if self.summaries.insert(identity.clone(), summary).is_some() {
+        for record in delta.records {
+            if self.by_identity.contains_key(&record.identity) {
                 return Err(CompilerError::compiler_error(format!(
-                    "Generated identity {identity:?} was published more than once in one compilation boundary"
+                    "Generated identity {:?} was published more than once in one compilation boundary",
+                    record.identity
                 )));
             }
+            let record_id = GeneratedFunctionId(self.records.len());
+            self.by_identity.insert(record.identity.clone(), record_id);
+            self.records.push(record);
         }
-        self.sidecars.extend(sidecars);
         Ok(())
     }
 
     /// Borrow this boundary's completed sidecars in deterministic publication order.
-    pub(crate) fn sidecars(&self) -> &[GeneratedFunctionSidecar] {
-        &self.sidecars
+    pub(crate) fn sidecars(&self) -> impl Iterator<Item = &GeneratedFunctionSidecar> + '_ {
+        self.records.iter().map(|record| &record.sidecar)
     }
 
-    /// Append one sidecar for focused tests that build real boundary payloads.
+    /// Resolve one completed sidecar by its dense publication index.
+    pub(crate) fn sidecar_at(
+        &self,
+        index: usize,
+    ) -> Result<&GeneratedFunctionSidecar, CompilerError> {
+        self.records
+            .get(index)
+            .map(|record| &record.sidecar)
+            .ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "Generated sidecar index {index} is out of range for this boundary"
+                ))
+            })
+    }
+
+    /// Append one completed record for focused tests that build real boundary payloads.
     #[cfg(test)]
-    pub(crate) fn push_sidecar_for_test(&mut self, sidecar: GeneratedFunctionSidecar) {
-        self.sidecars.push(sidecar);
+    pub(crate) fn push_completed_for_test(&mut self, record: CompletedGeneratedFunction) {
+        let record_id = GeneratedFunctionId(self.records.len());
+        self.by_identity.insert(record.identity.clone(), record_id);
+        self.records.push(record);
+    }
+}
+
+/// Borrowed fixed-leaf view over every completed generated function outside one boundary.
+///
+/// WHAT: flattens completed package stores into one direct summary lookup without cloning
+///       summaries into each consuming boundary.
+/// WHY: imported generated records are immutable leaves; one borrowed view per boundary
+///      compilation keeps cross-boundary lookup exact without per-module map copies.
+pub(crate) struct CompletedGeneratedFunctionView<'a> {
+    records: Vec<&'a CompletedGeneratedFunction>,
+    by_identity: FxHashMap<GeneratedFunctionIdentity, GeneratedFunctionId>,
+}
+
+impl<'a> CompletedGeneratedFunctionView<'a> {
+    pub(crate) fn new(
+        stores: impl IntoIterator<Item = &'a BoundaryGeneratedFunctionStore>,
+    ) -> Result<Self, CompilerError> {
+        let mut records = Vec::new();
+        let mut by_identity = FxHashMap::default();
+        for store in stores {
+            for record in &store.records {
+                if by_identity.contains_key(&record.identity) {
+                    return Err(CompilerError::compiler_error(format!(
+                        "Generated identity {:?} is published by more than one completed source-package boundary",
+                        record.identity
+                    )));
+                }
+                let record_id = GeneratedFunctionId(records.len());
+                by_identity.insert(record.identity.clone(), record_id);
+                records.push(record);
+            }
+        }
+        Ok(Self {
+            records,
+            by_identity,
+        })
+    }
+
+    fn summary(&self, identity: &GeneratedFunctionIdentity) -> Option<&PublicCallSummary> {
+        self.by_identity
+            .get(identity)
+            .and_then(|id| self.records.get(id.index()))
+            .map(|record| &record.summary)
     }
 }
 

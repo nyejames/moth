@@ -41,11 +41,38 @@ pub(crate) use visible_names::{VisibleNameBinding, VisibleNameRegistry, check_al
 pub(crate) use builder::ImportEnvironmentBuilder;
 
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::module_symbols::ModuleSymbols;
 use crate::compiler_frontend::public_interface::SourceProviderImportSet;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+
+/// One import-environment build failure.
+///
+/// WHAT: separates ordinary user-facing import diagnostics from internal successful-interface
+///       invariants that must abort through the `CompilerError` lane.
+/// WHY: provider publication and dense-lookup failures are trusted compiler state; degrading
+///      them into source diagnostics would let malformed successful artefacts depend on import
+///      order instead of failing closed.
+#[derive(Debug)]
+pub(super) enum ImportEnvironmentError {
+    Diagnostic(Box<CompilerDiagnostic>),
+    Internal(CompilerError),
+}
+
+impl From<Box<CompilerDiagnostic>> for ImportEnvironmentError {
+    fn from(diagnostic: Box<CompilerDiagnostic>) -> Self {
+        Self::Diagnostic(diagnostic)
+    }
+}
+
+impl From<CompilerError> for ImportEnvironmentError {
+    fn from(error: CompilerError) -> Self {
+        Self::Internal(error)
+    }
+}
 
 /// Input bundle for preparing the module-wide import environment.
 ///
@@ -89,13 +116,20 @@ pub(crate) fn prepare_import_environment(
     };
 
     for source_file in input.module_symbols.module_file_paths.clone() {
-        if let Err(boxed_diagnostic) =
-            builder.build_file_visibility(&source_file, &importable_symbol_paths)
-        {
-            return Err(CompilerMessages::from_diagnostic(
-                *boxed_diagnostic,
-                builder.string_table.clone(),
-            ));
+        match builder.build_file_visibility(&source_file, &importable_symbol_paths) {
+            Ok(()) => {}
+            Err(ImportEnvironmentError::Diagnostic(diagnostic)) => {
+                return Err(CompilerMessages::from_diagnostic(
+                    *diagnostic,
+                    builder.string_table.clone(),
+                ));
+            }
+            Err(ImportEnvironmentError::Internal(error)) => {
+                return Err(CompilerMessages::from_error_ref(
+                    error,
+                    builder.string_table,
+                ));
+            }
         }
     }
 

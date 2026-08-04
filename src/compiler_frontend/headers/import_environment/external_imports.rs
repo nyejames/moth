@@ -5,8 +5,8 @@
 //! syntax remains source-owned and compiler-owned rather than external-package metadata.
 //! MUST NOT: register source declarations or build source namespace records.
 
+use super::ImportEnvironmentError;
 use super::{FileVisibility, ImportEnvironmentBuilder, VisibleNameBinding, VisibleNameRegistry};
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
 use crate::compiler_frontend::headers::parse_file_headers::FileImport;
 
@@ -15,7 +15,7 @@ use crate::compiler_frontend::headers::parse_file_headers::FileImport;
 /// WHAT: gives external import registration one small error boundary.
 /// WHY: local-name derivation is already boxed, so registration can propagate it directly
 ///      and adapt the plain visible-name registry once.
-type ExternalImportResult<T> = Result<T, Box<CompilerDiagnostic>>;
+type ExternalImportResult<T> = Result<T, ImportEnvironmentError>;
 
 impl<'a> ImportEnvironmentBuilder<'a> {
     pub(super) fn register_external_import(

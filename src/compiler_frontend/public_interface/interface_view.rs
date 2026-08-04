@@ -9,10 +9,8 @@
 //! view is never stored inside it.
 
 use super::model::{
-    PublicBindingExport, PublicDeclarationRecord, PublicDiagnosticLocation, PublicEvidenceRecord,
-    PublicSemanticInterface,
+    PublicBindingExport, PublicDeclarationRecord, PublicDiagnosticLocation, PublicSemanticInterface,
 };
-use crate::compiler_frontend::canonical_type_identity::CanonicalEvidenceIdentity;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::semantic_identity::{OriginDeclarationId, OriginFunctionId};
@@ -21,114 +19,6 @@ use rustc_hash::FxHashMap;
 
 fn view_error(detail: impl Into<String>) -> CompilerError {
     CompilerError::compiler_error(format!("public semantic interface view: {}", detail.into()))
-}
-
-/// One operation-scoped record view over an interface used by recursive closure.
-///
-/// WHAT: indexes only the declaration, concrete summary and reusable evidence records closure
-///       needs, with duplicate-key validation while it builds.
-/// WHY: closure walks many interfaces; a narrow record view keeps lookups direct without
-///      carrying binding-only export maps into the closure operation.
-pub(crate) struct ClosureRecordView<'a> {
-    interface: &'a PublicSemanticInterface,
-    declaration_by_origin: FxHashMap<OriginDeclarationId, usize>,
-    summary_by_origin: FxHashMap<OriginFunctionId, usize>,
-    evidence_by_identity: FxHashMap<CanonicalEvidenceIdentity, usize>,
-}
-
-impl<'a> ClosureRecordView<'a> {
-    pub(crate) fn build(interface: &'a PublicSemanticInterface) -> Result<Self, CompilerError> {
-        let mut view = Self {
-            interface,
-            declaration_by_origin: FxHashMap::default(),
-            summary_by_origin: FxHashMap::default(),
-            evidence_by_identity: FxHashMap::default(),
-        };
-
-        for (index, declaration) in interface.declarations.iter().enumerate() {
-            Self::insert_unique(
-                interface,
-                &mut view.declaration_by_origin,
-                declaration.origin.clone(),
-                index,
-                "declaration origin",
-                || format!("{:?}", declaration.origin),
-            )?;
-        }
-        for (index, summary) in interface.concrete_call_summaries.iter().enumerate() {
-            Self::insert_unique(
-                interface,
-                &mut view.summary_by_origin,
-                summary.origin.clone(),
-                index,
-                "concrete summary origin",
-                || format!("{:?}", summary.origin),
-            )?;
-        }
-        for (index, evidence) in interface.reusable_evidence.iter().enumerate() {
-            Self::insert_unique(
-                interface,
-                &mut view.evidence_by_identity,
-                evidence.identity.clone(),
-                index,
-                "evidence identity",
-                || format!("{:?}", evidence.identity),
-            )?;
-        }
-
-        Ok(view)
-    }
-
-    fn insert_unique<K: std::hash::Hash + Eq>(
-        interface: &PublicSemanticInterface,
-        index: &mut FxHashMap<K, usize>,
-        key: K,
-        record_index: usize,
-        key_class: &str,
-        render_key: impl FnOnce() -> String,
-    ) -> Result<(), CompilerError> {
-        if index.insert(key, record_index).is_some() {
-            return Err(view_error(format!(
-                "duplicate {key_class} {:?} in interface {:?}",
-                render_key(),
-                interface.module_origin
-            )));
-        }
-
-        Ok(())
-    }
-
-    pub(crate) fn declaration(
-        &self,
-        origin: &OriginDeclarationId,
-    ) -> Option<&PublicDeclarationRecord> {
-        self.declaration_by_origin
-            .get(origin)
-            .map(|index| &self.interface.declarations[*index])
-    }
-
-    pub(crate) fn concrete_call_summary(
-        &self,
-        origin: &OriginFunctionId,
-    ) -> Option<&PublicCallSummary> {
-        self.summary_by_origin
-            .get(origin)
-            .map(|index| &self.interface.concrete_call_summaries[*index].summary)
-    }
-
-    pub(crate) fn evidence(
-        &self,
-        identity: &CanonicalEvidenceIdentity,
-    ) -> Option<&PublicEvidenceRecord> {
-        self.evidence_by_identity
-            .get(identity)
-            .map(|index| &self.interface.reusable_evidence[*index])
-    }
-
-    /// The completed interface this view indexes.
-    pub(crate) fn interface(&self) -> &'a PublicSemanticInterface {
-        self.interface
-    }
 }
 
 /// One operation-scoped binding view over a completed provider interface.

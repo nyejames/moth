@@ -116,7 +116,14 @@ impl<'a> ProviderInterfaceTable<'a> {
         interface: &'a PublicSemanticInterface,
     ) -> Result<ProviderInterfaceId, CompilerError> {
         if let Some(existing_id) = self.by_origin.get(&interface.module_origin).copied() {
-            if self.interfaces[existing_id.0] != interface {
+            let existing = self.interfaces[existing_id.0];
+            // The same borrowed completed interface is registered once per authored shell.
+            // Pointer equality is the exact-reference fast path: repeated shells for one
+            // provider must not rebuild or structurally compare the full interface.
+            if std::ptr::eq(existing, interface) {
+                return Ok(existing_id);
+            }
+            if existing != interface {
                 return Err(CompilerError::compiler_error(format!(
                     "provider interface for module origin {:?} disagrees with an equal-origin provider interface",
                     interface.module_origin

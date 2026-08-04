@@ -6,7 +6,9 @@
 //! import environment, turning provider results into ordinary external-package registrations.
 //! MUST NOT: perform provider parsing or AST-level semantic validation.
 
-use super::{FileVisibility, ImportEnvironmentBuilder, VisibleNameRegistry};
+use super::{
+    FileVisibility, ImportEnvironmentBuilder, ImportEnvironmentError, VisibleNameRegistry,
+};
 use crate::builder_surface::external_import_providers::provider::ResolvedExternalImport;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
@@ -20,7 +22,7 @@ use crate::compiler_frontend::symbols::string_interning::StringId;
 /// WHY: the external registration, namespace record, and namespace name helpers this family
 ///      calls already return boxed diagnostics, so boxing here lets `?` propagate directly
 ///      without temporary unboxing adapters.
-type ProviderImportResult<T> = Result<T, Box<CompilerDiagnostic>>;
+type ProviderImportResult<T> = Result<T, ImportEnvironmentError>;
 
 impl<'a> ImportEnvironmentBuilder<'a> {
     /// Try to resolve a grouped import against a provider-backed external file.
@@ -50,7 +52,8 @@ impl<'a> ImportEnvironmentBuilder<'a> {
             return Err(Box::new(CompilerDiagnostic::direct_symbol_path_import(
                 import.provider.path.clone(),
                 import.location.clone(),
-            )));
+            ))
+            .into());
         }
 
         let symbol_name = remaining[0];
@@ -61,7 +64,8 @@ impl<'a> ImportEnvironmentBuilder<'a> {
             return Err(Box::new(super::diagnostics::missing_import_target(
                 &import.provider.path,
                 import.location.clone(),
-            )));
+            ))
+            .into());
         };
 
         let symbol_id = self
@@ -104,7 +108,8 @@ impl<'a> ImportEnvironmentBuilder<'a> {
             return Err(Box::new(CompilerDiagnostic::direct_symbol_path_import(
                 import.provider.path.clone(),
                 import.location.clone(),
-            )));
+            ))
+            .into());
         }
 
         let package = self
@@ -114,7 +119,8 @@ impl<'a> ImportEnvironmentBuilder<'a> {
             return Err(Box::new(super::diagnostics::missing_import_target(
                 &import.provider.path,
                 import.location.clone(),
-            )));
+            ))
+            .into());
         };
 
         let package_path_id = self.string_table.intern(&package.path);

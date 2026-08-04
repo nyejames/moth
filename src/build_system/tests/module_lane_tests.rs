@@ -6,10 +6,12 @@ use crate::build_system::build::{
     ProjectCompilation,
 };
 use crate::build_system::create_project_modules::compiled_boundary::{
-    BlockedModule, BlockedProvider, CompiledGraphBoundary, CompiledSourcePackage, DiagnosedModule,
-    ProjectFrontendCompilation,
+    BlockedModule, BlockedProvider, CompiledGraphBoundary, CompiledSourcePackage,
+    CompletedSourcePackageRegistry, DiagnosedModule, ProjectFrontendCompilation,
 };
-use crate::build_system::create_project_modules::generated_worklist::BoundaryGeneratedFunctionStore;
+use crate::build_system::create_project_modules::generated_worklist::{
+    BoundaryGeneratedFunctionStore, CompletedGeneratedFunction,
+};
 use crate::build_system::create_project_modules::module_artifact_store::ModuleArtifactStore;
 use crate::build_system::create_project_modules::module_identity::ModuleId;
 use crate::build_system::create_project_modules::project_module_graph::ProjectModuleGraph;
@@ -18,6 +20,7 @@ use crate::builder_surface::external_import_providers::provider::RuntimeAssetIde
 use crate::compiler_frontend::analysis::borrow_checker::{
     BorrowCheckReport, ReactiveInvalidationFact, ReactiveInvalidationKind,
 };
+use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
@@ -45,6 +48,9 @@ use crate::compiler_frontend::hir::reactivity::ReactiveSourceId;
 use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::public_call_summary::{
+    FunctionReturnAliasSummary, PublicCallSummary,
+};
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, GeneratedFunctionIdentity, ModulePrivateExecutableCategory,
@@ -404,7 +410,10 @@ fn source_package_artefacts_are_retained_but_never_project_entries() {
     let frontend = test_frontend_with_source_package(active_project, package_root);
     assert_eq!(frontend.source_packages.len(), 1);
     assert!(
-        frontend.source_packages[0]
+        frontend
+            .source_packages
+            .get(0)
+            .expect("package boundary retained")
             .boundary
             .modules
             .artifact(ModuleId::from_index(0))
@@ -439,9 +448,20 @@ fn source_package_artefacts_are_retained_but_never_project_entries() {
     );
 }
 
+fn test_package_registry(packages: Vec<CompiledSourcePackage>) -> CompletedSourcePackageRegistry {
+    let mut registry = CompletedSourcePackageRegistry::new();
+    for package in packages {
+        registry
+            .publish(package, &[])
+            .expect("test package should publish without dependencies");
+    }
+    registry
+}
+
 fn test_frontend_from_project_modules(modules: Vec<Module>) -> ProjectFrontendCompilation {
     let project = test_graph_boundary(modules, "test", "");
-    ProjectFrontendCompilation::new(project, Vec::new())
+    ProjectFrontendCompilation::new(project, CompletedSourcePackageRegistry::new())
+        .expect("test project boundary should validate")
 }
 
 fn test_frontend_with_source_package(
@@ -454,12 +474,13 @@ fn test_frontend_with_source_package(
         StablePackageIdentity::source_package(PackageOrigin::ProjectLocal, "html");
     ProjectFrontendCompilation::new(
         project,
-        vec![CompiledSourcePackage {
+        test_package_registry(vec![CompiledSourcePackage {
             package_identity,
             root_module_id: ModuleId::from_index(0),
             boundary: package,
-        }],
+        }]),
     )
+    .expect("test frontend should validate")
 }
 
 fn test_graph_boundary(
@@ -585,6 +606,119 @@ fn dense_lookup_resolves_wave_publication_out_of_module_id_order() {
 }
 
 #[test]
+fn duplicate_declaration_inside_one_materialisation_context_fails_publication() {
+    let identity = generated_test_identity("dup").declaration().clone();
+    let origin = StableModuleOriginIdentity::from_portable_path(
+        StablePackageIdentity::project_local("dup"),
+        "dup".to_owned(),
+        ModuleRootRole::Normal,
+    );
+    let graph = ProjectModuleGraph::from_normal_roots(vec![(
+        origin,
+        PathBuf::from("@dup.moth"),
+        PathBuf::from("@dup.moth"),
+    )]);
+    let mut store = ModuleArtifactStore::new(1);
+    let mut module = minimal_lane_module(PathBuf::from("@dup.moth"), true);
+    module.metadata.materialisation_context = Some(
+        ModuleMaterialisationContext::from_identities_for_test(vec![identity.clone(), identity]),
+    );
+
+    let error = store
+        .publish_success(
+            ModuleId::from_index(0),
+            CompiledModuleArtifact {
+                module,
+                interface: empty_test_interface("dup".to_owned()),
+            },
+        )
+        .unwrap_err();
+    assert!(
+        error
+            .msg
+            .contains("duplicated inside one materialisation context")
+    );
+    let _ = graph;
+}
+
+#[test]
+fn materialisation_lookup_resolves_the_exact_template_row() {
+    let first_identity = generated_test_identity("first").declaration().clone();
+    let second_identity = generated_test_identity("second").declaration().clone();
+    let origin = StableModuleOriginIdentity::from_portable_path(
+        StablePackageIdentity::project_local("rows"),
+        "rows".to_owned(),
+        ModuleRootRole::Normal,
+    );
+    let graph = ProjectModuleGraph::from_normal_roots(vec![(
+        origin,
+        PathBuf::from("@rows.moth"),
+        PathBuf::from("@rows.moth"),
+    )]);
+    let mut store = ModuleArtifactStore::new(1);
+    let mut module = minimal_lane_module(PathBuf::from("@rows.moth"), true);
+    module.metadata.materialisation_context =
+        Some(ModuleMaterialisationContext::from_identities_for_test(
+            vec![first_identity, second_identity.clone()],
+        ));
+    store
+        .publish_success(
+            ModuleId::from_index(0),
+            CompiledModuleArtifact {
+                module,
+                interface: empty_test_interface("rows".to_owned()),
+            },
+        )
+        .expect("row context should publish");
+
+    let location = store
+        .materialisation_context_for(&second_identity)
+        .expect("valid identity lookup")
+        .expect("second identity should be indexed");
+    assert_eq!(location.template_index, 1);
+    assert!(store.materialisation_context_at(location).is_ok());
+    assert!(
+        store
+            .materialisation_context_for(generated_test_identity("missing").declaration())
+            .expect("valid identity lookup")
+            .is_none(),
+        "an unindexed identity must miss without scanning"
+    );
+    let _ = graph;
+}
+
+#[test]
+fn same_generated_declaration_across_project_and_package_boundaries_fails() {
+    let identity = generated_test_identity("shared").declaration().clone();
+    let mut project_module = minimal_lane_module(PathBuf::from("@page.moth"), true);
+    project_module.metadata.materialisation_context = Some(
+        ModuleMaterialisationContext::from_identities_for_test(vec![identity.clone()]),
+    );
+    let project = test_graph_boundary(vec![project_module], "test", "page");
+
+    let mut package_module = minimal_lane_module(PathBuf::from("@mod.moth"), true);
+    package_module.metadata.materialisation_context = Some(
+        ModuleMaterialisationContext::from_identities_for_test(vec![identity]),
+    );
+    let package = test_graph_boundary(vec![package_module], "html", "");
+
+    let registry = test_package_registry(vec![CompiledSourcePackage {
+        package_identity: StablePackageIdentity::source_package(
+            PackageOrigin::ProjectLocal,
+            "html",
+        ),
+        root_module_id: ModuleId::from_index(0),
+        boundary: package,
+    }]);
+
+    let error = match ProjectFrontendCompilation::new(project, registry) {
+        Ok(_) => panic!("one declaration identity must not cross boundaries"),
+        Err(error) => error,
+    };
+    assert!(error.msg.contains("both project"));
+}
+
+#[test]
 fn source_package_boundaries_never_cross_address_overlapping_module_ids() {
     let package_a = test_graph_boundary(
         vec![minimal_lane_module(
@@ -609,7 +743,7 @@ fn source_package_boundaries_never_cross_address_overlapping_module_ids() {
     );
     let frontend = ProjectFrontendCompilation::new(
         project,
-        vec![
+        test_package_registry(vec![
             CompiledSourcePackage {
                 package_identity: StablePackageIdentity::source_package(
                     PackageOrigin::ProjectLocal,
@@ -626,10 +760,15 @@ fn source_package_boundaries_never_cross_address_overlapping_module_ids() {
                 root_module_id: ModuleId::from_index(0),
                 boundary: package_b,
             },
-        ],
-    );
+        ]),
+    )
+    .expect("overlapping package module ids should stay isolated");
 
-    let package_a_module = frontend.source_packages[0]
+    let package_a_module = frontend
+        .source_packages
+        .iter()
+        .next()
+        .expect("package a retained")
         .boundary
         .modules
         .artifact(ModuleId::from_index(0))
@@ -642,7 +781,11 @@ fn source_package_boundaries_never_cross_address_overlapping_module_ids() {
             .entry_point
             .ends_with("packages/a/@mod.moth")
     );
-    let package_b_module = frontend.source_packages[1]
+    let package_b_module = frontend
+        .source_packages
+        .iter()
+        .nth(1)
+        .expect("package b retained")
         .boundary
         .modules
         .artifact(ModuleId::from_index(0))
@@ -828,7 +971,8 @@ fn success_only_conversion_rejects_unfinished_module_slots() {
         diagnosed: Vec::new(),
         blocked: Vec::new(),
     };
-    let frontend = ProjectFrontendCompilation::new(boundary, Vec::new());
+    let frontend = ProjectFrontendCompilation::new(boundary, CompletedSourcePackageRegistry::new())
+        .expect("unfinished slot boundary should still validate");
 
     let error = match ProjectCompilation::from_frontend(frontend) {
         Ok(_) => panic!("an unfinished non-entry module slot must reject ProjectCompilation"),
@@ -851,10 +995,14 @@ fn frontend_with_sidecar_warnings(string_table: &mut StringTable) -> ProjectFron
             string_table,
         ));
     let mut project_generated = BoundaryGeneratedFunctionStore::default();
-    project_generated.push_sidecar_for_test(GeneratedFunctionSidecar::new(
-        generated_test_identity("generated_project"),
-        project_sidecar_module,
-    ));
+    project_generated.push_completed_for_test(CompletedGeneratedFunction {
+        identity: generated_test_identity("generated_project"),
+        summary: generated_test_summary(),
+        sidecar: GeneratedFunctionSidecar::new(
+            generated_test_identity("generated_project"),
+            project_sidecar_module,
+        ),
+    });
     let mut project = test_graph_boundary(
         vec![minimal_lane_module(PathBuf::from("@page.moth"), true)],
         "test",
@@ -872,10 +1020,14 @@ fn frontend_with_sidecar_warnings(string_table: &mut StringTable) -> ProjectFron
             string_table,
         ));
     let mut package_generated = BoundaryGeneratedFunctionStore::default();
-    package_generated.push_sidecar_for_test(GeneratedFunctionSidecar::new(
-        generated_test_identity("generated_package"),
-        package_sidecar_module,
-    ));
+    package_generated.push_completed_for_test(CompletedGeneratedFunction {
+        identity: generated_test_identity("generated_package"),
+        summary: generated_test_summary(),
+        sidecar: GeneratedFunctionSidecar::new(
+            generated_test_identity("generated_package"),
+            package_sidecar_module,
+        ),
+    });
     let mut package = test_graph_boundary(
         vec![minimal_lane_module(
             PathBuf::from("packages/warnpkg/@mod.moth"),
@@ -888,15 +1040,16 @@ fn frontend_with_sidecar_warnings(string_table: &mut StringTable) -> ProjectFron
 
     ProjectFrontendCompilation::new(
         project,
-        vec![CompiledSourcePackage {
+        test_package_registry(vec![CompiledSourcePackage {
             package_identity: StablePackageIdentity::source_package(
                 PackageOrigin::ProjectLocal,
                 "warnpkg",
             ),
             root_module_id: ModuleId::from_index(0),
             boundary: package,
-        }],
+        }]),
     )
+    .expect("warning package frontend should validate")
 }
 
 fn test_warning_diagnostic(
@@ -944,6 +1097,13 @@ fn generated_test_identity(name: &str) -> GeneratedFunctionIdentity {
         Box::new([CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)]),
         Box::new([]),
     )
+}
+
+fn generated_test_summary() -> PublicCallSummary {
+    PublicCallSummary {
+        parameters: Vec::new(),
+        return_alias: FunctionReturnAliasSummary::Fresh,
+    }
 }
 
 fn minimal_lane_module(entry_point: PathBuf, active_root: bool) -> Module {

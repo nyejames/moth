@@ -16,12 +16,15 @@ use crate::build_system::build::{CompiledModuleArtifact, Module};
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::module_diagnostics::ModuleDiagnostics;
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
-use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
+use crate::compiler_frontend::semantic_identity::{
+    GeneratedDeclarationIdentity, StablePackageIdentity,
+};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::generated_worklist::BoundaryGeneratedFunctionStore;
+use super::module_artifact_store::MaterialisationContextLocation;
 use super::module_artifact_store::{ModuleArtifactStore, ProviderSlot};
 use super::module_identity::ModuleId;
 use super::project_module_graph::ProjectModuleGraph;
@@ -75,6 +78,42 @@ impl CompiledGraphBoundary {
         self.blocked.sort_by_key(|module| module.module_id.index());
     }
 
+    /// Validate retained boundary invariants before any consumer trusts the dense lanes.
+    ///
+    /// WHAT: checks graph node count against store slot count and every diagnosed and blocked
+    ///       module against its own store slot.
+    /// WHY: dense lookups are only safe after this validation; an invalid mapping must surface
+    ///       as `CompilerError` instead of becoming an absent artefact later. The success-only
+    ///       `ProjectCompilation` gate separately rejects unresolved slots.
+    pub(crate) fn validate_invariants(&self) -> Result<(), CompilerError> {
+        if self.structure.nodes().len() != self.modules.slot_count() {
+            return Err(CompilerError::compiler_error(format!(
+                "Graph retained {} nodes but module store has {} slots",
+                self.structure.nodes().len(),
+                self.modules.slot_count()
+            )));
+        }
+
+        for diagnosed in &self.diagnosed {
+            if self.modules.slot(diagnosed.module_id)? != ProviderSlot::Diagnosed {
+                return Err(CompilerError::compiler_error(format!(
+                    "Diagnosed module {} does not hold the diagnosed store slot",
+                    diagnosed.module_id.index()
+                )));
+            }
+        }
+        for blocked in &self.blocked {
+            if self.modules.slot(blocked.module_id)? != ProviderSlot::Blocked {
+                return Err(CompilerError::compiler_error(format!(
+                    "Blocked module {} does not hold the blocked store slot",
+                    blocked.module_id.index()
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
     /// Iterate every successful artefact in deterministic `ModuleId` order.
     pub(crate) fn successful_artefacts_in_module_id_order(
         &self,
@@ -90,12 +129,7 @@ impl CompiledGraphBoundary {
     pub(crate) fn successful_module_views(&self) -> impl Iterator<Item = &Module> + '_ {
         self.successful_artefacts_in_module_id_order()
             .map(|artifact| &artifact.module)
-            .chain(
-                self.generated
-                    .sidecars()
-                    .iter()
-                    .map(|sidecar| &sidecar.module),
-            )
+            .chain(self.generated.sidecars().map(|sidecar| &sidecar.module))
     }
 }
 
@@ -148,6 +182,13 @@ impl PackageBoundaryId {
     }
 }
 
+/// Exact cross-package location of one published materialisation template.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PackageMaterialisationLocation {
+    pub(crate) package_id: PackageBoundaryId,
+    pub(crate) location: MaterialisationContextLocation,
+}
+
 /// One incrementally maintained registry of completed source-package boundaries.
 ///
 /// WHAT: stores completed packages contiguously, resolves import prefixes to dense
@@ -163,6 +204,8 @@ pub(crate) struct CompletedSourcePackageRegistry {
     by_prefix: FxHashMap<String, PackageBoundaryId>,
     provider_packages: Vec<Vec<PackageBoundaryId>>,
     consumer_packages: Vec<Vec<PackageBoundaryId>>,
+    declarations_by_identity:
+        FxHashMap<GeneratedDeclarationIdentity, PackageMaterialisationLocation>,
 }
 
 impl CompletedSourcePackageRegistry {
@@ -172,6 +215,7 @@ impl CompletedSourcePackageRegistry {
             by_prefix: FxHashMap::default(),
             provider_packages: Vec::new(),
             consumer_packages: Vec::new(),
+            declarations_by_identity: FxHashMap::default(),
         }
     }
 
@@ -195,6 +239,7 @@ impl CompletedSourcePackageRegistry {
         }
 
         let package_id = PackageBoundaryId(self.packages.len());
+        self.register_package_materialisations(&package, package_id)?;
         self.packages.push(package);
         self.provider_packages.push(Vec::new());
         self.consumer_packages.push(Vec::new());
@@ -274,6 +319,65 @@ impl CompletedSourcePackageRegistry {
         self.packages.iter()
     }
 
+    /// Number of completed source-package boundaries.
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.packages.len()
+    }
+
+    /// Borrow one completed package by its dense publication index.
+    #[cfg(test)]
+    pub(crate) fn get(&self, index: usize) -> Option<&CompiledSourcePackage> {
+        self.packages.get(index)
+    }
+
+    /// Resolve one published materialisation template across every completed package boundary.
+    pub(crate) fn materialisation_location_for(
+        &self,
+        identity: &GeneratedDeclarationIdentity,
+    ) -> Option<PackageMaterialisationLocation> {
+        self.declarations_by_identity.get(identity).copied()
+    }
+
+    /// Iterate every cross-package materialisation location in deterministic package order.
+    pub(crate) fn materialisation_locations(
+        &self,
+    ) -> impl Iterator<
+        Item = (
+            &GeneratedDeclarationIdentity,
+            PackageMaterialisationLocation,
+        ),
+    > + '_ {
+        self.declarations_by_identity
+            .iter()
+            .map(|(identity, location)| (identity, *location))
+    }
+
+    fn register_package_materialisations(
+        &mut self,
+        package: &CompiledSourcePackage,
+        package_id: PackageBoundaryId,
+    ) -> Result<(), CompilerError> {
+        for (identity, location) in package.boundary.modules.materialisation_locations() {
+            if let Some(existing) = self.declarations_by_identity.get(identity) {
+                return Err(CompilerError::compiler_error(format!(
+                    "Generated declaration identity {:?} was published by source packages @{} and @{}",
+                    identity,
+                    self.package(existing.package_id)?.import_prefix(),
+                    package.import_prefix()
+                )));
+            }
+            self.declarations_by_identity.insert(
+                identity.clone(),
+                PackageMaterialisationLocation {
+                    package_id,
+                    location,
+                },
+            );
+        }
+        Ok(())
+    }
+
     /// Validate that every recorded dependency edge follows publication order.
     ///
     /// WHAT: each package's provider edges must point at earlier package IDs and its consumer
@@ -324,12 +428,12 @@ impl CompletedSourcePackageRegistry {
 pub(crate) enum CompiledModuleRef {
     Project(ModuleId),
     SourcePackage {
-        package_index: usize,
+        package_id: PackageBoundaryId,
         module_id: ModuleId,
     },
     GeneratedProject(usize),
     GeneratedSourcePackage {
-        package_index: usize,
+        package_id: PackageBoundaryId,
         sidecar_index: usize,
     },
 }
@@ -341,8 +445,8 @@ pub(crate) enum CompiledModuleRef {
 /// transient view when building function-owner indexes; the retained boundaries stay separate.
 pub(crate) fn compilation_module_views<'a>(
     project: &'a CompiledGraphBoundary,
-    source_packages: &'a [CompiledSourcePackage],
-) -> Vec<(CompiledModuleRef, &'a Module)> {
+    source_packages: &'a CompletedSourcePackageRegistry,
+) -> Result<Vec<(CompiledModuleRef, &'a Module)>, CompilerError> {
     let mut views = Vec::new();
 
     for module_id in project
@@ -351,12 +455,13 @@ pub(crate) fn compilation_module_views<'a>(
         .iter()
         .map(|node| node.module_id())
     {
-        if let Some(artifact) = project.modules.artifact(module_id).ok().flatten() {
+        if let Some(artifact) = project.modules.artifact(module_id)? {
             views.push((CompiledModuleRef::Project(module_id), &artifact.module));
         }
     }
 
     for (package_index, package) in source_packages.iter().enumerate() {
+        let package_id = PackageBoundaryId(package_index);
         for module_id in package
             .boundary
             .structure
@@ -364,10 +469,10 @@ pub(crate) fn compilation_module_views<'a>(
             .iter()
             .map(|node| node.module_id())
         {
-            if let Some(artifact) = package.boundary.modules.artifact(module_id).ok().flatten() {
+            if let Some(artifact) = package.boundary.modules.artifact(module_id)? {
                 views.push((
                     CompiledModuleRef::SourcePackage {
-                        package_index,
+                        package_id,
                         module_id,
                     },
                     &artifact.module,
@@ -376,7 +481,7 @@ pub(crate) fn compilation_module_views<'a>(
         }
     }
 
-    for (sidecar_index, sidecar) in project.generated.sidecars().iter().enumerate() {
+    for (sidecar_index, sidecar) in project.generated.sidecars().enumerate() {
         views.push((
             CompiledModuleRef::GeneratedProject(sidecar_index),
             &sidecar.module,
@@ -384,10 +489,11 @@ pub(crate) fn compilation_module_views<'a>(
     }
 
     for (package_index, package) in source_packages.iter().enumerate() {
-        for (sidecar_index, sidecar) in package.boundary.generated.sidecars().iter().enumerate() {
+        let package_id = PackageBoundaryId(package_index);
+        for (sidecar_index, sidecar) in package.boundary.generated.sidecars().enumerate() {
             views.push((
                 CompiledModuleRef::GeneratedSourcePackage {
-                    package_index,
+                    package_id,
                     sidecar_index,
                 },
                 &sidecar.module,
@@ -395,7 +501,7 @@ pub(crate) fn compilation_module_views<'a>(
         }
     }
 
-    views
+    Ok(views)
 }
 
 /// Typed frontend outcome carrying every project and source-package graph boundary.
@@ -407,18 +513,49 @@ pub(crate) fn compilation_module_views<'a>(
 /// [`CompilerError`] aborts compilation.
 pub(crate) struct ProjectFrontendCompilation {
     pub(crate) project: CompiledGraphBoundary,
-    pub(crate) source_packages: Vec<CompiledSourcePackage>,
+    pub(crate) source_packages: CompletedSourcePackageRegistry,
 }
 
 impl ProjectFrontendCompilation {
     pub(crate) fn new(
         project: CompiledGraphBoundary,
-        source_packages: Vec<CompiledSourcePackage>,
-    ) -> Self {
-        Self {
+        source_packages: CompletedSourcePackageRegistry,
+    ) -> Result<Self, CompilerError> {
+        project.validate_invariants()?;
+        source_packages.validate_dependency_edges()?;
+
+        for (identity, project_location) in project.modules.materialisation_locations() {
+            if let Some(package_location) = source_packages.materialisation_location_for(identity) {
+                return Err(CompilerError::compiler_error(format!(
+                    "Generated declaration identity {:?} is published by both project module {} and source package @{}",
+                    identity,
+                    project_location.artifact_id.index(),
+                    source_packages
+                        .package(package_location.package_id)?
+                        .import_prefix()
+                )));
+            }
+        }
+        for (identity, package_location) in source_packages.materialisation_locations() {
+            if project
+                .modules
+                .materialisation_context_for(identity)?
+                .is_some()
+            {
+                return Err(CompilerError::compiler_error(format!(
+                    "Generated declaration identity {:?} is published by both source package @{} and project module",
+                    identity,
+                    source_packages
+                        .package(package_location.package_id)?
+                        .import_prefix()
+                )));
+            }
+        }
+
+        Ok(Self {
             project,
             source_packages,
-        }
+        })
     }
 
     /// Whether any boundary contains a diagnosed or blocked module.
@@ -458,7 +595,8 @@ impl ProjectFrontendCompilation {
         for diagnosed in self.project.diagnosed {
             messages.append_messages_preserving_context(diagnosed.diagnostics.into_messages());
         }
-        for package in self.source_packages {
+        let source_packages = self.source_packages.into_packages();
+        for package in source_packages {
             for diagnosed in package.boundary.diagnosed {
                 messages.append_messages_preserving_context(diagnosed.diagnostics.into_messages());
             }

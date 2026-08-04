@@ -13,10 +13,16 @@ use crate::build_system::build::CompiledModuleArtifact;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CompiledModuleArtifactId(usize);
+
+impl CompiledModuleArtifactId {
+    pub(crate) fn index(self) -> usize {
+        self.0
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ProviderSlot {
@@ -26,6 +32,13 @@ pub(crate) enum ProviderSlot {
     Blocked,
 }
 
+/// Exact location of one published materialisation template inside this store.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct MaterialisationContextLocation {
+    pub(crate) artifact_id: CompiledModuleArtifactId,
+    pub(crate) template_index: usize,
+}
+
 pub(crate) struct ModuleArtifactStore {
     slots: Vec<ProviderSlot>,
     artifacts: Vec<CompiledModuleArtifact>,
@@ -33,9 +46,10 @@ pub(crate) struct ModuleArtifactStore {
     /// declaration identity.
     ///
     /// WHAT: lets generated materialisation resolve the declaring context by identity without
-    ///       scanning all successful artefacts, and validates duplicate contexts at
-    ///       publication before any module requests them.
-    contexts_by_declaration: FxHashMap<GeneratedDeclarationIdentity, CompiledModuleArtifactId>,
+    ///       scanning all successful artefacts, and points at the exact template row. It also
+    ///       validates duplicate contexts at publication before any module requests them.
+    contexts_by_declaration:
+        FxHashMap<GeneratedDeclarationIdentity, MaterialisationContextLocation>,
 }
 
 impl ModuleArtifactStore {
@@ -61,17 +75,33 @@ impl ModuleArtifactStore {
 
         let artifact_id = CompiledModuleArtifactId(self.artifacts.len());
         if let Some(context) = artifact.module.metadata.materialisation_context.as_ref() {
-            for identity in context.declaration_identities() {
-                if self.contexts_by_declaration.contains_key(identity) {
+            let mut local_identities = FxHashSet::default();
+            for (identity, template_index) in context.declaration_rows() {
+                if !local_identities.insert(identity) {
                     return Err(CompilerError::compiler_error(format!(
-                        "Generated declaration identity {:?} was published by more than one materialisation context (module slot {} and {})",
-                        identity, self.contexts_by_declaration[identity].0, artifact_id.0
+                        "Generated declaration identity {:?} is duplicated inside one materialisation context",
+                        identity
+                    )));
+                }
+                if let Some(existing) = self.contexts_by_declaration.get(identity) {
+                    return Err(CompilerError::compiler_error(format!(
+                        "Generated declaration identity {:?} was published by more than one materialisation context (artifact {} row {} and artifact {} row {})",
+                        identity,
+                        existing.artifact_id.0,
+                        existing.template_index,
+                        artifact_id.0,
+                        template_index
                     )));
                 }
             }
-            for identity in context.declaration_identities() {
-                self.contexts_by_declaration
-                    .insert(identity.clone(), artifact_id);
+            for (identity, template_index) in context.declaration_rows() {
+                self.contexts_by_declaration.insert(
+                    identity.clone(),
+                    MaterialisationContextLocation {
+                        artifact_id,
+                        template_index,
+                    },
+                );
             }
         }
         self.artifacts.push(artifact);
@@ -95,6 +125,11 @@ impl ModuleArtifactStore {
                 self.slots.len()
             ))
         })
+    }
+
+    /// Number of dense module slots retained by this boundary.
+    pub(crate) fn slot_count(&self) -> usize {
+        self.slots.len()
     }
 
     /// Require every dense slot to have reached a final outcome.
@@ -180,20 +215,49 @@ impl ModuleArtifactStore {
     pub(crate) fn materialisation_context_for(
         &self,
         identity: &GeneratedDeclarationIdentity,
+    ) -> Result<Option<MaterialisationContextLocation>, CompilerError> {
+        Ok(self.contexts_by_declaration.get(identity).copied())
+    }
+
+    /// Resolve the exact published context for one indexed location.
+    pub(crate) fn materialisation_context_at(
+        &self,
+        location: MaterialisationContextLocation,
     ) -> Result<
-        Option<&crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext>,
+        &crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext,
         CompilerError,
     > {
-        let Some(artifact_id) = self.contexts_by_declaration.get(identity) else {
-            return Ok(None);
-        };
-        let artifact = self.artifacts.get(artifact_id.0).ok_or_else(|| {
+        let artifact = self.artifacts.get(location.artifact_id.0).ok_or_else(|| {
             CompilerError::compiler_error(format!(
                 "Materialisation context index references missing artifact {}",
-                artifact_id.0
+                location.artifact_id.0
             ))
         })?;
-        Ok(artifact.module.metadata.materialisation_context.as_ref())
+        artifact
+            .module
+            .metadata
+            .materialisation_context
+            .as_ref()
+            .ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "Materialisation context index references artifact {} without a context",
+                    location.artifact_id.0
+                ))
+            })
+    }
+
+    /// Iterate every published materialisation location with its declaration identity.
+    pub(crate) fn materialisation_locations(
+        &self,
+    ) -> impl Iterator<
+        Item = (
+            &GeneratedDeclarationIdentity,
+            MaterialisationContextLocation,
+        ),
+    > + '_ {
+        self.contexts_by_declaration
+            .iter()
+            .map(|(identity, location)| (identity, *location))
     }
 
     fn transition_unavailable(

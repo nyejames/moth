@@ -118,6 +118,23 @@ impl NumericLiteralToken {
         self.normalized_text = remap.get(self.normalized_text);
     }
 
+    /// Remap both interned text payloads through one fallible string-ID mapping.
+    pub fn try_map_string_ids<E>(
+        &self,
+        map: &mut impl FnMut(StringId) -> Result<StringId, E>,
+    ) -> Result<Self, E> {
+        Ok(Self::new(
+            self.sign,
+            map(self.source_text)?,
+            map(self.normalized_text)?,
+            self.kind,
+            self.digit_count,
+            self.fractional_digit_count,
+            self.exponent_digit_count,
+            self.exponent_sign,
+        ))
+    }
+
     /// Build a test numeric token from a valid source snippet.
     ///
     /// WHY: unit tests across the frontend need a concise way to construct

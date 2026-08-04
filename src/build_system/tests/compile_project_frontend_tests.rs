@@ -228,7 +228,13 @@ fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_
     .expect("a diagnosed package with blocked project consumers is a retained outcome");
 
     assert_eq!(
-        frontend.source_packages[0].boundary.diagnosed.len(),
+        frontend
+            .source_packages
+            .get(0)
+            .expect("package boundary retained")
+            .boundary
+            .diagnosed
+            .len(),
         1,
         "package diagnostic should be retained in its own boundary"
     );
@@ -290,12 +296,11 @@ io.line(result)
         .project
         .generated
         .sidecars()
-        .iter()
         .chain(
             frontend
                 .source_packages
                 .iter()
-                .flat_map(|package| package.boundary.generated.sidecars().iter()),
+                .flat_map(|package| package.boundary.generated.sidecars()),
         )
         .collect::<Vec<_>>();
 
@@ -373,12 +378,11 @@ same_private_box PrivateBox of Bool = forward(private_box)
         .project
         .generated
         .sidecars()
-        .iter()
         .chain(
             frontend
                 .source_packages
                 .iter()
-                .flat_map(|package| package.boundary.generated.sidecars().iter()),
+                .flat_map(|package| package.boundary.generated.sidecars()),
         )
         .collect::<Vec<_>>();
 
@@ -513,12 +517,11 @@ wrapped Wrapper = identity(make())
         .project
         .generated
         .sidecars()
-        .iter()
         .chain(
             frontend
                 .source_packages
                 .iter()
-                .flat_map(|package| package.boundary.generated.sidecars().iter()),
+                .flat_map(|package| package.boundary.generated.sidecars()),
         )
         .collect::<Vec<_>>();
 

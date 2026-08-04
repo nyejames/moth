@@ -6,8 +6,8 @@
 
 use crate::build_system::BuildProfile;
 use crate::build_system::create_project_modules::compiled_boundary::{
-    CompiledGraphBoundary, CompiledModuleRef, CompiledSourcePackage, ProjectFrontendCompilation,
-    compilation_module_views,
+    CompiledGraphBoundary, CompiledModuleRef, CompletedSourcePackageRegistry,
+    ProjectFrontendCompilation, compilation_module_views,
 };
 use crate::build_system::create_project_modules::{
     compile_project_frontend, resolve_project_entry_root,
@@ -299,7 +299,7 @@ pub struct ProjectCompilation {
     /// Retained project graph boundary with its artefact store and generated lane.
     project: CompiledGraphBoundary,
     /// Retained source-package boundaries, each with its own dense identity space.
-    source_packages: Vec<CompiledSourcePackage>,
+    source_packages: CompletedSourcePackageRegistry,
     entries: Vec<EntryAssembly>,
     source_function_names: Arc<std::collections::HashMap<OriginFunctionId, String>>,
     module_private_function_names:
@@ -357,23 +357,26 @@ impl ProjectCompilation {
             diagnosed: Vec::new(),
             blocked: Vec::new(),
         };
-        Self::from_successful_boundaries(project, Vec::new())
+        Self::from_successful_boundaries(project, CompletedSourcePackageRegistry::new())
     }
 
     fn from_successful_boundaries(
         project: CompiledGraphBoundary,
-        source_packages: Vec<CompiledSourcePackage>,
+        source_packages: CompletedSourcePackageRegistry,
     ) -> Result<Self, CompilerError> {
+        project.validate_invariants()?;
         ensure_success_only(&project)?;
         project.modules.ensure_all_successful()?;
-        for package in &source_packages {
+        for package in source_packages.iter() {
+            package.boundary.validate_invariants()?;
             ensure_success_only(&package.boundary)?;
             package.boundary.modules.ensure_all_successful()?;
         }
 
-        let module_views = compilation_module_views(&project, &source_packages);
+        let module_views = compilation_module_views(&project, &source_packages)?;
         let module_at = |module_ref: CompiledModuleRef| -> &Module {
             boundary_module_at(&project, &source_packages, module_ref)
+                .expect("module refs were validated during construction")
         };
         let mut function_owner_by_origin = FxHashMap::default();
         let mut function_owner_by_private_identity = FxHashMap::default();
@@ -628,6 +631,7 @@ impl ProjectCompilation {
 
     fn module_at(&self, module_ref: CompiledModuleRef) -> &Module {
         boundary_module_at(&self.project, &self.source_packages, module_ref)
+            .expect("module refs were validated during construction")
     }
 
     /// Resolve every entry through this compilation's own module store.
@@ -707,39 +711,47 @@ fn ensure_success_only(boundary: &CompiledGraphBoundary) -> Result<(), CompilerE
 /// internal invariant rather than a user-facing failure.
 fn boundary_module_at<'a>(
     project: &'a CompiledGraphBoundary,
-    source_packages: &'a [CompiledSourcePackage],
+    source_packages: &'a CompletedSourcePackageRegistry,
     module_ref: CompiledModuleRef,
-) -> &'a Module {
+) -> Result<&'a Module, CompilerError> {
     match module_ref {
-        CompiledModuleRef::Project(module_id) => {
-            &project
-                .modules
-                .artifact(module_id)
-                .ok()
-                .flatten()
-                .expect("project entry module ref was validated during construction")
-                .module
-        }
+        CompiledModuleRef::Project(module_id) => Ok(&project
+            .modules
+            .artifact(module_id)?
+            .ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "Project module ref {} references a non-successful slot",
+                    module_id.index()
+                ))
+            })?
+            .module),
         CompiledModuleRef::SourcePackage {
-            package_index,
+            package_id,
             module_id,
-        } => {
-            &source_packages[package_index]
-                .boundary
-                .modules
-                .artifact(module_id)
-                .ok()
-                .flatten()
-                .expect("source-package module ref was validated during construction")
-                .module
-        }
+        } => Ok(&source_packages
+            .package(package_id)?
+            .boundary
+            .modules
+            .artifact(module_id)?
+            .ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "Source-package module ref {} references a non-successful slot",
+                    module_id.index()
+                ))
+            })?
+            .module),
         CompiledModuleRef::GeneratedProject(sidecar_index) => {
-            &project.generated.sidecars()[sidecar_index].module
+            Ok(&project.generated.sidecar_at(sidecar_index)?.module)
         }
         CompiledModuleRef::GeneratedSourcePackage {
-            package_index,
+            package_id,
             sidecar_index,
-        } => &source_packages[package_index].boundary.generated.sidecars()[sidecar_index].module,
+        } => Ok(&source_packages
+            .package(package_id)?
+            .boundary
+            .generated
+            .sidecar_at(sidecar_index)?
+            .module),
     }
 }
 

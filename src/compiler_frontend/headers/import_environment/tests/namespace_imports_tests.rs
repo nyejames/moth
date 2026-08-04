@@ -43,7 +43,7 @@ use crate::compiler_frontend::symbols::identity::{FileId, ImportShellId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 fn intern_path(components: &[&str], string_table: &mut StringTable) -> InternedPath {
     InternedPath::from_components(
@@ -95,6 +95,19 @@ fn assert_duplicate_import_surface_member(error: CompilerDiagnostic) {
         error.kind,
         DiagnosticKind::Import(ImportDiagnosticKind::DuplicateImportSurfaceMember)
     );
+}
+
+fn import_error_diagnostic(
+    error: crate::compiler_frontend::headers::import_environment::ImportEnvironmentError,
+) -> CompilerDiagnostic {
+    match error {
+        crate::compiler_frontend::headers::import_environment::ImportEnvironmentError::Diagnostic(
+            diagnostic,
+        ) => *diagnostic,
+        crate::compiler_frontend::headers::import_environment::ImportEnvironmentError::Internal(
+            error,
+        ) => panic!("expected import diagnostic, got internal error: {error:?}"),
+    }
 }
 
 #[test]
@@ -251,7 +264,7 @@ fn duplicate_external_namespace_value_and_type_slot_is_rejected() {
         )
         .expect_err("value/type slot collision should fail");
 
-    assert_duplicate_import_surface_member(*error);
+    assert_duplicate_import_surface_member(import_error_diagnostic(error));
 }
 
 #[test]
@@ -285,7 +298,7 @@ fn duplicate_external_namespace_and_value_slot_is_rejected() {
         )
         .expect_err("namespace/value slot collision should fail");
 
-    assert_duplicate_import_surface_member(*error);
+    assert_duplicate_import_surface_member(import_error_diagnostic(error));
 }
 
 #[test]
@@ -319,7 +332,7 @@ fn duplicate_external_namespace_and_type_slot_is_rejected() {
         )
         .expect_err("namespace/type slot collision should fail");
 
-    assert_duplicate_import_surface_member(*error);
+    assert_duplicate_import_surface_member(import_error_diagnostic(error));
 }
 
 #[test]
@@ -1284,4 +1297,97 @@ fn receiver_methods_reuse_summary_by_origin_storage() {
         1,
         "the repeated receiver contract must not duplicate the local function entry"
     );
+}
+
+#[test]
+fn differing_provider_declarations_with_one_origin_fail_as_compiler_error() {
+    let module_origin = StableModuleOriginIdentity::from_portable_path(
+        StablePackageIdentity::project_local("shared"),
+        "shared/@mod.moth".to_owned(),
+        ModuleRootRole::Normal,
+    );
+    let origin =
+        OriginDeclarationId::Constant(OriginConstantId::new(module_origin, "VALUE".to_owned()));
+    let first = PublicDeclarationRecord {
+        origin: origin.clone(),
+        semantics: PublicDeclarationSemantics::Constant(PublicConstantSemantics {
+            type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
+            folded_value: PublicFoldedValue::String("first".to_owned()),
+        }),
+    };
+    let mut second = first.clone();
+    let PublicDeclarationSemantics::Constant(second_constant) = &mut second.semantics else {
+        unreachable!("declaration semantics is constant");
+    };
+    second_constant.folded_value = PublicFoldedValue::String("second".to_owned());
+
+    let mut table = FxHashMap::default();
+    super::super::builder::insert_agreed(&mut table, origin.clone(), first, "declaration origin")
+        .expect("first publisher should insert");
+    let error =
+        super::super::builder::insert_agreed(&mut table, origin, second, "declaration origin")
+            .expect_err("second publisher must disagree");
+    assert!(error.msg.contains("declaration origin"));
+}
+
+#[test]
+fn differing_provider_summaries_with_one_origin_fail_as_compiler_error() {
+    let module_origin = StableModuleOriginIdentity::from_portable_path(
+        StablePackageIdentity::project_local("shared"),
+        "shared/@mod.moth".to_owned(),
+        ModuleRootRole::Normal,
+    );
+    let origin = OriginFunctionId::new_free(module_origin, "make".to_owned());
+    let first = PublicCallSummary {
+        parameters: Vec::new(),
+        return_alias: FunctionReturnAliasSummary::Fresh,
+    };
+    let second = PublicCallSummary {
+        parameters: Vec::new(),
+        return_alias: FunctionReturnAliasSummary::Unknown,
+    };
+
+    let mut table = FxHashMap::default();
+    super::super::builder::insert_agreed(&mut table, origin.clone(), first, "summary origin")
+        .expect("first publisher should insert");
+    let error = super::super::builder::insert_agreed(&mut table, origin, second, "summary origin")
+        .expect_err("second publisher must disagree");
+    assert!(error.msg.contains("summary origin"));
+}
+
+#[test]
+fn differing_evidence_records_with_one_identity_fail_as_compiler_error() {
+    let module_origin = StableModuleOriginIdentity::from_portable_path(
+        StablePackageIdentity::project_local("shared"),
+        "shared/@mod.moth".to_owned(),
+        ModuleRootRole::Normal,
+    );
+    let identity = CanonicalEvidenceIdentity::new(
+        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
+        CanonicalTraitIdentity::Core(CanonicalCoreTraitIdentity::Displayable),
+    );
+    let first = PublicEvidenceRecord {
+        identity: identity.clone(),
+        ownership: PublicEvidenceOwnership::SourceCanonical,
+        requirement_mappings: Vec::new(),
+    };
+    let mut second = first.clone();
+    second.requirement_mappings.push(
+        crate::compiler_frontend::public_interface::PublicEvidenceRequirementMapping {
+            requirement_identity:
+                crate::compiler_frontend::canonical_type_identity::StableTraitRequirementIdentity::new(
+                    CanonicalTraitIdentity::Core(CanonicalCoreTraitIdentity::Displayable),
+                    "show".to_owned(),
+                ),
+            method_origin: OriginFunctionId::new_free(module_origin, "show".to_owned()),
+        },
+    );
+
+    let mut table = FxHashMap::default();
+    super::super::builder::insert_agreed(&mut table, identity.clone(), first, "evidence identity")
+        .expect("first publisher should insert");
+    let error =
+        super::super::builder::insert_agreed(&mut table, identity, second, "evidence identity")
+            .expect_err("second publisher must disagree");
+    assert!(error.msg.contains("evidence identity"));
 }

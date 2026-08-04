@@ -129,6 +129,23 @@ impl InternedPath {
         }
     }
 
+    /// Remap every interned component through one fallible string-ID mapping.
+    ///
+    /// WHAT: the single canonical walker for `InternedPath` payloads, shared by normal string
+    ///       merges and frozen-token pool remapping.
+    /// WHY: path components are interned strings; one traversal owner prevents callers from
+    ///      walking some component classes while a future payload class silently bypasses it.
+    pub fn try_map_string_ids<E>(
+        &self,
+        map: &mut impl FnMut(StringId) -> Result<StringId, E>,
+    ) -> Result<Self, E> {
+        let mut components = Vec::with_capacity(self.components.len());
+        for component in &self.components {
+            components.push(map(*component)?);
+        }
+        Ok(Self { components })
+    }
+
     pub fn append(&self, new: StringId) -> Self {
         let mut new_components = Vec::with_capacity(self.components.len() + 1);
         new_components.extend_from_slice(&self.components);

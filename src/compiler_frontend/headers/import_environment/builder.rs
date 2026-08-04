@@ -8,7 +8,7 @@
 
 use crate::builder_surface::SourceFileKind;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
-use crate::compiler_frontend::compiler_errors::{CompilerError, compiler_error_to_diagnostic};
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, ImportPublicSurfaceType};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::external_packages::ExternalSymbolCategory;
@@ -25,26 +25,63 @@ use crate::compiler_frontend::source_packages::root_file::{
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{CharPosition, SourceLocation};
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
+use std::fmt::Debug;
 
 use super::{
     ExternalPackageSymbolLookup, ExternalPackageSymbolResolutionInput, FileVisibility,
-    HeaderImportEnvironment, ImportTargetResolutionInput, ModuleBoundaryCheckInput,
-    NamespaceRecord, NamespaceRecordSource, NamespaceTargetResolutionInput, NamespaceTypeMember,
-    NamespaceValueMember, PublicExportLookupResult, PublicExportResolutionInput,
-    ReceiverMethodVisibility, ResolvedImportTarget, SourceDeclarationTarget, SourceFunctionTarget,
-    SourceImportAccess, SourcePackageBoundaryCheckInput, VisibleNameBinding, VisibleNameRegistry,
+    HeaderImportEnvironment, ImportEnvironmentError, ImportTargetResolutionInput,
+    ModuleBoundaryCheckInput, NamespaceRecord, NamespaceRecordSource,
+    NamespaceTargetResolutionInput, NamespaceTypeMember, NamespaceValueMember,
+    PublicExportLookupResult, PublicExportResolutionInput, ReceiverMethodVisibility,
+    ResolvedImportTarget, SourceDeclarationTarget, SourceFunctionTarget, SourceImportAccess,
+    SourcePackageBoundaryCheckInput, VisibleNameBinding, VisibleNameRegistry,
     check_alias_case_warning, check_module_boundary, check_source_package_boundary,
     has_explicit_moth_extension, resolve_external_package_symbol, resolve_import_target,
     resolve_namespace_target, resolve_public_export_boundary,
 };
 
-/// Boxed diagnostic result for the import-environment builder family.
+/// Result for the import-environment builder family.
 ///
-/// WHAT: gives visibility construction and its local resolution helpers one small error boundary.
-/// WHY: import resolution passes structured diagnostics through several recursive helpers
-///      without carrying the large value inline at every return.
-type BuilderResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// WHAT: carries ordinary user-facing import diagnostics separately from internal
+///       successful-interface invariant failures.
+/// WHY: import resolution passes structured diagnostics through several recursive helpers, and
+///      provider agreement failures must reach the `CompilerError` lane without first degrading
+///      into a source diagnostic.
+type BuilderResult<T> = Result<T, ImportEnvironmentError>;
+
+/// Insert one imported provider fact only when every publisher of the same key agrees.
+///
+/// WHAT: declaration origins, evidence identities and concrete summary origins are stable
+///       semantic keys. A malformed successful artefact may publish one key from more than one
+///       provider; first-provider-wins would make the accepted facts depend on import order.
+/// WHY: this is an internal successful-interface invariant, so disagreement is a
+///      `CompilerError`, never a user-facing source diagnostic.
+pub(super) fn insert_agreed<K, V>(
+    table: &mut FxHashMap<K, V>,
+    key: K,
+    value: V,
+    fact_class: &str,
+) -> Result<(), CompilerError>
+where
+    K: std::hash::Hash + Eq + Debug,
+    V: Eq + Debug,
+{
+    match table.entry(key) {
+        std::collections::hash_map::Entry::Occupied(existing) => {
+            if existing.get() != &value {
+                return Err(CompilerError::compiler_error(format!(
+                    "provider {fact_class} {:?} disagrees across imported providers",
+                    existing.key()
+                )));
+            }
+        }
+        std::collections::hash_map::Entry::Vacant(slot) => {
+            slot.insert(value);
+        }
+    }
+    Ok(())
+}
 
 pub(crate) struct ImportEnvironmentBuilder<'a> {
     pub(super) module_symbols: &'a ModuleSymbols,
@@ -76,7 +113,8 @@ impl<'a> ImportEnvironmentBuilder<'a> {
                 Some(name) => Ok(name),
                 None => Err(Box::new(super::diagnostics::missing_import_target_no_path(
                     import.location.clone(),
-                ))),
+                ))
+                .into()),
             },
         }
     }
@@ -276,7 +314,8 @@ impl<'a> ImportEnvironmentBuilder<'a> {
                     return Err(Box::new(super::diagnostics::direct_special_file_import(
                         &import.provider.path,
                         import.location.clone(),
-                    )));
+                    ))
+                    .into());
                 }
 
                 if import.from_grouped {
@@ -385,45 +424,33 @@ impl<'a> ImportEnvironmentBuilder<'a> {
             return Ok(());
         }
 
-        let interface = self
-            .source_provider_imports
-            .interface(provider_id)
-            .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
+        let interface = self.source_provider_imports.interface(provider_id)?;
 
         for provider_declaration in &interface.declarations {
-            self.environment
-                .imported_declarations_by_origin
-                .entry(provider_declaration.origin.clone())
-                .or_insert_with(|| provider_declaration.clone());
+            insert_agreed(
+                &mut self.environment.imported_declarations_by_origin,
+                provider_declaration.origin.clone(),
+                provider_declaration.clone(),
+                "declaration origin",
+            )?;
         }
 
         for evidence in &interface.reusable_evidence {
-            match self
-                .environment
-                .imported_evidence_by_identity
-                .entry(evidence.identity.clone())
-            {
-                std::collections::hash_map::Entry::Occupied(existing) => {
-                    if existing.get() != evidence {
-                        return Err(Box::new(compiler_error_to_diagnostic(
-                            &CompilerError::compiler_error(format!(
-                                "provider evidence identity {:?} disagrees across imported providers",
-                                evidence.identity
-                            )),
-                        )));
-                    }
-                }
-                std::collections::hash_map::Entry::Vacant(slot) => {
-                    slot.insert(evidence.clone());
-                }
-            }
+            insert_agreed(
+                &mut self.environment.imported_evidence_by_identity,
+                evidence.identity.clone(),
+                evidence.clone(),
+                "evidence identity",
+            )?;
         }
 
         for summary in &interface.concrete_call_summaries {
-            self.environment
-                .imported_call_summaries_by_origin
-                .entry(summary.origin.clone())
-                .or_insert_with(|| summary.summary.clone());
+            insert_agreed(
+                &mut self.environment.imported_call_summaries_by_origin,
+                summary.origin.clone(),
+                summary.summary.clone(),
+                "concrete summary origin",
+            )?;
         }
 
         Ok(())
@@ -439,19 +466,14 @@ impl<'a> ImportEnvironmentBuilder<'a> {
         // Import the provider's closed semantics once and reuse the narrow binding view for
         // every shell that references this provider.
         self.import_provider_semantics_once(provider_id)?;
-        let view = self
-            .source_provider_imports
-            .binding_view(provider_id)
-            .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
-        let interface = self
-            .source_provider_imports
-            .interface(provider_id)
-            .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
+        let view = self.source_provider_imports.binding_view(provider_id)?;
+        let interface = self.source_provider_imports.interface(provider_id)?;
 
         let Some(public_name_id) = import.provider.path.name() else {
             return Err(Box::new(super::diagnostics::missing_import_target_no_path(
                 import.location.clone(),
-            )));
+            ))
+            .into());
         };
         let public_name = self.string_table.resolve(public_name_id);
         let Some(origin) = view.exported_origin(public_name).cloned() else {
@@ -462,13 +484,14 @@ impl<'a> ImportEnvironmentBuilder<'a> {
                 else {
                     return Err(Box::new(
                         self.provider_public_surface_diagnostic(import, interface),
-                    ));
+                    )
+                    .into());
                 };
                 return self.register_external_import(file_visibility, registry, import, symbol_id);
             }
-            return Err(Box::new(
-                self.provider_public_surface_diagnostic(import, interface),
-            ));
+            return Err(
+                Box::new(self.provider_public_surface_diagnostic(import, interface)).into(),
+            );
         };
         let declaration = view
             .declaration(&origin)
@@ -590,14 +613,8 @@ impl<'a> ImportEnvironmentBuilder<'a> {
         provider_id: ProviderInterfaceId,
     ) -> BuilderResult<()> {
         self.import_provider_semantics_once(provider_id)?;
-        let view = self
-            .source_provider_imports
-            .binding_view(provider_id)
-            .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
-        let interface = self
-            .source_provider_imports
-            .interface(provider_id)
-            .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
+        let view = self.source_provider_imports.binding_view(provider_id)?;
+        let interface = self.source_provider_imports.interface(provider_id)?;
 
         let mut record = NamespaceRecord::empty(NamespaceRecordSource::SourceFile(
             import.provider.path.clone(),
@@ -689,7 +706,8 @@ impl<'a> ImportEnvironmentBuilder<'a> {
                 return Err(Box::new(super::diagnostics::missing_import_target(
                     &import.provider.path,
                     import.location.clone(),
-                )));
+                ))
+                .into());
             };
             let name = self.string_table.intern(&binding.public_name);
             match binding.target.category {
@@ -858,14 +876,8 @@ impl<'a> ImportEnvironmentBuilder<'a> {
             .implicit_template_scope_providers()
         {
             self.import_provider_semantics_once(provider_id)?;
-            let view = self
-                .source_provider_imports
-                .binding_view(provider_id)
-                .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
-            let interface = self
-                .source_provider_imports
-                .interface(provider_id)
-                .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
+            let view = self.source_provider_imports.binding_view(provider_id)?;
+            let interface = self.source_provider_imports.interface(provider_id)?;
 
             // When a source-package root is prepared in the current module (test fixtures), the
             // header-built public-export map contains the entries. Production packages expose
@@ -1233,14 +1245,13 @@ impl<'a> ImportEnvironmentBuilder<'a> {
                             ImportPublicSurfaceType::ModuleRoot
                         }
                     };
-                    return Err(Box::new(
-                        super::diagnostics::not_exported_by_public_surface(
-                            &import.provider.path,
-                            public_surface_name_id,
-                            diagnostic_public_surface_type,
-                            import.location.clone(),
-                        ),
-                    ));
+                    return Err(Box::new(super::diagnostics::not_exported_by_public_surface(
+                        &import.provider.path,
+                        public_surface_name_id,
+                        diagnostic_public_surface_type,
+                        import.location.clone(),
+                    ))
+                    .into());
                 }
                 PublicExportLookupResult::NotAPublicExportBoundary => {
                     // Fall through to normal target resolution.
@@ -1293,16 +1304,16 @@ impl<'a> ImportEnvironmentBuilder<'a> {
                     access
                 };
 
-                self.register_source_import(
+                Ok(self.register_source_import(
                     file_visibility,
                     registry,
                     &symbol_path,
                     import,
                     effective_requirement,
-                )
+                )?)
             }
             ResolvedImportTarget::External { symbol_id } => {
-                self.register_external_import(file_visibility, registry, import, symbol_id)
+                Ok(self.register_external_import(file_visibility, registry, import, symbol_id)?)
             }
         }
     }
@@ -1340,7 +1351,8 @@ impl<'a> ImportEnvironmentBuilder<'a> {
                 symbol_name,
                 package_path,
                 import.location.clone(),
-            ))),
+            ))
+            .into()),
             ExternalPackageSymbolLookup::NoMatch => Ok(None),
         }
     }
@@ -1358,7 +1370,8 @@ impl<'a> ImportEnvironmentBuilder<'a> {
             return Err(Box::new(CompilerDiagnostic::explicit_moth_extension(
                 import.provider.path.clone(),
                 import.location.clone(),
-            )));
+            ))
+            .into());
         }
 
         if let Some(provider_id) = self
@@ -1422,12 +1435,14 @@ impl<'a> ImportEnvironmentBuilder<'a> {
         match target {
             ResolvedImportTarget::Source { symbol_path, .. } => Err(Box::new(
                 CompilerDiagnostic::direct_symbol_path_import(symbol_path, import.location.clone()),
-            )),
+            )
+            .into()),
             ResolvedImportTarget::External { .. } => {
                 Err(Box::new(CompilerDiagnostic::direct_symbol_path_import(
                     import.provider.path.clone(),
                     import.location.clone(),
-                )))
+                ))
+                .into())
             }
         }
     }

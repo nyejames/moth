@@ -76,9 +76,7 @@ use crate::compiler_frontend::semantic_identity::{
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{
-    FileTokens, PathTokenItem, SourceLocation, Token, TokenKind,
-};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::environment::{
     TraitEvidenceKind, TraitRequirementEvidence,
@@ -190,24 +188,21 @@ impl StableBodySyntax {
         }
     }
 
-    fn materialise(&self, string_table: &mut StringTable) -> FileTokens {
+    fn materialise(&self, string_table: &mut StringTable) -> Result<FileTokens, CompilerError> {
         let source_path = materialise_path(&self.source_path, string_table);
         let remap = self
             .pool
             .iter()
             .map(|text| string_table.intern(text))
             .collect::<Vec<_>>();
-        let tokens = self
-            .tokens
-            .iter()
-            .map(|token| {
-                Token::new(
-                    materialise_token_kind(&token.kind, &remap),
-                    materialise_source_location(&token.location, &remap),
-                )
-            })
-            .collect();
-        FileTokens::new(source_path, tokens)
+        let mut tokens = Vec::with_capacity(self.tokens.len());
+        for token in self.tokens.iter() {
+            tokens.push(Token::new(
+                materialise_token_kind(&token.kind, &remap)?,
+                materialise_source_location(&token.location, &remap),
+            ));
+        }
+        Ok(FileTokens::new(source_path, tokens))
     }
 }
 
@@ -220,53 +215,7 @@ fn freeze_token_kind(
     pool: &mut FrozenStringPool,
     string_table: &StringTable,
 ) -> TokenKind {
-    match kind {
-        TokenKind::Symbol(value) => TokenKind::Symbol(pool.index(string_table.resolve(*value))),
-        TokenKind::StyleDirective(value) => {
-            TokenKind::StyleDirective(pool.index(string_table.resolve(*value)))
-        }
-        TokenKind::StringSliceLiteral(value) => {
-            TokenKind::StringSliceLiteral(pool.index(string_table.resolve(*value)))
-        }
-        TokenKind::RawStringLiteral(value) => {
-            TokenKind::RawStringLiteral(pool.index(string_table.resolve(*value)))
-        }
-        TokenKind::CharLiteral(value) => TokenKind::CharLiteral(*value),
-        TokenKind::BoolLiteral(value) => TokenKind::BoolLiteral(*value),
-        TokenKind::NumericLiteral(value) => TokenKind::NumericLiteral(
-            crate::compiler_frontend::numeric_text::token::NumericLiteralToken::new(
-                value.sign,
-                pool.index(string_table.resolve(value.source_text)),
-                pool.index(string_table.resolve(value.normalized_text)),
-                value.kind,
-                value.digit_count,
-                value.fractional_digit_count,
-                value.exponent_digit_count,
-                value.exponent_sign,
-            ),
-        ),
-        TokenKind::Path(items) => TokenKind::Path(
-            items
-                .iter()
-                .map(|item| PathTokenItem {
-                    path: freeze_interned_path(&item.path, pool, string_table),
-                    alias: item
-                        .alias
-                        .map(|alias| pool.index(string_table.resolve(alias))),
-                    path_location: freeze_source_location(&item.path_location, pool, string_table),
-                    alias_location: item
-                        .alias_location
-                        .as_ref()
-                        .map(|location| freeze_source_location(location, pool, string_table)),
-                    from_grouped: item.from_grouped,
-                })
-                .collect(),
-        ),
-        // Unit variants carry no string payload. If a future payload-bearing variant is
-        // added, it must get an explicit arm here and in `materialise_token_kind`; the
-        // materialise remap guard then fails loudly instead of leaking a donor index.
-        plain => plain.clone(),
-    }
+    kind.map_string_ids(|id| pool.index(string_table.resolve(id)))
 }
 
 /// Freeze one source location by remapping its interned scope path into the frozen pool.
@@ -297,52 +246,18 @@ fn freeze_interned_path(
 }
 
 /// Materialise one frozen canonical token kind through the one pool remap.
-fn materialise_token_kind(kind: &TokenKind, remap: &[StringId]) -> TokenKind {
-    // Every frozen ID must resolve inside the pool; a payload-bearing variant that reaches
-    // this closure without a walker entry would leak a donor index instead of failing loudly.
-    let map = |id: StringId| {
-        debug_assert!(
-            (id.index() as usize) < remap.len(),
-            "frozen token payload references an out-of-range pool entry"
-        );
-        remap[id.index() as usize]
-    };
-    match kind {
-        TokenKind::Symbol(value) => TokenKind::Symbol(map(*value)),
-        TokenKind::StyleDirective(value) => TokenKind::StyleDirective(map(*value)),
-        TokenKind::StringSliceLiteral(value) => TokenKind::StringSliceLiteral(map(*value)),
-        TokenKind::RawStringLiteral(value) => TokenKind::RawStringLiteral(map(*value)),
-        TokenKind::CharLiteral(value) => TokenKind::CharLiteral(*value),
-        TokenKind::BoolLiteral(value) => TokenKind::BoolLiteral(*value),
-        TokenKind::NumericLiteral(value) => TokenKind::NumericLiteral(
-            crate::compiler_frontend::numeric_text::token::NumericLiteralToken::new(
-                value.sign,
-                map(value.source_text),
-                map(value.normalized_text),
-                value.kind,
-                value.digit_count,
-                value.fractional_digit_count,
-                value.exponent_digit_count,
-                value.exponent_sign,
-            ),
-        ),
-        TokenKind::Path(items) => TokenKind::Path(
-            items
-                .iter()
-                .map(|item| PathTokenItem {
-                    path: materialise_interned_path(&item.path, remap),
-                    alias: item.alias.map(map),
-                    path_location: materialise_source_location(&item.path_location, remap),
-                    alias_location: item
-                        .alias_location
-                        .as_ref()
-                        .map(|location| materialise_source_location(location, remap)),
-                    from_grouped: item.from_grouped,
-                })
-                .collect(),
-        ),
-        plain => plain.clone(),
-    }
+fn materialise_token_kind(
+    kind: &TokenKind,
+    remap: &[StringId],
+) -> Result<TokenKind, CompilerError> {
+    kind.try_map_string_ids(&mut |id| {
+        let index = id.index() as usize;
+        remap.get(index).copied().ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "frozen token payload references out-of-range pool entry {index}"
+            ))
+        })
+    })
 }
 
 /// Materialise one frozen source location through the one pool remap.
@@ -703,6 +618,45 @@ fn stable_body_symbol_names(tokens: &FileTokens, string_table: &StringTable) -> 
 }
 
 impl ModuleMaterialisationContext {
+    /// Build a test-only context with one artefact per identity and no real body payload.
+    ///
+    /// WHY: build-system tests need to exercise publication duplicate detection and exact row
+    ///      indexing without preparing a full generic module.
+    #[cfg(test)]
+    pub(crate) fn from_identities_for_test(identities: Vec<GeneratedDeclarationIdentity>) -> Self {
+        let artefacts = identities
+            .into_iter()
+            .map(|declaration_identity| GenericTemplateArtefact {
+                declaration_identity,
+                function_path: Box::new([]),
+                source_file: Box::new([]),
+                declaration_location: StableSourceLocation {
+                    scope: Box::new([]),
+                    start: crate::compiler_frontend::tokenizer::tokens::CharPosition::default(),
+                    end: crate::compiler_frontend::tokenizer::tokens::CharPosition::default(),
+                },
+                body: StableBodySyntax {
+                    source_path: Box::new([]),
+                    pool: Box::new([]),
+                    tokens: Box::new([]),
+                },
+                signature: StableFunctionSignature {
+                    parameters: Box::new([]),
+                    returns: Box::new([]),
+                },
+                generic_parameters: Box::new([]),
+                visibility: StableFileVisibility::default(),
+                declarations: Box::new([]),
+                declaration_closure: Box::new([]),
+                evidence: Box::new([]),
+                callables: Box::new([]),
+                nominals: Box::new([]),
+                nominal_blueprints: FxHashMap::default(),
+            })
+            .collect::<Box<[_]>>();
+        Self { artefacts }
+    }
+
     #[cfg(test)]
     pub(crate) fn contains_template(&self, identity: &GeneratedDeclarationIdentity) -> bool {
         self.artefacts
@@ -710,33 +664,35 @@ impl ModuleMaterialisationContext {
             .any(|artefact| &artefact.declaration_identity == identity)
     }
 
-    /// Iterate every generic declaration identity published by this context.
+    /// Iterate every published template with its exact dense row index.
     ///
-    /// WHAT: lets the boundary index contexts by declaration identity once at publication.
-    pub(crate) fn declaration_identities(
+    /// WHAT: lets the boundary publication index point at one exact template row instead of
+    ///       re-searching all artefacts at materialisation time.
+    /// WHY: generated materialisation is request-driven; a direct row index keeps lookup
+    ///      proportional to one identity and detects duplicates inside one context.
+    pub(crate) fn declaration_rows(
         &self,
-    ) -> impl Iterator<Item = &GeneratedDeclarationIdentity> {
+    ) -> impl Iterator<Item = (&GeneratedDeclarationIdentity, usize)> + '_ {
         self.artefacts
             .iter()
-            .map(|artefact| &artefact.declaration_identity)
+            .enumerate()
+            .map(|(index, artefact)| (&artefact.declaration_identity, index))
     }
 
-    pub(crate) fn materialise_ast(
+    /// Materialise the exact template row selected by the boundary publication index.
+    pub(crate) fn materialise_ast_at(
         &self,
+        template_index: usize,
         input: ModuleMaterialisationInput<'_>,
     ) -> Result<MaterialisedGenericAst, CompilerMessages> {
-        let artefact = self
-            .artefacts
-            .iter()
-            .find(|artefact| &artefact.declaration_identity == input.identity.declaration())
-            .ok_or_else(|| {
-                CompilerMessages::from_error_ref(
-                    CompilerError::compiler_error(
-                        "Generated request has no retained stable generic artefact",
-                    ),
-                    &input.requester_context.string_table,
-                )
-            })?;
+        let artefact = self.artefacts.get(template_index).ok_or_else(|| {
+            CompilerMessages::from_error_ref(
+                CompilerError::compiler_error(format!(
+                    "Published materialisation context has no template row {template_index}"
+                )),
+                &input.requester_context.string_table,
+            )
+        })?;
         artefact.materialise_ast(self, input)
     }
 }
@@ -1118,7 +1074,7 @@ impl GenericTemplateArtefact {
                 declaration_identity: Some(nested.declaration_identity.clone()),
                 generic_parameter_list_id: registration.list_id,
                 signature: signature.clone(),
-                body_tokens: Some(nested.body.materialise(string_table)),
+                body_tokens: Some(nested.body.materialise(string_table)?),
                 declaration_location: nested.declaration_location.materialise(string_table),
             };
             let lookups = Rc::make_mut(&mut environment.lookups);

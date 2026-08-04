@@ -5,7 +5,7 @@
 //!      `StringTable` only at rendering or filesystem-adjacent boundaries.
 
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
-use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use std::cmp::Ordering;
 use std::path::Path;
 
@@ -55,6 +55,18 @@ impl SourceLocation {
 
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.scope.remap_string_ids(remap);
+    }
+
+    /// Remap the interned scope through one fallible string-ID mapping.
+    pub fn try_map_string_ids<E>(
+        &self,
+        map: &mut impl FnMut(StringId) -> Result<StringId, E>,
+    ) -> Result<Self, E> {
+        Ok(Self {
+            scope: self.scope.try_map_string_ids(map)?,
+            start_pos: self.start_pos,
+            end_pos: self.end_pos,
+        })
     }
 }
 

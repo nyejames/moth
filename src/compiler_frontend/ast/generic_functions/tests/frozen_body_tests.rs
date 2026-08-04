@@ -155,7 +155,9 @@ fn every_token_payload_round_trips_through_the_frozen_buffer() {
 
     let frozen = StableBodySyntax::capture(&original, &source_table);
     let mut generated_table = StringTable::new();
-    let materialised = frozen.materialise(&mut generated_table);
+    let materialised = frozen
+        .materialise(&mut generated_table)
+        .expect("frozen body should materialise");
 
     let original_text = tokens
         .iter()
