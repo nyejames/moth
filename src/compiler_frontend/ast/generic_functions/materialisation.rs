@@ -120,22 +120,47 @@ pub(crate) struct ModuleMaterialisationInput<'a> {
     pub(crate) template_const_loop_iteration_limit: usize,
 }
 
-/// Owned token stream retained by one generic declaration artefact.
+/// Owned frozen token buffer retained by one generic declaration artefact.
 ///
-/// WHAT: preserves the already-tokenized body with owned strings and portable path components.
-/// WHY: successful metadata must not retain `StringId`, `InternedPath`, `FileId`, filesystem
-/// paths, or another handle into the declaring module's token arena. Materialisation interns this
-/// syntax into its fresh generated-local string table without running tokenization again.
+/// WHAT: preserves the already-tokenized body as canonical [`TokenKind`] values whose
+///       `StringId` payloads index one context-local immutable frozen string pool.
+/// WHY: successful metadata must not retain donor `StringId`, `InternedPath`, `FileId`,
+/// filesystem paths, or a mutable string table. Freezing remaps donor IDs into the pool once;
+/// materialisation merges the pool into the fresh generated-local table once and remaps every
+/// token payload through that single pool remap, without running tokenization again and without
+/// a second exhaustive token-kind vocabulary.
 #[derive(Clone)]
 struct StableBodySyntax {
     source_path: Box<[String]>,
-    tokens: Box<[StableToken]>,
+    pool: Box<[String]>,
+    tokens: Box<[Token]>,
 }
 
-#[derive(Clone)]
-struct StableToken {
-    kind: StableTokenKind,
-    location: StableSourceLocation,
+/// Incremental frozen string pool builder used while capturing one body syntax.
+///
+/// Repeated spellings, path components and literals share one pool entry.
+#[derive(Default)]
+struct FrozenStringPool {
+    entries: Vec<String>,
+    by_text: FxHashMap<String, u32>,
+}
+
+impl FrozenStringPool {
+    fn index(&mut self, text: &str) -> StringId {
+        if let Some(index) = self.by_text.get(text) {
+            return StringId::from_index(*index);
+        }
+
+        let index = self.entries.len() as u32;
+        let owned = text.to_owned();
+        self.entries.push(owned.clone());
+        self.by_text.insert(owned, index);
+        StringId::from_index(index)
+    }
+
+    fn finish(self) -> Box<[String]> {
+        self.entries.into_boxed_slice()
+    }
 }
 
 #[derive(Clone)]
@@ -145,161 +170,198 @@ struct StableSourceLocation {
     end: crate::compiler_frontend::tokenizer::tokens::CharPosition,
 }
 
-#[derive(Clone)]
-struct StablePathTokenItem {
-    path: Box<[String]>,
-    alias: Option<String>,
-    path_location: StableSourceLocation,
-    alias_location: Option<StableSourceLocation>,
-    from_grouped: bool,
-}
-
-#[derive(Clone)]
-enum StableTokenKind {
-    Plain(StablePlainTokenKind),
-    Symbol(String),
-    StyleDirective(String),
-    StringSliceLiteral(String),
-    Path(Box<[StablePathTokenItem]>),
-    NumericLiteral(StableNumericLiteral),
-    CharLiteral(char),
-    RawStringLiteral(String),
-    BoolLiteral(bool),
-}
-
-#[derive(Clone)]
-struct StableNumericLiteral {
-    sign: crate::compiler_frontend::numeric_text::token::NumericLiteralSign,
-    source_text: String,
-    normalized_text: String,
-    kind: crate::compiler_frontend::numeric_text::token::NumericLiteralKind,
-    digit_count: u32,
-    fractional_digit_count: u32,
-    exponent_digit_count: u32,
-    exponent_sign: crate::compiler_frontend::numeric_text::token::NumericExponentSign,
-}
-
-#[derive(Clone, Copy)]
-enum StablePlainTokenKind {
-    ModuleStart,
-    Eof,
-    Import,
-    Export,
-    Hash,
-    Reactive,
-    Arrow,
-    OpenCurly,
-    CloseCurly,
-    TypeParameterBracket,
-    Newline,
-    End,
-    StartTemplateBody,
-    Comma,
-    Dot,
-    Colon,
-    DoubleColon,
-    Assign,
-    This,
-    Must,
-    TraitThis,
-    OpenParenthesis,
-    CloseParenthesis,
-    As,
-    Type,
-    Of,
-    Variadic,
-    Mutable,
-    DatatypeNone,
-    NoneLiteral,
-    DatatypeInt,
-    DatatypeFloat,
-    DatatypeBool,
-    DatatypeTrue,
-    DatatypeFalse,
-    DatatypeString,
-    DatatypeChar,
-    Bang,
-    QuestionMark,
-    Negative,
-    Exponent,
-    Multiply,
-    Divide,
-    Modulus,
-    IntDivide,
-    ExponentAssign,
-    MultiplyAssign,
-    DivideAssign,
-    ModulusAssign,
-    IntDivideAssign,
-    Add,
-    Subtract,
-    AddAssign,
-    SubtractAssign,
-    Not,
-    Is,
-    LessThan,
-    LessThanOrEqual,
-    GreaterThan,
-    GreaterThanOrEqual,
-    And,
-    Or,
-    If,
-    Else,
-    Return,
-    ReturnBang,
-    Catch,
-    Then,
-    Block,
-    Checked,
-    Async,
-    Cast,
-    CastBang,
-    Assert,
-    Loop,
-    By,
-    Break,
-    Continue,
-    ExclusiveRange,
-    Ampersand,
-    FatArrow,
-    Wildcard,
-    Copy,
-    TemplateClose,
-    TemplateHead,
-    ChannelSend,
-    ChannelReceive,
-    Yield,
-}
-
 impl StableBodySyntax {
     fn capture(tokens: &FileTokens, string_table: &StringTable) -> Self {
+        let mut pool = FrozenStringPool::default();
+        let frozen_tokens = tokens
+            .tokens
+            .iter()
+            .map(|token| {
+                let mut frozen = token.clone();
+                frozen.kind = freeze_token_kind(&token.kind, &mut pool, string_table);
+                frozen.location = freeze_source_location(&token.location, &mut pool, string_table);
+                frozen
+            })
+            .collect::<Vec<_>>();
         Self {
             source_path: stable_path(&tokens.src_path, string_table),
-            tokens: tokens
-                .tokens
-                .iter()
-                .map(|token| StableToken {
-                    kind: StableTokenKind::capture(&token.kind, string_table),
-                    location: StableSourceLocation::capture(&token.location, string_table),
-                })
-                .collect(),
+            pool: pool.finish(),
+            tokens: frozen_tokens.into_boxed_slice(),
         }
     }
 
     fn materialise(&self, string_table: &mut StringTable) -> FileTokens {
         let source_path = materialise_path(&self.source_path, string_table);
+        let remap = self
+            .pool
+            .iter()
+            .map(|text| string_table.intern(text))
+            .collect::<Vec<_>>();
         let tokens = self
             .tokens
             .iter()
             .map(|token| {
                 Token::new(
-                    token.kind.materialise(string_table),
-                    token.location.materialise(string_table),
+                    materialise_token_kind(&token.kind, &remap),
+                    materialise_source_location(&token.location, &remap),
                 )
             })
             .collect();
         FileTokens::new(source_path, tokens)
     }
+}
+
+/// Freeze one canonical token kind by remapping every donor string ID into the frozen pool.
+///
+/// The canonical [`TokenKind`] vocabulary is retained as-is; only the string payload space
+/// changes, so adding a tokenizer variant never requires a parallel token-kind enum.
+fn freeze_token_kind(
+    kind: &TokenKind,
+    pool: &mut FrozenStringPool,
+    string_table: &StringTable,
+) -> TokenKind {
+    match kind {
+        TokenKind::Symbol(value) => TokenKind::Symbol(pool.index(string_table.resolve(*value))),
+        TokenKind::StyleDirective(value) => {
+            TokenKind::StyleDirective(pool.index(string_table.resolve(*value)))
+        }
+        TokenKind::StringSliceLiteral(value) => {
+            TokenKind::StringSliceLiteral(pool.index(string_table.resolve(*value)))
+        }
+        TokenKind::RawStringLiteral(value) => {
+            TokenKind::RawStringLiteral(pool.index(string_table.resolve(*value)))
+        }
+        TokenKind::CharLiteral(value) => TokenKind::CharLiteral(*value),
+        TokenKind::BoolLiteral(value) => TokenKind::BoolLiteral(*value),
+        TokenKind::NumericLiteral(value) => TokenKind::NumericLiteral(
+            crate::compiler_frontend::numeric_text::token::NumericLiteralToken::new(
+                value.sign,
+                pool.index(string_table.resolve(value.source_text)),
+                pool.index(string_table.resolve(value.normalized_text)),
+                value.kind,
+                value.digit_count,
+                value.fractional_digit_count,
+                value.exponent_digit_count,
+                value.exponent_sign,
+            ),
+        ),
+        TokenKind::Path(items) => TokenKind::Path(
+            items
+                .iter()
+                .map(|item| PathTokenItem {
+                    path: freeze_interned_path(&item.path, pool, string_table),
+                    alias: item
+                        .alias
+                        .map(|alias| pool.index(string_table.resolve(alias))),
+                    path_location: freeze_source_location(&item.path_location, pool, string_table),
+                    alias_location: item
+                        .alias_location
+                        .as_ref()
+                        .map(|location| freeze_source_location(location, pool, string_table)),
+                    from_grouped: item.from_grouped,
+                })
+                .collect(),
+        ),
+        // Unit variants carry no string payload. If a future payload-bearing variant is
+        // added, it must get an explicit arm here and in `materialise_token_kind`; the
+        // materialise remap guard then fails loudly instead of leaking a donor index.
+        plain => plain.clone(),
+    }
+}
+
+/// Freeze one source location by remapping its interned scope path into the frozen pool.
+fn freeze_source_location(
+    location: &SourceLocation,
+    pool: &mut FrozenStringPool,
+    string_table: &StringTable,
+) -> SourceLocation {
+    SourceLocation::new(
+        freeze_interned_path(&location.scope, pool, string_table),
+        location.start_pos,
+        location.end_pos,
+    )
+}
+
+/// Freeze one interned path by remapping every component into the frozen pool.
+fn freeze_interned_path(
+    path: &InternedPath,
+    pool: &mut FrozenStringPool,
+    string_table: &StringTable,
+) -> InternedPath {
+    InternedPath::from_components(
+        path.as_components()
+            .iter()
+            .map(|component| pool.index(string_table.resolve(*component)))
+            .collect(),
+    )
+}
+
+/// Materialise one frozen canonical token kind through the one pool remap.
+fn materialise_token_kind(kind: &TokenKind, remap: &[StringId]) -> TokenKind {
+    // Every frozen ID must resolve inside the pool; a payload-bearing variant that reaches
+    // this closure without a walker entry would leak a donor index instead of failing loudly.
+    let map = |id: StringId| {
+        debug_assert!(
+            (id.index() as usize) < remap.len(),
+            "frozen token payload references an out-of-range pool entry"
+        );
+        remap[id.index() as usize]
+    };
+    match kind {
+        TokenKind::Symbol(value) => TokenKind::Symbol(map(*value)),
+        TokenKind::StyleDirective(value) => TokenKind::StyleDirective(map(*value)),
+        TokenKind::StringSliceLiteral(value) => TokenKind::StringSliceLiteral(map(*value)),
+        TokenKind::RawStringLiteral(value) => TokenKind::RawStringLiteral(map(*value)),
+        TokenKind::CharLiteral(value) => TokenKind::CharLiteral(*value),
+        TokenKind::BoolLiteral(value) => TokenKind::BoolLiteral(*value),
+        TokenKind::NumericLiteral(value) => TokenKind::NumericLiteral(
+            crate::compiler_frontend::numeric_text::token::NumericLiteralToken::new(
+                value.sign,
+                map(value.source_text),
+                map(value.normalized_text),
+                value.kind,
+                value.digit_count,
+                value.fractional_digit_count,
+                value.exponent_digit_count,
+                value.exponent_sign,
+            ),
+        ),
+        TokenKind::Path(items) => TokenKind::Path(
+            items
+                .iter()
+                .map(|item| PathTokenItem {
+                    path: materialise_interned_path(&item.path, remap),
+                    alias: item.alias.map(map),
+                    path_location: materialise_source_location(&item.path_location, remap),
+                    alias_location: item
+                        .alias_location
+                        .as_ref()
+                        .map(|location| materialise_source_location(location, remap)),
+                    from_grouped: item.from_grouped,
+                })
+                .collect(),
+        ),
+        plain => plain.clone(),
+    }
+}
+
+/// Materialise one frozen source location through the one pool remap.
+fn materialise_source_location(location: &SourceLocation, remap: &[StringId]) -> SourceLocation {
+    SourceLocation::new(
+        materialise_interned_path(&location.scope, remap),
+        location.start_pos,
+        location.end_pos,
+    )
+}
+
+/// Materialise one frozen interned path through the one pool remap.
+fn materialise_interned_path(path: &InternedPath, remap: &[StringId]) -> InternedPath {
+    InternedPath::from_components(
+        path.as_components()
+            .iter()
+            .map(|component| remap[component.index() as usize])
+            .collect(),
+    )
 }
 
 impl StableSourceLocation {
@@ -317,300 +379,6 @@ impl StableSourceLocation {
             self.start,
             self.end,
         )
-    }
-}
-
-impl StableTokenKind {
-    fn capture(kind: &TokenKind, string_table: &StringTable) -> Self {
-        match kind {
-            TokenKind::Symbol(value) => Self::Symbol(string_table.resolve(*value).to_owned()),
-            TokenKind::StyleDirective(value) => {
-                Self::StyleDirective(string_table.resolve(*value).to_owned())
-            }
-            TokenKind::StringSliceLiteral(value) => {
-                Self::StringSliceLiteral(string_table.resolve(*value).to_owned())
-            }
-            TokenKind::RawStringLiteral(value) => {
-                Self::RawStringLiteral(string_table.resolve(*value).to_owned())
-            }
-            TokenKind::CharLiteral(value) => Self::CharLiteral(*value),
-            TokenKind::BoolLiteral(value) => Self::BoolLiteral(*value),
-            TokenKind::NumericLiteral(value) => Self::NumericLiteral(StableNumericLiteral {
-                sign: value.sign,
-                source_text: string_table.resolve(value.source_text).to_owned(),
-                normalized_text: string_table.resolve(value.normalized_text).to_owned(),
-                kind: value.kind,
-                digit_count: value.digit_count,
-                fractional_digit_count: value.fractional_digit_count,
-                exponent_digit_count: value.exponent_digit_count,
-                exponent_sign: value.exponent_sign,
-            }),
-            TokenKind::Path(items) => Self::Path(
-                items
-                    .iter()
-                    .map(|item| StablePathTokenItem {
-                        path: stable_path(&item.path, string_table),
-                        alias: item
-                            .alias
-                            .map(|alias| string_table.resolve(alias).to_owned()),
-                        path_location: StableSourceLocation::capture(
-                            &item.path_location,
-                            string_table,
-                        ),
-                        alias_location: item
-                            .alias_location
-                            .as_ref()
-                            .map(|location| StableSourceLocation::capture(location, string_table)),
-                        from_grouped: item.from_grouped,
-                    })
-                    .collect(),
-            ),
-            plain => Self::Plain(StablePlainTokenKind::capture(plain)),
-        }
-    }
-
-    fn materialise(&self, string_table: &mut StringTable) -> TokenKind {
-        match self {
-            Self::Symbol(value) => TokenKind::Symbol(string_table.intern(value)),
-            Self::StyleDirective(value) => TokenKind::StyleDirective(string_table.intern(value)),
-            Self::StringSliceLiteral(value) => {
-                TokenKind::StringSliceLiteral(string_table.intern(value))
-            }
-            Self::RawStringLiteral(value) => {
-                TokenKind::RawStringLiteral(string_table.intern(value))
-            }
-            Self::CharLiteral(value) => TokenKind::CharLiteral(*value),
-            Self::BoolLiteral(value) => TokenKind::BoolLiteral(*value),
-            Self::NumericLiteral(value) => TokenKind::NumericLiteral(
-                crate::compiler_frontend::numeric_text::token::NumericLiteralToken::new(
-                    value.sign,
-                    string_table.intern(&value.source_text),
-                    string_table.intern(&value.normalized_text),
-                    value.kind,
-                    value.digit_count,
-                    value.fractional_digit_count,
-                    value.exponent_digit_count,
-                    value.exponent_sign,
-                ),
-            ),
-            Self::Path(items) => TokenKind::Path(
-                items
-                    .iter()
-                    .map(|item| PathTokenItem {
-                        path: materialise_path(&item.path, string_table),
-                        alias: item
-                            .alias
-                            .as_deref()
-                            .map(|alias| string_table.intern(alias)),
-                        path_location: item.path_location.materialise(string_table),
-                        alias_location: item
-                            .alias_location
-                            .as_ref()
-                            .map(|location| location.materialise(string_table)),
-                        from_grouped: item.from_grouped,
-                    })
-                    .collect(),
-            ),
-            Self::Plain(kind) => kind.materialise(),
-        }
-    }
-}
-
-impl StablePlainTokenKind {
-    fn capture(kind: &TokenKind) -> Self {
-        match kind {
-            TokenKind::ModuleStart => Self::ModuleStart,
-            TokenKind::Eof => Self::Eof,
-            TokenKind::Import => Self::Import,
-            TokenKind::Export => Self::Export,
-            TokenKind::Hash => Self::Hash,
-            TokenKind::Reactive => Self::Reactive,
-            TokenKind::Arrow => Self::Arrow,
-            TokenKind::OpenCurly => Self::OpenCurly,
-            TokenKind::CloseCurly => Self::CloseCurly,
-            TokenKind::TypeParameterBracket => Self::TypeParameterBracket,
-            TokenKind::Newline => Self::Newline,
-            TokenKind::End => Self::End,
-            TokenKind::StartTemplateBody => Self::StartTemplateBody,
-            TokenKind::Comma => Self::Comma,
-            TokenKind::Dot => Self::Dot,
-            TokenKind::Colon => Self::Colon,
-            TokenKind::DoubleColon => Self::DoubleColon,
-            TokenKind::Assign => Self::Assign,
-            TokenKind::This => Self::This,
-            TokenKind::Must => Self::Must,
-            TokenKind::TraitThis => Self::TraitThis,
-            TokenKind::OpenParenthesis => Self::OpenParenthesis,
-            TokenKind::CloseParenthesis => Self::CloseParenthesis,
-            TokenKind::As => Self::As,
-            TokenKind::Type => Self::Type,
-            TokenKind::Of => Self::Of,
-            TokenKind::Variadic => Self::Variadic,
-            TokenKind::Mutable => Self::Mutable,
-            TokenKind::DatatypeNone => Self::DatatypeNone,
-            TokenKind::NoneLiteral => Self::NoneLiteral,
-            TokenKind::DatatypeInt => Self::DatatypeInt,
-            TokenKind::DatatypeFloat => Self::DatatypeFloat,
-            TokenKind::DatatypeBool => Self::DatatypeBool,
-            TokenKind::DatatypeTrue => Self::DatatypeTrue,
-            TokenKind::DatatypeFalse => Self::DatatypeFalse,
-            TokenKind::DatatypeString => Self::DatatypeString,
-            TokenKind::DatatypeChar => Self::DatatypeChar,
-            TokenKind::Bang => Self::Bang,
-            TokenKind::QuestionMark => Self::QuestionMark,
-            TokenKind::Negative => Self::Negative,
-            TokenKind::Exponent => Self::Exponent,
-            TokenKind::Multiply => Self::Multiply,
-            TokenKind::Divide => Self::Divide,
-            TokenKind::Modulus => Self::Modulus,
-            TokenKind::IntDivide => Self::IntDivide,
-            TokenKind::ExponentAssign => Self::ExponentAssign,
-            TokenKind::MultiplyAssign => Self::MultiplyAssign,
-            TokenKind::DivideAssign => Self::DivideAssign,
-            TokenKind::ModulusAssign => Self::ModulusAssign,
-            TokenKind::IntDivideAssign => Self::IntDivideAssign,
-            TokenKind::Add => Self::Add,
-            TokenKind::Subtract => Self::Subtract,
-            TokenKind::AddAssign => Self::AddAssign,
-            TokenKind::SubtractAssign => Self::SubtractAssign,
-            TokenKind::Not => Self::Not,
-            TokenKind::Is => Self::Is,
-            TokenKind::LessThan => Self::LessThan,
-            TokenKind::LessThanOrEqual => Self::LessThanOrEqual,
-            TokenKind::GreaterThan => Self::GreaterThan,
-            TokenKind::GreaterThanOrEqual => Self::GreaterThanOrEqual,
-            TokenKind::And => Self::And,
-            TokenKind::Or => Self::Or,
-            TokenKind::If => Self::If,
-            TokenKind::Else => Self::Else,
-            TokenKind::Return => Self::Return,
-            TokenKind::ReturnBang => Self::ReturnBang,
-            TokenKind::Catch => Self::Catch,
-            TokenKind::Then => Self::Then,
-            TokenKind::Block => Self::Block,
-            TokenKind::Checked => Self::Checked,
-            TokenKind::Async => Self::Async,
-            TokenKind::Cast => Self::Cast,
-            TokenKind::CastBang => Self::CastBang,
-            TokenKind::Assert => Self::Assert,
-            TokenKind::Loop => Self::Loop,
-            TokenKind::By => Self::By,
-            TokenKind::Break => Self::Break,
-            TokenKind::Continue => Self::Continue,
-            TokenKind::ExclusiveRange => Self::ExclusiveRange,
-            TokenKind::Ampersand => Self::Ampersand,
-            TokenKind::FatArrow => Self::FatArrow,
-            TokenKind::Wildcard => Self::Wildcard,
-            TokenKind::Copy => Self::Copy,
-            TokenKind::TemplateClose => Self::TemplateClose,
-            TokenKind::TemplateHead => Self::TemplateHead,
-            TokenKind::ChannelSend => Self::ChannelSend,
-            TokenKind::ChannelReceive => Self::ChannelReceive,
-            TokenKind::Yield => Self::Yield,
-            TokenKind::Symbol(_)
-            | TokenKind::StyleDirective(_)
-            | TokenKind::StringSliceLiteral(_)
-            | TokenKind::Path(_)
-            | TokenKind::NumericLiteral(_)
-            | TokenKind::CharLiteral(_)
-            | TokenKind::RawStringLiteral(_)
-            | TokenKind::BoolLiteral(_) => {
-                unreachable!("payload token handled before plain capture")
-            }
-        }
-    }
-
-    fn materialise(self) -> TokenKind {
-        match self {
-            Self::ModuleStart => TokenKind::ModuleStart,
-            Self::Eof => TokenKind::Eof,
-            Self::Import => TokenKind::Import,
-            Self::Export => TokenKind::Export,
-            Self::Hash => TokenKind::Hash,
-            Self::Reactive => TokenKind::Reactive,
-            Self::Arrow => TokenKind::Arrow,
-            Self::OpenCurly => TokenKind::OpenCurly,
-            Self::CloseCurly => TokenKind::CloseCurly,
-            Self::TypeParameterBracket => TokenKind::TypeParameterBracket,
-            Self::Newline => TokenKind::Newline,
-            Self::End => TokenKind::End,
-            Self::StartTemplateBody => TokenKind::StartTemplateBody,
-            Self::Comma => TokenKind::Comma,
-            Self::Dot => TokenKind::Dot,
-            Self::Colon => TokenKind::Colon,
-            Self::DoubleColon => TokenKind::DoubleColon,
-            Self::Assign => TokenKind::Assign,
-            Self::This => TokenKind::This,
-            Self::Must => TokenKind::Must,
-            Self::TraitThis => TokenKind::TraitThis,
-            Self::OpenParenthesis => TokenKind::OpenParenthesis,
-            Self::CloseParenthesis => TokenKind::CloseParenthesis,
-            Self::As => TokenKind::As,
-            Self::Type => TokenKind::Type,
-            Self::Of => TokenKind::Of,
-            Self::Variadic => TokenKind::Variadic,
-            Self::Mutable => TokenKind::Mutable,
-            Self::DatatypeNone => TokenKind::DatatypeNone,
-            Self::NoneLiteral => TokenKind::NoneLiteral,
-            Self::DatatypeInt => TokenKind::DatatypeInt,
-            Self::DatatypeFloat => TokenKind::DatatypeFloat,
-            Self::DatatypeBool => TokenKind::DatatypeBool,
-            Self::DatatypeTrue => TokenKind::DatatypeTrue,
-            Self::DatatypeFalse => TokenKind::DatatypeFalse,
-            Self::DatatypeString => TokenKind::DatatypeString,
-            Self::DatatypeChar => TokenKind::DatatypeChar,
-            Self::Bang => TokenKind::Bang,
-            Self::QuestionMark => TokenKind::QuestionMark,
-            Self::Negative => TokenKind::Negative,
-            Self::Exponent => TokenKind::Exponent,
-            Self::Multiply => TokenKind::Multiply,
-            Self::Divide => TokenKind::Divide,
-            Self::Modulus => TokenKind::Modulus,
-            Self::IntDivide => TokenKind::IntDivide,
-            Self::ExponentAssign => TokenKind::ExponentAssign,
-            Self::MultiplyAssign => TokenKind::MultiplyAssign,
-            Self::DivideAssign => TokenKind::DivideAssign,
-            Self::ModulusAssign => TokenKind::ModulusAssign,
-            Self::IntDivideAssign => TokenKind::IntDivideAssign,
-            Self::Add => TokenKind::Add,
-            Self::Subtract => TokenKind::Subtract,
-            Self::AddAssign => TokenKind::AddAssign,
-            Self::SubtractAssign => TokenKind::SubtractAssign,
-            Self::Not => TokenKind::Not,
-            Self::Is => TokenKind::Is,
-            Self::LessThan => TokenKind::LessThan,
-            Self::LessThanOrEqual => TokenKind::LessThanOrEqual,
-            Self::GreaterThan => TokenKind::GreaterThan,
-            Self::GreaterThanOrEqual => TokenKind::GreaterThanOrEqual,
-            Self::And => TokenKind::And,
-            Self::Or => TokenKind::Or,
-            Self::If => TokenKind::If,
-            Self::Else => TokenKind::Else,
-            Self::Return => TokenKind::Return,
-            Self::ReturnBang => TokenKind::ReturnBang,
-            Self::Catch => TokenKind::Catch,
-            Self::Then => TokenKind::Then,
-            Self::Block => TokenKind::Block,
-            Self::Checked => TokenKind::Checked,
-            Self::Async => TokenKind::Async,
-            Self::Cast => TokenKind::Cast,
-            Self::CastBang => TokenKind::CastBang,
-            Self::Assert => TokenKind::Assert,
-            Self::Loop => TokenKind::Loop,
-            Self::By => TokenKind::By,
-            Self::Break => TokenKind::Break,
-            Self::Continue => TokenKind::Continue,
-            Self::ExclusiveRange => TokenKind::ExclusiveRange,
-            Self::Ampersand => TokenKind::Ampersand,
-            Self::FatArrow => TokenKind::FatArrow,
-            Self::Wildcard => TokenKind::Wildcard,
-            Self::Copy => TokenKind::Copy,
-            Self::TemplateClose => TokenKind::TemplateClose,
-            Self::TemplateHead => TokenKind::TemplateHead,
-            Self::ChannelSend => TokenKind::ChannelSend,
-            Self::ChannelReceive => TokenKind::ChannelReceive,
-            Self::Yield => TokenKind::Yield,
-        }
     }
 }
 
@@ -935,10 +703,22 @@ fn stable_body_symbol_names(tokens: &FileTokens, string_table: &StringTable) -> 
 }
 
 impl ModuleMaterialisationContext {
+    #[cfg(test)]
     pub(crate) fn contains_template(&self, identity: &GeneratedDeclarationIdentity) -> bool {
         self.artefacts
             .iter()
             .any(|artefact| &artefact.declaration_identity == identity)
+    }
+
+    /// Iterate every generic declaration identity published by this context.
+    ///
+    /// WHAT: lets the boundary index contexts by declaration identity once at publication.
+    pub(crate) fn declaration_identities(
+        &self,
+    ) -> impl Iterator<Item = &GeneratedDeclarationIdentity> {
+        self.artefacts
+            .iter()
+            .map(|artefact| &artefact.declaration_identity)
     }
 
     pub(crate) fn materialise_ast(
@@ -3964,3 +3744,7 @@ fn requester_type_id_for_canonical_identity(
         )),
     }
 }
+
+#[cfg(test)]
+#[path = "tests/frozen_body_tests.rs"]
+mod frozen_body_tests;

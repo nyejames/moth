@@ -17,6 +17,21 @@ use std::sync::Arc;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct StringId(u32);
 
+impl StringId {
+    /// Build an ID from a numeric index.
+    ///
+    /// WHAT: used only by owners that manage their own string space, such as the frozen token
+    ///       buffer whose pooled strings are indexed contiguously.
+    pub(crate) fn from_index(index: u32) -> Self {
+        Self(index)
+    }
+
+    /// The numeric index of this ID in its owning string space.
+    pub(crate) fn index(self) -> u32 {
+        self.0
+    }
+}
+
 /// Display implementation that shows the underlying ID value.
 impl std::fmt::Display for StringId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

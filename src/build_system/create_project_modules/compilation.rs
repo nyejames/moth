@@ -714,7 +714,7 @@ impl<'a> DirectoryModuleCompileContext<'a> {
     fn compile(
         &self,
         job: module_inventory::ModuleCompilationJob,
-        generated_worklist: super::generated_worklist::GeneratedFunctionWorklist,
+        generated_worklist: super::generated_worklist::GeneratedFunctionWorklist<'_>,
     ) -> DirectoryModuleTaskResult {
         let module_inventory::ModuleCompilationJob {
             module_id,
@@ -750,27 +750,22 @@ impl<'a> DirectoryModuleCompileContext<'a> {
                 };
             }
         };
-        let compile_context =
-            FrontendModuleBuildContext {
-                config: self.config,
-                build_profile: self.build_profile,
-                project_path_resolver: Some(self.project_path_resolver.clone()),
-                style_directives: self.style_directives,
-                external_packages: Arc::clone(self.external_packages),
-                external_import_resolution_table: &self
-                    .builder_surface
-                    .external_import_resolution_table,
-                source_provider_imports: &source_provider_imports,
-                source_provider_materialisations: &SourceProviderMaterialisationSet::new(
-                    self.provider_store
-                        .materialisation_contexts()
-                        .chain(self.completed_packages.iter().flat_map(|package| {
-                            package.boundary.modules.materialisation_contexts()
-                        }))
-                        .collect(),
-                ),
-                builder_runtime_packages: &self.builder_surface.builder_runtime_packages,
-            };
+        let compile_context = FrontendModuleBuildContext {
+            config: self.config,
+            build_profile: self.build_profile,
+            project_path_resolver: Some(self.project_path_resolver.clone()),
+            style_directives: self.style_directives,
+            external_packages: Arc::clone(self.external_packages),
+            external_import_resolution_table: &self
+                .builder_surface
+                .external_import_resolution_table,
+            source_provider_imports: &source_provider_imports,
+            source_provider_materialisations: &SourceProviderMaterialisationSet::new(
+                self.provider_store,
+                self.completed_packages,
+            ),
+            builder_runtime_packages: &self.builder_surface.builder_runtime_packages,
+        };
 
         // The typed semantic boundary already classified user diagnostics from infrastructure
         // failures, so the task outcome carries the retained `ModuleDiagnostics` unchanged.

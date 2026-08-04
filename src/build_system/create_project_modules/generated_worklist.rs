@@ -14,6 +14,7 @@ use crate::compiler_frontend::semantic_identity::{
     GeneratedFunctionIdentity, StableModuleOriginIdentity,
 };
 use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
+use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 use rustc_hash::FxHashMap;
 
@@ -41,9 +42,19 @@ enum GeneratedRequestState {
 
 struct GeneratedRequestRecord {
     identity: GeneratedFunctionIdentity,
+    display_name: String,
+    diagnostic_location: SourceLocation,
     requesters: Vec<GeneratedRequester>,
     dependencies: Vec<GeneratedRequestId>,
     state: GeneratedRequestState,
+}
+
+/// One generated request as authored by AST, carrying the facts diagnostics need.
+#[derive(Clone, Debug)]
+pub(super) struct GeneratedRequestFacts {
+    pub(super) identity: GeneratedFunctionIdentity,
+    pub(super) display_name: String,
+    pub(super) diagnostic_location: SourceLocation,
 }
 
 /// Result of attempting to enter one request during depth-first fixed-point materialisation.
@@ -58,16 +69,16 @@ pub(super) enum GeneratedRequestEntry {
 ///
 /// Existing boundary summaries seed the session, while newly produced sidecars stay local until
 /// the containing module has completed and its string IDs have been merged.
-pub(super) struct GeneratedFunctionWorklist {
-    known_summaries: FxHashMap<GeneratedFunctionIdentity, PublicCallSummary>,
+pub(super) struct GeneratedFunctionWorklist<'a> {
+    known_summaries: &'a FxHashMap<GeneratedFunctionIdentity, PublicCallSummary>,
     records: Vec<GeneratedRequestRecord>,
     ids_by_identity: FxHashMap<GeneratedFunctionIdentity, GeneratedRequestId>,
     completed_summaries: FxHashMap<GeneratedFunctionIdentity, PublicCallSummary>,
     sidecars: Vec<GeneratedFunctionSidecar>,
 }
 
-impl GeneratedFunctionWorklist {
-    fn new(known_summaries: FxHashMap<GeneratedFunctionIdentity, PublicCallSummary>) -> Self {
+impl<'a> GeneratedFunctionWorklist<'a> {
+    fn new(known_summaries: &'a FxHashMap<GeneratedFunctionIdentity, PublicCallSummary>) -> Self {
         Self {
             known_summaries,
             records: Vec::new(),
@@ -80,18 +91,18 @@ impl GeneratedFunctionWorklist {
     pub(super) fn register_module_requests(
         &mut self,
         requester: &StableModuleOriginIdentity,
-        identities: impl IntoIterator<Item = GeneratedFunctionIdentity>,
+        requests: impl IntoIterator<Item = GeneratedRequestFacts>,
     ) -> Vec<GeneratedRequestId> {
-        self.register_requests(GeneratedRequester::Module(requester.clone()), identities)
+        self.register_requests(GeneratedRequester::Module(requester.clone()), requests)
     }
 
     pub(super) fn register_generated_requests(
         &mut self,
         requester: GeneratedRequestId,
-        identities: impl IntoIterator<Item = GeneratedFunctionIdentity>,
+        requests: impl IntoIterator<Item = GeneratedRequestFacts>,
     ) -> Vec<GeneratedRequestId> {
         let dependency_ids =
-            self.register_requests(GeneratedRequester::Generated(requester), identities);
+            self.register_requests(GeneratedRequester::Generated(requester), requests);
         let record = &mut self.records[requester.index()];
         for dependency_id in &dependency_ids {
             if !record.dependencies.contains(dependency_id) {
@@ -105,25 +116,28 @@ impl GeneratedFunctionWorklist {
     fn register_requests(
         &mut self,
         requester: GeneratedRequester,
-        identities: impl IntoIterator<Item = GeneratedFunctionIdentity>,
+        requests: impl IntoIterator<Item = GeneratedRequestFacts>,
     ) -> Vec<GeneratedRequestId> {
-        let mut identities = identities.into_iter().collect::<Vec<_>>();
-        identities.sort();
-        identities.dedup();
+        let mut requests = requests.into_iter().collect::<Vec<_>>();
+        requests.sort_by(|left, right| left.identity.cmp(&right.identity));
+        requests.dedup_by(|left, right| left.identity == right.identity);
 
-        let mut request_ids = Vec::with_capacity(identities.len());
-        for identity in identities {
-            if self.known_summaries.contains_key(&identity) {
+        let mut request_ids = Vec::with_capacity(requests.len());
+        for request in requests {
+            if self.known_summaries.contains_key(&request.identity) {
                 continue;
             }
 
-            let request_id = if let Some(request_id) = self.ids_by_identity.get(&identity) {
+            let request_id = if let Some(request_id) = self.ids_by_identity.get(&request.identity) {
                 *request_id
             } else {
                 let request_id = GeneratedRequestId(self.records.len());
-                self.ids_by_identity.insert(identity.clone(), request_id);
+                self.ids_by_identity
+                    .insert(request.identity.clone(), request_id);
                 self.records.push(GeneratedRequestRecord {
-                    identity,
+                    identity: request.identity,
+                    display_name: request.display_name,
+                    diagnostic_location: request.diagnostic_location,
                     requesters: Vec::new(),
                     dependencies: Vec::new(),
                     state: GeneratedRequestState::Pending,
@@ -146,6 +160,27 @@ impl GeneratedFunctionWorklist {
         self.records
             .get(request_id.index())
             .map(|record| &record.identity)
+            .ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "Generated worklist received out-of-range request id {}",
+                    request_id.index()
+                ))
+            })
+    }
+
+    /// The display facts one request record owns for diagnostics.
+    pub(super) fn request_facts(
+        &self,
+        request_id: GeneratedRequestId,
+    ) -> Result<(String, SourceLocation), CompilerError> {
+        self.records
+            .get(request_id.index())
+            .map(|record| {
+                (
+                    record.display_name.clone(),
+                    record.diagnostic_location.clone(),
+                )
+            })
             .ok_or_else(|| {
                 CompilerError::compiler_error(format!(
                     "Generated worklist received out-of-range request id {}",
@@ -330,8 +365,8 @@ impl BoundaryGeneratedFunctionStore {
         Ok(())
     }
 
-    pub(super) fn session(&self) -> GeneratedFunctionWorklist {
-        GeneratedFunctionWorklist::new(self.summaries.clone())
+    pub(super) fn session(&self) -> GeneratedFunctionWorklist<'_> {
+        GeneratedFunctionWorklist::new(&self.summaries)
     }
 
     pub(super) fn publish(

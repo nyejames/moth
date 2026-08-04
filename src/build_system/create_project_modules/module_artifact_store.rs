@@ -12,6 +12,8 @@ use super::module_identity::ModuleId;
 use crate::build_system::build::CompiledModuleArtifact;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
+use crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity;
+use rustc_hash::FxHashMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CompiledModuleArtifactId(usize);
@@ -27,6 +29,13 @@ pub(crate) enum ProviderSlot {
 pub(crate) struct ModuleArtifactStore {
     slots: Vec<ProviderSlot>,
     artifacts: Vec<CompiledModuleArtifact>,
+    /// Boundary-owned index of every published materialisation context by its generic
+    /// declaration identity.
+    ///
+    /// WHAT: lets generated materialisation resolve the declaring context by identity without
+    ///       scanning all successful artefacts, and validates duplicate contexts at
+    ///       publication before any module requests them.
+    contexts_by_declaration: FxHashMap<GeneratedDeclarationIdentity, CompiledModuleArtifactId>,
 }
 
 impl ModuleArtifactStore {
@@ -34,6 +43,7 @@ impl ModuleArtifactStore {
         Self {
             slots: vec![ProviderSlot::Unavailable; module_count],
             artifacts: Vec::with_capacity(module_count),
+            contexts_by_declaration: FxHashMap::default(),
         }
     }
 
@@ -50,6 +60,20 @@ impl ModuleArtifactStore {
         }
 
         let artifact_id = CompiledModuleArtifactId(self.artifacts.len());
+        if let Some(context) = artifact.module.metadata.materialisation_context.as_ref() {
+            for identity in context.declaration_identities() {
+                if self.contexts_by_declaration.contains_key(identity) {
+                    return Err(CompilerError::compiler_error(format!(
+                        "Generated declaration identity {:?} was published by more than one materialisation context (module slot {} and {})",
+                        identity, self.contexts_by_declaration[identity].0, artifact_id.0
+                    )));
+                }
+            }
+            for identity in context.declaration_identities() {
+                self.contexts_by_declaration
+                    .insert(identity.clone(), artifact_id);
+            }
+        }
         self.artifacts.push(artifact);
         *self.slot_mut(module_id)? = ProviderSlot::Successful(artifact_id);
         Ok(())
@@ -152,14 +176,24 @@ impl ModuleArtifactStore {
         })
     }
 
-    pub(crate) fn materialisation_contexts(
+    /// Resolve one published materialisation context by its generic declaration identity.
+    pub(crate) fn materialisation_context_for(
         &self,
-    ) -> impl Iterator<
-        Item = &crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext,
+        identity: &GeneratedDeclarationIdentity,
+    ) -> Result<
+        Option<&crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext>,
+        CompilerError,
     > {
-        self.artifacts
-            .iter()
-            .filter_map(|artifact| artifact.module.metadata.materialisation_context.as_ref())
+        let Some(artifact_id) = self.contexts_by_declaration.get(identity) else {
+            return Ok(None);
+        };
+        let artifact = self.artifacts.get(artifact_id.0).ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "Materialisation context index references missing artifact {}",
+                artifact_id.0
+            ))
+        })?;
+        Ok(artifact.module.metadata.materialisation_context.as_ref())
     }
 
     fn transition_unavailable(

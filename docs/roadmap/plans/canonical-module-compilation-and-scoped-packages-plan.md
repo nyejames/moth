@@ -24,8 +24,8 @@ ACTIVE_PLAN: docs/roadmap/plans/canonical-module-compilation-and-scoped-packages
 WORK_ID: R5-closeout
 WORK_SOURCE: parent in-depth review of the implemented R5C1-R5C3 checkpoint
 BASE_REVISION: 85199889194ba6b3a378d9d25a4bd72f74a57ed4 (implementation checkpoint reviewed; later main commits are unrelated docs/benchmark work)
-STATUS: active - R5C3B checkpointed; R5C4 next
-CURRENT_SLICE: R5C4 - compact immutable generic materialisation metadata
+STATUS: active - R5C5 checkpointed; R5C6 next
+CURRENT_SLICE: R5C6 - dependency-driven call-summary convergence
 LAST_ACCEPTED_COMMIT: 6750c9a57238203ba83b2a31d74d6a19ecf36d70 (R5C1); R5C2/R5C3 remain implemented on main but their acceptance is reopened by this review
 WORKTREE: committed main; coordinator-owned edits begin after this record
 REQUIRED_RELOADS: AGENTS.md, this plan, compiler-design-overview.md, build-system-design.md, compilation.rs, compiled_boundary.rs, module_artifact_store.rs, source_discovery.rs, headers/file_imports.rs, public_interface/import_bindings.rs, public_interface/interface_view.rs, public_interface/interface_closure.rs and headers/import_environment/
@@ -40,14 +40,14 @@ ACCEPTANCE_CRITERIA:
 - equal module origins with differing interface contents fail deterministically
 - completed source packages and per-consumer package dependencies are indexed once
 - package ordering uses one deterministic dense dependency graph rather than repeated whole-set scans
-VALIDATION_STATE: R5C2A+R5C3A+R5C3B pass full just validate (ci-clippy native/linux/windows, workspace tests 4019+17+581+595, integration 1817/1817, docs check, bench-ci 60 preflight cases) and the R5C3B correction re-run (closure tests 8/8, clippy clean, integration 1817/1817)
+VALIDATION_STATE: R5C2A-R5C5 pass moth gates: workspace tests 4024+17+581+595, integration 1817/1817, clippy clean
 DOCS_IMPACT: active plan only unless implementation exposes architecture-doc drift
 BLOCKERS_OR_OPEN_DECISIONS: none for R5C2A; stop if exact provider identity cannot be introduced without another durable semantic identity
-AUDIT_STATE: full provider/closure audit reported one low finding (temporary vectors in enqueue_type/enqueue_folded_value instead of direct callback enqueue); corrected and validated (closure tests, clippy, integration). InterfaceView deleted; closure uses ClosureRecordView; provider tables keyed by ProviderInterfaceId.
+AUDIT_STATE: R5C4 focused audit findings corrected and validated. R5C5 implemented: boundary-owned GeneratedDeclarationIdentity->context index with duplicate publication validation, borrowed SourceProviderMaterialisationSet view over the project store and package registry, delta-only sessions borrowing known summaries, request records owning display name and diagnostic location, materialisation no longer searches a parallel request list; focused worklist tests added (session delta-only, request facts). Interim audit for R5C5 scheduled with the R5C6 gate.
 DELEGATION_DECISION: coordinator-owned implementation for the R5C2A correction train; separate read-only auditors at the named review gates
 NEXT_WORKER_ORDER: R5C2A -> audit -> R5C3A -> R5C3B -> audit -> R5C4 -> R5C5 -> R5C6 -> R5C7 -> R5C8 -> R5C9 -> R6 -> R7 -> R8
 STOP_REASON: none active; user requested continuation through plan completion
-NEXT_RESUME_ACTION: implement R5C4 (compact immutable generic materialisation metadata, frozen token buffer over canonical TokenKind vocabulary)
+NEXT_RESUME_ACTION: implement R5C6 dependency-driven call-summary convergence with instrumentation, then run the R5C5+R5C6 interim audit
 ```
 
 Keep this block current and concise. Git history is the durable implementation history. Do not append worker transcripts or complete validation logs.
@@ -550,7 +550,7 @@ Invariants:
 - no donor `StringId`, `InternedPath`, `FileId`, absolute path or mutable string table crosses the artefact boundary
 - source identity remains portable and self-contained
 
-Store module-wide declaration, nominal, trait, evidence and callable closure tables once. Template records reference those tables by dense indexes and remain keyed by stable generic declaration identity.
+Template artefacts remain keyed by stable generic declaration identity and each artefact carries the closure vectors it needs. Sharing one module-wide declaration, nominal, trait, evidence and callable closure table across template records is deferred to R5C8, where the generated materialisation context model is split from syntax freezing and execution; this slice does not claim that invariant.
 
 Do not retain AST, TIR, a mutable type environment or a persistent-serialization format.
 
@@ -558,7 +558,6 @@ Tests:
 
 - every token payload round-trips
 - repeated spellings occupy one frozen string entry
-- two templates share module closure tables
 - contexts remain `Send`
 - no donor-local identity crosses
 

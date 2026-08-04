@@ -65,15 +65,18 @@ use crate::compiler_frontend::symbols::identity::{FileId, SourceFileTable};
 use crate::compiler_frontend::symbols::string_interning::{
     StringId, StringTable, StringTableForkSource,
 };
+use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::validated_generic_template_metadata::validate_materialisation_context_templates;
 use crate::compiler_frontend::{
     CompilerFrontend, FrontendBuildProfile, FrontendFilePrepareContext, FrontendFilePrepareInput,
     FrontendFilePrepareSource,
 };
 
+use super::compiled_boundary::CompletedSourcePackageRegistry;
 use super::generated_worklist::{
-    GeneratedFunctionWorklist, GeneratedRequestEntry, GeneratedRequestId,
+    GeneratedFunctionWorklist, GeneratedRequestEntry, GeneratedRequestFacts, GeneratedRequestId,
 };
+use super::module_artifact_store::ModuleArtifactStore;
 use super::prepared_module::PreparedModule;
 use super::prepared_source::PreparedSourceInput;
 
@@ -259,8 +262,8 @@ pub(super) struct FrontendModuleBuildContext<'a> {
 
 #[derive(Default)]
 pub(super) struct SourceProviderMaterialisationSet<'a> {
-    contexts:
-        Vec<&'a crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext>,
+    project_contexts: Option<&'a ModuleArtifactStore>,
+    completed_packages: Option<&'a CompletedSourcePackageRegistry>,
 }
 
 enum DeclaringMaterialisation<'a> {
@@ -272,11 +275,13 @@ enum DeclaringMaterialisation<'a> {
 
 impl<'a> SourceProviderMaterialisationSet<'a> {
     pub(super) fn new(
-        contexts: Vec<
-            &'a crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext,
-        >,
+        project_contexts: &'a ModuleArtifactStore,
+        completed_packages: &'a CompletedSourcePackageRegistry,
     ) -> Self {
-        Self { contexts }
+        Self {
+            project_contexts: Some(project_contexts),
+            completed_packages: Some(completed_packages),
+        }
     }
 
     fn context_for(
@@ -284,17 +289,28 @@ impl<'a> SourceProviderMaterialisationSet<'a> {
         identity: &GeneratedDeclarationIdentity,
         requester_context: &'a crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationPreparation,
     ) -> Option<DeclaringMaterialisation<'a>> {
-        self.contexts
-            .iter()
-            .copied()
-            .find(|context| context.contains_template(identity))
-            .map(DeclaringMaterialisation::Published)
-            .or_else(|| {
-                requester_context
-                    .template_for_identity(identity)
-                    .is_some()
-                    .then_some(DeclaringMaterialisation::Preparing(requester_context))
-            })
+        if let Some(project_contexts) = self.project_contexts
+            && let Ok(Some(context)) = project_contexts.materialisation_context_for(identity)
+        {
+            return Some(DeclaringMaterialisation::Published(context));
+        }
+
+        if let Some(completed_packages) = self.completed_packages {
+            for package in completed_packages.iter() {
+                if let Ok(Some(context)) = package
+                    .boundary
+                    .modules
+                    .materialisation_context_for(identity)
+                {
+                    return Some(DeclaringMaterialisation::Published(context));
+                }
+            }
+        }
+
+        requester_context
+            .template_for_identity(identity)
+            .is_some()
+            .then_some(DeclaringMaterialisation::Preparing(requester_context))
     }
 }
 
@@ -1028,7 +1044,7 @@ impl FrontendModuleBuildContext<'_> {
         prepared: PreparedModule,
         entry_file_path: &Path,
         module_label: Option<&str>,
-        mut generated_worklist: GeneratedFunctionWorklist,
+        mut generated_worklist: GeneratedFunctionWorklist<'_>,
     ) -> Result<ModuleCompilationOutcome, CompilerError> {
         let PreparedModule {
             active_root_file_id,
@@ -1258,7 +1274,14 @@ impl FrontendModuleBuildContext<'_> {
                 &active_module_origin,
                 generated_requests
                     .iter()
-                    .map(|request| request.identity.clone()),
+                    .map(|request| GeneratedRequestFacts {
+                        identity: request.identity.clone(),
+                        display_name: request
+                            .function_name
+                            .map(|name| compiler.string_table.resolve(name).to_owned())
+                            .unwrap_or_else(|| "<generated>".to_owned()),
+                        diagnostic_location: request.call_location.clone(),
+                    }),
             );
             // 4b. Extract validated generic-template body artefacts before HIR consumes AST
             //     state. The transient public callable seed table is the exact path-to-origin
@@ -1326,7 +1349,6 @@ impl FrontendModuleBuildContext<'_> {
             )
             .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
             self.materialise_generated_request_roots(
-                &generated_requests,
                 &generated_request_ids,
                 &mut generated_worklist,
                 materialisation_context_builder.context(),
@@ -1609,9 +1631,8 @@ impl FrontendModuleBuildContext<'_> {
 
     fn materialise_generated_request_roots(
         &self,
-        requests: &[CanonicalGeneratedRequest],
         request_ids: &[GeneratedRequestId],
-        worklist: &mut GeneratedFunctionWorklist,
+        worklist: &mut GeneratedFunctionWorklist<'_>,
         requester_context: &crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationPreparation,
         compiler: &mut CompilerFrontend,
         entry_file_path: &Path,
@@ -1621,20 +1642,16 @@ impl FrontendModuleBuildContext<'_> {
                 .identity(*request_id)
                 .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?
                 .clone();
-            let request = requests
-                .iter()
-                .find(|request| request.identity == identity)
-                .ok_or_else(|| {
-                    CompilerMessages::from_error_ref(
-                        CompilerError::compiler_error(
-                            "Generated root request lost its diagnostic context",
-                        ),
-                        &compiler.string_table,
-                    )
-                })?;
+            let (display_name, diagnostic_location) = worklist
+                .request_facts(*request_id)
+                .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
             self.materialise_generated_request(
                 *request_id,
-                request,
+                &MaterialisingRequest {
+                    identity,
+                    display_name,
+                    diagnostic_location,
+                },
                 worklist,
                 requester_context,
                 compiler,
@@ -1647,8 +1664,8 @@ impl FrontendModuleBuildContext<'_> {
     fn materialise_generated_request(
         &self,
         request_id: GeneratedRequestId,
-        request: &CanonicalGeneratedRequest,
-        worklist: &mut GeneratedFunctionWorklist,
+        request: &MaterialisingRequest,
+        worklist: &mut GeneratedFunctionWorklist<'_>,
         requester_context: &crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationPreparation,
         compiler: &mut CompilerFrontend,
         entry_file_path: &Path,
@@ -1661,27 +1678,22 @@ impl FrontendModuleBuildContext<'_> {
             GeneratedRequestEntry::Recursive => {
                 return Err(CompilerMessages::from_diagnostic(
                     recursive_generic_function_instantiation(
-                        request.function_name,
-                        request.call_location.clone(),
+                        Some(compiler.string_table.intern(&request.display_name)),
+                        request.diagnostic_location.clone(),
                     ),
                     compiler.string_table.clone(),
                 ));
             }
             GeneratedRequestEntry::Materialise => {}
         }
-
-        let identity = worklist
-            .identity(request_id)
-            .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?
-            .clone();
         let declaring_context = self
             .source_provider_materialisations
-            .context_for(identity.declaration(), requester_context)
+            .context_for(request.identity.declaration(), requester_context)
             .ok_or_else(|| {
                 CompilerMessages::from_error_ref(
                     CompilerError::compiler_error(format!(
                         "Generated request for '{}' has no completed declaring-module materialisation context",
-                        identity.declaration().defining_name()
+                        request.identity.declaration().defining_name()
                     )),
                     &compiler.string_table,
                 )
@@ -1689,9 +1701,9 @@ impl FrontendModuleBuildContext<'_> {
         let materialised = match declaring_context {
             DeclaringMaterialisation::Published(context) => {
                 context.materialise_ast(ModuleMaterialisationInput {
-                    identity: &identity,
+                    identity: &request.identity,
                     requester_context,
-                    requester_call_location: &request.call_location,
+                    requester_call_location: &request.diagnostic_location,
                     external_package_registry: self.external_packages.as_ref(),
                     style_directives: self.style_directives,
                     build_profile: self.build_profile,
@@ -1705,9 +1717,9 @@ impl FrontendModuleBuildContext<'_> {
                 })
             }
             DeclaringMaterialisation::Preparing(context) => context.materialise_ast(
-                &identity,
+                &request.identity,
                 requester_context,
-                &request.call_location,
+                &request.diagnostic_location,
                 self.project_path_resolver
                     .clone()
                     .or_else(|| requester_context.project_path_resolver.clone()),
@@ -1735,9 +1747,14 @@ impl FrontendModuleBuildContext<'_> {
         .map_err(|error| CompilerMessages::from_error_ref(error, &generated_string_table))?;
         let nested_request_ids = worklist.register_generated_requests(
             request_id,
-            nested_requests
-                .iter()
-                .map(|request| request.identity.clone()),
+            nested_requests.iter().map(|request| GeneratedRequestFacts {
+                identity: request.identity.clone(),
+                display_name: request
+                    .function_name
+                    .map(|name| generated_string_table.resolve(name).to_owned())
+                    .unwrap_or_else(|| "<generated>".to_owned()),
+                diagnostic_location: request.call_location.clone(),
+            }),
         );
 
         let first_nested_sidecar = worklist.sidecar_count();
@@ -1755,20 +1772,18 @@ impl FrontendModuleBuildContext<'_> {
                     CompilerMessages::from_error_ref(error, &generated_compiler.string_table)
                 })?
                 .clone();
-            let nested_request = nested_requests
-                .iter()
-                .find(|request| request.identity == nested_identity)
-                .ok_or_else(|| {
-                    CompilerMessages::from_error_ref(
-                        CompilerError::compiler_error(
-                            "Nested generated request lost its diagnostic context",
-                        ),
-                        &generated_compiler.string_table,
-                    )
+            let (nested_name, nested_location) = worklist
+                .request_facts(*nested_request_id)
+                .map_err(|error| {
+                    CompilerMessages::from_error_ref(error, &generated_compiler.string_table)
                 })?;
             self.materialise_generated_request(
                 *nested_request_id,
-                nested_request,
+                &MaterialisingRequest {
+                    identity: nested_identity,
+                    display_name: nested_name,
+                    diagnostic_location: nested_location,
+                },
                 worklist,
                 &generated_context,
                 &mut generated_compiler,
@@ -1814,7 +1829,7 @@ impl FrontendModuleBuildContext<'_> {
             })?;
         hir_module
             .function_ids_by_generated
-            .insert(identity.clone(), function_id);
+            .insert(request.identity.clone(), function_id);
         let borrow_analysis =
             Self::check_borrows(&generated_compiler, &hir_module, &generated_warnings)?;
         let functions = collect_module_function_link_facts(&hir_module).map_err(|error| {
@@ -1865,8 +1880,8 @@ impl FrontendModuleBuildContext<'_> {
                 materialisation_context: None,
             },
         };
-        let summary =
-            exact_generated_sidecar_summary(&identity, &generated_module).map_err(|error| {
+        let summary = exact_generated_sidecar_summary(&request.identity, &generated_module)
+            .map_err(|error| {
                 CompilerMessages::from_error_ref(error, &generated_compiler.string_table)
             })?;
         let generated_remap = compiler
@@ -1880,14 +1895,14 @@ impl FrontendModuleBuildContext<'_> {
             .complete(
                 request_id,
                 summary,
-                GeneratedFunctionSidecar::new(identity, generated_module),
+                GeneratedFunctionSidecar::new(request.identity.clone(), generated_module),
             )
             .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))
     }
 
     fn recheck_generated_borrows(
         &self,
-        worklist: &mut GeneratedFunctionWorklist,
+        worklist: &mut GeneratedFunctionWorklist<'_>,
         materialisation_context: &crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationPreparation,
         compiler: &CompilerFrontend,
     ) -> Result<bool, CompilerMessages> {
@@ -2133,6 +2148,13 @@ struct CanonicalGeneratedRequest {
     identity: GeneratedFunctionIdentity,
     function_name: Option<StringId>,
     call_location: crate::compiler_frontend::tokenizer::tokens::SourceLocation,
+}
+
+/// The identity and diagnostic facts one generated request needs while materialising.
+struct MaterialisingRequest {
+    identity: GeneratedFunctionIdentity,
+    display_name: String,
+    diagnostic_location: SourceLocation,
 }
 
 fn install_generated_request_contracts(

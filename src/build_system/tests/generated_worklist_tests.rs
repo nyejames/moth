@@ -8,6 +8,8 @@ use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, ModulePrivateExecutableCategory, ModulePrivateExecutableIdentity,
     ModuleRootRole, StablePackageIdentity,
 };
+use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tokenizer::tokens::{CharPosition, SourceLocation};
 
 fn module_origin() -> StableModuleOriginIdentity {
     StableModuleOriginIdentity::from_portable_path(
@@ -38,14 +40,47 @@ fn summary() -> PublicCallSummary {
     }
 }
 
+fn facts(name: &str) -> GeneratedRequestFacts {
+    GeneratedRequestFacts {
+        identity: generated_identity(name),
+        display_name: name.to_owned(),
+        diagnostic_location: SourceLocation::new(
+            crate::compiler_frontend::symbols::interned_path::InternedPath::from_single_str(
+                "src/@page.moth",
+                &mut StringTable::new(),
+            ),
+            CharPosition::default(),
+            CharPosition::default(),
+        ),
+    }
+}
+
 #[test]
 fn registration_sorts_and_deduplicates_stable_identities_before_assigning_dense_ids() {
     let alpha = generated_identity("alpha");
     let beta = generated_identity("beta");
-    let mut worklist = GeneratedFunctionWorklist::new(FxHashMap::default());
+    let known = FxHashMap::default();
+    let mut worklist = GeneratedFunctionWorklist::new(&known);
 
-    let ids =
-        worklist.register_module_requests(&module_origin(), [beta.clone(), alpha.clone(), beta]);
+    let ids = worklist.register_module_requests(
+        &module_origin(),
+        [
+            facts("beta"),
+            facts("alpha"),
+            GeneratedRequestFacts {
+                identity: beta,
+                display_name: "beta".to_owned(),
+                diagnostic_location: SourceLocation::new(
+                    crate::compiler_frontend::symbols::interned_path::InternedPath::from_single_str(
+                        "src/@page.moth",
+                        &mut StringTable::new(),
+                    ),
+                    CharPosition::default(),
+                    CharPosition::default(),
+                ),
+            },
+        ],
+    );
 
     assert_eq!(ids, vec![GeneratedRequestId(0), GeneratedRequestId(1)]);
     assert_eq!(worklist.identity(ids[0]).unwrap(), &alpha);
@@ -54,15 +89,14 @@ fn registration_sorts_and_deduplicates_stable_identities_before_assigning_dense_
 
 #[test]
 fn duplicate_requesters_and_dependency_edges_are_recorded_once() {
-    let parent = generated_identity("parent");
-    let child = generated_identity("child");
-    let mut worklist = GeneratedFunctionWorklist::new(FxHashMap::default());
+    let known = FxHashMap::default();
+    let mut worklist = GeneratedFunctionWorklist::new(&known);
     let parent_id =
-        worklist.register_module_requests(&module_origin(), [parent.clone(), parent])[0];
+        worklist.register_module_requests(&module_origin(), [facts("parent"), facts("parent")])[0];
 
     let child_ids = worklist
-        .register_generated_requests(parent_id, [child.clone(), child.clone(), child.clone()]);
-    worklist.register_generated_requests(parent_id, [child]);
+        .register_generated_requests(parent_id, [facts("child"), facts("child"), facts("child")]);
+    worklist.register_generated_requests(parent_id, [facts("child")]);
 
     assert_eq!(child_ids.len(), 1);
     assert_eq!(worklist.records[parent_id.index()].dependencies, child_ids);
@@ -75,13 +109,69 @@ fn completed_boundary_summary_suppresses_rematerialisation() {
     let expected = summary();
     let mut known = FxHashMap::default();
     known.insert(identity.clone(), expected.clone());
-    let mut worklist = GeneratedFunctionWorklist::new(known);
+    let mut worklist = GeneratedFunctionWorklist::new(&known);
 
-    let ids = worklist.register_module_requests(&module_origin(), [identity.clone()]);
+    let ids = worklist.register_module_requests(&module_origin(), [facts("known")]);
 
     assert!(ids.is_empty());
     assert_eq!(worklist.summary(&identity), Some(&expected));
     assert!(worklist.finish().is_ok());
+}
+
+#[test]
+fn session_allocates_only_new_records() {
+    let known_identity = generated_identity("known");
+    let mut known = FxHashMap::default();
+    known.insert(known_identity, summary());
+    let mut worklist = GeneratedFunctionWorklist::new(&known);
+
+    let known_ids = worklist.register_module_requests(&module_origin(), [facts("known")]);
+    assert!(known_ids.is_empty());
+    assert_eq!(
+        worklist.records.len(),
+        0,
+        "known summaries seed the session"
+    );
+
+    let new_ids = worklist.register_module_requests(&module_origin(), [facts("new")]);
+    assert_eq!(new_ids.len(), 1);
+    assert_eq!(
+        worklist.records.len(),
+        1,
+        "a session owns only its new delta"
+    );
+}
+
+#[test]
+fn request_records_own_diagnostic_facts() {
+    let known = FxHashMap::default();
+    let mut worklist = GeneratedFunctionWorklist::new(&known);
+    let first_location = SourceLocation::new(
+        crate::compiler_frontend::symbols::interned_path::InternedPath::from_single_str(
+            "src/a.moth",
+            &mut StringTable::new(),
+        ),
+        CharPosition {
+            line_number: 3,
+            char_column: 5,
+        },
+        CharPosition {
+            line_number: 3,
+            char_column: 9,
+        },
+    );
+    let ids = worklist.register_module_requests(
+        &module_origin(),
+        [GeneratedRequestFacts {
+            identity: generated_identity("make"),
+            display_name: "make".to_owned(),
+            diagnostic_location: first_location.clone(),
+        }],
+    );
+
+    let (display_name, diagnostic_location) = worklist.request_facts(ids[0]).unwrap();
+    assert_eq!(display_name, "make");
+    assert_eq!(diagnostic_location, first_location);
 }
 
 #[test]
