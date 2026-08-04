@@ -278,7 +278,7 @@ pub(crate) fn load_benchmark_manifest() -> Result<BenchmarkManifest, BenchmarkMa
     load_benchmark_manifest_from(&current_directory)
 }
 
-fn load_benchmark_manifest_from(
+pub(crate) fn load_benchmark_manifest_from(
     current_directory: &Path,
 ) -> Result<BenchmarkManifest, BenchmarkManifestError> {
     let repository_root =
@@ -915,6 +915,7 @@ fn validate_generated_output_roots(
     }
 
     let mut roots: Vec<PathBuf> = Vec::with_capacity(authored_roots.len());
+    let mut folded_roots: Vec<Vec<String>> = Vec::with_capacity(authored_roots.len());
     for authored_root in authored_roots {
         let relative_path = validate_relative_path(
             manifest_path,
@@ -928,9 +929,11 @@ fn validate_generated_output_roots(
         // from the shared relative-path rules (no '.', '..', absolute or
         // platform-prefixed components).
 
-        // Reject duplicate, overlapping and ASCII-case-colliding roots.
-        let canonical_spelling = relative_path.to_string_lossy().to_ascii_lowercase();
-        for existing in &roots {
+        // Reject duplicate, overlapping and ASCII-case-colliding roots using
+        // portable folded component vectors so case-insensitive filesystems
+        // cannot accept physically overlapping spellings.
+        let folded = folded_path_components(&relative_path);
+        for (existing, existing_folded) in roots.iter().zip(&folded_roots) {
             if existing == &relative_path {
                 return Err(invalid(
                     manifest_path,
@@ -938,8 +941,7 @@ fn validate_generated_output_roots(
                     format!("duplicate generated output root '{authored_root}'"),
                 ));
             }
-            let existing_spelling = existing.to_string_lossy().to_ascii_lowercase();
-            if existing_spelling == canonical_spelling {
+            if existing_folded == &folded {
                 return Err(invalid(
                     manifest_path,
                     format!("workload '{workload_id}'"),
@@ -949,7 +951,9 @@ fn validate_generated_output_roots(
                     ),
                 ));
             }
-            if relative_path.starts_with(existing) || existing.starts_with(&relative_path) {
+            if components_are_prefix(&folded, existing_folded)
+                || components_are_prefix(existing_folded, &folded)
+            {
                 return Err(invalid(
                     manifest_path,
                     format!("workload '{workload_id}'"),
@@ -986,10 +990,31 @@ fn validate_generated_output_roots(
             ));
         }
 
-        roots.push(relative_path);
+        roots.push(relative_path.clone());
+        folded_roots.push(folded);
     }
 
-    Ok(roots)
+    // Stable ordering by folded components so deletion and reporting never
+    // depend on authored spelling or insertion order.
+    let mut indexed: Vec<(Vec<String>, PathBuf)> = folded_roots.into_iter().zip(roots).collect();
+    indexed.sort_by(|left, right| left.0.cmp(&right.0));
+    Ok(indexed.into_iter().map(|(_, path)| path).collect())
+}
+
+/// Fold one validated entry-relative path into portable ASCII-lowercase
+/// component strings for case-insensitive comparison and ordering.
+fn folded_path_components(path: &Path) -> Vec<String> {
+    path.components()
+        .filter_map(|component| match component {
+            Component::Normal(value) => Some(value.to_string_lossy().to_ascii_lowercase()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Whether one folded component vector is a strict prefix of another.
+fn components_are_prefix(prefix: &[String], full: &[String]) -> bool {
+    prefix.len() < full.len() && full.starts_with(prefix)
 }
 
 /// Validate fingerprint roots against the declared boundary mode.

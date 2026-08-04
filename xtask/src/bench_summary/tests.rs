@@ -8,6 +8,8 @@ use crate::bench_types::{
     calculate_group_stats,
 };
 use crate::benchmark_manifest::{BenchmarkRunner, CliBenchmarkCommand};
+use crate::benchmark_run::BenchmarkPaths;
+use std::path::Path;
 
 fn benchmark_case(case_name: &str, mean_ms: f64) -> BenchmarkCaseResult {
     benchmark_group_case(case_name, "ungrouped", mean_ms)
@@ -1077,7 +1079,8 @@ fn test_update_monthly_summary_rejects_dirty_run() {
     run.git_revision.dirty = Some(true);
 
     let comparison = BenchmarkComparison::new(&run.cases, None);
-    let error = update_monthly_summary(&run, &comparison)
+    let paths = BenchmarkPaths::for_repository(Path::new("."));
+    let error = update_monthly_summary(&run, &comparison, &paths)
         .expect_err("a dirty run must never update the tracked summary");
     assert!(error.contains("clean and committed"));
 }
@@ -1089,7 +1092,8 @@ fn test_update_monthly_summary_rejects_unknown_revision_run() {
     run.git_revision.commit = None;
 
     let comparison = BenchmarkComparison::new(&run.cases, None);
-    let error = update_monthly_summary(&run, &comparison)
+    let paths = BenchmarkPaths::for_repository(Path::new("."));
+    let error = update_monthly_summary(&run, &comparison, &paths)
         .expect_err("an unknown-revision run must never update the tracked summary");
     assert!(error.contains("clean and committed"));
 }
@@ -1137,6 +1141,7 @@ fn test_update_monthly_summary_fixed_thread_run_is_noop() {
 
     let comparison = BenchmarkComparison::new(&run.cases, None);
 
-    let result = update_monthly_summary(&run, &comparison);
+    let paths = BenchmarkPaths::for_repository(Path::new("."));
+    let result = update_monthly_summary(&run, &comparison, &paths);
     assert!(result.is_ok(), "fixed-thread run should no-op cleanly");
 }

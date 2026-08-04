@@ -20,6 +20,7 @@
 
 use super::{artifacts, history, observations, options::ProfileFilterMode};
 use crate::bench_time::BenchmarkTimestamp;
+use crate::bench_types::{BenchmarkRecording, GitRevision};
 use crate::benchmark_execution::{
     BenchmarkExecutionContext, format_case_failures, preflight_cases,
 };
@@ -29,14 +30,13 @@ use crate::benchmark_run::PreparedBenchmarkRun;
 use crate::benchmark_workspace::{BenchmarkExecutionWorkspace, finalise_workspace};
 use crate::compiler_binary::{CompilerBinary, build_profiling_compiler_with_timers};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 
 use super::artifacts::{ProfileCaseManifest, ProfileRunPaths, write_index_md, write_run_manifest};
 use super::drift::{
     DriftCaseInput, DriftHotFunction, compute_drift, find_comparable_previous,
     format_drift_markdown, format_drift_summary_section, no_previous_drift_report,
 };
-use super::history::{HistoryCaseRecord, HistoryHotFunction, PROFILE_RUNS_JSONL_PATH};
+use super::history::{HistoryCaseRecord, HistoryHotFunction};
 use super::hotspots::{HotspotExtractionResult, extract_hotspots};
 use super::observations::run_observation;
 use super::options::ProfileOptions;
@@ -47,34 +47,45 @@ use super::summary::{
     generate_root_hotspots_json,
 };
 
-/// Root path for all profiling local data, relative to repo root.
-const PROFILES_ROOT: &str = "benchmarks/local-data/profiles";
-
-/// Anchor profile artifact paths to the repository rather than the benchmark
-/// case's current directory, which may be an isolated file-entry workspace.
-pub(crate) fn profile_artifacts_root(repository_root: &Path) -> PathBuf {
-    repository_root.join(PROFILES_ROOT)
+/// One completed profile collection phase.
+///
+/// Holds every artifact-writing fact needed after the generated-output
+/// workspace has been explicitly finalised: run paths, the start revision,
+/// the selected cases, per-case manifests and per-case observation/hotspot
+/// data. Only this phase may write per-case artifacts; summaries, drift and
+/// history run afterwards.
+pub(crate) struct CollectedProfileRun {
+    run_paths: ProfileRunPaths,
+    git_revision: GitRevision,
+    commit: Option<String>,
+    selected_cases: Vec<BenchmarkCase>,
+    case_manifests: Vec<ProfileCaseManifest>,
+    case_summaries: Vec<(
+        observations::ProfileObservation,
+        Option<HotspotExtractionResult>,
+    )>,
 }
 
 /// Run the profiling benchmark workflow.
 ///
 /// WHAT: Loads benchmark cases, applies case filtering, builds the profiling
-/// compiler, preflights every selected case, runs observation passes, records
-/// Samply profiles, and writes local artifacts under
-/// `benchmarks/local-data/profiles/`.
+/// compiler, collects observations and Samply profiles, explicitly finalises
+/// generated outputs, and only then writes root summaries, drift reports and
+/// profile history.
 ///
 /// WHY: This orchestrator ties together failure-safe preflight, artifact layout,
-/// observation logging, Samply recording and case filtering. The observation
-/// pass gives timer/counter data without profiler overhead; the Samply pass
-/// gives stack samples for hotspot extraction.
+/// observation logging, Samply recording and case filtering. The collection
+/// phase can fail at preflight, observation, Samply recording, parsing or
+/// artifact writing; explicit workspace finalisation must run on every one of
+/// those paths and must succeed before repository verification or persistence.
 ///
 /// If any case fails, the run directory is left for debugging but no history
 /// is appended.
 pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), String> {
     // Prepare one run: manifest, then repository snapshot, then fingerprints.
-    // The snapshot must precede fingerprint traversal and compiler construction.
-    let prepared = PreparedBenchmarkRun::load()?;
-    let selected_cases = select_profile_cases(&prepared.manifest, options.case_filter.as_deref())?;
+    // Profiling is read-only for persistence eligibility; dirty runs still
+    // write local artifacts but never append comparable history.
+    let prepared = PreparedBenchmarkRun::load(BenchmarkRecording::ReadOnly)?;
 
     // Verify Samply is available and learn the version-specific record flags before doing work.
     let samply_capabilities = check_samply_available()?;
@@ -93,169 +104,27 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
     println!("Building profiling compiler...");
     let profiling_binary =
         build_profiling_compiler_with_timers(&prepared.manifest.repository_root)?;
-    let moth_path = profiling_binary.as_path();
-    let symbol_dirs = profiling_binary.symbol_dirs.clone();
     let workspace = BenchmarkExecutionWorkspace::create(&prepared.manifest.repository_root)?;
-    let execution_context =
-        BenchmarkExecutionContext::new(&prepared.manifest, moth_path, &workspace);
 
-    println!(
-        "Preflighting {} CLI profile case(s) with the profiling binary...",
-        selected_cases.len()
-    );
-    preflight_cases(&execution_context, &selected_cases)
-        .map_err(|failures| format_case_failures("profile preflight", &failures))?;
+    let collected = finalise_workspace(
+        &workspace,
+        collect_profile_run(
+            &options,
+            &prepared,
+            &workspace,
+            &profiling_binary,
+            &samply_capabilities,
+        ),
+    )?;
 
-    // Use the start snapshot's commit for the run id.
-    let git_revision = prepared.snapshot.git_revision();
-    let commit = git_revision.commit.clone();
-
-    // Create the run directory.
-    let profiles_root = profile_artifacts_root(&prepared.manifest.repository_root);
-    let run_paths = ProfileRunPaths::create(&profiles_root, commit.as_deref())?;
-
-    println!(
-        "Profiling run {} — {} cases, filter: {}",
-        run_paths.run_id,
-        selected_cases.len(),
-        options.filter.display_label(),
-    );
-
-    // Run each selected case: observation → Samply → write artifacts.
-    // Accumulate both manifests (for run-manifest.json) and summary data
-    // (for root agent-summary.md and profile-hotspots.json).
-    let mut case_manifests = Vec::new();
-    let mut case_summaries: Vec<(
-        observations::ProfileObservation,
-        Option<HotspotExtractionResult>,
-    )> = Vec::new();
-
-    for case in &selected_cases {
-        let invocation = execution_context
-            .resolve_cli_invocation(case)
-            .map_err(|error| error.to_string())?;
-        print!("  {} ", case.id);
-
-        // Observation pass (timer/counter data without profiler overhead).
-        let observation = run_observation(&execution_context, case)?;
-        print!("~{:.0}ms ", observation.wall_ms);
-
-        // Write per-case artifacts (stdout, stderr, observations).
-        // Summary is deferred until after hotspot extraction so it can include
-        // hotspot data, hints, and sample counts.
-        let case_paths = run_paths.case_paths(&case.id);
-        case_paths.create_dir()?;
-        case_paths.write_stdout(&observation.stdout)?;
-        case_paths.write_stderr(&observation.stderr)?;
-        case_paths.write_observations_json(&observation)?;
-
-        // Samply recording pass (stack samples for hotspot extraction).
-        let samply_input = SamplyRunInput {
-            moth_path: moth_path.to_path_buf(),
-            current_directory: invocation.current_directory.clone(),
-            command: invocation.command.as_str().to_owned(),
-            args: invocation.args.clone(),
-            output_path: case_paths.profile_json.clone(),
-            samply_rate_hz: options.samply_rate_hz,
-            presymbolicate: options.presymbolicate,
-            presymbolication_flag: samply_capabilities.presymbolication_flag,
-            symbol_dirs: symbol_dirs.clone(),
-        };
-
-        let samply_run = run_samply(&samply_input)?;
-
-        if !samply_run.success {
-            let smoke_diagnostic = format_symbolication_smoke_diagnostic(
-                &samply_capabilities,
-                &profiling_binary,
-                options.presymbolicate,
-                samply_run.presymbolication_flag.display_label(),
-                &case_paths.profile_json,
-                None,
-                "samply_failed",
-            );
-            return Err(format!(
-                "Samply recording failed for case '{}'.\n\
-                 Command: {}\n\
-                 Observation artifacts were written under '{}' before Samply failed.\n\
-                 {}\n\
-                 Stdout: {}\n\
-                 Stderr: {}",
-                case.id,
-                samply_run.command_line,
-                case_paths.case_dir.display(),
-                smoke_diagnostic,
-                samply_run.stdout.trim(),
-                samply_run.stderr.trim()
-            ));
-        }
-
-        print!("[samply {:.0}ms] ", samply_run.duration_ms);
-
-        // Hotspot extraction: parse the profile and extract hotspots for
-        // non-RawIndex modes. RawIndex skips parsing to save time.
-        let hotspot_result = if options.filter != ProfileFilterMode::RawIndex {
-            let parsed = parse_profile(&case_paths.profile_json)
-                .map_err(|e| format!("Failed to parse profile for case '{}': {}", case.id, e))?;
-
-            let mut result = extract_hotspots(&parsed, options.filter, observation.wall_ms);
-            if result.symbolication.is_failed() {
-                match parse_profile_shape_dump(&case_paths.profile_json) {
-                    Ok(shape) => {
-                        artifacts::write_profile_shape_dump(&case_paths, &shape)?;
-                    }
-                    Err(error) => {
-                        result
-                            .warnings
-                            .push(format!("Profile shape dump failed: {error}"));
-                    }
-                }
-            }
-
-            print_symbolication_smoke_diagnostic(
-                &samply_capabilities,
-                &profiling_binary,
-                options.presymbolicate,
-                samply_run.presymbolication_flag.display_label(),
-                &case_paths.profile_json,
-                &result,
-            );
-            artifacts::write_hotspots_json(&case_paths, &result)?;
-            print!("[{} hotspots] ", result.functions.len());
-            Some(result)
-        } else {
-            None
-        };
-
-        // Build manifest entry for this case.
-        case_manifests.push(ProfileCaseManifest {
-            case_id: case.id.clone(),
-            identity: prepared
-                .fingerprints
-                .identity_for(&prepared.manifest, case)
-                .map_err(|error| error.to_string())?,
-            group_name: case.group_name.persistence_spelling().to_string(),
-            command: invocation.command.as_str().to_owned(),
-            args: invocation.args.clone(),
-            observation_wall_ms: observation.wall_ms,
-            profile_path: format!("cases/{}/profile.json.gz", case.id),
-            stdout_path: format!("cases/{}/stdout.log", case.id),
-            stderr_path: format!("cases/{}/stderr.log", case.id),
-            summary_path: hotspot_result
-                .as_ref()
-                .map(|_| format!("cases/{}/summary.md", case.id)),
-        });
-
-        // Accumulate for root summary generation.
-        case_summaries.push((observation, hotspot_result));
-
-        println!("done");
-    }
-
-    // Explicitly finalise run-owned outputs before drift, verification and
-    // history persistence. Local profile artifacts stay for diagnosis when
-    // cleanup fails, but the failure is reported.
-    finalise_workspace(&workspace, Ok(()))?;
+    let CollectedProfileRun {
+        run_paths,
+        git_revision,
+        commit,
+        selected_cases,
+        case_manifests,
+        case_summaries,
+    } = collected;
 
     // ---------------------------------------------------------------
     //  Enriched per-case summaries and root summary artifacts
@@ -320,11 +189,12 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
 
     // Compute drift against the latest comparable previous record.
     let drift_report = if options.filter != ProfileFilterMode::RawIndex {
-        let history_path = std::path::Path::new(PROFILE_RUNS_JSONL_PATH);
+        let history_path = &prepared.paths.profile_history;
         let previous_records =
             history::read_profile_runs(history_path).map_err(|error| error.to_string())?;
 
-        let system = crate::bench_system::load_or_create_system(
+        let system = crate::bench_system::load_or_create_system_at(
+            &prepared.paths.system_toml,
             crate::bench_system::SystemIdentityMode::ReadOnly,
         )
         .map_err(|error| error.to_string())?;
@@ -406,7 +276,7 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
     }
 
     // Append profile history record after repository verification succeeds.
-    // The collection phase (cases, artifacts, drift) is complete; persistence
+    // The collection and finalisation phases are complete; persistence
     // must not run if the repository changed during the run.
     if options.filter != ProfileFilterMode::RawIndex {
         let mut history_cases = Vec::new();
@@ -466,6 +336,7 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
             options.filter.display_label(),
             options.samply_rate_hz,
             history_cases,
+            &prepared.paths.system_toml,
         )?;
 
         // Verify the repository is unchanged before any persistence. Cleanup
@@ -479,7 +350,7 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
         // Dirty start snapshots still produce local profile artifacts for
         // investigation, but their history would be an incomparable baseline.
         if profile_history_allowed(&prepared.snapshot) {
-            let history_path = std::path::Path::new(PROFILE_RUNS_JSONL_PATH);
+            let history_path = &prepared.paths.profile_history;
             history::append_profile_run(history_path, &history_record)?;
         } else {
             println!(
@@ -501,6 +372,183 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
     );
 
     Ok(())
+}
+
+/// Collect one profile run: preflight, observations, Samply recordings and
+/// per-case artifact writes.
+///
+/// Returns `Err` on the first failure. The caller passes this result through
+/// `finalise_workspace`, so generated output roots are explicitly cleaned up
+/// on success and on every failure path.
+pub(crate) fn collect_profile_run(
+    options: &ProfileOptions,
+    prepared: &PreparedBenchmarkRun,
+    workspace: &BenchmarkExecutionWorkspace,
+    profiling_binary: &CompilerBinary,
+    samply_capabilities: &SamplyRecordCapabilities,
+) -> Result<CollectedProfileRun, String> {
+    let selected_cases = select_profile_cases(&prepared.manifest, options.case_filter.as_deref())?;
+    let moth_path = profiling_binary.as_path().to_path_buf();
+    let symbol_dirs = profiling_binary.symbol_dirs.clone();
+    let execution_context =
+        BenchmarkExecutionContext::new(&prepared.manifest, profiling_binary.as_path(), workspace);
+
+    println!(
+        "Preflighting {} CLI profile case(s) with the profiling binary...",
+        selected_cases.len()
+    );
+    preflight_cases(&execution_context, &selected_cases)
+        .map_err(|failures| format_case_failures("profile preflight", &failures))?;
+
+    // Use the start snapshot's commit for the run id.
+    let git_revision = prepared.snapshot.git_revision();
+    let commit = git_revision.commit.clone();
+
+    // Create the run directory.
+    let profiles_root = prepared.paths.profiles.clone();
+    let run_paths = ProfileRunPaths::create(&profiles_root, commit.as_deref())?;
+
+    println!(
+        "Profiling run {} — {} cases, filter: {}",
+        run_paths.run_id,
+        selected_cases.len(),
+        options.filter.display_label(),
+    );
+
+    // Run each selected case: observation → Samply → write artifacts.
+    // Accumulate both manifests (for run-manifest.json) and summary data
+    // (for root agent-summary.md and profile-hotspots.json).
+    let mut case_manifests = Vec::new();
+    let mut case_summaries: Vec<(
+        observations::ProfileObservation,
+        Option<HotspotExtractionResult>,
+    )> = Vec::new();
+
+    for case in &selected_cases {
+        let invocation = execution_context
+            .resolve_cli_invocation(case)
+            .map_err(|error| error.to_string())?;
+        print!("  {} ", case.id);
+
+        // Observation pass (timer/counter data without profiler overhead).
+        let observation = run_observation(&execution_context, case)?;
+        print!("~{:.0}ms ", observation.wall_ms);
+
+        // Write per-case artifacts (stdout, stderr, observations).
+        // Summary is deferred until after hotspot extraction so it can include
+        // hotspot data, hints, and sample counts.
+        let case_paths = run_paths.case_paths(&case.id);
+        case_paths.create_dir()?;
+        case_paths.write_stdout(&observation.stdout)?;
+        case_paths.write_stderr(&observation.stderr)?;
+        case_paths.write_observations_json(&observation)?;
+
+        // Samply recording pass (stack samples for hotspot extraction).
+        let samply_input = SamplyRunInput {
+            moth_path: moth_path.clone(),
+            current_directory: invocation.current_directory.clone(),
+            command: invocation.command.as_str().to_owned(),
+            args: invocation.args.clone(),
+            output_path: case_paths.profile_json.clone(),
+            samply_rate_hz: options.samply_rate_hz,
+            presymbolicate: options.presymbolicate,
+            presymbolication_flag: samply_capabilities.presymbolication_flag,
+            symbol_dirs: symbol_dirs.clone(),
+        };
+
+        let samply_run = run_samply(&samply_input)?;
+
+        if !samply_run.success {
+            let smoke_diagnostic = format_symbolication_smoke_diagnostic(
+                samply_capabilities,
+                profiling_binary,
+                options.presymbolicate,
+                samply_run.presymbolication_flag.display_label(),
+                &case_paths.profile_json,
+                None,
+                "samply_failed",
+            );
+            return Err(format!(
+                "Samply recording failed for case '{}'.\n                 Command: {}\n                 Observation artifacts were written under '{}' before Samply failed.\n                 {}\n                 Stdout: {}\n                 Stderr: {}",
+                case.id,
+                samply_run.command_line,
+                case_paths.case_dir.display(),
+                smoke_diagnostic,
+                samply_run.stdout.trim(),
+                samply_run.stderr.trim()
+            ));
+        }
+
+        print!("[samply {:.0}ms] ", samply_run.duration_ms);
+
+        // Hotspot extraction: parse the profile and extract hotspots for
+        // non-RawIndex modes. RawIndex skips parsing to save time.
+        let hotspot_result = if options.filter != ProfileFilterMode::RawIndex {
+            let parsed = parse_profile(&case_paths.profile_json)
+                .map_err(|e| format!("Failed to parse profile for case '{}': {}", case.id, e))?;
+
+            let mut result = extract_hotspots(&parsed, options.filter, observation.wall_ms);
+            if result.symbolication.is_failed() {
+                match parse_profile_shape_dump(&case_paths.profile_json) {
+                    Ok(shape) => {
+                        artifacts::write_profile_shape_dump(&case_paths, &shape)?;
+                    }
+                    Err(error) => {
+                        result
+                            .warnings
+                            .push(format!("Profile shape dump failed: {error}"));
+                    }
+                }
+            }
+
+            print_symbolication_smoke_diagnostic(
+                samply_capabilities,
+                profiling_binary,
+                options.presymbolicate,
+                samply_run.presymbolication_flag.display_label(),
+                &case_paths.profile_json,
+                &result,
+            );
+            artifacts::write_hotspots_json(&case_paths, &result)?;
+            print!("[{} hotspots] ", result.functions.len());
+            Some(result)
+        } else {
+            None
+        };
+
+        // Build manifest entry for this case.
+        case_manifests.push(ProfileCaseManifest {
+            case_id: case.id.clone(),
+            identity: prepared
+                .fingerprints
+                .identity_for(&prepared.manifest, case)
+                .map_err(|error| error.to_string())?,
+            group_name: case.group_name.persistence_spelling().to_string(),
+            command: invocation.command.as_str().to_owned(),
+            args: invocation.args.clone(),
+            observation_wall_ms: observation.wall_ms,
+            profile_path: format!("cases/{}/profile.json.gz", case.id),
+            stdout_path: format!("cases/{}/stdout.log", case.id),
+            stderr_path: format!("cases/{}/stderr.log", case.id),
+            summary_path: hotspot_result
+                .as_ref()
+                .map(|_| format!("cases/{}/summary.md", case.id)),
+        });
+
+        // Accumulate for root summary generation.
+        case_summaries.push((observation, hotspot_result));
+
+        println!("done");
+    }
+
+    Ok(CollectedProfileRun {
+        run_paths,
+        git_revision,
+        commit,
+        selected_cases,
+        case_manifests,
+        case_summaries,
+    })
 }
 
 /// Decide whether current profile history may be appended for a start snapshot.

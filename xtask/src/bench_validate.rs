@@ -5,6 +5,7 @@
 //! WHY: benchmark validation must not maintain a second command or diagnostic
 //! parsing implementation.
 
+use crate::bench_types::BenchmarkRecording;
 use crate::benchmark_execution::{
     BenchmarkExecutionContext, format_case_failures, preflight_cases,
 };
@@ -15,7 +16,7 @@ use crate::compiler_binary::build_release_compiler_with_timers;
 
 /// Preflight all benchmark cases without recording history or summaries.
 pub fn validate_all_benchmarks() -> Result<(), String> {
-    let prepared = PreparedBenchmarkRun::load()?;
+    let prepared = PreparedBenchmarkRun::load(BenchmarkRecording::ReadOnly)?;
 
     let compiler = build_release_compiler_with_timers(&prepared.manifest.repository_root)?;
     let workspace = BenchmarkExecutionWorkspace::create(&prepared.manifest.repository_root)?;

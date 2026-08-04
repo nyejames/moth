@@ -24,11 +24,7 @@ use crate::compiler_binary::build_release_compiler_with_timers;
 /// writing any data. Explicit workspace finalisation precedes repository
 /// verification and persistence.
 pub(crate) fn run_benchmarks(policy: BenchmarkRunPolicy) -> Result<(), String> {
-    let prepared = PreparedBenchmarkRun::load()?;
-
-    // Recording requires an exactly clean, committed repository before any
-    // fingerprint traversal, compiler construction or history read/write.
-    prepared.require_recording_eligible(policy.recording())?;
+    let prepared = PreparedBenchmarkRun::load(policy.recording())?;
 
     println!("Building release compiler...");
     let compiler = build_release_compiler_with_timers(&prepared.manifest.repository_root)?;
@@ -71,6 +67,7 @@ pub(crate) fn run_benchmarks(policy: BenchmarkRunPolicy) -> Result<(), String> {
                 thread_count,
                 policy,
                 &git_revision,
+                prepared.paths(),
             )
         }
         Err(operation) => finalise_workspace(&workspace, Err(operation)),

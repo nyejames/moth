@@ -37,10 +37,26 @@ pub(crate) enum BenchmarkWorkspaceError {
     ExistingOutputRoot { path: PathBuf },
     /// A declared root is tracked by Git and must never be deleted.
     TrackedOutputRoot { path: PathBuf },
-    /// A registered root escaped its workload entry.
+    /// A registered root escaped its workload entry lexically.
     RootOutsideEntry { root: PathBuf, entry: PathBuf },
     /// A registered root was replaced by a symlink during the run.
     SymlinkReplacedRoot { root: PathBuf },
+    /// A symlink appeared between a workload entry and a registered root.
+    SymlinkComponent { path: PathBuf },
+    /// A registered root resolved outside its canonical workload entry.
+    RootNotContained { root: PathBuf, entry: PathBuf },
+    /// A directory scan failed while searching for undeclared manifests.
+    ScanFailed {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    /// A symlink was encountered during the undeclared-manifest scan.
+    UnexpectedSymlink { path: PathBuf },
+    /// Inspecting a path component or canonical ancestor failed.
+    MetadataInspectionFailed {
+        path: PathBuf,
+        source: std::io::Error,
+    },
     /// Removing a registered root failed.
     RemovalFailed {
         root: PathBuf,
@@ -76,6 +92,32 @@ impl Display for BenchmarkWorkspaceError {
                 "generated output root '{}' was replaced by a symlink during the run",
                 root.display()
             ),
+            Self::SymlinkComponent { path } => write!(
+                formatter,
+                "symlink component '{}' found between workload entry and generated output root",
+                path.display()
+            ),
+            Self::RootNotContained { root, entry } => write!(
+                formatter,
+                "generated output root '{}' resolved outside workload entry '{}'",
+                root.display(),
+                entry.display()
+            ),
+            Self::ScanFailed { path, source } => write!(
+                formatter,
+                "failed to scan '{}' for undeclared output manifests: {source}",
+                path.display()
+            ),
+            Self::UnexpectedSymlink { path } => write!(
+                formatter,
+                "encountered symlink '{}' while scanning for undeclared output manifests",
+                path.display()
+            ),
+            Self::MetadataInspectionFailed { path, source } => write!(
+                formatter,
+                "failed to inspect path '{}': {source}",
+                path.display()
+            ),
             Self::RemovalFailed { root, source } => write!(
                 formatter,
                 "failed to remove generated output root '{}': {source}",
@@ -98,7 +140,9 @@ impl Display for BenchmarkWorkspaceError {
 impl std::error::Error for BenchmarkWorkspaceError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::RemovalFailed { source, .. } => Some(source),
+            Self::ScanFailed { source, .. }
+            | Self::MetadataInspectionFailed { source, .. }
+            | Self::RemovalFailed { source, .. } => Some(source),
             _ => None,
         }
     }
@@ -320,6 +364,8 @@ impl BenchmarkExecutionWorkspace {
                 continue;
             }
 
+            validate_root_path_for_removal(&root.entry_path, &root.root_path)?;
+
             std::fs::remove_dir_all(&root.root_path).map_err(|source| {
                 BenchmarkWorkspaceError::RemovalFailed {
                     root: root.root_path.clone(),
@@ -348,6 +394,9 @@ impl BenchmarkExecutionWorkspace {
 
     /// One bounded recursive scan per affected workload for `.moth_manifest`
     /// files outside the declared generated roots.
+    ///
+    /// `read_dir` failures, entry metadata failures and symlinks are reported
+    /// as dedicated workspace errors rather than being flattened away.
     fn scan_for_undeclared_manifests(
         &self,
         entry_path: &Path,
@@ -356,21 +405,36 @@ impl BenchmarkExecutionWorkspace {
         let mut pending = vec![entry_path.to_owned()];
         while let Some(directory) = pending.pop() {
             let entries = std::fs::read_dir(&directory).map_err(|source| {
-                BenchmarkWorkspaceError::RemovalFailed {
-                    root: directory.clone(),
+                BenchmarkWorkspaceError::ScanFailed {
+                    path: directory.clone(),
                     source,
                 }
             })?;
 
-            for entry in entries.flatten() {
+            for entry in entries {
+                let entry = entry.map_err(|source| BenchmarkWorkspaceError::ScanFailed {
+                    path: directory.clone(),
+                    source,
+                })?;
                 let path = entry.path();
                 let file_name = entry.file_name();
+                let file_type =
+                    entry
+                        .file_type()
+                        .map_err(|source| BenchmarkWorkspaceError::ScanFailed {
+                            path: path.clone(),
+                            source,
+                        })?;
+
+                if file_type.is_symlink() {
+                    return Err(BenchmarkWorkspaceError::UnexpectedSymlink { path });
+                }
 
                 if file_name == ".moth_manifest" {
                     return Err(BenchmarkWorkspaceError::UndeclaredManifest { path });
                 }
 
-                if path.is_dir() {
+                if file_type.is_dir() {
                     let inside_declared_root = roots
                         .iter()
                         .filter(|root| root.entry_path == entry_path)
@@ -386,23 +450,101 @@ impl BenchmarkExecutionWorkspace {
     }
 }
 
+/// Validate that one registered root may be safely removed.
+///
+/// Inspects every path component between the workload entry and the root with
+/// `symlink_metadata`, rejects any symlink component, then canonicalises the
+/// nearest existing ancestor and proves it stays inside the canonical workload
+/// entry. Only after that may `remove_dir_all` run.
+fn validate_root_path_for_removal(
+    entry_path: &Path,
+    root_path: &Path,
+) -> Result<(), BenchmarkWorkspaceError> {
+    let relative = root_path.strip_prefix(entry_path).map_err(|_| {
+        BenchmarkWorkspaceError::RootOutsideEntry {
+            root: root_path.to_owned(),
+            entry: entry_path.to_owned(),
+        }
+    })?;
+
+    let mut current = entry_path.to_owned();
+    for component in relative.components() {
+        current.push(component);
+        let metadata = match std::fs::symlink_metadata(&current) {
+            Ok(metadata) => metadata,
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(source) => {
+                return Err(BenchmarkWorkspaceError::MetadataInspectionFailed {
+                    path: current.clone(),
+                    source,
+                });
+            }
+        };
+
+        if metadata.file_type().is_symlink() {
+            return Err(BenchmarkWorkspaceError::SymlinkComponent { path: current });
+        }
+    }
+
+    let canonical_entry = std::fs::canonicalize(entry_path).map_err(|source| {
+        BenchmarkWorkspaceError::MetadataInspectionFailed {
+            path: entry_path.to_owned(),
+            source,
+        }
+    })?;
+
+    let mut existing_ancestor = root_path.to_owned();
+    loop {
+        match std::fs::symlink_metadata(&existing_ancestor) {
+            Ok(_) => break,
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
+                if !existing_ancestor.pop() {
+                    break;
+                }
+            }
+            Err(source) => {
+                return Err(BenchmarkWorkspaceError::MetadataInspectionFailed {
+                    path: existing_ancestor.clone(),
+                    source,
+                });
+            }
+        }
+    }
+
+    let canonical_ancestor = std::fs::canonicalize(&existing_ancestor).map_err(|source| {
+        BenchmarkWorkspaceError::MetadataInspectionFailed {
+            path: existing_ancestor.clone(),
+            source,
+        }
+    })?;
+
+    if !canonical_ancestor.starts_with(&canonical_entry) {
+        return Err(BenchmarkWorkspaceError::RootNotContained {
+            root: root_path.to_owned(),
+            entry: entry_path.to_owned(),
+        });
+    }
+
+    Ok(())
+}
+
 /// Explicitly finalise run-owned outputs and combine operation and cleanup
 /// failures.
 ///
 /// Runs before repository verification and persistence in every suite and
 /// profile flow. When the operation and cleanup both fail, both causes are
 /// reported.
-pub(crate) fn finalise_workspace(
+pub(crate) fn finalise_workspace<T>(
     workspace: &BenchmarkExecutionWorkspace,
-    result: Result<(), String>,
-) -> Result<(), String> {
-    match (result, workspace.finish()) {
-        (Err(operation), Err(cleanup_error)) => Err(format!(
-            "{operation}\nworkspace cleanup also failed: {cleanup_error}"
+    operation: Result<T, String>,
+) -> Result<T, String> {
+    match (operation, workspace.finish()) {
+        (Err(operation_error), Err(cleanup_error)) => Err(format!(
+            "{operation_error}\nworkspace cleanup also failed: {cleanup_error}"
         )),
-        (Err(operation), Ok(())) => Err(operation),
-        (Ok(()), Err(cleanup_error)) => Err(format!("workspace cleanup failed: {cleanup_error}")),
-        (Ok(()), Ok(())) => Ok(()),
+        (Err(operation_error), Ok(())) => Err(operation_error),
+        (Ok(_), Err(cleanup_error)) => Err(format!("workspace cleanup failed: {cleanup_error}")),
+        (Ok(value), Ok(())) => Ok(value),
     }
 }
 
@@ -415,6 +557,7 @@ impl Drop for BenchmarkExecutionWorkspace {
             if root.root_path.starts_with(&root.entry_path)
                 && !root.root_path.is_symlink()
                 && root.root_path.exists()
+                && validate_root_path_for_removal(&root.entry_path, &root.root_path).is_ok()
             {
                 let _ = std::fs::remove_dir_all(&root.root_path);
             }

@@ -686,8 +686,123 @@ fn finalise_reports_operation_and_cleanup_failures_together() {
     std::fs::write(entry_path.join(".moth_manifest"), "drift\n")
         .expect("undeclared manifest should be writable");
 
-    let error = finalise_workspace(&workspace, Err("operation failed".to_owned()))
+    let error = finalise_workspace::<()>(&workspace, Err("operation failed".to_owned()))
         .expect_err("both failures must be reported");
     assert!(error.contains("operation failed"));
     assert!(error.contains("workspace cleanup also failed"));
+}
+
+#[test]
+fn finalise_workspace_preserves_successful_operation_value() {
+    let directory = tempdir().expect("temporary repository should exist");
+    let entry_path = directory_project(directory.path(), "project");
+
+    let manifest = make_manifest(
+        directory.path(),
+        vec![make_workload(
+            "project",
+            "project",
+            BenchmarkEntryKind::Directory,
+            &["dev"],
+        )],
+        vec![cli_case(
+            "project_build",
+            0,
+            CliBenchmarkCommand::Build,
+            &[],
+        )],
+    );
+    let workspace = BenchmarkExecutionWorkspace::create(directory.path())
+        .expect("workspace should be creatable");
+    workspace
+        .resolve_cli_invocation(&manifest, &manifest.cases[0])
+        .expect("build invocation should resolve");
+    std::fs::create_dir_all(entry_path.join("dev")).expect("dev output should be creatable");
+
+    let value = finalise_workspace(&workspace, Ok(42usize))
+        .expect("a successful operation with successful cleanup should pass through");
+    assert_eq!(value, 42);
+    assert!(!entry_path.join("dev").exists());
+}
+
+#[test]
+#[cfg(unix)]
+fn scan_rejects_symlink_encountered_during_undeclared_manifest_scan() {
+    let directory = tempdir().expect("temporary repository should exist");
+    let entry_path = directory_project(directory.path(), "project");
+
+    let manifest = make_manifest(
+        directory.path(),
+        vec![make_workload(
+            "project",
+            "project",
+            BenchmarkEntryKind::Directory,
+            &["dev"],
+        )],
+        vec![cli_case(
+            "project_build",
+            0,
+            CliBenchmarkCommand::Build,
+            &[],
+        )],
+    );
+    let workspace = BenchmarkExecutionWorkspace::create(directory.path())
+        .expect("workspace should be creatable");
+    workspace
+        .resolve_cli_invocation(&manifest, &manifest.cases[0])
+        .expect("build invocation should resolve");
+
+    let outside = directory.path().join("outside");
+    std::fs::create_dir_all(&outside).expect("outside directory should be creatable");
+    std::os::unix::fs::symlink(&outside, entry_path.join("linked"))
+        .expect("nested symlink should be creatable");
+
+    let error = workspace
+        .finish()
+        .expect_err("a symlink inside the scan must fail finalisation");
+    assert!(matches!(
+        error,
+        BenchmarkWorkspaceError::UnexpectedSymlink { .. }
+    ));
+}
+
+#[test]
+#[cfg(unix)]
+fn nested_root_with_symlink_intermediate_component_fails_finalisation() {
+    let directory = tempdir().expect("temporary repository should exist");
+    let entry_path = directory_project(directory.path(), "project");
+
+    let manifest = make_manifest(
+        directory.path(),
+        vec![make_workload(
+            "project",
+            "project",
+            BenchmarkEntryKind::Directory,
+            &["deep/assets", "deep"],
+        )],
+        vec![cli_case(
+            "project_build",
+            0,
+            CliBenchmarkCommand::Build,
+            &[],
+        )],
+    );
+    let workspace = BenchmarkExecutionWorkspace::create(directory.path())
+        .expect("workspace should be creatable");
+    workspace
+        .resolve_cli_invocation(&manifest, &manifest.cases[0])
+        .expect("build invocation should resolve");
+
+    let outside = directory.path().join("outside");
+    std::fs::create_dir_all(outside.join("assets")).expect("outside assets should be creatable");
+    std::os::unix::fs::symlink(&outside, entry_path.join("deep"))
+        .expect("intermediate symlink should be creatable");
+
+    let error = workspace
+        .finish()
+        .expect_err("a symlink component between entry and root must fail finalisation");
+    assert!(matches!(
+        error,
+        BenchmarkWorkspaceError::SymlinkComponent { .. }
+    ));
 }

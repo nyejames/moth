@@ -227,7 +227,7 @@ Profile history uses its own protocol version (`PROFILE_PROTOCOL_VERSION`, curre
 
 When a case's source fingerprint changed since the previous run, drift reports "workload changed" and the case does not contribute to function, stage, or counter drift. When the measurement fingerprint changed (e.g., runner or protocol changed), drift reports "measurement changed" with the same exclusion. Only cases with identical identity contribute to drift aggregates.
 
-Legacy profile history (format v1 and v2) remains readable but is never selected as a directly comparable previous run because it lacks current protocol version and identity.
+Legacy profile history (formats v1 through v3) remains readable but is never selected as a directly comparable previous run because it lacks current protocol version and identity.
 
 Current profile history requires a mandatory measurement identity and a captured revision. Dirty profile runs write artifacts but skip history append, so they never become future drift baselines.
 

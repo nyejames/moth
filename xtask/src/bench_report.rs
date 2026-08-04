@@ -6,23 +6,23 @@
 //! per-case, stage, counter, and ratio evidence without writing any files.
 
 use crate::bench_history::{
-    LocalRunRecord, RUNS_JSONL_PATH, read_local_runs, thread_identity_label, to_case_results,
+    LocalRunRecord, read_local_runs, thread_identity_label, to_case_results,
 };
-use crate::bench_system::{SystemIdentityMode, load_or_create_system};
+use crate::bench_system::{SystemIdentityMode, load_or_create_system_at};
 use crate::bench_types::{
     BENCHMARK_PROTOCOL_VERSION, BenchmarkCaseResult, BenchmarkComparison, BenchmarkMetric,
     BenchmarkStageMovement, BenchmarkSuiteKind, BenchmarkSystem, BenchmarkThresholds,
     calculate_stage_movement,
 };
-use crate::benchmark_manifest::{BenchmarkRunner, CliBenchmarkCommand};
+use crate::benchmark_manifest::{BenchmarkRunner, CliBenchmarkCommand, load_benchmark_manifest};
+use crate::benchmark_run::BenchmarkPaths;
 use crate::profile::drift::{
     DriftCaseInput, DriftHotFunction, compute_drift, find_comparable_previous,
 };
 use crate::profile::history::{
-    PROFILE_RUNS_JSONL_PATH, ProfileHistoryRecord, StoredProfileHistoryRecord, read_profile_runs,
+    ProfileHistoryRecord, StoredProfileHistoryRecord, read_profile_runs,
 };
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
 
 const SLOW_CASE_LIMIT: usize = 3;
 const SLOW_CASE_STAGE_LIMIT: usize = 2;
@@ -187,12 +187,14 @@ const RATIO_CATALOG: &[RatioSpec] = &[
 
 /// Run `bench-report` from the repository root.
 pub fn run_benchmark_report() -> Result<(), String> {
-    let runs = read_local_runs(Path::new(RUNS_JSONL_PATH))?;
-    let system = load_or_create_system(SystemIdentityMode::ReadOnly)?;
+    let manifest = load_benchmark_manifest().map_err(|error| error.to_string())?;
+    let paths = BenchmarkPaths::for_repository(&manifest.repository_root);
+    let runs = read_local_runs(&paths.runs_jsonl)?;
+    let system = load_or_create_system_at(&paths.system_toml, SystemIdentityMode::ReadOnly)?;
     let mut report = calculate_benchmark_report(&runs, system.as_ref());
 
     // Collect the latest profile run info (silently omitted if missing/malformed).
-    report.latest_profile_run = collect_latest_profile_run(system.as_ref());
+    report.latest_profile_run = collect_latest_profile_run(system.as_ref(), &paths);
 
     println!("{}", format_benchmark_report(&report));
 
@@ -1052,9 +1054,9 @@ fn append_latest_profile_run(output: &mut String, report: &BenchmarkReport) {
 /// malformed so `bench-report` never depends on profile data existing.
 fn collect_latest_profile_run(
     current_system: Option<&BenchmarkSystem>,
+    paths: &BenchmarkPaths,
 ) -> Option<LatestProfileRun> {
-    let history_path = Path::new(PROFILE_RUNS_JSONL_PATH);
-    let records = read_profile_runs(history_path).ok()?;
+    let records = read_profile_runs(&paths.profile_history).ok()?;
 
     // Only current-format records surface in the report; legacy records stay
     // readable history but never become the latest displayed run.
@@ -1076,10 +1078,12 @@ fn collect_latest_profile_run(
         .first()
         .map(|c| format!("{}/agent-summary.md", c.run_directory_path))
         .unwrap_or_else(|| {
-            format!(
-                "benchmarks/local-data/profiles/{}/agent-summary.md",
-                latest.run_id
-            )
+            paths
+                .profiles
+                .join(&latest.run_id)
+                .join("agent-summary.md")
+                .display()
+                .to_string()
         });
 
     // The latest legacy record is listed for context; it never becomes a

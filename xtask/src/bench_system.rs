@@ -18,9 +18,6 @@ use std::path::Path;
 use std::time::SystemTime;
 use std::{env, fs, process};
 
-/// Path to the local system identity file, relative to repo root.
-pub const SYSTEM_TOML_PATH: &str = "benchmarks/local-data/system.toml";
-
 /// Controls whether a missing local benchmark identity may be created.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SystemIdentityMode {
@@ -30,19 +27,15 @@ pub enum SystemIdentityMode {
     CreateIfMissing,
 }
 
-/// Load or create the local system identity.
+/// Load or create the local system identity at one repository-anchored path.
 ///
-/// - `CreateIfMissing`: creates `benchmarks/local-data/` and `system.toml`
-///   if missing.
-/// - `ReadOnly`: returns `Ok(None)` if `system.toml` does not exist.
+/// - `CreateIfMissing`: creates the local-data directory and `system.toml`
+///   when the file is missing.
+/// - `ReadOnly`: returns `Ok(None)` when the file is missing.
 ///
 /// Returns `Some(BenchmarkSystem)` when identity is available, `None` when
 /// read-only mode is used and the file is missing.
-pub fn load_or_create_system(mode: SystemIdentityMode) -> Result<Option<BenchmarkSystem>, String> {
-    load_or_create_system_at(Path::new(SYSTEM_TOML_PATH), mode)
-}
-
-fn load_or_create_system_at(
+pub(crate) fn load_or_create_system_at(
     path: &Path,
     mode: SystemIdentityMode,
 ) -> Result<Option<BenchmarkSystem>, String> {

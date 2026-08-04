@@ -11,18 +11,15 @@
 //! WHY:  Provides a compact, human-readable, tracked record of benchmark
 //!       trends without committing raw per-case data.
 
-use crate::bench_history::{
-    LocalRunRecord, RUNS_JSONL_PATH, read_local_runs, to_case_results, to_group_stats,
-};
+use crate::bench_history::{LocalRunRecord, read_local_runs, to_case_results, to_group_stats};
 use crate::bench_types::{
     BENCHMARK_PROTOCOL_VERSION, BenchmarkChangeKind, BenchmarkComparison, BenchmarkGroupStats,
     BenchmarkRun, BenchmarkThresholds, SuiteStats, calculate_stage_movement,
     format_stage_movement_line,
 };
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-const SUMMARIES_DIR: &str = "benchmarks/summaries";
 const SECTION_SEPARATOR: &str = "---------------------";
 
 /// Parsed representation of a single run entry in the summary file.
@@ -89,6 +86,7 @@ impl ParsedSummaryRunEntry {
 pub fn update_monthly_summary(
     run: &BenchmarkRun,
     comparison: &BenchmarkComparison,
+    paths: &crate::benchmark_run::BenchmarkPaths,
 ) -> Result<(), String> {
     // Defense in depth: a non-clean run must never update the tracked summary,
     // even if a caller bypasses the recording gate.
@@ -106,11 +104,11 @@ pub fn update_monthly_summary(
     }
 
     let month_key = run.timestamp.month_key();
-    let path = summary_path(&month_key);
+    let path = summary_path(paths, &month_key);
     let suite_kind_label = run.suite_kind.display_label().to_string();
     let persisted_suite_kind = run.suite_kind.persisted_name();
 
-    let month_runs = load_month_runs(&month_key)?;
+    let month_runs = load_month_runs(paths, &month_key)?;
 
     // Only default-thread runs feed the public summary top block so a
     // recorded fixed-thread run can never become the initial or latest record.
@@ -191,13 +189,16 @@ fn comparable_summary_record(
 }
 
 /// Build the file path for a given month key.
-fn summary_path(month_key: &str) -> PathBuf {
-    PathBuf::from(SUMMARIES_DIR).join(format!("{}-Summary.md", month_key))
+fn summary_path(paths: &crate::benchmark_run::BenchmarkPaths, month_key: &str) -> PathBuf {
+    paths.summaries.join(format!("{}-Summary.md", month_key))
 }
 
 /// Load all local raw runs for a specific month.
-fn load_month_runs(month_key: &str) -> Result<Vec<LocalRunRecord>, String> {
-    let runs = read_local_runs(Path::new(RUNS_JSONL_PATH))?;
+fn load_month_runs(
+    paths: &crate::benchmark_run::BenchmarkPaths,
+    month_key: &str,
+) -> Result<Vec<LocalRunRecord>, String> {
+    let runs = read_local_runs(&paths.runs_jsonl)?;
     Ok(runs
         .into_iter()
         .filter(|r| {

@@ -22,14 +22,11 @@
 //! - Profile JSON parsing or hotspot extraction (see `parse.rs`, `hotspots.rs`)
 //! - Agent summaries and enriched per-case summaries (see `summary.rs`)
 
-use crate::bench_system::{SystemIdentityMode, load_or_create_system};
+use crate::bench_system::{SystemIdentityMode, load_or_create_system_at};
 use crate::bench_types::{BenchmarkMeasurementIdentity, BenchmarkMetric, GitRevision};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
-
-/// Path to the profile history file, relative to repo root.
-pub const PROFILE_RUNS_JSONL_PATH: &str = "benchmarks/local-data/profile-runs.jsonl";
 
 /// Profile measurement and comparison protocol version.
 ///
@@ -290,8 +287,9 @@ pub fn build_history_record(
     filter_mode: &str,
     sample_rate_hz: Option<f64>,
     cases: Vec<HistoryCaseRecord>,
+    system_toml_path: &Path,
 ) -> Result<ProfileHistoryRecord, String> {
-    let system = load_or_create_system(SystemIdentityMode::ReadOnly)?;
+    let system = load_or_create_system_at(system_toml_path, SystemIdentityMode::ReadOnly)?;
     let (system_uuid, system_display) = match system {
         Some(s) => (s.system_uuid, s.display_name),
         None => ("unknown".to_string(), "unknown".to_string()),

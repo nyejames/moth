@@ -8,11 +8,11 @@
 //! or history implementation can drift.
 
 use crate::bench_history::{
-    RUNS_JSONL_PATH, append_local_run, find_latest_matching_run, read_local_runs,
-    thread_identity_suffix, to_case_results, to_local_record,
+    append_local_run, find_latest_matching_run, read_local_runs, thread_identity_suffix,
+    to_case_results, to_local_record,
 };
 use crate::bench_summary::update_monthly_summary;
-use crate::bench_system::{SystemIdentityMode, load_or_create_system};
+use crate::bench_system::{SystemIdentityMode, load_or_create_system_at};
 use crate::bench_time::BenchmarkTimestamp;
 use crate::bench_types::{
     BENCHMARK_PROTOCOL_VERSION, BenchmarkCaseObservations, BenchmarkCaseResult,
@@ -26,9 +26,8 @@ use crate::benchmark_execution::{
     BenchmarkExecutionContext, average_case_observations, execute_case,
 };
 use crate::benchmark_manifest::BenchmarkCase;
-use crate::benchmark_run::PreparedBenchmarkRun;
+use crate::benchmark_run::{BenchmarkPaths, PreparedBenchmarkRun};
 use std::num::NonZeroUsize;
-use std::path::PathBuf;
 
 /// Measured case results plus the presentation facts needed to persist a run.
 struct SuitePresentation {
@@ -135,6 +134,7 @@ pub(crate) fn finish_suite_run(
     thread_count: Option<u32>,
     policy: BenchmarkRunPolicy,
     git_revision: &GitRevision,
+    paths: &BenchmarkPaths,
 ) -> Result<(), String> {
     if policy.recording() == BenchmarkRecording::ReadOnly {
         return present_run(
@@ -143,6 +143,7 @@ pub(crate) fn finish_suite_run(
             thread_count,
             policy.selection(),
             SystemIdentityMode::ReadOnly,
+            paths,
         )
         .map(|_| ());
     }
@@ -153,6 +154,7 @@ pub(crate) fn finish_suite_run(
         thread_count,
         policy.selection(),
         SystemIdentityMode::CreateIfMissing,
+        paths,
     )?
     .ok_or_else(|| "recording benchmark run has no system identity".to_owned())?;
 
@@ -169,7 +171,7 @@ pub(crate) fn finish_suite_run(
         measured_iterations: policy.measured_iterations().get(),
         thread_count,
     };
-    record_run(&run, &presentation.comparison)
+    record_run(&run, &presentation.comparison, paths)
 }
 
 /// Present one completed suite without entering any persistence path.
@@ -178,6 +180,7 @@ pub(crate) fn present_read_only(
     suite_kind: BenchmarkSuiteKind,
     thread_count: Option<u32>,
     selection: BenchmarkSelection,
+    paths: &BenchmarkPaths,
 ) -> Result<(), String> {
     present_run(
         case_results,
@@ -185,6 +188,7 @@ pub(crate) fn present_read_only(
         thread_count,
         selection,
         SystemIdentityMode::ReadOnly,
+        paths,
     )
     .map(|_| ())
 }
@@ -195,6 +199,7 @@ fn present_run(
     thread_count: Option<u32>,
     selection: BenchmarkSelection,
     identity_mode: SystemIdentityMode,
+    paths: &BenchmarkPaths,
 ) -> Result<Option<SuitePresentation>, String> {
     let groups = calculate_group_stats(case_results);
     debug_assert_eq!(
@@ -214,7 +219,7 @@ fn present_run(
     let suite = SuiteStats::from_case_results(case_results);
     let timestamp = BenchmarkTimestamp::now();
 
-    let system = match load_or_create_system(identity_mode)? {
+    let system = match load_or_create_system_at(&paths.system_toml, identity_mode)? {
         Some(sys) => sys,
         None => {
             println!(
@@ -236,7 +241,7 @@ fn present_run(
     };
 
     let previous_cases =
-        load_previous_cases_for_system(&system.system_uuid, suite_kind, thread_count)?;
+        load_previous_cases_for_system(&system.system_uuid, suite_kind, thread_count, paths)?;
 
     let comparison = match &previous_cases {
         Some(cases) if selection == BenchmarkSelection::Quick => {
@@ -285,13 +290,13 @@ fn load_previous_cases_for_system(
     system_uuid: &str,
     suite_kind: BenchmarkSuiteKind,
     thread_count: Option<u32>,
+    paths: &BenchmarkPaths,
 ) -> Result<Option<Vec<BenchmarkCaseResult>>, String> {
-    let runs_path = PathBuf::from(RUNS_JSONL_PATH);
-    if !runs_path.exists() {
+    if !paths.runs_jsonl.exists() {
         return Ok(None);
     }
 
-    let runs = read_local_runs(&runs_path)?;
+    let runs = read_local_runs(&paths.runs_jsonl)?;
     Ok(find_latest_matching_run(&runs, system_uuid, suite_kind, thread_count).map(to_case_results))
 }
 
@@ -300,12 +305,15 @@ fn load_previous_cases_for_system(
 /// Appends the run to local raw history, then delegates tracked-summary
 /// updates to `update_monthly_summary`, which owns the default-thread policy
 /// and safely no-ops for fixed-thread runs.
-fn record_run(run: &BenchmarkRun, comparison: &BenchmarkComparison) -> Result<(), String> {
-    let runs_path = PathBuf::from(RUNS_JSONL_PATH);
+fn record_run(
+    run: &BenchmarkRun,
+    comparison: &BenchmarkComparison,
+    paths: &BenchmarkPaths,
+) -> Result<(), String> {
     let record = to_local_record(run);
-    append_local_run(&runs_path, &record)?;
+    append_local_run(&paths.runs_jsonl, &record)?;
 
-    update_monthly_summary(run, comparison)?;
+    update_monthly_summary(run, comparison, paths)?;
 
     Ok(())
 }

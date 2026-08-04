@@ -40,7 +40,7 @@ const FRONTEND_SECTION: BenchCiSection = BenchCiSection {
 
 /// Run the complete bounded validation benchmark gate.
 pub(crate) fn run_bench_ci() -> Result<(), String> {
-    let prepared = PreparedBenchmarkRun::load()?;
+    let prepared = PreparedBenchmarkRun::load(BenchmarkRecording::ReadOnly)?;
 
     println!("Building release compiler...");
     let compiler = build_release_compiler_with_timers(&prepared.manifest.repository_root)?;
@@ -83,6 +83,7 @@ pub(crate) fn run_bench_ci() -> Result<(), String> {
                 &case_results,
                 thread_count,
                 BenchmarkSelection::Quick,
+                prepared.paths(),
             )
         },
     );
@@ -119,8 +120,15 @@ fn present_section(
     case_results: &[BenchmarkCaseResult],
     thread_count: Option<u32>,
     selection: BenchmarkSelection,
+    paths: &crate::benchmark_run::BenchmarkPaths,
 ) -> Result<(), String> {
-    present_read_only(case_results, section.suite_kind, thread_count, selection)
+    present_read_only(
+        case_results,
+        section.suite_kind,
+        thread_count,
+        selection,
+        paths,
+    )
 }
 
 /// Preserve the gate ordering: complete preflight first, then derive and run

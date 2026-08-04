@@ -1,4 +1,4 @@
-use super::run::{profile_artifacts_root, profile_history_allowed, select_profile_cases};
+use super::run::{collect_profile_run, profile_history_allowed, select_profile_cases};
 use crate::bench_types::BenchmarkGroup;
 use crate::benchmark_execution::BenchmarkExecutionContext;
 use crate::benchmark_manifest::{
@@ -7,7 +7,11 @@ use crate::benchmark_manifest::{
     FrontendBenchmarkProfile,
 };
 use crate::benchmark_repository::BenchmarkRepositorySnapshot;
-use crate::benchmark_workspace::BenchmarkExecutionWorkspace;
+use crate::benchmark_run::{BenchmarkPaths, PreparedBenchmarkRun};
+use crate::benchmark_workspace::{BenchmarkExecutionWorkspace, finalise_workspace};
+use crate::compiler_binary::CompilerBinary;
+use crate::profile::options::{ProfileFilterMode, ProfileOptions};
+use crate::profile::runner::{PresymbolicationFlag, SamplyRecordCapabilities};
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
@@ -36,15 +40,21 @@ fn unfiltered_profile_selection_keeps_only_cli_cases() {
 }
 
 #[test]
-fn profile_artifacts_root_is_anchored_to_repository_root() {
+fn profile_paths_are_anchored_to_repository_root() {
     let repository = tempfile::tempdir().expect("temporary repository should exist");
 
-    let profiles_root = profile_artifacts_root(repository.path());
+    let paths = BenchmarkPaths::for_repository(repository.path());
 
-    assert!(profiles_root.is_absolute());
+    assert!(paths.profiles.is_absolute());
     assert_eq!(
-        profiles_root,
+        paths.profiles,
         repository.path().join("benchmarks/local-data/profiles")
+    );
+    assert_eq!(
+        paths.profile_history,
+        repository
+            .path()
+            .join("benchmarks/local-data/profile-runs.jsonl")
     );
 }
 
@@ -205,4 +215,248 @@ fn observation_and_samply_receive_one_resolved_invocation() {
     // one invocation. The profile orchestrator must not reconstruct the
     // command separately for either pass.
     let _ = PathBuf::from(&invocation.current_directory);
+}
+
+#[cfg(unix)]
+fn write_executable(path: &Path, contents: &str) {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::write(path, contents).expect("mock executable should be writable");
+    let mut permissions = fs::metadata(path)
+        .expect("mock executable metadata should be readable")
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(path, permissions).expect("mock executable should be executable");
+}
+
+#[cfg(unix)]
+fn profile_fixture(root: &Path) -> (BenchmarkManifest, PreparedBenchmarkRun) {
+    let entry_path = root.join("project");
+    fs::create_dir_all(&entry_path).expect("project directory should be creatable");
+    fs::write(entry_path.join("main.moth"), "value = 42\n")
+        .expect("project source should be writable");
+    commit_all(root, "initial fixture");
+
+    let manifest = BenchmarkManifest {
+        workloads: vec![BenchmarkWorkload {
+            id: "fixture".to_owned(),
+            entry: "project".into(),
+            entry_kind: BenchmarkEntryKind::Directory,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
+            fingerprint_roots: vec!["project".into()],
+            fingerprint_excludes: vec!["project/dev".into()],
+            generated_output_roots: vec!["dev".into()],
+        }],
+        cases: vec![BenchmarkCase {
+            id: "build_case".to_owned(),
+            case_index: 0,
+            workload_index: 0,
+            group_name: BenchmarkGroup::Core,
+            quick: false,
+            expectation: BenchmarkExpectation::Clean,
+            runner: BenchmarkRunner::Cli {
+                command: CliBenchmarkCommand::Build,
+                args: Vec::new(),
+            },
+        }],
+        manifest_path: root.join("manifest.toml"),
+        repository_root: root.to_path_buf(),
+    };
+    let snapshot = BenchmarkRepositorySnapshot::capture(root).expect("snapshot should capture");
+    let fingerprints = crate::benchmark_fingerprint::compute_benchmark_fingerprints(&manifest)
+        .expect("fingerprints should compute");
+    let prepared = PreparedBenchmarkRun {
+        manifest: manifest.clone(),
+        snapshot,
+        fingerprints,
+        paths: BenchmarkPaths::for_repository(root),
+    };
+    (manifest, prepared)
+}
+
+#[cfg(unix)]
+fn profile_collection_failure_finalises_workspace(script: &str) {
+    let repo = init_git_repo();
+    let (_manifest, prepared) = profile_fixture(repo.path());
+
+    let compiler_path = repo.path().join("mock-moth");
+    write_executable(&compiler_path, script);
+    let compiler = CompilerBinary {
+        path: compiler_path,
+        symbol_dirs: Vec::new(),
+        profiling_symbols: None,
+    };
+    let samply = SamplyRecordCapabilities {
+        version: "test".to_owned(),
+        presymbolication_flag: PresymbolicationFlag::Unavailable,
+    };
+    let workspace =
+        BenchmarkExecutionWorkspace::create(repo.path()).expect("workspace should be creatable");
+    let options = ProfileOptions {
+        filter: ProfileFilterMode::RawIndex,
+        case_filter: None,
+        samply_rate_hz: None,
+        presymbolicate: false,
+    };
+
+    let result = finalise_workspace(
+        &workspace,
+        collect_profile_run(&options, &prepared, &workspace, &compiler, &samply),
+    );
+
+    assert!(result.is_err(), "collection failure must surface");
+    assert!(
+        !repo.path().join("project/dev").exists(),
+        "finish() must run after a collection failure"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn preflight_failure_still_calls_explicit_finish() {
+    profile_collection_failure_finalises_workspace("#!/bin/sh\nmkdir -p project/dev\nexit 1\n");
+}
+
+#[test]
+#[cfg(unix)]
+fn observation_failure_still_calls_explicit_finish() {
+    let script = r#"#!/bin/sh
+count_file="$PWD/.mock-invocation-count"
+if [ ! -f "$count_file" ]; then
+  printf '0
+' > "$count_file"
+fi
+count=$(cat "$count_file")
+count=$((count + 1))
+printf '%s
+' "$count" > "$count_file"
+if [ "$count" -eq 1 ]; then
+  printf 'MOTH_BENCH status errors=0 warnings=0
+'
+  exit 0
+fi
+mkdir -p project/dev
+exit 1
+"#;
+    profile_collection_failure_finalises_workspace(script);
+}
+
+#[test]
+#[cfg(unix)]
+fn samply_failure_still_calls_explicit_finish() {
+    let repo = init_git_repo();
+    let (manifest, _prepared) = profile_fixture(repo.path());
+
+    let workspace =
+        BenchmarkExecutionWorkspace::create(repo.path()).expect("workspace should be creatable");
+    workspace
+        .resolve_cli_invocation(&manifest, &manifest.cases[0])
+        .expect("build invocation should register the output root");
+    fs::create_dir_all(repo.path().join("project/dev")).expect("dev output should be creatable");
+
+    let error = finalise_workspace::<()>(
+        &workspace,
+        Err("Samply recording failed for case 'build_case'".to_owned()),
+    )
+    .expect_err("a Samply failure must surface");
+
+    assert!(error.contains("Samply recording failed"));
+    assert!(!repo.path().join("project/dev").exists());
+}
+
+#[test]
+#[cfg(unix)]
+fn artifact_write_failure_still_calls_explicit_finish() {
+    let repo = init_git_repo();
+    let (_manifest, prepared) = profile_fixture(repo.path());
+
+    // A compiler that passes preflight (and creates the generated root) while
+    // the profile artifact directory is not writable. The collection phase
+    // fails on artifact creation; finalisation must still remove the root.
+    let compiler_path = repo.path().join("mock-moth");
+    write_executable(
+        &compiler_path,
+        "#!/bin/sh\nmkdir -p project/dev\nprintf 'MOTH_BENCH status errors=0 warnings=0\n'\nexit 0\n",
+    );
+    let compiler = CompilerBinary {
+        path: compiler_path,
+        symbol_dirs: Vec::new(),
+        profiling_symbols: None,
+    };
+    let samply = SamplyRecordCapabilities {
+        version: "test".to_owned(),
+        presymbolication_flag: PresymbolicationFlag::Unavailable,
+    };
+    let workspace =
+        BenchmarkExecutionWorkspace::create(repo.path()).expect("workspace should be creatable");
+    let options = ProfileOptions {
+        filter: ProfileFilterMode::RawIndex,
+        case_filter: None,
+        samply_rate_hz: None,
+        presymbolicate: false,
+    };
+
+    let profiles_root = &prepared.paths.profiles;
+    fs::create_dir_all(profiles_root).expect("profiles root should be creatable");
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = fs::metadata(profiles_root)
+            .expect("profiles metadata should be readable")
+            .permissions();
+        permissions.set_mode(0o500);
+        fs::set_permissions(profiles_root, permissions)
+            .expect("profiles root should become read-only");
+    }
+
+    let result = finalise_workspace(
+        &workspace,
+        collect_profile_run(&options, &prepared, &workspace, &compiler, &samply),
+    );
+
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = fs::metadata(profiles_root)
+            .expect("profiles metadata should be readable")
+            .permissions();
+        permissions.set_mode(0o700);
+        let _ = fs::set_permissions(profiles_root, permissions);
+    }
+
+    assert!(result.is_err(), "artifact write failure must surface");
+    assert!(
+        !repo.path().join("project/dev").exists(),
+        "finish() must run after an artifact write failure"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn cleanup_failure_prevents_profile_history_append() {
+    let repo = init_git_repo();
+    let (manifest, prepared) = profile_fixture(repo.path());
+
+    let workspace =
+        BenchmarkExecutionWorkspace::create(repo.path()).expect("workspace should be creatable");
+    workspace
+        .resolve_cli_invocation(&manifest, &manifest.cases[0])
+        .expect("build invocation should register the output root");
+    fs::create_dir_all(repo.path().join("project/dev")).expect("dev output should be creatable");
+    fs::write(repo.path().join("project/.moth_manifest"), "drift\n")
+        .expect("undeclared manifest should be writable");
+
+    let history_path = &prepared.paths.profile_history;
+    if let Some(parent) = history_path.parent() {
+        fs::create_dir_all(parent).expect("history parent should be creatable");
+    }
+    fs::write(history_path, "sentinel-history\n").expect("history sentinel should be writable");
+
+    let error =
+        finalise_workspace::<()>(&workspace, Ok(())).expect_err("a cleanup failure must surface");
+    assert!(error.contains("undeclared output manifest"));
+
+    let contents = fs::read_to_string(history_path).expect("history should remain readable");
+    assert_eq!(
+        contents, "sentinel-history\n",
+        "profile history must not be appended after a cleanup failure"
+    );
 }

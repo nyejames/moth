@@ -15,9 +15,6 @@ use serde_json::Value;
 use std::fs;
 use std::path::Path;
 
-/// Path to the local raw benchmark history file, relative to repo root.
-pub const RUNS_JSONL_PATH: &str = "benchmarks/local-data/runs.jsonl";
-
 /// Current on-disk format version.
 const FORMAT_VERSION: u32 = 7;
 

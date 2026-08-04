@@ -29,11 +29,7 @@ use crate::benchmark_workspace::{BenchmarkExecutionWorkspace, finalise_workspace
 /// writing any data. Explicit workspace finalisation precedes repository
 /// verification and persistence.
 pub(crate) fn run_frontend_benchmarks(policy: BenchmarkRunPolicy) -> Result<(), String> {
-    let prepared = PreparedBenchmarkRun::load()?;
-
-    // Recording requires an exactly clean, committed repository before any
-    // fingerprint traversal, compiler construction or history read/write.
-    prepared.require_recording_eligible(policy.recording())?;
+    let prepared = PreparedBenchmarkRun::load(policy.recording())?;
 
     let cases: Vec<BenchmarkCase> = prepared
         .manifest
@@ -73,6 +69,7 @@ pub(crate) fn run_frontend_benchmarks(policy: BenchmarkRunPolicy) -> Result<(), 
                 thread_count,
                 policy,
                 &git_revision,
+                prepared.paths(),
             )
         }
         Err(operation) => finalise_workspace(&workspace, Err(operation)),

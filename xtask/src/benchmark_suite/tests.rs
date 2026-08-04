@@ -8,6 +8,7 @@ use crate::benchmark_manifest::{
     BenchmarkManifest, BenchmarkRunner, BenchmarkWorkload, CliBenchmarkCommand,
 };
 use crate::benchmark_repository::BenchmarkRepositorySnapshot;
+use crate::benchmark_run::BenchmarkPaths;
 use crate::benchmark_workspace::BenchmarkExecutionWorkspace;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -89,6 +90,7 @@ impl CliFixture {
             manifest,
             snapshot,
             fingerprints,
+            paths: BenchmarkPaths::for_repository(self.root()),
         }
     }
 }
@@ -242,8 +244,14 @@ fn cli_and_frontend_suites_share_one_presentation_owner() {
         BenchmarkSuiteKind::EndToEndCli,
         BenchmarkSuiteKind::FrontendPhases,
     ] {
-        present_read_only(&results, suite_kind, None, BenchmarkSelection::Full)
-            .expect("read-only presentation should succeed without system identity");
+        present_read_only(
+            &results,
+            suite_kind,
+            None,
+            BenchmarkSelection::Full,
+            &BenchmarkPaths::for_repository(fixture.root()),
+        )
+        .expect("read-only presentation should succeed without system identity");
         assert!(
             !Path::new("benchmarks/local-data/runs.jsonl").exists(),
             "read-only presentation must not write normal history"
@@ -261,8 +269,13 @@ fn previous_run_loader_is_shared_and_returns_none_without_local_history() {
         BenchmarkSuiteKind::EndToEndCli,
         BenchmarkSuiteKind::FrontendPhases,
     ] {
-        let previous = load_previous_cases_for_system("sys-a", suite_kind, None)
-            .expect("previous-run lookup should not fail without local history");
+        let previous = load_previous_cases_for_system(
+            "sys-a",
+            suite_kind,
+            None,
+            &BenchmarkPaths::for_repository(Path::new(".")),
+        )
+        .expect("previous-run lookup should not fail without local history");
         assert!(previous.is_none());
     }
 }

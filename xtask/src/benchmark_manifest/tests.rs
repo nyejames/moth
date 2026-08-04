@@ -280,6 +280,77 @@ fn overlapping_generated_roots_fail() {
 }
 
 #[test]
+fn case_insensitive_duplicate_generated_roots_fail() {
+    let directory = tempdir().expect("temporary repository should exist");
+    create_directory_entry(directory.path(), "project");
+
+    let path = write_manifest(
+        directory.path(),
+        &directory_build_manifest("project", &["Dev", "dev"], &["project/Dev"]),
+    );
+    let error = load_manifest_at(&path, directory.path())
+        .expect_err("ASCII-case duplicate generated roots must fail");
+    assert!(error.to_string().contains("only by ASCII case"));
+}
+
+#[test]
+fn case_insensitive_ancestor_overlap_generated_roots_fail() {
+    let directory = tempdir().expect("temporary repository should exist");
+    create_directory_entry(directory.path(), "project");
+
+    let path = write_manifest(
+        directory.path(),
+        &directory_build_manifest(
+            "project",
+            &["Dev", "dev/assets"],
+            &["project/Dev", "project/dev/assets"],
+        ),
+    );
+    let error = load_manifest_at(&path, directory.path())
+        .expect_err("case-insensitive overlapping generated roots must fail");
+    assert!(error.to_string().contains("must not overlap"));
+}
+
+#[test]
+fn case_insensitive_ancestor_overlap_with_suffix_fails() {
+    let directory = tempdir().expect("temporary repository should exist");
+    create_directory_entry(directory.path(), "project");
+
+    let path = write_manifest(
+        directory.path(),
+        &directory_build_manifest(
+            "project",
+            &["output/assets", "OUTPUT"],
+            &["project/output/assets", "project/OUTPUT"],
+        ),
+    );
+    let error = load_manifest_at(&path, directory.path())
+        .expect_err("case-insensitive ancestor overlap must fail");
+    assert!(error.to_string().contains("must not overlap"));
+}
+
+#[test]
+fn non_overlapping_case_distinct_generated_roots_load() {
+    let directory = tempdir().expect("temporary repository should exist");
+    create_directory_entry(directory.path(), "project");
+
+    let path = write_manifest(
+        directory.path(),
+        &directory_build_manifest(
+            "project",
+            &["dev", "release"],
+            &["project/dev", "project/release"],
+        ),
+    );
+    let manifest =
+        load_manifest_at(&path, directory.path()).expect("distinct generated roots should load");
+    assert_eq!(
+        manifest.workloads[0].generated_output_roots,
+        vec![PathBuf::from("dev"), PathBuf::from("release")]
+    );
+}
+
+#[test]
 #[cfg(unix)]
 fn symlink_generated_root_fails() {
     let directory = tempdir().expect("temporary repository should exist");
