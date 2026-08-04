@@ -73,6 +73,7 @@ args = []
     write_file(repository_root, "benchmarks/manifest.toml", contents);
 }
 
+#[cfg(unix)]
 fn write_invalid_manifest(repository_root: &Path) {
     let contents = r#"schema = 3
 

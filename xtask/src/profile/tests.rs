@@ -1,4 +1,4 @@
-use super::run::{collect_profile_run, profile_history_allowed, select_profile_cases};
+use super::run::{profile_history_allowed, select_profile_cases};
 use crate::bench_types::BenchmarkGroup;
 use crate::benchmark_execution::BenchmarkExecutionContext;
 use crate::benchmark_manifest::{
@@ -7,15 +7,25 @@ use crate::benchmark_manifest::{
     FrontendBenchmarkProfile,
 };
 use crate::benchmark_repository::BenchmarkRepositorySnapshot;
-use crate::benchmark_run::{BenchmarkPaths, PreparedBenchmarkRun};
-use crate::benchmark_workspace::{BenchmarkExecutionWorkspace, finalise_workspace};
-use crate::compiler_binary::CompilerBinary;
-use crate::profile::options::{ProfileFilterMode, ProfileOptions};
-use crate::profile::runner::{PresymbolicationFlag, SamplyRecordCapabilities};
+use crate::benchmark_run::BenchmarkPaths;
+use crate::benchmark_workspace::BenchmarkExecutionWorkspace;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
+
+#[cfg(unix)]
+use super::run::collect_profile_run;
+#[cfg(unix)]
+use crate::benchmark_run::PreparedBenchmarkRun;
+#[cfg(unix)]
+use crate::benchmark_workspace::finalise_workspace;
+#[cfg(unix)]
+use crate::compiler_binary::CompilerBinary;
+#[cfg(unix)]
+use crate::profile::options::{ProfileFilterMode, ProfileOptions};
+#[cfg(unix)]
+use crate::profile::runner::{PresymbolicationFlag, SamplyRecordCapabilities};
 
 #[test]
 fn profile_selection_rejects_frontend_cases_clearly() {
