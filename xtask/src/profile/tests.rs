@@ -285,9 +285,11 @@ fn profile_fixture(root: &Path) -> (BenchmarkManifest, PreparedBenchmarkRun) {
 }
 
 #[cfg(unix)]
-fn profile_collection_failure_finalises_workspace(script: &str) {
+fn profile_collection_failure_finalises_workspace(script: &str, expected_error: &str) {
     let repo = init_git_repo();
     let (_manifest, prepared) = profile_fixture(repo.path());
+    let selected_cases = select_profile_cases(&prepared.manifest, None)
+        .expect("profile case selection should succeed");
 
     let compiler_path = repo.path().join("mock-moth");
     write_executable(&compiler_path, script);
@@ -311,10 +313,24 @@ fn profile_collection_failure_finalises_workspace(script: &str) {
 
     let result = finalise_workspace(
         &workspace,
-        collect_profile_run(&options, &prepared, &workspace, &compiler, &samply),
+        collect_profile_run(
+            &options,
+            &prepared,
+            selected_cases,
+            &workspace,
+            &compiler,
+            &samply,
+        ),
     );
 
-    assert!(result.is_err(), "collection failure must surface");
+    let error = match result {
+        Err(error) => error,
+        Ok(_) => panic!("collection failure must surface"),
+    };
+    assert!(
+        error.contains(expected_error),
+        "error should name the intended phase, got: {error}"
+    );
     assert!(
         !repo.path().join("project/dev").exists(),
         "finish() must run after a collection failure"
@@ -324,7 +340,10 @@ fn profile_collection_failure_finalises_workspace(script: &str) {
 #[test]
 #[cfg(unix)]
 fn preflight_failure_still_calls_explicit_finish() {
-    profile_collection_failure_finalises_workspace("#!/bin/sh\nmkdir -p project/dev\nexit 1\n");
+    profile_collection_failure_finalises_workspace(
+        "#!/bin/sh\nmkdir -p project/dev\nexit 1\n",
+        "profile preflight",
+    );
 }
 
 #[test]
@@ -341,14 +360,15 @@ count=$((count + 1))
 printf '%s
 ' "$count" > "$count_file"
 if [ "$count" -eq 1 ]; then
-  printf 'MOTH_BENCH status errors=0 warnings=0
+  printf 'MOTH_BENCH timing command.build.total=1ms
+MOTH_BENCH status errors=0 warnings=0
 '
   exit 0
 fi
 mkdir -p project/dev
 exit 1
 "#;
-    profile_collection_failure_finalises_workspace(script);
+    profile_collection_failure_finalises_workspace(script, "Observation pass failed");
 }
 
 #[test]
@@ -383,10 +403,12 @@ fn artifact_write_failure_still_calls_explicit_finish() {
     // A compiler that passes preflight (and creates the generated root) while
     // the profile artifact directory is not writable. The collection phase
     // fails on artifact creation; finalisation must still remove the root.
+    let selected_cases =
+        select_profile_cases(&_manifest, None).expect("profile case selection should succeed");
     let compiler_path = repo.path().join("mock-moth");
     write_executable(
         &compiler_path,
-        "#!/bin/sh\nmkdir -p project/dev\nprintf 'MOTH_BENCH status errors=0 warnings=0\n'\nexit 0\n",
+        "#!/bin/sh\nmkdir -p project/dev\nprintf 'MOTH_BENCH timing command.build.total=1ms\nMOTH_BENCH status errors=0 warnings=0\n'\nexit 0\n",
     );
     let compiler = CompilerBinary {
         path: compiler_path,
@@ -420,7 +442,14 @@ fn artifact_write_failure_still_calls_explicit_finish() {
 
     let result = finalise_workspace(
         &workspace,
-        collect_profile_run(&options, &prepared, &workspace, &compiler, &samply),
+        collect_profile_run(
+            &options,
+            &prepared,
+            selected_cases,
+            &workspace,
+            &compiler,
+            &samply,
+        ),
     );
 
     {
@@ -432,7 +461,14 @@ fn artifact_write_failure_still_calls_explicit_finish() {
         let _ = fs::set_permissions(profiles_root, permissions);
     }
 
-    assert!(result.is_err(), "artifact write failure must surface");
+    let error = match result {
+        Err(error) => error,
+        Ok(_) => panic!("artifact write failure must surface"),
+    };
+    assert!(
+        error.contains("Failed to create profile run directory"),
+        "error should name the artifact phase, got: {error}"
+    );
     assert!(
         !repo.path().join("project/dev").exists(),
         "finish() must run after an artifact write failure"

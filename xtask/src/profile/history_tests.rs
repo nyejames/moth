@@ -48,8 +48,7 @@ fn test_record(run_id: &str) -> ProfileHistoryRecord {
                 self_pct: 16.0,
             }],
             top_bucket_label: "AST".to_string(),
-            run_directory_path: "benchmarks/local-data/profiles/2026-06-18T10-30-abc1234"
-                .to_string(),
+            run_directory_path: "2026-06-18T10-30-abc1234".to_string(),
         }],
     }
 }
@@ -99,8 +98,7 @@ fn test_record_b(run_id: &str) -> ProfileHistoryRecord {
                 self_pct: 16.7,
             }],
             top_bucket_label: "AST".to_string(),
-            run_directory_path: "benchmarks/local-data/profiles/2026-06-18T11-00-def5678"
-                .to_string(),
+            run_directory_path: "2026-06-18T11-00-def5678".to_string(),
         }],
     }
 }

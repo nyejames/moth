@@ -86,6 +86,7 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
     // Profiling is read-only for persistence eligibility; dirty runs still
     // write local artifacts but never append comparable history.
     let prepared = PreparedBenchmarkRun::load(BenchmarkRecording::ReadOnly)?;
+    let selected_cases = select_profile_cases(&prepared.manifest, options.case_filter.as_deref())?;
 
     // Verify Samply is available and learn the version-specific record flags before doing work.
     let samply_capabilities = check_samply_available()?;
@@ -111,6 +112,7 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
         collect_profile_run(
             &options,
             &prepared,
+            selected_cases,
             &workspace,
             &profiling_binary,
             &samply_capabilities,
@@ -322,7 +324,11 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
                 counters: observation.observations.counters.clone(),
                 hot_functions,
                 top_bucket_label,
-                run_directory_path: run_paths.root.to_str().unwrap_or("").to_string(),
+                run_directory_path: run_paths
+                    .root
+                    .strip_prefix(&prepared.paths.profiles)
+                    .map(|relative| relative.display().to_string())
+                    .unwrap_or_else(|_| run_paths.root.display().to_string()),
             });
         }
 
@@ -383,11 +389,11 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
 pub(crate) fn collect_profile_run(
     options: &ProfileOptions,
     prepared: &PreparedBenchmarkRun,
+    selected_cases: Vec<BenchmarkCase>,
     workspace: &BenchmarkExecutionWorkspace,
     profiling_binary: &CompilerBinary,
     samply_capabilities: &SamplyRecordCapabilities,
 ) -> Result<CollectedProfileRun, String> {
-    let selected_cases = select_profile_cases(&prepared.manifest, options.case_filter.as_deref())?;
     let moth_path = profiling_binary.as_path().to_path_buf();
     let symbol_dirs = profiling_binary.symbol_dirs.clone();
     let execution_context =

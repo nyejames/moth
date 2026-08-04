@@ -1076,7 +1076,14 @@ fn collect_latest_profile_run(
     let agent_summary_path = latest
         .cases
         .first()
-        .map(|c| format!("{}/agent-summary.md", c.run_directory_path))
+        .map(|c| {
+            paths
+                .profiles
+                .join(&c.run_directory_path)
+                .join("agent-summary.md")
+                .display()
+                .to_string()
+        })
         .unwrap_or_else(|| {
             paths
                 .profiles

@@ -108,7 +108,8 @@ pub struct HistoryCaseRecord {
     pub hot_functions: Vec<HistoryHotFunction>,
     /// Top bucket label for the hottest function.
     pub top_bucket_label: String,
-    /// Relative run directory path used to locate per-case summary artifacts.
+    /// Run directory path relative to `BenchmarkPaths::profiles`, used to
+    /// locate per-case summary artifacts even after a checkout moves.
     pub run_directory_path: String,
 }
 

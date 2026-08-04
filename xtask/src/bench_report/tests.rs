@@ -5,7 +5,9 @@ use crate::bench_types::{
     BenchmarkSystem, GitRevision,
 };
 use crate::benchmark_manifest::{BenchmarkRunner, CliBenchmarkCommand};
+use crate::benchmark_run::BenchmarkPaths;
 use crate::profile::history::{HistoryCaseRecord, HistoryHotFunction, ProfileHistoryRecord};
+use std::fs;
 
 #[test]
 fn report_handles_no_local_history() {
@@ -452,7 +454,7 @@ fn test_profile_record(run_id: &str, system_uuid: &str) -> ProfileHistoryRecord 
                 self_pct: 16.0,
             }],
             top_bucket_label: "AST".to_string(),
-            run_directory_path: format!("benchmarks/local-data/profiles/{}", run_id),
+            run_directory_path: run_id.to_string(),
         }],
     }
 }
@@ -507,7 +509,7 @@ fn test_profile_record_shifted(run_id: &str, system_uuid: &str) -> ProfileHistor
                 self_pct: 20.0,
             }],
             top_bucket_label: "AST".to_string(),
-            run_directory_path: format!("benchmarks/local-data/profiles/{}", run_id),
+            run_directory_path: run_id.to_string(),
         }],
     }
 }
@@ -630,6 +632,32 @@ fn format_top_drift_item_returns_none_when_no_comparable_previous() {
     let top_drift = format_top_drift_item(&records, Some(&system), &latest);
 
     assert_eq!(top_drift, "none");
+}
+
+#[test]
+fn latest_profile_run_resolves_relative_run_directory_through_profiles_root() {
+    let temp = tempfile::tempdir().expect("temporary directory should exist");
+    let system = test_system("TEST-UUID-001");
+    let record = test_profile_record("2026-06-18T10-30-abc1234", "TEST-UUID-001");
+
+    let paths = BenchmarkPaths::for_repository(temp.path());
+    if let Some(parent) = paths.profile_history.parent() {
+        fs::create_dir_all(parent).expect("profile history parent should be creatable");
+    }
+    let line = serde_json::to_string(&record).expect("profile record should serialize");
+    fs::write(&paths.profile_history, format!("{line}\n")).expect("profile history should write");
+
+    let latest = collect_latest_profile_run(Some(&system), &paths)
+        .expect("latest profile run should resolve");
+    assert_eq!(
+        latest.agent_summary_path,
+        paths
+            .profiles
+            .join("2026-06-18T10-30-abc1234")
+            .join("agent-summary.md")
+            .display()
+            .to_string()
+    );
 }
 
 // ---------------------------------------------------------------------------

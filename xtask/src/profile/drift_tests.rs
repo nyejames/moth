@@ -71,8 +71,7 @@ fn test_previous_record() -> ProfileHistoryRecord {
                 },
             ],
             top_bucket_label: "AST".to_string(),
-            run_directory_path: "benchmarks/local-data/profiles/2026-06-18T10-30-abc1234"
-                .to_string(),
+            run_directory_path: "2026-06-18T10-30-abc1234".to_string(),
         }],
     }
 }
