@@ -11,7 +11,15 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             .imported_declarations_by_local_path
             .clone();
 
-        for (local_path, record) in imported {
+        for (local_path, origin) in imported {
+            let Some(record) = self
+                .import_environment
+                .imported_declarations_by_origin
+                .get(&origin)
+                .cloned()
+            else {
+                continue;
+            };
             let PublicDeclarationSemantics::TransparentAlias(alias) = record.semantics else {
                 continue;
             };
@@ -39,7 +47,15 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             .clone();
         let mut declarations = self.declaration_table.iter().cloned().collect::<Vec<_>>();
 
-        for (local_path, record) in imported {
+        for (local_path, origin) in imported {
+            let Some(record) = self
+                .import_environment
+                .imported_declarations_by_origin
+                .get(&origin)
+                .cloned()
+            else {
+                continue;
+            };
             let PublicDeclarationSemantics::Constant(constant) = record.semantics else {
                 continue;
             };

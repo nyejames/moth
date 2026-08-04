@@ -45,7 +45,7 @@
 //! (export-capable roots versus the active module root alone); this module's projection is
 //! narrower because imported-module-root headers belong to another module's component.
 
-use super::interface_view::InterfaceView;
+use super::interface_view::{InterfaceView, ProviderBindingView};
 use super::model::{
     PublicBindingExport, PublicDiagnosticLocation, PublicExportDiagnosticProvenance,
 };
@@ -233,7 +233,7 @@ pub(crate) fn build_direct_export_seed(
 fn collect_binding_exports<'a>(
     module_origin: &StableModuleOriginIdentity,
     module_symbols: &ModuleSymbols,
-    source_provider_imports: &SourceProviderImportSet<'a>,
+    source_provider_imports: &'a SourceProviderImportSet<'a>,
     external_registry: &ExternalPackageRegistry,
     string_table: &StringTable,
 ) -> Result<Vec<PublicBindingExport>, CompilerError> {
@@ -276,7 +276,8 @@ fn collect_binding_exports<'a>(
 
     let mut exports = Vec::new();
     // One transient binding view per provider interface for this operation.
-    let mut binding_views: FxHashMap<ProviderInterfaceId, InterfaceView<'a>> = FxHashMap::default();
+    let mut binding_views: FxHashMap<ProviderInterfaceId, &'a ProviderBindingView<'a>> =
+        FxHashMap::default();
     for entry in entries {
         let target = match &entry.target {
             PublicExportTarget::External(symbol_id) => external_registry
@@ -303,7 +304,11 @@ fn collect_binding_exports<'a>(
                     ))
                 })?;
                 let view =
-                    interface_view_for(&mut binding_views, source_provider_imports, provider_id)?;
+                    provider_binding_view_for(
+                        &mut binding_views,
+                        source_provider_imports,
+                        provider_id,
+                    )?;
                 let Some(binding) = view.binding_export(imported_name) else {
                     continue;
                 };
@@ -979,9 +984,7 @@ fn collect_one_reexport_binding<'a>(
                 export_name,
                 provider_origin,
             ),
-            provenance: provider_interface
-                .export_diagnostic_provenance(imported_name)
-                .cloned(),
+            provenance: view.export_diagnostic_provenance(imported_name).cloned(),
         });
         return Ok(());
     }
@@ -1184,6 +1187,24 @@ fn declaration_category_rank(origin: &OriginDeclarationId) -> u8 {
 }
 
 /// Get or build the one operation-scoped binding view for a provider interface.
+///
+/// WHAT: builds each view at most once per re-export binding operation, keyed by the dense
+///       [`ProviderInterfaceId`], so repeated public-name lookups against the same provider
+///       interface stay direct and never depend on module origins or raw pointer identity.
+fn provider_binding_view_for<'a, 'v>(
+    views: &'v mut FxHashMap<ProviderInterfaceId, &'a ProviderBindingView<'a>>,
+    source_provider_imports: &'a SourceProviderImportSet<'a>,
+    provider_id: ProviderInterfaceId,
+) -> Result<&'v ProviderBindingView<'a>, CompilerError> {
+    Ok(*match views.entry(provider_id) {
+        std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+        std::collections::hash_map::Entry::Vacant(entry) => {
+            entry.insert(source_provider_imports.binding_view(provider_id)?)
+        }
+    })
+}
+
+/// Get or build the one operation-scoped view for a provider interface.
 ///
 /// WHAT: builds each view at most once per re-export binding operation, keyed by the dense
 ///       [`ProviderInterfaceId`], so repeated public-name lookups against the same provider

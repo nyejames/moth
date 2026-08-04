@@ -7,12 +7,10 @@
 //! reconstruction.
 
 use super::*;
-use crate::compiler_frontend::canonical_type_identity::{
-    CanonicalEvidenceIdentity, CanonicalTraitIdentity,
-};
+use crate::compiler_frontend::canonical_type_identity::CanonicalTraitIdentity;
 use crate::compiler_frontend::headers::import_environment::SourceFunctionTarget;
 use crate::compiler_frontend::public_interface::{
-    PublicEvidenceRecord, PublicTraitReceiverAccess, TraitSurfaceTypeIdentity,
+    PublicTraitReceiverAccess, TraitSurfaceTypeIdentity,
 };
 use crate::compiler_frontend::semantic_identity::{OriginFunctionId, OriginTraitId};
 use crate::compiler_frontend::traits::definitions::{
@@ -120,8 +118,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             .import_environment
             .imported_declarations_by_local_path
             .iter()
-            .filter_map(|(path, record)| {
-                let OriginDeclarationId::Trait(origin) = &record.origin else {
+            .filter_map(|(path, origin)| {
+                let OriginDeclarationId::Trait(origin) = origin else {
                     return None;
                 };
                 Some((path.clone(), origin.clone()))
@@ -261,22 +259,15 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         evidence_environment: &mut TraitEvidenceEnvironment,
         string_table: &StringTable,
     ) -> Result<(), CompilerError> {
-        let mut unique_evidence: Vec<PublicEvidenceRecord> = Vec::new();
-        let mut evidence_index: FxHashMap<CanonicalEvidenceIdentity, usize> = FxHashMap::default();
-
-        for evidence in &self.import_environment.imported_reusable_evidence {
-            if let Some(existing_index) = evidence_index.get(&evidence.identity) {
-                if unique_evidence[*existing_index] != *evidence {
-                    return Err(CompilerError::compiler_error(
-                        "Completed provider interfaces disagree on one canonical reusable evidence record.",
-                    ));
-                }
-                continue;
-            }
-
-            evidence_index.insert(evidence.identity.clone(), unique_evidence.len());
-            unique_evidence.push(evidence.clone());
-        }
+        // Evidence is already keyed by canonical identity and agreement-checked when provider
+        // semantics are imported; project it in deterministic identity order.
+        let mut unique_evidence = self
+            .import_environment
+            .imported_evidence_by_identity
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        unique_evidence.sort_by(|left, right| left.identity.cmp(&right.identity));
 
         for evidence in unique_evidence {
             let target_type_id =

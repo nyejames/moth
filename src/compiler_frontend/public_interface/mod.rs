@@ -104,8 +104,8 @@ pub(crate) use receiver_projection::CallableSeed;
 use evidence_projection::{EvidenceProjectionContext, project_reusable_evidence};
 #[cfg(test)]
 pub(crate) use model::{
-    PublicEvidenceOwnership, PublicFunctionSemantics, PublicGenericTemplateDescriptor,
-    PublicTraitSemantics,
+    ConcreteCallSummaryRecord, PublicEvidenceOwnership, PublicEvidenceRequirementMapping,
+    PublicFunctionSemantics, PublicGenericTemplateDescriptor, PublicTraitSemantics,
 };
 #[cfg(test)]
 pub(crate) use receiver_projection::CallableSeedKind;

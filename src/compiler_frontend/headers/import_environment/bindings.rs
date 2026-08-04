@@ -6,6 +6,7 @@
 //! so later stages do not rebuild import bindings or rediscover top-level symbols.
 //! MUST NOT: parse executable bodies, fold constants, or perform AST semantic validation.
 
+use crate::compiler_frontend::canonical_type_identity::CanonicalEvidenceIdentity;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
@@ -286,8 +287,12 @@ pub(crate) struct FileVisibility {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct HeaderImportEnvironment {
     pub(crate) file_visibility_by_source: FxHashMap<InternedPath, FileVisibility>,
-    pub(crate) imported_declarations_by_local_path:
-        FxHashMap<InternedPath, PublicDeclarationRecord>,
+    /// Consumer-local declaration paths mapped to their stable provider origins.
+    ///
+    /// WHAT: aliases and namespace members reference the one record stored under
+    ///       [`HeaderImportEnvironment::imported_declarations_by_origin`] instead of cloning the
+    ///       complete declaration payload per local path.
+    pub(crate) imported_declarations_by_local_path: FxHashMap<InternedPath, OriginDeclarationId>,
     /// Stable declaration closure supplied by completed provider interfaces.
     ///
     /// AST projects these records into consumer-local semantic handles. Keeping the stable
@@ -297,12 +302,19 @@ pub(crate) struct HeaderImportEnvironment {
         crate::compiler_frontend::semantic_identity::OriginDeclarationId,
         PublicDeclarationRecord,
     >,
-    /// Stable reusable evidence supplied by imported provider interfaces.
+    /// Stable reusable evidence supplied by imported provider interfaces, keyed by canonical
+    /// evidence identity.
     ///
-    /// Duplicates are retained here because the same immutable provider may be imported by
-    /// several files. AST inverse projection owns deterministic deduplication and consistency
-    /// validation once canonical types, traits and receiver call targets have local handles.
-    pub(crate) imported_reusable_evidence: Vec<PublicEvidenceRecord>,
+    /// Equal records deduplicate; differing records claiming one identity fail before AST
+    /// projection.
+    pub(crate) imported_evidence_by_identity:
+        FxHashMap<CanonicalEvidenceIdentity, PublicEvidenceRecord>,
+    /// Stable concrete call summaries supplied by imported provider interfaces, keyed by
+    /// function origin.
+    ///
+    /// Local function contracts reference these summaries by origin instead of cloning the
+    /// summary payload per alias or receiver method.
+    pub(crate) imported_call_summaries_by_origin: FxHashMap<OriginFunctionId, PublicCallSummary>,
     pub(crate) imported_functions_by_local_path: FxHashMap<InternedPath, ImportedFunctionContract>,
     pub(crate) warnings: Vec<CompilerDiagnostic>,
 }
@@ -310,7 +322,6 @@ pub(crate) struct HeaderImportEnvironment {
 #[derive(Clone, Debug)]
 pub(crate) struct ImportedFunctionContract {
     pub(crate) target: SourceFunctionTarget,
-    pub(crate) summary: PublicCallSummary,
 }
 
 impl HeaderImportEnvironment {

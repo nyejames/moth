@@ -238,15 +238,22 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         }
 
         let mut declarations = self.declaration_table.iter().cloned().collect::<Vec<_>>();
-        for (local_path, record) in self
+        for (local_path, origin) in self
             .import_environment
             .imported_declarations_by_local_path
             .clone()
         {
-            let OriginDeclarationId::Type(origin) = &record.origin else {
+            let OriginDeclarationId::Type(origin_type) = &origin else {
                 continue;
             };
-            let Some(type_id) = self.imported_type_ids_by_origin.get(origin).copied() else {
+            let Some(record) = self
+                .import_environment
+                .imported_declarations_by_origin
+                .get(&origin)
+            else {
+                continue;
+            };
+            let Some(type_id) = self.imported_type_ids_by_origin.get(origin_type).copied() else {
                 continue;
             };
             let diagnostic_type = diagnostic_type_spelling(type_id, &self.type_environment);
@@ -336,15 +343,21 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     /// Computes the nominal declaration closure required by directly imported declarations.
     fn reachable_imported_type_origins(&self) -> FxHashSet<OriginTypeId> {
         let mut reachable = FxHashSet::default();
-        for record in self
+        for origin in self
             .import_environment
             .imported_declarations_by_local_path
             .values()
         {
-            if let OriginDeclarationId::Type(origin) = &record.origin {
-                reachable.insert(origin.clone());
+            if let OriginDeclarationId::Type(type_origin) = origin {
+                reachable.insert(type_origin.clone());
             }
-            collect_semantic_type_origins(&record.semantics, &mut reachable);
+            if let Some(record) = self
+                .import_environment
+                .imported_declarations_by_origin
+                .get(origin)
+            {
+                collect_semantic_type_origins(&record.semantics, &mut reachable);
+            }
         }
 
         let mut pending = reachable.iter().cloned().collect::<Vec<_>>();

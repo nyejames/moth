@@ -6,19 +6,39 @@
 
 use super::*;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
-use crate::compiler_frontend::compiler_messages::{DiagnosticKind, ImportDiagnosticKind};
+use crate::compiler_frontend::canonical_type_identity::{
+    CanonicalBuiltinType, CanonicalCoreTraitIdentity, CanonicalEvidenceIdentity,
+    CanonicalTraitIdentity, CanonicalTypeIdentity,
+};
+use crate::compiler_frontend::compiler_messages::{
+    DiagnosticKind, DiagnosticPayload, ImportDiagnosticKind,
+};
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalConstantDef, ExternalConstantId, ExternalConstantValue,
     ExternalFunctionDef, ExternalFunctionId, ExternalFunctionLowerings, ExternalPackageRegistry,
     ExternalReturnAlias, ExternalSymbolId, ExternalSymbolPath, ExternalTypeDef, ExternalTypeId,
     external_success_returns,
 };
+use crate::compiler_frontend::folded_value::PublicFoldedValue;
 use crate::compiler_frontend::headers::import_environment::{
     ImportEnvironmentInput, prepare_import_environment,
 };
 use crate::compiler_frontend::headers::module_symbols::{ModuleRootBoundary, ModuleSymbols};
 use crate::compiler_frontend::headers::types::{FileImport, HeaderExportMode};
 use crate::compiler_frontend::paths::const_paths::RetainedProviderReference;
+use crate::compiler_frontend::public_call_summary::{
+    FunctionReturnAliasSummary, PublicCallSummary,
+};
+use crate::compiler_frontend::public_interface::{
+    ConcreteCallSummaryRecord, ProviderImportKind, PublicConstantSemantics,
+    PublicDeclarationRecord, PublicDeclarationSemantics, PublicEvidenceOwnership,
+    PublicEvidenceRecord, PublicReceiverMethodCategory, PublicReceiverMethodSemantics,
+    PublicSemanticInterface, PublicStructSemantics, SourceProviderImport, SourceProviderImportSet,
+};
+use crate::compiler_frontend::semantic_identity::{
+    ExportBinding, ModuleRootRole, OriginConstantId, OriginDeclarationId, OriginFunctionId,
+    OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity, StablePackageIdentity,
+};
 use crate::compiler_frontend::symbols::identity::{FileId, ImportShellId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -335,6 +355,7 @@ fn source_receiver_methods_remain_absent_from_namespace_records() {
         string_table: &mut string_table,
         environment: Default::default(),
         warnings: Vec::new(),
+        provider_semantics_imported: Default::default(),
     };
 
     let record = builder
@@ -386,6 +407,7 @@ fn module_root_namespace_uses_prepared_root_file_identity() {
         string_table: &mut string_table,
         environment: Default::default(),
         warnings: Vec::new(),
+        provider_semantics_imported: Default::default(),
     };
 
     let Some(ResolvedNamespaceTarget::SourceFile(path)) =
@@ -727,6 +749,7 @@ fn nested_module_root_imports_child_facade_resolves_child_root() {
         string_table: &mut string_table,
         environment: Default::default(),
         warnings: Vec::new(),
+        provider_semantics_imported: Default::default(),
     };
 
     let Some(ResolvedNamespaceTarget::SourceFile(path)) =
@@ -737,5 +760,528 @@ fn nested_module_root_imports_child_facade_resolves_child_root() {
     assert_eq!(
         path, grandchild_mod_file,
         "nested child namespace import should resolve to the grandchild module's root file"
+    );
+}
+
+#[test]
+fn provider_semantics_import_once_across_many_shells() {
+    let mut string_table = StringTable::new();
+    let names = (0..10)
+        .map(|index| format!("CONST_{index}"))
+        .collect::<Vec<_>>();
+    let name_refs = names.iter().map(String::as_str).collect::<Vec<_>>();
+    let provider = constant_provider("provider", &name_refs);
+
+    // Ten authored shells reference the same provider, one grouped constant import each.
+    let mut module_symbols = ModuleSymbols::empty();
+    let source_file = intern_path(&["src", "@page.moth"], &mut string_table);
+    module_symbols.module_file_paths.insert(source_file.clone());
+    let imports = names
+        .iter()
+        .enumerate()
+        .map(|(index, name)| {
+            let mut import = test_import(
+                intern_path(&["provider", name], &mut string_table),
+                &mut string_table,
+            );
+            import.provider.import_shell_id = ImportShellId::new(FileId(0), index as u32);
+            import.from_grouped = true;
+            import
+        })
+        .collect();
+    module_symbols
+        .file_imports_by_source
+        .insert(source_file.clone(), imports);
+
+    let provider_imports = SourceProviderImportSet::new(
+        names
+            .iter()
+            .enumerate()
+            .map(|(index, _)| SourceProviderImport {
+                kind: ProviderImportKind::Authored {
+                    shell_id: ImportShellId::new(FileId(0), index as u32),
+                },
+                interface: &provider,
+            })
+            .collect(),
+    )
+    .expect("ten distinct shells should register");
+
+    let environment = prepare_import_environment(ImportEnvironmentInput {
+        module_symbols: &mut module_symbols,
+        external_package_registry: &ExternalPackageRegistry::new(),
+        external_import_resolution_table: &ExternalImportResolutionTable::new(),
+        source_provider_imports: &provider_imports,
+        string_table: &mut string_table,
+    })
+    .expect("provider imports should bind");
+
+    assert_eq!(
+        environment.imported_declarations_by_origin.len(),
+        10,
+        "one semantic record per origin"
+    );
+    assert_eq!(
+        environment.imported_declarations_by_local_path.len(),
+        10,
+        "each alias stores its stable origin, never a cloned declaration"
+    );
+    assert_eq!(
+        environment.imported_evidence_by_identity.len(),
+        1,
+        "ten shells from one provider must not duplicate evidence"
+    );
+    assert!(
+        environment.imported_call_summaries_by_origin.is_empty(),
+        "constant-only provider contributes no summaries"
+    );
+}
+
+#[test]
+fn differing_evidence_records_with_one_identity_fail_before_projection() {
+    let mut string_table = StringTable::new();
+    let identity = CanonicalEvidenceIdentity::new(
+        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
+        CanonicalTraitIdentity::Core(CanonicalCoreTraitIdentity::Displayable),
+    );
+    let alpha_origin = StableModuleOriginIdentity::from_portable_path(
+        StablePackageIdentity::project_local("alpha"),
+        "alpha/@mod.moth".to_string(),
+        ModuleRootRole::Normal,
+    );
+    let alpha_value = OriginDeclarationId::Constant(OriginConstantId::new(
+        alpha_origin.clone(),
+        "VALUE".to_owned(),
+    ));
+    let first_provider = PublicSemanticInterface {
+        module_origin: alpha_origin.clone(),
+        export_bindings: vec![ExportBinding::new(
+            alpha_origin.clone(),
+            "VALUE".to_owned(),
+            alpha_value.clone(),
+        )],
+        export_diagnostic_provenance: Vec::new(),
+        binding_exports: Vec::new(),
+        declarations: vec![PublicDeclarationRecord {
+            origin: alpha_value,
+            semantics: PublicDeclarationSemantics::Constant(PublicConstantSemantics {
+                type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
+                folded_value: PublicFoldedValue::String("alpha".to_owned()),
+            }),
+        }],
+        reusable_evidence: vec![PublicEvidenceRecord {
+            identity: identity.clone(),
+            ownership: PublicEvidenceOwnership::SourceCanonical,
+            requirement_mappings: Vec::new(),
+        }],
+        concrete_call_summaries: Vec::new(),
+    };
+    let beta_origin = StableModuleOriginIdentity::from_portable_path(
+        StablePackageIdentity::project_local("beta"),
+        "beta/@mod.moth".to_string(),
+        ModuleRootRole::Normal,
+    );
+    let beta_value = OriginDeclarationId::Constant(OriginConstantId::new(
+        beta_origin.clone(),
+        "VALUE".to_owned(),
+    ));
+    let mut second_provider = PublicSemanticInterface {
+        module_origin: beta_origin.clone(),
+        export_bindings: vec![ExportBinding::new(
+            beta_origin.clone(),
+            "VALUE".to_owned(),
+            beta_value.clone(),
+        )],
+        export_diagnostic_provenance: Vec::new(),
+        binding_exports: Vec::new(),
+        declarations: vec![PublicDeclarationRecord {
+            origin: beta_value,
+            semantics: PublicDeclarationSemantics::Constant(PublicConstantSemantics {
+                type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
+                folded_value: PublicFoldedValue::String("beta".to_owned()),
+            }),
+        }],
+        reusable_evidence: vec![PublicEvidenceRecord {
+            identity: identity.clone(),
+            ownership: PublicEvidenceOwnership::SourceCanonical,
+            requirement_mappings: Vec::new(),
+        }],
+        concrete_call_summaries: Vec::new(),
+    };
+    // Different requirement mappings claim the same canonical evidence identity.
+    second_provider.reusable_evidence[0]
+        .requirement_mappings
+        .push(crate::compiler_frontend::public_interface::PublicEvidenceRequirementMapping {
+            requirement_identity:
+                crate::compiler_frontend::canonical_type_identity::StableTraitRequirementIdentity::new(
+                    CanonicalTraitIdentity::Core(CanonicalCoreTraitIdentity::Displayable),
+                    "show".to_owned(),
+                ),
+            method_origin: crate::compiler_frontend::semantic_identity::OriginFunctionId::new_free(
+                alpha_origin.clone(),
+                "show".to_owned(),
+            ),
+        });
+
+    let mut module_symbols = ModuleSymbols::empty();
+    let source_file = intern_path(&["src", "@page.moth"], &mut string_table);
+    module_symbols.module_file_paths.insert(source_file.clone());
+    let mut alpha_import = test_import(
+        intern_path(&["alpha", "VALUE"], &mut string_table),
+        &mut string_table,
+    );
+    alpha_import.provider.import_shell_id = ImportShellId::new(FileId(0), 0);
+    alpha_import.from_grouped = true;
+    let mut beta_import = test_import(
+        intern_path(&["beta", "VALUE"], &mut string_table),
+        &mut string_table,
+    );
+    beta_import.provider.import_shell_id = ImportShellId::new(FileId(0), 1);
+    beta_import.from_grouped = true;
+    let imports = vec![alpha_import, beta_import];
+    module_symbols
+        .file_imports_by_source
+        .insert(source_file.clone(), imports);
+
+    let provider_imports = SourceProviderImportSet::new(vec![
+        SourceProviderImport {
+            kind: ProviderImportKind::Authored {
+                shell_id: ImportShellId::new(FileId(0), 0),
+            },
+            interface: &first_provider,
+        },
+        SourceProviderImport {
+            kind: ProviderImportKind::Authored {
+                shell_id: ImportShellId::new(FileId(0), 1),
+            },
+            interface: &second_provider,
+        },
+    ])
+    .expect("two distinct providers should register");
+
+    let messages = prepare_import_environment(ImportEnvironmentInput {
+        module_symbols: &mut module_symbols,
+        external_package_registry: &ExternalPackageRegistry::new(),
+        external_import_resolution_table: &ExternalImportResolutionTable::new(),
+        source_provider_imports: &provider_imports,
+        string_table: &mut string_table,
+    })
+    .expect_err("differing evidence records with one identity must fail before AST projection");
+
+    let diagnostic = &messages.diagnostics[0];
+    assert!(
+        matches!(
+            &diagnostic.payload,
+            DiagnosticPayload::InfrastructureError { msg, .. }
+                if msg.contains("evidence identity")
+        ),
+        "unexpected diagnostic payload: {:?}",
+        diagnostic.payload
+    );
+}
+
+fn constant_provider(prefix: &str, names: &[&str]) -> PublicSemanticInterface {
+    let module_origin = StableModuleOriginIdentity::from_portable_path(
+        StablePackageIdentity::project_local(prefix),
+        format!("{prefix}/@mod.moth"),
+        ModuleRootRole::Normal,
+    );
+    let mut export_bindings = Vec::new();
+    let mut declarations = Vec::new();
+    for name in names {
+        let origin = OriginDeclarationId::Constant(OriginConstantId::new(
+            module_origin.clone(),
+            (*name).to_owned(),
+        ));
+        export_bindings.push(ExportBinding::new(
+            module_origin.clone(),
+            (*name).to_owned(),
+            origin.clone(),
+        ));
+        declarations.push(PublicDeclarationRecord {
+            origin,
+            semantics: PublicDeclarationSemantics::Constant(PublicConstantSemantics {
+                type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
+                folded_value: PublicFoldedValue::String((*name).to_owned()),
+            }),
+        });
+    }
+    PublicSemanticInterface {
+        module_origin,
+        export_bindings,
+        export_diagnostic_provenance: Vec::new(),
+        binding_exports: Vec::new(),
+        declarations,
+        reusable_evidence: vec![PublicEvidenceRecord {
+            identity: CanonicalEvidenceIdentity::new(
+                CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
+                CanonicalTraitIdentity::Core(CanonicalCoreTraitIdentity::Displayable),
+            ),
+            ownership: PublicEvidenceOwnership::SourceCanonical,
+            requirement_mappings: Vec::new(),
+        }],
+        concrete_call_summaries: Vec::new(),
+    }
+}
+
+fn struct_provider_with_receiver_method() -> PublicSemanticInterface {
+    let module_origin = StableModuleOriginIdentity::from_portable_path(
+        StablePackageIdentity::project_local("shapes"),
+        "shapes/@mod.moth".to_string(),
+        ModuleRootRole::Normal,
+    );
+    let box_origin = OriginTypeId::new(
+        module_origin.clone(),
+        "Box".to_owned(),
+        OriginTypeCategory::Struct,
+    );
+    let method_origin = OriginFunctionId::new_receiver(
+        module_origin.clone(),
+        "size".to_owned(),
+        box_origin.clone(),
+    );
+    PublicSemanticInterface {
+        module_origin: module_origin.clone(),
+        export_bindings: vec![ExportBinding::new(
+            module_origin.clone(),
+            "Box".to_owned(),
+            OriginDeclarationId::Type(box_origin.clone()),
+        )],
+        export_diagnostic_provenance: Vec::new(),
+        binding_exports: Vec::new(),
+        declarations: vec![PublicDeclarationRecord {
+            origin: OriginDeclarationId::Type(box_origin),
+            semantics: PublicDeclarationSemantics::Struct(PublicStructSemantics {
+                generic_parameters: Vec::new(),
+                fields: Vec::new(),
+                receiver_methods: vec![PublicReceiverMethodSemantics {
+                    method_origin: method_origin.clone(),
+                    category: PublicReceiverMethodCategory::ConcreteLocal,
+                    parameters: Vec::new(),
+                    returns: Vec::new(),
+                    error_return: None,
+                }],
+            }),
+        }],
+        reusable_evidence: Vec::new(),
+        concrete_call_summaries: vec![ConcreteCallSummaryRecord {
+            origin: method_origin,
+            summary: PublicCallSummary {
+                parameters: Vec::new(),
+                return_alias: FunctionReturnAliasSummary::Fresh,
+            },
+        }],
+    }
+}
+
+fn single_file_module_symbols(
+    imports: Vec<FileImport>,
+    string_table: &mut StringTable,
+) -> ModuleSymbols {
+    let mut module_symbols = ModuleSymbols::empty();
+    let source_file = intern_path(&["src", "@page.moth"], string_table);
+    module_symbols.module_file_paths.insert(source_file.clone());
+    module_symbols
+        .file_imports_by_source
+        .insert(source_file, imports);
+    module_symbols
+}
+
+fn bind_environment(
+    provider_imports: &SourceProviderImportSet<'_>,
+    module_symbols: &mut ModuleSymbols,
+    string_table: &mut StringTable,
+) -> Result<
+    crate::compiler_frontend::headers::import_environment::HeaderImportEnvironment,
+    crate::compiler_frontend::compiler_errors::CompilerMessages,
+> {
+    prepare_import_environment(ImportEnvironmentInput {
+        module_symbols,
+        external_package_registry: &ExternalPackageRegistry::new(),
+        external_import_resolution_table: &ExternalImportResolutionTable::new(),
+        source_provider_imports: provider_imports,
+        string_table,
+    })
+}
+
+#[test]
+fn namespace_and_grouped_imports_share_provider_semantics() {
+    let mut string_table = StringTable::new();
+    let provider = constant_provider("provider", &["CONST_0", "CONST_1"]);
+
+    let mut grouped = test_import(
+        intern_path(&["provider", "CONST_0"], &mut string_table),
+        &mut string_table,
+    );
+    grouped.provider.import_shell_id = ImportShellId::new(FileId(0), 0);
+    grouped.from_grouped = true;
+    let mut namespace = test_import(
+        intern_path(&["provider"], &mut string_table),
+        &mut string_table,
+    );
+    namespace.provider.import_shell_id = ImportShellId::new(FileId(0), 1);
+
+    let mut module_symbols =
+        single_file_module_symbols(vec![grouped, namespace], &mut string_table);
+    let provider_imports = SourceProviderImportSet::new(vec![
+        SourceProviderImport {
+            kind: ProviderImportKind::Authored {
+                shell_id: ImportShellId::new(FileId(0), 0),
+            },
+            interface: &provider,
+        },
+        SourceProviderImport {
+            kind: ProviderImportKind::Authored {
+                shell_id: ImportShellId::new(FileId(0), 1),
+            },
+            interface: &provider,
+        },
+    ])
+    .expect("two shells should collapse to one provider");
+
+    let environment = bind_environment(&provider_imports, &mut module_symbols, &mut string_table)
+        .expect("grouped and namespace imports should bind");
+
+    assert_eq!(environment.imported_declarations_by_origin.len(), 2);
+    assert_eq!(
+        environment.imported_evidence_by_identity.len(),
+        1,
+        "grouped and namespace imports must share one evidence record"
+    );
+    assert!(environment.imported_call_summaries_by_origin.is_empty());
+}
+
+#[test]
+fn two_aliases_of_one_declaration_retain_one_record() {
+    let mut string_table = StringTable::new();
+    let provider = constant_provider("provider", &["CONST_0"]);
+
+    let mut first = test_import(
+        intern_path(&["provider", "CONST_0"], &mut string_table),
+        &mut string_table,
+    );
+    first.provider.import_shell_id = ImportShellId::new(FileId(0), 0);
+    first.from_grouped = true;
+    first.alias = Some(string_table.intern("first_alias"));
+    let mut second = test_import(
+        intern_path(&["provider", "CONST_0"], &mut string_table),
+        &mut string_table,
+    );
+    second.provider.import_shell_id = ImportShellId::new(FileId(0), 1);
+    second.from_grouped = true;
+    second.alias = Some(string_table.intern("second_alias"));
+
+    let mut module_symbols = single_file_module_symbols(vec![first, second], &mut string_table);
+    let provider_imports = SourceProviderImportSet::new(vec![
+        SourceProviderImport {
+            kind: ProviderImportKind::Authored {
+                shell_id: ImportShellId::new(FileId(0), 0),
+            },
+            interface: &provider,
+        },
+        SourceProviderImport {
+            kind: ProviderImportKind::Authored {
+                shell_id: ImportShellId::new(FileId(0), 1),
+            },
+            interface: &provider,
+        },
+    ])
+    .expect("two shells should collapse to one provider");
+
+    let environment = bind_environment(&provider_imports, &mut module_symbols, &mut string_table)
+        .expect("two aliases of one declaration should bind");
+
+    assert_eq!(
+        environment.imported_declarations_by_origin.len(),
+        1,
+        "two aliases must retain one semantic record"
+    );
+    assert_eq!(environment.imported_declarations_by_local_path.len(), 1);
+    let local_origin = environment
+        .imported_declarations_by_local_path
+        .values()
+        .next()
+        .expect("one local alias path");
+    assert!(
+        environment
+            .imported_declarations_by_origin
+            .contains_key(local_origin)
+    );
+}
+
+#[test]
+fn missing_provider_record_fails_deterministically() {
+    let mut string_table = StringTable::new();
+    let provider = constant_provider("provider", &["CONST_0"]);
+
+    let mut missing = test_import(
+        intern_path(&["provider", "MISSING"], &mut string_table),
+        &mut string_table,
+    );
+    missing.provider.import_shell_id = ImportShellId::new(FileId(0), 0);
+    missing.from_grouped = true;
+
+    let mut module_symbols = single_file_module_symbols(vec![missing], &mut string_table);
+    let provider_imports = SourceProviderImportSet::new(vec![SourceProviderImport {
+        kind: ProviderImportKind::Authored {
+            shell_id: ImportShellId::new(FileId(0), 0),
+        },
+        interface: &provider,
+    }])
+    .expect("one shell should register");
+
+    let messages = bind_environment(&provider_imports, &mut module_symbols, &mut string_table)
+        .expect_err("a missing provider record must fail binding deterministically");
+    assert!(
+        matches!(
+            &messages.diagnostics[0].payload,
+            DiagnosticPayload::NotExportedByPublicSurface { .. }
+        ),
+        "unexpected diagnostic payload: {:?}",
+        messages.diagnostics[0].payload
+    );
+}
+
+#[test]
+fn receiver_methods_reuse_summary_by_origin_storage() {
+    let mut string_table = StringTable::new();
+    let provider = struct_provider_with_receiver_method();
+
+    let imports = (0..2)
+        .map(|index| {
+            let mut import = test_import(
+                intern_path(&["shapes", "Box"], &mut string_table),
+                &mut string_table,
+            );
+            import.provider.import_shell_id = ImportShellId::new(FileId(0), index);
+            import.from_grouped = true;
+            import
+        })
+        .collect();
+    let mut module_symbols = single_file_module_symbols(imports, &mut string_table);
+    let provider_imports = SourceProviderImportSet::new(
+        (0..2)
+            .map(|index| SourceProviderImport {
+                kind: ProviderImportKind::Authored {
+                    shell_id: ImportShellId::new(FileId(0), index),
+                },
+                interface: &provider,
+            })
+            .collect(),
+    )
+    .expect("two shells should collapse to one provider");
+
+    let environment = bind_environment(&provider_imports, &mut module_symbols, &mut string_table)
+        .expect("receiver method imports should bind");
+
+    assert_eq!(
+        environment.imported_call_summaries_by_origin.len(),
+        1,
+        "receiver methods must reuse one summary by origin"
+    );
+    assert_eq!(
+        environment.imported_functions_by_local_path.len(),
+        1,
+        "the repeated receiver contract must not duplicate the local function entry"
     );
 }

@@ -482,45 +482,13 @@ pub(crate) struct PublicSemanticInterface {
 }
 
 impl PublicSemanticInterface {
-    pub(crate) fn exported_origin(&self, public_name: &str) -> Option<&OriginDeclarationId> {
-        self.export_bindings
-            .iter()
-            .find(|binding| binding.public_name() == public_name)
-            .map(ExportBinding::origin)
-    }
-
-    pub(crate) fn binding_export(&self, public_name: &str) -> Option<&PublicBindingExport> {
-        self.binding_exports
-            .iter()
-            .find(|binding| binding.public_name == public_name)
-    }
-
-    pub(crate) fn export_diagnostic_provenance(
-        &self,
-        public_name: &str,
-    ) -> Option<&PublicDiagnosticLocation> {
-        self.export_diagnostic_provenance
-            .iter()
-            .find(|entry| entry.public_name == public_name)
-            .map(|entry| &entry.location)
-    }
-
     pub(crate) fn declaration(
         &self,
         origin: &OriginDeclarationId,
     ) -> Option<&PublicDeclarationRecord> {
         self.declarations
-            .iter()
-            .find(|declaration| &declaration.origin == origin)
-    }
-
-    pub(crate) fn concrete_call_summary(
-        &self,
-        origin: &OriginFunctionId,
-    ) -> Option<&PublicCallSummary> {
-        self.concrete_call_summaries
-            .iter()
-            .find(|record| &record.origin == origin)
-            .map(|record| &record.summary)
+            .binary_search_by(|declaration| declaration.origin.cmp(origin))
+            .ok()
+            .map(|index| &self.declarations[index])
     }
 }

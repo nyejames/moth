@@ -246,3 +246,31 @@ fn provider_ids_are_dense_and_stable() {
     assert!(set.interface(ProviderInterfaceId::new(0)).is_ok());
     assert!(set.interface(ProviderInterfaceId::new(99)).is_err());
 }
+
+#[test]
+fn ten_shells_from_one_provider_share_one_binding_view() {
+    let provider = provider_interface("provider");
+
+    let set = SourceProviderImportSet::new(
+        (0..10)
+            .map(|index| authored(ImportShellId::new(FileId(9), index), &provider))
+            .collect(),
+    )
+    .expect("ten distinct shells should register");
+
+    assert_eq!(
+        set.interfaces().count(),
+        1,
+        "ten shells from one provider must collapse to one provider id"
+    );
+    let first_view = set
+        .binding_view(ProviderInterfaceId::new(0))
+        .expect("the provider binding view exists");
+    let second_view = set
+        .binding_view(ProviderInterfaceId::new(0))
+        .expect("the provider binding view exists");
+    assert!(
+        std::ptr::eq(first_view, second_view),
+        "all shells must reuse the one binding view"
+    );
+}

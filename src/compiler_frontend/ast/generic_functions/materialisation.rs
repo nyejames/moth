@@ -1119,25 +1119,33 @@ impl GenericTemplateArtefact {
             let local_path = materialise_path(&binding.local_path, string_table);
             environment
                 .imported_declarations_by_local_path
-                .insert(local_path, binding.record.clone());
+                .insert(local_path, binding.record.origin.clone());
         }
         for record in &self.declaration_closure {
             environment
                 .imported_declarations_by_origin
                 .insert(record.origin.clone(), record.clone());
         }
-        environment
-            .imported_reusable_evidence
-            .extend(self.evidence.iter().cloned());
+        for record in &self.evidence {
+            environment
+                .imported_evidence_by_identity
+                .insert(record.identity.clone(), record.clone());
+        }
         for callable in &self.callables {
             let local_path = materialise_path(&callable.local_path, string_table);
-            environment.imported_functions_by_local_path.insert(
-                local_path.clone(),
-                ImportedFunctionContract {
-                    target: callable.target.materialise(local_path),
-                    summary: callable.summary.clone(),
-                },
-            );
+            let target = callable.target.materialise(local_path.clone());
+            let SourceFunctionTarget::Imported { origin, .. } = &target else {
+                // Generated and module-private callables materialise through the generated
+                // function lanes; only imported provider callables enter the header contract
+                // tables.
+                continue;
+            };
+            environment
+                .imported_call_summaries_by_origin
+                .insert(origin.clone(), callable.summary.clone());
+            environment
+                .imported_functions_by_local_path
+                .insert(local_path, ImportedFunctionContract { target });
         }
         Ok(environment)
     }
@@ -1748,7 +1756,12 @@ impl ModuleMaterialisationPreparation {
         declaration_closure.sort_by_key(|record| format!("{:?}", record.origin));
         declaration_closure.dedup_by(|left, right| left.origin == right.origin);
 
-        let mut evidence = self.import_environment.imported_reusable_evidence.clone();
+        let mut evidence = self
+            .import_environment
+            .imported_evidence_by_identity
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
         evidence.extend(public_interface.reusable_evidence.iter().cloned());
         evidence.sort_by(|left, right| left.identity.cmp(&right.identity));
         evidence.dedup_by(|left, right| left.identity == right.identity);
@@ -2048,10 +2061,14 @@ impl ModuleMaterialisationPreparation {
     ) -> Result<Box<[StableDeclarationBinding]>, CompilerError> {
         let mut bindings = Vec::new();
         for path in selected_paths {
-            if let Some(record) = self
+            if let Some(origin) = self
                 .import_environment
                 .imported_declarations_by_local_path
                 .get(path)
+                && let Some(record) = self
+                    .import_environment
+                    .imported_declarations_by_origin
+                    .get(origin)
             {
                 bindings.push(StableDeclarationBinding {
                     local_path: stable_path(path, &self.string_table),

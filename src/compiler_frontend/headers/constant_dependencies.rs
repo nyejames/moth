@@ -19,6 +19,7 @@ use crate::compiler_frontend::headers::types::LocalDeclarationOrderingHint;
 use crate::compiler_frontend::public_interface::{
     PublicDeclarationRecord, PublicDeclarationSemantics,
 };
+use crate::compiler_frontend::semantic_identity::OriginDeclarationId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::utilities::token_scan::InitializerReference;
@@ -148,6 +149,7 @@ pub(crate) fn add_constant_initializer_dependencies(
                 &struct_or_choice_paths,
                 module_symbols,
                 &import_environment.imported_declarations_by_local_path,
+                &import_environment.imported_declarations_by_origin,
             );
 
             match resolution {
@@ -234,7 +236,8 @@ fn classify_reference(
     constant_positions: &FxHashMap<InternedPath, ConstantPosition>,
     struct_or_choice_paths: &FxHashSet<InternedPath>,
     module_symbols: &ModuleSymbols,
-    imported_declarations: &FxHashMap<InternedPath, PublicDeclarationRecord>,
+    imported_declarations: &FxHashMap<InternedPath, OriginDeclarationId>,
+    imported_declarations_by_origin: &FxHashMap<OriginDeclarationId, PublicDeclarationRecord>,
 ) -> ConstantReferenceResolution {
     // 1. External symbols: constants are valid references; non-constants are errors.
     if let Some(symbol_id) = visibility.visible_external_symbols.get(&reference.name) {
@@ -273,6 +276,7 @@ fn classify_reference(
                 module_symbols,
                 reference,
                 imported_declarations,
+                imported_declarations_by_origin,
             );
         }
 
@@ -301,6 +305,7 @@ fn classify_reference(
         module_symbols,
         reference,
         imported_declarations,
+        imported_declarations_by_origin,
     )
 }
 
@@ -310,7 +315,8 @@ fn classify_namespace_value_member(
     struct_or_choice_paths: &FxHashSet<InternedPath>,
     module_symbols: &ModuleSymbols,
     reference: &InitializerReference,
-    imported_declarations: &FxHashMap<InternedPath, PublicDeclarationRecord>,
+    imported_declarations: &FxHashMap<InternedPath, OriginDeclarationId>,
+    imported_declarations_by_origin: &FxHashMap<OriginDeclarationId, PublicDeclarationRecord>,
 ) -> ConstantReferenceResolution {
     match member {
         NamespaceValueMember::SourceDeclaration(target_path) => {
@@ -321,6 +327,7 @@ fn classify_namespace_value_member(
                 module_symbols,
                 reference,
                 imported_declarations,
+                imported_declarations_by_origin,
             )
         }
 
@@ -344,9 +351,12 @@ fn classify_source_declaration_reference(
     struct_or_choice_paths: &FxHashSet<InternedPath>,
     module_symbols: &ModuleSymbols,
     reference: &InitializerReference,
-    imported_declarations: &FxHashMap<InternedPath, PublicDeclarationRecord>,
+    imported_declarations: &FxHashMap<InternedPath, OriginDeclarationId>,
+    imported_declarations_by_origin: &FxHashMap<OriginDeclarationId, PublicDeclarationRecord>,
 ) -> ConstantReferenceResolution {
-    if let Some(record) = imported_declarations.get(target_path) {
+    if let Some(origin) = imported_declarations.get(target_path)
+        && let Some(record) = imported_declarations_by_origin.get(origin)
+    {
         return match &record.semantics {
             PublicDeclarationSemantics::Constant(_) => {
                 ConstantReferenceResolution::ImportedConstant

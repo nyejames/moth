@@ -85,6 +85,7 @@ pub(crate) fn prepare_import_environment(
         string_table: input.string_table,
         environment: HeaderImportEnvironment::default(),
         warnings: Vec::new(),
+        provider_semantics_imported: rustc_hash::FxHashSet::default(),
     };
 
     for source_file in input.module_symbols.module_file_paths.clone() {

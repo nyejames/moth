@@ -706,9 +706,18 @@ fn closes_provider_reexport_over_nested_nominal_without_adding_a_public_binding(
             .declaration(&OriginDeclarationId::Type(hidden_origin))
             .is_some()
     );
-    assert!(facade.exported_origin("HiddenLabel").is_none());
+    assert!(
+        !facade
+            .export_bindings
+            .iter()
+            .any(|binding| binding.public_name() == "HiddenLabel")
+    );
     assert_eq!(
-        facade.concrete_call_summary(&make_origin),
+        facade
+            .concrete_call_summaries
+            .iter()
+            .find(|record| record.origin == make_origin)
+            .map(|record| &record.summary),
         Some(&empty_summary())
     );
 }

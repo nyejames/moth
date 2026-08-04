@@ -23,6 +23,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{
     BoundModuleHeaders, Header, HeaderKind, LocalDeclarationOrderingHint, TopLevelConstFragment,
 };
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
+use crate::compiler_frontend::semantic_identity::OriginDeclarationId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::header_log;
@@ -99,20 +100,14 @@ struct DependencyGraph<'a> {
     source_order_by_path: FxHashMap<InternedPath, usize>,
     ordered_paths: Vec<InternedPath>,
     source_package_public_exports: &'a FxHashMap<String, FxHashSet<PublicExportEntry>>,
-    provider_interface_paths: &'a FxHashMap<
-        InternedPath,
-        crate::compiler_frontend::public_interface::PublicDeclarationRecord,
-    >,
+    provider_interface_paths: &'a FxHashMap<InternedPath, OriginDeclarationId>,
 }
 
 impl<'a> DependencyGraph<'a> {
     fn from_headers(
         headers: Vec<Header>,
         source_package_public_exports: &'a FxHashMap<String, FxHashSet<PublicExportEntry>>,
-        provider_interface_paths: &'a FxHashMap<
-            InternedPath,
-            crate::compiler_frontend::public_interface::PublicDeclarationRecord,
-        >,
+        provider_interface_paths: &'a FxHashMap<InternedPath, OriginDeclarationId>,
         _string_table: &StringTable,
     ) -> Self {
         let mut headers_by_path: FxHashMap<InternedPath, Header> =

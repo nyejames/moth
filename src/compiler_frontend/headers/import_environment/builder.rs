@@ -8,7 +8,7 @@
 
 use crate::builder_surface::SourceFileKind;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
-use crate::compiler_frontend::compiler_errors::compiler_error_to_diagnostic;
+use crate::compiler_frontend::compiler_errors::{CompilerError, compiler_error_to_diagnostic};
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, ImportPublicSurfaceType};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::external_packages::ExternalSymbolCategory;
@@ -17,7 +17,7 @@ use crate::compiler_frontend::headers::module_symbols::{
 };
 use crate::compiler_frontend::headers::parse_file_headers::FileImport;
 use crate::compiler_frontend::public_interface::{
-    PublicDeclarationSemantics, SourceProviderImportSet,
+    ProviderInterfaceId, PublicDeclarationSemantics, SourceProviderImportSet,
 };
 use crate::compiler_frontend::source_packages::root_file::{
     import_path_references_config_file, import_path_references_support_root_file,
@@ -54,6 +54,13 @@ pub(crate) struct ImportEnvironmentBuilder<'a> {
     pub(super) string_table: &'a mut StringTable,
     pub(super) environment: HeaderImportEnvironment,
     pub(super) warnings: Vec<crate::compiler_frontend::compiler_messages::CompilerDiagnostic>,
+    /// Provider IDs whose closed semantics have already been imported into the module-wide
+    /// header environment.
+    ///
+    /// WHAT: the first shell referencing a provider imports its declarations, evidence and
+    ///       summaries once; later grouped, namespace, receiver and implicit-template imports
+    ///       reuse those tables.
+    pub(super) provider_semantics_imported: FxHashSet<ProviderInterfaceId>,
 }
 
 impl<'a> ImportEnvironmentBuilder<'a> {
@@ -363,24 +370,83 @@ impl<'a> ImportEnvironmentBuilder<'a> {
         Ok(())
     }
 
-    fn register_source_provider_import(
+    /// Import one provider's closed semantics into the module-wide environment exactly once.
+    ///
+    /// WHAT: the first shell referencing a provider ID stores its declaration records, evidence
+    ///       records and concrete call summaries in the shared tables; later shells resolve the
+    ///       same records by origin and identity without cloning the provider payloads again.
+    /// WHY: repeated per-shell full-interface projection made binding quadratic in shells and
+    ///      duplicated every provider fact per alias.
+    fn import_provider_semantics_once(
         &mut self,
-        file_visibility: &mut FileVisibility,
-        registry: &mut VisibleNameRegistry,
-        import: &FileImport,
-        interface: &crate::compiler_frontend::public_interface::PublicSemanticInterface,
+        provider_id: ProviderInterfaceId,
     ) -> BuilderResult<()> {
-        // Retain the provider's complete stable declaration closure once. AST owns projection
-        // into consumer-local handles and must never reopen donor syntax for nested types.
+        if !self.provider_semantics_imported.insert(provider_id) {
+            return Ok(());
+        }
+
+        let interface = self
+            .source_provider_imports
+            .interface(provider_id)
+            .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
+
         for provider_declaration in &interface.declarations {
             self.environment
                 .imported_declarations_by_origin
                 .entry(provider_declaration.origin.clone())
                 .or_insert_with(|| provider_declaration.clone());
         }
-        self.environment
-            .imported_reusable_evidence
-            .extend(interface.reusable_evidence.iter().cloned());
+
+        for evidence in &interface.reusable_evidence {
+            match self
+                .environment
+                .imported_evidence_by_identity
+                .entry(evidence.identity.clone())
+            {
+                std::collections::hash_map::Entry::Occupied(existing) => {
+                    if existing.get() != evidence {
+                        return Err(Box::new(compiler_error_to_diagnostic(
+                            &CompilerError::compiler_error(format!(
+                                "provider evidence identity {:?} disagrees across imported providers",
+                                evidence.identity
+                            )),
+                        )));
+                    }
+                }
+                std::collections::hash_map::Entry::Vacant(slot) => {
+                    slot.insert(evidence.clone());
+                }
+            }
+        }
+
+        for summary in &interface.concrete_call_summaries {
+            self.environment
+                .imported_call_summaries_by_origin
+                .entry(summary.origin.clone())
+                .or_insert_with(|| summary.summary.clone());
+        }
+
+        Ok(())
+    }
+
+    fn register_source_provider_import(
+        &mut self,
+        file_visibility: &mut FileVisibility,
+        registry: &mut VisibleNameRegistry,
+        import: &FileImport,
+        provider_id: ProviderInterfaceId,
+    ) -> BuilderResult<()> {
+        // Import the provider's closed semantics once and reuse the narrow binding view for
+        // every shell that references this provider.
+        self.import_provider_semantics_once(provider_id)?;
+        let view = self
+            .source_provider_imports
+            .binding_view(provider_id)
+            .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
+        let interface = self
+            .source_provider_imports
+            .interface(provider_id)
+            .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
 
         let Some(public_name_id) = import.provider.path.name() else {
             return Err(Box::new(super::diagnostics::missing_import_target_no_path(
@@ -388,8 +454,8 @@ impl<'a> ImportEnvironmentBuilder<'a> {
             )));
         };
         let public_name = self.string_table.resolve(public_name_id);
-        let Some(origin) = interface.exported_origin(public_name).cloned() else {
-            if let Some(binding) = interface.binding_export(public_name) {
+        let Some(origin) = view.exported_origin(public_name).cloned() else {
+            if let Some(binding) = view.binding_export(public_name) {
                 let Some(symbol_id) = self
                     .external_package_registry
                     .resolve_canonical_symbol(&binding.target)
@@ -404,11 +470,9 @@ impl<'a> ImportEnvironmentBuilder<'a> {
                 self.provider_public_surface_diagnostic(import, interface),
             ));
         };
-        let Some(declaration) = interface.declaration(&origin).cloned() else {
-            return Err(Box::new(
-                self.provider_public_surface_diagnostic(import, interface),
-            ));
-        };
+        let declaration = view
+            .declaration(&origin)
+            .ok_or_else(|| Box::new(self.provider_public_surface_diagnostic(import, interface)))?;
 
         let local_name = self.derive_import_local_name(import)?;
         let local_path = import.provider.path.clone();
@@ -416,7 +480,7 @@ impl<'a> ImportEnvironmentBuilder<'a> {
             origin: origin.clone(),
             local_path: local_path.clone(),
         };
-        let binding = match declaration.semantics {
+        let binding = match &declaration.semantics {
             PublicDeclarationSemantics::TransparentAlias(_) => VisibleNameBinding::TypeAlias {
                 canonical_path: local_path.clone(),
             },
@@ -433,7 +497,7 @@ impl<'a> ImportEnvironmentBuilder<'a> {
             .visible_declaration_paths
             .insert(local_path.clone());
 
-        match declaration.semantics {
+        match &declaration.semantics {
             PublicDeclarationSemantics::TransparentAlias(_) => {
                 file_visibility
                     .visible_type_alias_names
@@ -460,14 +524,14 @@ impl<'a> ImportEnvironmentBuilder<'a> {
         };
         self.environment
             .imported_declarations_by_local_path
-            .insert(local_path.clone(), declaration);
+            .insert(local_path.clone(), origin.clone());
 
         if let Some(receiver_methods) = receiver_methods {
             self.register_imported_receiver_methods(
                 file_visibility,
                 &local_path,
                 &receiver_methods,
-                interface,
+                provider_id,
                 &import.location,
             )?;
         }
@@ -475,16 +539,15 @@ impl<'a> ImportEnvironmentBuilder<'a> {
         if let crate::compiler_frontend::semantic_identity::OriginDeclarationId::Function(
             function_origin,
         ) = origin
-            && let Some(summary) = interface.concrete_call_summary(&function_origin)
+            && view.concrete_call_summary(&function_origin).is_some()
         {
             self.environment.imported_functions_by_local_path.insert(
                 local_path.clone(),
                 super::ImportedFunctionContract {
                     target: super::SourceFunctionTarget::Imported {
-                        origin: function_origin,
+                        origin: function_origin.clone(),
                         local_path,
                     },
-                    summary: summary.clone(),
                 },
             );
         }
@@ -524,28 +587,28 @@ impl<'a> ImportEnvironmentBuilder<'a> {
         file_visibility: &mut FileVisibility,
         registry: &mut VisibleNameRegistry,
         import: &FileImport,
-        interface: &crate::compiler_frontend::public_interface::PublicSemanticInterface,
+        provider_id: ProviderInterfaceId,
     ) -> BuilderResult<()> {
-        for provider_declaration in &interface.declarations {
-            self.environment
-                .imported_declarations_by_origin
-                .entry(provider_declaration.origin.clone())
-                .or_insert_with(|| provider_declaration.clone());
-        }
-        self.environment
-            .imported_reusable_evidence
-            .extend(interface.reusable_evidence.iter().cloned());
+        self.import_provider_semantics_once(provider_id)?;
+        let view = self
+            .source_provider_imports
+            .binding_view(provider_id)
+            .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
+        let interface = self
+            .source_provider_imports
+            .interface(provider_id)
+            .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
 
         let mut record = NamespaceRecord::empty(NamespaceRecordSource::SourceFile(
             import.provider.path.clone(),
         ));
         for binding in &interface.export_bindings {
-            let Some(declaration) = interface.declaration(binding.origin()).cloned() else {
-                return Err(Box::new(super::diagnostics::missing_import_target(
+            let declaration = view.declaration(binding.origin()).ok_or_else(|| {
+                Box::new(super::diagnostics::missing_import_target(
                     &import.provider.path,
                     import.location.clone(),
-                )));
-            };
+                ))
+            })?;
             let name = self.string_table.intern(binding.public_name());
             let local_path = import.provider.path.append(name);
             let target = SourceDeclarationTarget::Imported {
@@ -562,7 +625,7 @@ impl<'a> ImportEnvironmentBuilder<'a> {
                         file_visibility,
                         &local_path,
                         &structure.receiver_methods,
-                        interface,
+                        provider_id,
                         &import.location,
                     )?;
                 }
@@ -574,7 +637,7 @@ impl<'a> ImportEnvironmentBuilder<'a> {
                         file_visibility,
                         &local_path,
                         &choice.receiver_methods,
-                        interface,
+                        provider_id,
                         &import.location,
                     )?;
                 }
@@ -591,7 +654,7 @@ impl<'a> ImportEnvironmentBuilder<'a> {
                     if let crate::compiler_frontend::semantic_identity::OriginDeclarationId::Function(
                         function_origin,
                     ) = binding.origin()
-                        && let Some(summary) = interface.concrete_call_summary(function_origin)
+                        && view.concrete_call_summary(function_origin).is_some()
                     {
                         self.environment.imported_functions_by_local_path.insert(
                             local_path.clone(),
@@ -600,7 +663,6 @@ impl<'a> ImportEnvironmentBuilder<'a> {
                                     origin: function_origin.clone(),
                                     local_path: local_path.clone(),
                                 },
-                                summary: summary.clone(),
                             },
                         );
                     }
@@ -616,7 +678,7 @@ impl<'a> ImportEnvironmentBuilder<'a> {
 
             self.environment
                 .imported_declarations_by_local_path
-                .insert(local_path, declaration);
+                .insert(local_path, binding.origin().clone());
         }
 
         for binding in &interface.binding_exports {
@@ -663,9 +725,11 @@ impl<'a> ImportEnvironmentBuilder<'a> {
         file_visibility: &mut FileVisibility,
         imported_type_path: &InternedPath,
         methods: &[crate::compiler_frontend::public_interface::PublicReceiverMethodSemantics],
-        interface: &crate::compiler_frontend::public_interface::PublicSemanticInterface,
+        provider_id: ProviderInterfaceId,
         import_location: &SourceLocation,
     ) -> BuilderResult<()> {
+        self.import_provider_semantics_once(provider_id)?;
+
         for method in methods {
             let method_name = self
                 .string_table
@@ -685,14 +749,14 @@ impl<'a> ImportEnvironmentBuilder<'a> {
                     location: import_location.clone(),
                 });
 
-            if let Some(summary) = interface.concrete_call_summary(&method.method_origin) {
-                self.environment.imported_functions_by_local_path.insert(
-                    method_path,
-                    super::ImportedFunctionContract {
-                        target,
-                        summary: summary.clone(),
-                    },
-                );
+            if self
+                .environment
+                .imported_call_summaries_by_origin
+                .contains_key(&method.method_origin)
+            {
+                self.environment
+                    .imported_functions_by_local_path
+                    .insert(method_path, super::ImportedFunctionContract { target });
             }
         }
 
@@ -793,6 +857,11 @@ impl<'a> ImportEnvironmentBuilder<'a> {
             .source_provider_imports
             .implicit_template_scope_providers()
         {
+            self.import_provider_semantics_once(provider_id)?;
+            let view = self
+                .source_provider_imports
+                .binding_view(provider_id)
+                .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
             let interface = self
                 .source_provider_imports
                 .interface(provider_id)
@@ -812,7 +881,14 @@ impl<'a> ImportEnvironmentBuilder<'a> {
             }
 
             for binding in &interface.export_bindings {
-                let Some(declaration) = interface.declaration(binding.origin()) else {
+                let Some(origin) = view.exported_origin(binding.public_name()).cloned() else {
+                    continue;
+                };
+                let Some(declaration) = self
+                    .environment
+                    .imported_declarations_by_origin
+                    .get(&origin)
+                else {
                     continue;
                 };
 
@@ -833,8 +909,8 @@ impl<'a> ImportEnvironmentBuilder<'a> {
                 self.environment
                     .imported_declarations_by_local_path
                     .entry(synthetic_path.clone())
-                    .or_insert_with(|| declaration.clone());
-                let location = interface
+                    .or_insert_with(|| origin);
+                let location = view
                     .export_diagnostic_provenance(binding.public_name())
                     .map(|location| self.remap_provider_diagnostic_location(location))
                     .unwrap_or_else(|| SourceLocation {
@@ -1084,15 +1160,11 @@ impl<'a> ImportEnvironmentBuilder<'a> {
             .source_provider_imports
             .resolve(import.provider.import_shell_id)
         {
-            let interface = self
-                .source_provider_imports
-                .interface(provider_id)
-                .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
             return self.register_source_provider_import(
                 file_visibility,
                 registry,
                 import,
-                interface,
+                provider_id,
             );
         }
 
@@ -1293,15 +1365,11 @@ impl<'a> ImportEnvironmentBuilder<'a> {
             .source_provider_imports
             .resolve(import.provider.import_shell_id)
         {
-            let interface = self
-                .source_provider_imports
-                .interface(provider_id)
-                .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
             return self.register_source_provider_namespace_import(
                 file_visibility,
                 registry,
                 import,
-                interface,
+                provider_id,
             );
         }
 

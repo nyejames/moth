@@ -14,8 +14,16 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
         let mut projected_declarations = self.declaration_table.iter().cloned().collect::<Vec<_>>();
 
-        for (local_path, record) in imported {
-            let PublicDeclarationSemantics::Function(function) = record.semantics else {
+        for (local_path, origin) in imported {
+            let Some(record) = self
+                .import_environment
+                .imported_declarations_by_origin
+                .get(&origin)
+                .cloned()
+            else {
+                continue;
+            };
+            let PublicDeclarationSemantics::Function(function) = &record.semantics else {
                 continue;
             };
             let generic_parameter_list_id = match &function.category {
@@ -58,7 +66,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             );
 
             if let PublicFunctionCategory::GenericTemplate(_) = &function.category {
-                let OriginDeclarationId::Function(origin) = record.origin else {
+                let OriginDeclarationId::Function(origin) = origin else {
                     return Err(CompilerMessages::from_error_ref(
                         CompilerError::compiler_error(
                             "Imported generic function declaration has no function origin",
@@ -108,7 +116,21 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 local_path,
                 AstImportedFunctionContract {
                     target: header_contract.target.clone(),
-                    summary: header_contract.summary.clone(),
+                    summary: self
+                        .import_environment
+                        .imported_call_summaries_by_origin
+                        .get(&summary_origin(header_contract).map_err(|error| {
+                            CompilerMessages::from_error_ref(error, string_table)
+                        })?)
+                        .cloned()
+                        .ok_or_else(|| {
+                            CompilerMessages::from_error_ref(
+                                CompilerError::compiler_error(
+                                    "Imported concrete function has no shared call summary",
+                                ),
+                                string_table,
+                            )
+                        })?,
                     fallible_carrier_type_id,
                 },
             );
@@ -128,8 +150,16 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             .imported_declarations_by_local_path
             .clone();
 
-        for (imported_type_path, record) in imported {
-            let OriginDeclarationId::Type(receiver_origin) = &record.origin else {
+        for (imported_type_path, origin) in imported {
+            let OriginDeclarationId::Type(receiver_origin) = &origin else {
+                continue;
+            };
+            let Some(record) = self
+                .import_environment
+                .imported_declarations_by_origin
+                .get(&origin)
+                .cloned()
+            else {
                 continue;
             };
             let methods = match &record.semantics {
@@ -222,7 +252,21 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     method_path,
                     AstImportedFunctionContract {
                         target: header_contract.target.clone(),
-                        summary: header_contract.summary.clone(),
+                        summary: self
+                            .import_environment
+                            .imported_call_summaries_by_origin
+                            .get(&summary_origin(header_contract).map_err(|error| {
+                                CompilerMessages::from_error_ref(error, string_table)
+                            })?)
+                            .cloned()
+                            .ok_or_else(|| {
+                                CompilerMessages::from_error_ref(
+                                    CompilerError::compiler_error(
+                                        "Imported receiver method has no shared call summary",
+                                    ),
+                                    string_table,
+                                )
+                            })?,
                         fallible_carrier_type_id,
                     },
                 );
@@ -337,5 +381,20 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             function_type_id,
             fallible_carrier_type_id,
         ))
+    }
+}
+
+/// The stable function origin whose shared call summary a header-stage contract references.
+fn summary_origin(
+    contract: &crate::compiler_frontend::headers::import_environment::ImportedFunctionContract,
+) -> Result<crate::compiler_frontend::semantic_identity::OriginFunctionId, CompilerError> {
+    match &contract.target {
+        crate::compiler_frontend::headers::import_environment::SourceFunctionTarget::Imported {
+            origin,
+            ..
+        } => Ok(origin.clone()),
+        _ => Err(CompilerError::compiler_error(
+            "Header-stage imported function contract must target an imported origin",
+        )),
     }
 }

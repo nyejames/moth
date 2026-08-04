@@ -11,6 +11,7 @@
 //! components to rediscover a provider, and gives re-export caches and shell bindings one exact
 //! provider identity instead of module origins or raw pointer identity.
 
+use super::interface_view::ProviderBindingView;
 use super::model::PublicSemanticInterface;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -61,6 +62,7 @@ pub(crate) struct SourceProviderImport<'a> {
 #[derive(Debug, Default)]
 pub(crate) struct ProviderInterfaceTable<'a> {
     interfaces: Vec<&'a PublicSemanticInterface>,
+    binding_views: Vec<ProviderBindingView<'a>>,
     by_shell: FxHashMap<ImportShellId, ProviderInterfaceId>,
     implicit_by_prefix: FxHashMap<&'a str, ProviderInterfaceId>,
     implicit_providers: Vec<(&'a str, ProviderInterfaceId)>,
@@ -71,6 +73,7 @@ impl<'a> ProviderInterfaceTable<'a> {
     fn build(imports: &[SourceProviderImport<'a>]) -> Result<Self, CompilerError> {
         let mut table = Self {
             interfaces: Vec::with_capacity(imports.len()),
+            binding_views: Vec::with_capacity(imports.len()),
             by_shell: FxHashMap::default(),
             implicit_by_prefix: FxHashMap::default(),
             implicit_providers: Vec::new(),
@@ -124,6 +127,8 @@ impl<'a> ProviderInterfaceTable<'a> {
 
         let provider_id = ProviderInterfaceId(self.interfaces.len());
         self.interfaces.push(interface);
+        self.binding_views
+            .push(ProviderBindingView::build(interface)?);
         self.by_origin
             .insert(interface.module_origin.clone(), provider_id);
         Ok(provider_id)
@@ -150,6 +155,21 @@ impl<'a> ProviderInterfaceTable<'a> {
         self.interfaces.get(provider_id.0).copied().ok_or_else(|| {
             CompilerError::compiler_error(format!(
                 "provider interface table has no interface for provider id {}",
+                provider_id.0
+            ))
+        })
+    }
+
+    /// The one operation-scoped binding view for a provider ID.
+    ///
+    /// Built once when the provider registers; every shell referencing the provider reuses it.
+    pub(crate) fn binding_view(
+        &self,
+        provider_id: ProviderInterfaceId,
+    ) -> Result<&ProviderBindingView<'a>, CompilerError> {
+        self.binding_views.get(provider_id.0).ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "provider interface table has no binding view for provider id {}",
                 provider_id.0
             ))
         })
@@ -233,6 +253,14 @@ impl<'a> SourceProviderImportSet<'a> {
         provider_id: ProviderInterfaceId,
     ) -> Result<&'a PublicSemanticInterface, CompilerError> {
         self.table.interface(provider_id)
+    }
+
+    /// The one operation-scoped binding view for a provider ID.
+    pub(crate) fn binding_view(
+        &self,
+        provider_id: ProviderInterfaceId,
+    ) -> Result<&ProviderBindingView<'a>, CompilerError> {
+        self.table.binding_view(provider_id)
     }
 
     /// Iterate over source packages selected by the builder for `.mtf` implicit scope.

@@ -513,7 +513,6 @@ fn disagreeing_provider_summaries_fail_deterministically() {
 #[test]
 fn duplicate_keys_in_one_interface_fail_at_view_construction() {
     let module = provider_origin("duplicate");
-    let origin = function_origin(&module, "make_card");
     let duplicate = provider_interface(
         &module,
         vec![
@@ -524,15 +523,13 @@ fn duplicate_keys_in_one_interface_fail_at_view_construction() {
         Vec::new(),
     );
 
-    let error = close(
-        vec![ExportBinding::new(
-            provider_origin("facade"),
-            "make_card".to_owned(),
-            OriginDeclarationId::Function(origin),
-        )],
-        vec![&duplicate],
-    )
-    .expect_err("a malformed successful interface must fail while its view is built");
+    let error = SourceProviderImportSet::new(vec![SourceProviderImport {
+        kind: crate::compiler_frontend::public_interface::ProviderImportKind::Authored {
+            shell_id: ImportShellId::new(FileId(0), 0),
+        },
+        interface: &duplicate,
+    }])
+    .expect_err("a malformed successful interface must fail while its binding view is built");
 
     assert!(
         error.msg.contains("duplicate declaration origin"),
