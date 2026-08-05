@@ -323,7 +323,8 @@ struct CodeScanner<'source> {
     language: CodeLanguage,
     contract_state: ContractState,
     generic_declaration: bool,
-    in_loop_header: bool,
+    moth_delimiter_depth: usize,
+    loop_header_depth: Option<usize>,
     in_pipe_group: bool,
     css_brace_depth: usize,
     expected_word_role: Option<ExpectedWordRole>,
@@ -339,7 +340,8 @@ impl<'source> CodeScanner<'source> {
             language,
             contract_state: ContractState::None,
             generic_declaration: false,
-            in_loop_header: false,
+            moth_delimiter_depth: 0,
+            loop_header_depth: None,
             in_pipe_group: false,
             css_brace_depth: 0,
             expected_word_role: None,
@@ -710,7 +712,7 @@ impl<'source> CodeScanner<'source> {
                 "loop" => {
                     // A collection or range loop keeps its source/projection
                     // unclassified until the header ends at `:` or a newline.
-                    self.in_loop_header = true;
+                    self.loop_header_depth = Some(self.moth_delimiter_depth);
                     self.contract_state = ContractState::None;
                 }
                 "must" => {
@@ -801,7 +803,7 @@ impl<'source> CodeScanner<'source> {
         self.contract_state = ContractState::None;
         match self.next_non_horizontal_whitespace_byte(word_end) {
             Some(b'(') => Some(CodeHighlightRole::Function),
-            Some(b'|') if !self.in_pipe_group && !self.in_loop_header => {
+            Some(b'|') if !self.in_pipe_group && self.loop_header_depth.is_none() => {
                 Some(CodeHighlightRole::Function)
             }
             _ if !self.in_pipe_group && self.next_word_is(word_end, "type") => {
@@ -811,12 +813,38 @@ impl<'source> CodeScanner<'source> {
         }
     }
 
-    /// Resets contract-list, generic-declaration and loop-header context at
-    /// structural boundaries so later source cannot inherit stale expectations.
+    /// Resets contract-list and generic-declaration context at structural
+    /// boundaries so later source cannot inherit stale expectations.
+    ///
+    /// Loop-header state is deliberately separate: it must survive nested
+    /// delimiters and source-expression operators and ends only at its own
+    /// top-level `|`, header `:` or terminating newline.
     fn reset_declaration_context(&mut self) {
         self.contract_state = ContractState::None;
         self.generic_declaration = false;
-        self.in_loop_header = false;
+    }
+
+    /// Tracks Moth delimiter nesting for the loop-header heuristic.
+    fn update_moth_delimiter_depth(&mut self) {
+        match self.bytes[self.index] {
+            b'(' | b'[' | b'{' => self.moth_delimiter_depth += 1,
+            b')' | b']' | b'}' => {
+                self.moth_delimiter_depth = self.moth_delimiter_depth.saturating_sub(1)
+            }
+            _ => {}
+        }
+    }
+
+    /// Ends loop-header context at a pipe or colon at the same nesting depth
+    /// as the `loop` keyword.
+    ///
+    /// WHY: the binding pipe and the header colon are top-level boundaries;
+    ///      the same byte inside a nested source expression must not end the
+    ///      header early.
+    fn end_loop_header_at_top_level(&mut self) {
+        if self.loop_header_depth == Some(self.moth_delimiter_depth) {
+            self.loop_header_depth = None;
+        }
     }
 
     /// Resets declaration context at a newline, preserving only a conformance
@@ -825,7 +853,7 @@ impl<'source> CodeScanner<'source> {
     /// WHY: `Label must FIRST,\n SECOND` stays one conformance list, while an
     ///      ordinary newline ends every declaration expectation.
     fn reset_after_newline(&mut self) {
-        self.in_loop_header = false;
+        self.loop_header_depth = None;
         self.generic_declaration = false;
 
         if !matches!(
@@ -995,6 +1023,10 @@ impl<'source> CodeScanner<'source> {
         }
 
         if self.language == CodeLanguage::Moth {
+            self.update_moth_delimiter_depth();
+            if matches!(self.bytes[self.index], b'|' | b':') {
+                self.end_loop_header_at_top_level();
+            }
             self.reset_declaration_context();
         }
 

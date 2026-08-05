@@ -183,6 +183,14 @@ projects.
 Supported aliases:
 
 - `text` / `txt`
+- `html`
+- `markdown` / `md`
+- `toml`
+- `json`
+- `yaml` / `yml`
+- `css`
+- `c`
+- `sql`
 - `moth`
 - `javascript` / `js`
 - `typescript` / `ts`

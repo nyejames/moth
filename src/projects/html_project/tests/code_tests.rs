@@ -1166,6 +1166,31 @@ fn moth_loop_sources_are_not_function_declarations() {
         "the loop binding must stay plain, got: {call}"
     );
 
+    let nested_call = highlight_code_html("loop get_items().children |child|:", CodeLanguage::Moth);
+    assert_eq!(
+        nested_call,
+        "<span class='moth-code-keyword'>loop</span> <span class='moth-code-function'>get_items</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span>.children <span class='moth-code-delimiter'>|</span>child<span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>",
+        "a call result followed by a projection must keep the final source plain, got: {nested_call}"
+    );
+
+    let grouped_call =
+        highlight_code_html("loop (get_items()).children |child|:", CodeLanguage::Moth);
+    assert_eq!(
+        grouped_call,
+        "<span class='moth-code-keyword'>loop</span> <span class='moth-code-delimiter'>(</span><span class='moth-code-function'>get_items</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span><span class='moth-code-delimiter'>)</span>.children <span class='moth-code-delimiter'>|</span>child<span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>",
+        "a grouped call result followed by a projection must keep the final source plain, got: {grouped_call}"
+    );
+
+    let projected_call = highlight_code_html(
+        "loop source.get_items().children |child|:",
+        CodeLanguage::Moth,
+    );
+    assert_eq!(
+        projected_call,
+        "<span class='moth-code-keyword'>loop</span> source.<span class='moth-code-function'>get_items</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span>.children <span class='moth-code-delimiter'>|</span>child<span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>",
+        "a projected call result followed by a projection must keep the final source plain, got: {projected_call}"
+    );
+
     // The header state must end at `:` so a later declaration is unaffected.
     let following = highlight_code_html("loop items |item|:\nrender |value|", CodeLanguage::Moth);
     assert!(
