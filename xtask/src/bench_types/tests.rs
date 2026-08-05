@@ -800,6 +800,10 @@ fn test_friendly_stage_label_maps_known_names() {
         "module roots"
     );
     assert_eq!(friendly_stage_label("backend.js.lower_hir"), "js lower");
+    assert_eq!(
+        friendly_stage_label("backend.js.lower_linked_hir"),
+        "js linked lower"
+    );
     assert_eq!(friendly_stage_label("unknown_ms"), "unknown_ms");
 }
 

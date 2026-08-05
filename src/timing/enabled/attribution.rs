@@ -111,17 +111,3 @@ impl TimingModuleContext {
         }
     }
 }
-
-/// One module's timing label and compact context, bundled so frontend
-/// signatures stay small.
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct TimingModuleAttribution<'a> {
-    pub(crate) label: Option<&'a str>,
-    pub(crate) context: TimingModuleContext,
-}
-
-impl<'a> TimingModuleAttribution<'a> {
-    pub(crate) fn new(label: Option<&'a str>, context: TimingModuleContext) -> Self {
-        Self { label, context }
-    }
-}

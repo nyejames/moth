@@ -80,7 +80,6 @@ fn timed_manual_finish_does_not_evaluate_arguments() {
 fn timed_manual_finish_attributed_does_not_evaluate_arguments() {
     let metric_evaluated = evaluation_counter();
     let start_evaluated = evaluation_counter();
-    let label_evaluated = evaluation_counter();
     let context_evaluated = evaluation_counter();
     timed_manual_finish_attributed!(
         {
@@ -92,10 +91,6 @@ fn timed_manual_finish_attributed_does_not_evaluate_arguments() {
             ()
         },
         {
-            label_evaluated.set(label_evaluated.get() + 1);
-            None
-        },
-        {
             context_evaluated.set(context_evaluated.get() + 1);
             crate::timing::TimingModuleContext::default()
         }
@@ -103,7 +98,6 @@ fn timed_manual_finish_attributed_does_not_evaluate_arguments() {
 
     assert_eq!(metric_evaluated.get(), 0);
     assert_eq!(start_evaluated.get(), 0);
-    assert_eq!(label_evaluated.get(), 0);
     assert_eq!(context_evaluated.get(), 0);
 }
 
@@ -134,7 +128,6 @@ fn command_timing_finish_discards_success_expression() {
 fn timed_frontend_stage_expands_to_production_expression() {
     let metric_evaluated = evaluation_counter();
     let prose_evaluated = evaluation_counter();
-    let module_evaluated = evaluation_counter();
     let context_evaluated = evaluation_counter();
 
     // A non-callable value only compiles when the disabled expansion is the
@@ -149,10 +142,6 @@ fn timed_frontend_stage_expands_to_production_expression() {
             "Test stage: "
         },
         {
-            module_evaluated.set(module_evaluated.get() + 1);
-            None
-        },
-        {
             context_evaluated.set(context_evaluated.get() + 1);
             crate::timing::TimingModuleContext::default()
         },
@@ -162,7 +151,6 @@ fn timed_frontend_stage_expands_to_production_expression() {
     assert_eq!(value, 42);
     assert_eq!(metric_evaluated.get(), 0);
     assert_eq!(prose_evaluated.get(), 0);
-    assert_eq!(module_evaluated.get(), 0);
     assert_eq!(context_evaluated.get(), 0);
 }
 

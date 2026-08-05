@@ -144,14 +144,17 @@ pub(crate) fn compile_html_module_js(
                 Arc::clone(&module_private_function_names),
                 Arc::clone(&linked.generated_function_names),
             );
-            let linked_js = lower_hir_to_js(
-                &linked.module.executable.hir,
-                &linked.module.executable.borrow_analysis,
-                string_table,
-                linked_config,
-                &linked.module.executable.type_environment,
-            )
-            .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
+            let linked_js = {
+                timing_guard!("backend.js.lower_linked_hir");
+                lower_hir_to_js(
+                    &linked.module.executable.hir,
+                    &linked.module.executable.borrow_analysis,
+                    string_table,
+                    linked_config,
+                    &linked.module.executable.type_environment,
+                )
+                .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?
+            };
             let exported_names = linked
                 .module
                 .executable

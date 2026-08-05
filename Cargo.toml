@@ -8,7 +8,12 @@ members = [".", "xtask"]
 resolver = "2"
 
 [features]
-# These add println! macros for debugging and info when compiling
+# Timer and developer-instrumentation features. `timers` enables the
+# command/build/dev timing collector and the concise human summary;
+# `detailed_timers` adds verbose inline prose and detailed AST substage
+# timings; `benchmark_counters` adds high-volume local diagnostic counters
+# when combined with `timers`. A build without `timers` performs no
+# timer-system runtime work (see `just timers-erasure-check`).
 timers = []
 detailed_timers = ["timers"]
 benchmark_counters = []

@@ -230,6 +230,8 @@ pub(super) struct ModuleSyntaxDiscovery<'a> {
     warnings: Vec<CompilerDiagnostic>,
     source_byte_count: usize,
     contains_moth_template: bool,
+    #[cfg(feature = "timers")]
+    timing_context: crate::timing::TimingModuleContext,
 }
 
 // -------------------------
@@ -352,6 +354,7 @@ impl ModulePreparationContext<'_> {
         candidate_source_paths: impl ExactSizeIterator<Item = &'a Path>,
         entry_file_path: &Path,
         mut string_table: StringTable,
+        #[cfg(feature = "timers")] timing_context: crate::timing::TimingModuleContext,
     ) -> Result<ModuleSyntaxDiscovery<'a>, CompilerMessages> {
         let source_files = SourceFileTable::build(
             candidate_source_paths,
@@ -375,6 +378,8 @@ impl ModulePreparationContext<'_> {
             warnings: Vec::new(),
             source_byte_count: 0,
             contains_moth_template: false,
+            #[cfg(feature = "timers")]
+            timing_context,
         })
     }
 
@@ -404,7 +409,7 @@ impl ModulePreparationContext<'_> {
         entry_file_path: &Path,
         mut string_table: StringTable,
         source_byte_count: usize,
-        #[cfg(feature = "timers")] module_attribution: crate::timing::TimingModuleAttribution<'_>,
+        #[cfg(feature = "timers")] timing_context: crate::timing::TimingModuleContext,
     ) -> Result<PreparedModule, CompilerMessages> {
         let mut warnings = Vec::new();
         let contains_moth_template = module.iter().any(PreparedSourceInput::is_moth_template);
@@ -428,8 +433,7 @@ impl ModulePreparationContext<'_> {
         let (prepared_header_syntax, file_warnings) = timed_frontend_stage!(
             "frontend.file_prepare",
             "Files Prepared in: ",
-            module_attribution.label,
-            module_attribution.context,
+            timing_context,
             {
                 self.prepare_module_files(
                     &mut string_table,
@@ -959,10 +963,15 @@ impl ModuleSyntaxDiscovery<'_> {
             runtime_fragment_offset: 0,
         };
 
-        let output = match CompilerFrontend::prepare_file_frontend_local(
-            &prepare_context,
-            input,
-            &mut self.string_table,
+        let output = match timed_frontend_stage!(
+            "frontend.file_prepare",
+            "Files Prepared in: ",
+            self.timing_context,
+            CompilerFrontend::prepare_file_frontend_local(
+                &prepare_context,
+                input,
+                &mut self.string_table,
+            ),
         ) {
             Ok(output) => output,
             Err(error) => {
@@ -1000,15 +1009,20 @@ impl ModuleSyntaxDiscovery<'_> {
             .map(|(_, output)| output)
             .collect::<Vec<_>>();
         let source_file_count = prepared_outputs.len();
-        let prepared_header_syntax =
-            prepare_header_syntax(prepared_outputs, &mut self.string_table).map_err(|bag| {
-                let mut messages = CompilerMessages::from_diagnostics(
-                    bag.into_diagnostics(),
-                    self.string_table.clone(),
-                );
-                messages.prepend_diagnostics_preserving_context(self.warnings.iter().cloned());
-                messages
-            })?;
+        let prepared_header_syntax = timed_frontend_stage!(
+            "frontend.file_prepare",
+            "Files Prepared in: ",
+            self.timing_context,
+            prepare_header_syntax(prepared_outputs, &mut self.string_table),
+        )
+        .map_err(|bag| {
+            let mut messages = CompilerMessages::from_diagnostics(
+                bag.into_diagnostics(),
+                self.string_table.clone(),
+            );
+            messages.prepend_diagnostics_preserving_context(self.warnings.iter().cloned());
+            messages
+        })?;
         let active_root_file_id = ModulePreparationContext::resolve_and_validate_active_root(
             &self.source_files,
             &self.source_module_origins,
@@ -1050,7 +1064,7 @@ impl FrontendModuleBuildContext<'_> {
         &self,
         prepared: PreparedModule,
         entry_file_path: &Path,
-        #[cfg(feature = "timers")] module_attribution: crate::timing::TimingModuleAttribution<'_>,
+        #[cfg(feature = "timers")] timing_context: crate::timing::TimingModuleContext,
         mut generated_worklist: GeneratedFunctionWorklist<'_>,
     ) -> Result<ModuleCompilationOutcome, CompilerError> {
         let PreparedModule {
@@ -1098,8 +1112,7 @@ impl FrontendModuleBuildContext<'_> {
             let module_headers = timed_frontend_stage!(
                 "frontend.header_bind",
                 "Headers bound in: ",
-                module_attribution.label,
-                module_attribution.context,
+                timing_context,
                 {
                     Self::bind_retained_headers(
                         &mut compiler,
@@ -1121,8 +1134,7 @@ impl FrontendModuleBuildContext<'_> {
             let sorted = timed_frontend_stage!(
                 "frontend.dependency_sort",
                 "Dependency graph created in: ",
-                module_attribution.label,
-                module_attribution.context,
+                timing_context,
                 Self::sort_headers(&mut compiler, module_headers, &warnings),
             )?;
 
@@ -1195,12 +1207,8 @@ impl FrontendModuleBuildContext<'_> {
             // projection input carries the resolved receiver-method catalog and public type-root
             // table that step 4 joins with the pre-AST `DirectExportSeed` to build the post-AST
             // `CallableSeed` table, the one receiver and callable identity owner.
-            let module_ast_build = timed_frontend_stage!(
-                "frontend.ast",
-                "AST created in: ",
-                module_attribution.label,
-                module_attribution.context,
-                {
+            let module_ast_build =
+                timed_frontend_stage!("frontend.ast", "AST created in: ", timing_context, {
                     self.build_ast(
                         &mut compiler,
                         sorted,
@@ -1209,8 +1217,7 @@ impl FrontendModuleBuildContext<'_> {
                         capacity_estimate,
                         &mut warnings,
                     )
-                },
-            )?;
+                },)?;
 
             // Destructure the build result once: the projection input and generic-template map
             // feed the draft and extraction owners, while only the executable `Ast` reaches HIR.
@@ -1240,7 +1247,10 @@ impl FrontendModuleBuildContext<'_> {
             //    borrow validation, while provenance, re-export interfaces, cross-module call
             //    lowering and future generated-generic summaries remain for later phases.
             //    Folded constant values are now owned by each constant declaration record.
-            let public_interface_build =
+            let public_interface_build = timed_frontend_stage!(
+                "frontend.public_interface",
+                "Public interface built in: ",
+                timing_context,
                 PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {
                     export_seed,
                     public_interface_projection_input,
@@ -1254,8 +1264,9 @@ impl FrontendModuleBuildContext<'_> {
                         .generic_function_templates(),
                     module_constants: &module_ast.module_constants,
                 })
-                .build()
-                .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+                .build(),
+            )
+            .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
             let public_interface_draft = public_interface_build.draft;
 
             let public_origins_by_path = public_interface_build
@@ -1333,8 +1344,7 @@ impl FrontendModuleBuildContext<'_> {
             let hir_lowering = timed_frontend_stage!(
                 "frontend.hir",
                 "HIR generated in: ",
-                module_attribution.label,
-                module_attribution.context,
+                timing_context,
                 Self::lower_hir(&mut compiler, module_ast, &warnings, function_origin_lookup),
             )?;
             let HirLoweringResult {
@@ -1356,8 +1366,7 @@ impl FrontendModuleBuildContext<'_> {
             let bootstrap_borrow_analysis = timed_frontend_stage!(
                 "frontend.borrow",
                 "Borrow checking completed in: ",
-                module_attribution.label,
-                module_attribution.context,
+                timing_context,
                 Self::check_borrows(&compiler, &hir_module, &warnings),
             )?;
             install_exact_concrete_call_summaries(
@@ -1366,12 +1375,17 @@ impl FrontendModuleBuildContext<'_> {
                 &bootstrap_borrow_analysis,
             )
             .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
-            self.materialise_generated_request_roots(
-                &generated_request_ids,
-                &mut generated_worklist,
-                materialisation_context_builder.context(),
-                &mut compiler,
-                entry_file_path,
+            timed_frontend_stage!(
+                "frontend.generated_functions",
+                "Generated functions materialized in: ",
+                timing_context,
+                self.materialise_generated_request_roots(
+                    &generated_request_ids,
+                    &mut generated_worklist,
+                    materialisation_context_builder.context(),
+                    &mut compiler,
+                    entry_file_path,
+                ),
             )?;
             hir_module.generated_call_summaries = generated_worklist
                 .summaries_for(
@@ -1392,8 +1406,7 @@ impl FrontendModuleBuildContext<'_> {
                 let borrow_analysis = timed_frontend_stage!(
                     "frontend.borrow.exact_generated",
                     "Exact generated-call borrow checking completed in: ",
-                    module_attribution.label,
-                    module_attribution.context,
+                    timing_context,
                     Self::check_borrows(&compiler, &hir_module, &warnings),
                 )?;
                 let concrete_summaries_changed = install_exact_concrete_call_summaries(
@@ -1402,10 +1415,15 @@ impl FrontendModuleBuildContext<'_> {
                     &borrow_analysis,
                 )
                 .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
-                let generated_summaries_changed = self.recheck_generated_borrows(
-                    &mut generated_worklist,
-                    materialisation_context_builder.context(),
-                    &compiler,
+                let generated_summaries_changed = timed_frontend_stage!(
+                    "frontend.borrow.generated",
+                    "Generated borrow rechecks completed in: ",
+                    timing_context,
+                    self.recheck_generated_borrows(
+                        &mut generated_worklist,
+                        materialisation_context_builder.context(),
+                        &compiler,
+                    ),
                 )?;
                 hir_module.generated_call_summaries = generated_worklist
                     .summaries_for(
@@ -1442,15 +1460,26 @@ impl FrontendModuleBuildContext<'_> {
             // generated summaries belong to the future sidecar worklist, distinct from these
             // direct concrete summaries. Private functions and implicit start retain local
             // summaries but never enter declaration records.
-            let local_public_interface = public_interface_draft
-                .finalize_after_borrow_validation(&borrow_analysis.analysis, &hir_module)
-                .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
-            let public_interface = PublicSemanticInterface::close_from_local(
-                local_public_interface,
-                self.source_provider_imports,
-                compiler.external_package_registry.as_ref(),
-            )
-            .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+            let public_interface = timed_frontend_stage!(
+                "frontend.public_interface",
+                "Public interface finalized in: ",
+                timing_context,
+                {
+                    let local_public_interface = public_interface_draft
+                        .finalize_after_borrow_validation(&borrow_analysis.analysis, &hir_module)
+                        .map_err(|error| {
+                            CompilerMessages::from_error_ref(error, &compiler.string_table)
+                        })?;
+                    PublicSemanticInterface::close_from_local(
+                        local_public_interface,
+                        self.source_provider_imports,
+                        compiler.external_package_registry.as_ref(),
+                    )
+                    .map_err(|error| {
+                        CompilerMessages::from_error_ref(error, &compiler.string_table)
+                    })
+                },
+            )?;
             let materialisation_context = materialisation_context_builder
                 .freeze(&public_interface)
                 .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
@@ -2647,32 +2676,6 @@ fn collect_source_logical_paths_from_table(
         .iter()
         .map(|identity| identity.logical_path.to_portable_string(string_table))
         .collect()
-}
-
-/// Format a bounded, human-readable attribution label for one module's timing.
-///
-/// WHAT: combines the entry path, source file count, and source byte count into a
-///      short label suitable for the concise timing summary's "slowest module" line.
-/// WHY:  the label stays out of stable `MOTH_BENCH timing` lines; it is display-only
-///       evidence so the summary can attribute the max sample without per-module listing.
-#[cfg(feature = "timers")]
-pub(super) fn module_timing_label(
-    entry_file_path: &Path,
-    source_file_count: usize,
-    source_byte_count: usize,
-) -> String {
-    let file_word = if source_file_count == 1 {
-        "file"
-    } else {
-        "files"
-    };
-    format!(
-        "{} ({} {}, {:.1}KB)",
-        entry_file_path.display(),
-        source_file_count,
-        file_word,
-        source_byte_count as f64 / 1024.0,
-    )
 }
 
 #[cfg(test)]

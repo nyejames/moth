@@ -291,6 +291,7 @@ impl BackendBuilder for InvalidOutputWarningBuilder {
 
 #[test]
 fn successful_build_marks_state_ok_and_uses_declared_entry_page() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let root = temp_dir("success");
     fs::create_dir_all(&root).expect("should create temp root");
     let output_dir = root.join("dev");
@@ -322,6 +323,7 @@ fn successful_build_marks_state_ok_and_uses_declared_entry_page() {
 
 #[test]
 fn successful_rebuild_updates_output_and_watch_roots_from_new_plan() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let root = temp_dir("dev_output_plan_change");
     fs::create_dir_all(&root).expect("should create temp root");
     let state = Arc::new(DevServerState::new(root.join("dev")));
@@ -366,6 +368,7 @@ fn successful_rebuild_updates_output_and_watch_roots_from_new_plan() {
 
 #[test]
 fn failed_build_marks_state_and_stores_error_page() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let root = temp_dir("failure");
     fs::create_dir_all(&root).expect("should create temp root");
     let state = Arc::new(DevServerState::new(root.join("dev")));
@@ -390,6 +393,7 @@ fn failed_build_marks_state_and_stores_error_page() {
 
 #[test]
 fn build_without_declared_entry_page_is_treated_as_failure() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let root = temp_dir("missing_entry_page");
     fs::create_dir_all(&root).expect("should create temp root");
     let state = Arc::new(DevServerState::new(root.join("dev")));
@@ -414,6 +418,7 @@ fn build_without_declared_entry_page_is_treated_as_failure() {
 
 #[test]
 fn build_version_increments_on_each_attempt() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let root = temp_dir("version");
     fs::create_dir_all(&root).expect("should create temp root");
     let state = Arc::new(DevServerState::new(root.join("dev")));
@@ -430,6 +435,7 @@ fn build_version_increments_on_each_attempt() {
 
 #[test]
 fn queued_rebuild_runs_when_files_change_during_build() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let root = temp_dir("queued");
     fs::create_dir_all(&root).expect("should create temp root");
     fs::write(root.join("main.moth"), "start").expect("should write initial source file");
@@ -466,6 +472,7 @@ fn queued_rebuild_runs_when_files_change_during_build() {
 
 #[test]
 fn rebuild_loop_stops_at_max_consecutive_rebuilds() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     use super::MAX_CONSECUTIVE_REBUILDS;
 
     let root = temp_dir("max_rebuilds");
@@ -515,6 +522,7 @@ fn rebuild_loop_stops_at_max_consecutive_rebuilds() {
 
 #[test]
 fn dev_server_error_messages_use_dev_server_error_type() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let messages = dev_server_error_messages(Path::new("x.moth"), "oops");
     assert_eq!(messages.error_count(), 1);
     let (error_type, _message, _location) = messages
@@ -525,6 +533,7 @@ fn dev_server_error_messages_use_dev_server_error_type() {
 
 #[test]
 fn successful_build_with_warnings_preserves_structured_success_messages() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let root = temp_dir("success_warnings");
     fs::create_dir_all(&root).expect("should create temp root");
     let mut executor = FakeExecutor::new(vec![Ok(html_build_result_with_warning())]);
@@ -548,6 +557,7 @@ fn successful_build_with_warnings_preserves_structured_success_messages() {
 
 #[test]
 fn successful_build_without_warnings_has_no_success_messages() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let root = temp_dir("success_no_warnings");
     fs::create_dir_all(&root).expect("should create temp root");
     let mut executor = FakeExecutor::new(vec![Ok(html_build_result())]);
@@ -565,6 +575,7 @@ fn successful_build_without_warnings_has_no_success_messages() {
 
 #[test]
 fn rebuild_loop_success_with_warnings_updates_summary() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let root = temp_dir("rebuild_warnings");
     fs::create_dir_all(&root).expect("should create temp root");
     fs::write(root.join("main.moth"), "start").expect("should write initial source file");
@@ -604,6 +615,7 @@ fn rebuild_loop_success_with_warnings_updates_summary() {
 
 #[test]
 fn project_build_executor_preserves_warnings_when_output_write_fails() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let root = temp_dir("write_failure_preserves_warnings");
     fs::create_dir_all(&root).expect("should create temp root");
     let entry_file = root.join("main.moth");
@@ -639,6 +651,7 @@ fn project_build_executor_preserves_warnings_when_output_write_fails() {
 
 #[test]
 fn project_build_executor_writes_the_validated_directory_plan() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let root = temp_dir("project_executor_directory_plan");
     let source_root = root.join("src");
     fs::create_dir_all(&source_root).expect("should create source root");
@@ -669,6 +682,91 @@ fn project_build_executor_writes_the_validated_directory_plan() {
     );
     assert!(root.join("preview/index.html").exists());
     assert!(!root.join("dev/index.html").exists());
+
+    fs::remove_dir_all(&root).expect("should remove temp dir");
+}
+
+#[cfg(feature = "timers")]
+#[test]
+fn dev_cycle_records_build_and_write_and_drains_one_collection_per_build() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let root = temp_dir("dev_cycle_timing");
+    let source_root = root.join("src");
+    fs::create_dir_all(&source_root).expect("should create source root");
+    fs::write(root.join("config.moth"), "entry_root #= \"src\"\n").expect("should write config");
+    fs::write(source_root.join("@page.moth"), "#[:<h1>Dev Cycle</h1>]\n")
+        .expect("should write page source");
+
+    let state = Arc::new(DevServerState::new(root.join("dev")));
+    let mut executor =
+        ProjectBuildExecutor::new(ProjectBuilder::new(Box::new(HtmlProjectBuilder::new())));
+
+    let first = run_single_build_cycle(&state, &mut executor, &root, &Vec::new());
+    let second = run_single_build_cycle(&state, &mut executor, &root, &Vec::new());
+
+    let first_snapshot = first
+        .timing_snapshot
+        .expect("every dev cycle must drain a timing snapshot");
+    let second_snapshot = second
+        .timing_snapshot
+        .expect("every dev cycle must drain a timing snapshot");
+
+    for snapshot in [&first_snapshot, &second_snapshot] {
+        assert_eq!(
+            snapshot
+                .timings
+                .iter()
+                .filter(|observation| observation.name == "command.dev.build_and_write")
+                .count(),
+            1,
+            "each dev cycle records exactly one build-and-write observation"
+        );
+    }
+    #[cfg(feature = "detailed_timers")]
+    {
+        assert_eq!(
+            first_snapshot
+                .timings
+                .iter()
+                .filter(|observation| observation.name == "command.dev.cycle")
+                .count(),
+            1,
+            "each dev cycle records exactly one full-cycle observation"
+        );
+        assert_eq!(
+            second_snapshot
+                .timings
+                .iter()
+                .filter(|observation| observation.name == "command.dev.cycle")
+                .count(),
+            1,
+            "cycle observations must not leak across builds"
+        );
+    }
+
+    fs::remove_dir_all(&root).expect("should remove temp dir");
+}
+
+#[cfg(feature = "timers")]
+#[test]
+fn failed_dev_build_still_drains_timing_snapshot() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let root = temp_dir("dev_failed_cycle_timing");
+    fs::create_dir_all(&root).expect("should create temp root");
+    let state = Arc::new(DevServerState::new(root.join("dev")));
+    let mut executor = FakeExecutor::new(vec![Err(dev_server_error_messages(
+        &root.join("main.moth"),
+        "synthetic failure",
+    ))]);
+
+    let report =
+        run_single_build_cycle(&state, &mut executor, &root.join("main.moth"), &Vec::new());
+
+    assert!(!report.build_ok);
+    assert!(
+        report.timing_snapshot.is_some(),
+        "a failed dev build must still drain its timing collection"
+    );
 
     fs::remove_dir_all(&root).expect("should remove temp dir");
 }

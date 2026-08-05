@@ -150,6 +150,7 @@ impl ModuleCompilationSchedule {
 /// API-only semantic jobs. A defensive
 /// graph cycle, a missing project-local root or a graph/inventory disagreement surfaces through
 /// the existing `CompilerMessages`/string-table boundary without panicking.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn discover_all_modules_in_project(
     config: &Config,
     project_path_resolver: &ProjectPathResolver,
@@ -158,6 +159,7 @@ pub(crate) fn discover_all_modules_in_project(
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     directory_import_resolution: DirectoryImportResolution<'_>,
     string_table: &mut StringTable,
+    #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
 ) -> Result<ModuleCompilationSchedule, CompilerMessages> {
     discover_all_modules_in_boundary(
         config,
@@ -168,9 +170,12 @@ pub(crate) fn discover_all_modules_in_project(
         directory_import_resolution,
         true,
         string_table,
+        #[cfg(feature = "timers")]
+        timing_boundary,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn discover_all_modules_in_package(
     config: &Config,
     project_path_resolver: &ProjectPathResolver,
@@ -179,6 +184,7 @@ pub(crate) fn discover_all_modules_in_package(
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     directory_import_resolution: DirectoryImportResolution<'_>,
     string_table: &mut StringTable,
+    #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
 ) -> Result<ModuleCompilationSchedule, CompilerMessages> {
     discover_all_modules_in_boundary(
         config,
@@ -189,6 +195,8 @@ pub(crate) fn discover_all_modules_in_package(
         directory_import_resolution,
         false,
         string_table,
+        #[cfg(feature = "timers")]
+        timing_boundary,
     )
 }
 
@@ -202,6 +210,7 @@ fn discover_all_modules_in_boundary(
     directory_import_resolution: DirectoryImportResolution<'_>,
     require_normal_entry: bool,
     string_table: &mut StringTable,
+    #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
 ) -> Result<ModuleCompilationSchedule, CompilerMessages> {
     let seeds = module_seeds_in_module_id_order(project_module_graph);
     let source_origin_lookup = project_module_graph
@@ -243,6 +252,8 @@ fn discover_all_modules_in_boundary(
         external_imports,
         &mut prepared_source_store,
         string_table,
+        #[cfg(feature = "timers")]
+        timing_boundary,
     )?;
 
     // Insert the resolved dependency edges directly by ModuleId before the graph completes.
@@ -457,6 +468,7 @@ fn discover_modules_serial_provider_capable(
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     prepared_source_store: &mut PreparedSourceStore,
     string_table: &mut StringTable,
+    #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
 ) -> Result<ModuleCompilationJobBatch, CompilerMessages> {
     let ModuleDiscoveryContext {
         project_path_resolver,
@@ -510,6 +522,12 @@ fn discover_modules_serial_provider_capable(
             .node(seed.module_id)
             .stable_origin()
             .clone();
+        #[cfg(feature = "timers")]
+        let timing_context =
+            crate::timing::TimingModuleContext::for_module(crate::timing::TimingModuleKey {
+                boundary: timing_boundary,
+                module_index: seed.module_id.index() as u32,
+            });
         let mut syntax = preparation_context.begin_syntax_discovery(
             stable_origin,
             source_origin_lookup,
@@ -518,6 +536,8 @@ fn discover_modules_serial_provider_capable(
                 .map(|source_id| source_tree_index.source(*source_id).canonical_path()),
             &seed.entry_path,
             local_string_table,
+            #[cfg(feature = "timers")]
+            timing_context,
         )?;
 
         let mut queued = BTreeSet::new();

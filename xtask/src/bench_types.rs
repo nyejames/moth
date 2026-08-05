@@ -1430,6 +1430,7 @@ pub fn friendly_stage_label(stage_name: &str) -> &str {
         "backend.html.tracked_assets_plan" => "asset plan",
         "backend.html.tracked_assets_emit" => "asset emit",
         "backend.js.lower_hir" => "js lower",
+        "backend.js.lower_linked_hir" => "js linked lower",
         "backend.js.generate_module_glue" => "js glue",
         "backend.js.render_html_document" => "html render",
         "backend.wasm.total" => "wasm backend",

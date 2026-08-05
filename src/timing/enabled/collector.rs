@@ -32,6 +32,15 @@ static ACTIVE_COLLECTOR: Mutex<Option<ActiveCollection>> = Mutex::new(None);
 /// that read observations programmatically instead of parsing stdout.
 pub(crate) fn start_collection(suppress_output: bool) {
     if let Ok(mut guard) = ACTIVE_COLLECTOR.lock() {
+        // A nested collection would silently discard the previous scope's
+        // observations. Production callers never nest; tests must serialize
+        // through the collector test lock, so an active scope here is a test
+        // failure rather than a silent replacement.
+        #[cfg(test)]
+        assert!(
+            guard.is_none(),
+            "nested timing collection: a collection scope is already active"
+        );
         *guard = Some(ActiveCollection {
             timings: Vec::new(),
             counters: Vec::new(),
@@ -50,31 +59,43 @@ pub(crate) fn record_timing(name: &'static str, duration: Duration) {
         collection.timings.push(TimingObservation {
             name,
             duration,
-            label: None,
             boundary: None,
             module: None,
         });
     }
 }
 
-/// Record one timing observation with an optional label and compact context.
+/// Record one timing observation with compact boundary/module context.
 ///
-/// The label is preserved on the raw observation for detailed tooling and the
-/// ids drive structured summary attribution. Neither appears in stable
-/// `MOTH_BENCH timing` lines so benchmark parsing is unaffected.
+/// The ids drive structured summary attribution and never appear in stable
+/// `MOTH_BENCH timing` lines, so benchmark parsing is unaffected.
 pub(crate) fn record_attributed_timing(
     name: &'static str,
     duration: Duration,
-    label: Option<&str>,
     context: TimingModuleContext,
 ) {
+    // A compile that started before a collection scope returns the sentinel
+    // boundary; its late observations must not pollute the first active scope.
+    if context.boundary == Some(NO_TIMING_BOUNDARY) {
+        return;
+    }
+    // A module id without a boundary is an inconsistent attribution; drop it
+    // rather than storing evidence the summary can never resolve.
+    if context.module.is_some() && context.boundary.is_none() {
+        return;
+    }
+    // Attributed observations always name a boundary. A default context is a
+    // test-only artifact and must not leak into an active collection scope.
+    if context.boundary.is_none() && context.module.is_none() {
+        return;
+    }
+
     if let Ok(mut guard) = ACTIVE_COLLECTOR.lock()
         && let Some(collection) = guard.as_mut()
     {
         collection.timings.push(TimingObservation {
             name,
             duration,
-            label: label.map(str::to_owned),
             boundary: context.boundary,
             module: context.module,
         });

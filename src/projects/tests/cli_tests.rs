@@ -30,6 +30,7 @@ fn args(values: &[&str]) -> Vec<String> {
 
 #[test]
 fn dev_command_uses_default_options() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let command = get_command(&args(&["dev", "main.moth"])).expect("command should parse");
     assert_eq!(
         command,
@@ -43,6 +44,7 @@ fn dev_command_uses_default_options() {
 
 #[test]
 fn build_command_uses_current_directory_when_path_is_missing() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let command = get_command(&args(&["build"])).expect("build command should parse");
     assert_eq!(
         command,
@@ -55,6 +57,7 @@ fn build_command_uses_current_directory_when_path_is_missing() {
 
 #[test]
 fn build_command_writes_the_validated_directory_output_plan() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let root = temp_dir("cli_directory_output_plan");
     let source_root = root.join("src");
     fs::create_dir_all(&source_root).expect("should create source root");
@@ -83,6 +86,7 @@ fn build_command_writes_the_validated_directory_output_plan() {
 
 #[test]
 fn build_command_supports_mixed_path_and_flag_ordering() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let command =
         get_command(&args(&["build", "--release", "main.moth"])).expect("command should parse");
     assert_eq!(
@@ -96,6 +100,7 @@ fn build_command_supports_mixed_path_and_flag_ordering() {
 
 #[test]
 fn build_command_rejects_unknown_flags() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let error =
         get_command(&args(&["build", "--wat"])).expect_err("unknown build flag should fail");
     assert!(error.contains("Unknown build flag"));
@@ -105,6 +110,7 @@ fn build_command_rejects_unknown_flags() {
 
 #[test]
 fn new_html_command_uses_current_directory_when_path_is_missing() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let command = get_command(&args(&["new", "html"])).expect("new html command should parse");
     assert_eq!(
         command,
@@ -117,6 +123,7 @@ fn new_html_command_uses_current_directory_when_path_is_missing() {
 
 #[test]
 fn new_html_command_parses_project_path() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let command = get_command(&args(&["new", "html", "site"])).expect("new html should parse");
     assert_eq!(
         command,
@@ -129,6 +136,7 @@ fn new_html_command_parses_project_path() {
 
 #[test]
 fn dev_command_parses_custom_host_port_and_poll_interval() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let command = get_command(&args(&[
         "dev",
         "main.moth",
@@ -157,6 +165,7 @@ fn dev_command_parses_custom_host_port_and_poll_interval() {
 
 #[test]
 fn dev_command_rejects_invalid_port_values() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let error = get_command(&args(&["dev", "main.moth", "--port", "invalid"]))
         .expect_err("invalid port should fail");
     assert!(error.contains("Invalid --port value"));
@@ -164,6 +173,7 @@ fn dev_command_rejects_invalid_port_values() {
 
 #[test]
 fn dev_command_rejects_unknown_flags() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let error =
         get_command(&args(&["dev", "main.moth", "--wat"])).expect_err("unknown flag should fail");
     assert!(error.contains("Unknown dev flag"));
@@ -171,6 +181,7 @@ fn dev_command_rejects_unknown_flags() {
 
 #[test]
 fn dev_command_rejects_missing_flag_values() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let host_error =
         get_command(&args(&["dev", "main.moth", "--host"])).expect_err("missing host value");
     assert!(host_error.contains("Missing value for --host"));
@@ -182,6 +193,7 @@ fn dev_command_rejects_missing_flag_values() {
 
 #[test]
 fn dev_command_rejects_zero_poll_interval() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let error = get_command(&args(&["dev", "main.moth", "--poll-interval-ms", "0"]))
         .expect_err("zero interval should fail");
     assert!(error.contains("greater than zero"));
@@ -189,6 +201,7 @@ fn dev_command_rejects_zero_poll_interval() {
 
 #[test]
 fn dev_command_supports_path_and_flag_ordering() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let command = get_command(&args(&[
         "dev",
         "--host",
@@ -215,6 +228,7 @@ fn dev_command_supports_path_and_flag_ordering() {
 
 #[test]
 fn new_html_command_rejects_multiple_paths() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let error = get_command(&args(&["new", "html", "a", "b"]))
         .expect_err("multiple new html paths should fail");
     assert!(error.contains("at most one path"));
@@ -222,6 +236,7 @@ fn new_html_command_rejects_multiple_paths() {
 
 #[test]
 fn new_html_command_parses_force_flag_after_path() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let command =
         get_command(&args(&["new", "html", "site", "--force"])).expect("command should parse");
     assert_eq!(
@@ -235,6 +250,7 @@ fn new_html_command_parses_force_flag_after_path() {
 
 #[test]
 fn new_html_command_parses_force_flag_before_path() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let command =
         get_command(&args(&["new", "html", "--force", "site"])).expect("command should parse");
     assert_eq!(
@@ -248,6 +264,7 @@ fn new_html_command_parses_force_flag_before_path() {
 
 #[test]
 fn new_html_command_rejects_unknown_flags() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let error =
         get_command(&args(&["new", "html", "--yes"])).expect_err("unknown flag should fail");
     assert!(error.contains("Unknown new flag"));
@@ -255,12 +272,14 @@ fn new_html_command_rejects_unknown_flags() {
 
 #[test]
 fn build_command_rejects_force_flag() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let error = get_command(&args(&["build", "--force"])).expect_err("build --force should fail");
     assert!(error.contains("Unknown build flag"));
 }
 
 #[test]
 fn tests_command_uses_default_options() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let command = get_command(&args(&["tests"])).expect("tests command should parse");
     assert_eq!(
         command,
@@ -276,6 +295,7 @@ fn tests_command_uses_default_options() {
 
 #[test]
 fn tests_command_parses_backend_filter() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let command = get_command(&args(&["tests", "--backend", "html_wasm"]))
         .expect("tests backend filter should parse");
     assert_eq!(
@@ -292,6 +312,7 @@ fn tests_command_parses_backend_filter() {
 
 #[test]
 fn tests_command_parses_audit_mode() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let command = get_command(&args(&["tests", "--audit"])).expect("audit mode should parse");
     assert_eq!(
         command,
@@ -307,6 +328,7 @@ fn tests_command_parses_audit_mode() {
 
 #[test]
 fn tests_command_parses_composable_selection_options() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let command = get_command(&args(&[
         "tests",
         "--tag",
@@ -341,6 +363,7 @@ fn tests_command_parses_composable_selection_options() {
 
 #[test]
 fn tests_command_rejects_duplicate_singleton_options() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     for duplicate in [
         vec!["--case", "one", "--case", "two"],
         vec!["--contract", "one", "--contract", "two"],
@@ -359,6 +382,7 @@ fn tests_command_rejects_duplicate_singleton_options() {
 
 #[test]
 fn tests_command_rejects_audit_filters_in_any_argument_order() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     for values in [
         vec!["tests", "--audit", "--case", "case"],
         vec!["tests", "--case", "case", "--audit"],
@@ -377,6 +401,7 @@ fn tests_command_rejects_audit_filters_in_any_argument_order() {
 
 #[test]
 fn tests_command_rejects_duplicate_audit() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let error = get_command(&args(&["tests", "--audit", "--audit"]))
         .expect_err("duplicate audit should fail");
     assert!(error.contains("--audit") && error.contains("at most once"));
@@ -384,6 +409,7 @@ fn tests_command_rejects_duplicate_audit() {
 
 #[test]
 fn tests_command_rejects_duplicate_tag_values() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let error = get_command(&args(&["tests", "--tag", "borrows", "--tag", "borrows"]))
         .expect_err("duplicate tag should fail");
     assert!(
@@ -394,6 +420,7 @@ fn tests_command_rejects_duplicate_tag_values() {
 
 #[test]
 fn tests_command_rejects_missing_selection_values() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     for option in ["--case", "--tag", "--contract", "--backend"] {
         let error = get_command(&args(&["tests", option]))
             .expect_err("missing selection value should fail");
@@ -403,6 +430,7 @@ fn tests_command_rejects_missing_selection_values() {
 
 #[test]
 fn tests_command_rejects_unknown_backend_and_positional_arguments() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let backend_error = get_command(&args(&["tests", "--backend", "wasm"]))
         .expect_err("unsupported backend should fail");
     assert!(backend_error.contains("Invalid value for --backend"));
@@ -415,6 +443,7 @@ fn tests_command_rejects_unknown_backend_and_positional_arguments() {
 
 #[test]
 fn compact_whitespace_collapses_multiline_to_one_line() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     assert_eq!(compact_whitespace("hello\nworld"), "hello world");
     assert_eq!(
         compact_whitespace("line1\n\n  line2  \nline3"),
@@ -427,6 +456,7 @@ fn compact_whitespace_collapses_multiline_to_one_line() {
 
 #[test]
 fn tests_command_rejects_unknown_flags() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let error =
         get_command(&args(&["tests", "--wat"])).expect_err("unknown tests flag should fail");
     assert!(error.contains("Unknown tests flag"));
@@ -435,6 +465,7 @@ fn tests_command_rejects_unknown_flags() {
 
 #[test]
 fn check_command_uses_default_options() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let command = get_command(&args(&["check"])).expect("check command should parse");
     assert_eq!(
         command,
@@ -447,6 +478,7 @@ fn check_command_uses_default_options() {
 
 #[test]
 fn check_command_parses_path_and_terse_flag() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let command = get_command(&args(&["check", "main.moth", "--terse"]))
         .expect("check command should parse path and terse flag");
     assert_eq!(
@@ -460,6 +492,7 @@ fn check_command_parses_path_and_terse_flag() {
 
 #[test]
 fn check_command_supports_mixed_argument_ordering() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let command = get_command(&args(&["check", "--terse", "main.moth"]))
         .expect("check command should parse mixed argument ordering");
     assert_eq!(
@@ -473,6 +506,7 @@ fn check_command_supports_mixed_argument_ordering() {
 
 #[test]
 fn check_command_rejects_multiple_paths() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let error = get_command(&args(&["check", "a.moth", "b.moth"]))
         .expect_err("multiple check paths should fail");
     assert!(error.contains("at most one path"));
@@ -480,6 +514,7 @@ fn check_command_rejects_multiple_paths() {
 
 #[test]
 fn build_command_returns_exact_flags() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let release = get_command(&args(&["build", "--release"])).expect("release flag should parse");
     assert_eq!(
         release,
@@ -511,6 +546,7 @@ fn build_command_returns_exact_flags() {
 
 #[test]
 fn dev_command_returns_exact_flags() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let release = get_command(&args(&["dev", "--release"])).expect("release flag should parse");
     assert_eq!(
         release,
@@ -534,6 +570,7 @@ fn dev_command_returns_exact_flags() {
 
 #[test]
 fn build_command_rejects_removed_warning_flags() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     for removed in &["--hide-warnings", "--hide-timers", "--show-warnings"] {
         let error = get_command(&args(&["build", removed]))
             .expect_err("removed flag should be rejected by build");
@@ -546,6 +583,7 @@ fn build_command_rejects_removed_warning_flags() {
 
 #[test]
 fn dev_command_rejects_removed_warning_flags() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     for removed in &["--hide-warnings", "--hide-timers", "--show-warnings"] {
         let error = get_command(&args(&["dev", "main.moth", removed]))
             .expect_err("removed flag should be rejected by dev");
@@ -558,6 +596,7 @@ fn dev_command_rejects_removed_warning_flags() {
 
 #[test]
 fn new_command_rejects_removed_warning_flags() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     for removed in &["--hide-warnings", "--hide-timers", "--show-warnings"] {
         let error = get_command(&args(&["new", "html", removed]))
             .expect_err("removed flag should be rejected by new");
@@ -570,6 +609,7 @@ fn new_command_rejects_removed_warning_flags() {
 
 #[test]
 fn new_html_command_rejects_build_flags() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     for flag in &["--release", "--html-wasm"] {
         let error = get_command(&args(&["new", "html", flag]))
             .expect_err("build flag should be rejected by new");
@@ -582,6 +622,7 @@ fn new_html_command_rejects_build_flags() {
 
 #[test]
 fn check_command_rejects_build_flags() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     for flag in &["--release", "--html-wasm"] {
         let error = get_command(&args(&["check", flag]))
             .expect_err("build flag should be rejected by check");
@@ -594,6 +635,7 @@ fn check_command_rejects_build_flags() {
 
 #[test]
 fn tests_command_rejects_build_flags() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     for flag in &["--release", "--html-wasm"] {
         let error = get_command(&args(&["tests", flag]))
             .expect_err("build flag should be rejected by tests");
@@ -606,6 +648,7 @@ fn tests_command_rejects_build_flags() {
 
 #[test]
 fn standalone_version_request_recognises_all_spellings() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     assert!(is_standalone_version_request(&args(&["--version"])));
     assert!(is_standalone_version_request(&args(&["-v"])));
     assert!(is_standalone_version_request(&args(&["-V"])));
@@ -613,6 +656,7 @@ fn standalone_version_request_recognises_all_spellings() {
 
 #[test]
 fn standalone_version_request_rejects_non_version_flags() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     assert!(!is_standalone_version_request(&args(&["--release"])));
     for removed in &["--hide-warnings", "--hide-timers", "--show-warnings"] {
         assert!(!is_standalone_version_request(&args(&[removed])));
@@ -627,6 +671,7 @@ fn standalone_version_request_rejects_non_version_flags() {
 
 #[test]
 fn help_advertises_accepted_flags_but_not_removed_spelling() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let entries = help_build_flag_entries();
     let joined = entries.join("\n");
 
@@ -639,6 +684,7 @@ fn help_advertises_accepted_flags_but_not_removed_spelling() {
 
 #[test]
 fn integration_run_status_reflects_suite_correctness() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let correct = IntegrationRunSummary {
         total_tests: 5,
         passed_tests: 3,
@@ -660,6 +706,7 @@ fn integration_run_status_reflects_suite_correctness() {
 
 #[test]
 fn tests_command_terse_flag_sets_terse_true() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let command = get_command(&args(&["tests", "--terse"])).expect("tests --terse should parse");
     assert_eq!(
         command,
@@ -675,6 +722,7 @@ fn tests_command_terse_flag_sets_terse_true() {
 
 #[test]
 fn tests_command_terse_composes_with_filters() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     for args_slice in [
         vec!["tests", "--terse", "--case", "case_a"],
         vec!["tests", "--case", "case_a", "--terse"],
@@ -692,6 +740,7 @@ fn tests_command_terse_composes_with_filters() {
 
 #[test]
 fn tests_command_rejects_duplicate_terse() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let error = get_command(&args(&["tests", "--terse", "--terse"]))
         .expect_err("duplicate --terse should fail");
     assert!(error.contains("--terse") && error.contains("at most once"));
@@ -699,6 +748,7 @@ fn tests_command_rejects_duplicate_terse() {
 
 #[test]
 fn tests_command_rejects_terse_list_in_either_order() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     for values in [
         vec!["tests", "--terse", "--list"],
         vec!["tests", "--list", "--terse"],
@@ -713,6 +763,7 @@ fn tests_command_rejects_terse_list_in_either_order() {
 
 #[test]
 fn tests_command_rejects_terse_audit_in_either_order() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     for values in [
         vec!["tests", "--terse", "--audit"],
         vec!["tests", "--audit", "--terse"],
@@ -749,6 +800,7 @@ fn build_result_with_warnings(warnings: Vec<CompilerDiagnostic>) -> BuildResult 
 
 #[test]
 fn successful_build_without_warnings_has_no_warning_messages() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let build_result = build_result_with_warnings(Vec::new());
 
     assert!(
@@ -759,6 +811,7 @@ fn successful_build_without_warnings_has_no_warning_messages() {
 
 #[test]
 fn successful_build_with_warnings_exposes_warning_messages() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let mut string_table = StringTable::new();
     let name = string_table.intern("unused_value");
     let warning = CompilerDiagnostic::with_severity(

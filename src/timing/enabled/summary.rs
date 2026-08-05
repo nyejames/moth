@@ -31,7 +31,7 @@ pub(crate) enum TimingEmphasis {
 }
 
 /// One display row in a summary section.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct TimingSummaryRow {
     pub(crate) label: Cow<'static, str>,
     pub(crate) kind: TimingMeasurementKind,
@@ -44,7 +44,7 @@ pub(crate) struct TimingSummaryRow {
 }
 
 /// One titled group of rows.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct TimingSummarySection {
     pub(crate) title: String,
     pub(crate) rows: Vec<TimingSummaryRow>,
@@ -78,11 +78,25 @@ pub(crate) struct TimingSlowestModuleSummary {
 /// The complete basic-mode report.
 #[derive(Debug, Clone)]
 pub(crate) struct TimingSummaryReport {
+    /// Heading text without the duration, for example `Build timings` or
+    /// `Build timings · failed after`. The renderer prints the duration
+    /// separately in the total colour role.
     pub(crate) title: String,
     pub(crate) command_total: Duration,
-    pub(crate) sections: Vec<TimingSummarySection>,
-    pub(crate) compilation_boundaries: Vec<TimingBoundarySummary>,
-    pub(crate) slowest_module: Option<TimingSlowestModuleSummary>,
+    /// Top-level report items in the accepted display order: pipeline,
+    /// compilation boundaries, frontend, backend, slowest module.
+    pub(crate) items: Vec<TimingReportItem>,
+}
+
+/// One ordered top-level report item.
+///
+/// The renderer walks this list verbatim, so the accepted section order is
+/// owned by the model rather than by renderer field ordering.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum TimingReportItem {
+    Section(TimingSummarySection),
+    CompilationBoundaries(Vec<TimingBoundarySummary>),
+    SlowestModule(TimingSlowestModuleSummary),
 }
 
 /// Which command produced the snapshot.
@@ -90,17 +104,33 @@ pub(crate) struct TimingSummaryReport {
 pub(crate) enum TimingCommandKind {
     Build,
     Check,
+    Dev,
 }
 
 /// One raw metric's basic-mode presentation policy.
 struct MetricPolicy {
-    metric: &'static str,
+    /// One or more raw metrics summed into this row. Multiple metrics are
+    /// used when a human row owns disjoint evidence, for example direct
+    /// borrow-check calls or generated-function materialisation plus its
+    /// sidecar borrow rechecks.
+    metrics: &'static [&'static str],
     label: &'static str,
     kind: TimingMeasurementKind,
     section: SectionId,
     emphasis: TimingEmphasis,
+    /// Nested evidence rows shown only when they pass the child threshold.
+    children: &'static [MetricChildPolicy],
+    /// Pipeline fallback shown only when the directory pipeline rows are
+    /// absent, for example the single-file `Compile frontend` row.
+    fallback: bool,
     /// `None` applies to every command.
     command: Option<TimingCommandKind>,
+}
+
+/// One nested child row inside a parent policy row.
+struct MetricChildPolicy {
+    metric: &'static str,
+    label: &'static str,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -116,115 +146,206 @@ enum SectionId {
 /// metrics have no entry and therefore never appear in basic output.
 const BASIC_METRIC_POLICY: &[MetricPolicy] = &[
     MetricPolicy {
-        metric: "build_project.bootstrap",
+        metrics: &["build_project.bootstrap"],
         label: "Bootstrap",
         kind: TimingMeasurementKind::WallSpan,
         section: SectionId::Pipeline,
         emphasis: TimingEmphasis::Ordinary,
+        children: &[],
+        fallback: false,
         command: Some(TimingCommandKind::Build),
     },
     MetricPolicy {
-        metric: "command.check.bootstrap",
+        metrics: &["command.check.bootstrap"],
         label: "Bootstrap",
         kind: TimingMeasurementKind::WallSpan,
         section: SectionId::Pipeline,
         emphasis: TimingEmphasis::Ordinary,
+        children: &[],
+        fallback: false,
         command: Some(TimingCommandKind::Check),
     },
     MetricPolicy {
-        metric: "stage0.directory.module_inventory",
+        metrics: &["stage0.directory.module_inventory"],
         label: "Discover and prepare graph",
         kind: TimingMeasurementKind::WallSpan,
         section: SectionId::Pipeline,
         emphasis: TimingEmphasis::Ordinary,
+        children: &[],
+        fallback: false,
         command: None,
     },
     MetricPolicy {
-        metric: "stage0.directory.module_compile_batch",
+        metrics: &["stage0.directory.module_compile_batch"],
         label: "Compile packages and project",
         kind: TimingMeasurementKind::WallSpan,
         section: SectionId::Pipeline,
         emphasis: TimingEmphasis::Ordinary,
+        children: &[],
+        fallback: false,
         command: None,
     },
     MetricPolicy {
-        metric: "build_project.backend",
+        metrics: &["stage0.single_file.total"],
+        label: "Compile frontend",
+        kind: TimingMeasurementKind::WallSpan,
+        section: SectionId::Pipeline,
+        emphasis: TimingEmphasis::Ordinary,
+        children: &[],
+        fallback: true,
+        command: None,
+    },
+    MetricPolicy {
+        metrics: &["build_project.backend"],
         label: "Backend",
         kind: TimingMeasurementKind::WallSpan,
         section: SectionId::Pipeline,
         emphasis: TimingEmphasis::Ordinary,
+        children: &[],
+        fallback: false,
         command: Some(TimingCommandKind::Build),
     },
     MetricPolicy {
-        metric: "output.write_total",
+        metrics: &["output.write_total"],
         label: "Write output",
         kind: TimingMeasurementKind::WallSpan,
         section: SectionId::Pipeline,
         emphasis: TimingEmphasis::Ordinary,
+        children: &[],
+        fallback: false,
         command: Some(TimingCommandKind::Build),
     },
     MetricPolicy {
-        metric: "frontend.file_prepare",
+        metrics: &["frontend.file_prepare"],
         label: "Prepare source files",
         kind: TimingMeasurementKind::Accumulated,
         section: SectionId::Frontend,
         emphasis: TimingEmphasis::Ordinary,
+        children: &[],
+        fallback: false,
         command: None,
     },
     MetricPolicy {
-        metric: "frontend.header_bind",
+        metrics: &["frontend.header_bind"],
         label: "Bind headers",
         kind: TimingMeasurementKind::Accumulated,
         section: SectionId::Frontend,
         emphasis: TimingEmphasis::Ordinary,
+        children: &[],
+        fallback: false,
         command: None,
     },
     MetricPolicy {
-        metric: "frontend.dependency_sort",
+        metrics: &["frontend.dependency_sort"],
         label: "Order declarations",
         kind: TimingMeasurementKind::Accumulated,
         section: SectionId::Frontend,
         emphasis: TimingEmphasis::Ordinary,
+        children: &[],
+        fallback: false,
         command: None,
     },
     MetricPolicy {
-        metric: "frontend.ast",
+        metrics: &["frontend.ast"],
         label: "Semantic frontend / AST",
         kind: TimingMeasurementKind::Accumulated,
         section: SectionId::Frontend,
         emphasis: TimingEmphasis::Ordinary,
+        children: &[
+            MetricChildPolicy {
+                metric: "ast_build_environment_ms",
+                label: "Environment, types and constants",
+            },
+            MetricChildPolicy {
+                metric: "ast_emit_nodes_ms",
+                label: "Bodies and TIR construction",
+            },
+            MetricChildPolicy {
+                metric: "ast_finalize_ms",
+                label: "Template and constant finalization",
+            },
+        ],
+        fallback: false,
         command: None,
     },
     MetricPolicy {
-        metric: "frontend.hir",
+        metrics: &["frontend.hir"],
         label: "HIR",
         kind: TimingMeasurementKind::Accumulated,
         section: SectionId::Frontend,
         emphasis: TimingEmphasis::Ordinary,
+        children: &[],
+        fallback: false,
         command: None,
     },
     MetricPolicy {
-        metric: "frontend.borrow",
+        metrics: &["frontend.public_interface"],
+        label: "Public interface",
+        kind: TimingMeasurementKind::Accumulated,
+        section: SectionId::Frontend,
+        emphasis: TimingEmphasis::Ordinary,
+        children: &[],
+        fallback: false,
+        command: None,
+    },
+    MetricPolicy {
+        metrics: &["frontend.borrow", "frontend.borrow.exact_generated"],
         label: "Borrow validation",
         kind: TimingMeasurementKind::Accumulated,
         section: SectionId::Frontend,
         emphasis: TimingEmphasis::Ordinary,
+        children: &[],
+        fallback: false,
         command: None,
     },
     MetricPolicy {
-        metric: "backend.js.lower_hir",
+        metrics: &["frontend.generated_functions", "frontend.borrow.generated"],
+        label: "Generated functions",
+        kind: TimingMeasurementKind::Accumulated,
+        section: SectionId::Frontend,
+        emphasis: TimingEmphasis::Ordinary,
+        children: &[],
+        fallback: false,
+        command: None,
+    },
+    MetricPolicy {
+        metrics: &["backend.js.lower_hir", "backend.js.lower_linked_hir"],
         label: "JS lowering",
         kind: TimingMeasurementKind::NestedEvidence,
         section: SectionId::Backend,
         emphasis: TimingEmphasis::Ordinary,
+        children: &[],
+        fallback: false,
         command: Some(TimingCommandKind::Build),
     },
     MetricPolicy {
-        metric: "backend.js.render_html_document",
+        metrics: &["backend.js.render_html_document"],
         label: "HTML rendering",
         kind: TimingMeasurementKind::NestedEvidence,
         section: SectionId::Backend,
         emphasis: TimingEmphasis::Ordinary,
+        children: &[],
+        fallback: false,
+        command: Some(TimingCommandKind::Build),
+    },
+    MetricPolicy {
+        metrics: &["backend.wasm.total"],
+        label: "Wasm lowering",
+        kind: TimingMeasurementKind::NestedEvidence,
+        section: SectionId::Backend,
+        emphasis: TimingEmphasis::Ordinary,
+        children: &[],
+        fallback: false,
+        command: Some(TimingCommandKind::Build),
+    },
+    MetricPolicy {
+        metrics: &["backend.html.tracked_assets_emit"],
+        label: "Tracked assets",
+        kind: TimingMeasurementKind::NestedEvidence,
+        section: SectionId::Backend,
+        emphasis: TimingEmphasis::Ordinary,
+        children: &[],
+        fallback: false,
         command: Some(TimingCommandKind::Build),
     },
 ];
@@ -238,36 +359,39 @@ pub(crate) fn build_timing_summary(
     let aggregates = aggregate_by_metric(snapshot);
     let command_total = command_total(&aggregates, command);
 
-    let mut sections = Vec::new();
+    let mut items = Vec::new();
     if let Some(section) = build_pipeline_section(&aggregates, command, command_total) {
-        sections.push(section);
+        items.push(TimingReportItem::Section(section));
     }
-    if let Some(section) = build_frontend_section(&aggregates) {
-        sections.push(section);
+    let boundaries = build_boundary_summaries(snapshot);
+    if !boundaries.is_empty() {
+        items.push(TimingReportItem::CompilationBoundaries(boundaries));
+    }
+    if let Some(section) = build_frontend_section(&aggregates, snapshot) {
+        items.push(TimingReportItem::Section(section));
     }
     if let Some(section) = build_backend_section(&aggregates) {
-        sections.push(section);
+        items.push(TimingReportItem::Section(section));
+    }
+    if let Some(slowest_module) = build_slowest_module_summary(snapshot) {
+        items.push(TimingReportItem::SlowestModule(slowest_module));
     }
 
     let command_word = match command {
         TimingCommandKind::Build => "Build",
         TimingCommandKind::Check => "Check",
+        TimingCommandKind::Dev => "Dev",
     };
     let title = if succeeded {
-        format!("{command_word} timings {}", format_duration(command_total))
+        format!("{command_word} timings")
     } else {
-        format!(
-            "{command_word} timings · failed after {}",
-            format_duration(command_total)
-        )
+        format!("{command_word} timings · failed after")
     };
 
     TimingSummaryReport {
         title,
         command_total,
-        sections,
-        compilation_boundaries: build_boundary_summaries(snapshot),
-        slowest_module: build_slowest_module_summary(snapshot),
+        items,
     }
 }
 
@@ -292,6 +416,7 @@ fn command_total(
     let metric = match command {
         TimingCommandKind::Build => "command.build.total",
         TimingCommandKind::Check => "command.check.total",
+        TimingCommandKind::Dev => "command.dev.build_and_write",
     };
     aggregates
         .get(metric)
@@ -400,14 +525,29 @@ fn build_pipeline_section(
     command_total: Duration,
 ) -> Option<TimingSummarySection> {
     let mut rows = Vec::new();
+    let directory_mode = aggregates.contains_key("stage0.directory.module_inventory")
+        || aggregates.contains_key("stage0.directory.module_compile_batch");
 
     for policy in BASIC_METRIC_POLICY.iter().filter(|policy| {
-        policy.section == SectionId::Pipeline && policy.command.is_none_or(|c| c == command)
+        policy.section == SectionId::Pipeline
+            && !policy.fallback
+            && policy.command.is_none_or(|c| {
+                c == command || (command == TimingCommandKind::Dev && c == TimingCommandKind::Build)
+            })
     }) {
         push_policy_row(&mut rows, aggregates, policy);
     }
 
-    push_other_row(&mut rows, aggregates, command_total);
+    if !directory_mode {
+        for policy in BASIC_METRIC_POLICY
+            .iter()
+            .filter(|policy| policy.section == SectionId::Pipeline && policy.fallback)
+        {
+            push_policy_row(&mut rows, aggregates, policy);
+        }
+    }
+
+    push_other_row(&mut rows, aggregates, command_total, directory_mode);
 
     if rows.is_empty() {
         return None;
@@ -424,18 +564,40 @@ fn push_policy_row(
     aggregates: &BTreeMap<&'static str, TimingMetricSummary>,
     policy: &MetricPolicy,
 ) {
-    if let Some(summary) = aggregates.get(policy.metric)
-        && !rounds_to_zero(summary.total)
-    {
-        rows.push(TimingSummaryRow {
-            label: Cow::Borrowed(policy.label),
-            kind: policy.kind,
-            emphasis: policy.emphasis,
-            total: summary.total,
-            suffix: None,
-            children: Vec::new(),
-        });
+    let total = policy
+        .metrics
+        .iter()
+        .filter_map(|metric| aggregates.get(metric))
+        .map(|summary| summary.total)
+        .sum::<Duration>();
+    if rounds_to_zero(total) {
+        return;
     }
+
+    let mut children = Vec::new();
+    for child in policy.children {
+        if let Some(summary) = aggregates.get(child.metric)
+            && is_significant_child(summary.total, total)
+        {
+            children.push(TimingSummaryRow {
+                label: Cow::Borrowed(child.label),
+                kind: TimingMeasurementKind::NestedEvidence,
+                emphasis: TimingEmphasis::Ordinary,
+                total: summary.total,
+                suffix: None,
+                children: Vec::new(),
+            });
+        }
+    }
+
+    rows.push(TimingSummaryRow {
+        label: Cow::Borrowed(policy.label),
+        kind: policy.kind,
+        emphasis: policy.emphasis,
+        total,
+        suffix: None,
+        children,
+    });
 }
 
 /// Compute the bounded `Other` row from wall-clock children only.
@@ -443,19 +605,30 @@ fn push_other_row(
     rows: &mut Vec<TimingSummaryRow>,
     aggregates: &BTreeMap<&'static str, TimingMetricSummary>,
     command_total: Duration,
+    directory_mode: bool,
 ) {
     let mut accounted = Duration::ZERO;
     for metric in [
         "build_project.bootstrap",
         "command.check.bootstrap",
-        "stage0.directory.module_inventory",
-        "stage0.directory.module_compile_batch",
         "build_project.backend",
         "output.write_total",
     ] {
         if let Some(summary) = aggregates.get(metric) {
             accounted += summary.total;
         }
+    }
+    if directory_mode {
+        for metric in [
+            "stage0.directory.module_inventory",
+            "stage0.directory.module_compile_batch",
+        ] {
+            if let Some(summary) = aggregates.get(metric) {
+                accounted += summary.total;
+            }
+        }
+    } else if let Some(summary) = aggregates.get("stage0.single_file.total") {
+        accounted += summary.total;
     }
 
     let other = command_total.saturating_sub(accounted);
@@ -477,6 +650,7 @@ fn push_other_row(
 
 fn build_frontend_section(
     aggregates: &BTreeMap<&'static str, TimingMetricSummary>,
+    snapshot: &BenchmarkObservationSnapshot,
 ) -> Option<TimingSummarySection> {
     let mut rows = Vec::new();
 
@@ -491,10 +665,14 @@ fn build_frontend_section(
         return None;
     }
 
-    Some(TimingSummarySection {
-        title: "Frontend work · accumulated".to_owned(),
-        rows,
-    })
+    let module_count = snapshot.modules.len();
+    let title = if module_count > 0 {
+        format!("Frontend work · {module_count} modules · accumulated")
+    } else {
+        "Frontend work · accumulated".to_owned()
+    };
+
+    Some(TimingSummarySection { title, rows })
 }
 
 fn build_backend_section(
@@ -530,23 +708,30 @@ fn push_significant_child(
     policy: &MetricPolicy,
     parent_total: Duration,
 ) {
-    let Some(summary) = aggregates.get(policy.metric) else {
-        return;
-    };
-    let child_ms = summary.total.as_secs_f64() * 1000.0;
-    let parent_ms = parent_total.as_secs_f64() * 1000.0;
-    let significant = child_ms >= 1.0 && (parent_ms > 0.0 && child_ms >= parent_ms * 0.05);
+    let total = policy
+        .metrics
+        .iter()
+        .filter_map(|metric| aggregates.get(metric))
+        .map(|summary| summary.total)
+        .sum::<Duration>();
 
-    if significant && !rounds_to_zero(summary.total) {
+    if is_significant_child(total, parent_total) {
         rows.push(TimingSummaryRow {
             label: Cow::Borrowed(policy.label),
             kind: policy.kind,
             emphasis: policy.emphasis,
-            total: summary.total,
+            total,
             suffix: None,
             children: Vec::new(),
         });
     }
+}
+
+/// Whether a nested child is at least 1ms and 5% of its parent.
+fn is_significant_child(child: Duration, parent: Duration) -> bool {
+    let child_ms = child.as_secs_f64() * 1000.0;
+    let parent_ms = parent.as_secs_f64() * 1000.0;
+    child_ms >= 1.0 && (parent_ms > 0.0 && child_ms >= parent_ms * 0.05) && !rounds_to_zero(child)
 }
 
 /// Whether a duration would render as `0.00ms` after two-decimal rounding.

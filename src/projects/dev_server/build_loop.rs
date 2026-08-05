@@ -7,6 +7,7 @@ use crate::build_system::build::{self, BuildResult, ProjectBuilder};
 use crate::build_system::output::{
     OutputPlan, SingleFileOutputPlan, WriteMode, WriteOptions, write_project_outputs,
 };
+use crate::command_timing_start;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
@@ -18,6 +19,9 @@ use crate::projects::dev_server::sse;
 use crate::projects::dev_server::state::DevServerState;
 use crate::projects::dev_server::watch;
 use crate::projects::routing::{HtmlSiteConfig, parse_html_site_config};
+#[cfg(feature = "detailed_timers")]
+use crate::timed_manual_finish;
+use crate::timing_guard;
 use saying::say;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -32,6 +36,10 @@ pub struct BuildCycleReport {
     /// Structured warnings for successful dev builds, carried to the rebuild loop so terminal
     /// output can print full diagnostics after the success summary.
     pub success_messages: Option<CompilerMessages>,
+    /// Drained timing observations for this cycle, rendered by the caller
+    /// after its own status line.
+    #[cfg(feature = "timers")]
+    pub timing_snapshot: Option<crate::timing::BenchmarkObservationSnapshot>,
 }
 
 #[derive(Debug, Clone)]
@@ -89,6 +97,7 @@ impl DevBuildExecutor for ProjectBuildExecutor {
         entry_file: &Path,
         flags: &[Flag],
     ) -> Result<BuildResult, CompilerMessages> {
+        timing_guard!("command.dev.build_and_write");
         let entry_path = entry_file.to_str().ok_or_else(|| {
             dev_server_error_messages(
                 entry_file,
@@ -137,6 +146,9 @@ pub fn run_single_build_cycle(
     entry_file: &Path,
     flags: &[Flag],
 ) -> BuildCycleReport {
+    command_timing_start!();
+    #[cfg(feature = "detailed_timers")]
+    let cycle_start = crate::timing::start_pipeline_timing();
     let build_outcome = build_once(executor, entry_file, flags);
     let project_root = dev_server_project_root(entry_file);
     let BuildOutcome {
@@ -204,12 +216,18 @@ pub fn run_single_build_cycle(
     };
 
     let clients_notified = sse::broadcast_reload(state, version);
+    #[cfg(feature = "detailed_timers")]
+    timed_manual_finish!("command.dev.cycle", cycle_start);
+    #[cfg(feature = "timers")]
+    let timing_snapshot = crate::timing::drain_command_timing_snapshot();
     BuildCycleReport {
         version,
         build_ok: build_succeeded,
         clients_notified,
         watch_scope,
         success_messages,
+        #[cfg(feature = "timers")]
+        timing_snapshot: Some(timing_snapshot),
     }
 }
 
@@ -257,6 +275,10 @@ pub fn run_builds_until_stable(
                 Yellow report.clients_notified,
                 Yellow " clients."
             );
+        }
+        #[cfg(feature = "timers")]
+        if let Some(snapshot) = &report.timing_snapshot {
+            crate::timing::render_command_timing_summary(snapshot, report.build_ok);
         }
 
         // Queue one immediate follow-up build when the watch revision advances during a build.

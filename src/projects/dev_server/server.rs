@@ -64,6 +64,10 @@ pub fn run_dev_server(
             Yellow " clients."
         );
     }
+    #[cfg(feature = "timers")]
+    if let Some(snapshot) = &initial_build_report.timing_snapshot {
+        crate::timing::render_command_timing_summary(snapshot, initial_build_report.build_ok);
+    }
 
     let bind_addr = format!("{}:{}", options.host, options.port);
     let listener = TcpListener::bind(&bind_addr).map_err(|error| {

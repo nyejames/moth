@@ -24,7 +24,7 @@ pub(crate) mod summary;
 
 pub(crate) use attribution::{
     NO_TIMING_BOUNDARY, TimingBoundaryId, TimingBoundaryKind, TimingBoundaryRecord,
-    TimingModuleAttribution, TimingModuleContext, TimingModuleKey, TimingModuleRecord,
+    TimingModuleContext, TimingModuleKey, TimingModuleRecord,
 };
 pub(crate) use mode::TimerOutputMode;
 
@@ -39,10 +39,6 @@ use std::time::Duration;
 pub(crate) struct TimingObservation {
     pub(crate) name: &'static str,
     pub(crate) duration: Duration,
-    /// Optional attribution label preserved in raw observations for detailed
-    /// tooling. The basic summary never renders it; slowest-module attribution
-    /// comes from explicit registered module metadata.
-    pub(crate) label: Option<String>,
     /// Compilation boundary for this observation, when attributed.
     pub(crate) boundary: Option<TimingBoundaryId>,
     /// Dense module key inside the boundary, when attributed.
@@ -213,19 +209,17 @@ pub(crate) fn register_timing_module(
 
 /// Record a pipeline-stage timing with attribution context.
 ///
-/// WHAT: like `record_pipeline_timing` but stores an optional human label plus
-///      the compact boundary/module ids on the observation for the structured
-///      summary.
+/// WHAT: like `record_pipeline_timing` but stores the compact boundary/module
+///      ids on the observation for the structured summary.
 /// WHY:  the basic summary needs registered metadata, never labels or paths,
-///       to attribute boundary and slowest-module rows. The label never
-///       appears in stable `MOTH_BENCH timing` lines.
+///       to attribute boundary and slowest-module rows. The ids never appear
+///       in stable `MOTH_BENCH timing` lines.
 pub(crate) fn record_pipeline_timing_attributed(
     metric: &'static str,
     duration: Duration,
-    label: Option<&str>,
     context: TimingModuleContext,
 ) {
-    collector::record_attributed_timing(metric, duration, label, context);
+    collector::record_attributed_timing(metric, duration, context);
     emit_bench_timing_line(metric, duration);
 }
 
@@ -251,10 +245,9 @@ pub(crate) fn record_started_pipeline_timing(metric: &'static str, start: Pipeli
 pub(crate) fn record_started_pipeline_timing_attributed(
     metric: &'static str,
     start: PipelineTimingStart,
-    label: Option<&str>,
     context: TimingModuleContext,
 ) {
-    record_pipeline_timing_attributed(metric, start.elapsed(), label, context);
+    record_pipeline_timing_attributed(metric, start.elapsed(), context);
 }
 
 /// RAII guard that records a pipeline-stage timing when dropped.
@@ -569,12 +562,41 @@ pub(crate) fn start_command_timing() {
 ///      scope is always stopped to clean up even when no summary is shown.
 ///      `succeeded` only changes the human title; stable metrics are unchanged.
 pub(crate) fn print_command_timing_summary(succeeded: bool) {
-    let mode = TimerOutputMode::from_env();
-
     let snapshot = stop_and_collect_benchmark_observations();
+    render_command_timing_summary(&snapshot, succeeded);
+}
+
+/// Drain the current command timing scope without rendering.
+///
+/// WHAT: stops the collection and returns the snapshot so a caller can print
+///      its own status line first and render the summary afterwards.
+/// WHY:  the dev server prints its one-line build status before the structured
+///       report; draining inside the cycle keeps one collection per cycle and
+///       guarantees no cross-cycle leakage.
+pub(crate) fn drain_command_timing_snapshot() -> BenchmarkObservationSnapshot {
+    stop_and_collect_benchmark_observations()
+}
+
+/// Render a structured timing summary from an already-drained snapshot.
+///
+/// WHAT: prints the human summary when the output mode requests one, plus the
+///      concise counter summary when `MOTH_COUNTERS` asks for it.
+/// WHY:  callers that print their own status line first (the dev server) reuse
+///       the same rendering path as `print_command_timing_summary`.
+pub(crate) fn render_command_timing_summary(
+    snapshot: &BenchmarkObservationSnapshot,
+    succeeded: bool,
+) {
+    let mode = TimerOutputMode::from_env();
 
     if mode.emits_summary() {
         let command = if snapshot
+            .timings
+            .iter()
+            .any(|observation| observation.name == "command.dev.build_and_write")
+        {
+            summary::TimingCommandKind::Dev
+        } else if snapshot
             .timings
             .iter()
             .any(|observation| observation.name == "command.build.total")
@@ -583,7 +605,7 @@ pub(crate) fn print_command_timing_summary(succeeded: bool) {
         } else {
             summary::TimingCommandKind::Check
         };
-        let report = summary::build_timing_summary(&snapshot, command, succeeded);
+        let report = summary::build_timing_summary(snapshot, command, succeeded);
         render::render_timing_summary_report(&report);
     }
 
@@ -595,7 +617,7 @@ pub(crate) fn print_command_timing_summary(succeeded: bool) {
     {
         let counter_mode = crate::timing::CounterOutputMode::from_env();
         if counter_mode.emits_counter_summary() {
-            for line in render_counter_summary(&snapshot) {
+            for line in render_counter_summary(snapshot) {
                 saying::say!(line);
             }
         }

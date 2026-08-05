@@ -95,6 +95,13 @@ Before declaring a non-trivial code-bearing slice complete, run:
         [: `cargo run --package xtask --bin xtask -- bench-ci`]
         [: Complete benchmark preflight followed by bounded non-recording measurements]
     ]
+
+    [td:
+        [: Timer erasure gate]
+        [: `just timers-erasure-check`]
+        [: Builds a no-timer release binary and rejects timer-only markers and
+        source-level closure wrappers]
+    ]
 ]
 
 - `ci-clippy` uses the pinned Rust toolchain configured in the `justfile`.

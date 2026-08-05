@@ -28,8 +28,17 @@ const TIMER_ONLY_MARKERS: &[&str] = &[
     "Build timings",
     "Compilation boundaries",
     "backend.js.lower_hir",
+    "backend.js.lower_linked_hir",
     "build.boundary.inventory",
     "frontend.module.semantic_total",
+    "frontend.public_interface",
+    "frontend.generated_functions",
+    "frontend.borrow.generated",
+    "ast_build_environment_ms",
+    "ast_emit_nodes_ms",
+    "ast_finalize_ms",
+    "command.dev.build_and_write",
+    "command.dev.cycle",
 ];
 
 /// Run the complete erasure gate.

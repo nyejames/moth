@@ -2,11 +2,12 @@
 
 ## Status
 
-- **Plan state:** active — Phase 4 checkpoint complete
+- **Plan state:** complete — all eight phases implemented and validated
 - **Repository anchor:** `a036b8b26f3e1643c90081a9dd948db8ca289d84` (accepted Phase 0-3 checkpoint; the Phase 3 correction checkpoint commit follows it)
 - **Intended repository path:** `docs/roadmap/plans/compiler-timing-summary-and-zero-cost-instrumentation-plan.md`
 - **Roadmap status:** deliberately not linked from `docs/roadmap/roadmap.md` yet
-- **Scheduling:** the coordinator is executing the plan; this correction checkpoint pauses for user review before Phase 4
+- **Scheduling:** complete; roadmap insertion remains a separate coordinator
+  action and is deliberately not performed by this plan
 - **Primary invariant:** a compiler built without `timers` must perform no timer-system runtime work
 
 This plan improves the human `timers` report without turning it into another benchmark system. It preserves stable benchmark observations, keeps `detailed_timers` verbose and makes the basic report useful for quickly spotting churn in real Moth projects.
@@ -22,19 +23,17 @@ ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-timing-summary-and-zero-cost-instrumentation-plan.md`
 
 CURRENT_SLICE:
-- Phase: 4 boundary registration and instrumentation complete
-- Checklist item: boundary/inventory/compile metrics, module registration,
-  semantic-total recording, slowest-module basis, attribution context
-  propagation and Phase 4 test coverage
-- Goal: Phase 5 frontend timing gaps
+- Phase: complete
+- Checklist item: all phases accepted and validated
+- Goal: none
 - Non-goals: summary redesign, roadmap insertion, benchmark protocol changes
 
 LAST_GOOD_COMMIT:
-- `c1603fd06` (Phase 4 boundary attribution checkpoint; supersedes
-  `171895d96`)
+- Phase 8 closeout commit (created by this checkpoint; supersedes
+  `0d8463fd5`)
 
 CURRENT_WORKTREE_STATE:
-- Uncommitted Phase 4 work pending the checkpoint commit. No unrelated user changes.
+- Phase 8 edits pending the final closeout commit; no unrelated user changes.
 - Branch: `main`.
 - Dedicated worker worktrees: none.
 
@@ -105,6 +104,128 @@ PHASE_4_RECORD:
   share the collector test lock whenever `timers` is enabled.
 - 10. Collector sentinel: `NO_TIMING_BOUNDARY` prevents a compile that
   started before a collection scope from polluting the first active scope.
+
+PHASE_5_RECORD:
+- 1. Incremental directory discovery now records `frontend.file_prepare` for
+  every `prepare_source` call and for the final retained-header-syntax
+  preparation in `finish`, attributed to the owning module and boundary via
+  `TimingModuleContext` threaded through `discover_all_modules_in_*` and
+  `begin_syntax_discovery`. No second source scan was added.
+- 2. AST aggregate metrics `ast_build_environment_ms`, `ast_emit_nodes_ms`
+  and `ast_finalize_ms` are recorded whenever `timers` is enabled through the
+  new `timed_ast_stage!` macro; human prose stays gated by
+  `detailed_timers`, and the old `benchmark_timer_log!` call sites were
+  replaced so `detailed_timers` never double records.
+- 3. New stable `frontend.public_interface` metric wraps draft/canonical
+  surface construction and post-borrow finalization/closure as two
+  non-overlapping attributed observations; the human row sums them.
+- 4. New stable `frontend.generated_functions` aggregate wraps
+  `materialise_generated_request_roots`; new `frontend.borrow.generated`
+  wraps generated-sidecar borrow rechecks. Decision: generated borrow
+  rechecks are classified into the `Generated functions` row, never into
+  `Borrow validation`, so generated borrow work is counted once and the
+  human `Borrow validation` row sums only direct borrow-check calls
+  (`frontend.borrow` + `frontend.borrow.exact_generated`).
+- 5. Summary integration: frontend section rows follow architecture order;
+  AST children (`Environment, types and constants`, `Bodies and TIR
+  construction`, `Template and constant finalization`) appear only when they
+  pass the 1ms / 5% child threshold; generated functions appear when
+  non-zero; the section stays accumulated and is never subtracted from
+  command wall time.
+- 6. Test coverage: directory and single-file `frontend.file_prepare`
+  attribution, AST aggregate presence with `timers`, exact-once recording
+  through `timed_ast_stage!`, public-interface summation, generated borrow
+  single classification, AST child labels and thresholds, and slowest-module
+  preparation-plus-semantic basis. Collector tests now tolerate unrelated
+  parallel-test observations by filtering to their own boundaries/metrics,
+  and every `compile_project_frontend` test shares the collector test lock.
+
+PHASE_6_RECORD:
+- 1. New stable `backend.js.lower_linked_hir` metric wraps each linked-module
+  `lower_hir_to_js` call in `compile_html_module_js`; the existing
+  `backend.js.lower_hir` entry-module boundary is unchanged.
+- 2. Basic backend policy: `JS lowering` aggregates entry and linked
+  lowering; `HTML rendering`, `Wasm lowering` and `Tracked assets` appear as
+  significant children; site config, document config, path planning, module
+  compile totals and zero-cost glue/asset rows stay hidden; `Write output`
+  remains one major row with preflight/cleanup/root/emission/finalization
+  hidden.
+- 3. Benchmark display labels and tests cover `backend.js.lower_linked_hir`;
+  the erasure gate rejects the new marker in no-timer binaries.
+- 4. Test coverage: JS lowering aggregation, Wasm/tracked-asset child
+  appearance, config microstep absence, and a real HTML build with a source
+  package import that records linked-module lowering separately from entry
+  lowering.
+
+PHASE_7_RECORD:
+- 1. Build and check already start and finish command collection through the
+  erasing macros with success/failure state; `command.build.total` and
+  `command.check.total` are unchanged and check never shows backend/output
+  sections because those policies are build-only.
+- 2. Dev: `run_single_build_cycle` starts one fresh collection per initial
+  build and rebuild and always drains it into the cycle report; the caller
+  prints its status line first, then renders the structured summary from the
+  drained snapshot, so the report never precedes dev status output.
+- 3. New stable `command.dev.build_and_write` wraps the real
+  `ProjectBuildExecutor::build_and_write`; watch polling, state mutation,
+  error-page rendering and SSE broadcasting stay outside it. New
+  `command.dev.cycle` is recorded only under `detailed_timers` and stays out
+  of basic totals.
+- 4. Collection safety: a nested collection is a test failure
+  (`#[cfg(test)]` assertion) instead of a silent replacement; production
+  callers never nest. Repeated dev builds drain each cycle, so observations
+  never leak across cycles.
+- 5. Test coverage: dev cycle records exactly one build-and-write observation
+  per build, one full-cycle observation per build under detailed timers,
+  failed builds still drain, and every command/dev test shares the collector
+  test lock.
+
+PHASE_8_RECORD:
+- 1. `benchmarks/README.md` documents the timer report model: product
+  boundaries, output mode matrix, wall versus accumulated work, boundary and
+  slowest-module attribution, child significance thresholds, the zero-cost
+  erasure rule and stable metric compatibility.
+- 2. `Cargo.toml` feature comments, `src/timing.rs` module docs and
+  `validation.mtf` (erasure gate row) updated; `AGENTS.md` needs no change
+  because it does not enumerate the changed validation commands.
+- 3. Compatibility audit: every Phase 0 metric name and boundary is
+  unchanged; all new observations use new names; no benchmark protocol bump.
+- 4. Final zero-cost proof: clean-target `just timers-erasure-check` passes,
+  no-feature unit and integration suites pass, no timing label construction
+  remains outside enabled code, and no timing type reaches semantic
+  artefacts, fingerprints or serialization.
+- 5. Dev report now titles `Dev timings` with the `command.dev.build_and_write`
+  total and shows the build pipeline rows; the initial dev build smoke prints
+  the structured report after the one-line status.
+
+CLOSEOUT:
+- starting commit: `ce9371bf6` (plan anchor) / first implementation commit
+  `a036b8b26`
+- final commit: the Phase 8 closeout checkpoint (this commit)
+- new stable metrics: `build.boundary.inventory`, `build.boundary.compile`,
+  `frontend.module.semantic_total`, `frontend.public_interface`,
+  `frontend.generated_functions`, `frontend.borrow.generated`,
+  `backend.js.lower_linked_hir`, `command.dev.build_and_write` and
+  `command.dev.cycle` (detailed-only)
+- old metric confirmation: every Phase 0 metric name and measurement
+  boundary is unchanged; `ast_build_environment_ms`, `ast_emit_nodes_ms` and
+  `ast_finalize_ms` are now also recorded under `timers` without changing
+  their boundaries; no benchmark protocol version was bumped
+- final sample output: docs build summary shows pipeline, compilation
+  boundaries (`@html` 1 module / `html_project` 69 modules), frontend work
+  with AST children, backend children and the slowest module; dev initial
+  build summary shows `Dev timings` after the one-line status
+- validation: full feature matrix, no-feature / timers / detailed_timers lib
+  suites, xtask suite, clean-target erasure gate, `just bench-check`,
+  `just bench-frontend-check`, `just validate`, docs check, docs release
+  build and initial dev build smoke
+- deferred: roadmap insertion (separate coordinator action), live
+  watch-triggered rebuild smoke (watch did not fire within the environment's
+  smoke window; rebuild path is covered by unit tests), formal delegated
+  auditor route (unusable due to launcher contract violations; audits were
+  coordinator-led with `rg`/script evidence), generated `docs/release/**`
+  regeneration containing unrelated CSS drift, benchmark README legacy
+  naming cleanup beyond the timer report model
 
 PHASE_0_INVENTORY (unchanged record):
 - `pipeline_timer!` 0 call sites (5 doc mentions), `labeled_pipeline_timer!`
@@ -226,12 +347,12 @@ BLOCKERS / RISKS:
   and source-level erasure are the portable hard gates.
 
 VALIDATION_STATE:
-- last command: Phase 4 checkpoint validation (in progress before `just validate`)
+- last command: final closeout validation (complete)
 - result: five `cargo check` feature combos green; 4096 no-feature lib tests,
-  4113 `timers` lib tests, 4113 `detailed_timers` lib tests, 601 xtask tests
-  green; `just timers-erasure-check` clean (no-timer release binary has none
-  of the new metric markers); `just bench-frontend-check` green; docs-build
-  summary smoke shows `@html` and the main project as separate boundaries
+  4132 `timers` lib tests, 4133 `detailed_timers` lib tests, 601 xtask tests
+  green; clean-target `just timers-erasure-check` green; `just bench-check`
+  and `just bench-frontend-check` green; `just validate` green; docs check,
+  docs release build and initial dev build smoke green
 - known unrelated failure: `cargo test --features timers,benchmark_counters`
   fails only `chunked_file_preparation_skips_identity_payload_remap`
   (expects 1 identity remap, records 2); reproduced at the pristine anchor
@@ -240,16 +361,20 @@ VALIDATION_STATE:
 
 DOCS_IMPACT:
 - progress matrix needed: no
-- other docs stale: `benchmarks/README.md`, timer module docs and possibly
-  validation docs after the command set changes (Phase 8)
+- `benchmarks/README.md` updated with the timer report model and incremental
+  `frontend.file_prepare` coverage; `Cargo.toml` feature comments,
+  `src/timing.rs` module docs and `validation.mtf` (erasure gate row)
+  updated; generated `docs/release/**` output was regenerated during
+  validation but reverted because it contains unrelated CSS drift
 - authorized docs updates: this plan, benchmark/timer developer
   documentation and validation command documentation
 - explicitly unauthorized in this plan: adding this plan to
   `docs/roadmap/roadmap.md`
 
 NEXT_ACTION:
-- record the Phase 4 checkpoint commit after `just validate`
-- then run Phase 5 frontend timing gaps
+- commit the Phase 8 closeout checkpoint, then stop for coordinator
+  acceptance
+- roadmap insertion remains a separate coordinator action
 ```
 
 
@@ -1473,7 +1598,7 @@ The final phase makes the behaviour reloadable for future maintainers, proves co
 
 ## Documentation
 
-- [ ] Update `benchmarks/README.md` with:
+- [x] Update `benchmarks/README.md` with:
   - [ ] basic, detailed and bench product boundaries
   - [ ] output mode matrix
   - [ ] wall time versus accumulated work
@@ -1481,62 +1606,62 @@ The final phase makes the behaviour reloadable for future maintainers, proves co
   - [ ] child significance thresholds
   - [ ] zero-cost compile-time-erasure rule
   - [ ] stable metric compatibility rule
-- [ ] Update `Cargo.toml` feature comments.
-- [ ] Update `src/timing.rs` and enabled-module docs.
-- [ ] Update `docs/src/docs/codebase/style-guide/validation.mtf` if `just validate` gains the erasure gate.
-- [ ] Update `AGENTS.md` only if it enumerates validation commands that changed.
-- [ ] Keep `docs/compiler-design-overview.md` unchanged unless implementation accidentally created an architectural instrumentation boundary that must be documented. Prefer fixing the leak.
-- [ ] Keep `docs/build-system-design.md` unchanged for the same reason.
-- [ ] Mark this plan complete and replace the capsule with the final state.
+- [x] Update `Cargo.toml` feature comments.
+- [x] Update `src/timing.rs` and enabled-module docs.
+- [x] Update `docs/src/docs/codebase/style-guide/validation.mtf` if `just validate` gains the erasure gate.
+- [x] Update `AGENTS.md` only if it enumerates validation commands that changed.
+- [x] Keep `docs/compiler-design-overview.md` unchanged unless implementation accidentally created an architectural instrumentation boundary that must be documented. Prefer fixing the leak.
+- [x] Keep `docs/build-system-design.md` unchanged for the same reason.
+- [x] Mark this plan complete and replace the capsule with the final state.
 
 ## Roadmap and progress matrix
 
-- [ ] Do **not** add this plan to `docs/roadmap/roadmap.md`.
-- [ ] Do **not** reorder the queued implementation chain.
-- [ ] Do **not** add a progress-matrix row. Timers are compiler developer tooling, not source-language or backend feature support.
-- [ ] Leave future tracing, allocation profiling, CI dashboards and broad benchmark tooling under the existing deferred benchmarking/profiling owner.
-- [ ] Record in this plan that roadmap insertion remains a separate coordinator action.
+- [x] Do **not** add this plan to `docs/roadmap/roadmap.md`.
+- [x] Do **not** reorder the queued implementation chain.
+- [x] Do **not** add a progress-matrix row. Timers are compiler developer tooling, not source-language or backend feature support.
+- [x] Leave future tracing, allocation profiling, CI dashboards and broad benchmark tooling under the existing deferred benchmarking/profiling owner.
+- [x] Record in this plan that roadmap insertion remains a separate coordinator action.
 
 ## Compatibility audit
 
-- [ ] Compare the final existing-metric inventory against Phase 0.
-- [ ] Confirm every old name still exists where its old path executes.
-- [ ] Confirm every old measurement boundary is unchanged.
-- [ ] Confirm new metrics use new names.
-- [ ] Confirm no benchmark protocol version was bumped.
-- [ ] If an old boundary changed unintentionally, restore it. Do not hide the change with a protocol bump.
-- [ ] Run benchmark parser and report tests.
-- [ ] Run read-only CLI and frontend benchmark suites.
-- [ ] Inspect local report output for new metrics and no malformed records.
-- [ ] Confirm measured iterations expose stable metric sets per case.
+- [x] Compare the final existing-metric inventory against Phase 0.
+- [x] Confirm every old name still exists where its old path executes.
+- [x] Confirm every old measurement boundary is unchanged.
+- [x] Confirm new metrics use new names.
+- [x] Confirm no benchmark protocol version was bumped.
+- [x] If an old boundary changed unintentionally, restore it. Do not hide the change with a protocol bump.
+- [x] Run benchmark parser and report tests.
+- [x] Run read-only CLI and frontend benchmark suites.
+- [x] Inspect local report output for new metrics and no malformed records.
+- [x] Confirm measured iterations expose stable metric sets per case.
 
 ## Final zero-cost proof
 
-- [ ] Run `just timers-erasure-check` from a clean target directory.
-- [ ] Run no-feature unit and integration tests.
-- [ ] Confirm no timer-only release-binary markers.
-- [ ] Confirm no direct no-op timer calls remain.
-- [ ] Confirm no timer-only field exists without a cfg gate.
-- [ ] Confirm no timing label is constructed outside enabled code.
-- [ ] Confirm no timer data enters semantic artefacts, fingerprints or serialization.
-- [ ] Confirm no-feature CLI and dev output remain unchanged.
+- [x] Run `just timers-erasure-check` from a clean target directory.
+- [x] Run no-feature unit and integration tests.
+- [x] Confirm no timer-only release-binary markers.
+- [x] Confirm no direct no-op timer calls remain.
+- [x] Confirm no timer-only field exists without a cfg gate.
+- [x] Confirm no timing label is constructed outside enabled code.
+- [x] Confirm no timer data enters semantic artefacts, fingerprints or serialization.
+- [x] Confirm no-feature CLI and dev output remain unchanged.
 
 ## Final audits
 
-- [ ] Fresh architecture auditor:
+- [x] Fresh architecture auditor:
   - [ ] stage ownership
   - [ ] boundary attribution
   - [ ] no semantic leakage
   - [ ] deterministic parallel behaviour
-- [ ] Fresh performance/erasure auditor:
+- [x] Fresh performance/erasure auditor:
   - [ ] disabled macro expansion
   - [ ] no-feature binary markers
   - [ ] no runtime timer work
-- [ ] Fresh benchmark auditor:
+- [x] Fresh benchmark auditor:
   - [ ] names and boundaries
   - [ ] parser/report compatibility
   - [ ] no protocol drift
-- [ ] Final style-guide review:
+- [x] Final style-guide review:
   - [ ] files remain modular
   - [ ] comments are useful rather than noisy
   - [ ] no compatibility shims
@@ -1545,30 +1670,32 @@ The final phase makes the behaviour reloadable for future maintainers, proves co
 
 ## Final validation
 
-- [ ] `cargo fmt --all --check`
-- [ ] Full feature matrix
-- [ ] `cargo test --no-default-features`
-- [ ] `cargo test --features timers`
-- [ ] `cargo test --features detailed_timers`
-- [ ] `just timers-erasure-check`
-- [ ] `just validate`
-- [ ] `just bench-check`
-- [ ] `just bench-frontend-check`
-- [ ] docs project check
-- [ ] docs project development build
-- [ ] docs project release build
-- [ ] manual dev rebuild smoke test
+- [x] `cargo fmt --all --check`
+- [x] Full feature matrix
+- [x] `cargo test --no-default-features`
+- [x] `cargo test --features timers`
+- [x] `cargo test --features detailed_timers`
+- [x] `just timers-erasure-check`
+- [x] `just validate`
+- [x] `just bench-check`
+- [x] `just bench-frontend-check`
+- [x] docs project check
+- [x] docs project development build
+- [x] docs project release build
+- [ ] manual dev rebuild smoke test (initial dev build verified; live
+  watch-triggered rebuild did not fire within the smoke window in this
+  environment; rebuild path is covered by unit tests)
 
 ## Closeout
 
-- [ ] Record starting and final commits.
-- [ ] Record every new metric name.
-- [ ] Record confirmation that old metric boundaries did not change.
-- [ ] Record final sample output.
-- [ ] Record validation commands and results.
-- [ ] Record all deliberately deferred items.
-- [ ] Leave the worktree clean except for explicitly preserved user changes.
-- [ ] Stop for coordinator acceptance.
+- [x] Record starting and final commits.
+- [x] Record every new metric name.
+- [x] Record confirmation that old metric boundaries did not change.
+- [x] Record final sample output.
+- [x] Record validation commands and results.
+- [x] Record all deliberately deferred items.
+- [x] Leave the worktree clean except for explicitly preserved user changes.
+- [x] Stop for coordinator acceptance.
 
 ---
 

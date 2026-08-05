@@ -470,11 +470,6 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
     let local_table = string_table.fork_source().fork_for_module().into_parts().0;
 
     let source_byte_count = source_byte_count(&input_files);
-    #[cfg(feature = "timers")]
-    let module_label_text =
-        super::module_timing_label(&canonical_entry, input_files.len(), source_byte_count);
-    #[cfg(feature = "timers")]
-    let module_label: Option<&str> = Some(&module_label_text);
 
     let external_packages = Arc::new(ExternalPackageRegistry::new());
     let resolution_table = ExternalImportResolutionTable::default();
@@ -524,10 +519,7 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
         &canonical_entry,
         local_table,
         source_byte_count,
-        crate::timing::TimingModuleAttribution::new(
-            module_label,
-            crate::timing::TimingModuleContext::default(),
-        ),
+        crate::timing::TimingModuleContext::default(),
     );
     #[cfg(not(feature = "timers"))]
     let prepared_result = preparation_context.prepare_module(
@@ -578,10 +570,7 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
     let semantic_result = compile_context.compile_module_semantic(
         prepared,
         &canonical_entry,
-        crate::timing::TimingModuleAttribution::new(
-            module_label,
-            crate::timing::TimingModuleContext::default(),
-        ),
+        crate::timing::TimingModuleContext::default(),
         generated_store.session(),
     );
     #[cfg(not(feature = "timers"))]
@@ -703,10 +692,7 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
         &canonical_entry,
         local_table,
         source_byte_count,
-        crate::timing::TimingModuleAttribution::new(
-            None,
-            crate::timing::TimingModuleContext::default(),
-        ),
+        crate::timing::TimingModuleContext::default(),
     );
     #[cfg(not(feature = "timers"))]
     let prepared_result = preparation_context.prepare_module(
@@ -738,10 +724,7 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
     let semantic_result = compile_context.compile_module_semantic(
         prepared,
         &canonical_entry,
-        crate::timing::TimingModuleAttribution::new(
-            None,
-            crate::timing::TimingModuleContext::default(),
-        ),
+        crate::timing::TimingModuleContext::default(),
         generated_store.session(),
     );
     #[cfg(not(feature = "timers"))]

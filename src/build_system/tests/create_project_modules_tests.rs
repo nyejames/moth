@@ -211,6 +211,8 @@ fn discover_modules_for_test(
         &mut external_imports,
         DirectoryImportResolution::project(&module_namespace_set, &source_tree_index),
         &mut string_table,
+        #[cfg(feature = "timers")]
+        crate::timing::NO_TIMING_BOUNDARY,
     )
 }
 
@@ -271,6 +273,8 @@ fn discover_modules_for_test_with_providers(
         &mut external_imports,
         DirectoryImportResolution::project(&module_namespace_set, &source_tree_index),
         &mut string_table,
+        #[cfg(feature = "timers")]
+        crate::timing::NO_TIMING_BOUNDARY,
     )
 }
 
@@ -587,6 +591,8 @@ fn discover_modules_and_graph_for_test(
         &mut external_imports,
         DirectoryImportResolution::project(&module_namespace_set, &source_tree_index),
         &mut string_table,
+        #[cfg(feature = "timers")]
+        crate::timing::NO_TIMING_BOUNDARY,
     )
     .expect("module discovery should pass for focused graph-edge tests");
 

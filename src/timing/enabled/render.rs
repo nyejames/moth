@@ -8,29 +8,47 @@
 //!       helpers so tests pin the layout without capturing terminal output.
 
 use super::summary::{
-    TimingBoundarySummary, TimingEmphasis, TimingSlowestModuleSummary, TimingSummaryReport,
-    TimingSummaryRow, TimingSummarySection,
+    TimingBoundarySummary, TimingEmphasis, TimingReportItem, TimingSlowestModuleSummary,
+    TimingSummaryReport, TimingSummaryRow, TimingSummarySection,
 };
 use std::time::Duration;
 
 /// Print one complete report.
 pub(crate) fn render_timing_summary_report(report: &TimingSummaryReport) {
-    saying::say!(Bold Blue report.title);
+    saying::say!(
+        Bold Blue report.title,
+        "  ",
+        Yellow format_duration(report.command_total)
+    );
 
-    for section in &report.sections {
-        saying::say!();
-        render_section(section);
+    for item in &report.items {
+        match item {
+            TimingReportItem::Section(section) => {
+                saying::say!();
+                render_section(section);
+            }
+            TimingReportItem::CompilationBoundaries(boundaries) => {
+                saying::say!();
+                render_boundary_section(boundaries);
+            }
+            TimingReportItem::SlowestModule(slowest_module) => {
+                saying::say!();
+                render_slowest_module(slowest_module);
+            }
+        }
     }
+}
 
-    if !report.compilation_boundaries.is_empty() {
-        saying::say!();
-        render_boundary_section(&report.compilation_boundaries);
-    }
-
-    if let Some(slowest_module) = &report.slowest_module {
-        saying::say!();
-        render_slowest_module(slowest_module);
-    }
+/// Build the exact heading line text, including the total in its own field.
+///
+/// The renderer colours the title and duration separately; this pure helper
+/// pins the layout without capturing terminal output.
+pub(crate) fn report_title_text(report: &TimingSummaryReport) -> String {
+    format!(
+        "{}  {}",
+        report.title,
+        format_duration(report.command_total)
+    )
 }
 
 fn render_section(section: &TimingSummarySection) {

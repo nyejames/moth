@@ -149,7 +149,6 @@ use crate::compiler_frontend::ast::templates::top_level_templates::AstConstTopLe
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::instrumentation::{log_ast_counters, reset_ast_counters};
 
-use crate::benchmark_timer_log;
 use crate::compiler_frontend::ast::generic_functions::{
     GenericFunctionInstantiationRequest, ModuleMaterialisationPreparationBuilder,
 };
@@ -168,8 +167,9 @@ use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
+use crate::timed_ast_stage;
 use rustc_hash::FxHashMap;
-#[cfg(feature = "detailed_timers")]
+#[cfg(feature = "timers")]
 use std::time::Instant;
 
 /// Resolved choice definition carried from AST to HIR for pre-registration.
@@ -332,32 +332,32 @@ impl Ast {
         let generic_template_count = environment.lookups.generic_declarations_by_path.len();
         let receiver_method_count = environment.lookups.receiver_methods.by_function_path.len();
 
-        #[cfg(feature = "detailed_timers")]
+        #[cfg(feature = "timers")]
         let node_emission_start = Instant::now();
         let emitted = AstEmitter::new(&phase_context, &mut environment, header_count)
             .emit(headers, string_table)?;
         let generic_instance_count = emitted.generic_instance_count;
-        benchmark_timer_log!(
+        timed_ast_stage!(
             node_emission_start,
             "ast_emit_nodes_ms",
             "AST/emit nodes completed in: "
         );
-        #[cfg(feature = "detailed_timers")]
+        #[cfg(feature = "timers")]
         let _ = node_emission_start;
 
-        #[cfg(feature = "detailed_timers")]
+        #[cfg(feature = "timers")]
         let finalization_start = Instant::now();
         let build_result = AstFinalizer::new(&phase_context, environment).finalize(
             emitted,
             &top_level_const_fragments,
             string_table,
         )?;
-        benchmark_timer_log!(
+        timed_ast_stage!(
             finalization_start,
             "ast_finalize_ms",
             "AST/finalize completed in: "
         );
-        #[cfg(feature = "detailed_timers")]
+        #[cfg(feature = "timers")]
         let _ = finalization_start;
 
         ast_header_counts.record();

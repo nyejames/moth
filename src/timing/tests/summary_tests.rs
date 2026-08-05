@@ -7,11 +7,13 @@
 //!       terminal rendering so policy bugs cannot hide behind styling.
 
 use crate::timing::enabled::render::{
-    boundary_row_text, boundary_section_title, render_row_text, slowest_module_text,
+    boundary_row_text, boundary_section_title, render_row_text, report_title_text,
+    slowest_module_text,
 };
 use crate::timing::enabled::summary::{
     TimingBoundarySummary, TimingCommandKind, TimingEmphasis, TimingMeasurementKind,
-    TimingSlowestModuleSummary, TimingSummaryRow, build_timing_summary,
+    TimingReportItem, TimingSlowestModuleSummary, TimingSummaryReport, TimingSummaryRow,
+    TimingSummarySection, build_timing_summary,
 };
 use crate::timing::{
     BenchmarkObservationSnapshot, TimingBoundaryId, TimingBoundaryKind, TimingBoundaryRecord,
@@ -27,7 +29,6 @@ fn snapshot_with(entries: &[(&'static str, f64)]) -> BenchmarkObservationSnapsho
             .map(|(name, millis)| TimingObservation {
                 name,
                 duration: Duration::from_secs_f64(millis / 1000.0),
-                label: None,
                 boundary: None,
                 module: None,
             })
@@ -36,6 +37,31 @@ fn snapshot_with(entries: &[(&'static str, f64)]) -> BenchmarkObservationSnapsho
         boundaries: Vec::new(),
         modules: Vec::new(),
     }
+}
+
+fn section_items(report: &TimingSummaryReport) -> Vec<&TimingSummarySection> {
+    report
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            TimingReportItem::Section(section) => Some(section),
+            _ => None,
+        })
+        .collect()
+}
+
+fn boundary_items(report: &TimingSummaryReport) -> Option<&[TimingBoundarySummary]> {
+    report.items.iter().find_map(|item| match item {
+        TimingReportItem::CompilationBoundaries(boundaries) => Some(boundaries.as_slice()),
+        _ => None,
+    })
+}
+
+fn slowest_module_item(report: &TimingSummaryReport) -> Option<&TimingSlowestModuleSummary> {
+    report.items.iter().find_map(|item| match item {
+        TimingReportItem::SlowestModule(module) => Some(module),
+        _ => None,
+    })
 }
 
 fn build_snapshot() -> BenchmarkObservationSnapshot {
@@ -58,24 +84,59 @@ fn build_snapshot() -> BenchmarkObservationSnapshot {
 }
 
 #[test]
-fn sections_follow_architecture_order() {
-    let report = build_timing_summary(&build_snapshot(), TimingCommandKind::Build, true);
+fn report_items_follow_architecture_order() {
+    let mut snapshot = build_snapshot();
+    snapshot.boundaries.push(boundary_record(0, "@html", 1));
+    snapshot.modules.push(module_record(
+        TimingBoundaryId::from_index(0),
+        0,
+        "@html",
+        1,
+        512,
+    ));
+    snapshot.timings.push(attributed_observation(
+        "frontend.module.semantic_total",
+        5.0,
+        TimingModuleContext::for_module(TimingModuleKey {
+            boundary: TimingBoundaryId::from_index(0),
+            module_index: 0,
+        }),
+    ));
+    snapshot.timings.push(attributed_observation(
+        "build.boundary.compile",
+        3.0,
+        TimingModuleContext::for_boundary(TimingBoundaryId::from_index(0)),
+    ));
 
-    let titles: Vec<&str> = report
-        .sections
+    let report = build_timing_summary(&snapshot, TimingCommandKind::Build, true);
+
+    let item_kinds: Vec<&str> = report
+        .items
         .iter()
-        .map(|section| section.title.as_str())
+        .map(|item| match item {
+            TimingReportItem::Section(section) => section.title.as_str(),
+            TimingReportItem::CompilationBoundaries(_) => "Compilation boundaries",
+            TimingReportItem::SlowestModule(_) => "Slowest module",
+        })
         .collect();
     assert_eq!(
-        titles,
-        vec!["Build pipeline", "Frontend work · accumulated", "Backend"]
+        item_kinds,
+        vec![
+            "Build pipeline",
+            "Compilation boundaries",
+            "Frontend work · 1 modules · accumulated",
+            "Backend",
+            "Slowest module",
+        ]
     );
 }
 
 #[test]
-fn headings_include_command_specific_total() {
+fn headings_keep_total_in_a_separate_field() {
     let report = build_timing_summary(&build_snapshot(), TimingCommandKind::Build, true);
-    assert_eq!(report.title, "Build timings 100.00ms");
+    assert_eq!(report.title, "Build timings");
+    assert_eq!(report.command_total, Duration::from_millis(100));
+    assert_eq!(report_title_text(&report), "Build timings  100.00ms");
 
     let check_snapshot = snapshot_with(&[
         ("command.check.total", 60.0),
@@ -84,13 +145,15 @@ fn headings_include_command_specific_total() {
         ("stage0.directory.module_compile_batch", 20.0),
     ]);
     let check_report = build_timing_summary(&check_snapshot, TimingCommandKind::Check, true);
-    assert_eq!(check_report.title, "Check timings 60.00ms");
+    assert_eq!(check_report.title, "Check timings");
+    assert_eq!(check_report.command_total, Duration::from_millis(60));
+    assert_eq!(report_title_text(&check_report), "Check timings  60.00ms");
 }
 
 #[test]
 fn pipeline_omits_command_total_row() {
     let report = build_timing_summary(&build_snapshot(), TimingCommandKind::Build, true);
-    let pipeline = &report.sections[0];
+    let pipeline = section_items(&report)[0];
 
     assert!(
         pipeline.rows.iter().all(|row| row.label != "Command total"),
@@ -102,7 +165,7 @@ fn pipeline_omits_command_total_row() {
 #[test]
 fn other_is_bounded_and_never_negative() {
     let report = build_timing_summary(&build_snapshot(), TimingCommandKind::Build, true);
-    let pipeline = &report.sections[0];
+    let pipeline = section_items(&report)[0];
     let other = pipeline
         .rows
         .iter()
@@ -124,12 +187,374 @@ fn other_is_omitted_when_insignificant() {
         ("output.write_total", 24.9),
     ]);
     let report = build_timing_summary(&snapshot, TimingCommandKind::Build, true);
-    let pipeline = &report.sections[0];
+    let pipeline = section_items(&report)[0];
 
     assert!(
         pipeline.rows.iter().all(|row| row.label != "Other"),
         "0.1ms Other must be omitted"
     );
+}
+
+#[test]
+fn single_file_build_shows_compile_frontend_fallback() {
+    let snapshot = snapshot_with(&[
+        ("command.build.total", 100.0),
+        ("build_project.bootstrap", 10.0),
+        ("stage0.single_file.total", 40.0),
+        ("build_project.backend", 15.0),
+        ("output.write_total", 5.0),
+    ]);
+    let report = build_timing_summary(&snapshot, TimingCommandKind::Build, true);
+    let pipeline = section_items(&report)[0];
+
+    let compile_frontend = pipeline
+        .rows
+        .iter()
+        .find(|row| row.label == "Compile frontend")
+        .expect("single-file builds should show one Compile frontend row");
+    assert_eq!(compile_frontend.total, Duration::from_millis(40));
+    assert!(
+        pipeline
+            .rows
+            .iter()
+            .all(|row| row.label != "Discover and prepare graph"),
+        "directory rows must not appear in single-file mode"
+    );
+
+    // 100 - (10 + 40 + 15 + 5) = 30ms.
+    let other = pipeline
+        .rows
+        .iter()
+        .find(|row| row.label == "Other")
+        .expect("Other should account the single-file fallback");
+    assert_eq!(other.total, Duration::from_millis(30));
+}
+
+#[test]
+fn single_file_check_shows_compile_frontend_fallback() {
+    let snapshot = snapshot_with(&[
+        ("command.check.total", 60.0),
+        ("command.check.bootstrap", 5.0),
+        ("stage0.single_file.total", 30.0),
+    ]);
+    let report = build_timing_summary(&snapshot, TimingCommandKind::Check, true);
+    let pipeline = section_items(&report)[0];
+
+    let compile_frontend = pipeline
+        .rows
+        .iter()
+        .find(|row| row.label == "Compile frontend")
+        .expect("single-file checks should show one Compile frontend row");
+    assert_eq!(compile_frontend.total, Duration::from_millis(30));
+
+    // 60 - (5 + 30) = 25ms.
+    let other = pipeline
+        .rows
+        .iter()
+        .find(|row| row.label == "Other")
+        .expect("Other should account the single-file fallback");
+    assert_eq!(other.total, Duration::from_millis(25));
+}
+
+#[test]
+fn frontend_heading_shows_registered_module_count() {
+    let mut snapshot = build_snapshot();
+    snapshot.modules.push(module_record(
+        TimingBoundaryId::from_index(0),
+        0,
+        "moth_docs/site",
+        1,
+        512,
+    ));
+    snapshot.modules.push(module_record(
+        TimingBoundaryId::from_index(0),
+        1,
+        "moth_docs/api",
+        1,
+        1024,
+    ));
+
+    let report = build_timing_summary(&snapshot, TimingCommandKind::Build, true);
+    let sections = section_items(&report);
+    let frontend = sections
+        .iter()
+        .find(|section| section.title.starts_with("Frontend work"))
+        .expect("frontend section should exist");
+
+    assert_eq!(frontend.title, "Frontend work · 2 modules · accumulated");
+}
+
+#[test]
+fn frontend_heading_omits_count_when_no_modules_registered() {
+    let report = build_timing_summary(&build_snapshot(), TimingCommandKind::Build, true);
+    let sections = section_items(&report);
+    let frontend = sections
+        .iter()
+        .find(|section| section.title.starts_with("Frontend work"))
+        .expect("frontend section should exist");
+
+    assert_eq!(frontend.title, "Frontend work · accumulated");
+}
+
+#[test]
+fn public_interface_repeated_samples_sum_into_one_row() {
+    let mut snapshot = build_snapshot();
+    snapshot.timings.push(TimingObservation {
+        name: "frontend.public_interface",
+        duration: Duration::from_millis(8),
+        boundary: None,
+        module: None,
+    });
+    snapshot.timings.push(TimingObservation {
+        name: "frontend.public_interface",
+        duration: Duration::from_millis(4),
+        boundary: None,
+        module: None,
+    });
+
+    let report = build_timing_summary(&snapshot, TimingCommandKind::Build, true);
+    let sections = section_items(&report);
+    let frontend = sections
+        .iter()
+        .find(|section| section.title.starts_with("Frontend work"))
+        .expect("frontend section should exist");
+    let public_interface = frontend
+        .rows
+        .iter()
+        .find(|row| row.label == "Public interface")
+        .expect("public interface row should exist");
+
+    assert_eq!(public_interface.total, Duration::from_millis(12));
+}
+
+#[test]
+fn generated_borrow_work_is_classified_once() {
+    let mut snapshot = build_snapshot();
+    snapshot.timings.push(TimingObservation {
+        name: "frontend.generated_functions",
+        duration: Duration::from_millis(6),
+        boundary: None,
+        module: None,
+    });
+    snapshot.timings.push(TimingObservation {
+        name: "frontend.borrow.generated",
+        duration: Duration::from_millis(2),
+        boundary: None,
+        module: None,
+    });
+    snapshot.timings.push(TimingObservation {
+        name: "frontend.borrow.exact_generated",
+        duration: Duration::from_millis(3),
+        boundary: None,
+        module: None,
+    });
+
+    let report = build_timing_summary(&snapshot, TimingCommandKind::Build, true);
+    let sections = section_items(&report);
+    let frontend = sections
+        .iter()
+        .find(|section| section.title.starts_with("Frontend work"))
+        .expect("frontend section should exist");
+
+    let generated = frontend
+        .rows
+        .iter()
+        .find(|row| row.label == "Generated functions")
+        .expect("generated functions row should exist");
+    assert_eq!(
+        generated.total,
+        Duration::from_millis(8),
+        "generated materialisation plus sidecar borrow rechecks belong to one row"
+    );
+
+    let borrow = frontend
+        .rows
+        .iter()
+        .find(|row| row.label == "Borrow validation")
+        .expect("borrow validation row should exist");
+    assert_eq!(
+        borrow.total,
+        Duration::from_millis(4),
+        "borrow validation sums direct borrow-check calls only"
+    );
+}
+
+#[test]
+fn ast_children_show_tir_and_constant_finalization_labels() {
+    let mut snapshot = build_snapshot();
+    snapshot.timings.push(TimingObservation {
+        name: "ast_build_environment_ms",
+        duration: Duration::from_millis(30),
+        boundary: None,
+        module: None,
+    });
+    snapshot.timings.push(TimingObservation {
+        name: "ast_emit_nodes_ms",
+        duration: Duration::from_millis(40),
+        boundary: None,
+        module: None,
+    });
+    snapshot.timings.push(TimingObservation {
+        name: "ast_finalize_ms",
+        duration: Duration::from_millis(20),
+        boundary: None,
+        module: None,
+    });
+
+    let report = build_timing_summary(&snapshot, TimingCommandKind::Build, true);
+    let sections = section_items(&report);
+    let frontend = sections
+        .iter()
+        .find(|section| section.title.starts_with("Frontend work"))
+        .expect("frontend section should exist");
+    let ast = frontend
+        .rows
+        .iter()
+        .find(|row| row.label == "Semantic frontend / AST")
+        .expect("AST row should exist");
+
+    let child_labels = ast
+        .children
+        .iter()
+        .map(|child| child.label.as_ref())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        child_labels,
+        vec![
+            "Environment, types and constants",
+            "Bodies and TIR construction",
+            "Template and constant finalization",
+        ]
+    );
+    assert_eq!(ast.children[1].total, Duration::from_millis(40));
+    assert_eq!(ast.children[2].total, Duration::from_millis(20));
+}
+
+#[test]
+fn ast_children_hidden_below_significance_threshold() {
+    let mut snapshot = build_snapshot();
+    snapshot.timings.push(TimingObservation {
+        name: "ast_finalize_ms",
+        duration: Duration::from_secs_f64(0.0005),
+        boundary: None,
+        module: None,
+    });
+
+    let report = build_timing_summary(&snapshot, TimingCommandKind::Build, true);
+    let sections = section_items(&report);
+    let frontend = sections
+        .iter()
+        .find(|section| section.title.starts_with("Frontend work"))
+        .expect("frontend section should exist");
+    let ast = frontend
+        .rows
+        .iter()
+        .find(|row| row.label == "Semantic frontend / AST")
+        .expect("AST row should exist");
+
+    assert!(
+        ast.children
+            .iter()
+            .all(|child| child.label != "Template and constant finalization"),
+        "sub-threshold AST children must stay hidden"
+    );
+}
+
+#[test]
+fn js_lowering_aggregates_entry_and_linked_observations() {
+    let mut snapshot = build_snapshot();
+    snapshot.timings.push(TimingObservation {
+        name: "backend.js.lower_linked_hir",
+        duration: Duration::from_millis(3),
+        boundary: None,
+        module: None,
+    });
+
+    let report = build_timing_summary(&snapshot, TimingCommandKind::Build, true);
+    let sections = section_items(&report);
+    let backend = sections
+        .iter()
+        .find(|section| section.title == "Backend")
+        .expect("backend section should exist");
+    let js_lowering = backend
+        .rows
+        .iter()
+        .find(|row| row.label == "JS lowering")
+        .expect("JS lowering row should exist");
+
+    assert_eq!(
+        js_lowering.total,
+        Duration::from_millis(5),
+        "entry-module and linked-module lowering must share one human row"
+    );
+}
+
+#[test]
+fn wasm_and_tracked_asset_children_appear_when_significant() {
+    let mut snapshot = build_snapshot();
+    snapshot.timings.push(TimingObservation {
+        name: "backend.wasm.total",
+        duration: Duration::from_millis(2),
+        boundary: None,
+        module: None,
+    });
+    snapshot.timings.push(TimingObservation {
+        name: "backend.html.tracked_assets_emit",
+        duration: Duration::from_millis(1),
+        boundary: None,
+        module: None,
+    });
+
+    let report = build_timing_summary(&snapshot, TimingCommandKind::Build, true);
+    let sections = section_items(&report);
+    let backend = sections
+        .iter()
+        .find(|section| section.title == "Backend")
+        .expect("backend section should exist");
+    let labels = backend
+        .rows
+        .iter()
+        .map(|row| row.label.as_ref())
+        .collect::<Vec<_>>();
+
+    assert!(labels.contains(&"Wasm lowering"));
+    assert!(labels.contains(&"Tracked assets"));
+    assert!(
+        !labels.contains(&"Site config") && !labels.contains(&"Document config"),
+        "config microsteps must stay hidden from basic output"
+    );
+}
+
+#[test]
+fn dev_report_uses_build_and_write_total_and_build_pipeline_rows() {
+    let snapshot = snapshot_with(&[
+        ("command.dev.build_and_write", 100.0),
+        ("build_project.bootstrap", 10.0),
+        ("stage0.directory.module_inventory", 20.0),
+        ("stage0.directory.module_compile_batch", 30.0),
+        ("build_project.backend", 15.0),
+        ("output.write_total", 5.0),
+    ]);
+    let report = build_timing_summary(&snapshot, TimingCommandKind::Dev, true);
+
+    assert_eq!(report.title, "Dev timings");
+    assert_eq!(report.command_total, Duration::from_millis(100));
+
+    let sections = section_items(&report);
+    let pipeline = sections
+        .iter()
+        .find(|section| section.title == "Build pipeline")
+        .expect("dev report should show the build pipeline");
+    let labels = pipeline
+        .rows
+        .iter()
+        .map(|row| row.label.as_ref())
+        .collect::<Vec<_>>();
+    assert!(labels.contains(&"Bootstrap"));
+    assert!(labels.contains(&"Discover and prepare graph"));
+    assert!(labels.contains(&"Compile packages and project"));
+    assert!(labels.contains(&"Backend"));
+    assert!(labels.contains(&"Write output"));
 }
 
 #[test]
@@ -143,7 +568,7 @@ fn zero_rows_are_suppressed_before_rounding() {
         ("output.write_total", 5.0),
     ]);
     let report = build_timing_summary(&snapshot, TimingCommandKind::Build, true);
-    let pipeline = &report.sections[0];
+    let pipeline = section_items(&report)[0];
 
     assert!(
         pipeline.rows.iter().all(|row| row.label != "Bootstrap"),
@@ -157,16 +582,19 @@ fn unknown_metrics_stay_hidden_from_basic_output() {
     snapshot.timings.push(TimingObservation {
         name: "backend.html.tracked_assets_emit",
         duration: Duration::from_millis(50),
-        label: None,
         boundary: None,
         module: None,
     });
 
     let report = build_timing_summary(&snapshot, TimingCommandKind::Build, true);
     let all_labels: Vec<&str> = report
-        .sections
+        .items
         .iter()
-        .flat_map(|section| section.rows.iter())
+        .filter_map(|item| match item {
+            TimingReportItem::Section(section) => Some(section.rows.iter()),
+            _ => None,
+        })
+        .flatten()
         .map(|row| row.label.as_ref())
         .collect();
 
@@ -189,8 +617,8 @@ fn child_thresholds_apply_at_exact_boundaries() {
         ("backend.js.lower_hir", 1.0),
     ]);
     let report = build_timing_summary(&shown, TimingCommandKind::Build, true);
-    let backend = report
-        .sections
+    let sections = section_items(&report);
+    let backend = sections
         .iter()
         .find(|section| section.title == "Backend")
         .expect("backend section should exist");
@@ -204,8 +632,7 @@ fn child_thresholds_apply_at_exact_boundaries() {
     ]);
     let report = build_timing_summary(&hidden, TimingCommandKind::Build, true);
     assert!(
-        report
-            .sections
+        section_items(&report)
             .iter()
             .all(|section| section.title != "Backend"),
         "sub-threshold child must hide the whole backend section"
@@ -232,14 +659,17 @@ fn shuffled_event_order_produces_identical_rows() {
 
     let row_signature = |report: &crate::timing::enabled::summary::TimingSummaryReport| {
         report
-            .sections
+            .items
             .iter()
-            .map(|section| {
-                section
-                    .rows
-                    .iter()
-                    .map(|row| (row.label.clone(), row.total.as_millis()))
-                    .collect::<Vec<_>>()
+            .filter_map(|item| match item {
+                TimingReportItem::Section(section) => Some(
+                    section
+                        .rows
+                        .iter()
+                        .map(|row| (row.label.clone(), row.total.as_millis()))
+                        .collect::<Vec<_>>(),
+                ),
+                _ => None,
             })
             .collect::<Vec<_>>()
     };
@@ -253,7 +683,7 @@ fn failed_command_title_records_duration_without_changing_metrics() {
     let failed = build_timing_summary(&snapshot, TimingCommandKind::Build, false);
     let succeeded = build_timing_summary(&snapshot, TimingCommandKind::Build, true);
 
-    assert!(failed.title.starts_with("Build timings · failed after "));
+    assert_eq!(failed.title, "Build timings · failed after");
     assert_eq!(failed.command_total, succeeded.command_total);
 }
 
@@ -263,16 +693,19 @@ fn repeated_rows_show_aggregate_duration_without_sample_noise() {
     snapshot.timings.push(TimingObservation {
         name: "frontend.file_prepare",
         duration: Duration::from_millis(1),
-        label: Some("/absolute/path/module.moth".to_owned()),
         boundary: None,
         module: None,
     });
 
     let report = build_timing_summary(&snapshot, TimingCommandKind::Build, true);
     let prepare_row = report
-        .sections
+        .items
         .iter()
-        .flat_map(|section| section.rows.iter())
+        .filter_map(|item| match item {
+            TimingReportItem::Section(section) => Some(section.rows.iter()),
+            _ => None,
+        })
+        .flatten()
         .find(|row| row.label == "Prepare source files")
         .expect("prepare source files row should exist");
 
@@ -283,34 +716,36 @@ fn repeated_rows_show_aggregate_duration_without_sample_noise() {
     assert!(!text.contains("across"));
     assert!(!text.contains("samples"));
     assert!(!text.contains("["));
-    assert!(!text.contains("/absolute/path"));
 }
 
 #[test]
 fn model_supports_dynamic_boundary_and_slowest_module_labels() {
     let mut report = build_timing_summary(&build_snapshot(), TimingCommandKind::Build, true);
-    report.compilation_boundaries.push(TimingBoundarySummary {
-        label: Cow::Owned("@html".to_owned()),
-        module_count: 1,
-        total: Duration::from_millis(5),
-    });
-    report.slowest_module = Some(TimingSlowestModuleSummary {
-        identity: Cow::Owned("@docs/progress".to_owned()),
-        source_file_count: 1,
-        source_byte_count: 45_000,
-        total: Duration::from_millis(16),
-    });
+    report
+        .items
+        .push(TimingReportItem::CompilationBoundaries(vec![
+            TimingBoundarySummary {
+                label: Cow::Owned("@html".to_owned()),
+                module_count: 1,
+                total: Duration::from_millis(5),
+            },
+        ]));
+    report.items.push(TimingReportItem::SlowestModule(
+        TimingSlowestModuleSummary {
+            identity: Cow::Owned("@docs/progress".to_owned()),
+            source_file_count: 1,
+            source_byte_count: 45_000,
+            total: Duration::from_millis(16),
+        },
+    ));
 
-    let boundary = &report.compilation_boundaries[0];
+    let boundary = &boundary_items(&report).expect("boundaries should exist")[0];
     assert_eq!(
         boundary_row_text(boundary, boundary.label.len()),
         "@html  1 module  5.00ms"
     );
 
-    let slowest_module = report
-        .slowest_module
-        .as_ref()
-        .expect("slowest module should exist");
+    let slowest_module = slowest_module_item(&report).expect("slowest module should exist");
     assert_eq!(
         slowest_module_text(slowest_module),
         "@docs/progress  16.00ms · 1 file · 43.9KB"
@@ -372,7 +807,6 @@ fn attributed_observation(
     TimingObservation {
         name,
         duration: Duration::from_secs_f64(millis / 1000.0),
-        label: None,
         boundary: context.boundary,
         module: context.module,
     }
@@ -415,20 +849,15 @@ fn boundary_rows_separate_packages_and_project_totals() {
     };
 
     let report = build_timing_summary(&snapshot, TimingCommandKind::Build, true);
+    let boundaries = boundary_items(&report).expect("boundaries should exist");
 
-    assert_eq!(report.compilation_boundaries.len(), 2);
-    assert_eq!(report.compilation_boundaries[0].label, "@html");
-    assert_eq!(report.compilation_boundaries[0].module_count, 1);
-    assert_eq!(
-        report.compilation_boundaries[0].total,
-        Duration::from_millis(5)
-    );
-    assert_eq!(report.compilation_boundaries[1].label, "moth_docs");
-    assert_eq!(report.compilation_boundaries[1].module_count, 69);
-    assert_eq!(
-        report.compilation_boundaries[1].total,
-        Duration::from_millis(340)
-    );
+    assert_eq!(boundaries.len(), 2);
+    assert_eq!(boundaries[0].label, "@html");
+    assert_eq!(boundaries[0].module_count, 1);
+    assert_eq!(boundaries[0].total, Duration::from_millis(5));
+    assert_eq!(boundaries[1].label, "moth_docs");
+    assert_eq!(boundaries[1].module_count, 69);
+    assert_eq!(boundaries[1].total, Duration::from_millis(340));
 }
 
 #[test]
@@ -466,8 +895,13 @@ fn boundary_rows_follow_registration_order() {
 
     let report = build_timing_summary(&snapshot, TimingCommandKind::Build, true);
     let labels = report
-        .compilation_boundaries
+        .items
         .iter()
+        .filter_map(|item| match item {
+            TimingReportItem::CompilationBoundaries(boundaries) => Some(boundaries.iter()),
+            _ => None,
+        })
+        .flatten()
         .map(|boundary| boundary.label.as_ref())
         .collect::<Vec<_>>();
 
@@ -517,10 +951,7 @@ fn same_module_index_in_two_boundaries_does_not_collide() {
     };
 
     let report = build_timing_summary(&snapshot, TimingCommandKind::Build, true);
-    let slowest_module = report
-        .slowest_module
-        .as_ref()
-        .expect("slowest module should exist");
+    let slowest_module = slowest_module_item(&report).expect("slowest module should exist");
 
     assert_eq!(slowest_module.identity, "moth_docs");
     assert_eq!(slowest_module.total, Duration::from_millis(9));
@@ -581,14 +1012,7 @@ fn shuffled_events_do_not_change_boundary_or_slowest_module() {
     let ordered_report = build_timing_summary(&ordered, TimingCommandKind::Build, true);
     let shuffled_report = build_timing_summary(&shuffled, TimingCommandKind::Build, true);
 
-    assert_eq!(
-        ordered_report.compilation_boundaries,
-        shuffled_report.compilation_boundaries
-    );
-    assert_eq!(
-        ordered_report.slowest_module,
-        shuffled_report.slowest_module
-    );
+    assert_eq!(ordered_report.items, shuffled_report.items);
 }
 
 #[test]
@@ -630,10 +1054,7 @@ fn slowest_module_uses_preparation_plus_semantic_total() {
     };
 
     let report = build_timing_summary(&snapshot, TimingCommandKind::Build, true);
-    let slowest_module = report
-        .slowest_module
-        .as_ref()
-        .expect("slowest module should exist");
+    let slowest_module = slowest_module_item(&report).expect("slowest module should exist");
 
     assert_eq!(slowest_module.identity, "moth_docs/site");
     assert_eq!(slowest_module.total, Duration::from_millis(8));
@@ -668,10 +1089,7 @@ fn slowest_module_identity_uses_logical_path_not_absolute_path() {
     };
 
     let report = build_timing_summary(&snapshot, TimingCommandKind::Build, true);
-    let slowest_module = report
-        .slowest_module
-        .as_ref()
-        .expect("slowest module should exist");
+    let slowest_module = slowest_module_item(&report).expect("slowest module should exist");
     let text = slowest_module_text(slowest_module);
 
     assert_eq!(slowest_module.identity, "moth_docs/docs/progress");
@@ -698,11 +1116,11 @@ fn only_registered_boundaries_produce_rows() {
     };
 
     let report = build_timing_summary(&snapshot, TimingCommandKind::Build, true);
+    let boundaries = boundary_items(&report).expect("boundaries should exist");
 
-    assert_eq!(report.compilation_boundaries.len(), 1);
+    assert_eq!(boundaries.len(), 1);
     assert!(
-        report
-            .compilation_boundaries
+        boundaries
             .iter()
             .all(|boundary| boundary.label != "@web/canvas"),
         "binding-backed packages are never registered as source boundaries"

@@ -170,6 +170,44 @@ Counter lines are emitted only when the compiler is built with
 Do not turn counters on for normal before/after benchmark runs unless the active
 investigation specifically needs counter evidence.
 
+### Timer report model
+
+The human `MOTH_TIMERS=summary` report is a short developer scan, not a fourth
+benchmark system. It shows one command, one set of compilation boundaries, the
+curated frontend and backend sections, and one slowest module. Detailed timers
+keep verbose inline prose and every raw observation; bench mode emits stable
+`MOTH_BENCH timing` lines only. Unknown raw metrics always stay available in
+bench and detailed output but never appear in the basic report by accident.
+
+Rows distinguish wall spans from accumulated work:
+
+- command and pipeline rows are wall-clock spans
+- boundary rows sum disjoint inventory and compile passes and are labelled
+  accumulated work
+- frontend rows sum repeated per-module observations and are labelled
+  accumulated
+- nested AST children are evidence inside the AST parent and are never added
+  to top-level accounting
+
+Compilation boundaries name source-backed packages (`@<prefix>`) and the main
+project in deterministic registration order. The slowest-module row uses
+registered logical module metadata, never absolute filesystem paths, and
+defines module work as source preparation plus `frontend.module.semantic_total`.
+Optional child rows appear only when the unrounded duration is at least 1ms and
+5% of the parent. `Other` appears only when it is at least 1ms or 2% of the
+command total.
+
+The zero-cost rule is a hard contract: a compiler built without `timers`
+performs no timer-system clock reads, allocations, formatting, environment
+lookups, collector operations or context propagation. The erasure gate
+(`just timers-erasure-check`) builds a no-timer release binary and rejects
+timer-only markers in its bytes.
+
+Stable metric compatibility is mandatory. Existing metric names and measurement
+boundaries never change; new observations always use new names. Human grouping
+may combine raw metrics without changing them. A benchmark protocol bump is a
+separate deliberate action, never a way to hide an accidental boundary change.
+
 ### Frontend parallelism matrix
 
 For frontend scheduling and parallelism work, run the focused frontend suite with the default
@@ -253,9 +291,12 @@ summaries.
 
 The current `frontend.file_prepare` metric is the combined parallel
 file-preparation aggregate: per-file tokenization, header parsing, local
-string-table work, and deterministic merge/remap into the module table. Older
-local records may still contain legacy `file_prepare_ms`, `tokenize_ms`, or
-`headers_ms` observations.
+string-table work, and deterministic merge/remap into the module table.
+Directory projects also record the same metric for incremental Stage 0
+discovery: each per-file header preparation and the final retained
+header-syntax aggregation are attributed to the owning module and boundary.
+Older local records may still contain legacy `file_prepare_ms`,
+`tokenize_ms`, or `headers_ms` observations.
 
 In-process frontend timings call production compiler paths directly and stop at the documented frontend/backend boundary after HIR and borrow validation. They are useful for compiler refactors, but they are still rough development signals rather than precise measurements.
 

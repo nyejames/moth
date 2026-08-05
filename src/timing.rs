@@ -7,6 +7,16 @@
 //!      projects, and lets counter-only benchmark runs happen behind
 //!      `benchmark_counters` without enabling verbose timer prose.
 //!
+//! Three output products share one collector:
+//! - `MOTH_TIMERS=summary` prints the curated human report (pipeline,
+//!   compilation boundaries, frontend, backend, slowest module).
+//! - `MOTH_TIMERS=bench` emits stable `MOTH_BENCH timing` lines only.
+//! - `MOTH_TIMERS=verbose` keeps detailed inline prose and ends with the
+//!   curated report.
+//!
+//! The dev server starts one fresh collection per build cycle and renders
+//! the same report after its one-line status.
+//!
 //! Zero-cost rule:
 //! - With `timers` selected, `timing::enabled` owns the collector, output
 //!   modes, observation types, guards and renderers, and the macros below
@@ -264,45 +274,38 @@ macro_rules! timed_manual_finish {
     ($metric:expr, $start:expr $(,)?) => {};
 }
 
-/// Finish a manually started pipeline stage with an optional label and
-/// explicit boundary/module attribution context.
+/// Finish a manually started pipeline stage with explicit boundary/module
+/// attribution context.
 ///
 /// When `timers` is off, the expansion emits no statement and none of the
-/// metric, start, label or context expressions are evaluated.
+/// metric, start or context expressions are evaluated.
 #[macro_export]
 #[cfg(feature = "timers")]
 macro_rules! timed_manual_finish_attributed {
-    ($metric:expr, $start:expr, $label:expr, $context:expr $(,)?) => {
-        $crate::timing::record_started_pipeline_timing_attributed(
-            $metric, $start, $label, $context,
-        );
+    ($metric:expr, $start:expr, $context:expr $(,)?) => {
+        $crate::timing::record_started_pipeline_timing_attributed($metric, $start, $context);
     };
 }
 
 #[macro_export]
 #[cfg(not(feature = "timers"))]
 macro_rules! timed_manual_finish_attributed {
-    ($metric:expr, $start:expr, $label:expr, $context:expr $(,)?) => {};
+    ($metric:expr, $start:expr, $context:expr $(,)?) => {};
 }
 
 /// Time one frontend stage through an erasing wrapper.
 ///
 /// The stage argument is a direct production expression, not a closure. The
-/// metric, prose label, module label and attribution context are only
-/// evaluated while `timers` is active; the disabled expansion is the
-/// production expression itself, so no timing wrapper survives in that build.
+/// metric, prose label and attribution context are only evaluated while
+/// `timers` is active; the disabled expansion is the production expression
+/// itself, so no timing wrapper survives in that build.
 #[macro_export]
 #[cfg(feature = "timers")]
 macro_rules! timed_frontend_stage {
-    ($metric:expr, $prose_label:expr, $module_label:expr, $context:expr, $stage:expr $(,)?) => {{
+    ($metric:expr, $prose_label:expr, $context:expr, $stage:expr $(,)?) => {{
         let timing_start = $crate::timing::start_pipeline_timing();
         let timing_result = $stage;
-        $crate::timing::record_started_pipeline_timing_attributed(
-            $metric,
-            timing_start,
-            $module_label,
-            $context,
-        );
+        $crate::timing::record_started_pipeline_timing_attributed($metric, timing_start, $context);
 
         // Human prose stays gated by detailed_timers for verbose developer output.
         #[cfg(feature = "detailed_timers")]
@@ -320,7 +323,7 @@ macro_rules! timed_frontend_stage {
 #[macro_export]
 #[cfg(not(feature = "timers"))]
 macro_rules! timed_frontend_stage {
-    ($metric:expr, $prose_label:expr, $module_label:expr, $context:expr, $stage:expr $(,)?) => {{ $stage }};
+    ($metric:expr, $prose_label:expr, $context:expr, $stage:expr $(,)?) => {{ $stage }};
 }
 
 /// Time one detailed frontend substep through an erasing macro.
