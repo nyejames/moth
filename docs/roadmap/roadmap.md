@@ -15,9 +15,10 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 
 ## Queued implementation chain
 
-- [path values and dependencies final design](./plans/path-values-dependency-clauses-and-resource-linking-plan.md)
-- [TIR follow up cleanup](./plans/tir-corrections-and-simplification-plan.md)
-- [growable collections infallability](./plans/collection-push-fallibility-split-plan.md)
+- [Dependency clauses and path syntax](./plans/dependency-clauses-and-path-syntax-plan.md)
+- [TIR corrections and simplification](./plans/tir-corrections-and-simplification-plan.md)
+- [Path values and resource linking](./plans/path-values-and-resource-linking-plan.md)
+- [Growable collections infallability](./plans/collection-push-fallibility-split-plan.md)
 - [Anonymous const records](./plans/anonymous-const-records-plan.md)
 - [Project config and recursive schemas](./plans/project-config-and-recursive-schemas-plan.md)
 - [Imported build values and project globals](./plans/imported-build-values-and-project-globals-plan.md)
@@ -29,6 +30,8 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 - [Runtime anonymous records](./plans/runtime-anonymous-records-plan.md)
 - [HTML mixed JavaScript and Wasm backend](./plans/html_project_backend_wasm_final_implementation_plan.md)
 - [Package dependency declarations and package-manager foundations](./plans/package-dependency-declarations-and-manager-foundations-plan.md)
+
+The roadmap order is the implementation sequence. Individual plans may state their immediate blockers, but they do not redefine the full chain.
 
 The package dependency plan is design-gated. Its implementation remains blocked until its declaration, alias, resolver and future package-manager boundaries are reviewed and accepted.
 
