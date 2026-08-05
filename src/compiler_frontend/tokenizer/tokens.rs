@@ -127,35 +127,31 @@ impl PathTokenItem {
     /// WHY: path token items carry `InternedPath` and `SourceLocation` data that must stay
     ///      valid when per-file local tables are merged into the module/global table.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        self.path.remap_string_ids(remap);
-
-        if let Some(alias) = &mut self.alias {
-            *alias = remap.get(*alias);
-        }
-
-        self.path_location.remap_string_ids(remap);
-
-        if let Some(alias_location) = &mut self.alias_location {
-            alias_location.remap_string_ids(remap);
-        }
+        self.try_remap_string_ids(&mut |id| {
+            Ok::<StringId, std::convert::Infallible>(remap.get(id))
+        })
+        .expect("token string-ID remapping is infallible");
     }
 
-    /// Remap every interned string payload through one fallible string-ID mapping.
-    pub fn try_map_string_ids<E>(
-        &self,
+    /// Remap every interned string payload through one exhaustive, in-place, fallible walker.
+    ///
+    /// WHAT: the single canonical `PathTokenItem` string-ID traversal for ordinary remaps,
+    ///       frozen body capture and frozen body materialisation.
+    /// WHY: every payload-bearing field is listed explicitly here; remapping mutates existing
+    ///      allocations instead of rebuilding the item, so path vectors keep their allocation.
+    pub fn try_remap_string_ids<E>(
+        &mut self,
         map: &mut impl FnMut(StringId) -> Result<StringId, E>,
-    ) -> Result<Self, E> {
-        Ok(Self {
-            path: self.path.try_map_string_ids(map)?,
-            alias: self.alias.map(&mut *map).transpose()?,
-            path_location: self.path_location.try_map_string_ids(map)?,
-            alias_location: self
-                .alias_location
-                .as_ref()
-                .map(|location| location.try_map_string_ids(map))
-                .transpose()?,
-            from_grouped: self.from_grouped,
-        })
+    ) -> Result<(), E> {
+        self.path.try_remap_string_ids(map)?;
+        if let Some(alias) = &mut self.alias {
+            *alias = map(*alias)?;
+        }
+        self.path_location.try_remap_string_ids(map)?;
+        if let Some(alias_location) = &mut self.alias_location {
+            alias_location.try_remap_string_ids(map)?;
+        }
+        Ok(())
     }
 }
 
@@ -716,153 +712,143 @@ pub enum TokenKind {
 }
 
 impl Token {
-    /// Remap all interned string IDs in this token into a merged string table.
-    ///
-    /// WHAT: updates the token kind and source location after a string-table merge.
-    /// WHY: tokens carry `StringId` payloads and `SourceLocation` scopes that must stay
-    ///      valid when per-file local tables are merged into the module/global table.
-    // This is called by token-stream remapping once file-level frontend outputs are merged.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.kind.remap_string_ids(remap);
         self.location.remap_string_ids(remap);
     }
+
+    /// Remap every interned payload in place through one fallible string-ID walker.
+    pub fn try_remap_string_ids<E>(
+        &mut self,
+        map: &mut impl FnMut(StringId) -> Result<StringId, E>,
+    ) -> Result<(), E> {
+        self.kind.try_remap_string_ids(map)?;
+        self.location.try_remap_string_ids(map)
+    }
 }
 
 impl TokenKind {
-    /// Remap all interned string IDs in this token kind into a merged string table.
-    ///
-    /// WHAT: updates `Symbol`, `StyleDirective`, string literals, raw string literals,
-    ///       and `Path` item payloads after a string-table merge.
-    /// WHY: token kinds are the primary carriers of interned string identity from the
-    ///      tokenizer; remapping them explicitly keeps string-table ownership local to
-    ///      the tokenizer module instead of leaking into diagnostics or downstream stages.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        *self = self.map_string_ids(|id| remap.get(id));
+        self.try_remap_string_ids(&mut |id| {
+            Ok::<StringId, std::convert::Infallible>(remap.get(id))
+        })
+        .expect("token string-ID remapping is infallible");
     }
 
-    /// Remap every interned string payload through one exhaustive, fallible walker.
+    /// Remap every interned string payload through one exhaustive, in-place, fallible walker.
     ///
     /// WHAT: the single canonical `TokenKind` string-ID traversal for ordinary remaps, frozen
     ///       body capture and frozen body materialisation.
-    /// WHY: every payload-bearing variant is listed explicitly here. Adding a new `TokenKind`
-    ///       variant produces one compile error at this owner instead of silently retaining a
-    ///       donor `StringId` through a catch-all arm.
-    pub fn try_map_string_ids<E>(
-        &self,
+    /// WHY: every payload-bearing variant is listed explicitly here and mutated in place.
+    ///       Adding a new `TokenKind` variant produces one compile error at this owner instead
+    ///       of silently retaining a donor `StringId` through a catch-all arm.
+    pub fn try_remap_string_ids<E>(
+        &mut self,
         map: &mut impl FnMut(StringId) -> Result<StringId, E>,
-    ) -> Result<Self, E> {
-        Ok(match self {
-            TokenKind::Symbol(value) => TokenKind::Symbol(map(*value)?),
-            TokenKind::StyleDirective(value) => TokenKind::StyleDirective(map(*value)?),
-            TokenKind::StringSliceLiteral(value) => TokenKind::StringSliceLiteral(map(*value)?),
-            TokenKind::RawStringLiteral(value) => TokenKind::RawStringLiteral(map(*value)?),
-            TokenKind::NumericLiteral(value) => {
-                TokenKind::NumericLiteral(value.try_map_string_ids(map)?)
+    ) -> Result<(), E> {
+        match self {
+            TokenKind::Symbol(value) => *value = map(*value)?,
+            TokenKind::StyleDirective(value) => *value = map(*value)?,
+            TokenKind::StringSliceLiteral(value) => *value = map(*value)?,
+            TokenKind::RawStringLiteral(value) => *value = map(*value)?,
+            TokenKind::NumericLiteral(value) => value.try_remap_string_ids(map)?,
+            TokenKind::Path(items) => {
+                for item in items {
+                    item.try_remap_string_ids(map)?;
+                }
             }
-            TokenKind::Path(items) => TokenKind::Path(
-                items
-                    .iter()
-                    .map(|item| item.try_map_string_ids(map))
-                    .collect::<Result<Vec<_>, E>>()?,
-            ),
-            TokenKind::CharLiteral(value) => TokenKind::CharLiteral(*value),
-            TokenKind::BoolLiteral(value) => TokenKind::BoolLiteral(*value),
-
-            TokenKind::ModuleStart => TokenKind::ModuleStart,
-            TokenKind::Eof => TokenKind::Eof,
-            TokenKind::Import => TokenKind::Import,
-            TokenKind::Export => TokenKind::Export,
-            TokenKind::Hash => TokenKind::Hash,
-            TokenKind::Reactive => TokenKind::Reactive,
-            TokenKind::Arrow => TokenKind::Arrow,
-            TokenKind::OpenCurly => TokenKind::OpenCurly,
-            TokenKind::CloseCurly => TokenKind::CloseCurly,
-            TokenKind::TypeParameterBracket => TokenKind::TypeParameterBracket,
-            TokenKind::Newline => TokenKind::Newline,
-            TokenKind::End => TokenKind::End,
-            TokenKind::StartTemplateBody => TokenKind::StartTemplateBody,
-            TokenKind::Comma => TokenKind::Comma,
-            TokenKind::Dot => TokenKind::Dot,
-            TokenKind::Colon => TokenKind::Colon,
-            TokenKind::DoubleColon => TokenKind::DoubleColon,
-            TokenKind::Assign => TokenKind::Assign,
-            TokenKind::This => TokenKind::This,
-            TokenKind::Must => TokenKind::Must,
-            TokenKind::TraitThis => TokenKind::TraitThis,
-            TokenKind::OpenParenthesis => TokenKind::OpenParenthesis,
-            TokenKind::CloseParenthesis => TokenKind::CloseParenthesis,
-            TokenKind::As => TokenKind::As,
-            TokenKind::Type => TokenKind::Type,
-            TokenKind::Of => TokenKind::Of,
-            TokenKind::Variadic => TokenKind::Variadic,
-            TokenKind::Mutable => TokenKind::Mutable,
-            TokenKind::DatatypeNone => TokenKind::DatatypeNone,
-            TokenKind::NoneLiteral => TokenKind::NoneLiteral,
-            TokenKind::DatatypeInt => TokenKind::DatatypeInt,
-            TokenKind::DatatypeFloat => TokenKind::DatatypeFloat,
-            TokenKind::DatatypeBool => TokenKind::DatatypeBool,
-            TokenKind::DatatypeTrue => TokenKind::DatatypeTrue,
-            TokenKind::DatatypeFalse => TokenKind::DatatypeFalse,
-            TokenKind::DatatypeString => TokenKind::DatatypeString,
-            TokenKind::DatatypeChar => TokenKind::DatatypeChar,
-            TokenKind::Bang => TokenKind::Bang,
-            TokenKind::QuestionMark => TokenKind::QuestionMark,
-            TokenKind::Negative => TokenKind::Negative,
-            TokenKind::Exponent => TokenKind::Exponent,
-            TokenKind::Multiply => TokenKind::Multiply,
-            TokenKind::Divide => TokenKind::Divide,
-            TokenKind::Modulus => TokenKind::Modulus,
-            TokenKind::IntDivide => TokenKind::IntDivide,
-            TokenKind::ExponentAssign => TokenKind::ExponentAssign,
-            TokenKind::MultiplyAssign => TokenKind::MultiplyAssign,
-            TokenKind::DivideAssign => TokenKind::DivideAssign,
-            TokenKind::ModulusAssign => TokenKind::ModulusAssign,
-            TokenKind::IntDivideAssign => TokenKind::IntDivideAssign,
-            TokenKind::Add => TokenKind::Add,
-            TokenKind::Subtract => TokenKind::Subtract,
-            TokenKind::AddAssign => TokenKind::AddAssign,
-            TokenKind::SubtractAssign => TokenKind::SubtractAssign,
-            TokenKind::Not => TokenKind::Not,
-            TokenKind::Is => TokenKind::Is,
-            TokenKind::LessThan => TokenKind::LessThan,
-            TokenKind::LessThanOrEqual => TokenKind::LessThanOrEqual,
-            TokenKind::GreaterThan => TokenKind::GreaterThan,
-            TokenKind::GreaterThanOrEqual => TokenKind::GreaterThanOrEqual,
-            TokenKind::And => TokenKind::And,
-            TokenKind::Or => TokenKind::Or,
-            TokenKind::If => TokenKind::If,
-            TokenKind::Else => TokenKind::Else,
-            TokenKind::Return => TokenKind::Return,
-            TokenKind::ReturnBang => TokenKind::ReturnBang,
-            TokenKind::Catch => TokenKind::Catch,
-            TokenKind::Then => TokenKind::Then,
-            TokenKind::Block => TokenKind::Block,
-            TokenKind::Checked => TokenKind::Checked,
-            TokenKind::Async => TokenKind::Async,
-            TokenKind::Cast => TokenKind::Cast,
-            TokenKind::CastBang => TokenKind::CastBang,
-            TokenKind::Assert => TokenKind::Assert,
-            TokenKind::Loop => TokenKind::Loop,
-            TokenKind::By => TokenKind::By,
-            TokenKind::Break => TokenKind::Break,
-            TokenKind::Continue => TokenKind::Continue,
-            TokenKind::ExclusiveRange => TokenKind::ExclusiveRange,
-            TokenKind::Ampersand => TokenKind::Ampersand,
-            TokenKind::FatArrow => TokenKind::FatArrow,
-            TokenKind::Wildcard => TokenKind::Wildcard,
-            TokenKind::Copy => TokenKind::Copy,
-            TokenKind::TemplateClose => TokenKind::TemplateClose,
-            TokenKind::TemplateHead => TokenKind::TemplateHead,
-            TokenKind::ChannelSend => TokenKind::ChannelSend,
-            TokenKind::ChannelReceive => TokenKind::ChannelReceive,
-            TokenKind::Yield => TokenKind::Yield,
-        })
-    }
-
-    /// Remap every interned string payload through one infallible closure.
-    pub fn map_string_ids(&self, mut map: impl FnMut(StringId) -> StringId) -> Self {
-        self.try_map_string_ids(&mut |id| Ok::<StringId, std::convert::Infallible>(map(id)))
-            .expect("token string-id mapping is infallible")
+            TokenKind::CharLiteral(_)
+            | TokenKind::BoolLiteral(_)
+            | TokenKind::ModuleStart
+            | TokenKind::Eof
+            | TokenKind::Import
+            | TokenKind::Export
+            | TokenKind::Hash
+            | TokenKind::Reactive
+            | TokenKind::Arrow
+            | TokenKind::OpenCurly
+            | TokenKind::CloseCurly
+            | TokenKind::TypeParameterBracket
+            | TokenKind::Newline
+            | TokenKind::End
+            | TokenKind::StartTemplateBody
+            | TokenKind::Comma
+            | TokenKind::Dot
+            | TokenKind::Colon
+            | TokenKind::DoubleColon
+            | TokenKind::Assign
+            | TokenKind::This
+            | TokenKind::Must
+            | TokenKind::TraitThis
+            | TokenKind::OpenParenthesis
+            | TokenKind::CloseParenthesis
+            | TokenKind::As
+            | TokenKind::Type
+            | TokenKind::Of
+            | TokenKind::Variadic
+            | TokenKind::Mutable
+            | TokenKind::DatatypeNone
+            | TokenKind::NoneLiteral
+            | TokenKind::DatatypeInt
+            | TokenKind::DatatypeFloat
+            | TokenKind::DatatypeBool
+            | TokenKind::DatatypeTrue
+            | TokenKind::DatatypeFalse
+            | TokenKind::DatatypeString
+            | TokenKind::DatatypeChar
+            | TokenKind::Bang
+            | TokenKind::QuestionMark
+            | TokenKind::Negative
+            | TokenKind::Exponent
+            | TokenKind::Multiply
+            | TokenKind::Divide
+            | TokenKind::Modulus
+            | TokenKind::IntDivide
+            | TokenKind::ExponentAssign
+            | TokenKind::MultiplyAssign
+            | TokenKind::DivideAssign
+            | TokenKind::ModulusAssign
+            | TokenKind::IntDivideAssign
+            | TokenKind::Add
+            | TokenKind::Subtract
+            | TokenKind::AddAssign
+            | TokenKind::SubtractAssign
+            | TokenKind::Not
+            | TokenKind::Is
+            | TokenKind::LessThan
+            | TokenKind::LessThanOrEqual
+            | TokenKind::GreaterThan
+            | TokenKind::GreaterThanOrEqual
+            | TokenKind::And
+            | TokenKind::Or
+            | TokenKind::If
+            | TokenKind::Else
+            | TokenKind::Return
+            | TokenKind::ReturnBang
+            | TokenKind::Catch
+            | TokenKind::Then
+            | TokenKind::Block
+            | TokenKind::Checked
+            | TokenKind::Async
+            | TokenKind::Cast
+            | TokenKind::CastBang
+            | TokenKind::Assert
+            | TokenKind::Loop
+            | TokenKind::By
+            | TokenKind::Break
+            | TokenKind::Continue
+            | TokenKind::ExclusiveRange
+            | TokenKind::Ampersand
+            | TokenKind::FatArrow
+            | TokenKind::Wildcard
+            | TokenKind::Copy
+            | TokenKind::TemplateClose
+            | TokenKind::TemplateHead
+            | TokenKind::ChannelSend
+            | TokenKind::ChannelReceive
+            | TokenKind::Yield => {}
+        }
+        Ok(())
     }
 
     /// Returns true when this token is a supported assignment operator in statement/write position.

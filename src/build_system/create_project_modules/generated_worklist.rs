@@ -17,7 +17,7 @@ use crate::compiler_frontend::semantic_identity::{
 use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(super) struct GeneratedRequestId(usize);
@@ -403,13 +403,32 @@ impl BoundaryGeneratedFunctionStore {
         &mut self,
         delta: GeneratedFunctionWorklistDelta,
     ) -> Result<(), CompilerError> {
-        for record in delta.records {
+        // Preflight the complete delta before mutation: identity/sidecar agreement, duplicate
+        // identities inside the delta and duplicates against retained state must all pass before
+        // any row is appended.
+        let mut delta_identities = FxHashSet::default();
+        for record in &delta.records {
+            if record.identity != record.sidecar.identity {
+                return Err(CompilerError::compiler_error(format!(
+                    "Generated sidecar identity {:?} disagrees with its record identity {:?}",
+                    record.sidecar.identity, record.identity
+                )));
+            }
+            if !delta_identities.insert(record.identity.clone()) {
+                return Err(CompilerError::compiler_error(format!(
+                    "Generated identity {:?} is duplicated inside one publication delta",
+                    record.identity
+                )));
+            }
             if self.by_identity.contains_key(&record.identity) {
                 return Err(CompilerError::compiler_error(format!(
                     "Generated identity {:?} was published more than once in one compilation boundary",
                     record.identity
                 )));
             }
+        }
+
+        for record in delta.records {
             let record_id = GeneratedFunctionId(self.records.len());
             self.by_identity.insert(record.identity.clone(), record_id);
             self.records.push(record);

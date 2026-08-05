@@ -325,3 +325,65 @@ fn rebind_source_identity_updates_scopes_without_changing_spans_or_paths() {
         .collect();
     assert_eq!(path_strings, vec!["helper", "util"]);
 }
+
+#[test]
+fn token_kind_path_payload_remaps_in_place_and_keeps_vector_allocation() {
+    let mut local_table = StringTable::new();
+    let mut global_table = StringTable::new();
+
+    let items = vec![
+        make_path_token_item(&["ui", "Button"], Some("Btn"), &mut local_table),
+        make_path_token_item(&["utils", "helper"], None, &mut local_table),
+    ];
+    let mut kind = TokenKind::Path(items);
+    let items_ptr = match &kind {
+        TokenKind::Path(items) => items.as_ptr(),
+        _ => unreachable!("path kind constructed above"),
+    };
+
+    let remap = global_table.merge_from(&local_table);
+    kind.remap_string_ids(&remap);
+
+    let items = match &kind {
+        TokenKind::Path(items) => items,
+        _ => panic!("path kind must survive remap"),
+    };
+    assert_eq!(
+        items.as_ptr(),
+        items_ptr,
+        "in-place remapping must not rebuild the path item vector"
+    );
+    assert_eq!(items.len(), 2);
+    let first_path: Vec<&str> = items[0]
+        .path
+        .as_components()
+        .iter()
+        .map(|id| global_table.resolve(*id))
+        .collect();
+    assert_eq!(first_path, vec!["ui", "Button"]);
+}
+
+#[test]
+fn path_token_item_path_components_keep_their_allocation_under_remap() {
+    let mut local_table = StringTable::new();
+    let mut global_table = StringTable::new();
+
+    let mut item = make_path_token_item(&["components", "Button"], Some("Btn"), &mut local_table);
+    let components_ptr = item.path.as_components().as_ptr();
+
+    let remap = global_table.merge_from(&local_table);
+    item.remap_string_ids(&remap);
+
+    assert_eq!(
+        item.path.as_components().as_ptr(),
+        components_ptr,
+        "in-place remapping must keep the interned path allocation"
+    );
+    let path_strings: Vec<&str> = item
+        .path
+        .as_components()
+        .iter()
+        .map(|id| global_table.resolve(*id))
+        .collect();
+    assert_eq!(path_strings, vec!["components", "Button"]);
+}

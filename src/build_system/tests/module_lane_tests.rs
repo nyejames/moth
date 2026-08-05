@@ -341,7 +341,9 @@ fn entry_assembly_rejects_reachable_external_function_without_package_owner() {
         },
     };
 
-    let error = match ProjectCompilation::from_test_modules(vec![module]) {
+    let error = match crate::build_system::test_support::project_compilation_from_test_modules(
+        vec![module],
+    ) {
         Ok(_) => panic!("missing external package ownership should violate entry assembly"),
         Err(error) => error,
     };
@@ -1383,7 +1385,7 @@ fn lane_sidecar(
 }
 
 #[test]
-fn success_only_conversion_rejects_unfinished_module_slots() {
+fn frontend_boundary_rejects_unfinished_module_slots() {
     let first_root = PathBuf::from("@first.moth");
     let second_root = PathBuf::from("@second.moth");
     let graph = ProjectModuleGraph::from_normal_roots(vec![
@@ -1423,15 +1425,90 @@ fn success_only_conversion_rejects_unfinished_module_slots() {
         diagnosed: Vec::new(),
         blocked: Vec::new(),
     };
+    let error =
+        match ProjectFrontendCompilation::new(boundary, CompletedSourcePackageRegistry::new()) {
+            Ok(_) => panic!("an unfinished module slot must reject the frontend boundary"),
+            Err(error) => error,
+        };
+    assert!(
+        error.msg.contains("never reached a completed outcome"),
+        "unexpected frontend-boundary rejection: {error:?}"
+    );
+}
+
+#[test]
+fn mixed_outcomes_remain_valid_for_check_and_reject_success_only_compilation() {
+    let graph = ProjectModuleGraph::from_normal_roots(vec![
+        (
+            StableModuleOriginIdentity::from_portable_path(
+                StablePackageIdentity::project_local("test"),
+                "success".to_owned(),
+                ModuleRootRole::Normal,
+            ),
+            PathBuf::from("@success.moth"),
+            PathBuf::from("@success.moth"),
+        ),
+        (
+            StableModuleOriginIdentity::from_portable_path(
+                StablePackageIdentity::project_local("test"),
+                "diagnosed".to_owned(),
+                ModuleRootRole::Normal,
+            ),
+            PathBuf::from("@diagnosed.moth"),
+            PathBuf::from("@diagnosed.moth"),
+        ),
+        (
+            StableModuleOriginIdentity::from_portable_path(
+                StablePackageIdentity::project_local("test"),
+                "blocked".to_owned(),
+                ModuleRootRole::Normal,
+            ),
+            PathBuf::from("@blocked.moth"),
+            PathBuf::from("@blocked.moth"),
+        ),
+    ]);
+    let mut store = ModuleArtifactStore::new(3);
+    store
+        .publish_success(
+            ModuleId::from_index(0),
+            CompiledModuleArtifact {
+                module: minimal_lane_module(PathBuf::from("@success.moth"), true),
+                interface: empty_test_interface("success".to_owned()),
+            },
+        )
+        .expect("success module should publish");
+    store
+        .mark_diagnosed(ModuleId::from_index(1))
+        .expect("diagnosed slot should transition");
+    store
+        .mark_blocked(ModuleId::from_index(2))
+        .expect("blocked slot should transition");
+
+    let mut string_table = StringTable::new();
+    let boundary = CompiledGraphBoundary {
+        structure: graph,
+        modules: store,
+        generated: BoundaryGeneratedFunctionStore::default(),
+        diagnosed: vec![DiagnosedModule {
+            module_id: ModuleId::from_index(1),
+            diagnostics: test_module_diagnostics("diagnosed.moth", &mut string_table),
+        }],
+        blocked: vec![BlockedModule {
+            module_id: ModuleId::from_index(2),
+            required_provider: BlockedProvider::Module(ModuleId::from_index(1)),
+        }],
+    };
+
     let frontend = ProjectFrontendCompilation::new(boundary, CompletedSourcePackageRegistry::new())
-        .expect("unfinished slot boundary should still validate");
+        .expect("mixed outcomes are a valid retained frontend result for check");
+    assert!(frontend.has_diagnosed_or_blocked());
 
     let error = match ProjectCompilation::from_frontend(frontend) {
-        Ok(_) => panic!("an unfinished non-entry module slot must reject ProjectCompilation"),
+        Ok(_) => panic!("diagnosed or blocked modules must reject success-only compilation"),
         Err(error) => error,
     };
     assert!(
-        error.msg.contains("not successful"),
+        error.msg.contains("boundary with diagnosed ModuleId"),
         "unexpected success-only rejection: {error:?}"
     );
 }
@@ -1591,4 +1668,483 @@ fn minimal_lane_module(entry_point: PathBuf, active_root: bool) -> Module {
             materialisation_context: None,
         },
     }
+}
+
+fn single_node_graph() -> ProjectModuleGraph {
+    ProjectModuleGraph::from_normal_roots(vec![(
+        StableModuleOriginIdentity::from_portable_path(
+            StablePackageIdentity::project_local("test"),
+            "single".to_owned(),
+            ModuleRootRole::Normal,
+        ),
+        PathBuf::from("@single.moth"),
+        PathBuf::from("@single.moth"),
+    )])
+}
+
+#[test]
+fn boundary_validation_rejects_diagnosed_lane_mismatch_in_both_directions() {
+    // Record present but the slot is successful.
+    let mut string_table = StringTable::new();
+    let mut boundary = test_graph_boundary(
+        vec![minimal_lane_module(PathBuf::from("@single.moth"), false)],
+        "test",
+        "single",
+    );
+    boundary.diagnosed = vec![DiagnosedModule {
+        module_id: ModuleId::from_index(0),
+        diagnostics: test_module_diagnostics("single.moth", &mut string_table),
+    }];
+    let error = boundary
+        .validate_invariants()
+        .expect_err("a diagnosed record must hold the diagnosed slot");
+    assert!(error.msg.contains("does not hold the diagnosed store slot"));
+
+    // Slot diagnosed but no record.
+    let mut store = ModuleArtifactStore::new(1);
+    store
+        .mark_diagnosed(ModuleId::from_index(0))
+        .expect("slot should transition");
+    let boundary = CompiledGraphBoundary {
+        structure: single_node_graph(),
+        modules: store,
+        generated: BoundaryGeneratedFunctionStore::default(),
+        diagnosed: Vec::new(),
+        blocked: Vec::new(),
+    };
+    let error = boundary
+        .validate_invariants()
+        .expect_err("a diagnosed slot must own a diagnosed record");
+    assert!(error.msg.contains("has no diagnosed record"));
+}
+
+#[test]
+fn boundary_validation_rejects_blocked_lane_mismatch_in_both_directions() {
+    let mut store = ModuleArtifactStore::new(1);
+    store
+        .publish_success(
+            ModuleId::from_index(0),
+            CompiledModuleArtifact {
+                module: minimal_lane_module(PathBuf::from("@single.moth"), false),
+                interface: empty_test_interface("single".to_owned()),
+            },
+        )
+        .expect("slot should publish");
+    let boundary = CompiledGraphBoundary {
+        structure: single_node_graph(),
+        modules: store,
+        generated: BoundaryGeneratedFunctionStore::default(),
+        diagnosed: Vec::new(),
+        blocked: vec![BlockedModule {
+            module_id: ModuleId::from_index(0),
+            required_provider: BlockedProvider::Module(ModuleId::from_index(1)),
+        }],
+    };
+    let error = boundary
+        .validate_invariants()
+        .expect_err("a blocked record must hold the blocked slot");
+    assert!(error.msg.contains("does not hold the blocked store slot"));
+
+    let mut store = ModuleArtifactStore::new(1);
+    store
+        .mark_blocked(ModuleId::from_index(0))
+        .expect("slot should transition");
+    let boundary = CompiledGraphBoundary {
+        structure: single_node_graph(),
+        modules: store,
+        generated: BoundaryGeneratedFunctionStore::default(),
+        diagnosed: Vec::new(),
+        blocked: Vec::new(),
+    };
+    let error = boundary
+        .validate_invariants()
+        .expect_err("a blocked slot must own a blocked record");
+    assert!(error.msg.contains("has no blocked record"));
+}
+
+#[test]
+fn boundary_validation_rejects_duplicate_and_overlapping_outcome_lanes() {
+    let mut string_table = StringTable::new();
+    let mut store = ModuleArtifactStore::new(2);
+    store
+        .mark_diagnosed(ModuleId::from_index(0))
+        .expect("slot 0 should transition");
+    store
+        .mark_diagnosed(ModuleId::from_index(1))
+        .expect("slot 1 should transition");
+    let graph = ProjectModuleGraph::from_normal_roots(vec![
+        (
+            StableModuleOriginIdentity::from_portable_path(
+                StablePackageIdentity::project_local("test"),
+                "a".to_owned(),
+                ModuleRootRole::Normal,
+            ),
+            PathBuf::from("@a.moth"),
+            PathBuf::from("@a.moth"),
+        ),
+        (
+            StableModuleOriginIdentity::from_portable_path(
+                StablePackageIdentity::project_local("test"),
+                "b".to_owned(),
+                ModuleRootRole::Normal,
+            ),
+            PathBuf::from("@b.moth"),
+            PathBuf::from("@b.moth"),
+        ),
+    ]);
+    let boundary = CompiledGraphBoundary {
+        structure: graph,
+        modules: store,
+        generated: BoundaryGeneratedFunctionStore::default(),
+        diagnosed: vec![
+            DiagnosedModule {
+                module_id: ModuleId::from_index(0),
+                diagnostics: test_module_diagnostics("a.moth", &mut string_table),
+            },
+            DiagnosedModule {
+                module_id: ModuleId::from_index(0),
+                diagnostics: test_module_diagnostics("duplicate.moth", &mut string_table),
+            },
+        ],
+        blocked: Vec::new(),
+    };
+    let error = boundary
+        .validate_invariants()
+        .expect_err("duplicate diagnosed records must be rejected");
+    assert!(
+        error
+            .msg
+            .contains("appears more than once in the diagnosed lane")
+    );
+
+    let mut store = ModuleArtifactStore::new(2);
+    store
+        .mark_blocked(ModuleId::from_index(0))
+        .expect("slot 0 should transition");
+    store
+        .mark_blocked(ModuleId::from_index(1))
+        .expect("slot 1 should transition");
+    let boundary = CompiledGraphBoundary {
+        structure: ProjectModuleGraph::from_normal_roots(vec![
+            (
+                StableModuleOriginIdentity::from_portable_path(
+                    StablePackageIdentity::project_local("test"),
+                    "a".to_owned(),
+                    ModuleRootRole::Normal,
+                ),
+                PathBuf::from("@a.moth"),
+                PathBuf::from("@a.moth"),
+            ),
+            (
+                StableModuleOriginIdentity::from_portable_path(
+                    StablePackageIdentity::project_local("test"),
+                    "b".to_owned(),
+                    ModuleRootRole::Normal,
+                ),
+                PathBuf::from("@b.moth"),
+                PathBuf::from("@b.moth"),
+            ),
+        ]),
+        modules: store,
+        generated: BoundaryGeneratedFunctionStore::default(),
+        diagnosed: Vec::new(),
+        blocked: vec![
+            BlockedModule {
+                module_id: ModuleId::from_index(0),
+                required_provider: BlockedProvider::Module(ModuleId::from_index(2)),
+            },
+            BlockedModule {
+                module_id: ModuleId::from_index(0),
+                required_provider: BlockedProvider::Module(ModuleId::from_index(1)),
+            },
+        ],
+    };
+    let error = boundary
+        .validate_invariants()
+        .expect_err("duplicate blocked records must be rejected");
+    assert!(
+        error
+            .msg
+            .contains("appears more than once in the blocked lane")
+    );
+
+    let mut store = ModuleArtifactStore::new(1);
+    store
+        .mark_diagnosed(ModuleId::from_index(0))
+        .expect("slot should transition");
+    let boundary = CompiledGraphBoundary {
+        structure: single_node_graph(),
+        modules: store,
+        generated: BoundaryGeneratedFunctionStore::default(),
+        diagnosed: vec![DiagnosedModule {
+            module_id: ModuleId::from_index(0),
+            diagnostics: test_module_diagnostics("overlap.moth", &mut string_table),
+        }],
+        blocked: vec![BlockedModule {
+            module_id: ModuleId::from_index(0),
+            required_provider: BlockedProvider::Module(ModuleId::from_index(1)),
+        }],
+    };
+    let error = boundary
+        .validate_invariants()
+        .expect_err("diagnosed and blocked lanes must never overlap");
+    assert!(error.msg.contains("is both diagnosed and blocked"));
+}
+
+#[test]
+fn frontend_boundary_rejects_unavailable_source_package_slot() {
+    let package_boundary = CompiledGraphBoundary {
+        structure: ProjectModuleGraph::from_normal_roots(vec![(
+            StableModuleOriginIdentity::from_portable_path(
+                StablePackageIdentity::source_package(PackageOrigin::ProjectLocal, "pkg"),
+                "pkg/@mod.moth".to_owned(),
+                ModuleRootRole::Normal,
+            ),
+            PathBuf::from("pkg/@mod.moth"),
+            PathBuf::from("pkg/@mod.moth"),
+        )]),
+        modules: ModuleArtifactStore::new(1),
+        generated: BoundaryGeneratedFunctionStore::default(),
+        diagnosed: Vec::new(),
+        blocked: Vec::new(),
+    };
+    let mut registry = CompletedSourcePackageRegistry::new();
+    registry
+        .publish(
+            CompiledSourcePackage {
+                package_identity: StablePackageIdentity::source_package(
+                    PackageOrigin::ProjectLocal,
+                    "pkg",
+                ),
+                root_module_id: ModuleId::from_index(0),
+                boundary: package_boundary,
+            },
+            &[],
+        )
+        .expect("package row publishes");
+
+    let error = match ProjectFrontendCompilation::new(
+        test_graph_boundary(
+            vec![minimal_lane_module(PathBuf::from("@page.moth"), false)],
+            "test",
+            "page",
+        ),
+        registry,
+    ) {
+        Ok(_) => panic!("an unavailable package slot must reject the frontend boundary"),
+        Err(error) => error,
+    };
+    assert!(error.msg.contains("never reached a completed outcome"));
+}
+
+#[test]
+fn materialisation_rows_iterate_in_deterministic_publication_order() {
+    let second_identity = generated_test_identity("second");
+    let first_identity = generated_test_identity("first");
+    let mut store = ModuleArtifactStore::new(2);
+
+    let mut second_module = minimal_lane_module(PathBuf::from("second/@mod.moth"), false);
+    second_module.metadata.materialisation_context =
+        Some(ModuleMaterialisationContext::from_identities_for_test(
+            vec![second_identity.declaration().clone()],
+        ));
+    store
+        .publish_success(
+            ModuleId::from_index(1),
+            CompiledModuleArtifact {
+                module: second_module,
+                interface: empty_test_interface("second".to_owned()),
+            },
+        )
+        .expect("higher module id publishes first");
+
+    let mut first_module = minimal_lane_module(PathBuf::from("first/@mod.moth"), false);
+    first_module.metadata.materialisation_context =
+        Some(ModuleMaterialisationContext::from_identities_for_test(
+            vec![first_identity.declaration().clone()],
+        ));
+    store
+        .publish_success(
+            ModuleId::from_index(0),
+            CompiledModuleArtifact {
+                module: first_module,
+                interface: empty_test_interface("first".to_owned()),
+            },
+        )
+        .expect("lower module id publishes second");
+
+    let order = store
+        .materialisation_locations()
+        .map(|(identity, _)| identity.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        order,
+        vec![
+            second_identity.declaration().clone(),
+            first_identity.declaration().clone()
+        ],
+        "materialisation rows must iterate in publication order, not hash order"
+    );
+}
+
+#[test]
+fn package_registry_materialisation_rows_iterate_in_publication_order() {
+    let beta_identity = generated_test_identity("beta");
+    let alpha_identity = generated_test_identity("alpha");
+    let mut registry = CompletedSourcePackageRegistry::new();
+
+    let mut beta_module = minimal_lane_module(PathBuf::from("packages/beta/@mod.moth"), false);
+    beta_module.metadata.materialisation_context =
+        Some(ModuleMaterialisationContext::from_identities_for_test(
+            vec![beta_identity.declaration().clone()],
+        ));
+    registry
+        .publish(
+            CompiledSourcePackage {
+                package_identity: StablePackageIdentity::source_package(
+                    PackageOrigin::ProjectLocal,
+                    "beta",
+                ),
+                root_module_id: ModuleId::from_index(0),
+                boundary: test_graph_boundary(vec![beta_module], "beta", ""),
+            },
+            &[],
+        )
+        .expect("beta package publishes first");
+
+    let mut alpha_module = minimal_lane_module(PathBuf::from("packages/alpha/@mod.moth"), false);
+    alpha_module.metadata.materialisation_context =
+        Some(ModuleMaterialisationContext::from_identities_for_test(
+            vec![alpha_identity.declaration().clone()],
+        ));
+    registry
+        .publish(
+            CompiledSourcePackage {
+                package_identity: StablePackageIdentity::source_package(
+                    PackageOrigin::ProjectLocal,
+                    "alpha",
+                ),
+                root_module_id: ModuleId::from_index(0),
+                boundary: test_graph_boundary(vec![alpha_module], "alpha", ""),
+            },
+            &[],
+        )
+        .expect("alpha package publishes second");
+
+    let order = registry
+        .materialisation_locations()
+        .map(|(identity, _)| identity.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        order,
+        vec![
+            beta_identity.declaration().clone(),
+            alpha_identity.declaration().clone()
+        ],
+        "package materialisation rows must iterate in publication order"
+    );
+}
+
+#[test]
+fn late_package_duplicate_leaves_registry_unchanged() {
+    let shared_identity = generated_test_identity("shared");
+    let mut registry = CompletedSourcePackageRegistry::new();
+
+    let mut first_module = minimal_lane_module(PathBuf::from("packages/first/@mod.moth"), false);
+    first_module.metadata.materialisation_context =
+        Some(ModuleMaterialisationContext::from_identities_for_test(
+            vec![shared_identity.declaration().clone()],
+        ));
+    registry
+        .publish(
+            CompiledSourcePackage {
+                package_identity: StablePackageIdentity::source_package(
+                    PackageOrigin::ProjectLocal,
+                    "first",
+                ),
+                root_module_id: ModuleId::from_index(0),
+                boundary: test_graph_boundary(vec![first_module], "first", ""),
+            },
+            &[],
+        )
+        .expect("first package publishes");
+
+    let mut late_module = minimal_lane_module(PathBuf::from("packages/late/@mod.moth"), false);
+    late_module.metadata.materialisation_context =
+        Some(ModuleMaterialisationContext::from_identities_for_test(
+            vec![shared_identity.declaration().clone()],
+        ));
+    let error = registry
+        .publish(
+            CompiledSourcePackage {
+                package_identity: StablePackageIdentity::source_package(
+                    PackageOrigin::ProjectLocal,
+                    "late",
+                ),
+                root_module_id: ModuleId::from_index(0),
+                boundary: test_graph_boundary(vec![late_module], "late", ""),
+            },
+            &[],
+        )
+        .expect_err("one declaration identity must not cross package boundaries");
+    assert!(error.msg.contains("published by source packages"));
+    assert_eq!(
+        registry.len(),
+        1,
+        "the failing package row must not be appended"
+    );
+    assert_eq!(registry.by_prefix("late"), None);
+    assert_eq!(
+        registry.materialisation_locations().count(),
+        1,
+        "materialisation rows must remain unchanged"
+    );
+}
+
+#[test]
+fn generated_names_stay_stable_under_sidecar_publication_reordering() {
+    let alpha = generated_test_identity("alpha");
+    let beta = generated_test_identity("beta");
+
+    let frontend_for_order = |first: GeneratedFunctionIdentity,
+                              second: GeneratedFunctionIdentity| {
+        let mut project = test_graph_boundary(
+            vec![minimal_lane_module(PathBuf::from("@page.moth"), true)],
+            "test",
+            "page",
+        );
+        let mut store = BoundaryGeneratedFunctionStore::default();
+        store.push_completed_for_test(CompletedGeneratedFunction {
+            identity: first.clone(),
+            summary: generated_test_summary(),
+            sidecar: lane_sidecar(first, PathBuf::from("@generated_first.moth")),
+        });
+        store.push_completed_for_test(CompletedGeneratedFunction {
+            identity: second.clone(),
+            summary: generated_test_summary(),
+            sidecar: lane_sidecar(second, PathBuf::from("@generated_second.moth")),
+        });
+        project.generated = store;
+        ProjectCompilation::from_frontend(
+            ProjectFrontendCompilation::new(project, CompletedSourcePackageRegistry::new())
+                .expect("frontend should validate"),
+        )
+        .expect("sidecar boundaries should assemble")
+    };
+
+    let alpha_first = frontend_for_order(alpha.clone(), beta.clone());
+    let beta_first = frontend_for_order(beta.clone(), alpha.clone());
+
+    let names_for = |compilation: &ProjectCompilation| -> (String, String) {
+        let names = &compilation.entries()[0].generated_function_names;
+        (
+            names.get(&alpha).expect("alpha name assigned").clone(),
+            names.get(&beta).expect("beta name assigned").clone(),
+        )
+    };
+    assert_eq!(
+        names_for(&alpha_first),
+        names_for(&beta_first),
+        "generated symbol names must depend only on stable identity order, not publication order"
+    );
 }

@@ -24,19 +24,22 @@ Phase 5 does not implement the new dependency grammar, builtin `Path`, resource 
 ACTIVE_PLAN: docs/roadmap/plans/canonical-module-compilation-and-scoped-packages-plan.md
 WORK_ID: R5-closeout
 WORK_SOURCE: parent reviews through checkpoint 909d41660b198db5f39e7d822282a107e69be118
-IMPLEMENTED_CHECKPOINT: 909d41660b198db5f39e7d822282a107e69be118
-STATUS: active - Gate A accepted
-CURRENT_SLICE: R5C1B and R5C4B
-ACCEPTED_CHECKPOINTS:
+IMPLEMENTED_CHECKPOINT: R5C1B/R5C4B checkpoint (pending Gate B review)
+REPOSITORY_STATE: one coordinator checkpoint commit for R5C1B/R5C4B; unrelated user docs edit in docs/src/styles/+package.moth left uncommitted
+STATUS: paused - Gate B review required
+CURRENT_SLICE: R5C1B and R5C4B (complete, awaiting Gate B)
+ACCEPTED_FROM_CHECKPOINT:
 - R5C3C provider agreement and recursive interface closure
 - R5C4A exhaustive canonical token traversal for correctness
 - R5C5B boundary-scoped generated ownership and caller-scoped lookup
+- R5C1B total graph-outcome validation
+- R5C4B exact remapping, exact template-row identity and transactional publication
 REQUIRED_RELOADS: AGENTS.md, this plan, compiler-design-overview.md, build-system-design.md, compiled_boundary.rs, module_artifact_store.rs, generated_worklist.rs, frontend_orchestration.rs, compilation.rs, build.rs and tokenizer/tokens.rs
-VALIDATION_STATE: checkpoint 909d41660 records full just validate success, including workspace tests, 1817/1817 integration executions, cross-target Clippy, docs and bench-ci
-BLOCKERS: none for R5C1B or R5C4B
-NEXT_WORKER_ORDER: R5C1B/R5C4B -> Gate B -> R5C6A -> Gate C -> R5C6B -> R5C7 -> R5C8 -> R5C9 -> Gate D
-STOP_REASON: Gate A review accepted R5C5B and authorised only the next bounded correction pair
-NEXT_RESUME_ACTION: implement R5C1B and R5C4B, run the full gate and stop for Gate B
+VALIDATION_STATE: full just validate green at the R5C1B/R5C4B checkpoint (workspace tests 4083, integration 1818/1818, cross-target Clippy, docs, bench-ci); interim auditor and final_auditor both audit_clean
+BLOCKERS: none
+NEXT_WORKER_ORDER: Gate B review -> R5C6A -> Gate C review -> R5C6B -> R5C7 -> R5C8 -> R5C9 -> Phase 5 exit review -> mandatory handoff
+STOP_REASON: plan requires stopping for Gate B after R5C1B/R5C4B
+NEXT_RESUME_ACTION: submit the checkpoint for Gate B review; after acceptance implement R5C6A
 FOLLOW_UP_CHAIN:
 1. dependency-clauses-and-path-syntax-plan.md
 2. tir-corrections-and-simplification-plan.md

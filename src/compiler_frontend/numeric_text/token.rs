@@ -114,25 +114,20 @@ impl NumericLiteralToken {
     ///       reporting and materialization remain valid after per-file tables
     ///       merge into the module table.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        self.source_text = remap.get(self.source_text);
-        self.normalized_text = remap.get(self.normalized_text);
+        self.try_remap_string_ids(&mut |id| {
+            Ok::<StringId, std::convert::Infallible>(remap.get(id))
+        })
+        .expect("string-ID remapping is infallible");
     }
 
-    /// Remap both interned text payloads through one fallible string-ID mapping.
-    pub fn try_map_string_ids<E>(
-        &self,
+    /// Remap both interned text payloads through one in-place, fallible string-ID walker.
+    pub fn try_remap_string_ids<E>(
+        &mut self,
         map: &mut impl FnMut(StringId) -> Result<StringId, E>,
-    ) -> Result<Self, E> {
-        Ok(Self::new(
-            self.sign,
-            map(self.source_text)?,
-            map(self.normalized_text)?,
-            self.kind,
-            self.digit_count,
-            self.fractional_digit_count,
-            self.exponent_digit_count,
-            self.exponent_sign,
-        ))
+    ) -> Result<(), E> {
+        self.source_text = map(self.source_text)?;
+        self.normalized_text = map(self.normalized_text)?;
+        Ok(())
     }
 
     /// Build a test numeric token from a valid source snippet.

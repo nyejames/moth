@@ -340,3 +340,74 @@ fn boundary_rejects_publishing_the_same_generated_identity_twice() {
 
     assert!(error.msg.contains("published more than once"));
 }
+
+#[test]
+fn late_generated_duplicate_leaves_existing_owners_unchanged() {
+    let existing = generated_identity("existing");
+    let late_duplicate = generated_identity("late");
+    let mut store = BoundaryGeneratedFunctionStore::default();
+    store
+        .publish(GeneratedFunctionWorklistDelta {
+            records: vec![CompletedGeneratedFunction {
+                identity: existing.clone(),
+                summary: summary(),
+                sidecar: test_sidecar(existing.clone()),
+            }],
+        })
+        .unwrap();
+    let records_before = store.records.len();
+    let sidecars_before = store.sidecars().count();
+
+    let error = store
+        .publish(GeneratedFunctionWorklistDelta {
+            records: vec![
+                CompletedGeneratedFunction {
+                    identity: late_duplicate.clone(),
+                    summary: summary(),
+                    sidecar: test_sidecar(late_duplicate.clone()),
+                },
+                CompletedGeneratedFunction {
+                    identity: late_duplicate.clone(),
+                    summary: summary(),
+                    sidecar: test_sidecar(late_duplicate.clone()),
+                },
+            ],
+        })
+        .unwrap_err();
+
+    assert!(
+        error
+            .msg
+            .contains("duplicated inside one publication delta")
+    );
+    assert_eq!(
+        store.records.len(),
+        records_before,
+        "a failing delta must not append any row"
+    );
+    assert_eq!(store.sidecars().count(), sidecars_before);
+    assert!(store.summary(&existing).is_some());
+    assert!(store.by_identity.len() == 1);
+}
+
+#[test]
+fn sidecar_record_identity_disagreement_leaves_store_unchanged() {
+    let record_identity = generated_identity("record");
+    let other_identity = generated_identity("other");
+    let mut store = BoundaryGeneratedFunctionStore::default();
+
+    let error = store
+        .publish(GeneratedFunctionWorklistDelta {
+            records: vec![CompletedGeneratedFunction {
+                identity: record_identity,
+                summary: summary(),
+                sidecar: test_sidecar(other_identity),
+            }],
+        })
+        .unwrap_err();
+
+    assert!(error.msg.contains("disagrees with its record identity"));
+    assert!(store.records.is_empty());
+    assert!(store.by_identity.is_empty());
+    assert_eq!(store.sidecars().count(), 0);
+}

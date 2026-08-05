@@ -57,16 +57,12 @@ impl SourceLocation {
         self.scope.remap_string_ids(remap);
     }
 
-    /// Remap the interned scope through one fallible string-ID mapping.
-    pub fn try_map_string_ids<E>(
-        &self,
+    /// Remap the interned scope through one in-place, fallible string-ID walker.
+    pub fn try_remap_string_ids<E>(
+        &mut self,
         map: &mut impl FnMut(StringId) -> Result<StringId, E>,
-    ) -> Result<Self, E> {
-        Ok(Self {
-            scope: self.scope.try_map_string_ids(map)?,
-            start_pos: self.start_pos,
-            end_pos: self.end_pos,
-        })
+    ) -> Result<(), E> {
+        self.scope.try_remap_string_ids(map)
     }
 }
 

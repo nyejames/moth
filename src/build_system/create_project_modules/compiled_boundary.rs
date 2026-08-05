@@ -80,11 +80,13 @@ impl CompiledGraphBoundary {
 
     /// Validate retained boundary invariants before any consumer trusts the dense lanes.
     ///
-    /// WHAT: checks graph node count against store slot count and every diagnosed and blocked
-    ///       module against its own store slot.
+    /// WHAT: the single completion proof for one frontend graph result. It checks the complete
+    ///       slot/lane bijection: graph nodes match store slots, every slot reached a final
+    ///       outcome, successful slots reference an existing artefact row, and diagnosed and
+    ///       blocked lanes hold exactly their slot's record without duplicates or overlap.
     /// WHY: dense lookups are only safe after this validation; an invalid mapping must surface
     ///       as `CompilerError` instead of becoming an absent artefact later. The success-only
-    ///       `ProjectCompilation` gate separately rejects unresolved slots.
+    ///       `ProjectCompilation` gate separately adds the all-successful requirement.
     pub(crate) fn validate_invariants(&self) -> Result<(), CompilerError> {
         if self.structure.nodes().len() != self.modules.slot_count() {
             return Err(CompilerError::compiler_error(format!(
@@ -94,6 +96,35 @@ impl CompiledGraphBoundary {
             )));
         }
 
+        let mut diagnosed_ids = FxHashSet::default();
+        for diagnosed in &self.diagnosed {
+            if !diagnosed_ids.insert(diagnosed.module_id) {
+                return Err(CompilerError::compiler_error(format!(
+                    "ModuleId {} appears more than once in the diagnosed lane",
+                    diagnosed.module_id.index()
+                )));
+            }
+        }
+        let mut blocked_ids = FxHashSet::default();
+        for blocked in &self.blocked {
+            if !blocked_ids.insert(blocked.module_id) {
+                return Err(CompilerError::compiler_error(format!(
+                    "ModuleId {} appears more than once in the blocked lane",
+                    blocked.module_id.index()
+                )));
+            }
+        }
+        if let Some(overlap) = diagnosed_ids
+            .iter()
+            .find(|module_id| blocked_ids.contains(module_id))
+        {
+            return Err(CompilerError::compiler_error(format!(
+                "ModuleId {} is both diagnosed and blocked",
+                overlap.index()
+            )));
+        }
+
+        // Every retained outcome record must agree with its own store slot (record -> slot).
         for diagnosed in &self.diagnosed {
             if self.modules.slot(diagnosed.module_id)? != ProviderSlot::Diagnosed {
                 return Err(CompilerError::compiler_error(format!(
@@ -108,6 +139,41 @@ impl CompiledGraphBoundary {
                     "Blocked module {} does not hold the blocked store slot",
                     blocked.module_id.index()
                 )));
+            }
+        }
+
+        // Walk the complete slot/lane bijection: every slot must be final, and every successful
+        // slot must reference an existing artefact row.
+        for index in 0..self.modules.slot_count() {
+            let module_id = ModuleId::from_index(index);
+            match self.modules.slot(module_id)? {
+                ProviderSlot::Unavailable => {
+                    return Err(CompilerError::compiler_error(format!(
+                        "ModuleId {index} never reached a completed outcome"
+                    )));
+                }
+                ProviderSlot::Successful(artifact_id) => {
+                    if self.modules.artifact(module_id)?.is_none() {
+                        return Err(CompilerError::compiler_error(format!(
+                            "ModuleId {index} references missing artifact row {}",
+                            artifact_id.index()
+                        )));
+                    }
+                }
+                ProviderSlot::Diagnosed => {
+                    if !diagnosed_ids.contains(&module_id) {
+                        return Err(CompilerError::compiler_error(format!(
+                            "ModuleId {index} holds the diagnosed slot but has no diagnosed record"
+                        )));
+                    }
+                }
+                ProviderSlot::Blocked => {
+                    if !blocked_ids.contains(&module_id) {
+                        return Err(CompilerError::compiler_error(format!(
+                            "ModuleId {index} holds the blocked slot but has no blocked record"
+                        )));
+                    }
+                }
             }
         }
 
@@ -206,6 +272,8 @@ pub(crate) struct CompletedSourcePackageRegistry {
     consumer_packages: Vec<Vec<PackageBoundaryId>>,
     declarations_by_identity:
         FxHashMap<GeneratedDeclarationIdentity, PackageMaterialisationLocation>,
+    /// Every published package materialisation row in deterministic publication order.
+    materialisation_rows: Vec<(GeneratedDeclarationIdentity, PackageMaterialisationLocation)>,
 }
 
 impl CompletedSourcePackageRegistry {
@@ -216,6 +284,7 @@ impl CompletedSourcePackageRegistry {
             provider_packages: Vec::new(),
             consumer_packages: Vec::new(),
             declarations_by_identity: FxHashMap::default(),
+            materialisation_rows: Vec::new(),
         }
     }
 
@@ -238,13 +307,10 @@ impl CompletedSourcePackageRegistry {
             )));
         }
 
-        let package_id = PackageBoundaryId(self.packages.len());
-        self.register_package_materialisations(&package, package_id)?;
-        self.packages.push(package);
-        self.provider_packages.push(Vec::new());
-        self.consumer_packages.push(Vec::new());
-        self.by_prefix.insert(prefix.clone(), package_id);
-
+        // Resolve every dependency prefix before any mutation so a failing publication leaves
+        // the registry unchanged.
+        let mut resolved_providers: Vec<PackageBoundaryId> =
+            Vec::with_capacity(dependency_prefixes.len());
         let mut seen_providers: FxHashSet<PackageBoundaryId> = FxHashSet::default();
         for dependency_prefix in dependency_prefixes {
             let provider_id = self
@@ -257,9 +323,43 @@ impl CompletedSourcePackageRegistry {
                         prefix, dependency_prefix
                     ))
                 })?;
-            if !seen_providers.insert(provider_id) {
-                continue;
+            if seen_providers.insert(provider_id) {
+                resolved_providers.push(provider_id);
             }
+        }
+
+        // Preflight materialisation rows against retained state before appending the package.
+        let mut materialisation_rows = Vec::new();
+        for (identity, location) in package.boundary.modules.materialisation_locations() {
+            if let Some(existing) = self.declarations_by_identity.get(identity) {
+                return Err(CompilerError::compiler_error(format!(
+                    "Generated declaration identity {:?} was published by source packages @{} and @{}",
+                    identity,
+                    self.package(existing.package_id)?.import_prefix(),
+                    prefix
+                )));
+            }
+            materialisation_rows.push((
+                identity.clone(),
+                PackageMaterialisationLocation {
+                    package_id: PackageBoundaryId(self.packages.len()),
+                    location,
+                },
+            ));
+        }
+
+        let package_id = PackageBoundaryId(self.packages.len());
+        self.packages.push(package);
+        self.provider_packages.push(Vec::new());
+        self.consumer_packages.push(Vec::new());
+        self.by_prefix.insert(prefix.clone(), package_id);
+        for (identity, location) in &materialisation_rows {
+            self.declarations_by_identity
+                .insert(identity.clone(), *location);
+            self.materialisation_rows
+                .push((identity.clone(), *location));
+        }
+        for provider_id in resolved_providers {
             self.provider_packages[package_id.0].push(provider_id);
             self.consumer_packages[provider_id.0].push(package_id);
         }
@@ -348,34 +448,9 @@ impl CompletedSourcePackageRegistry {
             PackageMaterialisationLocation,
         ),
     > + '_ {
-        self.declarations_by_identity
+        self.materialisation_rows
             .iter()
             .map(|(identity, location)| (identity, *location))
-    }
-
-    fn register_package_materialisations(
-        &mut self,
-        package: &CompiledSourcePackage,
-        package_id: PackageBoundaryId,
-    ) -> Result<(), CompilerError> {
-        for (identity, location) in package.boundary.modules.materialisation_locations() {
-            if let Some(existing) = self.declarations_by_identity.get(identity) {
-                return Err(CompilerError::compiler_error(format!(
-                    "Generated declaration identity {:?} was published by source packages @{} and @{}",
-                    identity,
-                    self.package(existing.package_id)?.import_prefix(),
-                    package.import_prefix()
-                )));
-            }
-            self.declarations_by_identity.insert(
-                identity.clone(),
-                PackageMaterialisationLocation {
-                    package_id,
-                    location,
-                },
-            );
-        }
-        Ok(())
     }
 
     /// Validate that every recorded dependency edge follows publication order.
@@ -523,30 +598,43 @@ impl ProjectFrontendCompilation {
     ) -> Result<Self, CompilerError> {
         project.validate_invariants()?;
         source_packages.validate_dependency_edges()?;
-
-        for (identity, project_location) in project.modules.materialisation_locations() {
-            if let Some(package_location) = source_packages.materialisation_location_for(identity) {
-                return Err(CompilerError::compiler_error(format!(
-                    "Generated declaration identity {:?} is published by both project module {} and source package @{}",
-                    identity,
-                    project_location.artifact_id.index(),
-                    source_packages
-                        .package(package_location.package_id)?
-                        .import_prefix()
-                )));
-            }
+        for package in source_packages.iter() {
+            package.boundary.validate_invariants()?;
         }
-        for (identity, package_location) in source_packages.materialisation_locations() {
-            if project
-                .modules
-                .materialisation_context_for(identity)?
+
+        // One deterministic registration pass over every boundary's materialisation rows:
+        // project rows first, then package rows in publication order. Equal generated
+        // identities may coexist in unrelated boundaries, but one identity must never be
+        // published by both the project and a source package.
+        let mut published_rows = FxHashMap::<GeneratedDeclarationIdentity, String>::default();
+        for (identity, location) in project.modules.materialisation_locations() {
+            if published_rows
+                .insert(
+                    identity.clone(),
+                    format!("project module {}", location.artifact_id.index()),
+                )
                 .is_some()
             {
                 return Err(CompilerError::compiler_error(format!(
-                    "Generated declaration identity {:?} is published by both source package @{} and project module",
+                    "Generated declaration identity {:?} is duplicated inside the project boundary",
+                    identity
+                )));
+            }
+        }
+        for (identity, location) in source_packages.materialisation_locations() {
+            let owner = format!(
+                "source package @{}",
+                source_packages
+                    .package(location.package_id)?
+                    .import_prefix()
+            );
+            if let Some(existing_owner) = published_rows.insert(identity.clone(), owner) {
+                return Err(CompilerError::compiler_error(format!(
+                    "Generated declaration identity {:?} is published by both {} and source package @{}",
                     identity,
+                    existing_owner,
                     source_packages
-                        .package(package_location.package_id)?
+                        .package(location.package_id)?
                         .import_prefix()
                 )));
             }

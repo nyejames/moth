@@ -124,26 +124,27 @@ impl InternedPath {
     }
 
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        for component in &mut self.components {
-            *component = remap.get(*component);
-        }
+        self.try_remap_string_ids(&mut |id| {
+            Ok::<StringId, std::convert::Infallible>(remap.get(id))
+        })
+        .expect("string-ID remapping is infallible");
     }
 
-    /// Remap every interned component through one fallible string-ID mapping.
+    /// Remap every interned component through one exhaustive, in-place, fallible walker.
     ///
     /// WHAT: the single canonical walker for `InternedPath` payloads, shared by normal string
     ///       merges and frozen-token pool remapping.
-    /// WHY: path components are interned strings; one traversal owner prevents callers from
-    ///      walking some component classes while a future payload class silently bypasses it.
-    pub fn try_map_string_ids<E>(
-        &self,
+    /// WHY: path components are interned strings; one in-place traversal owner prevents callers
+    ///      from walking some component classes while a future payload class silently bypasses
+    ///      it, and keeps the components vector allocation intact.
+    pub fn try_remap_string_ids<E>(
+        &mut self,
         map: &mut impl FnMut(StringId) -> Result<StringId, E>,
-    ) -> Result<Self, E> {
-        let mut components = Vec::with_capacity(self.components.len());
-        for component in &self.components {
-            components.push(map(*component)?);
+    ) -> Result<(), E> {
+        for component in &mut self.components {
+            *component = map(*component)?;
         }
-        Ok(Self { components })
+        Ok(())
     }
 
     pub fn append(&self, new: StringId) -> Self {

@@ -36,18 +36,6 @@ use crate::compiler_frontend::semantic_identity::{
     GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, OriginFunctionId,
 };
 
-#[cfg(test)]
-use crate::build_system::create_project_modules::generated_worklist::BoundaryGeneratedFunctionStore;
-#[cfg(test)]
-use crate::build_system::create_project_modules::module_artifact_store::ModuleArtifactStore;
-#[cfg(test)]
-use crate::build_system::create_project_modules::module_identity::ModuleId;
-#[cfg(test)]
-use crate::build_system::create_project_modules::project_module_graph::ProjectModuleGraph;
-#[cfg(test)]
-use crate::compiler_frontend::semantic_identity::{
-    ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
-};
 use crate::compiler_frontend::style_directives::{StyleDirectiveRegistry, StyleDirectiveSpec};
 use crate::compiler_frontend::symbols::compiler_symbols::CompilerSymbolSet;
 use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
@@ -331,6 +319,14 @@ pub struct ProjectCompilation {
     all_generated_function_names: Arc<Vec<String>>,
 }
 
+/// One shared empty generated-name map for boundaries that materialised no sidecars.
+///
+/// WHAT: every lookup for an empty package boundary returns the same immutable map instead of
+///       allocating a fresh `Arc<HashMap>` per call.
+static EMPTY_GENERATED_NAMES: std::sync::LazyLock<
+    Arc<std::collections::HashMap<GeneratedFunctionIdentity, String>>,
+> = std::sync::LazyLock::new(|| Arc::new(std::collections::HashMap::new()));
+
 impl ProjectCompilation {
     pub(crate) fn from_frontend(
         frontend: ProjectFrontendCompilation,
@@ -342,44 +338,7 @@ impl ProjectCompilation {
         Self::from_successful_boundaries(project, source_packages)
     }
 
-    #[cfg(test)]
-    pub(crate) fn from_test_modules(modules: Vec<Module>) -> Result<Self, CompilerError> {
-        let module_count = modules.len();
-        let graph = ProjectModuleGraph::from_normal_roots(
-            (0..module_count)
-                .map(|index| {
-                    let origin = StableModuleOriginIdentity::from_portable_path(
-                        StablePackageIdentity::project_local("test"),
-                        format!("module_{index}"),
-                        ModuleRootRole::Normal,
-                    );
-                    let root_path = PathBuf::from(format!("@module_{index}.moth"));
-                    (origin, root_path.clone(), root_path)
-                })
-                .collect(),
-        );
-        let mut module_store = ModuleArtifactStore::new(module_count);
-        for (index, module) in modules.into_iter().enumerate() {
-            let module_id = ModuleId::from_index(index);
-            module_store.publish_success(
-                module_id,
-                CompiledModuleArtifact {
-                    module,
-                    interface: test_public_interface(index),
-                },
-            )?;
-        }
-        let project = CompiledGraphBoundary {
-            structure: graph,
-            modules: module_store,
-            generated: BoundaryGeneratedFunctionStore::default(),
-            diagnosed: Vec::new(),
-            blocked: Vec::new(),
-        };
-        Self::from_successful_boundaries(project, CompletedSourcePackageRegistry::new())
-    }
-
-    fn from_successful_boundaries(
+    pub(crate) fn from_successful_boundaries(
         project: CompiledGraphBoundary,
         source_packages: CompletedSourcePackageRegistry,
     ) -> Result<Self, CompilerError> {
@@ -484,9 +443,10 @@ impl ProjectCompilation {
         );
 
         // Generated symbol names stay globally unique (one JS bundle may mix boundaries) while
-        // lookup maps stay keyed by identity within one boundary. Names are assigned in
-        // deterministic owner order: project sidecars in publication order, then each source
-        // package in stable import-prefix order.
+        // lookup maps stay keyed by identity within one boundary. Names are assigned in stable
+        // generated identity order inside each boundary, with the project boundary first and
+        // source packages in stable import-prefix order, so sidecar publication reordering can
+        // never change a generated symbol.
         let mut generated_function_names =
             std::collections::HashMap::<GeneratedFunctionIdentity, String>::default();
         let mut package_generated_function_names = FxHashMap::<
@@ -502,7 +462,7 @@ impl ProjectCompilation {
                     .iter()
                     .map(|(identity, owner)| (identity.clone(), *owner))
                     .collect::<Vec<_>>();
-                sorted.sort_by_key(|(_, (module_ref, function_id))| (*module_ref, function_id.0));
+                sorted.sort_by(|left, right| left.0.cmp(&right.0));
                 for (identity, _) in sorted {
                     let name = format!("__moth_generated_fn_{next_index}");
                     *next_index += 1;
@@ -781,7 +741,7 @@ impl ProjectCompilation {
                 .package_generated_function_names
                 .get(&package_id)
                 .cloned()
-                .unwrap_or_else(|| Arc::new(std::collections::HashMap::new())),
+                .unwrap_or_else(|| Arc::clone(&EMPTY_GENERATED_NAMES)),
         }
     }
 }
@@ -1384,28 +1344,6 @@ fn log_stage_timing(metric: &str, start: crate::timing::PipelineTimingStart) {
 
 fn collect_module_warnings(module: &Module) -> Vec<CompilerDiagnostic> {
     module.metadata.warnings.clone()
-}
-
-/// Build an immutable `PublicSemanticInterface` for one test-constructed artefact.
-///
-/// Test helpers wrap a bare `Module` into a real `CompiledModuleArtifact` inside a real graph
-/// boundary; production publication always supplies the completed interface. The origin path is
-/// unique per module so entry assembly and interface lookup behave like real artefacts.
-#[cfg(test)]
-fn test_public_interface(module_index: usize) -> PublicSemanticInterface {
-    PublicSemanticInterface {
-        module_origin: crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity::from_portable_path(
-            crate::compiler_frontend::semantic_identity::StablePackageIdentity::project_local("test"),
-            format!("module_{module_index}"),
-            crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
-        ),
-        export_bindings: Vec::new(),
-        export_diagnostic_provenance: Vec::new(),
-        binding_exports: Vec::new(),
-        declarations: Vec::new(),
-        reusable_evidence: Vec::new(),
-        concrete_call_summaries: Vec::new(),
-    }
 }
 
 #[cfg(test)]

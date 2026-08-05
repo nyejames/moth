@@ -176,8 +176,15 @@ impl StableBodySyntax {
             .iter()
             .map(|token| {
                 let mut frozen = token.clone();
-                frozen.kind = freeze_token_kind(&token.kind, &mut pool, string_table);
-                frozen.location = freeze_source_location(&token.location, &mut pool, string_table);
+                // Clone each token once, then remap the clone in place through the frozen pool.
+                // The pool never fails to accept a donor spelling, so the walker is infallible.
+                frozen
+                    .try_remap_string_ids(&mut |id| {
+                        Ok::<StringId, std::convert::Infallible>(
+                            pool.index(string_table.resolve(id)),
+                        )
+                    })
+                    .expect("frozen string pooling is infallible");
                 frozen
             })
             .collect::<Vec<_>>();
@@ -197,86 +204,19 @@ impl StableBodySyntax {
             .collect::<Vec<_>>();
         let mut tokens = Vec::with_capacity(self.tokens.len());
         for token in self.tokens.iter() {
-            tokens.push(Token::new(
-                materialise_token_kind(&token.kind, &remap)?,
-                materialise_source_location(&token.location, &remap),
-            ));
+            let mut materialised = token.clone();
+            materialised.try_remap_string_ids(&mut |id| {
+                let index = id.index() as usize;
+                remap.get(index).copied().ok_or_else(|| {
+                    CompilerError::compiler_error(format!(
+                        "frozen token payload references out-of-range pool entry {index}"
+                    ))
+                })
+            })?;
+            tokens.push(materialised);
         }
         Ok(FileTokens::new(source_path, tokens))
     }
-}
-
-/// Freeze one canonical token kind by remapping every donor string ID into the frozen pool.
-///
-/// The canonical [`TokenKind`] vocabulary is retained as-is; only the string payload space
-/// changes, so adding a tokenizer variant never requires a parallel token-kind enum.
-fn freeze_token_kind(
-    kind: &TokenKind,
-    pool: &mut FrozenStringPool,
-    string_table: &StringTable,
-) -> TokenKind {
-    kind.map_string_ids(|id| pool.index(string_table.resolve(id)))
-}
-
-/// Freeze one source location by remapping its interned scope path into the frozen pool.
-fn freeze_source_location(
-    location: &SourceLocation,
-    pool: &mut FrozenStringPool,
-    string_table: &StringTable,
-) -> SourceLocation {
-    SourceLocation::new(
-        freeze_interned_path(&location.scope, pool, string_table),
-        location.start_pos,
-        location.end_pos,
-    )
-}
-
-/// Freeze one interned path by remapping every component into the frozen pool.
-fn freeze_interned_path(
-    path: &InternedPath,
-    pool: &mut FrozenStringPool,
-    string_table: &StringTable,
-) -> InternedPath {
-    InternedPath::from_components(
-        path.as_components()
-            .iter()
-            .map(|component| pool.index(string_table.resolve(*component)))
-            .collect(),
-    )
-}
-
-/// Materialise one frozen canonical token kind through the one pool remap.
-fn materialise_token_kind(
-    kind: &TokenKind,
-    remap: &[StringId],
-) -> Result<TokenKind, CompilerError> {
-    kind.try_map_string_ids(&mut |id| {
-        let index = id.index() as usize;
-        remap.get(index).copied().ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "frozen token payload references out-of-range pool entry {index}"
-            ))
-        })
-    })
-}
-
-/// Materialise one frozen source location through the one pool remap.
-fn materialise_source_location(location: &SourceLocation, remap: &[StringId]) -> SourceLocation {
-    SourceLocation::new(
-        materialise_interned_path(&location.scope, remap),
-        location.start_pos,
-        location.end_pos,
-    )
-}
-
-/// Materialise one frozen interned path through the one pool remap.
-fn materialise_interned_path(path: &InternedPath, remap: &[StringId]) -> InternedPath {
-    InternedPath::from_components(
-        path.as_components()
-            .iter()
-            .map(|component| remap[component.index() as usize])
-            .collect(),
-    )
 }
 
 impl StableSourceLocation {
@@ -693,8 +633,31 @@ impl ModuleMaterialisationContext {
                 &input.requester_context.string_table,
             )
         })?;
+        check_materialisation_row_identity(artefact, input.identity).map_err(|error| {
+            CompilerMessages::from_error_ref(error, &input.requester_context.string_table)
+        })?;
         artefact.materialise_ast(self, input)
     }
+}
+
+/// Verify that one indexed template row belongs to the requested generated identity.
+///
+/// WHAT: a stale but in-range row must fail as an internal invariant error instead of
+///       materialising the wrong generic declaration.
+/// WHY: the boundary publication index is exact by contract; identity disagreement means the
+///      index or the retained artefact lane is corrupt.
+fn check_materialisation_row_identity(
+    artefact: &GenericTemplateArtefact,
+    identity: &GeneratedFunctionIdentity,
+) -> Result<(), CompilerError> {
+    if artefact.declaration_identity != *identity.declaration() {
+        return Err(CompilerError::compiler_error(format!(
+            "Published materialisation row holds declaration identity {:?} but request {:?} selected it",
+            artefact.declaration_identity,
+            identity.declaration()
+        )));
+    }
+    Ok(())
 }
 
 impl GenericTemplateArtefact {

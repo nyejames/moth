@@ -60,16 +60,16 @@ type BuilderResult<T> = Result<T, ImportEnvironmentError>;
 pub(super) fn insert_agreed<K, V>(
     table: &mut FxHashMap<K, V>,
     key: K,
-    value: V,
+    value: &V,
     fact_class: &str,
 ) -> Result<(), CompilerError>
 where
     K: std::hash::Hash + Eq + Debug,
-    V: Eq + Debug,
+    V: Eq + Debug + Clone,
 {
     match table.entry(key) {
         std::collections::hash_map::Entry::Occupied(existing) => {
-            if existing.get() != &value {
+            if existing.get() != value {
                 return Err(CompilerError::compiler_error(format!(
                     "provider {fact_class} {:?} disagrees across imported providers",
                     existing.key()
@@ -77,7 +77,8 @@ where
             }
         }
         std::collections::hash_map::Entry::Vacant(slot) => {
-            slot.insert(value);
+            // Clone the candidate only when the key is vacant; occupied agreement just borrows.
+            slot.insert(value.clone());
         }
     }
     Ok(())
@@ -430,7 +431,7 @@ impl<'a> ImportEnvironmentBuilder<'a> {
             insert_agreed(
                 &mut self.environment.imported_declarations_by_origin,
                 provider_declaration.origin.clone(),
-                provider_declaration.clone(),
+                provider_declaration,
                 "declaration origin",
             )?;
         }
@@ -439,7 +440,7 @@ impl<'a> ImportEnvironmentBuilder<'a> {
             insert_agreed(
                 &mut self.environment.imported_evidence_by_identity,
                 evidence.identity.clone(),
-                evidence.clone(),
+                evidence,
                 "evidence identity",
             )?;
         }
@@ -448,7 +449,7 @@ impl<'a> ImportEnvironmentBuilder<'a> {
             insert_agreed(
                 &mut self.environment.imported_call_summaries_by_origin,
                 summary.origin.clone(),
-                summary.summary.clone(),
+                &summary.summary,
                 "concrete summary origin",
             )?;
         }

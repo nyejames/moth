@@ -13,7 +13,7 @@ use crate::build_system::build::CompiledModuleArtifact;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CompiledModuleArtifactId(usize);
@@ -50,6 +50,11 @@ pub(crate) struct ModuleArtifactStore {
     ///       validates duplicate contexts at publication before any module requests them.
     contexts_by_declaration:
         FxHashMap<GeneratedDeclarationIdentity, MaterialisationContextLocation>,
+    /// Every published materialisation row in deterministic publication order.
+    ///
+    /// WHAT: the contiguous lane that keeps cross-boundary duplicate registration and boundary
+    ///       handoff iteration deterministic without depending on hash-map iteration order.
+    materialisation_rows: Vec<(GeneratedDeclarationIdentity, MaterialisationContextLocation)>,
 }
 
 impl ModuleArtifactStore {
@@ -58,6 +63,7 @@ impl ModuleArtifactStore {
             slots: vec![ProviderSlot::Unavailable; module_count],
             artifacts: Vec::with_capacity(module_count),
             contexts_by_declaration: FxHashMap::default(),
+            materialisation_rows: Vec::new(),
         }
     }
 
@@ -74,10 +80,12 @@ impl ModuleArtifactStore {
         }
 
         let artifact_id = CompiledModuleArtifactId(self.artifacts.len());
+        // Preflight every materialisation row before any mutation: a failing publication must
+        // leave the store unchanged.
+        let mut rows = Vec::new();
         if let Some(context) = artifact.module.metadata.materialisation_context.as_ref() {
-            let mut local_identities = FxHashSet::default();
             for (identity, template_index) in context.declaration_rows() {
-                if !local_identities.insert(identity) {
+                if rows.iter().any(|(existing, _)| existing == identity) {
                     return Err(CompilerError::compiler_error(format!(
                         "Generated declaration identity {:?} is duplicated inside one materialisation context",
                         identity
@@ -93,18 +101,22 @@ impl ModuleArtifactStore {
                         template_index
                     )));
                 }
-            }
-            for (identity, template_index) in context.declaration_rows() {
-                self.contexts_by_declaration.insert(
+                rows.push((
                     identity.clone(),
                     MaterialisationContextLocation {
                         artifact_id,
                         template_index,
                     },
-                );
+                ));
             }
         }
+
         self.artifacts.push(artifact);
+        for (identity, location) in rows {
+            self.contexts_by_declaration
+                .insert(identity.clone(), location);
+            self.materialisation_rows.push((identity, location));
+        }
         *self.slot_mut(module_id)? = ProviderSlot::Successful(artifact_id);
         Ok(())
     }
@@ -130,24 +142,6 @@ impl ModuleArtifactStore {
     /// Number of dense module slots retained by this boundary.
     pub(crate) fn slot_count(&self) -> usize {
         self.slots.len()
-    }
-
-    /// Require every dense slot to have reached a final outcome.
-    ///
-    /// A remaining `Unavailable` slot means a graph/job mismatch or scheduler regression; the
-    /// boundary must never publish an incomplete module result.
-    pub(crate) fn ensure_all_slots_completed(&self) -> Result<(), CompilerError> {
-        if let Some((index, _)) = self
-            .slots
-            .iter()
-            .enumerate()
-            .find(|(_, slot)| **slot == ProviderSlot::Unavailable)
-        {
-            return Err(CompilerError::compiler_error(format!(
-                "ModuleId {index} never reached a completed outcome"
-            )));
-        }
-        Ok(())
     }
 
     /// Require every dense slot to hold a successful artefact.
@@ -255,7 +249,7 @@ impl ModuleArtifactStore {
             MaterialisationContextLocation,
         ),
     > + '_ {
-        self.contexts_by_declaration
+        self.materialisation_rows
             .iter()
             .map(|(identity, location)| (identity, *location))
     }
@@ -285,5 +279,51 @@ impl ModuleArtifactStore {
                 slot_count
             ))
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::build_system::create_project_modules::compiled_boundary::CompiledGraphBoundary;
+    use crate::build_system::create_project_modules::generated_worklist::BoundaryGeneratedFunctionStore;
+    use crate::build_system::create_project_modules::project_module_graph::ProjectModuleGraph;
+    use crate::compiler_frontend::semantic_identity::{
+        ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
+    };
+    use std::path::PathBuf;
+
+    #[test]
+    fn boundary_validation_rejects_missing_successful_artefact_row() {
+        let graph = ProjectModuleGraph::from_normal_roots(vec![(
+            StableModuleOriginIdentity::from_portable_path(
+                StablePackageIdentity::project_local("test"),
+                "missing".to_owned(),
+                ModuleRootRole::Normal,
+            ),
+            PathBuf::from("@missing.moth"),
+            PathBuf::from("@missing.moth"),
+        )]);
+        let store = ModuleArtifactStore {
+            slots: vec![ProviderSlot::Successful(CompiledModuleArtifactId(0))],
+            artifacts: Vec::new(),
+            contexts_by_declaration: FxHashMap::default(),
+            materialisation_rows: Vec::new(),
+        };
+        let boundary = CompiledGraphBoundary {
+            structure: graph,
+            modules: store,
+            generated: BoundaryGeneratedFunctionStore::default(),
+            diagnosed: Vec::new(),
+            blocked: Vec::new(),
+        };
+
+        let error = boundary
+            .validate_invariants()
+            .expect_err("a successful slot must reference an existing artefact row");
+        assert!(
+            error.msg.contains("references missing artifact 0"),
+            "unexpected missing-artefact error: {error:?}"
+        );
     }
 }

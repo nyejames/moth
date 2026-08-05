@@ -981,10 +981,6 @@ fn compile_module_waves(
         }
     }
 
-    provider_store
-        .ensure_all_slots_completed()
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-
     let diagnosed_provider_exists = !diagnosed.is_empty()
         || completed_packages
             .iter()

@@ -1322,10 +1322,10 @@ fn differing_provider_declarations_with_one_origin_fail_as_compiler_error() {
     second_constant.folded_value = PublicFoldedValue::String("second".to_owned());
 
     let mut table = FxHashMap::default();
-    super::super::builder::insert_agreed(&mut table, origin.clone(), first, "declaration origin")
+    super::super::builder::insert_agreed(&mut table, origin.clone(), &first, "declaration origin")
         .expect("first publisher should insert");
     let error =
-        super::super::builder::insert_agreed(&mut table, origin, second, "declaration origin")
+        super::super::builder::insert_agreed(&mut table, origin, &second, "declaration origin")
             .expect_err("second publisher must disagree");
     assert!(error.msg.contains("declaration origin"));
 }
@@ -1348,9 +1348,9 @@ fn differing_provider_summaries_with_one_origin_fail_as_compiler_error() {
     };
 
     let mut table = FxHashMap::default();
-    super::super::builder::insert_agreed(&mut table, origin.clone(), first, "summary origin")
+    super::super::builder::insert_agreed(&mut table, origin.clone(), &first, "summary origin")
         .expect("first publisher should insert");
-    let error = super::super::builder::insert_agreed(&mut table, origin, second, "summary origin")
+    let error = super::super::builder::insert_agreed(&mut table, origin, &second, "summary origin")
         .expect_err("second publisher must disagree");
     assert!(error.msg.contains("summary origin"));
 }
@@ -1384,10 +1384,66 @@ fn differing_evidence_records_with_one_identity_fail_as_compiler_error() {
     );
 
     let mut table = FxHashMap::default();
-    super::super::builder::insert_agreed(&mut table, identity.clone(), first, "evidence identity")
+    super::super::builder::insert_agreed(&mut table, identity.clone(), &first, "evidence identity")
         .expect("first publisher should insert");
     let error =
-        super::super::builder::insert_agreed(&mut table, identity, second, "evidence identity")
+        super::super::builder::insert_agreed(&mut table, identity, &second, "evidence identity")
             .expect_err("second publisher must disagree");
     assert!(error.msg.contains("evidence identity"));
+}
+
+#[test]
+fn occupied_agreement_insertion_borrows_without_cloning() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[derive(Debug)]
+    struct CloneCounting(String, Arc<AtomicUsize>);
+
+    impl PartialEq for CloneCounting {
+        fn eq(&self, other: &Self) -> bool {
+            self.0 == other.0
+        }
+    }
+
+    impl Eq for CloneCounting {}
+
+    impl Clone for CloneCounting {
+        fn clone(&self) -> Self {
+            self.1.fetch_add(1, Ordering::Relaxed);
+            Self(self.0.clone(), Arc::clone(&self.1))
+        }
+    }
+
+    let clones = Arc::new(AtomicUsize::new(0));
+    let first = CloneCounting("shared".to_owned(), Arc::clone(&clones));
+    let equal = CloneCounting("shared".to_owned(), Arc::clone(&clones));
+    let differing = CloneCounting("other".to_owned(), Arc::clone(&clones));
+
+    let mut table = FxHashMap::default();
+    super::super::builder::insert_agreed(&mut table, "key".to_owned(), &first, "clone counting")
+        .expect("vacant insertion should clone once");
+    assert_eq!(clones.load(Ordering::Relaxed), 1);
+
+    super::super::builder::insert_agreed(&mut table, "key".to_owned(), &equal, "clone counting")
+        .expect("occupied equal agreement should borrow");
+    assert_eq!(
+        clones.load(Ordering::Relaxed),
+        1,
+        "occupied agreement must not clone the candidate"
+    );
+
+    let error = super::super::builder::insert_agreed(
+        &mut table,
+        "key".to_owned(),
+        &differing,
+        "clone counting",
+    )
+    .expect_err("occupied disagreement must fail");
+    assert!(error.msg.contains("clone counting"));
+    assert_eq!(
+        clones.load(Ordering::Relaxed),
+        1,
+        "disagreement must not clone the candidate either"
+    );
 }

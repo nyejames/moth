@@ -6,12 +6,20 @@
 //! WHY: generated sidecars must reparse a validated generic body against a fresh string table
 //! without retaining donor `StringId`/`InternedPath` handles or a mirrored token-kind enum.
 
-use super::{FrozenStringPool, StableBodySyntax};
+use super::{FrozenStringPool, StableBodySyntax, check_materialisation_row_identity};
+use crate::compiler_frontend::canonical_type_identity::{
+    CanonicalBuiltinType, CanonicalTypeIdentity,
+};
 use crate::compiler_frontend::numeric_text::token::{
     NumericExponentSign, NumericLiteralKind, NumericLiteralSign, NumericLiteralToken,
 };
+use crate::compiler_frontend::semantic_identity::{
+    GeneratedDeclarationIdentity, GeneratedFunctionIdentity, ModulePrivateExecutableCategory,
+    ModulePrivateExecutableIdentity, ModuleRootRole, StableModuleOriginIdentity,
+    StablePackageIdentity,
+};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{
     CharPosition, FileTokens, PathTokenItem, SourceLocation, Token, TokenKind,
 };
@@ -225,4 +233,88 @@ fn frozen_body_syntax_is_send_without_donor_identity() {
 
     assert_send::<StableBodySyntax>();
     assert_send::<FrozenStringPool>();
+}
+
+fn generated_identity(name: &str) -> GeneratedFunctionIdentity {
+    let origin = StableModuleOriginIdentity::from_portable_path(
+        StablePackageIdentity::project_local("frozen-tests"),
+        "main".to_owned(),
+        ModuleRootRole::Normal,
+    );
+    GeneratedFunctionIdentity::new(
+        GeneratedDeclarationIdentity::ModulePrivate(ModulePrivateExecutableIdentity::new(
+            origin,
+            "@main.moth".to_owned(),
+            ModulePrivateExecutableCategory::GenericFunction,
+            name.to_owned(),
+            None,
+        )),
+        Box::new([CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)]),
+        Box::new([]),
+    )
+}
+
+#[test]
+fn invalid_frozen_token_index_returns_compiler_error() {
+    let mut string_table = StringTable::new();
+    let frozen = StableBodySyntax {
+        source_path: Box::new([]),
+        pool: Box::new([]),
+        tokens: Box::new([Token::new(
+            TokenKind::Symbol(StringId::from_index(0)),
+            SourceLocation::default(),
+        )]),
+    };
+
+    let error = frozen
+        .materialise(&mut string_table)
+        .expect_err("a frozen payload outside the pool is corrupt");
+    assert!(
+        error.msg.contains("out-of-range pool entry 0"),
+        "unexpected frozen token error: {error:?}"
+    );
+}
+
+#[test]
+fn invalid_frozen_location_index_returns_compiler_error() {
+    let mut string_table = StringTable::new();
+    let frozen = StableBodySyntax {
+        source_path: Box::new([]),
+        pool: Box::new([]),
+        tokens: Box::new([Token::new(
+            TokenKind::Import,
+            SourceLocation::new(
+                InternedPath::from_components(vec![StringId::from_index(3)]),
+                CharPosition::default(),
+                CharPosition::default(),
+            ),
+        )]),
+    };
+
+    let error = frozen
+        .materialise(&mut string_table)
+        .expect_err("a frozen scope outside the pool is corrupt");
+    assert!(
+        error.msg.contains("out-of-range pool entry 3"),
+        "unexpected frozen location error: {error:?}"
+    );
+}
+
+#[test]
+fn stale_in_range_template_row_fails_declaration_identity_validation() {
+    let expected = generated_identity("expected");
+    let stale = generated_identity("stale");
+    let context = super::ModuleMaterialisationContext::from_identities_for_test(vec![
+        expected.declaration().clone(),
+    ]);
+    let artefact = &context.artefacts[0];
+
+    check_materialisation_row_identity(artefact, &expected)
+        .expect("the indexed row matches the request identity");
+    let error = check_materialisation_row_identity(artefact, &stale)
+        .expect_err("a stale but in-range row must never materialise");
+    assert!(
+        error.msg.contains("declaration identity"),
+        "unexpected row identity error: {error:?}"
+    );
 }

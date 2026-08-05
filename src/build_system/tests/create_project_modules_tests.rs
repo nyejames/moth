@@ -6283,16 +6283,12 @@ fn completed_package_registry_records_direct_dependency_edges_once() {
 }
 
 #[test]
-fn completed_package_registry_rejects_dependency_edges_out_of_order() {
+fn completed_package_registry_rejects_self_dependency_before_publication() {
     let mut registry = CompletedSourcePackageRegistry::new();
-    registry
-        .publish(compiled_package("a"), &["a".to_owned()])
-        .expect("a self-dependency publishes because the prefix already resolves");
-
     let error = registry
-        .validate_dependency_edges()
-        .expect_err("a provider edge that did not publish first violates the schedule");
-    assert!(error.msg.contains("did not publish first"));
+        .publish(compiled_package("a"), &["a".to_owned()])
+        .expect_err("a package must never depend on its own not-yet-published prefix");
+    assert!(error.msg.contains("unindexed source package @a"));
 }
 
 #[test]

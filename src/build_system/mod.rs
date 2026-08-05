@@ -15,4 +15,7 @@ pub(crate) mod path_validation;
 pub(crate) mod project_config;
 pub(crate) mod utils;
 
+#[cfg(test)]
+pub(crate) mod test_support;
+
 pub(crate) use build_profile::BuildProfile;
