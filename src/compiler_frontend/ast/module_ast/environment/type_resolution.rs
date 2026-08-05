@@ -54,6 +54,7 @@ use crate::compiler_frontend::value_mode::ValueMode;
 use crate::timer_log;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::rc::Rc;
+#[cfg(feature = "detailed_timers")]
 use std::time::Instant;
 
 #[derive(Clone, Copy)]
@@ -108,6 +109,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         sorted_headers: &[Header],
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
+        #[cfg(feature = "detailed_timers")]
         let struct_shell_registration_start = Instant::now();
         for header in sorted_headers {
             match &header.kind {
@@ -228,6 +230,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             struct_shell_registration_start,
             "AST/environment/nominal types/struct+choice shells registered in: "
         );
+        #[cfg(feature = "detailed_timers")]
         let _ = struct_shell_registration_start;
 
         Ok(())
@@ -248,6 +251,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // -------------------------------------------------
         //  Resolve constructor shell types for constants
         // -------------------------------------------------
+        #[cfg(feature = "detailed_timers")]
         let constructor_shell_resolution_start = Instant::now();
         self.resolve_constructor_shells_for_constants(
             sorted_headers,
@@ -258,22 +262,26 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             constructor_shell_resolution_start,
             "AST/environment/nominal types/constructor shells resolved in: "
         );
+        #[cfg(feature = "detailed_timers")]
         let _ = constructor_shell_resolution_start;
 
         // -------------------
         //  Resolve constants
         // -------------------
+        #[cfg(feature = "detailed_timers")]
         let constant_resolution_start = Instant::now();
         self.resolve_constant_headers(sorted_headers, trait_environment, string_table)?;
         timer_log!(
             constant_resolution_start,
             "AST/environment/constants resolved in: "
         );
+        #[cfg(feature = "detailed_timers")]
         let _ = constant_resolution_start;
 
         // ----------------------------
         //  Resolve struct field types
         // ----------------------------
+        #[cfg(feature = "detailed_timers")]
         let struct_fields_resolution_start = Instant::now();
         for header in sorted_headers {
             let HeaderKind::Struct {
@@ -393,11 +401,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             struct_fields_resolution_start,
             "AST/environment/nominal types/struct fields resolved in: "
         );
+        #[cfg(feature = "detailed_timers")]
         let _ = struct_fields_resolution_start;
 
         // --------------------------------------
         //  Resolve choice variant payload types
         // --------------------------------------
+        #[cfg(feature = "detailed_timers")]
         let choice_resolution_start = Instant::now();
         for header in sorted_headers {
             let HeaderKind::Choice {
@@ -554,6 +564,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             choice_resolution_start,
             "AST/environment/nominal types/choice variants resolved in: "
         );
+        #[cfg(feature = "detailed_timers")]
         let _ = choice_resolution_start;
 
         // ----------------------------
@@ -561,6 +572,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // ----------------------------
         // Ensure no runtime struct contains itself as a field type, directly or indirectly.
         // This check runs after all field types are resolved so the full graph is visible.
+        #[cfg(feature = "detailed_timers")]
         let recursive_validation_start = Instant::now();
         validate_no_recursive_runtime_structs(&self.resolved_struct_fields_by_path, string_table)
             .map_err(|diagnostic| self.diagnostic_messages(*diagnostic, string_table))?;
@@ -568,6 +580,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             recursive_validation_start,
             "AST/environment/nominal types/recursive struct validation in: "
         );
+        #[cfg(feature = "detailed_timers")]
         let _ = recursive_validation_start;
 
         Ok(())
@@ -967,6 +980,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         trait_environment: &TraitEnvironment,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
+        #[cfg(feature = "detailed_timers")]
         let constants_resolution_start = Instant::now();
 
         let resolved_type_aliases = Rc::new(self.resolved_type_aliases_by_path.clone());
@@ -1029,6 +1043,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             constants_resolution_start,
             "AST/environment/constants resolved in: "
         );
+        #[cfg(feature = "detailed_timers")]
         let _ = constants_resolution_start;
 
         Ok(())

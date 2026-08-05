@@ -185,9 +185,9 @@ pub fn run_frontend_benchmark(
     let stages = raw_observations
         .timings
         .into_iter()
-        .map(|metric| FrontendBenchmarkStage {
-            name: metric.name,
-            duration_ms: metric.value,
+        .map(|observation| FrontendBenchmarkStage {
+            name: observation.name.to_owned(),
+            duration_ms: observation.duration.as_secs_f64() * 1000.0,
         })
         .collect();
 

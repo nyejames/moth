@@ -169,6 +169,7 @@ use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 use rustc_hash::FxHashMap;
+#[cfg(feature = "detailed_timers")]
 use std::time::Instant;
 
 /// Resolved choice definition carried from AST to HIR for pre-registration.
@@ -331,6 +332,7 @@ impl Ast {
         let generic_template_count = environment.lookups.generic_declarations_by_path.len();
         let receiver_method_count = environment.lookups.receiver_methods.by_function_path.len();
 
+        #[cfg(feature = "detailed_timers")]
         let node_emission_start = Instant::now();
         let emitted = AstEmitter::new(&phase_context, &mut environment, header_count)
             .emit(headers, string_table)?;
@@ -340,8 +342,10 @@ impl Ast {
             "ast_emit_nodes_ms",
             "AST/emit nodes completed in: "
         );
+        #[cfg(feature = "detailed_timers")]
         let _ = node_emission_start;
 
+        #[cfg(feature = "detailed_timers")]
         let finalization_start = Instant::now();
         let build_result = AstFinalizer::new(&phase_context, environment).finalize(
             emitted,
@@ -353,6 +357,7 @@ impl Ast {
             "ast_finalize_ms",
             "AST/finalize completed in: "
         );
+        #[cfg(feature = "detailed_timers")]
         let _ = finalization_start;
 
         ast_header_counts.record();

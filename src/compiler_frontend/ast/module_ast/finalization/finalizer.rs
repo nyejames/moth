@@ -28,6 +28,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 use crate::timer_log;
 use std::rc::Rc;
+#[cfg(feature = "detailed_timers")]
 use std::time::Instant;
 
 #[cfg(debug_assertions)]
@@ -85,6 +86,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         // ----------------------------
         //  Collect doc fragments
         // ----------------------------
+        #[cfg(feature = "detailed_timers")]
         let doc_fragments_start = Instant::now();
         let doc_fragments = collect_and_strip_comment_templates(
             &mut emitted.ast,
@@ -102,11 +104,13 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             doc_fragments_start,
             "AST/finalize/doc fragments collected in: "
         );
+        #[cfg(feature = "detailed_timers")]
         let _ = doc_fragments_start;
 
         // ----------------------------
         //  Collect const top-level fragments
         // ----------------------------
+        #[cfg(feature = "detailed_timers")]
         let const_fragments_start = Instant::now();
         let const_top_level_fragments = collect_const_top_level_fragments(
             top_level_const_fragments,
@@ -117,11 +121,13 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             const_fragments_start,
             "AST/finalize/const top-level fragments collected in: "
         );
+        #[cfg(feature = "detailed_timers")]
         let _ = const_fragments_start;
 
         // ----------------------------
         //  Propagate reactive template metadata
         // ----------------------------
+        #[cfg(feature = "detailed_timers")]
         let reactive_template_metadata_start = Instant::now();
         self.propagate_reactive_template_metadata(&mut emitted.ast)
             .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
@@ -129,11 +135,13 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             reactive_template_metadata_start,
             "AST/finalize/reactive template metadata propagated in: "
         );
+        #[cfg(feature = "detailed_timers")]
         let _ = reactive_template_metadata_start;
 
         // ----------------------------
         //  Normalize AST templates for HIR
         // ----------------------------
+        #[cfg(feature = "detailed_timers")]
         let ast_template_normalization_start = Instant::now();
         self.normalize_ast_templates_for_hir(&mut emitted.ast, project_path_resolver, string_table)
             .map_err(|error| {
@@ -143,6 +151,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             ast_template_normalization_start,
             "AST/finalize/AST templates normalized in: "
         );
+        #[cfg(feature = "detailed_timers")]
         let _ = ast_template_normalization_start;
 
         // ----------------------------
@@ -155,6 +164,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         // public-interface draft's callable seed table reads one normalized copy. Generic free
         // functions, generic structs and generic receiver methods have no emitted declaration
         // node, so their retained defaults are normalized in place through the same helper.
+        #[cfg(feature = "detailed_timers")]
         let public_default_synchronization_start = Instant::now();
         self.synchronize_normalized_public_defaults(
             &emitted.ast,
@@ -168,11 +178,13 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             public_default_synchronization_start,
             "AST/finalize/public defaults synchronized in: "
         );
+        #[cfg(feature = "detailed_timers")]
         let _ = public_default_synchronization_start;
 
         // ----------------------------
         //  Normalize module constants
         // ----------------------------
+        #[cfg(feature = "detailed_timers")]
         let module_constant_normalization_start = Instant::now();
         let projected_const_templates = self
             .project_const_templates(project_path_resolver, string_table)
@@ -188,11 +200,13 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             module_constant_normalization_start,
             "AST/finalize/module constants normalized in: "
         );
+        #[cfg(feature = "detailed_timers")]
         let _ = module_constant_normalization_start;
 
         // ----------------------------
         //  Validate type boundaries
         // ----------------------------
+        #[cfg(feature = "detailed_timers")]
         let type_boundary_validation_start = Instant::now();
         self.validate_no_unresolved_executable_types(&emitted.ast, &module_constants, string_table)
             .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
@@ -200,11 +214,13 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             type_boundary_validation_start,
             "AST/finalize/type boundary validated in: "
         );
+        #[cfg(feature = "detailed_timers")]
         let _ = type_boundary_validation_start;
 
         // ----------------------------
         //  Collect const facts
         // ----------------------------
+        #[cfg(feature = "detailed_timers")]
         let const_fact_collection_start = Instant::now();
         let start_function_path = self.context.root_role.has_implicit_start().then(|| {
             self.context
@@ -231,11 +247,13 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             const_fact_collection_start,
             "AST/finalize/const facts collected in: "
         );
+        #[cfg(feature = "detailed_timers")]
         let _ = const_fact_collection_start;
 
         // ----------------------------
         //  Merge builtin AST nodes
         // ----------------------------
+        #[cfg(feature = "detailed_timers")]
         let builtin_merge_start = Instant::now();
         if !self.environment.lookups.builtin_struct_ast_nodes.is_empty() {
             let mut ast_nodes = self.environment.lookups.builtin_struct_ast_nodes.clone();
@@ -243,6 +261,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             emitted.ast = ast_nodes;
         }
         timer_log!(builtin_merge_start, "AST/finalize/builtin AST merge in: ");
+        #[cfg(feature = "detailed_timers")]
         let _ = builtin_merge_start;
 
         let mut choice_definitions = self.collect_choice_definitions();

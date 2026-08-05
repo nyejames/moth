@@ -17,10 +17,10 @@ pub(crate) use frontend_counters::*;
 /// compilation can update them cheaply. Any test that resets and reads those counters
 /// must share one lock across modules, otherwise parallel test execution can contaminate
 /// counter snapshots.
-#[cfg(all(test, feature = "benchmark_counters"))]
+#[cfg(test)]
 pub(crate) static COUNTER_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-#[cfg(all(test, feature = "benchmark_counters"))]
+#[cfg(test)]
 pub(crate) fn lock_counter_test() -> std::sync::MutexGuard<'static, ()> {
     COUNTER_TEST_LOCK
         .lock()

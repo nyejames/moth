@@ -9,6 +9,8 @@ use crate::build_system::BuildProfile;
 use crate::build_system::build::{BuildBootstrap, ProjectBuilder, bootstrap_project_build};
 use crate::build_system::create_project_modules::compile_project_frontend;
 use crate::build_system::path_validation::check_if_valid_path;
+use crate::command_timing_finish;
+use crate::command_timing_start;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::display_messages::{
     print_compiler_messages, print_terse_compiler_messages,
@@ -18,6 +20,7 @@ use crate::projects::command_status::{
     CommandStatus, benchmark_diagnostic_counts, emit_benchmark_status,
 };
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
+use crate::timed_manual_finish;
 use saying::say;
 use std::time::{Duration, Instant};
 
@@ -32,13 +35,15 @@ struct CheckOutcome {
 }
 
 pub(crate) fn run_check(path: &str, options: CheckOptions) -> CommandStatus {
-    crate::timing::start_command_timing();
+    command_timing_start!();
+    #[cfg(feature = "timers")]
     let command_start = crate::timing::start_pipeline_timing();
     let outcome = execute_check(path);
     let error_count = outcome.messages.error_count();
     let warning_count = outcome.messages.warning_count();
     let benchmark_counts = benchmark_diagnostic_counts(&outcome.messages);
 
+    #[cfg(feature = "timers")]
     let rendering_start = crate::timing::start_pipeline_timing();
     if options.terse {
         print_terse_compiler_messages(&outcome.messages);
@@ -53,10 +58,10 @@ pub(crate) fn run_check(path: &str, options: CheckOptions) -> CommandStatus {
     } else {
         print_compiler_messages(outcome.messages);
     }
-    log_check_timing("command.check.message_rendering", rendering_start);
-    log_check_timing("command.check.total", command_start);
+    timed_manual_finish!("command.check.message_rendering", rendering_start);
+    timed_manual_finish!("command.check.total", command_start);
 
-    crate::timing::print_command_timing_summary();
+    command_timing_finish!(error_count == 0);
     if let Some((error_count, warning_count)) = benchmark_counts {
         emit_benchmark_status(error_count, warning_count);
     }
@@ -73,14 +78,15 @@ fn execute_check(path: &str) -> CheckOutcome {
     let normalized_path = normalize_entry_path(path);
 
     let mut path_string_table = StringTable::new();
+    #[cfg(feature = "timers")]
     let path_validation_start = crate::timing::start_pipeline_timing();
     let valid_path = match check_if_valid_path(normalized_path, &mut path_string_table) {
         Ok(path) => {
-            log_check_timing("command.check.path_validation", path_validation_start);
+            timed_manual_finish!("command.check.path_validation", path_validation_start);
             path
         }
         Err(error) => {
-            log_check_timing("command.check.path_validation", path_validation_start);
+            timed_manual_finish!("command.check.path_validation", path_validation_start);
             return CheckOutcome {
                 messages: CompilerMessages::from_error(error, path_string_table),
                 duration: start.elapsed(),
@@ -88,13 +94,15 @@ fn execute_check(path: &str) -> CheckOutcome {
         }
     };
 
+    #[cfg(feature = "timers")]
     let builder_construction_start = crate::timing::start_pipeline_timing();
     let project_builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
-    log_check_timing(
+    timed_manual_finish!(
         "command.check.builder_construction",
         builder_construction_start,
     );
 
+    #[cfg(feature = "timers")]
     let bootstrap_start = crate::timing::start_pipeline_timing();
     let BuildBootstrap {
         mut config,
@@ -104,11 +112,11 @@ fn execute_check(path: &str) -> CheckOutcome {
         validated_directory_output_settings,
     } = match bootstrap_project_build(&project_builder, valid_path) {
         Ok(bootstrap) => {
-            log_check_timing("command.check.bootstrap", bootstrap_start);
+            timed_manual_finish!("command.check.bootstrap", bootstrap_start);
             bootstrap
         }
         Err(messages) => {
-            log_check_timing("command.check.bootstrap", bootstrap_start);
+            timed_manual_finish!("command.check.bootstrap", bootstrap_start);
             return CheckOutcome {
                 messages,
                 duration: start.elapsed(),
@@ -116,6 +124,7 @@ fn execute_check(path: &str) -> CheckOutcome {
         }
     };
 
+    #[cfg(feature = "timers")]
     let compile_frontend_start = crate::timing::start_pipeline_timing();
     let messages = match compile_project_frontend(
         &mut config,
@@ -126,14 +135,14 @@ fn execute_check(path: &str) -> CheckOutcome {
         &mut string_table,
     ) {
         Ok(frontend) => {
-            log_check_timing(
+            timed_manual_finish!(
                 "command.check.compile_project_frontend",
                 compile_frontend_start,
             );
             frontend.into_render_messages(&mut string_table)
         }
         Err(messages) => {
-            log_check_timing(
+            timed_manual_finish!(
                 "command.check.compile_project_frontend",
                 compile_frontend_start,
             );
@@ -169,24 +178,6 @@ fn format_duration(duration: Duration) -> String {
 
 fn success_message(duration: Duration) -> String {
     format!("Done in {}", format_duration(duration))
-}
-
-/// Record a check-command stage timing through the central `timers` substrate.
-///
-/// WHAT: delegates to `timing::record_started_pipeline_timing`, which stores the
-///      observation in the active collection scope and emits the stable
-///      `MOTH_BENCH timing` line when the output mode permits.
-/// WHY:  check-command boundaries use dotted `command.check.*` metric names so the
-///      concise summary and benchmark attribution share one recording path.
-#[cfg(feature = "timers")]
-fn log_check_timing(metric: &str, start: crate::timing::PipelineTimingStart) {
-    crate::timing::record_started_pipeline_timing(metric, start);
-}
-
-/// No-op timing recorder when `timers` is off.
-#[cfg(not(feature = "timers"))]
-fn log_check_timing(_metric: &str, _start: crate::timing::PipelineTimingStart) {
-    let _ = (_metric, _start);
 }
 
 #[cfg(test)]

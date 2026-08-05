@@ -343,6 +343,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                     }
 
                     #[cfg(feature = "detailed_timers")]
+                    #[cfg(feature = "detailed_timers")]
                     let start = Instant::now();
                     self.emit_function(
                         header,
@@ -359,6 +360,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 }
 
                 HeaderKind::StartFunction => {
+                    #[cfg(feature = "detailed_timers")]
                     #[cfg(feature = "detailed_timers")]
                     let start = Instant::now();
                     self.emit_start(
@@ -404,6 +406,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                     });
 
                     #[cfg(feature = "detailed_timers")]
+                    #[cfg(feature = "detailed_timers")]
                     let const_template_parse_start = Instant::now();
                     let template =
                         self.parse_const_template(&mut template_tokens, &context, string_table)?;
@@ -413,6 +416,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                     }
                     self.warnings.extend(context.take_emitted_warnings());
 
+                    #[cfg(feature = "detailed_timers")]
                     #[cfg(feature = "detailed_timers")]
                     let const_template_fold_start = Instant::now();
                     let folded_result =

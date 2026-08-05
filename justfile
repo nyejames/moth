@@ -16,6 +16,9 @@ validate:
     @echo "benchmark sanity"
     cargo run --package xtask --bin xtask -- bench-ci
 
+    @echo "timers erasure"
+    just timers-erasure-check
+
 ship:
     cargo fmt
     just validate
@@ -46,6 +49,9 @@ bench-frontend-check:
 
 bench-validate:
     cargo run --package xtask --bin xtask -- bench-validate
+
+timers-erasure-check:
+    cargo run --package xtask --bin xtask -- timers-erasure-check
 
 profile filter="terse":
     cargo run --package xtask --bin xtask -- bench-profile --filter {{filter}}

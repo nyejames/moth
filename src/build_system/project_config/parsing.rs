@@ -9,6 +9,7 @@
 
 use crate::build_system::create_project_modules::extract_source_code;
 use crate::build_system::project_config::ProjectConfigParseServices;
+use crate::timed_manual_finish;
 use std::sync::Arc;
 
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
@@ -62,15 +63,17 @@ pub(super) fn parse_config_file(
     services: &ProjectConfigParseServices<'_>,
     string_table: &mut StringTable,
 ) -> Result<ParsedConfigFile, CompilerMessages> {
+    #[cfg(feature = "timers")]
     let parse_total_start = crate::timing::start_pipeline_timing();
     let mut errors = Vec::new();
 
+    #[cfg(feature = "timers")]
     let canonicalize_start = crate::timing::start_pipeline_timing();
     let canonical_config = match std::fs::canonicalize(config_path) {
         Ok(canonical_config) => canonical_config,
         Err(error) => {
-            log_config_stage_timing("config.parse.canonicalize", canonicalize_start);
-            log_config_stage_timing("config.parse.total", parse_total_start);
+            timed_manual_finish!("config.parse.canonicalize", canonicalize_start);
+            timed_manual_finish!("config.parse.total", parse_total_start);
 
             return Err(CompilerMessages::from_error(
                 CompilerError::file_error(
@@ -82,7 +85,7 @@ pub(super) fn parse_config_file(
             ));
         }
     };
-    log_config_stage_timing("config.parse.canonicalize", canonicalize_start);
+    timed_manual_finish!("config.parse.canonicalize", canonicalize_start);
 
     // -------------------------
     //  Authored Config Identity
@@ -91,7 +94,7 @@ pub(super) fn parse_config_file(
     // tokenization, AST entry identity and validation ownership.
     let authored_scope =
         InternedPath::try_from_filesystem_path(config_path, string_table).map_err(|non_utf8| {
-            log_config_stage_timing("config.parse.total", parse_total_start);
+            timed_manual_finish!("config.parse.total", parse_total_start);
             CompilerMessages::from_error(
                 CompilerError::file_error(
                     &non_utf8.path,
@@ -108,6 +111,7 @@ pub(super) fn parse_config_file(
     // -------------------------
     //  Tokenize and Prepare Config
     // -------------------------
+    #[cfg(feature = "timers")]
     let prepare_files_start = crate::timing::start_pipeline_timing();
     let prepared_output = prepare_config_file(
         &canonical_config,
@@ -118,10 +122,10 @@ pub(super) fn parse_config_file(
         string_table,
     )?;
     let prepared_outputs = prepared_output.into_iter().collect::<Vec<_>>();
-    log_config_stage_timing("config.parse.prepare_files_total", prepare_files_start);
+    timed_manual_finish!("config.parse.prepare_files_total", prepare_files_start);
 
     if !errors.is_empty() {
-        log_config_stage_timing("config.parse.total", parse_total_start);
+        timed_manual_finish!("config.parse.total", parse_total_start);
         return Err(CompilerMessages::from_diagnostics(
             errors,
             string_table.clone(),
@@ -134,6 +138,7 @@ pub(super) fn parse_config_file(
     // WHY: syntax preparation is provider-independent and binding resolves retained shells
     // against provider interfaces. Both phases share the same config-specific duplicate-key
     // diagnostic routing, so the error path is extracted once.
+    #[cfg(feature = "timers")]
     let headers_start = crate::timing::start_pipeline_timing();
 
     let collect_header_diagnostics =
@@ -157,8 +162,8 @@ pub(super) fn parse_config_file(
         Ok(prepared) => prepared,
         Err(bag) => {
             collect_header_diagnostics(bag, &mut errors, &authored_scope);
-            log_config_stage_timing("config.parse.headers", headers_start);
-            log_config_stage_timing("config.parse.total", parse_total_start);
+            timed_manual_finish!("config.parse.headers", headers_start);
+            timed_manual_finish!("config.parse.total", parse_total_start);
             return Err(CompilerMessages::from_diagnostics(
                 errors,
                 string_table.clone(),
@@ -177,34 +182,35 @@ pub(super) fn parse_config_file(
         Ok(headers) => headers,
         Err(bag) => {
             collect_header_diagnostics(bag, &mut errors, &authored_scope);
-            log_config_stage_timing("config.parse.headers", headers_start);
-            log_config_stage_timing("config.parse.total", parse_total_start);
+            timed_manual_finish!("config.parse.headers", headers_start);
+            timed_manual_finish!("config.parse.total", parse_total_start);
             return Err(CompilerMessages::from_diagnostics(
                 errors,
                 string_table.clone(),
             ));
         }
     };
-    log_config_stage_timing("config.parse.headers", headers_start);
+    timed_manual_finish!("config.parse.headers", headers_start);
 
     // -------------------------
     //  Dependency Sorting
     // -------------------------
+    #[cfg(feature = "timers")]
     let dependency_sort_start = crate::timing::start_pipeline_timing();
 
     let sorted = match resolve_module_dependencies(bound_headers, string_table) {
         Ok(sorted) => sorted,
         Err(bag) => {
             errors.extend(bag.into_diagnostics());
-            log_config_stage_timing("config.parse.dependency_sort", dependency_sort_start);
-            log_config_stage_timing("config.parse.total", parse_total_start);
+            timed_manual_finish!("config.parse.dependency_sort", dependency_sort_start);
+            timed_manual_finish!("config.parse.total", parse_total_start);
             return Err(CompilerMessages::from_diagnostics(
                 errors,
                 string_table.clone(),
             ));
         }
     };
-    log_config_stage_timing("config.parse.dependency_sort", dependency_sort_start);
+    timed_manual_finish!("config.parse.dependency_sort", dependency_sort_start);
 
     // -------------------------
     //  Authored Key-Name Spans
@@ -217,6 +223,7 @@ pub(super) fn parse_config_file(
     // -------------------------
     //  AST Construction
     // -------------------------
+    #[cfg(feature = "timers")]
     let ast_start = crate::timing::start_pipeline_timing();
 
     let external_package_registry = Arc::new(services.frontend_surface.binding_packages.clone());
@@ -254,17 +261,17 @@ pub(super) fn parse_config_file(
             capacity_estimate: Default::default(),
         },
     );
-    log_config_stage_timing("config.parse.ast", ast_start);
+    timed_manual_finish!("config.parse.ast", ast_start);
 
     let ast = match ast_result {
         Ok(build_result) => build_result.ast,
         Err(messages) => {
-            log_config_stage_timing("config.parse.total", parse_total_start);
+            timed_manual_finish!("config.parse.total", parse_total_start);
             return Err(messages);
         }
     };
 
-    log_config_stage_timing("config.parse.total", parse_total_start);
+    timed_manual_finish!("config.parse.total", parse_total_start);
 
     Ok(ParsedConfigFile {
         ast,
@@ -272,18 +279,6 @@ pub(super) fn parse_config_file(
         authored_scope,
         authored_key_name_locations,
     })
-}
-
-/// Record a config-parse stage timing through the central `timers` substrate.
-///
-/// WHAT: delegates to `timing::record_started_pipeline_timing`, which stores the
-///      observation in the active collection scope and emits the stable
-///      `MOTH_BENCH timing` line when the output mode permits.
-/// WHY:  config parsing uses dotted `config.parse.*` metric names. The start
-///      token is zero-sized when `timers` is off, so regular builds do not read
-///      clocks for instrumentation-only measurements.
-fn log_config_stage_timing(metric: &str, start: crate::timing::PipelineTimingStart) {
-    crate::timing::record_started_pipeline_timing(metric, start);
 }
 
 // -------------------------

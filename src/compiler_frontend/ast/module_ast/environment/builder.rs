@@ -89,6 +89,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
+#[cfg(feature = "detailed_timers")]
 use std::time::Instant;
 
 pub(in crate::compiler_frontend::ast) mod import_projection;
@@ -256,6 +257,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         self.resolved_struct_fields_by_path = resolved_struct_fields_by_path;
         self.struct_source_by_path = struct_source_by_path;
 
+        #[cfg(feature = "detailed_timers")]
         let environment_start = Instant::now();
 
         // ------------------------------------
@@ -274,12 +276,14 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // ----------------------
         //  Resolve type aliases
         // ----------------------
+        #[cfg(feature = "detailed_timers")]
         let type_alias_resolution_start = Instant::now();
         self.resolve_type_aliases(sorted_headers, string_table)?;
         timer_log!(
             type_alias_resolution_start,
             "AST/environment/type aliases resolved in: "
         );
+        #[cfg(feature = "detailed_timers")]
         let _ = type_alias_resolution_start;
 
         // --------------------------------------------
@@ -287,12 +291,14 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // --------------------------------------------
         // WHAT: register identities early so trait requirement signatures and dynamic
         // trait annotations can reference nominal types before fields are resolved.
+        #[cfg(feature = "detailed_timers")]
         let shell_registration_start = Instant::now();
         self.register_nominal_shells(sorted_headers, string_table)?;
         timer_log!(
             shell_registration_start,
             "AST/environment/nominal shells registered in: "
         );
+        #[cfg(feature = "detailed_timers")]
         let _ = shell_registration_start;
 
         // --------------------------
@@ -304,6 +310,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // type positions can be rejected with the trait-specific diagnostic.
         // Evidence validation stays after receiver catalog construction because it needs
         // resolved receiver methods.
+        #[cfg(feature = "detailed_timers")]
         let trait_resolution_start = Instant::now();
         let trait_environment = self.resolve_trait_definitions(sorted_headers, string_table)?;
         self.resolve_imported_generic_parameter_bounds(&trait_environment)
@@ -312,6 +319,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             trait_resolution_start,
             "AST/environment/trait definitions resolved in: "
         );
+        #[cfg(feature = "detailed_timers")]
         let _ = trait_resolution_start;
 
         // -------------------------------------------
@@ -321,6 +329,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // payload types with trait-aware type resolution.
         // WHY: static trait metadata must be available so ordinary type annotations can
         // reject trait names without falling through to an unknown-type diagnostic.
+        #[cfg(feature = "detailed_timers")]
         let member_resolution_start = Instant::now();
         self.resolve_nominal_members_and_constants(
             sorted_headers,
@@ -331,33 +340,39 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             member_resolution_start,
             "AST/environment/nominal members and constants resolved in: "
         );
+        #[cfg(feature = "detailed_timers")]
         let _ = member_resolution_start;
 
         // --------------------------------------
         //  Resolve nominal generic bound traits
         // --------------------------------------
+        #[cfg(feature = "detailed_timers")]
         let nominal_bound_resolution_start = Instant::now();
         self.resolve_nominal_generic_bounds(sorted_headers, &trait_environment, string_table)?;
         timer_log!(
             nominal_bound_resolution_start,
             "AST/environment/nominal generic bounds resolved in: "
         );
+        #[cfg(feature = "detailed_timers")]
         let _ = nominal_bound_resolution_start;
 
         // -----------------------------
         //  Resolve function signatures
         // -----------------------------
+        #[cfg(feature = "detailed_timers")]
         let function_signatures_start = Instant::now();
         self.resolve_function_signatures(sorted_headers, &trait_environment, string_table)?;
         timer_log!(
             function_signatures_start,
             "AST/environment/function signatures resolved in: "
         );
+        #[cfg(feature = "detailed_timers")]
         let _ = function_signatures_start;
 
         // ------------------------
         //  Build receiver catalog
         // ------------------------
+        #[cfg(feature = "detailed_timers")]
         let receiver_catalog_start = Instant::now();
         let receiver_methods = self.build_receiver_catalog(sorted_headers, string_table)?;
         self.validate_receiver_method_visibility_invariants(&receiver_methods, string_table)?;
@@ -365,6 +380,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             receiver_catalog_start,
             "AST/environment/receiver catalog built in: "
         );
+        #[cfg(feature = "detailed_timers")]
         let _ = receiver_catalog_start;
 
         // Register compiler-owned builtin evidence rows for every initial
@@ -389,6 +405,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // ---------------------------
         //  Validate trait evidence
         // ---------------------------
+        #[cfg(feature = "detailed_timers")]
         let trait_evidence_start = Instant::now();
         validate_trait_evidence(
             ValidateTraitEvidenceInput {
@@ -409,11 +426,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             trait_evidence_start,
             "AST/environment/trait evidence resolved in: "
         );
+        #[cfg(feature = "detailed_timers")]
         let _ = trait_evidence_start;
 
         // -----------------------------------------
         //  Validate bounded nominal instantiations
         // -----------------------------------------
+        #[cfg(feature = "detailed_timers")]
         let nominal_bound_surface_start = Instant::now();
         self.validate_nominal_generic_bound_surfaces(
             sorted_headers,
@@ -425,17 +444,20 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             nominal_bound_surface_start,
             "AST/environment/nominal generic bound surfaces validated in: "
         );
+        #[cfg(feature = "detailed_timers")]
         let _ = nominal_bound_surface_start;
 
         // --------------------------------
         //  Validate public export surfaces
         // --------------------------------
+        #[cfg(feature = "detailed_timers")]
         let public_surface_start = Instant::now();
         self.validate_public_export_surfaces(sorted_headers, &trait_environment, string_table)?;
         timer_log!(
             public_surface_start,
             "AST/environment/public export surfaces validated in: "
         );
+        #[cfg(feature = "detailed_timers")]
         let _ = public_surface_start;
 
         // ---------------------------------------------
@@ -446,6 +468,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // used by public-surface validation. Re-exported declarations from private files targeted
         // by public export entries are also included. Donor-local TypeIds stay inside the Ast
         // handoff and never enter a cross-module artefact.
+        #[cfg(feature = "detailed_timers")]
         let public_type_roots_start = Instant::now();
 
         // Build the set of re-exported source declaration paths targeted by public export entries.
@@ -474,6 +497,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             public_type_roots_start,
             "AST/environment/resolved public type roots built in: "
         );
+        #[cfg(feature = "detailed_timers")]
         let _ = public_type_roots_start;
 
         // Build the transient direct public trait-root vector from the same sorted headers.
@@ -491,6 +515,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             "ast_build_environment_ms",
             "AST/build environment completed in: "
         );
+        #[cfg(feature = "detailed_timers")]
         let _ = environment_start;
 
         // Extract generic declarations before `self` is consumed by `finish_environment`.

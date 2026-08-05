@@ -43,6 +43,7 @@ mod frontend_bench;
 mod mode;
 mod process_runner;
 mod profile;
+mod timers_erasure_check;
 
 use bench::run_benchmarks;
 use bench_ci::run_bench_ci;
@@ -53,6 +54,7 @@ use frontend_bench::run_frontend_benchmarks;
 use mode::{BenchmarkMode, ModeParseResult, TOP_LEVEL_USAGE};
 use std::env;
 use std::process;
+use timers_erasure_check::run_timers_erasure_check;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -108,6 +110,9 @@ fn main() {
         }
         BenchmarkMode::BenchValidate => {
             exit_with_result(validate_all_benchmarks());
+        }
+        BenchmarkMode::TimersErasureCheck => {
+            exit_with_result(run_timers_erasure_check());
         }
     }
 }

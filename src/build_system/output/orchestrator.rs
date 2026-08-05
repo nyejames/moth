@@ -12,6 +12,7 @@ use crate::build_system::build::Project;
 use crate::build_system::utils::file_error_messages;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::timed_manual_finish;
 
 use std::fs;
 
@@ -38,11 +39,12 @@ pub(crate) fn write_project_outputs(
     options: &WriteOptions,
     string_table: &StringTable,
 ) -> Result<(), CompilerMessages> {
+    #[cfg(feature = "timers")]
     let write_total_start = crate::timing::start_pipeline_timing();
 
     // Keep the aggregate output timing visible even when filesystem validation or writes fail.
     let result = write_project_outputs_inner(project, options, string_table);
-    log_output_stage_timing("output.write_total", write_total_start);
+    timed_manual_finish!("output.write_total", write_total_start);
 
     result
 }
@@ -59,9 +61,10 @@ fn write_project_outputs_inner(
     // complete managed-path set, and prepare canonical destinations before any filesystem mutation.
     // WHY: a late invalid or duplicate path must not leave earlier files already written.
     let prepared_write = {
+        #[cfg(feature = "timers")]
         let preflight_start = crate::timing::start_pipeline_timing();
         let result = prepare_output_write(project, &options.output_plan, string_table);
-        log_output_stage_timing("output.preflight", preflight_start);
+        timed_manual_finish!("output.preflight", preflight_start);
         result?
     };
 
@@ -76,6 +79,7 @@ fn write_project_outputs_inner(
     // WHY: a foreign known owner must fail before emission; a matching recoverable owner may
     // proceed while preserving stale artifacts.
     let cleanup_state = {
+        #[cfg(feature = "timers")]
         let prepare_start = crate::timing::start_pipeline_timing();
         let result = prepare_output_cleanup(
             output_root,
@@ -86,11 +90,12 @@ fn write_project_outputs_inner(
             &project.cleanup_policy,
             string_table,
         );
-        log_output_stage_timing("output.prepare_cleanup", prepare_start);
+        timed_manual_finish!("output.prepare_cleanup", prepare_start);
         result?
     };
 
     {
+        #[cfg(feature = "timers")]
         let create_root_start = crate::timing::start_pipeline_timing();
         let result = fs::create_dir_all(output_root).map_err(|error| {
             file_error_messages(
@@ -102,7 +107,7 @@ fn write_project_outputs_inner(
                 string_table,
             )
         });
-        log_output_stage_timing("output.create_root", create_root_start);
+        timed_manual_finish!("output.create_root", create_root_start);
         result?;
     }
 
@@ -111,10 +116,11 @@ fn write_project_outputs_inner(
     // ---------------------------------------
 
     {
+        #[cfg(feature = "timers")]
         let emit_files_start = crate::timing::start_pipeline_timing();
         let result =
             emit_prepared_output_files(project, &prepared_write, options.write_mode, string_table);
-        log_output_stage_timing("output.emit_files_total", emit_files_start);
+        timed_manual_finish!("output.emit_files_total", emit_files_start);
         result?;
     }
 
@@ -125,6 +131,7 @@ fn write_project_outputs_inner(
     // WHY: artifacts from removed pages must not persist, while recoverable manifests must not
     // drive deletion under uncertain metadata.
     {
+        #[cfg(feature = "timers")]
         let finalize_start = crate::timing::start_pipeline_timing();
         let finalization = OutputCleanupFinalization {
             output_root,
@@ -137,13 +144,9 @@ fn write_project_outputs_inner(
             string_table,
         };
         let result = finalize_output_cleanup(&cleanup_state, &finalization);
-        log_output_stage_timing("output.finalize_cleanup", finalize_start);
+        timed_manual_finish!("output.finalize_cleanup", finalize_start);
         result?;
     }
 
     Ok(())
-}
-
-fn log_output_stage_timing(metric: &str, start: crate::timing::PipelineTimingStart) {
-    crate::timing::record_started_pipeline_timing(metric, start);
 }

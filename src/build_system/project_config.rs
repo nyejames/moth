@@ -15,6 +15,7 @@ use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::settings::Config;
+use crate::timed_manual_finish;
 
 use std::path::Path;
 
@@ -48,38 +49,28 @@ pub fn load_project_config(
     services: &ProjectConfigParseServices<'_>,
     string_table: &mut StringTable,
 ) -> Result<Option<ValidatedDirectoryOutputSettings>, CompilerMessages> {
+    #[cfg(feature = "timers")]
     let load_total_start = crate::timing::start_pipeline_timing();
 
     let config_path = config.config_file_path();
 
+    #[cfg(feature = "timers")]
     let file_exists_start = crate::timing::start_pipeline_timing();
     let config_exists = config_path.exists();
-    log_stage_timing("config.file_exists_check", file_exists_start);
+    timed_manual_finish!("config.file_exists_check", file_exists_start);
 
     if !config_exists {
-        log_stage_timing("config.load_total", load_total_start);
+        timed_manual_finish!("config.load_total", load_total_start);
         return validate_directory_output_settings_if_needed(config, string_table);
     }
 
+    #[cfg(feature = "timers")]
     let parse_start = crate::timing::start_pipeline_timing();
     let result = parse_project_config_file(config, &config_path, services, string_table);
-    log_stage_timing("config.parse_project_config_file", parse_start);
+    timed_manual_finish!("config.parse_project_config_file", parse_start);
 
-    log_stage_timing("config.load_total", load_total_start);
+    timed_manual_finish!("config.load_total", load_total_start);
     result
-}
-
-/// Record a config-stage timing through the central `timers` substrate.
-///
-/// WHAT: delegates to `timing::record_started_pipeline_timing`, which stores the
-///      observation in the active collection scope and emits the stable
-///      `MOTH_BENCH timing` line when the output mode permits.
-/// WHY:  config loading and parsing use dotted `config.*` metric names through the
-///      concise `timers` substrate. The start token is zero-sized when `timers`
-///      is off, so regular builds do not read clocks for instrumentation-only
-///      measurements.
-fn log_stage_timing(metric: &str, start: crate::timing::PipelineTimingStart) {
-    crate::timing::record_started_pipeline_timing(metric, start);
 }
 
 // -------------------------

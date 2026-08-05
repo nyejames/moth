@@ -27,6 +27,8 @@ use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::counter_observation;
+use crate::timed_manual_finish;
 
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
@@ -41,18 +43,6 @@ use super::prepared_source::PreparedSourceInput;
 use super::source_discovery_error::SourceDiscoveryError;
 use super::source_loading::{extract_source_code, read_source_code, source_read_error};
 use super::source_scanning::{ScannedImportSource, scan_imports_with_source};
-
-/// Record a reachable-discovery stage timing through the central `timers` substrate.
-///
-/// WHAT: delegates to `timing::record_started_pipeline_timing`, which stores the
-///      observation in the active collection scope and emits the stable
-///      `MOTH_BENCH timing` line when the output mode permits.
-/// WHY:  reachable-file discovery uses dotted `stage0.reachable_discovery.*` metric
-///      names. The start token is zero-sized when `timers` is off, so regular builds
-///      do not read clocks for instrumentation-only measurements.
-fn log_stage_timing(metric: &str, start: crate::timing::PipelineTimingStart) {
-    crate::timing::record_started_pipeline_timing(metric, start);
-}
 
 /// Minimum cache-miss count before Stage 0 uses Rayon for raw source loading.
 ///
@@ -239,6 +229,7 @@ pub(super) fn collect_reachable_input_files(
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     string_table: &mut StringTable,
 ) -> Result<CollectedReachableInputs, CompilerMessages> {
+    #[cfg(feature = "timers")]
     let total_start = crate::timing::start_pipeline_timing();
 
     // 1. Traverse the import graph to find all paths and retained resolved edges.
@@ -251,13 +242,13 @@ pub(super) fn collect_reachable_input_files(
     ) {
         Ok(discovery) => discovery,
         Err(error) => {
-            log_stage_timing("stage0.reachable_discovery.total", total_start);
+            timed_manual_finish!("stage0.reachable_discovery.total", total_start);
             return Err(error.into_messages(string_table));
         }
     };
 
     let input_files = assemble_input_files_from_inventory(discovery.inventory, string_table)?;
-    log_stage_timing("stage0.reachable_discovery.total", total_start);
+    timed_manual_finish!("stage0.reachable_discovery.total", total_start);
     Ok(CollectedReachableInputs { input_files })
 }
 
@@ -344,15 +335,16 @@ fn load_and_join_input_slots(
     let input_file_count = input_slots.len();
     let mut input_slots = input_slots;
 
+    #[cfg(feature = "timers")]
     let source_load_start = crate::timing::start_pipeline_timing();
     let loaded_missing_sources = match load_missing_sources(missing_sources, string_table) {
         Ok(loaded_missing_sources) => loaded_missing_sources,
         Err(messages) => {
-            log_stage_timing("stage0.reachable_discovery.source_load", source_load_start);
+            timed_manual_finish!("stage0.reachable_discovery.source_load", source_load_start);
             return Err(messages);
         }
     };
-    log_stage_timing("stage0.reachable_discovery.source_load", source_load_start);
+    timed_manual_finish!("stage0.reachable_discovery.source_load", source_load_start);
     for loaded in loaded_missing_sources {
         add_frontend_counter(
             FrontendCounter::Stage0SourceBytesLoaded,
@@ -486,6 +478,7 @@ fn traverse_reachable_source_files(
     let mut reachable = BTreeSet::new();
     let mut queue = VecDeque::new();
     let mut local_source_cache = FxHashMap::default();
+    #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
     let mut imports_scanned: usize = 0;
 
     // Seed with entry points in deterministic order.
@@ -535,6 +528,7 @@ fn traverse_reachable_source_files(
             SourceFileKind::Moth => {}
         }
 
+        #[cfg(feature = "timers")]
         let import_scan_start = crate::timing::start_pipeline_timing();
         let scanned = match scan_and_cache_local_moth_source(
             &canonical_file,
@@ -544,11 +538,11 @@ fn traverse_reachable_source_files(
         ) {
             Ok(scanned) => scanned,
             Err(error) => {
-                log_stage_timing("stage0.reachable_discovery.import_scan", import_scan_start);
+                timed_manual_finish!("stage0.reachable_discovery.import_scan", import_scan_start);
                 return Err(error);
             }
         };
-        log_stage_timing("stage0.reachable_discovery.import_scan", import_scan_start);
+        timed_manual_finish!("stage0.reachable_discovery.import_scan", import_scan_start);
 
         if scanned.fresh_read {
             add_frontend_counter(
@@ -558,7 +552,10 @@ fn traverse_reachable_source_files(
         }
 
         let import_references = scanned.imports.clone();
-        imports_scanned += import_references.len();
+        #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
+        {
+            imports_scanned += import_references.len();
+        }
 
         for provider in &import_references {
             // Stage 0 resolves reachability through the provider path today; the structural
@@ -576,6 +573,7 @@ fn traverse_reachable_source_files(
             match action {
                 ImportPolicyAction::Skip => continue,
                 ImportPolicyAction::QueueLocal => {
+                    #[cfg(feature = "timers")]
                     let import_resolve_start = crate::timing::start_pipeline_timing();
                     let mut reachable_queue = ReachableQueue {
                         reachable: &reachable,
@@ -588,7 +586,7 @@ fn traverse_reachable_source_files(
                         string_table,
                         &mut reachable_queue,
                     );
-                    log_stage_timing(
+                    timed_manual_finish!(
                         "stage0.reachable_discovery.import_resolve",
                         import_resolve_start,
                     );
@@ -601,11 +599,11 @@ fn traverse_reachable_source_files(
     // Record concise counters for the completed traversal. Counters are only
     // recorded when `benchmark_counters` is active, and reach stdout only when
     // `MOTH_COUNTERS` requests it (summary/full).
-    crate::timing::record_counter(
+    counter_observation!(
         "stage0.reachable_discovery.reachable_files",
         reachable.len() as f64,
     );
-    crate::timing::record_counter(
+    counter_observation!(
         "stage0.reachable_discovery.imports_scanned",
         imports_scanned as f64,
     );
@@ -737,6 +735,7 @@ fn handle_provider_capable_import(
         provider_backed_import_prefix(import_path, string_table)
     {
         if let Some(provider) = external_imports.providers.find_by_extension(&extension) {
+            #[cfg(feature = "timers")]
             let provider_imports_start = crate::timing::start_pipeline_timing();
             let result = resolve_provider_backed_import(
                 ProviderBackedImportRequest {
@@ -752,12 +751,12 @@ fn handle_provider_capable_import(
                 external_imports,
                 string_table,
             );
-            log_stage_timing(
+            timed_manual_finish!(
                 "stage0.reachable_discovery.provider_imports",
                 provider_imports_start,
             );
             result?;
-            crate::timing::record_counter("stage0.reachable_discovery.provider_imports", 1.0);
+            counter_observation!("stage0.reachable_discovery.provider_imports", 1.0);
             return Ok(ImportPolicyAction::Skip);
         }
 

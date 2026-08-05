@@ -8,6 +8,8 @@ use crate::build_system::build::BuildResult;
 use crate::build_system::output::{
     OutputPlan, SingleFileOutputPlan, WriteMode, WriteOptions, write_project_outputs,
 };
+use crate::command_timing_finish;
+use crate::command_timing_start;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, SourceLocation};
 use crate::compiler_frontend::display_messages::{print_compiler_messages, print_formatted_error};
@@ -21,6 +23,7 @@ use crate::projects::command_status::{
 use crate::projects::dev_server::{self, DevServerOptions};
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use crate::projects::html_project::new_html_project::NewHtmlProjectOptions;
+use crate::timed_manual_finish;
 use saying::say;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -154,7 +157,7 @@ pub fn start_cli() -> process::ExitCode {
 }
 
 fn run_build_command(path: &str, flags: &[Flag]) -> CommandStatus {
-    crate::timing::start_command_timing();
+    command_timing_start!();
     let start = Instant::now();
     let project_builder = build::ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
     let (status, diagnostic_counts) = match build::build_project(&project_builder, path, flags) {
@@ -165,14 +168,14 @@ fn run_build_command(path: &str, flags: &[Flag]) -> CommandStatus {
                 let output_root = match env::current_dir() {
                     Ok(path) => path,
                     Err(error) => {
-                        log_cli_total("command.build.total", start);
+                        timed_manual_finish!("command.build.total", start);
                         print_formatted_error(
                             CompilerError::compiler_error(format!(
                                 "Could not resolve current directory for build outputs: {error}"
                             )),
                             &build_result.string_table,
                         );
-                        crate::timing::print_command_timing_summary();
+                        command_timing_finish!(false);
                         return CommandStatus::Failure;
                     }
                 };
@@ -180,9 +183,9 @@ fn run_build_command(path: &str, flags: &[Flag]) -> CommandStatus {
                     match single_file_project_entry_dir(&build_result.config.entry_dir) {
                         Ok(path) => path,
                         Err(error) => {
-                            log_cli_total("command.build.total", start);
+                            timed_manual_finish!("command.build.total", start);
                             print_formatted_error(error, &build_result.string_table);
-                            crate::timing::print_command_timing_summary();
+                            command_timing_finish!(false);
                             return CommandStatus::Failure;
                         }
                     };
@@ -198,6 +201,7 @@ fn run_build_command(path: &str, flags: &[Flag]) -> CommandStatus {
                 })
             };
 
+            #[cfg(feature = "timers")]
             let output_write_start = crate::timing::start_pipeline_timing();
             let write_result = write_project_outputs(
                 &build_result.project,
@@ -207,18 +211,18 @@ fn run_build_command(path: &str, flags: &[Flag]) -> CommandStatus {
                 },
                 &build_result.string_table,
             );
-            log_cli_timing("command.build.output_write", output_write_start);
+            timed_manual_finish!("command.build.output_write", output_write_start);
 
             match write_result {
                 Ok(()) => {
                     let duration = start.elapsed();
                     let warning_count = build_result.warnings.len();
-                    log_cli_total("command.build.total", start);
+                    timed_manual_finish!("command.build.total", start);
                     print_build_message(build_result, duration);
                     (CommandStatus::Success, Some((0, warning_count)))
                 }
                 Err(mut messages) => {
-                    log_cli_total("command.build.total", start);
+                    timed_manual_finish!("command.build.total", start);
                     messages.extend_diagnostics(build_result.warnings);
                     print_compiler_messages(messages);
                     (CommandStatus::Failure, None)
@@ -227,12 +231,12 @@ fn run_build_command(path: &str, flags: &[Flag]) -> CommandStatus {
         }
         Err(messages) => {
             let diagnostic_counts = benchmark_diagnostic_counts(&messages);
-            log_cli_total("command.build.total", start);
+            timed_manual_finish!("command.build.total", start);
             print_compiler_messages(messages);
             (CommandStatus::Failure, diagnostic_counts)
         }
     };
-    crate::timing::print_command_timing_summary();
+    command_timing_finish!(matches!(status, CommandStatus::Success));
     if let Some((error_count, warning_count)) = diagnostic_counts {
         emit_benchmark_status(error_count, warning_count);
     }
@@ -269,30 +273,6 @@ fn single_file_project_entry_dir(entry_path: &Path) -> Result<PathBuf, CompilerE
         entry_path.display(),
         parent.display()
     )))
-}
-
-/// Record a CLI command stage timing through the central `timers` substrate.
-#[cfg(feature = "timers")]
-fn log_cli_timing(metric: &str, start: crate::timing::PipelineTimingStart) {
-    crate::timing::record_started_pipeline_timing(metric, start);
-}
-
-/// No-op timing recorder when `timers` is off.
-#[cfg(not(feature = "timers"))]
-fn log_cli_timing(_metric: &str, _start: crate::timing::PipelineTimingStart) {
-    let _ = (_metric, _start);
-}
-
-/// Record the total CLI build duration from the user-visible command start.
-#[cfg(feature = "timers")]
-fn log_cli_total(metric: &str, start: Instant) {
-    crate::timing::record_pipeline_timing(metric, start.elapsed());
-}
-
-/// No-op total recorder when `timers` is off.
-#[cfg(not(feature = "timers"))]
-fn log_cli_total(_metric: &str, _start: Instant) {
-    let _ = (_metric, _start);
 }
 
 fn integration_run_status(summary: IntegrationRunSummary) -> CommandStatus {

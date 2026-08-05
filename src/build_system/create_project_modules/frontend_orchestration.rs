@@ -9,6 +9,7 @@ use crate::build_system::build::{
     ModuleExternalImport, ModuleLinkFacts, ModuleRootActivity, ModuleSemanticDraft,
     ResolvedConstFragment,
 };
+use crate::timed_frontend_stage;
 
 use crate::builder_surface::external_import_providers::provider::BuilderRuntimePackageMetadata;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
@@ -407,7 +408,7 @@ impl ModulePreparationContext<'_> {
         entry_file_path: &Path,
         mut string_table: StringTable,
         source_byte_count: usize,
-        module_label: Option<&str>,
+        #[cfg(feature = "timers")] module_label: Option<&str>,
     ) -> Result<PreparedModule, CompilerMessages> {
         let mut warnings = Vec::new();
         let contains_moth_template = module.iter().any(PreparedSourceInput::is_moth_template);
@@ -428,7 +429,7 @@ impl ModulePreparationContext<'_> {
         // 2. Prepare all files against one local string-table per worker chunk. Moth files
         //    parse retained Stage 0 tokens, Moth template tokenizes its body once and plain Markdown
         //    bypasses tokenization. Merge/remap once before aggregating header syntax.
-        let (prepared_header_syntax, file_warnings) = timed_frontend_stage(
+        let (prepared_header_syntax, file_warnings) = timed_frontend_stage!(
             "frontend.file_prepare",
             "Files Prepared in: ",
             module_label,
@@ -1052,7 +1053,7 @@ impl FrontendModuleBuildContext<'_> {
         &self,
         prepared: PreparedModule,
         entry_file_path: &Path,
-        module_label: Option<&str>,
+        #[cfg(feature = "timers")] module_label: Option<&str>,
         mut generated_worklist: GeneratedFunctionWorklist<'_>,
     ) -> Result<ModuleCompilationOutcome, CompilerError> {
         let PreparedModule {
@@ -1097,7 +1098,7 @@ impl FrontendModuleBuildContext<'_> {
 
         let compile_result = (|| {
             // 1. Bind retained header syntax against provider interfaces.
-            let module_headers = timed_frontend_stage(
+            let module_headers = timed_frontend_stage!(
                 "frontend.header_bind",
                 "Headers bound in: ",
                 module_label,
@@ -1119,7 +1120,7 @@ impl FrontendModuleBuildContext<'_> {
             );
 
             // 2. Resolve dependencies and sort headers for linear processing.
-            let sorted = timed_frontend_stage(
+            let sorted = timed_frontend_stage!(
                 "frontend.dependency_sort",
                 "Dependency graph created in: ",
                 module_label,
@@ -1196,7 +1197,7 @@ impl FrontendModuleBuildContext<'_> {
             // table that step 4 joins with the pre-AST `DirectExportSeed` to build the post-AST
             // `CallableSeed` table, the one receiver and callable identity owner.
             let module_ast_build =
-                timed_frontend_stage("frontend.ast", "AST created in: ", module_label, || {
+                timed_frontend_stage!("frontend.ast", "AST created in: ", module_label, || {
                     self.build_ast(
                         &mut compiler,
                         sorted,
@@ -1326,7 +1327,7 @@ impl FrontendModuleBuildContext<'_> {
 
             // 6. Lower AST to Higher-level Intermediate Representation (HIR).
             let hir_lowering =
-                timed_frontend_stage("frontend.hir", "HIR generated in: ", module_label, || {
+                timed_frontend_stage!("frontend.hir", "HIR generated in: ", module_label, || {
                     Self::lower_hir(&mut compiler, module_ast, &warnings, function_origin_lookup)
                 })?;
             let HirLoweringResult {
@@ -1345,7 +1346,7 @@ impl FrontendModuleBuildContext<'_> {
             }
 
             // 8. Run static analysis (Borrow Checker).
-            let bootstrap_borrow_analysis = timed_frontend_stage(
+            let bootstrap_borrow_analysis = timed_frontend_stage!(
                 "frontend.borrow",
                 "Borrow checking completed in: ",
                 module_label,
@@ -1380,7 +1381,7 @@ impl FrontendModuleBuildContext<'_> {
                 .max(1);
             let mut stable_borrow_analysis = None;
             for _ in 0..convergence_limit {
-                let borrow_analysis = timed_frontend_stage(
+                let borrow_analysis = timed_frontend_stage!(
                     "frontend.borrow.exact_generated",
                     "Exact generated-call borrow checking completed in: ",
                     module_label,
@@ -2645,6 +2646,7 @@ fn collect_source_logical_paths_from_table(
 ///      short label suitable for the concise timing summary's "slowest module" line.
 /// WHY:  the label stays out of stable `MOTH_BENCH timing` lines; it is display-only
 ///       evidence so the summary can attribute the max sample without per-module listing.
+#[cfg(feature = "timers")]
 pub(super) fn module_timing_label(
     entry_file_path: &Path,
     source_file_count: usize,
@@ -2664,41 +2666,12 @@ pub(super) fn module_timing_label(
     )
 }
 
-/// Record one frontend pipeline stage through the central `timers` substrate.
-///
-/// WHAT: wraps a `Result`-returning stage so its duration is always recorded,
-///      regardless of success or error, with an optional module attribution label.
-/// WHY:  Phase 4 migrates public frontend stage timings from the `detailed_timers`
-///       macro to the central `timers` collector so concise `timers`-only builds
-///       see project-level aggregates.  Human prose stays gated by `detailed_timers`
-///       for verbose developer output; the xtask legacy parser reads that prose to
-///       attribute legacy metric names until Phase 6 updates xtask ratio definitions.
-fn timed_frontend_stage<T>(
-    metric: &str,
-    prose_label: &str,
-    module_label: Option<&str>,
-    stage: impl FnOnce() -> Result<T, CompilerMessages>,
-) -> Result<T, CompilerMessages> {
-    let start = crate::timing::start_pipeline_timing();
-    let result = stage();
-    crate::timing::record_started_pipeline_timing_with_label(metric, start, module_label);
-
-    // Human prose stays gated by detailed_timers for verbose developer output.
-    #[cfg(feature = "detailed_timers")]
-    {
-        if crate::compiler_frontend::compiler_messages::compiler_dev_logging::detailed_timer_output_enabled() {
-            saying::say!(prose_label, Green #start.elapsed());
-        }
-    }
-
-    // Keep parameters visibly used when detailed_timers is off.
-    let _ = prose_label;
-
-    result
-}
-
 #[cfg(feature = "detailed_timers")]
-fn timed_frontend_substep<T>(metric_name: &str, label: &str, substep: impl FnOnce() -> T) -> T {
+fn timed_frontend_substep<T>(
+    metric_name: &'static str,
+    label: &str,
+    substep: impl FnOnce() -> T,
+) -> T {
     let start = Instant::now();
     let result = substep();
     benchmark_timer_log!(start, metric_name, label);
@@ -2706,7 +2679,11 @@ fn timed_frontend_substep<T>(metric_name: &str, label: &str, substep: impl FnOnc
 }
 
 #[cfg(not(feature = "detailed_timers"))]
-fn timed_frontend_substep<T>(_metric_name: &str, _label: &str, substep: impl FnOnce() -> T) -> T {
+fn timed_frontend_substep<T>(
+    _metric_name: &'static str,
+    _label: &str,
+    substep: impl FnOnce() -> T,
+) -> T {
     substep()
 }
 

@@ -32,7 +32,10 @@ use crate::compiler_frontend::source_packages::root_file::{
     file_name_is_normal_module_root_file, file_name_is_support_root_file,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::counter_observation;
 use crate::projects::settings::Config;
+#[cfg(feature = "timers")]
+use crate::timed_manual_finish;
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -543,6 +546,7 @@ impl SourceTreeIndex {
         external_import_providers: &ExternalImportProviderRegistry,
         string_table: &mut StringTable,
     ) -> Result<Self, CompilerMessages> {
+        #[cfg(feature = "timers")]
         let discovery_start = crate::timing::start_pipeline_timing();
 
         let SourceTreeBoundary {
@@ -860,7 +864,10 @@ impl SourceTreeIndex {
             );
         }
 
-        record_discovery_metrics(&stats, discovery_start);
+        record_discovery_metrics(&stats);
+
+        #[cfg(feature = "timers")]
+        timed_manual_finish!("stage0.source_tree_index.discovery", discovery_start);
 
         let module_identities = ModuleIdentityTable::from_records(records);
         let module_roots = module_identities.derive_module_root_table();
@@ -1615,31 +1622,30 @@ fn build_source_inventory(
     })
 }
 
-fn record_discovery_metrics(
-    stats: &SourceTreeDiscoveryStats,
-    discovery_start: crate::timing::PipelineTimingStart,
-) {
-    crate::timing::record_started_pipeline_timing(
-        "stage0.source_tree_index.discovery",
-        discovery_start,
-    );
-    crate::timing::record_counter("source_tree_index.discovery_runs", 1.0);
-    crate::timing::record_counter("source_tree_index.dirs_visited", stats.dirs_visited as f64);
-    crate::timing::record_counter("source_tree_index.dirs_skipped", stats.dirs_skipped as f64);
-    crate::timing::record_counter("source_tree_index.files_seen", stats.files_seen as f64);
-    crate::timing::record_counter(
+// Without both `timers` and `benchmark_counters` every body reference to
+// `stats` expands away, so the parameter is intentionally unused there.
+#[cfg_attr(
+    not(all(feature = "timers", feature = "benchmark_counters")),
+    allow(unused_variables)
+)]
+fn record_discovery_metrics(stats: &SourceTreeDiscoveryStats) {
+    counter_observation!("source_tree_index.discovery_runs", 1.0);
+    counter_observation!("source_tree_index.dirs_visited", stats.dirs_visited as f64);
+    counter_observation!("source_tree_index.dirs_skipped", stats.dirs_skipped as f64);
+    counter_observation!("source_tree_index.files_seen", stats.files_seen as f64);
+    counter_observation!(
         "source_tree_index.normal_root_files_seen",
         stats.normal_root_files_seen as f64,
     );
-    crate::timing::record_counter(
+    counter_observation!(
         "source_tree_index.support_root_files_seen",
         stats.support_root_files_seen as f64,
     );
-    crate::timing::record_counter(
+    counter_observation!(
         "source_tree_index.module_roots_found",
         stats.module_roots_found as f64,
     );
-    crate::timing::record_counter(
+    counter_observation!(
         "source_tree_index.project_package_facade_found",
         if stats.project_package_facade_found {
             1.0

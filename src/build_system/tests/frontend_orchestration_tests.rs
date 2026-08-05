@@ -470,8 +470,10 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
     let local_table = string_table.fork_source().fork_for_module().into_parts().0;
 
     let source_byte_count = source_byte_count(&input_files);
+    #[cfg(feature = "timers")]
     let module_label_text =
         super::module_timing_label(&canonical_entry, input_files.len(), source_byte_count);
+    #[cfg(feature = "timers")]
     let module_label: Option<&str> = Some(&module_label_text);
 
     let external_packages = Arc::new(ExternalPackageRegistry::new());
@@ -515,16 +517,24 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
     )
     .expect("synthetic single-file module origin should construct");
 
-    let prepared = preparation_context
-        .prepare_module(
-            stable_origin.clone(),
-            &input_files,
-            &canonical_entry,
-            local_table,
-            source_byte_count,
-            module_label,
-        )
-        .expect("module preparation should succeed");
+    #[cfg(feature = "timers")]
+    let prepared_result = preparation_context.prepare_module(
+        stable_origin.clone(),
+        &input_files,
+        &canonical_entry,
+        local_table,
+        source_byte_count,
+        module_label,
+    );
+    #[cfg(not(feature = "timers"))]
+    let prepared_result = preparation_context.prepare_module(
+        stable_origin.clone(),
+        &input_files,
+        &canonical_entry,
+        local_table,
+        source_byte_count,
+    );
+    let prepared = prepared_result.expect("module preparation should succeed");
 
     assert!(
         prepared
@@ -561,14 +571,20 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
 
     let generated_store =
         super::super::generated_worklist::BoundaryGeneratedFunctionStore::default();
-    let draft = compile_context
-        .compile_module_semantic(
-            prepared,
-            &canonical_entry,
-            module_label,
-            generated_store.session(),
-        )
-        .expect("semantic compilation should succeed");
+    #[cfg(feature = "timers")]
+    let semantic_result = compile_context.compile_module_semantic(
+        prepared,
+        &canonical_entry,
+        module_label,
+        generated_store.session(),
+    );
+    #[cfg(not(feature = "timers"))]
+    let semantic_result = compile_context.compile_module_semantic(
+        prepared,
+        &canonical_entry,
+        generated_store.session(),
+    );
+    let draft = semantic_result.expect("semantic compilation should succeed");
 
     let draft = match draft {
         super::ModuleCompilationOutcome::Success(draft) => draft,
@@ -670,19 +686,28 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
     )
     .expect("API-only stable origin should construct");
     let source_byte_count = source_byte_count(&input_files);
-    let prepared = super::ModulePreparationContext {
+    let preparation_context = super::ModulePreparationContext {
         style_directives: &style_directives,
         project_path_resolver: Some(project_path_resolver.clone()),
-    }
-    .prepare_module(
+    };
+    #[cfg(feature = "timers")]
+    let prepared_result = preparation_context.prepare_module(
         stable_origin.clone(),
         &input_files,
         &canonical_entry,
         local_table,
         source_byte_count,
         None,
-    )
-    .expect("API-only module preparation should succeed");
+    );
+    #[cfg(not(feature = "timers"))]
+    let prepared_result = preparation_context.prepare_module(
+        stable_origin.clone(),
+        &input_files,
+        &canonical_entry,
+        local_table,
+        source_byte_count,
+    );
+    let prepared = prepared_result.expect("API-only module preparation should succeed");
 
     let external_packages = Arc::new(ExternalPackageRegistry::new());
     let resolution_table = ExternalImportResolutionTable::default();
@@ -700,9 +725,21 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
     };
     let generated_store =
         super::super::generated_worklist::BoundaryGeneratedFunctionStore::default();
-    let outcome = compile_context
-        .compile_module_semantic(prepared, &canonical_entry, None, generated_store.session())
-        .expect("API-only semantic compilation should not fail internally");
+    #[cfg(feature = "timers")]
+    let semantic_result = compile_context.compile_module_semantic(
+        prepared,
+        &canonical_entry,
+        None,
+        generated_store.session(),
+    );
+    #[cfg(not(feature = "timers"))]
+    let semantic_result = compile_context.compile_module_semantic(
+        prepared,
+        &canonical_entry,
+        generated_store.session(),
+    );
+    let outcome =
+        semantic_result.expect("API-only semantic compilation should not fail internally");
     let draft = match outcome {
         super::ModuleCompilationOutcome::Success(draft) => draft,
         super::ModuleCompilationOutcome::Diagnosed(diagnostics) => {

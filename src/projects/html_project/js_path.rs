@@ -28,6 +28,7 @@ use crate::projects::html_project::document_shell::render_html_document_shell;
 use crate::projects::html_project::external_js::runtime_glue::generate_module_glue;
 use crate::projects::html_project::output_plan::derive_logical_html_path;
 use crate::projects::html_project::page_metadata::extract_html_page_metadata;
+use crate::timing_guard;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -121,7 +122,7 @@ pub(crate) fn compile_html_module_js(
     );
 
     let mut js_module = {
-        let _lower_hir_guard = crate::timing::PipelineTimingGuard::new("backend.js.lower_hir");
+        timing_guard!("backend.js.lower_hir");
         lower_hir_to_js(
             input.hir_module,
             input.borrow_analysis,
@@ -212,8 +213,7 @@ pub(crate) fn compile_html_module_js(
     // Generate glue modules and import preamble only for external module exports referenced by
     // emitted JS. In HTML page bundles, JS lowering has already filtered unreachable wrappers.
     let glue_result = {
-        let _glue_guard =
-            crate::timing::PipelineTimingGuard::new("backend.js.generate_module_glue");
+        timing_guard!("backend.js.generate_module_glue");
         generate_module_glue(
             module,
             external_imports,
@@ -233,8 +233,7 @@ pub(crate) fn compile_html_module_js(
     };
 
     let html = {
-        let _render_guard =
-            crate::timing::PipelineTimingGuard::new("backend.js.render_html_document");
+        timing_guard!("backend.js.render_html_document");
         render_html_document(&mut HtmlDocumentRenderInput {
             hir_module: input.hir_module,
             const_fragments: input.const_fragments,

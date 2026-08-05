@@ -17,7 +17,8 @@ Modes:
   bench-frontend-check Run the focused frontend benchmark suite without writing history
   bench-frontend       Run the focused frontend benchmark suite and record
   bench-validate       Validate all benchmark cases compile without errors
-  bench-profile        Run Samply-backed profiling (use --help for options)";
+  bench-profile        Run Samply-backed profiling (use --help for options)
+  timers-erasure-check Build a no-timer release binary and verify zero-cost erasure";
 
 /// Distinguishes the supported xtask benchmark modes.
 ///
@@ -45,6 +46,8 @@ pub enum BenchmarkMode {
     BenchValidate,
     /// Run Samply-backed profiling on benchmark cases.
     BenchProfile(ProfileOptions),
+    /// Prove that a no-timer release binary contains no timer-only markers.
+    TimersErasureCheck,
 }
 
 /// Result of parsing the full xtask command line.
@@ -85,6 +88,7 @@ impl BenchmarkMode {
             "bench-frontend" => Some(BenchmarkMode::BenchFrontend),
             "bench-frontend-check" => Some(BenchmarkMode::BenchFrontendCheck),
             "bench-validate" => Some(BenchmarkMode::BenchValidate),
+            "timers-erasure-check" => Some(BenchmarkMode::TimersErasureCheck),
             _ => None,
         };
 

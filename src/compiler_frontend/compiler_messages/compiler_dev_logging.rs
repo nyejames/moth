@@ -12,6 +12,9 @@
 //! (`timer_log!`, `benchmark_timer_log!`, `log_aggregated_duration`) stay gated by
 //! `detailed_timers`.
 
+#[cfg(feature = "benchmark_counters")]
+use crate::counter_observation;
+
 #[cfg(feature = "detailed_timers")]
 use std::time::Duration;
 
@@ -111,16 +114,15 @@ pub fn log_aggregated_duration(label: &str, duration: Duration) {
 /// WHY: separating the stable metric line from colored human output lets compiler
 /// logging change its prose without silently breaking performance attribution.
 #[cfg(feature = "detailed_timers")]
-pub fn log_benchmark_timing(metric_name: &str, duration: Duration) {
+pub fn log_benchmark_timing(metric_name: &'static str, duration: Duration) {
     if metric_name.trim().is_empty() {
         return;
     }
 
-    let millis = duration.as_secs_f64() * 1000.0;
     crate::timing::emit_bench_timing_line(metric_name, duration);
 
     // Delegate timing storage to the central timing collector.
-    crate::timing::record_timing(metric_name, millis);
+    crate::timing::record_timing(metric_name, duration);
 }
 
 /// Emit one stable, machine-readable benchmark counter observation.
@@ -137,13 +139,13 @@ pub fn log_benchmark_timing(metric_name: &str, duration: Duration) {
 /// `timing::emit_bench_counter_line`, which honors the `MOTH_COUNTERS` mode
 /// and the in-process output-suppression flag.
 #[cfg(feature = "benchmark_counters")]
-pub fn log_benchmark_counter(metric_name: &str, value: f64) {
+pub fn log_benchmark_counter(metric_name: &'static str, value: f64) {
     if metric_name.trim().is_empty() || !value.is_finite() {
         return;
     }
 
     crate::timing::emit_bench_counter_line(metric_name, value);
-    crate::timing::record_counter(metric_name, value);
+    counter_observation!(metric_name, value);
 }
 
 #[cfg(feature = "detailed_timers")]
