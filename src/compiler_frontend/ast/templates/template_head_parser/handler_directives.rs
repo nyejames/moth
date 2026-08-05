@@ -56,10 +56,11 @@ pub(super) fn apply_handler_style_directive(
     apply_style_directive_effects(build_state, handler_spec.effects);
 
     if let Some(factory) = handler_spec.formatter_factory {
-        let formatter = factory(parsed_argument.value.as_ref()).map_err(|_message| {
+        let formatter = factory(parsed_argument.value.as_ref()).map_err(|message| {
+            let message_id = string_table.get_or_intern(message);
             CompilerDiagnostic::invalid_template_directive(
                 Some(string_table.intern(directive_name)),
-                InvalidTemplateDirectiveReason::InvalidArgument,
+                InvalidTemplateDirectiveReason::invalid_argument_with_detail(message_id),
                 parsed_argument.error_location,
             )
         })?;
@@ -139,7 +140,7 @@ fn parse_optional_handler_style_argument(
     if !argument_is_compile_time_constant {
         return Err(Box::new(CompilerDiagnostic::invalid_template_directive(
             Some(string_table.intern(directive_name)),
-            InvalidTemplateDirectiveReason::InvalidArgument,
+            InvalidTemplateDirectiveReason::invalid_argument(),
             argument_location,
         )));
     }
@@ -175,7 +176,7 @@ fn normalize_provided_style_argument_value(
             )),
             _ => Err(Box::new(CompilerDiagnostic::invalid_template_directive(
                 Some(string_table.intern(directive_name)),
-                InvalidTemplateDirectiveReason::InvalidArgument,
+                InvalidTemplateDirectiveReason::invalid_argument(),
                 argument_location.clone(),
             ))),
         },
@@ -186,7 +187,7 @@ fn normalize_provided_style_argument_value(
             )),
             _ => Err(Box::new(CompilerDiagnostic::invalid_template_directive(
                 Some(string_table.intern(directive_name)),
-                InvalidTemplateDirectiveReason::InvalidArgument,
+                InvalidTemplateDirectiveReason::invalid_argument(),
                 argument_location.clone(),
             ))),
         },
@@ -196,7 +197,7 @@ fn normalize_provided_style_argument_value(
             ExpressionKind::Float(value) => Ok(StyleDirectiveArgumentValue::Number(value)),
             _ => Err(Box::new(CompilerDiagnostic::invalid_template_directive(
                 Some(string_table.intern(directive_name)),
-                InvalidTemplateDirectiveReason::InvalidArgument,
+                InvalidTemplateDirectiveReason::invalid_argument(),
                 argument_location.clone(),
             ))),
         },
@@ -205,7 +206,7 @@ fn normalize_provided_style_argument_value(
             ExpressionKind::Bool(value) => Ok(StyleDirectiveArgumentValue::Bool(value)),
             _ => Err(Box::new(CompilerDiagnostic::invalid_template_directive(
                 Some(string_table.intern(directive_name)),
-                InvalidTemplateDirectiveReason::InvalidArgument,
+                InvalidTemplateDirectiveReason::invalid_argument(),
                 argument_location.clone(),
             ))),
         },

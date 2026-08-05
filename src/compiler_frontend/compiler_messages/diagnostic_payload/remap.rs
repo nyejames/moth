@@ -252,9 +252,17 @@ impl DiagnosticPayload {
                 }
             }
 
-            DiagnosticPayload::InvalidTemplateDirective { directive_name, .. } => {
+            DiagnosticPayload::InvalidTemplateDirective {
+                directive_name,
+                reason,
+            } => {
                 if let Some(directive_name) = directive_name {
                     *directive_name = remap.get(*directive_name);
+                }
+                if let InvalidTemplateDirectiveReason::InvalidArgument { detail } = reason
+                    && let Some(detail) = detail
+                {
+                    *detail = remap.get(*detail);
                 }
             }
 

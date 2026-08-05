@@ -681,7 +681,11 @@ pub enum InvalidGenericParameterReason {
 pub enum InvalidTemplateDirectiveReason {
     UnknownDirective,
     MissingArgument,
-    InvalidArgument,
+    /// Optional helpful detail from the directive's own argument validation,
+    /// for example an unsupported language name plus the supported aliases.
+    InvalidArgument {
+        detail: Option<StringId>,
+    },
     DirectiveNotAllowedHere,
     /// Directive received parenthesized arguments it does not accept.
     UnexpectedArguments,
@@ -693,6 +697,18 @@ pub enum InvalidTemplateDirectiveReason {
     InvalidInsertTarget,
     /// `$children` received an invalid wrapper argument.
     InvalidChildrenArgument,
+}
+
+impl InvalidTemplateDirectiveReason {
+    pub(crate) const fn invalid_argument() -> Self {
+        Self::InvalidArgument { detail: None }
+    }
+
+    pub(crate) const fn invalid_argument_with_detail(detail: StringId) -> Self {
+        Self::InvalidArgument {
+            detail: Some(detail),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

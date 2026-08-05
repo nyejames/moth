@@ -1,5 +1,6 @@
 use crate::compiler_frontend::ast::templates::formatter_contract::{
-    FormatterInput, FormatterInputPiece, FormatterOutputPiece, FormatterTextPiece,
+    FormatterInput, FormatterInputPiece, FormatterOpaqueKind, FormatterOpaquePiece,
+    FormatterOutputPiece, FormatterTextPiece,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
@@ -92,16 +93,117 @@ fn text_code_formatter_escapes_html_without_highlighting() {
         .formatter
         .format(input, &mut string_table)
         .expect("code formatter should succeed");
-    let content = match &output.output.pieces[0] {
-        FormatterOutputPiece::Text(t) => t,
-        _ => panic!("Expected text output"),
-    };
+    let content = output
+        .output
+        .pieces
+        .iter()
+        .map(|piece| match piece {
+            FormatterOutputPiece::Text(text) => text.as_str(),
+            FormatterOutputPiece::Opaque(_) => "<opaque>",
+        })
+        .collect::<String>();
 
     assert!(content.starts_with("<code class='codeblock'>"));
     assert!(content.ends_with("</code>"));
     assert!(content.contains("&lt;tag&gt;&amp;&quot;quoted&quot;"));
     assert!(!content.contains("<tag>"));
     assert!(!content.contains("moth-code-"));
+}
+
+#[test]
+fn code_formatter_wraps_opaque_pieces_inside_the_code_block() {
+    let mut string_table = StringTable::new();
+    let formatter = code_formatter(CodeLanguage::Moth);
+    let text_id = string_table.intern("value = 1");
+    let opaque = FormatterOpaquePiece {
+        id: crate::compiler_frontend::ast::templates::formatter_contract::FormatterAnchorId(0),
+        kind: FormatterOpaqueKind::DynamicExpression,
+    };
+    let input = FormatterInput {
+        pieces: vec![
+            FormatterInputPiece::Opaque(opaque),
+            FormatterInputPiece::Text(FormatterTextPiece {
+                text: text_id,
+                location: SourceLocation::default(),
+            }),
+            FormatterInputPiece::Opaque(opaque),
+        ],
+    };
+
+    let output = formatter
+        .formatter
+        .format(input, &mut string_table)
+        .expect("code formatter should succeed");
+    let pieces = output.output.pieces;
+
+    assert!(
+        matches!(
+            &pieces[0],
+            FormatterOutputPiece::Text(text) if text == "<code class='codeblock'>"
+        ),
+        "the opening wrapper must be the first output piece"
+    );
+    assert!(
+        matches!(
+            &pieces[1],
+            FormatterOutputPiece::Opaque(anchor) if *anchor == opaque
+        ),
+        "a leading dynamic expression must stay inside the wrapper"
+    );
+    assert!(matches!(
+        &pieces[2],
+        FormatterOutputPiece::Text(text) if text.contains("moth-code-operator'>=</span>")
+    ));
+    assert!(
+        matches!(
+            &pieces[3],
+            FormatterOutputPiece::Opaque(anchor) if *anchor == opaque
+        ),
+        "a trailing dynamic expression must stay inside the wrapper"
+    );
+    assert!(
+        matches!(
+            &pieces[4],
+            FormatterOutputPiece::Text(text) if text == "</code>"
+        ),
+        "the closing wrapper must be the last output piece"
+    );
+}
+
+#[test]
+fn code_formatter_wraps_an_opaque_only_body() {
+    let mut string_table = StringTable::new();
+    let formatter = code_formatter(CodeLanguage::Moth);
+    let opaque = FormatterOpaquePiece {
+        id: crate::compiler_frontend::ast::templates::formatter_contract::FormatterAnchorId(7),
+        kind: FormatterOpaqueKind::DynamicExpression,
+    };
+    let input = FormatterInput {
+        pieces: vec![FormatterInputPiece::Opaque(opaque)],
+    };
+
+    let output = formatter
+        .formatter
+        .format(input, &mut string_table)
+        .expect("code formatter should succeed");
+    let pieces = output.output.pieces;
+
+    let piece_kinds = pieces
+        .iter()
+        .map(|piece| match piece {
+            FormatterOutputPiece::Text(text) => format!("text:{text}"),
+            FormatterOutputPiece::Opaque(_) => "opaque".to_owned(),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        piece_kinds,
+        vec![
+            "text:<code class='codeblock'>".to_owned(),
+            "opaque".to_owned(),
+            "text:</code>".to_owned(),
+        ],
+        "an opaque-only body must still produce a complete code block wrapper"
+    );
 }
 
 #[test]
@@ -290,6 +392,33 @@ fn moth_number_runs_do_not_swallow_range_operators() {
     assert_eq!(
         highlighted,
         "<span class='moth-code-number'>1</span><span class='moth-code-operator'>..</span><span class='moth-code-number'>10</span>"
+    );
+}
+
+#[test]
+fn non_moth_number_runs_stop_before_ranges_and_method_dots() {
+    let range = highlight_code_html("for i in 0..10", CodeLanguage::Rust);
+    assert!(
+        range.contains(
+            "<span class='moth-code-number'>0</span>..<span class='moth-code-number'>10</span>"
+        ),
+        "a Rust range must keep `..` outside the number spans, got: {range}"
+    );
+
+    let float_method = highlight_code_html("let value = 1.0.to_string();", CodeLanguage::Rust);
+    assert!(
+        float_method.contains("<span class='moth-code-number'>1.0</span>.to_string"),
+        "a float method dot must not join the number span, got: {float_method}"
+    );
+    assert!(
+        !float_method.contains("<span class='moth-code-number'>1.0.</span>"),
+        "the trailing method dot must stay outside the number span, got: {float_method}"
+    );
+
+    let python_attribute = highlight_code_html("value = 1.0.real", CodeLanguage::Python);
+    assert!(
+        python_attribute.contains("<span class='moth-code-number'>1.0</span>.real"),
+        "a Python float attribute dot must not join the number span, got: {python_attribute}"
     );
 }
 
@@ -784,6 +913,24 @@ fn html_markdown_and_toml_aliases_select_dedicated_profiles() {
     assert_eq!(CodeLanguage::from_alias("css"), Some(CodeLanguage::Css));
     assert_eq!(CodeLanguage::from_alias("c"), Some(CodeLanguage::C));
     assert_eq!(CodeLanguage::from_alias("sql"), Some(CodeLanguage::Sql));
+}
+
+#[test]
+fn language_alias_table_is_consistent_with_supported_values_message() {
+    let supported = CodeLanguage::supported_aliases();
+
+    for (alias, expected_language) in crate::projects::html_project::styles::code::LANGUAGE_ALIASES
+    {
+        assert_eq!(
+            CodeLanguage::from_alias(alias),
+            Some(*expected_language),
+            "alias {alias:?} must resolve through the table"
+        );
+        assert!(
+            supported.contains(&format!("\"{alias}\"")),
+            "alias {alias:?} must appear in the supported-values message, got: {supported}"
+        );
+    }
 }
 
 #[test]

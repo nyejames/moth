@@ -227,7 +227,7 @@ define_stable_reason_keys! {
     InvalidTemplateDirectiveReason => {
     &InvalidTemplateDirectiveReason::UnknownDirective => "invalid_template_directive.unknown_directive",
     &InvalidTemplateDirectiveReason::MissingArgument => "invalid_template_directive.missing_argument",
-    &InvalidTemplateDirectiveReason::InvalidArgument => "invalid_template_directive.invalid_argument",
+    &InvalidTemplateDirectiveReason::InvalidArgument { .. } => "invalid_template_directive.invalid_argument",
     &InvalidTemplateDirectiveReason::DirectiveNotAllowedHere => "invalid_template_directive.directive_not_allowed_here",
     &InvalidTemplateDirectiveReason::UnexpectedArguments => "invalid_template_directive.unexpected_arguments",
     &InvalidTemplateDirectiveReason::EmptyArguments => "invalid_template_directive.empty_arguments",

@@ -207,11 +207,12 @@ Supported aliases:
 ]
 
 `$code` escapes HTML-sensitive characters and wraps the body in
-`<code class='codeblock'>`. Highlighting is lexical presentation only. It
-never validates the snippet, resolves names or reports diagnostics. Every
-language profile shares the same general role palette, and the Moth profile
-uses the compiler-owned source-word classification plus bounded lexical roles
-for contracts, functions, directives, import paths and the `io` namespace.
+`<code class='codeblock'>`. Dynamic expression anchors pass through as sealed
+content without highlighting or escaping. Highlighting is lexical presentation
+only. It never validates the snippet, resolves names or reports diagnostics.
+Every language profile shares the same general role palette, and the Moth
+profile uses the compiler-owned source-word classification plus bounded lexical
+roles for contracts, functions, directives, import paths and the `io` namespace.
 Stateful template-body-aware highlighting stays deferred.
 
 ### Canvas wrapper

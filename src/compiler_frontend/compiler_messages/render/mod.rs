@@ -205,8 +205,12 @@ pub(crate) fn invalid_template_directive_message(
         InvalidTemplateDirectiveReason::MissingArgument => {
             format!("Template directive '{name}' is missing a required argument.")
         }
-        InvalidTemplateDirectiveReason::InvalidArgument => {
-            format!("Invalid argument for template directive '{name}'.")
+        InvalidTemplateDirectiveReason::InvalidArgument { detail } => {
+            let message = format!("Invalid argument for template directive '{name}'.");
+            match detail {
+                Some(detail_id) => format!("{message} {}", string_table.resolve(detail_id)),
+                None => message,
+            }
         }
         InvalidTemplateDirectiveReason::DirectiveNotAllowedHere => {
             format!("Template directive '{name}' is not allowed here.")

@@ -170,30 +170,75 @@ pub(crate) enum CodeLanguage {
     Sql,
 }
 
+/// Canonical short and long aliases for every supported `$code` language.
+///
+/// WHAT: one table owns alias resolution and the supported-values diagnostic,
+///       so the two can never drift apart.
+/// WHY: adding a language means extending this table, its formatter rules and
+///      the documentation lists, not a second alias match somewhere else.
+pub(crate) const LANGUAGE_ALIASES: &[(&str, CodeLanguage)] = &[
+    ("txt", CodeLanguage::Text),
+    ("text", CodeLanguage::Text),
+    ("html", CodeLanguage::Html),
+    ("md", CodeLanguage::Markdown),
+    ("markdown", CodeLanguage::Markdown),
+    ("toml", CodeLanguage::Toml),
+    ("json", CodeLanguage::Json),
+    ("yaml", CodeLanguage::Yaml),
+    ("yml", CodeLanguage::Yaml),
+    ("css", CodeLanguage::Css),
+    ("c", CodeLanguage::C),
+    ("sql", CodeLanguage::Sql),
+    ("moth", CodeLanguage::Moth),
+    ("js", CodeLanguage::JavaScript),
+    ("javascript", CodeLanguage::JavaScript),
+    ("ts", CodeLanguage::TypeScript),
+    ("typescript", CodeLanguage::TypeScript),
+    ("py", CodeLanguage::Python),
+    ("python", CodeLanguage::Python),
+    ("rs", CodeLanguage::Rust),
+    ("rust", CodeLanguage::Rust),
+    ("bash", CodeLanguage::Shell),
+    ("sh", CodeLanguage::Shell),
+    ("shell", CodeLanguage::Shell),
+];
+
 impl CodeLanguage {
     pub(crate) fn from_alias(alias: &str) -> Option<Self> {
-        match alias {
-            "txt" | "text" => Some(Self::Text),
-            "html" => Some(Self::Html),
-            "md" | "markdown" => Some(Self::Markdown),
-            "toml" => Some(Self::Toml),
-            "json" => Some(Self::Json),
-            "yaml" | "yml" => Some(Self::Yaml),
-            "css" => Some(Self::Css),
-            "c" => Some(Self::C),
-            "sql" => Some(Self::Sql),
-            "moth" => Some(Self::Moth),
-            "js" | "javascript" => Some(Self::JavaScript),
-            "ts" | "typescript" => Some(Self::TypeScript),
-            "py" | "python" => Some(Self::Python),
-            "rs" | "rust" => Some(Self::Rust),
-            "bash" | "sh" | "shell" => Some(Self::Shell),
-            _ => None,
-        }
+        LANGUAGE_ALIASES
+            .iter()
+            .find(|(candidate, _)| *candidate == alias)
+            .map(|(_, language)| *language)
     }
 
-    pub(crate) fn supported_aliases() -> &'static str {
-        "\"txt\"/\"text\", \"html\", \"md\"/\"markdown\", \"toml\", \"json\", \"yaml\"/\"yml\", \"css\", \"c\", \"sql\", \"moth\", \"js\"/\"javascript\", \"ts\"/\"typescript\", \"py\"/\"python\", \"rs\"/\"rust\", \"bash\"/\"sh\"/\"shell\""
+    /// Renders the supported alias groups in table order, for example
+    /// `"txt"/"text", "html", ...`.
+    ///
+    /// WHY: the unsupported-language diagnostic should show the exact aliases
+    ///      `from_alias` accepts without keeping a second hand-written list.
+    pub(crate) fn supported_aliases() -> String {
+        let mut groups: Vec<(CodeLanguage, Vec<&str>)> = Vec::new();
+
+        for (alias, language) in LANGUAGE_ALIASES {
+            match groups.last_mut() {
+                Some((group_language, aliases)) if *group_language == *language => {
+                    aliases.push(alias);
+                }
+                _ => groups.push((*language, vec![alias])),
+            }
+        }
+
+        groups
+            .into_iter()
+            .map(|(_, aliases)| {
+                aliases
+                    .iter()
+                    .map(|alias| format!("\"{alias}\""))
+                    .collect::<Vec<_>>()
+                    .join("/")
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 
     fn comment_prefix(self) -> Option<&'static str> {
@@ -232,23 +277,23 @@ impl TemplateFormatter for CodeTemplateFormatter {
         string_table: &mut StringTable,
     ) -> Result<FormatterResult, CompilerMessages> {
         // Process each text piece through syntax highlighting. Opaque anchors (child
-        // templates, dynamic expressions) pass through without highlighting.
-        let mut output_pieces: Vec<FormatterOutputPiece> = Vec::with_capacity(input.pieces.len());
-        let mut first_text_emitted = false;
+        // templates, dynamic expressions) pass through without highlighting. The
+        // <code> wrapper is emitted as explicit boundary pieces so sealed anchors
+        // stay inside the block regardless of their position in the body.
+        let mut output_pieces: Vec<FormatterOutputPiece> =
+            Vec::with_capacity(input.pieces.len() + 2);
+        output_pieces.push(FormatterOutputPiece::Text(
+            "<code class='codeblock'>".to_owned(),
+        ));
 
         for piece in input.pieces {
             match piece {
                 FormatterInputPiece::Text(text_piece) => {
                     let text = string_table.resolve(text_piece.text);
 
-                    // Allocate one output string per text piece and write the opening
-                    // wrapper directly into it, avoiding a second format! allocation.
-                    let mut output = String::with_capacity(text.len() + 32);
-                    if !first_text_emitted {
-                        first_text_emitted = true;
-                        output.push_str("<code class='codeblock'>");
-                    }
-
+                    // Allocate one output string per text piece so each highlighted
+                    // run escapes directly into its own buffer.
+                    let mut output = String::with_capacity(text.len() + 16);
                     if self.language == CodeLanguage::Text {
                         push_escaped_html_text(&mut output, text);
                     } else {
@@ -263,15 +308,7 @@ impl TemplateFormatter for CodeTemplateFormatter {
             }
         }
 
-        // Close the <code> block on the last text piece.
-        if first_text_emitted {
-            for piece in output_pieces.iter_mut().rev() {
-                if let FormatterOutputPiece::Text(text) = piece {
-                    text.push_str("</code>");
-                    break;
-                }
-            }
-        }
+        output_pieces.push(FormatterOutputPiece::Text("</code>".to_owned()));
 
         Ok(FormatterResult {
             output: FormatterOutput {
@@ -1359,28 +1396,42 @@ impl<'source> CodeScanner<'source> {
     }
 
     /// Preserves the pre-scanner numeric run for non-Moth profiles: digits,
-    /// dots, underscores and Unicode numeric scalars.
+    /// underscores, Unicode numeric scalars and a decimal point that is
+    /// followed by a digit.
+    ///
+    /// WHY: allowing every dot would swallow Rust range operators (`0..10`)
+    ///      and float method access (`1.0.to_string()`), so a dot only joins
+    ///      the run when it starts a fractional part.
     fn legacy_number_end(&self) -> usize {
         let mut end = self.index;
 
         while end < self.bytes.len() {
             let byte = self.bytes[end];
             if byte.is_ascii() {
-                if byte.is_ascii_digit() || byte == b'.' || byte == b'_' {
+                if byte.is_ascii_digit() || byte == b'_' {
                     end += 1;
-                } else {
-                    break;
+                    continue;
                 }
+                if byte == b'.'
+                    && self
+                        .bytes
+                        .get(end + 1)
+                        .is_some_and(|next| next.is_ascii_digit())
+                {
+                    end += 1;
+                    continue;
+                }
+                break;
+            }
+
+            let ch = self.source[end..]
+                .chars()
+                .next()
+                .expect("number position is on a char boundary");
+            if ch.is_numeric() {
+                end += ch.len_utf8();
             } else {
-                let ch = self.source[end..]
-                    .chars()
-                    .next()
-                    .expect("number position is on a char boundary");
-                if ch.is_numeric() {
-                    end += ch.len_utf8();
-                } else {
-                    break;
-                }
+                break;
             }
         }
 

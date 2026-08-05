@@ -11656,3 +11656,10 @@ path = "html_code_highlighting"
 tags = ["integration", "html", "templates", "formatting"]
 contract = "builder.html.code_highlighter_lexical_roles"
 role = "primary"
+
+[[case]]
+id = "html_code_unsupported_language_alias"
+path = "html_code_unsupported_language_alias"
+tags = ["integration", "html", "templates", "formatting", "diagnostics"]
+contract = "builder.html.code_highlighter_unsupported_language_alias_rejected"
+role = "primary"

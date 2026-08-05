@@ -44,8 +44,9 @@ Supported aliases: `text`/`txt`, `html`, `markdown`/`md`, `toml`, `json`,
 `yaml`/`yml`, `css`, `c`, `sql`, `moth`, `javascript`/`js`,
 `typescript`/`ts`, `python`/`py`, `rust`/`rs`, `bash`/`sh`/`shell`.
 
-`$code` escapes HTML and applies lexical presentation only. It never checks
-the snippet or reports errors. All profiles share the same palette.
+`$code` escapes HTML and applies lexical presentation only. Dynamic expression
+anchors pass through sealed. It never checks the snippet or reports errors. All
+profiles share the same palette.
 
 ### Canvas
 

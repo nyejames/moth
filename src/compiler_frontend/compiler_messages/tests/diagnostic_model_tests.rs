@@ -1366,6 +1366,20 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
             "MissingArgument",
         ),
         (
+            CompilerDiagnostic::invalid_template_directive(
+                Some(template_directive),
+                InvalidTemplateDirectiveReason::invalid_argument_with_detail(
+                    string_table.get_or_intern(
+                        "Unsupported language \"rustt\". Supported aliases are \"rs\"/\"rust\"."
+                            .to_owned(),
+                    ),
+                ),
+                location(source_path.clone()),
+            ),
+            "Invalid argument for template directive 'insert'. Unsupported language \"rustt\". Supported aliases are \"rs\"/\"rust\".",
+            "InvalidArgument",
+        ),
+        (
             CompilerDiagnostic::namespace_misuse(
                 namespace_name,
                 NameNamespace::Type,

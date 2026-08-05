@@ -263,7 +263,7 @@ fn builder_registered_handler_directive_rejects_runtime_argument_values() {
     assert!(matches!(
         &error.payload,
         DiagnosticPayload::InvalidTemplateDirective {
-            reason: InvalidTemplateDirectiveReason::InvalidArgument,
+            reason: InvalidTemplateDirectiveReason::InvalidArgument { detail: None },
             ..
         }
     ));

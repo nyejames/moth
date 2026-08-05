@@ -1,0 +1,17 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0021"]
+message_contains = [
+    "Unsupported '$code(...)' language \"rustt\"",
+    "Supported aliases are",
+]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0021"
+reason = "invalid_template_directive.invalid_argument"
+path = "input/@page.moth"
+line = 7
+count = 1
