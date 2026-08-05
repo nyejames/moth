@@ -264,39 +264,44 @@ macro_rules! timed_manual_finish {
     ($metric:expr, $start:expr $(,)?) => {};
 }
 
-/// Finish a manually started pipeline stage with an optional attribution label.
+/// Finish a manually started pipeline stage with an optional label and
+/// explicit boundary/module attribution context.
 ///
 /// When `timers` is off, the expansion emits no statement and none of the
-/// metric, start or label expressions are evaluated.
+/// metric, start, label or context expressions are evaluated.
 #[macro_export]
 #[cfg(feature = "timers")]
-macro_rules! timed_manual_finish_labeled {
-    ($metric:expr, $start:expr, $label:expr $(,)?) => {
-        $crate::timing::record_started_pipeline_timing_with_label($metric, $start, $label);
+macro_rules! timed_manual_finish_attributed {
+    ($metric:expr, $start:expr, $label:expr, $context:expr $(,)?) => {
+        $crate::timing::record_started_pipeline_timing_attributed(
+            $metric, $start, $label, $context,
+        );
     };
 }
 
 #[macro_export]
 #[cfg(not(feature = "timers"))]
-macro_rules! timed_manual_finish_labeled {
-    ($metric:expr, $start:expr, $label:expr $(,)?) => {};
+macro_rules! timed_manual_finish_attributed {
+    ($metric:expr, $start:expr, $label:expr, $context:expr $(,)?) => {};
 }
 
 /// Time one frontend stage through an erasing wrapper.
 ///
-/// The stage argument is a closure returning `Result<T, CompilerMessages>`.
-/// The metric, prose label and module label are only evaluated while `timers`
-/// is active; the disabled expansion calls the closure unchanged.
+/// The stage argument is a direct production expression, not a closure. The
+/// metric, prose label, module label and attribution context are only
+/// evaluated while `timers` is active; the disabled expansion is the
+/// production expression itself, so no timing wrapper survives in that build.
 #[macro_export]
 #[cfg(feature = "timers")]
 macro_rules! timed_frontend_stage {
-    ($metric:expr, $prose_label:expr, $module_label:expr, $stage:expr $(,)?) => {{
+    ($metric:expr, $prose_label:expr, $module_label:expr, $context:expr, $stage:expr $(,)?) => {{
         let timing_start = $crate::timing::start_pipeline_timing();
-        let timing_result = $stage();
-        $crate::timing::record_started_pipeline_timing_with_label(
+        let timing_result = $stage;
+        $crate::timing::record_started_pipeline_timing_attributed(
             $metric,
             timing_start,
             $module_label,
+            $context,
         );
 
         // Human prose stays gated by detailed_timers for verbose developer output.
@@ -315,7 +320,29 @@ macro_rules! timed_frontend_stage {
 #[macro_export]
 #[cfg(not(feature = "timers"))]
 macro_rules! timed_frontend_stage {
-    ($metric:expr, $prose_label:expr, $module_label:expr, $stage:expr $(,)?) => {{ $stage() }};
+    ($metric:expr, $prose_label:expr, $module_label:expr, $context:expr, $stage:expr $(,)?) => {{ $stage }};
+}
+
+/// Time one detailed frontend substep through an erasing macro.
+///
+/// The substep argument is a direct production expression, not a closure.
+/// With `detailed_timers` disabled the expansion is that expression itself;
+/// no closure or timing wrapper survives in the build.
+#[macro_export]
+#[cfg(feature = "detailed_timers")]
+macro_rules! timed_frontend_substep {
+    ($metric:expr, $prose_label:expr, $substep:expr $(,)?) => {{
+        let timing_start = std::time::Instant::now();
+        let timing_result = $substep;
+        $crate::benchmark_timer_log!(timing_start, $metric, $prose_label);
+        timing_result
+    }};
+}
+
+#[macro_export]
+#[cfg(not(feature = "detailed_timers"))]
+macro_rules! timed_frontend_substep {
+    ($metric:expr, $prose_label:expr, $substep:expr $(,)?) => {{ $substep }};
 }
 
 /// Start the command-level timing collection scope.

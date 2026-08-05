@@ -16,11 +16,16 @@
 // quiet.
 #![cfg_attr(feature = "timers", allow(dead_code))]
 
+pub(crate) mod attribution;
 pub(crate) mod collector;
 pub(crate) mod mode;
 pub(crate) mod render;
 pub(crate) mod summary;
 
+pub(crate) use attribution::{
+    NO_TIMING_BOUNDARY, TimingBoundaryId, TimingBoundaryKind, TimingBoundaryRecord,
+    TimingModuleAttribution, TimingModuleContext, TimingModuleKey, TimingModuleRecord,
+};
 pub(crate) use mode::TimerOutputMode;
 
 use std::time::Duration;
@@ -34,9 +39,14 @@ use std::time::Duration;
 pub(crate) struct TimingObservation {
     pub(crate) name: &'static str,
     pub(crate) duration: Duration,
-    /// Optional attribution label for summary max display (e.g. slowest module).
-    /// Never appears in stable `MOTH_BENCH timing` lines.
+    /// Optional attribution label preserved in raw observations for detailed
+    /// tooling. The basic summary never renders it; slowest-module attribution
+    /// comes from explicit registered module metadata.
     pub(crate) label: Option<String>,
+    /// Compilation boundary for this observation, when attributed.
+    pub(crate) boundary: Option<TimingBoundaryId>,
+    /// Dense module key inside the boundary, when attributed.
+    pub(crate) module: Option<TimingModuleKey>,
 }
 
 /// One named counter metric value captured during a benchmark collection scope.
@@ -46,8 +56,8 @@ pub(crate) struct TimingObservation {
 pub(crate) struct BenchmarkObservationMetric {
     pub(crate) name: String,
     pub(crate) value: f64,
-    /// Optional attribution label for summary max display (e.g. slowest module).
-    /// Never appears in stable `MOTH_BENCH counter` lines.
+    /// Optional attribution label preserved in raw observations for detailed
+    /// tooling. Never appears in stable `MOTH_BENCH counter` lines.
     pub(crate) label: Option<String>,
 }
 
@@ -62,32 +72,27 @@ pub(crate) struct BenchmarkObservationMetric {
 pub(crate) struct BenchmarkObservationSnapshot {
     pub(crate) timings: Vec<TimingObservation>,
     pub(crate) counters: Vec<BenchmarkObservationMetric>,
+    /// Registered compilation boundaries in deterministic registration order.
+    pub(crate) boundaries: Vec<TimingBoundaryRecord>,
+    /// Registered modules with their logical identities and source facts.
+    pub(crate) modules: Vec<TimingModuleRecord>,
 }
 
 /// Aggregated view of repeated timing observations for summary output.
 ///
 /// WHAT: combines multiple observations with the same stable metric name into
-/// one total/count/max line.
-/// WHY: project-level timing summaries must stay short even when later phases
-/// record per-module or per-file metrics.
+/// one total duration.
+/// WHY: project-level timing summaries stay short even when later phases
+/// record per-module metrics; raw labels and sample counts remain available
+/// on the observations themselves.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct TimingMetricSummary {
     pub(crate) total: Duration,
-    pub(crate) count: u64,
-    pub(crate) max: Duration,
-    /// Attribution label of the slowest sample, shown in the concise summary.
-    pub(crate) max_label: Option<String>,
 }
 
 impl TimingMetricSummary {
-    fn record(&mut self, duration: Duration, label: Option<&str>) {
+    fn record(&mut self, duration: Duration) {
         self.total += duration;
-        let is_first_sample = self.count == 0;
-        self.count += 1;
-        if is_first_sample || duration > self.max {
-            self.max = duration;
-            self.max_label = label.map(|text| text.to_owned());
-        }
     }
 }
 
@@ -172,22 +177,55 @@ pub(crate) fn record_pipeline_timing(metric: &'static str, duration: Duration) {
     emit_bench_timing_line(metric, duration);
 }
 
-/// Record a pipeline-stage timing with an optional attribution label.
+/// Register one compilation boundary in deterministic registration order.
 ///
-/// WHAT: like `record_pipeline_timing` but stores an optional label alongside
-///      the observation so the concise summary can show the slowest contributor.
-/// WHY:  project-level frontend timings repeat per module; the label lets the
-///       summary attribute the max sample without flooding output with per-module
-///       lines. The label never appears in stable `MOTH_BENCH timing` lines.
-pub(crate) fn record_pipeline_timing_with_label(
+/// Returns the dense boundary id for later observations and module
+/// registration. With no active collection scope the call is a no-op that
+/// returns a sentinel id; every subsequent attributed call is also dropped.
+pub(crate) fn register_timing_boundary(
+    kind: TimingBoundaryKind,
+    display_name: String,
+) -> TimingBoundaryId {
+    collector::register_boundary(kind, display_name)
+}
+
+/// Register one module inside a boundary with its logical identity and source facts.
+///
+/// `module_index` is the boundary's dense graph `ModuleId`, so registration is
+/// deterministic and independent of worker completion order. The logical
+/// identity is composed from the boundary display name and the module's
+/// portable logical path, never from an absolute filesystem path.
+pub(crate) fn register_timing_module(
+    boundary: TimingBoundaryId,
+    module_index: u32,
+    logical_module_path: &str,
+    source_file_count: u64,
+    source_byte_count: u64,
+) -> TimingModuleKey {
+    collector::register_module(
+        boundary,
+        module_index,
+        logical_module_path,
+        source_file_count,
+        source_byte_count,
+    )
+}
+
+/// Record a pipeline-stage timing with attribution context.
+///
+/// WHAT: like `record_pipeline_timing` but stores an optional human label plus
+///      the compact boundary/module ids on the observation for the structured
+///      summary.
+/// WHY:  the basic summary needs registered metadata, never labels or paths,
+///       to attribute boundary and slowest-module rows. The label never
+///       appears in stable `MOTH_BENCH timing` lines.
+pub(crate) fn record_pipeline_timing_attributed(
     metric: &'static str,
     duration: Duration,
     label: Option<&str>,
+    context: TimingModuleContext,
 ) {
-    match label {
-        Some(text) => collector::record_labeled_timing(metric, duration, text),
-        None => collector::record_timing(metric, duration),
-    }
+    collector::record_attributed_timing(metric, duration, label, context);
     emit_bench_timing_line(metric, duration);
 }
 
@@ -209,13 +247,14 @@ pub(crate) fn record_started_pipeline_timing(metric: &'static str, start: Pipeli
     record_pipeline_timing(metric, start.elapsed());
 }
 
-/// Record a manually timed pipeline stage with an optional attribution label.
-pub(crate) fn record_started_pipeline_timing_with_label(
+/// Record a manually timed pipeline stage with attribution context.
+pub(crate) fn record_started_pipeline_timing_attributed(
     metric: &'static str,
     start: PipelineTimingStart,
     label: Option<&str>,
+    context: TimingModuleContext,
 ) {
-    record_pipeline_timing_with_label(metric, start.elapsed(), label);
+    record_pipeline_timing_attributed(metric, start.elapsed(), label, context);
 }
 
 /// RAII guard that records a pipeline-stage timing when dropped.

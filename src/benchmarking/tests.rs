@@ -14,7 +14,7 @@ static BENCHMARK_TEST_MUTEX: Mutex<()> = Mutex::new(());
 #[test]
 fn frontend_benchmark_runs_for_simple_file() {
     let _guard = BENCHMARK_TEST_MUTEX.lock().expect("test mutex should lock");
-    #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
+    #[cfg(feature = "timers")]
     let _counter_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
     let _counter_capture =
@@ -57,6 +57,8 @@ fn frontend_benchmark_runs_for_simple_file() {
 #[test]
 fn frontend_benchmark_retains_warning_count_and_codes() {
     let _guard = BENCHMARK_TEST_MUTEX.lock().expect("test mutex should lock");
+    #[cfg(feature = "timers")]
+    let _counter_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let temp_dir = tempfile::tempdir().expect("should create temp dir");
     let file_path = temp_dir.path().join("warning.moth");
     let warning_source = "\
@@ -95,6 +97,8 @@ if value is:
 #[test]
 fn frontend_benchmark_retains_source_package_warning() {
     let _guard = BENCHMARK_TEST_MUTEX.lock().expect("test mutex should lock");
+    #[cfg(feature = "timers")]
+    let _counter_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let temp_dir = tempfile::tempdir().expect("should create temp dir");
     let root = temp_dir.path();
     let package = root.join("packages/warnpkg");
@@ -137,6 +141,8 @@ fn frontend_benchmark_retains_source_package_warning() {
 #[test]
 fn frontend_benchmark_fails_for_missing_file() {
     let _guard = BENCHMARK_TEST_MUTEX.lock().expect("test mutex should lock");
+    #[cfg(feature = "timers")]
+    let _counter_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
 
     let options = FrontendBenchmarkOptions {
         entry_path: PathBuf::from("/definitely/does/not/exist.moth"),
@@ -150,6 +156,8 @@ fn frontend_benchmark_fails_for_missing_file() {
 #[test]
 fn frontend_benchmark_fails_for_invalid_syntax() {
     let _guard = BENCHMARK_TEST_MUTEX.lock().expect("test mutex should lock");
+    #[cfg(feature = "timers")]
+    let _counter_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
 
     let temp_dir = tempfile::tempdir().expect("should create temp dir");
     let file_path = temp_dir.path().join("bad.moth");

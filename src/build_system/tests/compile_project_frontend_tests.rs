@@ -108,6 +108,188 @@ fn directory_graph_retains_independent_diagnostics_without_blocked_consumer_casc
     fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
+#[cfg(feature = "timers")]
+#[test]
+fn directory_frontend_registers_package_and_project_boundaries() {
+    // The collector is process-global, so serialize against other collector tests.
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+
+    let dir = temp_dir("phase4_boundary_attribution");
+    // The package root lives outside the project root so the project boundary does not also
+    // discover it as an owned module.
+    let package_root = temp_dir("phase4_package_root");
+    // Unique names keep this test's records identifiable when unrelated parallel build tests
+    // register their own boundaries into the shared process-global collection scope.
+    const PACKAGE_NAME: &str = "phase4_helper";
+    const PROJECT_NAME: &str = "phase4_demo_project";
+    fs::create_dir_all(&dir).expect("should create project directory");
+    fs::create_dir_all(&package_root).expect("should create package directory");
+    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(dir.join("@page.moth"), "value = 1\n").expect("should write project root");
+    fs::write(
+        package_root.join("@mod.moth"),
+        "export:\n    helper || -> Int:\n        return 7\n    ;\n;\n",
+    )
+    .expect("should write package module");
+
+    let mut config = Config::new(dir.clone());
+    config.project_name = PROJECT_NAME.to_owned();
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut string_table = StringTable::new();
+    let mut frontend_surface = BuilderSurface::with_mandatory_core();
+    frontend_surface.source_packages.register_filesystem_root(
+        PACKAGE_NAME,
+        package_root.clone(),
+        PackageOrigin::Builder,
+    );
+
+    crate::timing::start_benchmark_collection(true);
+    let frontend = compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut frontend_surface,
+        &mut string_table,
+    )
+    .expect("a clean source package and project should compile");
+    let snapshot = crate::timing::stop_and_collect_benchmark_observations();
+    drop(frontend);
+
+    let package_boundary = snapshot
+        .boundaries
+        .iter()
+        .find(|boundary| boundary.display_name == format!("@{PACKAGE_NAME}"))
+        .expect("the source package boundary should be registered")
+        .id;
+    let project_boundary = snapshot
+        .boundaries
+        .iter()
+        .find(|boundary| boundary.display_name == PROJECT_NAME)
+        .expect("the main project boundary should be registered")
+        .id;
+    let package_boundary_index = snapshot
+        .boundaries
+        .iter()
+        .position(|boundary| boundary.id == package_boundary)
+        .expect("registered boundary should be indexed");
+    let project_boundary_index = snapshot
+        .boundaries
+        .iter()
+        .position(|boundary| boundary.id == project_boundary)
+        .expect("registered boundary should be indexed");
+    assert!(
+        package_boundary_index < project_boundary_index,
+        "source packages register before the main project in deterministic order"
+    );
+    assert_eq!(
+        snapshot
+            .boundaries
+            .iter()
+            .filter(|boundary| {
+                boundary.id == package_boundary || boundary.id == project_boundary
+            })
+            .map(|boundary| (boundary.id, boundary.module_count))
+            .collect::<Vec<_>>(),
+        vec![(package_boundary, 1), (project_boundary, 1)],
+        "one module per boundary (package {package_boundary:?}, project {project_boundary:?}): {:#?}",
+        snapshot.modules
+    );
+    assert!(snapshot.timings.iter().any(|observation| {
+        observation.name == "build.boundary.inventory"
+            && observation.boundary == Some(package_boundary)
+    }));
+    assert!(snapshot.timings.iter().any(|observation| {
+        observation.name == "build.boundary.inventory"
+            && observation.boundary == Some(project_boundary)
+    }));
+    assert!(snapshot.timings.iter().any(|observation| {
+        observation.name == "build.boundary.compile"
+            && observation.boundary == Some(package_boundary)
+    }));
+    assert!(snapshot.timings.iter().any(|observation| {
+        observation.name == "build.boundary.compile"
+            && observation.boundary == Some(project_boundary)
+    }));
+
+    let own_modules = snapshot
+        .modules
+        .iter()
+        .filter(|module| {
+            module.key.boundary == package_boundary || module.key.boundary == project_boundary
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(own_modules.len(), 2);
+    assert!(
+        own_modules
+            .iter()
+            .any(|module| module.logical_identity == format!("@{PACKAGE_NAME}")),
+        "entry-root package modules reuse the boundary display name: {:?}",
+        own_modules
+    );
+    assert!(
+        own_modules
+            .iter()
+            .any(|module| module.logical_identity == PROJECT_NAME),
+        "entry-root project modules reuse the boundary display name: {:?}",
+        own_modules
+    );
+    assert!(
+        own_modules
+            .iter()
+            .all(|module| !module.logical_identity.contains(&dir.display().to_string())),
+        "module identities must never contain checkout-specific paths"
+    );
+
+    let semantic_total_count = snapshot
+        .timings
+        .iter()
+        .filter(|observation| {
+            observation.name == "frontend.module.semantic_total"
+                && observation.boundary.is_some_and(|boundary| {
+                    boundary == package_boundary || boundary == project_boundary
+                })
+        })
+        .count();
+    assert_eq!(
+        semantic_total_count,
+        2,
+        "every compilation mode records one semantic total per module (package {package_boundary:?}, project {project_boundary:?}): {:#?}",
+        (
+            snapshot
+                .timings
+                .iter()
+                .filter(|observation| observation.name == "frontend.module.semantic_total")
+                .map(|observation| (observation.boundary, observation.module))
+                .collect::<Vec<_>>(),
+            snapshot
+                .modules
+                .iter()
+                .map(|module| (module.key, module.logical_identity.as_str()))
+                .collect::<Vec<_>>(),
+        )
+    );
+    assert!(snapshot.timings.iter().any(|observation| {
+        observation.name == "frontend.module.semantic_total"
+            && observation.module
+                == Some(crate::timing::TimingModuleKey {
+                    boundary: package_boundary,
+                    module_index: 0,
+                })
+    }));
+    assert!(snapshot.timings.iter().any(|observation| {
+        observation.name == "frontend.module.semantic_total"
+            && observation.module
+                == Some(crate::timing::TimingModuleKey {
+                    boundary: project_boundary,
+                    module_index: 0,
+                })
+    }));
+
+    fs::remove_dir_all(&dir).expect("should remove temp dir");
+    fs::remove_dir_all(&package_root).expect("should remove package temp dir");
+}
+
 #[test]
 fn directory_graph_retains_diagnostics_from_later_independent_source_packages() {
     let dir = temp_dir("graph_outcomes_source_package_diagnostics");

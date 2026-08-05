@@ -524,7 +524,10 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
         &canonical_entry,
         local_table,
         source_byte_count,
-        module_label,
+        crate::timing::TimingModuleAttribution::new(
+            module_label,
+            crate::timing::TimingModuleContext::default(),
+        ),
     );
     #[cfg(not(feature = "timers"))]
     let prepared_result = preparation_context.prepare_module(
@@ -575,7 +578,10 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
     let semantic_result = compile_context.compile_module_semantic(
         prepared,
         &canonical_entry,
-        module_label,
+        crate::timing::TimingModuleAttribution::new(
+            module_label,
+            crate::timing::TimingModuleContext::default(),
+        ),
         generated_store.session(),
     );
     #[cfg(not(feature = "timers"))]
@@ -697,7 +703,10 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
         &canonical_entry,
         local_table,
         source_byte_count,
-        None,
+        crate::timing::TimingModuleAttribution::new(
+            None,
+            crate::timing::TimingModuleContext::default(),
+        ),
     );
     #[cfg(not(feature = "timers"))]
     let prepared_result = preparation_context.prepare_module(
@@ -729,7 +738,10 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
     let semantic_result = compile_context.compile_module_semantic(
         prepared,
         &canonical_entry,
-        None,
+        crate::timing::TimingModuleAttribution::new(
+            None,
+            crate::timing::TimingModuleContext::default(),
+        ),
         generated_store.session(),
     );
     #[cfg(not(feature = "timers"))]

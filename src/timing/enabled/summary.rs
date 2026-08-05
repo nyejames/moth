@@ -7,7 +7,8 @@
 //!       raw metrics stay available to detailed and benchmark output but never
 //!       appear in the basic report by accident.
 
-use super::{BenchmarkObservationSnapshot, TimingMetricSummary};
+use super::{BenchmarkObservationSnapshot, TimingBoundaryId, TimingMetricSummary, TimingModuleKey};
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
@@ -25,21 +26,20 @@ pub(crate) enum TimingMeasurementKind {
 /// Visual role of a row, used by the renderer for colouring.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TimingEmphasis {
-    Heading,
     Ordinary,
     Total,
-    Suffix,
 }
 
 /// One display row in a summary section.
 #[derive(Debug, Clone)]
 pub(crate) struct TimingSummaryRow {
-    pub(crate) label: &'static str,
+    pub(crate) label: Cow<'static, str>,
     pub(crate) kind: TimingMeasurementKind,
     pub(crate) emphasis: TimingEmphasis,
     pub(crate) total: Duration,
-    pub(crate) sample_count: u64,
-    pub(crate) max_label: Option<String>,
+    /// Explicit per-row suffix, for example a boundary's module count.
+    /// Never inferred from sample counts or observation labels.
+    pub(crate) suffix: Option<Cow<'static, str>>,
     pub(crate) children: Vec<TimingSummaryRow>,
 }
 
@@ -48,7 +48,31 @@ pub(crate) struct TimingSummaryRow {
 pub(crate) struct TimingSummarySection {
     pub(crate) title: String,
     pub(crate) rows: Vec<TimingSummaryRow>,
-    pub(crate) accumulated: bool,
+}
+
+/// One source-package or main-project boundary row.
+///
+/// Phase 4 registers and populates these. The model owns the shape now so
+/// boundary attribution never leaks through generic row suffixes or
+/// metric-name prefixes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TimingBoundarySummary {
+    pub(crate) label: Cow<'static, str>,
+    pub(crate) module_count: u64,
+    pub(crate) total: Duration,
+}
+
+/// The single slowest-module attribution row.
+///
+/// Phase 4 computes module work as preparation attributed to the module plus
+/// `frontend.module.semantic_total`. The model owns the shape now so
+/// absolute filesystem paths cannot appear in basic output.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TimingSlowestModuleSummary {
+    pub(crate) identity: Cow<'static, str>,
+    pub(crate) source_file_count: u64,
+    pub(crate) source_byte_count: u64,
+    pub(crate) total: Duration,
 }
 
 /// The complete basic-mode report.
@@ -57,6 +81,8 @@ pub(crate) struct TimingSummaryReport {
     pub(crate) title: String,
     pub(crate) command_total: Duration,
     pub(crate) sections: Vec<TimingSummarySection>,
+    pub(crate) compilation_boundaries: Vec<TimingBoundarySummary>,
+    pub(crate) slowest_module: Option<TimingSlowestModuleSummary>,
 }
 
 /// Which command produced the snapshot.
@@ -89,22 +115,6 @@ enum SectionId {
 /// Rows appear in table order, which is the architecture order. Unknown raw
 /// metrics have no entry and therefore never appear in basic output.
 const BASIC_METRIC_POLICY: &[MetricPolicy] = &[
-    MetricPolicy {
-        metric: "command.build.total",
-        label: "Command total",
-        kind: TimingMeasurementKind::WallSpan,
-        section: SectionId::Pipeline,
-        emphasis: TimingEmphasis::Total,
-        command: Some(TimingCommandKind::Build),
-    },
-    MetricPolicy {
-        metric: "command.check.total",
-        label: "Command total",
-        kind: TimingMeasurementKind::WallSpan,
-        section: SectionId::Pipeline,
-        emphasis: TimingEmphasis::Total,
-        command: Some(TimingCommandKind::Check),
-    },
     MetricPolicy {
         metric: "build_project.bootstrap",
         label: "Bootstrap",
@@ -239,11 +249,15 @@ pub(crate) fn build_timing_summary(
         sections.push(section);
     }
 
+    let command_word = match command {
+        TimingCommandKind::Build => "Build",
+        TimingCommandKind::Check => "Check",
+    };
     let title = if succeeded {
-        "Build timings".to_owned()
+        format!("{command_word} timings {}", format_duration(command_total))
     } else {
         format!(
-            "Build timings · failed after {}",
+            "{command_word} timings · failed after {}",
             format_duration(command_total)
         )
     };
@@ -252,6 +266,8 @@ pub(crate) fn build_timing_summary(
         title,
         command_total,
         sections,
+        compilation_boundaries: build_boundary_summaries(snapshot),
+        slowest_module: build_slowest_module_summary(snapshot),
     }
 }
 
@@ -264,7 +280,7 @@ fn aggregate_by_metric(
         aggregates
             .entry(observation.name)
             .or_insert_with(TimingMetricSummary::default)
-            .record(observation.duration, observation.label.as_deref());
+            .record(observation.duration);
     }
     aggregates
 }
@@ -281,6 +297,101 @@ fn command_total(
         .get(metric)
         .map(|summary| summary.total)
         .unwrap_or_default()
+}
+
+/// Sum boundary inventory and compile observations per boundary.
+///
+/// Package inventory and package compilation are disjoint passes, so the
+/// human boundary total is accumulated work, never one contiguous wall span.
+fn aggregate_boundary_totals(
+    snapshot: &BenchmarkObservationSnapshot,
+) -> BTreeMap<TimingBoundaryId, Duration> {
+    let mut totals = BTreeMap::new();
+    for observation in &snapshot.timings {
+        if matches!(
+            observation.name,
+            "build.boundary.inventory" | "build.boundary.compile"
+        ) && let Some(boundary) = observation.boundary
+        {
+            *totals.entry(boundary).or_insert(Duration::ZERO) += observation.duration;
+        }
+    }
+    totals
+}
+
+/// Build boundary rows in deterministic registration order.
+///
+/// Registration order is the graph's deterministic package order followed by
+/// the main project, so the display order never depends on event insertion.
+fn build_boundary_summaries(snapshot: &BenchmarkObservationSnapshot) -> Vec<TimingBoundarySummary> {
+    let totals = aggregate_boundary_totals(snapshot);
+    let mut rows = Vec::new();
+
+    for record in &snapshot.boundaries {
+        let Some(total) = totals.get(&record.id).copied() else {
+            continue;
+        };
+        if rounds_to_zero(total) {
+            continue;
+        }
+        rows.push(TimingBoundarySummary {
+            label: Cow::Owned(record.display_name.clone()),
+            module_count: record.module_count,
+            total,
+        });
+    }
+
+    rows
+}
+
+/// Build the single slowest-module row from registered module metadata.
+///
+/// Module work is source preparation attributed to the module plus
+/// `frontend.module.semantic_total`; both aggregates are keyed by the compact
+/// module key, so shuffled event insertion cannot change the winner. The
+/// earliest registered module wins ties, keeping output deterministic.
+fn build_slowest_module_summary(
+    snapshot: &BenchmarkObservationSnapshot,
+) -> Option<TimingSlowestModuleSummary> {
+    let mut preparation = BTreeMap::<TimingModuleKey, Duration>::new();
+    let mut semantic_total = BTreeMap::<TimingModuleKey, Duration>::new();
+
+    for observation in &snapshot.timings {
+        let Some(module) = observation.module else {
+            continue;
+        };
+        match observation.name {
+            "frontend.file_prepare" => {
+                *preparation.entry(module).or_insert(Duration::ZERO) += observation.duration;
+            }
+            "frontend.module.semantic_total" => {
+                *semantic_total.entry(module).or_insert(Duration::ZERO) += observation.duration;
+            }
+            _ => {}
+        }
+    }
+
+    let mut slowest: Option<TimingSlowestModuleSummary> = None;
+    for record in &snapshot.modules {
+        let total = preparation.get(&record.key).copied().unwrap_or_default()
+            + semantic_total.get(&record.key).copied().unwrap_or_default();
+        if rounds_to_zero(total) {
+            continue;
+        }
+        let is_slowest = slowest
+            .as_ref()
+            .is_none_or(|current: &TimingSlowestModuleSummary| total > current.total);
+        if is_slowest {
+            slowest = Some(TimingSlowestModuleSummary {
+                identity: Cow::Owned(record.logical_identity.clone()),
+                source_file_count: record.source_file_count,
+                source_byte_count: record.source_byte_count,
+                total,
+            });
+        }
+    }
+
+    slowest
 }
 
 fn build_pipeline_section(
@@ -305,7 +416,6 @@ fn build_pipeline_section(
     Some(TimingSummarySection {
         title: "Build pipeline".to_owned(),
         rows,
-        accumulated: false,
     })
 }
 
@@ -318,12 +428,11 @@ fn push_policy_row(
         && !rounds_to_zero(summary.total)
     {
         rows.push(TimingSummaryRow {
-            label: policy.label,
+            label: Cow::Borrowed(policy.label),
             kind: policy.kind,
             emphasis: policy.emphasis,
             total: summary.total,
-            sample_count: summary.count,
-            max_label: summary.max_label.clone(),
+            suffix: None,
             children: Vec::new(),
         });
     }
@@ -356,12 +465,11 @@ fn push_other_row(
 
     if significant && !rounds_to_zero(other) {
         rows.push(TimingSummaryRow {
-            label: "Other",
+            label: Cow::Borrowed("Other"),
             kind: TimingMeasurementKind::WallSpan,
             emphasis: TimingEmphasis::Ordinary,
             total: other,
-            sample_count: 1,
-            max_label: None,
+            suffix: None,
             children: Vec::new(),
         });
     }
@@ -383,20 +491,9 @@ fn build_frontend_section(
         return None;
     }
 
-    let module_count = aggregates
-        .get("frontend.ast")
-        .map(|summary| summary.count)
-        .unwrap_or_default();
-    let module_word = if module_count == 1 {
-        "module"
-    } else {
-        "modules"
-    };
-
     Some(TimingSummarySection {
-        title: format!("Frontend work · {module_count} {module_word} · accumulated"),
+        title: "Frontend work · accumulated".to_owned(),
         rows,
-        accumulated: true,
     })
 }
 
@@ -423,7 +520,6 @@ fn build_backend_section(
     Some(TimingSummarySection {
         title: "Backend".to_owned(),
         rows: children,
-        accumulated: false,
     })
 }
 
@@ -443,12 +539,11 @@ fn push_significant_child(
 
     if significant && !rounds_to_zero(summary.total) {
         rows.push(TimingSummaryRow {
-            label: policy.label,
+            label: Cow::Borrowed(policy.label),
             kind: policy.kind,
             emphasis: policy.emphasis,
             total: summary.total,
-            sample_count: summary.count,
-            max_label: summary.max_label.clone(),
+            suffix: None,
             children: Vec::new(),
         });
     }

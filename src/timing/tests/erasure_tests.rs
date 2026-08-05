@@ -77,11 +77,12 @@ fn timed_manual_finish_does_not_evaluate_arguments() {
 }
 
 #[test]
-fn timed_manual_finish_labeled_does_not_evaluate_arguments() {
+fn timed_manual_finish_attributed_does_not_evaluate_arguments() {
     let metric_evaluated = evaluation_counter();
     let start_evaluated = evaluation_counter();
     let label_evaluated = evaluation_counter();
-    timed_manual_finish_labeled!(
+    let context_evaluated = evaluation_counter();
+    timed_manual_finish_attributed!(
         {
             metric_evaluated.set(metric_evaluated.get() + 1);
             "test.manual"
@@ -93,12 +94,17 @@ fn timed_manual_finish_labeled_does_not_evaluate_arguments() {
         {
             label_evaluated.set(label_evaluated.get() + 1);
             None
+        },
+        {
+            context_evaluated.set(context_evaluated.get() + 1);
+            crate::timing::TimingModuleContext::default()
         }
     );
 
     assert_eq!(metric_evaluated.get(), 0);
     assert_eq!(start_evaluated.get(), 0);
     assert_eq!(label_evaluated.get(), 0);
+    assert_eq!(context_evaluated.get(), 0);
 }
 
 #[test]
@@ -111,6 +117,75 @@ fn command_timing_macros_expand_to_nothing() {
     }
 
     assert_eq!(runs, 3);
+}
+
+#[test]
+fn command_timing_finish_discards_success_expression() {
+    let succeeded_evaluated = evaluation_counter();
+    command_timing_finish!({
+        succeeded_evaluated.set(succeeded_evaluated.get() + 1);
+        true
+    });
+
+    assert_eq!(succeeded_evaluated.get(), 0);
+}
+
+#[test]
+fn timed_frontend_stage_expands_to_production_expression() {
+    let metric_evaluated = evaluation_counter();
+    let prose_evaluated = evaluation_counter();
+    let module_evaluated = evaluation_counter();
+    let context_evaluated = evaluation_counter();
+
+    // A non-callable value only compiles when the disabled expansion is the
+    // production expression itself rather than a closure invocation.
+    let value: u32 = timed_frontend_stage!(
+        {
+            metric_evaluated.set(metric_evaluated.get() + 1);
+            "frontend.test"
+        },
+        {
+            prose_evaluated.set(prose_evaluated.get() + 1);
+            "Test stage: "
+        },
+        {
+            module_evaluated.set(module_evaluated.get() + 1);
+            None
+        },
+        {
+            context_evaluated.set(context_evaluated.get() + 1);
+            crate::timing::TimingModuleContext::default()
+        },
+        42
+    );
+
+    assert_eq!(value, 42);
+    assert_eq!(metric_evaluated.get(), 0);
+    assert_eq!(prose_evaluated.get(), 0);
+    assert_eq!(module_evaluated.get(), 0);
+    assert_eq!(context_evaluated.get(), 0);
+}
+
+#[test]
+fn timed_frontend_substep_expands_to_production_expression() {
+    let metric_evaluated = evaluation_counter();
+    let prose_evaluated = evaluation_counter();
+
+    let value: u32 = timed_frontend_substep!(
+        {
+            metric_evaluated.set(metric_evaluated.get() + 1);
+            "frontend.substep"
+        },
+        {
+            prose_evaluated.set(prose_evaluated.get() + 1);
+            "Substep: "
+        },
+        42
+    );
+
+    assert_eq!(value, 42);
+    assert_eq!(metric_evaluated.get(), 0);
+    assert_eq!(prose_evaluated.get(), 0);
 }
 
 #[test]
