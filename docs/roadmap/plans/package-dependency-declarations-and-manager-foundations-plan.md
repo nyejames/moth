@@ -2,111 +2,196 @@
 
 ## Purpose
 
-Design and then implement the minimal project dependency declaration and resolver boundary needed for external Moth packages, while leaving remote registry, fetching, version solving and package-manager policy to a later dedicated system.
+Design and implement the project-level declaration and resolver boundary that makes external Moth packages available to Stage 0.
+
+This plan is separate from file-local dependency clauses:
+
+```text
+ProjectDependencyDeclaration
+-> declares a direct external project dependency and optional project-local root alias
+
+FileDependencyClause
+-> binds names from an already registered root into one source file
+```
+
+The file-local grammar is owned by:
+
+- `docs/roadmap/plans/dependency-clauses-and-path-syntax-plan.md`
+
+Source clauses never add an undeclared external package implicitly.
+
+Remote registries, fetching, version solving, publishing and package-manager policy remain deferred.
 
 ## Current-state capsule
 
 ```text
 ACTIVE_PLAN: docs/roadmap/plans/package-dependency-declarations-and-manager-foundations-plan.md
-STATUS: queued-design - implementation blocked until the design review is accepted
-CURRENT_SLICE: Design Phase 0 - inventory package identity, config bootstrap and dependency graph boundaries
-REVIEW_BASELINE: 47dbf3fd1dfa3e8df3d02cef05001de695ea80ee
+PLAN_REVISION_BASELINE: bfaacd54227811f9e2b279d5a24e3df84dc381c2
+STATUS: queued-design - implementation blocked until declaration and resolver design is accepted
+CURRENT_SLICE: Design Phase 0 - audit project dependency availability and package boundary inputs
 LAST_GOOD_COMMIT: none until the design checkpoint and first implementation slice are accepted
-BRANCH: main
-IMPLEMENTATION_SCOPE: config dependency declarations, aliases, resolver/catalog handoff, separate dependency package graphs
+IMPLEMENTATION_SCOPE: project dependency declarations, aliases, resolver/catalog handoff and separate dependency package graphs
+SUPERSEDED_DECISION: the former `import @package` config preamble is not accepted and must not be implemented
 ```
 
 Keep this block concise. Git history is the implementation record.
 
 ## Roadmap position
 
-This plan runs after the HTML mixed JavaScript/Wasm backend plan.
+This plan remains design-gated. Its implementation starts only after its configuration, resolver and package-manager boundaries are reviewed.
 
-Do not begin implementation merely because this file exists. Design Phases 0 through 2 must be reviewed and accepted first.
+Do not infer activation from the presence of this file.
 
 ## Hard prerequisites
 
 - canonical project/package graph and immutable artefact architecture
-- grouped project config
+- dependency-clause and path-syntax migration
+- grouped project config and recursive schema support
 - imported build values and project-boundary isolation
 - stable package, module, public-interface and capability fingerprints
-- completed HTML mixed-target backend boundary
+- completed HTML mixed-target backend boundary where required by package compatibility policy
 
 ## Required authorities
 
 - `docs/compiler-design-overview.md`
 - `docs/build-system-design.md`
-- `docs/src/docs/codebase/language/overview.mtf` and its relevant canonical references
-- package sections of the progress matrix and roadmap
+- `docs/language-overview.md`
+- canonical package and project-configuration references
+- dependency-clause and path-syntax plan
+- progress matrix and roadmap
 - style, testing and validation guides
 
-## Accepted preliminary decisions
+## Superseded syntax decision
 
-The intended config surface is a restricted dependency preamble:
+Earlier revisions proposed:
 
 ```moth
 import @acme/ui
 import @community/markdown as md
-
-project #= |
-    name = "my_app",
-    entry_root = "src",
-|
-
-html #= ||
 ```
 
-Accepted rules:
+inside `config.moth`.
 
-- Config dependency declarations use ordinary root import spelling and optional `as` alias syntax.
-- They declare project dependencies. They do not import package symbols into the config program.
-- Declarations form one contiguous preamble before config constants.
-- Only package roots are valid. Grouped symbols, re-exports and child symbol paths are invalid.
-- Canonical package identity and the consumer's local alias are separate facts.
-- `import @acme/ui as widgets` makes `@widgets` the only local project spelling for that dependency.
-- The same canonical package may be declared once only.
-- Only direct dependencies are visible to project source. Transitive dependencies remain private to their package graphs.
-- Core, Standard, Builder and project-local support packages are not declared through this preamble.
-- `@project`, project modules, relative paths and parent traversal are invalid.
-- Each dependency compiles as a separate package boundary with its own config, source index, private `@project`, artefacts and external facade.
-- A dependency never sees the consuming project's `@project` or unqualified build inputs.
+That proposal is superseded.
+
+Reasons:
+
+- source `import` is removed by the dependency-clause plan
+- `import` becomes an ordinary identifier
+- project dependency declaration and source-file binding have different ownership
+- parser implementation must not choose project manifest policy
+
+This plan does not yet select replacement syntax.
+
+The accepted design review must choose one of:
+
+- a restricted compiler-owned `config.moth` declaration surface
+- a separate project manifest
+- package-manager-maintained metadata consumed before config folding
+- a programmatic resolver/catalog input for the first implementation
+
+Do not resurrect the removed source `import` grammar under a config-only exception without explicit user review.
+
+## Locked ownership decisions
+
+### Project dependency declarations
+
+A project dependency declaration:
+
+- names one direct external package
+- may define one project-local package-root alias
+- participates in bootstrap before project source graph construction
+- does not import package symbols into the config program
+- does not expose transitive dependencies to project source
+- does not use source-file visibility or re-export rules
+- is deterministic and authored-order-preserving for diagnostics
+
+### File-local dependency clauses
+
+A file-local clause:
+
+- references only roots already registered in the active Stage 0 namespace
+- binds a namespace or selected declarations into one `.moth` file
+- does not add or resolve a project dependency
+- does not make transitive dependencies visible
+- preserves canonical package and declaration identities beneath local aliases
+
+### Package aliases
+
+- canonical package identity and project-local root alias are separate facts
+- an alias replaces the canonical source spelling inside that project when policy requires it
+- aliases affect namespace binding and diagnostics, not package artefact identity
+- aliases never alter dependency package output identity
+- alias collisions across project modules, support packages, Core, Builder and dependencies are diagnosed before source compilation
+
+### Package boundaries
+
+Each dependency compiles as a separate package boundary with its own:
+
+- config and build inputs
+- private `@project`
+- source index
+- module graph
+- generated sidecar worklist
+- public package facade
+- capability and fingerprint facts
+
+A dependency never sees the consuming project's `@project` or unqualified build inputs.
+
+## Accepted preliminary rules
+
+- only direct dependencies are visible to project source
+- transitive dependencies remain private to their package graphs
+- the same canonical package may be declared once only
+- Core, Standard, Builder and project-local support packages are not declared through the external dependency surface
+- `@project`, project modules, relative paths and parent traversal are invalid package declarations
+- source imports never trigger implicit package acquisition
+- Stage 0 performs no undeclared filesystem probing
+- dependency compilation order is deterministic
+- package artefacts retain canonical identity beneath consumer-local aliases
+- source-backed and precompiled package inputs use one resolver boundary
+- package acquisition remains outside compiler semantics
 
 ## Design questions that must be finalised
 
 Before implementation, decide and document:
 
-1. canonical package-name grammar and registry ownership
-2. how a canonical name maps to a resolved package source or precompiled artefact
-3. the `DependencyCatalog`/resolver input supplied to bootstrap
-4. whether the first implementation supports only programmatically supplied resolved packages or one local development source
-5. version-constraint ownership and whether version syntax belongs in config, lock metadata or a future command surface
-6. lockfile identity, reproducibility and offline behaviour
-7. local path, Git and registry override policy
-8. alias collisions across package, child-module, support-package and source namespaces
-9. capability compatibility across builders and targets
-10. security, provenance, dependency-count and future package-quality policy
-11. package-manager command boundaries such as add, remove, update and audit
-12. persistent artefact and package-cache compatibility
+1. canonical package-name grammar and its owner
+2. the project declaration storage surface
+3. whether aliases are optional or mandatory for names outside the local grammar
+4. how canonical names map to resolved source or precompiled artefacts
+5. the exact `DependencyCatalog` or resolver input supplied to bootstrap
+6. whether the first implementation supports only programmatic resolved packages or one local development source
+7. version-constraint ownership and syntax location
+8. lockfile identity, reproducibility and offline policy
+9. local path, Git and registry override policy
+10. alias collisions across package, child-module, support and synthetic namespaces
+11. capability compatibility across builders and targets
+12. security, provenance and dependency-count policy
+13. package-manager command boundaries
+14. persistent artefact and package-cache compatibility
+15. how future package versions affect stable package output prefixes
 
-Do not invent syntax while implementing a parser slice. Update the authority documents and this plan after the design review.
+Do not invent declaration syntax while implementing parser or config slices.
 
 ## Allowed pre-design groundwork
 
-Before the design is final, only read-only audits and architecture-neutral cleanup are allowed:
+Before design acceptance, only read-only audits and architecture-neutral cleanup are allowed:
 
 - remove assumptions that every source package is Core, Builder or ProjectLocal
-- keep `PackageOrigin::Dependency` and source/binding backing orthogonal
-- ensure separate package boundary IDs never leak into the project boundary
+- keep `PackageOrigin::Dependency` orthogonal to source or binding backing
+- ensure package boundary IDs never leak into project semantic identity
 - make package graph inputs explicit and deterministic
 - preserve immutable facade and capability fingerprint contracts
+- keep package output-prefix encoding injective over full stable package identity
 - add no user syntax, resolver fallback, filesystem convention or placeholder registry
 
 ## Target data boundary
 
-After design acceptance, use a small data-oriented handoff equivalent to:
+Conceptual declaration records:
 
 ```rust
-pub struct PackageDependencyDeclaration {
+pub struct ProjectDependencyDeclaration {
     pub canonical_name: CanonicalPackageName,
     pub local_root: PackageImportRoot,
     pub location: SourceLocation,
@@ -117,134 +202,196 @@ pub struct ResolvedDependencyCatalog {
 }
 ```
 
+Exact names may change.
+
 Required invariants:
 
-- declarations stay in authored order for diagnostics
+- declarations retain authored order for diagnostics
+- duplicate canonical packages fail before resolution
+- duplicate local roots fail before source compilation
 - resolution and compilation use deterministic canonical order
-- aliases are consumer-local namespace facts
+- local aliases are project namespace facts
 - package artefacts retain canonical identity
-- transient maps accelerate lookup, final data uses contiguous records
-- Stage 0 never probes fallback filesystem locations for an undeclared package
+- transient maps accelerate lookup, final records remain contiguous
+- resolver results contain no fallback search policy
+- unknown source package roots diagnose rather than probe the filesystem
 
-## Non-goals
+## Resolver contract
 
-Unless Design Phase 2 explicitly expands scope:
+The resolver/catalog boundary owns:
 
-- no remote registry implementation
-- no network fetching
-- no version solver
-- no lockfile implementation
-- no package publishing
-- no arbitrary path or URL syntax in `config.moth`
-- no transitive dependency visibility
-- no implicit dependency discovery from source imports
-- no config-visible dependency symbols
-- no compatibility path for `package_folders` or `/lib`
+- declaration to canonical package resolution
+- source versus precompiled package input
+- compatibility and capability facts
+- package dependency metadata
+- structured missing, duplicate and incompatible package failures
+- future version and lockfile integration
+
+It does not own:
+
+- source-file binding
+- config constant visibility
+- project source import discovery
+- package acquisition policy
+- backend lowering
+- output placement
+
+Compiler and build orchestration consume resolved records only.
+
+## Non-goals before an explicit design expansion
+
+- remote registry implementation
+- network fetching
+- version solver
+- lockfile implementation
+- publishing
+- arbitrary URL syntax
+- transitive dependency visibility
+- implicit dependency discovery from source clauses
+- config-visible dependency symbols
+- compatibility for `package_folders` or `/lib`
+- restoring source `import`
+- resolver fallback filesystem search
 
 ## Design phases
 
-### Design Phase 0: Repository and authority audit
+### Design Phase 0 - repository and authority audit
 
-- Inventory config import shells, package identity, source/binding registries, separate package graphs, facades, fingerprints and builder capabilities.
-- Trace one hypothetical dependency from declaration through resolver input, graph compilation, interface binding, generated sidecars and linking.
-- Record every unresolved ownership question.
-- Produce no implementation code.
+- inventory config bootstrap, package identity, package registries, separate graphs, facades, fingerprints and capabilities
+- trace one hypothetical dependency from declaration through resolver, graph compilation, provider binding, generated sidecars and linking
+- trace alias ownership separately from canonical package identity
+- inspect package output-prefix requirements from the resource plan
+- record every unresolved ownership question
+- produce no implementation code
 
-### Design Phase 1: Freeze declaration and alias semantics
+### Design Phase 1 - freeze declaration and alias semantics
 
-- Specify package-name grammar.
-- Specify the exact preamble grammar and placement.
-- Specify alias replacement, duplicate declarations and namespace collision diagnostics.
-- Specify direct-only visibility and transitive privacy.
-- Specify config folding isolation.
-- Update language and build-system authorities for review.
+- choose the project declaration storage surface
+- specify canonical package-name grammar
+- specify alias replacement and duplicate policy
+- specify namespace collision rules
+- specify direct-only visibility and transitive privacy
+- specify config-folding isolation
+- specify migration and diagnostic ownership
+- update language and build authorities for review
 
-### Design Phase 2: Freeze resolver and package-manager handoff
+Mandatory review: no parser or config implementation before acceptance.
 
-- Define the resolver/catalog input and error classes.
-- Define source/precompiled package descriptors and compatibility facts.
-- Define what the first implementation can resolve without a package manager.
-- Define future lockfile and package-manager ownership without implementing it.
-- Decide local development dependency policy.
+### Design Phase 2 - freeze resolver and package-manager handoff
 
-Mandatory review gate: implementation remains blocked until Design Phases 1 and 2 are accepted.
+- define resolver/catalog input and result classes
+- define source and precompiled package descriptors
+- define compatibility and capability facts
+- define the first supported resolution source
+- define future lockfile and package-manager ownership without implementing it
+- decide local development dependency policy
+- define deterministic dependency graph order
+- define canonical package output identity inputs
+
+Mandatory review: implementation remains blocked until Phases 1 and 2 are accepted.
 
 ## Implementation phases after design acceptance
 
-### Phase 3: Extract dependency declarations from config
+### Phase 3 - extract project dependency declarations
 
-- Permit only the accepted dependency preamble.
-- Retain import shells once and classify them without provider binding.
-- Exclude dependency declarations from config AST visibility and constant ordering.
-- Keep every other config import invalid.
+- parse only the accepted project-level declaration surface
+- retain authored order and source locations
+- keep declarations outside config constant visibility
+- reject source-file dependency-clause shapes in config unless the accepted design explicitly chooses a related but distinct config grammar
+- preserve `import` as an ordinary identifier after the source grammar cutover
+- diagnose duplicates and invalid package roots before resolver calls
 
-### Phase 4: Build the declared dependency table
+### Phase 4 - build the project dependency table
 
-- Validate canonical names, aliases, duplicates and namespace collisions.
-- Produce deterministic declaration records.
-- Register only direct local roots into the project namespace.
-- Do not resolve transitive names into project visibility.
+- validate canonical names and local aliases
+- validate collisions against project, support, Core, Builder and synthetic roots
+- produce deterministic declaration records
+- register only direct local roots
+- keep transitive roots private
 
-### Phase 5: Resolve through the catalog boundary
+### Phase 5 - resolve through the catalog
 
-- Resolve every declaration exactly once through the accepted catalog interface.
-- Diagnose missing, duplicate, incompatible or unsupported packages before project source compilation.
-- Perform no undeclared filesystem probing or fallback search.
-- Keep package acquisition outside compiler semantics.
+- resolve each declaration exactly once
+- diagnose missing, duplicate, incompatible and unsupported packages before project source compilation
+- perform no undeclared filesystem probing
+- keep package acquisition outside compiler semantics
+- retain resolved package identity beneath local aliases
 
-Review gate: verify declaration, resolution and compilation are three separate owners.
+Review gate: declaration, resolution and compilation must have separate owners.
 
-### Phase 6: Compile separate dependency package graphs
+### Phase 6 - compile separate dependency package graphs
 
-- Compile dependencies in deterministic dependency order.
-- Give each package its own config, inputs, source index, graph, generated worklist and private `@project`.
-- Publish only immutable facade artefacts to consumers.
-- Preserve capability and public-interface fingerprints.
-- Reject public or reachable executable dependence on private dependency project context.
+- compile dependencies in deterministic dependency order
+- give each package its own config, inputs, source index, graph, generated worklist and private `@project`
+- publish only immutable facade artefacts to consumers
+- preserve capability, interface and compatibility fingerprints
+- reject public or reachable executable dependence on private package project context
+- preserve package resource origins and output-prefix identity when the resource plan is complete
 
-### Phase 7: Bind aliases into project source
+### Phase 7 - register aliases for project source
 
-- Register each local dependency root in the Stage 0 namespace.
-- Bind source imports through completed facade interfaces.
-- Preserve canonical origin identities beneath local aliases.
-- Reject canonical spelling when an alias replaced it.
+- register each direct dependency root in Stage 0
+- bind file-local dependency clauses through completed facade interfaces
+- preserve canonical origins beneath local aliases
+- reject canonical spelling when policy says an alias replaces it
+- keep transitive dependency roots unavailable
+- do not change file-local clause grammar in this phase
 
-### Phase 8: Tooling, tests and documentation
+### Phase 8 - tooling, tests and documentation
 
-- Add fixture catalogs for integration tests without introducing production fallback discovery.
-- Add diagnostics for missing declarations, collisions and transitive access.
-- Update scaffolds only when a package source is available through the accepted resolver boundary.
-- Update roadmap, progress and package documentation.
+- add fixture catalogs without production fallback discovery
+- add diagnostics for missing declarations, collisions and transitive access
+- update scaffolds only when a package source is available through the resolver
+- update project, package and configuration docs
+- update roadmap and progress only for implemented behavior
+
+## Required end-to-end contracts
+
+- one direct dependency declaration resolves once
+- local alias binds the facade while preserving canonical package identity
+- duplicate canonical declaration fails
+- duplicate local root fails
+- undeclared source clause does not acquire a package
+- transitive dependency remains private
+- dependency package cannot see consumer `@project`
+- dependency package has its own generated sidecars and graph identity
+- reversed declaration order does not change canonical compilation order
+- no resolver fallback path is probed
+- source and precompiled descriptors share one consumer boundary
+- package output identity does not depend on consumer alias
 
 ## Stop conditions
 
-Pause when:
+Stop and request review when:
 
-- implementation needs an unresolved version/path/lockfile decision
-- a package is found through fallback scanning
-- aliases change canonical package identity
-- transitive dependencies become source-visible
-- config folding needs provider symbols
-- project inputs leak into a dependency boundary
-- a second package graph or registry representation appears
-- a temporary parser surface would constrain the future package manager
+- implementation requires inventing declaration syntax
+- file-local clauses begin acquiring packages
+- transitive dependencies become project-visible
+- alias identity enters package artefacts
+- resolver code starts probing fallback filesystem locations
+- package acquisition enters compiler semantics
+- one package boundary needs the consumer's project globals
+- compatibility policy requires backend-specific parser behavior
+- an implementation phase crosses more than two unlisted stage boundaries
 
 ## Validation
 
-Every code-bearing phase after design acceptance runs:
+Every accepted code-bearing phase requires:
 
 ```bash
-cargo fmt
+cargo fmt --all
 just validate
 ```
 
-## Final audit
+Run architecture review whenever declaration, resolver, package graph, alias or facade ownership changes.
 
-Verify:
+## Deferred follow-ups
 
-- config declarations are metadata-only and preamble-only
-- aliases are project-wide local roots, not alternate canonical identities
-- only direct dependencies are visible
-- dependencies compile as separate immutable package graphs
-- no config symbol import, fallback filesystem search or input leakage exists
-- future package-manager ownership remains explicit and unimplemented where deferred
+- remote registry and fetching
+- version solver and lockfile
+- publishing
+- package-manager commands
+- security and package-quality policy
+- local, Git and registry overrides
+- persistent package caches
+- package audit and dependency-count policy
