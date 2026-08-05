@@ -395,17 +395,20 @@ pub(crate) fn compile_single_file_frontend(
                 .mark_diagnosed(module_id)
                 .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
+            let boundary = CompiledGraphBoundary {
+                structure: graph,
+                modules,
+                generated: generated_store,
+                diagnosed: vec![DiagnosedModule {
+                    module_id,
+                    diagnostics: diagnosed,
+                }],
+                blocked: Vec::new(),
+            };
             return ProjectFrontendCompilation::new(
-                CompiledGraphBoundary {
-                    structure: graph,
-                    modules,
-                    generated: generated_store,
-                    diagnosed: vec![DiagnosedModule {
-                        module_id,
-                        diagnostics: diagnosed,
-                    }],
-                    blocked: Vec::new(),
-                },
+                boundary
+                    .finish()
+                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?,
                 CompletedSourcePackageRegistry::new(),
             )
             .map_err(|error| CompilerMessages::from_error_ref(error, string_table));
@@ -466,14 +469,17 @@ pub(crate) fn compile_single_file_frontend(
         )
         .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
+    let boundary = CompiledGraphBoundary {
+        structure: graph,
+        modules,
+        generated: generated_store,
+        diagnosed: Vec::new(),
+        blocked: Vec::new(),
+    };
     ProjectFrontendCompilation::new(
-        CompiledGraphBoundary {
-            structure: graph,
-            modules,
-            generated: generated_store,
-            diagnosed: Vec::new(),
-            blocked: Vec::new(),
-        },
+        boundary
+            .finish()
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?,
         CompletedSourcePackageRegistry::new(),
     )
     .map_err(|error| CompilerMessages::from_error_ref(error, string_table))
@@ -995,15 +1001,16 @@ fn compile_module_waves(
         ));
     }
 
-    let mut boundary = CompiledGraphBoundary {
+    let boundary = CompiledGraphBoundary {
         structure: graph,
         modules: provider_store,
         generated: generated_store,
         diagnosed,
         blocked,
     };
-    boundary.sort_outcomes();
-    Ok(boundary)
+    boundary
+        .finish()
+        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))
 }
 
 fn order_source_package_inventories(

@@ -342,13 +342,9 @@ impl ProjectCompilation {
         project: CompiledGraphBoundary,
         source_packages: CompletedSourcePackageRegistry,
     ) -> Result<Self, CompilerError> {
-        project.validate_invariants()?;
-        ensure_success_only(&project)?;
-        project.modules.ensure_all_successful()?;
+        project.require_all_successful()?;
         for package in source_packages.iter() {
-            package.boundary.validate_invariants()?;
-            ensure_success_only(&package.boundary)?;
-            package.boundary.modules.ensure_all_successful()?;
+            package.boundary.require_all_successful()?;
         }
 
         let module_views = compilation_module_views(&project, &source_packages)?;
@@ -764,26 +760,6 @@ fn collect_reachable_external_package_ids(
     }
 
     Ok(package_ids)
-}
-
-/// Reject a boundary that contains diagnosed or blocked modules.
-///
-/// `ProjectCompilation` is success-only by construction: `build` and `dev` must never assemble a
-/// linkable payload from a partial graph.
-fn ensure_success_only(boundary: &CompiledGraphBoundary) -> Result<(), CompilerError> {
-    if let Some(diagnosed) = boundary.diagnosed.first() {
-        return Err(CompilerError::compiler_error(format!(
-            "Project compilation received a boundary with diagnosed ModuleId {}",
-            diagnosed.module_id.index()
-        )));
-    }
-    if let Some(blocked) = boundary.blocked.first() {
-        return Err(CompilerError::compiler_error(format!(
-            "Project compilation received a boundary with blocked ModuleId {}",
-            blocked.module_id.index()
-        )));
-    }
-    Ok(())
 }
 
 /// Resolve one dense module reference through the owning boundary's retained store.

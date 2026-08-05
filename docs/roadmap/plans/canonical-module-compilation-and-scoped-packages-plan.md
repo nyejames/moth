@@ -24,22 +24,32 @@ Phase 5 does not implement the new dependency grammar, builtin `Path`, resource 
 ACTIVE_PLAN: docs/roadmap/plans/canonical-module-compilation-and-scoped-packages-plan.md
 WORK_ID: R5-closeout
 WORK_SOURCE: parent reviews through checkpoint 909d41660b198db5f39e7d822282a107e69be118
-IMPLEMENTED_CHECKPOINT: R5C1B/R5C4B checkpoint (pending Gate B review)
-REPOSITORY_STATE: one coordinator checkpoint commit for R5C1B/R5C4B; unrelated user docs edit in docs/src/styles/+package.moth left uncommitted
-STATUS: paused - Gate B review required
-CURRENT_SLICE: R5C1B and R5C4B (complete, awaiting Gate B)
+IMPLEMENTED_CHECKPOINT: R5C1C checkpoint (complete, awaiting Gate B re-review)
+REPOSITORY_STATE: clean at the R5C1C checkpoint commit
+STATUS: paused - Gate B re-review required
+CURRENT_SLICE: R5C1C - finalize boundaries and validate dense identity mapping (complete)
 ACCEPTED_FROM_CHECKPOINT:
 - R5C3C provider agreement and recursive interface closure
 - R5C4A exhaustive canonical token traversal for correctness
 - R5C5B boundary-scoped generated ownership and caller-scoped lookup
-- R5C1B total graph-outcome validation
 - R5C4B exact remapping, exact template-row identity and transactional publication
-REQUIRED_RELOADS: AGENTS.md, this plan, compiler-design-overview.md, build-system-design.md, compiled_boundary.rs, module_artifact_store.rs, generated_worklist.rs, frontend_orchestration.rs, compilation.rs, build.rs and tokenizer/tokens.rs
-VALIDATION_STATE: full just validate green at the R5C1B/R5C4B checkpoint (workspace tests 4083, integration 1818/1818, cross-target Clippy, docs, bench-ci); interim auditor and final_auditor both audit_clean
+COMPLETED_R5C1C:
+- CompiledGraphBoundary::finish sorts and proves every boundary before publication
+- compile_module_waves and single-file compilation return only finished boundaries
+- CompletedSourcePackageRegistry::publish validates the finished package boundary before mutation
+- dense outcome lanes replace hash sets; successful slots prove interface origin equals graph node origin and reference exactly one artefact row with no orphaned rows
+- CompiledSourcePackage::validate proves root range, package identity, normal root role, final outcome and interface agreement
+- generated publication proves one in-range generated root and exact summary agreement
+- ProjectCompilation::from_successful_boundaries uses one require_all_successful conversion
+- project/package materialisation collision check uses direct indexes without per-row owner strings
+PENDING_GATE_B:
+- R5C1B completion through R5C1C
+REQUIRED_RELOADS: AGENTS.md, this plan, compiler-design-overview.md, build-system-design.md, compiled_boundary.rs, module_artifact_store.rs, generated_worklist.rs, compilation.rs, build.rs and boundary tests
+VALIDATION_STATE: full just validate green at R5C1C (workspace tests 4083, integration 1818/1818, cross-target Clippy, docs, bench-ci)
 BLOCKERS: none
-NEXT_WORKER_ORDER: Gate B review -> R5C6A -> Gate C review -> R5C6B -> R5C7 -> R5C8 -> R5C9 -> Phase 5 exit review -> mandatory handoff
-STOP_REASON: plan requires stopping for Gate B after R5C1B/R5C4B
-NEXT_RESUME_ACTION: submit the checkpoint for Gate B review; after acceptance implement R5C6A
+NEXT_WORKER_ORDER: Gate B re-review -> R5C6A -> Gate C review -> R5C6B -> R5C7 -> R5C8 -> R5C9 -> Phase 5 exit review -> mandatory handoff
+STOP_REASON: plan requires stopping for Gate B re-review after R5C1C
+NEXT_RESUME_ACTION: submit the R5C1C checkpoint for Gate B re-review; after acceptance implement R5C6A
 FOLLOW_UP_CHAIN:
 1. dependency-clauses-and-path-syntax-plan.md
 2. tir-corrections-and-simplification-plan.md

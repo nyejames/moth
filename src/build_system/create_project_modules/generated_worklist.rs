@@ -403,9 +403,9 @@ impl BoundaryGeneratedFunctionStore {
         &mut self,
         delta: GeneratedFunctionWorklistDelta,
     ) -> Result<(), CompilerError> {
-        // Preflight the complete delta before mutation: identity/sidecar agreement, duplicate
-        // identities inside the delta and duplicates against retained state must all pass before
-        // any row is appended.
+        // Preflight the complete delta before mutation: identity/sidecar agreement, executable
+        // record shape, duplicate identities inside the delta and duplicates against retained
+        // state must all pass before any row is appended.
         let mut delta_identities = FxHashSet::default();
         for record in &delta.records {
             if record.identity != record.sidecar.identity {
@@ -414,6 +414,7 @@ impl BoundaryGeneratedFunctionStore {
                     record.sidecar.identity, record.identity
                 )));
             }
+            Self::validate_completed_generated_record(record)?;
             if !delta_identities.insert(record.identity.clone()) {
                 return Err(CompilerError::compiler_error(format!(
                     "Generated identity {:?} is duplicated inside one publication delta",
@@ -432,6 +433,65 @@ impl BoundaryGeneratedFunctionStore {
             let record_id = GeneratedFunctionId(self.records.len());
             self.by_identity.insert(record.identity.clone(), record_id);
             self.records.push(record);
+        }
+        Ok(())
+    }
+
+    /// Validate one completed generated record as an executable retained-store row.
+    ///
+    /// WHAT: proves the sidecar HIR contains exactly one generated root mapping for this
+    ///       identity, that the root `FunctionId` is in range, and that the record's summary is
+    ///       the exact borrow summary of that generated root.
+    /// WHY: generated summaries and sidecars publish together, so the retained store must never
+    ///       accept a sidecar whose root identity or summary cannot back the record.
+    fn validate_completed_generated_record(
+        record: &CompletedGeneratedFunction,
+    ) -> Result<(), CompilerError> {
+        let hir = &record.sidecar.module.executable.hir;
+        let mut roots = hir.function_ids_by_generated.iter();
+        let Some((root_identity, function_id)) = roots.next() else {
+            return Err(CompilerError::compiler_error(format!(
+                "Generated sidecar {:?} has no generated root executable identity",
+                record.identity
+            )));
+        };
+        if roots.next().is_some() {
+            return Err(CompilerError::compiler_error(format!(
+                "Generated sidecar {:?} presents more than one generated root identity",
+                record.identity
+            )));
+        }
+        if root_identity != &record.identity {
+            return Err(CompilerError::compiler_error(format!(
+                "Generated sidecar root identity {:?} disagrees with its record identity {:?}",
+                root_identity, record.identity
+            )));
+        }
+        if function_id.0 as usize >= hir.functions.len() {
+            return Err(CompilerError::compiler_error(format!(
+                "Generated sidecar {:?} references out-of-range HIR FunctionId {}",
+                record.identity, function_id.0
+            )));
+        }
+        let exact_summary = record
+            .sidecar
+            .module
+            .executable
+            .borrow_analysis
+            .analysis
+            .public_call_summaries
+            .get(function_id)
+            .ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "Generated function {:?} has no exact borrow summary",
+                    record.identity
+                ))
+            })?;
+        if exact_summary != &record.summary {
+            return Err(CompilerError::compiler_error(format!(
+                "Generated function {:?} summary disagrees with its sidecar borrow summary",
+                record.identity
+            )));
         }
         Ok(())
     }

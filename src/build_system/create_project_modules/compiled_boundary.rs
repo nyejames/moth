@@ -17,7 +17,7 @@ use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages}
 use crate::compiler_frontend::compiler_messages::module_diagnostics::ModuleDiagnostics;
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
-    GeneratedDeclarationIdentity, StablePackageIdentity,
+    GeneratedDeclarationIdentity, ModuleRootRole, StablePackageIdentity,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -67,6 +67,18 @@ pub(crate) struct CompiledGraphBoundary {
     pub(crate) blocked: Vec<BlockedModule>,
 }
 
+/// One final outcome lane claimed by a dense module slot during boundary validation.
+///
+/// WHAT: a compact per-slot marker proving that every diagnosed or blocked record owns exactly
+///       one slot and that no record overlaps another lane. `ModuleId` is already a dense index,
+///       so a vector replaces hashing and keeps first-error selection deterministic.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RetainedOutcomeLane {
+    None,
+    Diagnosed,
+    Blocked,
+}
+
 impl CompiledGraphBoundary {
     /// Sort diagnosed and blocked outcomes by dense `ModuleId`.
     ///
@@ -76,6 +88,20 @@ impl CompiledGraphBoundary {
         self.diagnosed
             .sort_by_key(|module| module.module_id.index());
         self.blocked.sort_by_key(|module| module.module_id.index());
+    }
+
+    /// Finalize one graph result before any consumer or registry may trust it.
+    ///
+    /// WHAT: the single authoritative completion transition. It sorts the diagnosed and blocked
+    ///       lanes into deterministic `ModuleId` order and then runs the full outcome proof.
+    /// WHY: directory compilation publishes source-package boundaries before the project
+    ///       boundary exists, so a boundary must be provably complete before it becomes a
+    ///       provider. Callers that later receive an already-finished boundary keep only
+    ///       defensive validation.
+    pub(crate) fn finish(mut self) -> Result<Self, CompilerError> {
+        self.sort_outcomes();
+        self.validate_invariants()?;
+        Ok(self)
     }
 
     /// Validate retained boundary invariants before any consumer trusts the dense lanes.
@@ -96,36 +122,27 @@ impl CompiledGraphBoundary {
             )));
         }
 
-        let mut diagnosed_ids = FxHashSet::default();
+        // Dense lane proof: every diagnosed or blocked record claims one distinct slot lane.
+        // `ModuleId` is already a dense index, so a compact vector replaces hashing and keeps
+        // first-error selection deterministic.
+        let mut retained_lanes = vec![RetainedOutcomeLane::None; self.modules.slot_count()];
         for diagnosed in &self.diagnosed {
-            if !diagnosed_ids.insert(diagnosed.module_id) {
+            let lane = retained_lanes
+                .get_mut(diagnosed.module_id.index())
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(format!(
+                        "Diagnosed module {} is out of range for {} slots",
+                        diagnosed.module_id.index(),
+                        self.modules.slot_count()
+                    ))
+                })?;
+            if *lane != RetainedOutcomeLane::None {
                 return Err(CompilerError::compiler_error(format!(
-                    "ModuleId {} appears more than once in the diagnosed lane",
+                    "ModuleId {} is both diagnosed and blocked or appears more than once in the diagnosed lane",
                     diagnosed.module_id.index()
                 )));
             }
-        }
-        let mut blocked_ids = FxHashSet::default();
-        for blocked in &self.blocked {
-            if !blocked_ids.insert(blocked.module_id) {
-                return Err(CompilerError::compiler_error(format!(
-                    "ModuleId {} appears more than once in the blocked lane",
-                    blocked.module_id.index()
-                )));
-            }
-        }
-        if let Some(overlap) = diagnosed_ids
-            .iter()
-            .find(|module_id| blocked_ids.contains(module_id))
-        {
-            return Err(CompilerError::compiler_error(format!(
-                "ModuleId {} is both diagnosed and blocked",
-                overlap.index()
-            )));
-        }
-
-        // Every retained outcome record must agree with its own store slot (record -> slot).
-        for diagnosed in &self.diagnosed {
+            *lane = RetainedOutcomeLane::Diagnosed;
             if self.modules.slot(diagnosed.module_id)? != ProviderSlot::Diagnosed {
                 return Err(CompilerError::compiler_error(format!(
                     "Diagnosed module {} does not hold the diagnosed store slot",
@@ -134,6 +151,22 @@ impl CompiledGraphBoundary {
             }
         }
         for blocked in &self.blocked {
+            let lane = retained_lanes
+                .get_mut(blocked.module_id.index())
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(format!(
+                        "Blocked module {} is out of range for {} slots",
+                        blocked.module_id.index(),
+                        self.modules.slot_count()
+                    ))
+                })?;
+            if *lane != RetainedOutcomeLane::None {
+                return Err(CompilerError::compiler_error(format!(
+                    "ModuleId {} is both diagnosed and blocked or appears more than once in the blocked lane",
+                    blocked.module_id.index()
+                )));
+            }
+            *lane = RetainedOutcomeLane::Blocked;
             if self.modules.slot(blocked.module_id)? != ProviderSlot::Blocked {
                 return Err(CompilerError::compiler_error(format!(
                     "Blocked module {} does not hold the blocked store slot",
@@ -142,9 +175,12 @@ impl CompiledGraphBoundary {
             }
         }
 
-        // Walk the complete slot/lane bijection: every slot must be final, and every successful
-        // slot must reference an existing artefact row.
-        for index in 0..self.modules.slot_count() {
+        // Walk the complete slot/lane bijection: every slot must be final, successful slots
+        // must reference exactly one existing artefact row whose interface origin agrees with
+        // the graph node, and every retained artefact row must be referenced by exactly one
+        // slot. Dense row tracking proves the bijection without hashing.
+        let mut row_owners = vec![None; self.modules.artifact_count()];
+        for (index, retained_lane) in retained_lanes.iter().enumerate() {
             let module_id = ModuleId::from_index(index);
             match self.modules.slot(module_id)? {
                 ProviderSlot::Unavailable => {
@@ -153,22 +189,48 @@ impl CompiledGraphBoundary {
                     )));
                 }
                 ProviderSlot::Successful(artifact_id) => {
-                    if self.modules.artifact(module_id)?.is_none() {
-                        return Err(CompilerError::compiler_error(format!(
+                    let artifact = self.modules.artifact(module_id)?.ok_or_else(|| {
+                        CompilerError::compiler_error(format!(
                             "ModuleId {index} references missing artifact row {}",
                             artifact_id.index()
+                        ))
+                    })?;
+                    let row_count = row_owners.len();
+                    let owner: &mut Option<ModuleId> = row_owners
+                        .get_mut(artifact_id.index())
+                        .ok_or_else(|| {
+                            CompilerError::compiler_error(format!(
+                                "ModuleId {index} references artifact row {} outside the retained artefact lane of {} rows",
+                                artifact_id.index(),
+                                row_count
+                            ))
+                        })?;
+                    if let Some(existing) = owner {
+                        return Err(CompilerError::compiler_error(format!(
+                            "Artifact row {} is referenced by both ModuleId {} and ModuleId {index}",
+                            artifact_id.index(),
+                            existing.index()
+                        )));
+                    }
+                    *owner = Some(module_id);
+                    let node = &self.structure.nodes()[index];
+                    if &artifact.interface.module_origin != node.stable_origin() {
+                        return Err(CompilerError::compiler_error(format!(
+                            "ModuleId {index} artefact interface origin {:?} disagrees with its graph node origin {:?}",
+                            artifact.interface.module_origin,
+                            node.stable_origin()
                         )));
                     }
                 }
                 ProviderSlot::Diagnosed => {
-                    if !diagnosed_ids.contains(&module_id) {
+                    if *retained_lane != RetainedOutcomeLane::Diagnosed {
                         return Err(CompilerError::compiler_error(format!(
                             "ModuleId {index} holds the diagnosed slot but has no diagnosed record"
                         )));
                     }
                 }
                 ProviderSlot::Blocked => {
-                    if !blocked_ids.contains(&module_id) {
+                    if *retained_lane != RetainedOutcomeLane::Blocked {
                         return Err(CompilerError::compiler_error(format!(
                             "ModuleId {index} holds the blocked slot but has no blocked record"
                         )));
@@ -177,7 +239,41 @@ impl CompiledGraphBoundary {
             }
         }
 
+        if let Some((row_index, None)) = row_owners
+            .iter()
+            .enumerate()
+            .find(|(_, owner)| owner.is_none())
+        {
+            return Err(CompilerError::compiler_error(format!(
+                "Artifact row {row_index} is not referenced by any module slot"
+            )));
+        }
+
         Ok(())
+    }
+
+    /// Require every slot to be successful and no diagnosed or blocked record to remain.
+    ///
+    /// WHAT: the success-only conversion used when assembling a linkable `ProjectCompilation`.
+    ///       It runs one slot scan plus the two lane emptiness checks; finalization already
+    ///       proved the full outcome bijection at `finish`.
+    /// WHY: `build`/`dev` must never receive a diagnosed or blocked boundary, and the stricter
+    ///       requirement should not re-run the full invariant proof once finalization is the
+    ///       authoritative completion gate.
+    pub(crate) fn require_all_successful(&self) -> Result<(), CompilerError> {
+        if let Some(diagnosed) = self.diagnosed.first() {
+            return Err(CompilerError::compiler_error(format!(
+                "Project compilation received a boundary with diagnosed ModuleId {}",
+                diagnosed.module_id.index()
+            )));
+        }
+        if let Some(blocked) = self.blocked.first() {
+            return Err(CompilerError::compiler_error(format!(
+                "Project compilation received a boundary with blocked ModuleId {}",
+                blocked.module_id.index()
+            )));
+        }
+        self.modules.ensure_all_successful()
     }
 
     /// Iterate every successful artefact in deterministic `ModuleId` order.
@@ -214,6 +310,84 @@ impl CompiledSourcePackage {
     /// The `@`-stripped import spelling for this package boundary.
     pub(crate) fn import_prefix(&self) -> &str {
         self.package_identity.name()
+    }
+
+    /// Validate package identity and root ownership before registry publication.
+    ///
+    /// WHAT: proves the root `ModuleId` is in range, the root node belongs to this package's
+    ///       stable identity, the root role is a normal API-compatible package entry root, the
+    ///       root reached a final outcome, and a successful root interface agrees with the graph
+    ///       node's origin. The boundary must already be finished (or be validated by this call
+    ///       through the embedded boundary proof).
+    /// WHY: `CompletedSourcePackageRegistry::publish` mutates registry state, so the package
+    ///       row must be provably coherent before dependency edges and materialisation rows are
+    ///       recorded beside it.
+    pub(crate) fn validate(&self) -> Result<(), CompilerError> {
+        self.boundary.validate_invariants()?;
+
+        let root_index = self.root_module_id.index();
+        let node = self
+            .boundary
+            .structure
+            .nodes()
+            .get(root_index)
+            .ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "Source package @{} root ModuleId {} is out of range for {} graph nodes",
+                    self.import_prefix(),
+                    root_index,
+                    self.boundary.structure.nodes().len()
+                ))
+            })?;
+        if node.stable_origin().package() != &self.package_identity {
+            return Err(CompilerError::compiler_error(format!(
+                "Source package @{} root node belongs to package {:?}, not {:?}",
+                self.import_prefix(),
+                node.stable_origin().package(),
+                self.package_identity
+            )));
+        }
+        if node.role() != ModuleRootRole::Normal {
+            return Err(CompilerError::compiler_error(format!(
+                "Source package @{} root module has role {:?}; packages require a normal entry-root module",
+                self.import_prefix(),
+                node.role()
+            )));
+        }
+
+        match self.boundary.modules.slot(self.root_module_id)? {
+            ProviderSlot::Successful(_) => {
+                let interface = self
+                    .boundary
+                    .modules
+                    .interface(self.root_module_id)?
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(format!(
+                            "Source package @{} root ModuleId {} holds a successful slot without a published interface",
+                            self.import_prefix(),
+                            root_index
+                        ))
+                    })?;
+                if &interface.module_origin != node.stable_origin() {
+                    return Err(CompilerError::compiler_error(format!(
+                        "Source package @{} root interface origin {:?} disagrees with its graph node origin {:?}",
+                        self.import_prefix(),
+                        interface.module_origin,
+                        node.stable_origin()
+                    )));
+                }
+            }
+            ProviderSlot::Diagnosed | ProviderSlot::Blocked => {}
+            ProviderSlot::Unavailable => {
+                return Err(CompilerError::compiler_error(format!(
+                    "Source package @{} root ModuleId {} never reached a completed outcome",
+                    self.import_prefix(),
+                    root_index
+                )));
+            }
+        }
+
+        Ok(())
     }
 
     /// The root facade's publication slot inside this package's own store.
@@ -290,10 +464,14 @@ impl CompletedSourcePackageRegistry {
 
     /// Publish one completed package boundary with its direct provider packages.
     ///
-    /// WHAT: resolves every dependency prefix once, rejects unknown or duplicate prefixes, and
-    ///       records both dependency directions beside the package row.
+    /// WHAT: validates the package's finished boundary and root ownership, resolves every
+    ///       dependency prefix once, rejects unknown or duplicate prefixes, and records both
+    ///       dependency directions beside the package row. Every preflight runs before any
+    ///       mutation so a failing publication leaves the registry unchanged.
     /// WHY: packages compile in dependency order, so every provider prefix must already have a
-    ///      registry entry; a missing entry is a proven scheduling invariant failure.
+    ///      registry entry; a missing entry is a proven scheduling invariant failure. The
+    ///      boundary must also be provably complete before later consumers resolve its facade,
+    ///      slots or materialisation indexes.
     pub(crate) fn publish(
         &mut self,
         package: CompiledSourcePackage,
@@ -306,6 +484,9 @@ impl CompletedSourcePackageRegistry {
                 prefix
             )));
         }
+
+        // Validate the finished boundary and package root before any mutation.
+        package.validate()?;
 
         // Resolve every dependency prefix before any mutation so a failing publication leaves
         // the registry unchanged.
@@ -599,43 +780,25 @@ impl ProjectFrontendCompilation {
         project.validate_invariants()?;
         source_packages.validate_dependency_edges()?;
         for package in source_packages.iter() {
-            package.boundary.validate_invariants()?;
+            package.validate()?;
         }
 
-        // One deterministic registration pass over every boundary's materialisation rows:
-        // project rows first, then package rows in publication order. Equal generated
-        // identities may coexist in unrelated boundaries, but one identity must never be
-        // published by both the project and a source package.
-        let mut published_rows = FxHashMap::<GeneratedDeclarationIdentity, String>::default();
-        for (identity, location) in project.modules.materialisation_locations() {
-            if published_rows
-                .insert(
-                    identity.clone(),
-                    format!("project module {}", location.artifact_id.index()),
-                )
-                .is_some()
-            {
-                return Err(CompilerError::compiler_error(format!(
-                    "Generated declaration identity {:?} is duplicated inside the project boundary",
-                    identity
-                )));
-            }
-        }
+        // The project store and package registry already enforce uniqueness inside their own
+        // lanes, so the final handoff only needs to prove that one generated declaration
+        // identity is never published by both a project boundary and a source package. Iterate
+        // the package index directly and allocate no owner strings unless a collision exists.
+        let mut package_owners =
+            FxHashMap::<&GeneratedDeclarationIdentity, PackageBoundaryId>::default();
         for (identity, location) in source_packages.materialisation_locations() {
-            let owner = format!(
-                "source package @{}",
-                source_packages
-                    .package(location.package_id)?
-                    .import_prefix()
-            );
-            if let Some(existing_owner) = published_rows.insert(identity.clone(), owner) {
+            package_owners.insert(identity, location.package_id);
+        }
+        for (identity, location) in project.modules.materialisation_locations() {
+            if let Some(package_id) = package_owners.get(identity) {
                 return Err(CompilerError::compiler_error(format!(
-                    "Generated declaration identity {:?} is published by both {} and source package @{}",
+                    "Generated declaration identity {:?} is published by both project module {} and source package @{}",
                     identity,
-                    existing_owner,
-                    source_packages
-                        .package(location.package_id)?
-                        .import_prefix()
+                    location.artifact_id.index(),
+                    source_packages.package(*package_id)?.import_prefix()
                 )));
             }
         }

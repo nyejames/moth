@@ -491,36 +491,38 @@ fn test_graph_boundary(
     module_path: &str,
 ) -> CompiledGraphBoundary {
     let module_count = modules.len();
+    let origins = (0..module_count)
+        .map(|index| {
+            StableModuleOriginIdentity::from_portable_path(
+                StablePackageIdentity::project_local(package_name),
+                if module_path.is_empty() {
+                    format!("module_{index}")
+                } else {
+                    module_path.to_owned()
+                },
+                ModuleRootRole::Normal,
+            )
+        })
+        .collect::<Vec<_>>();
     let graph = ProjectModuleGraph::from_normal_roots(
-        (0..module_count)
-            .map(|index| {
-                let origin = StableModuleOriginIdentity::from_portable_path(
-                    StablePackageIdentity::project_local(package_name),
-                    if module_path.is_empty() {
-                        format!("module_{index}")
-                    } else {
-                        module_path.to_owned()
-                    },
-                    ModuleRootRole::Normal,
-                );
+        origins
+            .iter()
+            .cloned()
+            .zip((0..module_count).map(|index| {
                 let root_path = PathBuf::from(format!("@module_{index}.moth"));
-                (origin, root_path.clone(), root_path)
-            })
+                (root_path.clone(), root_path)
+            }))
+            .map(|(origin, (root_directory, root_file))| (origin, root_directory, root_file))
             .collect(),
     );
     let mut store = ModuleArtifactStore::new(module_count);
     for (index, module) in modules.into_iter().enumerate() {
-        let origin_path = if module_path.is_empty() {
-            format!("module_{index}")
-        } else {
-            module_path.to_owned()
-        };
         store
             .publish_success(
                 ModuleId::from_index(index),
                 CompiledModuleArtifact {
                     module,
-                    interface: empty_test_interface(origin_path),
+                    interface: empty_test_interface_for_origin(origins[index].clone()),
                 },
             )
             .expect("test store should publish each module");
@@ -535,12 +537,18 @@ fn test_graph_boundary(
 }
 
 fn empty_test_interface(module_path: String) -> PublicSemanticInterface {
+    empty_test_interface_for_origin(StableModuleOriginIdentity::from_portable_path(
+        StablePackageIdentity::project_local("test"),
+        module_path,
+        ModuleRootRole::Normal,
+    ))
+}
+
+fn empty_test_interface_for_origin(
+    module_origin: StableModuleOriginIdentity,
+) -> PublicSemanticInterface {
     PublicSemanticInterface {
-        module_origin: StableModuleOriginIdentity::from_portable_path(
-            StablePackageIdentity::project_local("test"),
-            module_path,
-            ModuleRootRole::Normal,
-        ),
+        module_origin,
         export_bindings: Vec::new(),
         export_diagnostic_provenance: Vec::new(),
         binding_exports: Vec::new(),
@@ -1892,7 +1900,7 @@ fn boundary_validation_rejects_duplicate_and_overlapping_outcome_lanes() {
 }
 
 #[test]
-fn frontend_boundary_rejects_unavailable_source_package_slot() {
+fn source_package_publication_rejects_unavailable_root_slot() {
     let package_boundary = CompiledGraphBoundary {
         structure: ProjectModuleGraph::from_normal_roots(vec![(
             StableModuleOriginIdentity::from_portable_path(
@@ -1909,7 +1917,7 @@ fn frontend_boundary_rejects_unavailable_source_package_slot() {
         blocked: Vec::new(),
     };
     let mut registry = CompletedSourcePackageRegistry::new();
-    registry
+    let error = registry
         .publish(
             CompiledSourcePackage {
                 package_identity: StablePackageIdentity::source_package(
@@ -1921,20 +1929,17 @@ fn frontend_boundary_rejects_unavailable_source_package_slot() {
             },
             &[],
         )
-        .expect("package row publishes");
+        .expect_err("an unfinished package boundary must not publish");
 
-    let error = match ProjectFrontendCompilation::new(
-        test_graph_boundary(
-            vec![minimal_lane_module(PathBuf::from("@page.moth"), false)],
-            "test",
-            "page",
-        ),
-        registry,
-    ) {
-        Ok(_) => panic!("an unavailable package slot must reject the frontend boundary"),
-        Err(error) => error,
-    };
-    assert!(error.msg.contains("never reached a completed outcome"));
+    assert!(
+        error.msg.contains("never reached a completed outcome"),
+        "unexpected publication rejection: {error:?}"
+    );
+    assert_eq!(
+        registry.len(),
+        0,
+        "a failing publication must not retain the package"
+    );
 }
 
 #[test]

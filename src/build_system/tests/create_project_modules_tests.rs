@@ -10,6 +10,9 @@ use super::project_module_graph::ProjectModuleGraph;
 use super::source_discovery::{ResolvedDependencyEdge, ResolvedSourcePackageImport};
 use super::*;
 use crate::build_system::build::BackendBuilder;
+use crate::build_system::build::{
+    CompiledModuleArtifact, Module, ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts,
+};
 use crate::build_system::create_project_modules::module_namespace::{
     DirectoryImportResolution, ModuleNamespaceSet, ResolvedImport,
 };
@@ -25,6 +28,7 @@ use crate::builder_surface::external_import_providers::provider::{
     ResolvedExternalImport, RuntimeAssetIdentity,
 };
 use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
+use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::compiler_errors::{CompilerMessages, ErrorType};
 use crate::compiler_frontend::compiler_messages::render::{DiagnosticRenderContext, terse};
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
@@ -33,10 +37,14 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidAssignmentTargetReason, InvalidConfigReason, InvalidImportClauseReason,
     InvalidOutputFolderReason, InvalidPackageFolderReason,
 };
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::external_packages::{ExternalFunctionId, ExternalTypeId};
+use crate::compiler_frontend::hir::module::HirModule;
+use crate::compiler_frontend::hir::reachability::HirModuleLinkFacts;
 use crate::compiler_frontend::paths::const_paths::RetainedProviderReference;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
+use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity;
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -6137,23 +6145,69 @@ fn compiled_package(prefix: &str) -> CompiledSourcePackage {
         ModuleRootRole::Normal,
     );
     let root_path = PathBuf::from(format!("{prefix}/@mod.moth"));
-    let graph =
-        ProjectModuleGraph::from_normal_roots(vec![(origin, PathBuf::from(prefix), root_path)]);
+    let graph = ProjectModuleGraph::from_normal_roots(vec![(
+        origin.clone(),
+        PathBuf::from(prefix),
+        root_path,
+    )]);
     let root_module_id = graph
         .entry_modules()
         .first()
         .copied()
         .expect("one entry module");
 
+    let mut modules = ModuleArtifactStore::new(1);
+    modules
+        .publish_success(
+            root_module_id,
+            CompiledModuleArtifact {
+                module: empty_module(),
+                interface: PublicSemanticInterface {
+                    module_origin: origin,
+                    export_bindings: Vec::new(),
+                    export_diagnostic_provenance: Vec::new(),
+                    binding_exports: Vec::new(),
+                    declarations: Vec::new(),
+                    reusable_evidence: Vec::new(),
+                    concrete_call_summaries: Vec::new(),
+                },
+            },
+        )
+        .expect("test package root should publish");
+
     CompiledSourcePackage {
         package_identity,
         root_module_id,
         boundary: CompiledGraphBoundary {
             structure: graph,
-            modules: ModuleArtifactStore::new(1),
+            modules,
             generated: BoundaryGeneratedFunctionStore::default(),
             diagnosed: Vec::new(),
             blocked: Vec::new(),
+        },
+    }
+}
+
+fn empty_module() -> Module {
+    Module {
+        executable: ModuleExecutable {
+            hir: HirModule::new(),
+            type_environment: TypeEnvironment::new(),
+            borrow_analysis: BorrowCheckReport::default(),
+        },
+        link_facts: ModuleLinkFacts {
+            external_package_registry: Arc::new(ExternalPackageRegistry::new()),
+            external_import_candidates: Vec::new(),
+            functions: HirModuleLinkFacts::default(),
+        },
+        metadata: ModuleCompilerMetadata {
+            entry_point: PathBuf::new(),
+            warnings: Vec::new(),
+            const_top_level_fragments: Vec::new(),
+            root_activity: crate::build_system::build::ModuleRootActivity::default(),
+            doc_fragments: Vec::new(),
+            rendered_path_usages: Vec::new(),
+            materialisation_context: None,
         },
     }
 }

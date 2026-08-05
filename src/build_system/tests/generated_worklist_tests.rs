@@ -9,7 +9,10 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::hir::functions::HirFunction;
+use crate::compiler_frontend::hir::ids::{BlockId, FunctionId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::reachability::HirModuleLinkFacts;
 use crate::compiler_frontend::public_call_summary::FunctionReturnAliasSummary;
@@ -75,8 +78,29 @@ fn test_module() -> Module {
     }
 }
 
-fn test_sidecar(identity: GeneratedFunctionIdentity) -> GeneratedFunctionSidecar {
-    GeneratedFunctionSidecar::new(identity, test_module())
+fn test_sidecar(
+    identity: GeneratedFunctionIdentity,
+    summary: PublicCallSummary,
+) -> GeneratedFunctionSidecar {
+    let mut module = test_module();
+    module.executable.hir.functions.push(HirFunction {
+        id: FunctionId(0),
+        entry: BlockId(0),
+        params: Vec::new(),
+        return_type: TypeId(0),
+    });
+    module
+        .executable
+        .hir
+        .function_ids_by_generated
+        .insert(identity.clone(), FunctionId(0));
+    module
+        .executable
+        .borrow_analysis
+        .analysis
+        .public_call_summaries
+        .insert(FunctionId(0), summary);
+    GeneratedFunctionSidecar::new(identity, module)
 }
 
 fn store_with(
@@ -86,8 +110,8 @@ fn store_with(
     let mut store = BoundaryGeneratedFunctionStore::default();
     store.push_completed_for_test(CompletedGeneratedFunction {
         identity: identity.clone(),
-        summary,
-        sidecar: test_sidecar(identity),
+        summary: summary.clone(),
+        sidecar: test_sidecar(identity, summary),
     });
     store
 }
@@ -246,7 +270,7 @@ fn equal_generated_identities_publish_across_independent_boundaries() {
             records: vec![CompletedGeneratedFunction {
                 identity: identity.clone(),
                 summary: summary(),
-                sidecar: test_sidecar(identity.clone()),
+                sidecar: test_sidecar(identity.clone(), summary()),
             }],
         })
         .unwrap();
@@ -256,7 +280,7 @@ fn equal_generated_identities_publish_across_independent_boundaries() {
             records: vec![CompletedGeneratedFunction {
                 identity: identity.clone(),
                 summary: summary(),
-                sidecar: test_sidecar(identity.clone()),
+                sidecar: test_sidecar(identity.clone(), summary()),
             }],
         })
         .unwrap();
@@ -323,7 +347,7 @@ fn boundary_rejects_publishing_the_same_generated_identity_twice() {
             records: vec![CompletedGeneratedFunction {
                 identity: identity.clone(),
                 summary: summary(),
-                sidecar: test_sidecar(identity.clone()),
+                sidecar: test_sidecar(identity.clone(), summary()),
             }],
         })
         .unwrap();
@@ -333,7 +357,7 @@ fn boundary_rejects_publishing_the_same_generated_identity_twice() {
             records: vec![CompletedGeneratedFunction {
                 identity: identity.clone(),
                 summary: summary(),
-                sidecar: test_sidecar(identity),
+                sidecar: test_sidecar(identity, summary()),
             }],
         })
         .unwrap_err();
@@ -351,7 +375,7 @@ fn late_generated_duplicate_leaves_existing_owners_unchanged() {
             records: vec![CompletedGeneratedFunction {
                 identity: existing.clone(),
                 summary: summary(),
-                sidecar: test_sidecar(existing.clone()),
+                sidecar: test_sidecar(existing.clone(), summary()),
             }],
         })
         .unwrap();
@@ -364,12 +388,12 @@ fn late_generated_duplicate_leaves_existing_owners_unchanged() {
                 CompletedGeneratedFunction {
                     identity: late_duplicate.clone(),
                     summary: summary(),
-                    sidecar: test_sidecar(late_duplicate.clone()),
+                    sidecar: test_sidecar(late_duplicate.clone(), summary()),
                 },
                 CompletedGeneratedFunction {
                     identity: late_duplicate.clone(),
                     summary: summary(),
-                    sidecar: test_sidecar(late_duplicate.clone()),
+                    sidecar: test_sidecar(late_duplicate.clone(), summary()),
                 },
             ],
         })
@@ -401,7 +425,7 @@ fn sidecar_record_identity_disagreement_leaves_store_unchanged() {
             records: vec![CompletedGeneratedFunction {
                 identity: record_identity,
                 summary: summary(),
-                sidecar: test_sidecar(other_identity),
+                sidecar: test_sidecar(other_identity, summary()),
             }],
         })
         .unwrap_err();

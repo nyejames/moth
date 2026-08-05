@@ -13,7 +13,7 @@ use crate::build_system::build::CompiledModuleArtifact;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CompiledModuleArtifactId(usize);
@@ -81,11 +81,13 @@ impl ModuleArtifactStore {
 
         let artifact_id = CompiledModuleArtifactId(self.artifacts.len());
         // Preflight every materialisation row before any mutation: a failing publication must
-        // leave the store unchanged.
+        // leave the store unchanged. One temporary set keeps the intra-context duplicate check
+        // linear; the retained lane remains the contiguous `materialisation_rows` vector.
         let mut rows = Vec::new();
+        let mut seen_rows = FxHashSet::default();
         if let Some(context) = artifact.module.metadata.materialisation_context.as_ref() {
             for (identity, template_index) in context.declaration_rows() {
-                if rows.iter().any(|(existing, _)| existing == identity) {
+                if !seen_rows.insert(identity) {
                     return Err(CompilerError::compiler_error(format!(
                         "Generated declaration identity {:?} is duplicated inside one materialisation context",
                         identity
@@ -142,6 +144,11 @@ impl ModuleArtifactStore {
     /// Number of dense module slots retained by this boundary.
     pub(crate) fn slot_count(&self) -> usize {
         self.slots.len()
+    }
+
+    /// Number of retained successful artefact rows in this store.
+    pub(crate) fn artifact_count(&self) -> usize {
+        self.artifacts.len()
     }
 
     /// Require every dense slot to hold a successful artefact.
