@@ -3,6 +3,7 @@
 //! WHAT: owns the public entry points for loading `config.moth` before compilation starts.
 //! WHY: callers only need one stable surface while parsing and validation details stay split by
 //! concern in dedicated helpers.
+use crate::timing_scope;
 
 mod parsing;
 mod validation;
@@ -15,7 +16,6 @@ use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::settings::Config;
-use crate::timed_manual_finish;
 
 use std::path::Path;
 
@@ -49,28 +49,25 @@ pub fn load_project_config(
     services: &ProjectConfigParseServices<'_>,
     string_table: &mut StringTable,
 ) -> Result<Option<ValidatedDirectoryOutputSettings>, CompilerMessages> {
-    #[cfg(feature = "timers")]
-    let load_total_start = crate::timing::start_pipeline_timing();
+    timing_scope!(timing_guard_config_load_total, "config.load_total");
 
     let config_path = config.config_file_path();
 
-    #[cfg(feature = "timers")]
-    let file_exists_start = crate::timing::start_pipeline_timing();
+    timing_scope!(
+        timing_guard_config_file_exists_check,
+        "config.file_exists_check"
+    );
     let config_exists = config_path.exists();
-    timed_manual_finish!("config.file_exists_check", file_exists_start);
 
     if !config_exists {
-        timed_manual_finish!("config.load_total", load_total_start);
         return validate_directory_output_settings_if_needed(config, string_table);
     }
 
-    #[cfg(feature = "timers")]
-    let parse_start = crate::timing::start_pipeline_timing();
-    let result = parse_project_config_file(config, &config_path, services, string_table);
-    timed_manual_finish!("config.parse_project_config_file", parse_start);
-
-    timed_manual_finish!("config.load_total", load_total_start);
-    result
+    timing_scope!(
+        timing_guard_config_parse_project_config_file,
+        "config.parse_project_config_file"
+    );
+    parse_project_config_file(config, &config_path, services, string_table)
 }
 
 // -------------------------

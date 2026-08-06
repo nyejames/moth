@@ -3,6 +3,7 @@
 //! This module provides the canonical project build flow (`build_project`). Build tools can
 //! compile once and pass the resulting project to the output subsystem without reimplementing
 //! frontend/backend orchestration.
+use crate::timing_scope;
 
 use crate::build_system::BuildProfile;
 use crate::build_system::create_project_modules::compiled_boundary::{
@@ -17,7 +18,6 @@ use crate::build_system::output::{
 };
 use crate::build_system::path_validation::check_if_valid_path;
 use crate::build_system::project_config::{ProjectConfigParseServices, load_project_config};
-use crate::timed_manual_finish;
 
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
@@ -1078,31 +1078,32 @@ pub fn build_project(
     entry_path: &str,
     flags: &[Flag],
 ) -> Result<BuildResult, CompilerMessages> {
-    #[cfg(feature = "timers")]
-    let total_start = crate::timing::start_pipeline_timing();
+    timing_scope!(timing_guard_build_project_total, "build_project.total");
     let build_profile = BuildProfile::from_flags(flags);
     let mut path_string_table = StringTable::new();
-    #[cfg(feature = "timers")]
-    let path_validation_start = crate::timing::start_pipeline_timing();
+    timing_scope!(
+        timing_guard_build_project_path_validation,
+        "build_project.path_validation"
+    );
     let valid_path = match check_if_valid_path(entry_path, &mut path_string_table) {
-        Ok(path) => {
-            timed_manual_finish!("build_project.path_validation", path_validation_start);
-            path
-        }
+        Ok(path) => path,
         Err(error) => {
-            timed_manual_finish!("build_project.path_validation", path_validation_start);
-            timed_manual_finish!("build_project.total", total_start);
             return Err(CompilerMessages::from_error(error, path_string_table));
         }
     };
+
+    #[cfg(feature = "timers")]
+    timing_guard_build_project_path_validation.finish();
 
     // --------------------------------------------
     //   PERFORM THE CORE COMPILER FRONTEND BUILD
     // --------------------------------------------
     // This discovers all the modules, parses the config,
     // and compiles each module to HIR for backend lowering.
-    #[cfg(feature = "timers")]
-    let bootstrap_start = crate::timing::start_pipeline_timing();
+    timing_scope!(
+        timing_guard_build_project_bootstrap,
+        "build_project.bootstrap"
+    );
     let BuildBootstrap {
         mut config,
         style_directives,
@@ -1110,19 +1111,18 @@ pub fn build_project(
         mut frontend_surface,
         validated_directory_output_settings,
     } = match bootstrap_project_build(project_builder, valid_path) {
-        Ok(bootstrap) => {
-            timed_manual_finish!("build_project.bootstrap", bootstrap_start);
-            bootstrap
-        }
+        Ok(bootstrap) => bootstrap,
         Err(messages) => {
-            timed_manual_finish!("build_project.bootstrap", bootstrap_start);
-            timed_manual_finish!("build_project.total", total_start);
             return Err(messages);
         }
     };
 
     #[cfg(feature = "timers")]
-    let compile_frontend_start = crate::timing::start_pipeline_timing();
+    timing_guard_build_project_bootstrap.finish();
+    timing_scope!(
+        timing_guard_build_project_compile_project_frontend,
+        "build_project.compile_project_frontend"
+    );
     let frontend_compilation = match compile_project_frontend(
         &mut config,
         build_profile,
@@ -1131,24 +1131,14 @@ pub fn build_project(
         &mut frontend_surface,
         &mut string_table,
     ) {
-        Ok(frontend_compilation) => {
-            timed_manual_finish!(
-                "build_project.compile_project_frontend",
-                compile_frontend_start,
-            );
-            frontend_compilation
-        }
+        Ok(frontend_compilation) => frontend_compilation,
         Err(messages) => {
-            timed_manual_finish!(
-                "build_project.compile_project_frontend",
-                compile_frontend_start,
-            );
-            timed_manual_finish!("build_project.total", total_start);
             return Err(messages);
         }
     };
+    #[cfg(feature = "timers")]
+    timing_guard_build_project_compile_project_frontend.finish();
     if frontend_compilation.has_diagnosed_or_blocked() {
-        timed_manual_finish!("build_project.total", total_start);
         return Err(frontend_compilation.into_render_messages(&mut string_table));
     }
     let project_compilation = ProjectCompilation::from_frontend(frontend_compilation)
@@ -1162,8 +1152,7 @@ pub fn build_project(
     // BUILD PROJECT USING THE APPROPRIATE BUILDER
     // --------------------------------------------
 
-    #[cfg(feature = "timers")]
-    let backend_start = crate::timing::start_pipeline_timing();
+    timing_scope!(timing_guard_build_project_backend, "build_project.backend");
     let project = match project_builder.backend.build_backend(
         project_compilation,
         &config,
@@ -1171,17 +1160,14 @@ pub fn build_project(
         flags,
         &mut string_table,
     ) {
-        Ok(project) => {
-            timed_manual_finish!("build_project.backend", backend_start);
-            project
-        }
+        Ok(project) => project,
         Err(mut compiler_messages) => {
-            timed_manual_finish!("build_project.backend", backend_start);
-            timed_manual_finish!("build_project.total", total_start);
             compiler_messages.string_table = string_table;
             return Err(compiler_messages);
         }
     };
+    #[cfg(feature = "timers")]
+    timing_guard_build_project_backend.finish();
 
     warnings.extend(project.warnings.iter().cloned());
 
@@ -1194,7 +1180,6 @@ pub fn build_project(
             let error = CompilerError::compiler_error(
                 "Directory output settings were not available after bootstrap validation.",
             );
-            timed_manual_finish!("build_project.total", total_start);
             return Err(CompilerMessages::from_error(error, string_table));
         };
 
@@ -1206,8 +1191,6 @@ pub fn build_project(
     } else {
         None
     };
-
-    timed_manual_finish!("build_project.total", total_start);
 
     Ok(BuildResult {
         project,
@@ -1229,85 +1212,83 @@ pub(crate) fn bootstrap_project_build(
     project_builder: &ProjectBuilder,
     entry_path: PathBuf,
 ) -> Result<BuildBootstrap, CompilerMessages> {
-    #[cfg(feature = "timers")]
-    let bootstrap_total_start = crate::timing::start_pipeline_timing();
+    timing_scope!(timing_guard_bootstrap_total, "bootstrap.total");
 
-    #[cfg(feature = "timers")]
-    let config_init_start = crate::timing::start_pipeline_timing();
+    timing_scope!(timing_guard_bootstrap_config_init, "bootstrap.config_init");
     let mut config = Config::new(entry_path);
-    timed_manual_finish!("bootstrap.config_init", config_init_start);
+    #[cfg(feature = "timers")]
+    timing_guard_bootstrap_config_init.finish();
 
     // Seed the build table with the compiler-owned symbols that per-file frontend tables will
     // also need as a stable prefix once file preparation becomes independent.
-    #[cfg(feature = "timers")]
-    let symbol_preseed_start = crate::timing::start_pipeline_timing();
+    timing_scope!(
+        timing_guard_bootstrap_symbol_preseed,
+        "bootstrap.symbol_preseed"
+    );
     let preseeded = CompilerSymbolSet::preseeded_table(FILE_MIN_UNIQUE_SYMBOLS_CAPACITY);
     let mut string_table = preseeded.string_table;
     // The bootstrap path only needs the preseeded table today. File-local preparation will keep
     // these typed IDs alongside its local outputs once fixed-symbol IDs are consumed directly.
     let _compiler_symbol_ids = preseeded.compiler_symbol_ids;
-    timed_manual_finish!("bootstrap.symbol_preseed", symbol_preseed_start);
+    #[cfg(feature = "timers")]
+    timing_guard_bootstrap_symbol_preseed.finish();
 
     // Compute the builder's frontend surface once so config loading and frontend compilation
     // see the same set of allowed config keys, external packages, and source-backed packages.
-    #[cfg(feature = "timers")]
-    let frontend_surface_start = crate::timing::start_pipeline_timing();
+    timing_scope!(
+        timing_guard_bootstrap_frontend_surface,
+        "bootstrap.frontend_surface"
+    );
     let frontend_surface = project_builder.backend.frontend_surface();
-    timed_manual_finish!("bootstrap.frontend_surface", frontend_surface_start);
-
     #[cfg(feature = "timers")]
-    let style_directives_start = crate::timing::start_pipeline_timing();
+    timing_guard_bootstrap_frontend_surface.finish();
+
+    timing_scope!(
+        timing_guard_bootstrap_style_directives,
+        "bootstrap.style_directives"
+    );
     let frontend_style_directives = project_builder.backend.frontend_style_directives();
     let style_directives = match StyleDirectiveRegistry::merged(&frontend_style_directives) {
         Ok(style_directives) => style_directives,
         Err(error) => {
-            timed_manual_finish!("bootstrap.style_directives", style_directives_start);
-            timed_manual_finish!("bootstrap.total", bootstrap_total_start);
             return Err(CompilerMessages::from_error(error, string_table.clone()));
         }
     };
-    timed_manual_finish!("bootstrap.style_directives", style_directives_start);
-
+    #[cfg(feature = "timers")]
+    timing_guard_bootstrap_style_directives.finish();
     // WHAT: Load and validate project config before compilation begins (Stage 0).
     // WHY: Backends and serving code both depend on the same validated config surface.
     let config_services = ProjectConfigParseServices {
         style_directives: &style_directives,
         frontend_surface: &frontend_surface,
     };
-    #[cfg(feature = "timers")]
-    let load_project_config_start = crate::timing::start_pipeline_timing();
+    timing_scope!(
+        timing_guard_bootstrap_load_project_config,
+        "bootstrap.load_project_config"
+    );
     let validated_directory_output_settings =
         match load_project_config(&mut config, &config_services, &mut string_table) {
             Ok(settings) => settings,
             Err(messages) => {
-                timed_manual_finish!("bootstrap.load_project_config", load_project_config_start);
-                timed_manual_finish!("bootstrap.total", bootstrap_total_start);
                 return Err(messages);
             }
         };
-    timed_manual_finish!("bootstrap.load_project_config", load_project_config_start);
-
+    #[cfg(feature = "timers")]
+    timing_guard_bootstrap_load_project_config.finish();
     // WHAT: Validate backend-specific config requirements before compilation.
     // WHY: Backends should reject unsupported settings before frontend compilation does work.
-    #[cfg(feature = "timers")]
-    let backend_config_validate_start = crate::timing::start_pipeline_timing();
+    timing_scope!(
+        timing_guard_bootstrap_backend_config_validate,
+        "bootstrap.backend_config_validate"
+    );
     if let Err(error) = project_builder
         .backend
         .validate_project_config(&config, &mut string_table)
     {
-        timed_manual_finish!(
-            "bootstrap.backend_config_validate",
-            backend_config_validate_start,
-        );
-        timed_manual_finish!("bootstrap.total", bootstrap_total_start);
         return Err(error.into_messages(string_table.clone()));
     }
-    timed_manual_finish!(
-        "bootstrap.backend_config_validate",
-        backend_config_validate_start,
-    );
-
-    timed_manual_finish!("bootstrap.total", bootstrap_total_start);
+    #[cfg(feature = "timers")]
+    timing_guard_bootstrap_backend_config_validate.finish();
 
     Ok(BuildBootstrap {
         config,

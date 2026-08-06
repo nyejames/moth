@@ -2,11 +2,10 @@
 //!
 //! WHAT: compiles project modules through the frontend pipeline for single-file and directory entries.
 //! WHY: separating the two flows keeps each path readable as orchestration over named steps.
+use crate::{timing_scope, timing_scope_attributed, timing_scope_multi};
 
 use crate::build_system::build::{CompiledModuleArtifact, ModuleSemanticDraft};
 use crate::build_system::output::ValidatedDirectoryOutputSettings;
-use crate::timed_manual_finish;
-use crate::timed_manual_finish_attributed;
 
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
@@ -128,12 +127,16 @@ pub(crate) fn compile_single_file_frontend(
         return Err(CompilerMessages::from_error_ref(err, string_table));
     }
 
-    #[cfg(feature = "timers")]
-    let total_start = crate::timing::start_pipeline_timing();
+    timing_scope!(
+        timing_guard_stage0_single_file_total,
+        "stage0.single_file.total"
+    );
 
     // 2. Resolve canonical entry path.
-    #[cfg(feature = "timers")]
-    let entry_canonicalize_start = crate::timing::start_pipeline_timing();
+    timing_scope!(
+        timing_guard_stage0_single_file_entry_canonicalize,
+        "stage0.single_file.entry_canonicalize"
+    );
     let entry_path = match fs::canonicalize(&config.entry_dir) {
         Ok(path) => path,
         Err(error) => {
@@ -143,26 +146,21 @@ pub(crate) fn compile_single_file_frontend(
                 string_table,
             );
 
-            timed_manual_finish!(
-                "stage0.single_file.entry_canonicalize",
-                entry_canonicalize_start,
-            );
-            timed_manual_finish!("stage0.single_file.total", total_start);
             return Err(CompilerMessages::from_error_ref(file_error, string_table));
         }
     };
-    timed_manual_finish!(
-        "stage0.single_file.entry_canonicalize",
-        entry_canonicalize_start,
-    );
+    #[cfg(feature = "timers")]
+    timing_guard_stage0_single_file_entry_canonicalize.finish();
 
     let source_root = entry_path
         .parent()
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
 
     // 3. Initialize path resolver for imports.
-    #[cfg(feature = "timers")]
-    let path_resolver_start = crate::timing::start_pipeline_timing();
+    timing_scope!(
+        timing_guard_stage0_single_file_path_resolver,
+        "stage0.single_file.path_resolver"
+    );
     // Build one independent source-package boundary index per registered package. The traversal
     // owns direct root discovery and sibling collision checks, so the resolver view is derived
     // from indexed facts and no separate package-root or package-tree scan remains.
@@ -174,8 +172,6 @@ pub(crate) fn compile_single_file_frontend(
     ) {
         Ok(indexes) => indexes.prepared_source_package_roots(),
         Err(messages) => {
-            timed_manual_finish!("stage0.single_file.path_resolver", path_resolver_start);
-            timed_manual_finish!("stage0.single_file.total", total_start);
             return Err(messages);
         }
     };
@@ -185,8 +181,6 @@ pub(crate) fn compile_single_file_frontend(
         None => {
             let messages =
                 non_utf8_filesystem_name_error(&entry_path, "single-file entry name", string_table);
-            timed_manual_finish!("stage0.single_file.path_resolver", path_resolver_start);
-            timed_manual_finish!("stage0.single_file.total", total_start);
             return Err(messages);
         }
     };
@@ -202,8 +196,6 @@ pub(crate) fn compile_single_file_frontend(
         ) {
             Ok(module_roots) => module_roots,
             Err(messages) => {
-                timed_manual_finish!("stage0.single_file.path_resolver", path_resolver_start);
-                timed_manual_finish!("stage0.single_file.total", total_start);
                 return Err(messages);
             }
         }
@@ -219,12 +211,11 @@ pub(crate) fn compile_single_file_frontend(
     ) {
         Ok(resolver) => resolver,
         Err(error) => {
-            timed_manual_finish!("stage0.single_file.path_resolver", path_resolver_start);
-            timed_manual_finish!("stage0.single_file.total", total_start);
             return Err(CompilerMessages::from_error_ref(error, string_table));
         }
     };
-    timed_manual_finish!("stage0.single_file.path_resolver", path_resolver_start);
+    #[cfg(feature = "timers")]
+    timing_guard_stage0_single_file_path_resolver.finish();
 
     // 4. Discover all transitively reachable files.
     let mut external_imports = source_discovery::ExternalImportDiscoveryState {
@@ -241,10 +232,15 @@ pub(crate) fn compile_single_file_frontend(
         crate::timing::TimingBoundaryKind::MainProject,
         || config.project_name.clone(),
     );
-    #[cfg(feature = "timers")]
-    let boundary_inventory_start = crate::timing::start_pipeline_timing();
-    #[cfg(feature = "timers")]
-    let reachable_files_start = crate::timing::start_pipeline_timing();
+    timing_scope_attributed!(
+        timing_guard_build_boundary_inventory,
+        "build.boundary.inventory",
+        Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
+    );
+    timing_scope!(
+        timing_guard_stage0_single_file_reachable_files,
+        "stage0.single_file.reachable_files"
+    );
     let input_files = match source_discovery::collect_reachable_input_files(
         &entry_path,
         &project_path_resolver,
@@ -254,22 +250,13 @@ pub(crate) fn compile_single_file_frontend(
     ) {
         Ok(collected) => collected.input_files,
         Err(messages) => {
-            timed_manual_finish!("stage0.single_file.reachable_files", reachable_files_start);
-            timed_manual_finish_attributed!(
-                "build.boundary.inventory",
-                boundary_inventory_start,
-                Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
-            );
-            timed_manual_finish!("stage0.single_file.total", total_start);
             return Err(messages);
         }
     };
-    timed_manual_finish!("stage0.single_file.reachable_files", reachable_files_start);
-    timed_manual_finish_attributed!(
-        "build.boundary.inventory",
-        boundary_inventory_start,
-        Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
-    );
+    #[cfg(feature = "timers")]
+    timing_guard_build_boundary_inventory.finish();
+    #[cfg(feature = "timers")]
+    timing_guard_stage0_single_file_reachable_files.finish();
 
     // Share the effective external package registry immutably for the rest of the frontend
     // pipeline so each stage does not need its own deep clone.
@@ -278,25 +265,28 @@ pub(crate) fn compile_single_file_frontend(
     // 5. Run the module compilation pipeline with a local string-table delta.
     add_frontend_counter(FrontendCounter::ModuleCompilationSerialCount, 1);
 
-    #[cfg(feature = "timers")]
-    let string_table_fork_start = crate::timing::start_pipeline_timing();
+    timing_scope!(
+        timing_guard_stage0_single_file_string_table_fork,
+        "stage0.single_file.string_table_fork"
+    );
     let string_table_fork = string_table.fork_for_module();
     let (local_table, base_len) = string_table_fork.into_parts();
-    timed_manual_finish!(
-        "stage0.single_file.string_table_fork",
-        string_table_fork_start,
-    );
+    #[cfg(feature = "timers")]
+    timing_guard_stage0_single_file_string_table_fork.finish();
 
     #[cfg(feature = "timers")]
-    let compile_module_start = crate::timing::start_pipeline_timing();
+    let timing_entries = &[
+        (
+            "build.boundary.compile",
+            Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
+        ),
+        ("stage0.single_file.compile_module", None),
+    ];
+    timing_scope_multi!(timing_guard_single_file_compile, timing_entries);
 
     // Record module-input counters before preparation so the frontend module
     // total can be attributed even when preparation fails.
     let source_byte_count = record_module_input_counters(&input_files);
-
-    // Record the total frontend time for this module (success or error).
-    #[cfg(feature = "timers")]
-    let module_total_start = crate::timing::start_pipeline_timing();
 
     // Register the single synthetic module with its portable logical identity and source facts.
     // The empty path is this mode's fixed entry-root logical spelling, matching the origin
@@ -312,6 +302,13 @@ pub(crate) fn compile_single_file_frontend(
     #[cfg(feature = "timers")]
     let timing_module_context = Some(crate::timing::TimingContext::for_module(timing_module_key));
 
+    // Record the total frontend time for this module (success or error).
+    timing_scope_attributed!(
+        timing_guard_frontend_module_total,
+        "frontend.module.total",
+        timing_module_context,
+    );
+
     // Single-file compilation is a separate synthetic-module mode: it builds one deterministic
     // normal-module origin from the configured project identity, the empty logical module path
     // and `ModuleRootRole::Normal`. The empty path is the entry-root spelling and is always valid,
@@ -326,23 +323,6 @@ pub(crate) fn compile_single_file_frontend(
     ) {
         Ok(origin) => origin,
         Err(error) => {
-            timed_manual_finish_attributed!(
-                "frontend.module.total",
-                module_total_start,
-                timing_module_context,
-            );
-            #[cfg(feature = "timers")]
-            crate::timing::record_pipeline_timing_multi(
-                &[
-                    (
-                        "build.boundary.compile",
-                        Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
-                    ),
-                    ("stage0.single_file.compile_module", None),
-                ],
-                compile_module_start.elapsed(),
-            );
-            timed_manual_finish!("stage0.single_file.total", total_start);
             return Err(CompilerMessages::from_error_ref(error, string_table));
         }
     };
@@ -376,23 +356,6 @@ pub(crate) fn compile_single_file_frontend(
     let prepared = match prepare_result {
         Ok(prepared) => prepared,
         Err(messages) => {
-            timed_manual_finish_attributed!(
-                "frontend.module.total",
-                module_total_start,
-                timing_module_context,
-            );
-            #[cfg(feature = "timers")]
-            crate::timing::record_pipeline_timing_multi(
-                &[
-                    (
-                        "build.boundary.compile",
-                        Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
-                    ),
-                    ("stage0.single_file.compile_module", None),
-                ],
-                compile_module_start.elapsed(),
-            );
-            timed_manual_finish!("stage0.single_file.total", total_start);
             return Err(messages);
         }
     };
@@ -415,8 +378,11 @@ pub(crate) fn compile_single_file_frontend(
         builder_runtime_packages: &builder_surface.builder_runtime_packages,
     };
 
-    #[cfg(feature = "timers")]
-    let semantic_total_start = crate::timing::start_pipeline_timing();
+    timing_scope_attributed!(
+        timing_guard_frontend_module_semantic_total,
+        "frontend.module.semantic_total",
+        timing_module_context,
+    );
     #[cfg(feature = "timers")]
     let semantic_result = compile_context.compile_module_semantic(
         prepared,
@@ -428,32 +394,10 @@ pub(crate) fn compile_single_file_frontend(
     let semantic_result =
         compile_context.compile_module_semantic(prepared, &entry_path, generated_store.session());
     #[cfg(feature = "timers")]
-    timed_manual_finish_attributed!(
-        "frontend.module.semantic_total",
-        semantic_total_start,
-        timing_module_context,
-    );
+    timing_guard_frontend_module_semantic_total.finish();
     let result = match semantic_result {
         Ok(ModuleCompilationOutcome::Success(compiled)) => *compiled,
         Ok(ModuleCompilationOutcome::Diagnosed(diagnostics)) => {
-            timed_manual_finish_attributed!(
-                "frontend.module.total",
-                module_total_start,
-                timing_module_context,
-            );
-            #[cfg(feature = "timers")]
-            crate::timing::record_pipeline_timing_multi(
-                &[
-                    (
-                        "build.boundary.compile",
-                        Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
-                    ),
-                    ("stage0.single_file.compile_module", None),
-                ],
-                compile_module_start.elapsed(),
-            );
-            timed_manual_finish!("stage0.single_file.total", total_start);
-
             let mut messages = diagnostics.into_messages();
             let remap = string_table.merge_delta_from(&messages.string_table, base_len);
             if !remap.is_identity() {
@@ -495,47 +439,22 @@ pub(crate) fn compile_single_file_frontend(
             .map_err(|error| CompilerMessages::from_error_ref(error, string_table));
         }
         Err(error) => {
-            timed_manual_finish_attributed!(
-                "frontend.module.total",
-                module_total_start,
-                timing_module_context,
-            );
-            #[cfg(feature = "timers")]
-            crate::timing::record_pipeline_timing_multi(
-                &[
-                    (
-                        "build.boundary.compile",
-                        Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
-                    ),
-                    ("stage0.single_file.compile_module", None),
-                ],
-                compile_module_start.elapsed(),
-            );
-            timed_manual_finish!("stage0.single_file.total", total_start);
             return Err(CompilerMessages::from_error_ref(error, string_table));
         }
     };
-    timed_manual_finish_attributed!(
-        "frontend.module.total",
-        module_total_start,
-        timing_module_context,
-    );
     #[cfg(feature = "timers")]
-    crate::timing::record_pipeline_timing_multi(
-        &[
-            (
-                "build.boundary.compile",
-                Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
-            ),
-            ("stage0.single_file.compile_module", None),
-        ],
-        compile_module_start.elapsed(),
-    );
+    timing_guard_frontend_module_total.finish();
+    #[cfg(feature = "timers")]
+    timing_guard_single_file_compile.finish();
 
     // 6. Merge local results back into the global build context.
-    #[cfg(feature = "timers")]
-    let merge_delta_start = crate::timing::start_pipeline_timing();
+    timing_scope!(
+        timing_guard_stage0_single_file_merge_delta,
+        "stage0.single_file.merge_delta"
+    );
     let remap = string_table.merge_delta_from(&result.string_table, base_len);
+    #[cfg(feature = "timers")]
+    timing_guard_stage0_single_file_merge_delta.finish();
     let ModuleSemanticDraft {
         mut module,
         mut generated_worklist_delta,
@@ -549,9 +468,6 @@ pub(crate) fn compile_single_file_frontend(
     generated_store
         .publish(generated_worklist_delta)
         .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-    timed_manual_finish!("stage0.single_file.merge_delta", merge_delta_start);
-
-    timed_manual_finish!("stage0.single_file.total", total_start);
 
     let graph =
         ProjectModuleGraph::from_normal_roots(vec![(graph_stable_origin, source_root, entry_path)]);
@@ -838,16 +754,19 @@ impl<'a> DirectoryModuleCompileContext<'a> {
             ..
         } = job;
 
-        // Record the total frontend time for this module (success or error).
-        #[cfg(feature = "timers")]
-        let module_total_start = crate::timing::start_pipeline_timing();
-
         // The dense graph `ModuleId` is the module key inside this boundary, so attribution
         // stays deterministic and independent of worker completion order.
         #[cfg(feature = "timers")]
         let module_context = Some(crate::timing::TimingContext::for_module(
             crate::timing::TimingModuleKey::new(self.timing_boundary, job.module_id.index() as u32),
         ));
+
+        // Record the total frontend time for this module (success or error).
+        timing_scope_attributed!(
+            timing_guard_frontend_module_total_2,
+            "frontend.module.total",
+            module_context
+        );
 
         // Semantic compilation is provider-dependent: it binds retained `PreparedHeaderSyntax`
         // against provider interfaces, then resolves dependencies, builds AST, lowers HIR and
@@ -882,8 +801,11 @@ impl<'a> DirectoryModuleCompileContext<'a> {
 
         // The typed semantic boundary already classified user diagnostics from infrastructure
         // failures, so the task outcome carries the retained `ModuleDiagnostics` unchanged.
-        #[cfg(feature = "timers")]
-        let semantic_total_start = crate::timing::start_pipeline_timing();
+        timing_scope_attributed!(
+            timing_guard_frontend_module_semantic_total_2,
+            "frontend.module.semantic_total",
+            module_context,
+        );
         #[cfg(feature = "timers")]
         let semantic_result = compile_context.compile_module_semantic(
             prepared,
@@ -895,11 +817,7 @@ impl<'a> DirectoryModuleCompileContext<'a> {
         let semantic_result =
             compile_context.compile_module_semantic(prepared, &entry_point, generated_worklist);
         #[cfg(feature = "timers")]
-        timed_manual_finish_attributed!(
-            "frontend.module.semantic_total",
-            semantic_total_start,
-            module_context,
-        );
+        timing_guard_frontend_module_semantic_total_2.finish();
         let outcome = match semantic_result {
             Ok(ModuleCompilationOutcome::Success(compiled)) => {
                 DirectoryModuleTaskOutcome::Success(compiled)
@@ -909,12 +827,8 @@ impl<'a> DirectoryModuleCompileContext<'a> {
             }
             Err(error) => DirectoryModuleTaskOutcome::Infrastructure(error),
         };
-        timed_manual_finish_attributed!(
-            "frontend.module.total",
-            module_total_start,
-            module_context,
-        );
-
+        #[cfg(feature = "timers")]
+        timing_guard_frontend_module_total_2.finish();
         DirectoryModuleTaskResult {
             module_id,
             string_table_base_len: base_len,
@@ -1297,12 +1211,16 @@ pub(crate) fn compile_directory_frontend(
     builder_surface: &mut BuilderSurface,
     string_table: &mut StringTable,
 ) -> Result<ProjectFrontendCompilation, CompilerMessages> {
-    #[cfg(feature = "timers")]
-    let total_start = crate::timing::start_pipeline_timing();
+    timing_scope!(
+        timing_guard_stage0_directory_total,
+        "stage0.directory.total"
+    );
 
     // 1. Setup path resolution based on config settings.
-    #[cfg(feature = "timers")]
-    let path_resolver_start = crate::timing::start_pipeline_timing();
+    timing_scope!(
+        timing_guard_stage0_directory_path_resolver,
+        "stage0.directory.path_resolver"
+    );
     let mut project_setup = match project_roots::build_project_path_resolver_with_index(
         config,
         validated_output_settings,
@@ -1314,12 +1232,9 @@ pub(crate) fn compile_directory_frontend(
     ) {
         Ok(resolver) => resolver,
         Err(error) => {
-            timed_manual_finish!("stage0.directory.path_resolver", path_resolver_start);
-            timed_manual_finish!("stage0.directory.total", total_start);
             return Err(error);
         }
     };
-    timed_manual_finish!("stage0.directory.path_resolver", path_resolver_start);
     let project_path_resolver = project_setup.resolver;
 
     // 2. Build every source-package inventory and the project inventory before semantic
@@ -1332,8 +1247,10 @@ pub(crate) fn compile_directory_frontend(
         resolution_table: &mut builder_surface.external_import_resolution_table,
     };
 
-    #[cfg(feature = "timers")]
-    let module_inventory_start = crate::timing::start_pipeline_timing();
+    timing_scope!(
+        timing_guard_stage0_directory_module_inventory,
+        "stage0.directory.module_inventory"
+    );
     let mut source_package_inventories = Vec::new();
     for (import_prefix, package_index) in project_setup
         .module_namespace_set
@@ -1358,8 +1275,11 @@ pub(crate) fn compile_directory_frontend(
             import_prefix,
             package_index,
         );
-        #[cfg(feature = "timers")]
-        let package_inventory_start = crate::timing::start_pipeline_timing();
+        timing_scope_attributed!(
+            timing_guard_build_boundary_inventory_2,
+            "build.boundary.inventory",
+            Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
+        );
         let package_waves = match module_inventory::discover_all_modules_in_package(
             config,
             &package_path_resolver,
@@ -1373,21 +1293,9 @@ pub(crate) fn compile_directory_frontend(
         ) {
             Ok(module_waves) => module_waves,
             Err(messages) => {
-                timed_manual_finish!("stage0.directory.module_inventory", module_inventory_start);
-                timed_manual_finish_attributed!(
-                    "build.boundary.inventory",
-                    package_inventory_start,
-                    Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
-                );
-                timed_manual_finish!("stage0.directory.total", total_start);
                 return Err(messages);
             }
         };
-        timed_manual_finish_attributed!(
-            "build.boundary.inventory",
-            package_inventory_start,
-            Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
-        );
         let root_module_id = package_index
             .module_identities()
             .module_id_for_directory(package_index.entry_root())
@@ -1427,8 +1335,13 @@ pub(crate) fn compile_directory_frontend(
         &project_setup.module_namespace_set,
         &project_setup.source_tree_index,
     );
-    #[cfg(feature = "timers")]
-    let project_inventory_start = crate::timing::start_pipeline_timing();
+    timing_scope_attributed!(
+        timing_guard_build_boundary_inventory_3,
+        "build.boundary.inventory",
+        Some(crate::timing::TimingContext::for_boundary(
+            project_timing_boundary
+        )),
+    );
     let module_waves = match module_inventory::discover_all_modules_in_project(
         config,
         &project_path_resolver,
@@ -1442,26 +1355,13 @@ pub(crate) fn compile_directory_frontend(
     ) {
         Ok(module_waves) => module_waves,
         Err(messages) => {
-            timed_manual_finish!("stage0.directory.module_inventory", module_inventory_start);
-            timed_manual_finish_attributed!(
-                "build.boundary.inventory",
-                project_inventory_start,
-                Some(crate::timing::TimingContext::for_boundary(
-                    project_timing_boundary
-                )),
-            );
-            timed_manual_finish!("stage0.directory.total", total_start);
             return Err(messages);
         }
     };
-    timed_manual_finish!("stage0.directory.module_inventory", module_inventory_start);
-    timed_manual_finish_attributed!(
-        "build.boundary.inventory",
-        project_inventory_start,
-        Some(crate::timing::TimingContext::for_boundary(
-            project_timing_boundary
-        )),
-    );
+    #[cfg(feature = "timers")]
+    timing_guard_build_boundary_inventory_3.finish();
+    #[cfg(feature = "timers")]
+    timing_guard_stage0_directory_module_inventory.finish();
 
     let source_package_inventories =
         order_source_package_inventories(source_package_inventories, string_table)?;
@@ -1473,8 +1373,10 @@ pub(crate) fn compile_directory_frontend(
     // 3. Compile source packages in package-dependency order, then compile the project against
     // their immutable facade interfaces. Each boundary owns independent dense IDs, graphs and
     // provider stores; only the stable public interface crosses into a consuming boundary.
-    #[cfg(feature = "timers")]
-    let module_compile_batch_start = crate::timing::start_pipeline_timing();
+    timing_scope!(
+        timing_guard_stage0_directory_module_compile_batch,
+        "stage0.directory.module_compile_batch"
+    );
     let mut completed_source_packages = CompletedSourcePackageRegistry::new();
     for inventory in source_package_inventories {
         let SourcePackageModuleInventory {
@@ -1489,8 +1391,11 @@ pub(crate) fn compile_directory_frontend(
             #[cfg(feature = "timers")]
             timing_boundary,
         } = inventory;
-        #[cfg(feature = "timers")]
-        let package_compile_start = crate::timing::start_pipeline_timing();
+        timing_scope_attributed!(
+            timing_guard_build_boundary_compile,
+            "build.boundary.compile",
+            Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
+        );
         let compiled = compile_module_waves(
             config,
             build_profile,
@@ -1507,12 +1412,9 @@ pub(crate) fn compile_directory_frontend(
             #[cfg(feature = "timers")]
             timing_boundary,
         );
-        timed_manual_finish_attributed!(
-            "build.boundary.compile",
-            package_compile_start,
-            Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
-        );
         let boundary = compiled?;
+        #[cfg(feature = "timers")]
+        timing_guard_build_boundary_compile.finish();
         let dependency_prefixes = source_package_imports
             .iter()
             .map(|dependency| dependency.import_prefix.clone())
@@ -1535,8 +1437,13 @@ pub(crate) fn compile_directory_frontend(
 
     let (project_module_waves, project_provider_bindings, project_source_package_imports) =
         module_waves.into_parts();
-    #[cfg(feature = "timers")]
-    let project_compile_start = crate::timing::start_pipeline_timing();
+    timing_scope_attributed!(
+        timing_guard_build_boundary_compile_2,
+        "build.boundary.compile",
+        Some(crate::timing::TimingContext::for_boundary(
+            project_timing_boundary
+        )),
+    );
     let compiled_project = compile_module_waves(
         config,
         build_profile,
@@ -1553,20 +1460,11 @@ pub(crate) fn compile_directory_frontend(
         #[cfg(feature = "timers")]
         project_timing_boundary,
     );
-    timed_manual_finish_attributed!(
-        "build.boundary.compile",
-        project_compile_start,
-        Some(crate::timing::TimingContext::for_boundary(
-            project_timing_boundary
-        )),
-    );
     let project_boundary = compiled_project?;
-    timed_manual_finish!(
-        "stage0.directory.module_compile_batch",
-        module_compile_batch_start,
-    );
-
-    timed_manual_finish!("stage0.directory.total", total_start);
+    #[cfg(feature = "timers")]
+    timing_guard_build_boundary_compile_2.finish();
+    #[cfg(feature = "timers")]
+    timing_guard_stage0_directory_module_compile_batch.finish();
 
     ProjectFrontendCompilation::new(project_boundary, completed_source_packages)
         .map_err(|error| CompilerMessages::from_error_ref(error, string_table))

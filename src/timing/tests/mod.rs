@@ -6,17 +6,19 @@ mod erasure_tests;
 mod enabled_tests;
 
 #[cfg(feature = "timers")]
+mod schema_tests;
+
+#[cfg(feature = "timers")]
 mod summary_tests;
 
-/// Serialize timing-collector tests against each other.
+/// Serialize timing-collector tests against each other and against every
+/// frontend counter/build test.
 ///
-/// The collector is one process-global scope. This lock is owned by the timing
-/// test suite so timing tests never borrow the frontend counter-test lock.
+/// The collector is one process-global scope shared with the frontend counter
+/// stores. This test suite delegates to the single facade-owned lock so timing
+/// tests and frontend instrumentation tests can never run concurrently and
+/// interleave sessions.
 #[cfg(feature = "timers")]
 pub(crate) fn lock_timing_tests() -> std::sync::MutexGuard<'static, ()> {
-    use std::sync::Mutex;
-    static TIMING_TEST_LOCK: Mutex<()> = Mutex::new(());
-    TIMING_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+    crate::timing::lock_instrumentation_tests()
 }

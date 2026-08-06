@@ -7,7 +7,7 @@ use crate::build_system::build::{self, BuildResult, ProjectBuilder};
 use crate::build_system::output::{
     OutputPlan, SingleFileOutputPlan, WriteMode, WriteOptions, write_project_outputs,
 };
-use crate::command_timing_start;
+use crate::command_timing_scope;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
@@ -19,9 +19,8 @@ use crate::projects::dev_server::sse;
 use crate::projects::dev_server::state::DevServerState;
 use crate::projects::dev_server::watch;
 use crate::projects::routing::{HtmlSiteConfig, parse_html_site_config};
-#[cfg(feature = "detailed_timers")]
-use crate::timed_manual_finish;
-use crate::timing_guard;
+#[cfg(feature = "timers")]
+use crate::timing_scope;
 use saying::say;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -145,9 +144,9 @@ pub fn run_single_build_cycle(
     entry_file: &Path,
     flags: &[Flag],
 ) -> BuildCycleReport {
-    command_timing_start!(timing_session, crate::timing::TimingCommandKind::Dev);
+    command_timing_scope!(timing_session, crate::timing::TimingCommandKind::Dev);
     #[cfg(feature = "detailed_timers")]
-    let cycle_start = crate::timing::start_pipeline_timing();
+    timing_scope!(timing_guard_command_dev_cycle, "command.dev.cycle");
     let build_outcome = build_once(executor, entry_file, flags);
     let project_root = dev_server_project_root(entry_file);
     let BuildOutcome {
@@ -216,7 +215,7 @@ pub fn run_single_build_cycle(
 
     let clients_notified = sse::broadcast_reload(state, version);
     #[cfg(feature = "detailed_timers")]
-    timed_manual_finish!("command.dev.cycle", cycle_start);
+    drop(timing_guard_command_dev_cycle);
     #[cfg(feature = "timers")]
     let timing_snapshot = timing_session.finish();
     BuildCycleReport {
@@ -365,7 +364,11 @@ fn build_once(
     let mut build_result = {
         // The dev total is owned by the orchestration around the executor trait
         // call, so every DevBuildExecutor implementation receives the same metric.
-        timing_guard!("command.dev.build_and_write");
+        #[cfg(feature = "timers")]
+        timing_scope!(
+            timing_guard_command_dev_build_and_write,
+            "command.dev.build_and_write"
+        );
         match executor.build_and_write(entry_file, flags) {
             Ok(build_result) => build_result,
             Err(messages) => {

@@ -44,7 +44,7 @@ use crate::projects::html_project::wasm::artifacts::{
 };
 use crate::projects::routing::parse_html_site_config;
 use crate::projects::settings::{Config, ProjectConfigError};
-use crate::timing_guard;
+use crate::timing_scope;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -92,16 +92,22 @@ impl BackendBuilder for HtmlProjectBuilder {
         string_table: &mut StringTable,
     ) -> Result<Project, CompilerMessages> {
         // Record the full backend build duration on every exit path (success or error).
-        timing_guard!("backend.html.total");
+        timing_scope!(timing_guard_backend_html_total, "backend.html.total");
 
         {
-            timing_guard!("backend.html.site_config");
+            timing_scope!(
+                timing_guard_backend_html_site_config,
+                "backend.html.site_config"
+            );
             parse_html_site_config(config, string_table)
                 .map_err(|error| error.into_messages(string_table.clone()))?;
         }
 
         let document_config = {
-            timing_guard!("backend.html.document_config");
+            timing_scope!(
+                timing_guard_backend_html_document_config,
+                "backend.html.document_config"
+            );
             parse_html_document_config(config, string_table)
                 .map_err(|error| error.into_messages(string_table.clone()))?
         };
@@ -117,7 +123,10 @@ impl BackendBuilder for HtmlProjectBuilder {
 
         let wasm_enabled = flags.contains(&Flag::HtmlWasm);
         let entry_paths = {
-            timing_guard!("backend.html.entry_path_plan");
+            timing_scope!(
+                timing_guard_backend_html_entry_path_plan,
+                "backend.html.entry_path_plan"
+            );
             HtmlEntryPathPlan::from_config(config, string_table)?
         };
 
@@ -131,7 +140,10 @@ impl BackendBuilder for HtmlProjectBuilder {
         let mut warnings = Vec::new();
 
         {
-            timing_guard!("backend.html.module_compile_total");
+            timing_scope!(
+                timing_guard_backend_html_module_compile_total,
+                "backend.html.module_compile_total"
+            );
             for entry in artifact_entries.iter().cloned() {
                 let module = entry.module;
                 // Derive the canonical page route once. Both JS-only and HTML+Wasm output modes
@@ -198,7 +210,10 @@ impl BackendBuilder for HtmlProjectBuilder {
         );
 
         {
-            timing_guard!("backend.html.external_runtime_assets");
+            timing_scope!(
+                timing_guard_backend_html_external_runtime_assets,
+                "backend.html.external_runtime_assets"
+            );
             output_files.extend(emit_external_js_runtime_assets(
                 &runtime_emission_plan,
                 &mut output_paths,
@@ -207,7 +222,10 @@ impl BackendBuilder for HtmlProjectBuilder {
         }
 
         {
-            timing_guard!("backend.html.external_runtime_glue");
+            timing_scope!(
+                timing_guard_backend_html_external_runtime_glue,
+                "backend.html.external_runtime_glue"
+            );
             output_files.extend(emit_build_runtime_modules(
                 &runtime_emission_plan,
                 &mut output_paths,
@@ -218,7 +236,10 @@ impl BackendBuilder for HtmlProjectBuilder {
         let mut tracked_assets = Vec::new();
         let mut tracked_asset_sources_by_output: HashMap<PathBuf, PathBuf> = HashMap::new();
         {
-            timing_guard!("backend.html.tracked_assets_plan");
+            timing_scope!(
+                timing_guard_backend_html_tracked_assets_plan,
+                "backend.html.tracked_assets_plan"
+            );
             for (module, html_output_path) in &compiled_html_output_paths {
                 let planned_assets =
                     plan_module_tracked_assets(module, html_output_path, string_table)?;
@@ -256,7 +277,10 @@ impl BackendBuilder for HtmlProjectBuilder {
             }
         }
         {
-            timing_guard!("backend.html.tracked_assets_emit");
+            timing_scope!(
+                timing_guard_backend_html_tracked_assets_emit,
+                "backend.html.tracked_assets_emit"
+            );
             output_files.extend(emit_tracked_assets(&tracked_assets, string_table)?);
         }
 

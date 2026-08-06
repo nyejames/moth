@@ -9,7 +9,7 @@ use crate::build_system::output::{
     OutputPlan, SingleFileOutputPlan, WriteMode, WriteOptions, write_project_outputs,
 };
 use crate::command_timing_finish;
-use crate::command_timing_start;
+use crate::command_timing_scope;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, SourceLocation};
 use crate::compiler_frontend::display_messages::{print_compiler_messages, print_formatted_error};
@@ -23,7 +23,7 @@ use crate::projects::command_status::{
 use crate::projects::dev_server::{self, DevServerOptions};
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use crate::projects::html_project::new_html_project::NewHtmlProjectOptions;
-use crate::timed_manual_finish;
+use crate::timing_scope;
 use saying::say;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -157,8 +157,9 @@ pub fn start_cli() -> process::ExitCode {
 }
 
 fn run_build_command(path: &str, flags: &[Flag]) -> CommandStatus {
-    command_timing_start!(timing_session, crate::timing::TimingCommandKind::Build);
+    command_timing_scope!(timing_session, crate::timing::TimingCommandKind::Build);
     let start = Instant::now();
+    timing_scope!(timing_guard_command_build_total, "command.build.total");
     let project_builder = build::ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
     let (status, diagnostic_counts) = match build::build_project(&project_builder, path, flags) {
         Ok(mut build_result) => {
@@ -168,7 +169,6 @@ fn run_build_command(path: &str, flags: &[Flag]) -> CommandStatus {
                 let output_root = match env::current_dir() {
                     Ok(path) => path,
                     Err(error) => {
-                        timed_manual_finish!("command.build.total", start);
                         print_formatted_error(
                             CompilerError::compiler_error(format!(
                                 "Could not resolve current directory for build outputs: {error}"
@@ -183,7 +183,6 @@ fn run_build_command(path: &str, flags: &[Flag]) -> CommandStatus {
                     match single_file_project_entry_dir(&build_result.config.entry_dir) {
                         Ok(path) => path,
                         Err(error) => {
-                            timed_manual_finish!("command.build.total", start);
                             print_formatted_error(error, &build_result.string_table);
                             command_timing_finish!(timing_session, false);
                             return CommandStatus::Failure;
@@ -201,8 +200,10 @@ fn run_build_command(path: &str, flags: &[Flag]) -> CommandStatus {
                 })
             };
 
-            #[cfg(feature = "timers")]
-            let output_write_start = crate::timing::start_pipeline_timing();
+            timing_scope!(
+                timing_guard_command_build_output_write,
+                "command.build.output_write"
+            );
             let write_result = write_project_outputs(
                 &build_result.project,
                 &WriteOptions {
@@ -211,18 +212,14 @@ fn run_build_command(path: &str, flags: &[Flag]) -> CommandStatus {
                 },
                 &build_result.string_table,
             );
-            timed_manual_finish!("command.build.output_write", output_write_start);
-
             match write_result {
                 Ok(()) => {
                     let duration = start.elapsed();
                     let warning_count = build_result.warnings.len();
-                    timed_manual_finish!("command.build.total", start);
                     print_build_message(build_result, duration);
                     (CommandStatus::Success, Some((0, warning_count)))
                 }
                 Err(mut messages) => {
-                    timed_manual_finish!("command.build.total", start);
                     messages.extend_diagnostics(build_result.warnings);
                     print_compiler_messages(messages);
                     (CommandStatus::Failure, None)
@@ -231,11 +228,12 @@ fn run_build_command(path: &str, flags: &[Flag]) -> CommandStatus {
         }
         Err(messages) => {
             let diagnostic_counts = benchmark_diagnostic_counts(&messages);
-            timed_manual_finish!("command.build.total", start);
             print_compiler_messages(messages);
             (CommandStatus::Failure, diagnostic_counts)
         }
     };
+    #[cfg(feature = "timers")]
+    drop(timing_guard_command_build_total);
     command_timing_finish!(timing_session, matches!(status, CommandStatus::Success));
     if let Some((error_count, warning_count)) = diagnostic_counts {
         emit_benchmark_status(error_count, warning_count);

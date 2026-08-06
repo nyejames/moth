@@ -22,7 +22,7 @@ use crate::projects::html_project::wasm::export_plan::{
 };
 use crate::projects::html_project::wasm::js_bootstrap::generate_wasm_bootstrap_js;
 use crate::projects::html_project::wasm::request::build_wasm_backend_request;
-use crate::timing_guard;
+use crate::timing_scope;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -99,7 +99,7 @@ pub(crate) fn compile_html_module_wasm(
     logical_html_output_path: &Path,
 ) -> Result<CompiledHtmlWasmModule, CompilerMessages> {
     // Record the full Wasm build duration on every exit path (success or error).
-    timing_guard!("backend.wasm.total");
+    timing_scope!(timing_guard_backend_wasm_total, "backend.wasm.total");
 
     // Derive per-route artifact paths from the already-derived logical HTML path.
     // WHY: the builder has already computed the canonical route via derive_logical_html_path.
@@ -133,7 +133,10 @@ pub(crate) fn compile_html_module_wasm(
         Arc::clone(&input.external_package_registry);
 
     let wasm_result = {
-        timing_guard!("backend.wasm.lower_wasm");
+        timing_scope!(
+            timing_guard_backend_wasm_lower_wasm,
+            "backend.wasm.lower_wasm"
+        );
         lower_hir_to_wasm_module(
             input.hir_module,
             input.borrow_analysis.borrow_facts(),
@@ -152,7 +155,10 @@ pub(crate) fn compile_html_module_wasm(
     })?;
 
     let artifacts = {
-        timing_guard!("backend.wasm.artifact_assembly");
+        timing_scope!(
+            timing_guard_backend_wasm_artifact_assembly,
+            "backend.wasm.artifact_assembly"
+        );
         emit_html_wasm_artifacts(
             &build_plan,
             HtmlWasmArtifactEmitInput {
@@ -236,7 +242,10 @@ pub(crate) fn emit_html_wasm_artifacts(
     } = &mut input;
 
     let bootstrap_js = {
-        timing_guard!("backend.wasm.bootstrap_js");
+        timing_scope!(
+            timing_guard_backend_wasm_bootstrap_js,
+            "backend.wasm.bootstrap_js"
+        );
         generate_wasm_bootstrap_js(
             js_bundle,
             &plan.js_entry_slot_ids,

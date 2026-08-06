@@ -10,7 +10,7 @@ use crate::build_system::build::{BuildBootstrap, ProjectBuilder, bootstrap_proje
 use crate::build_system::create_project_modules::compile_project_frontend;
 use crate::build_system::path_validation::check_if_valid_path;
 use crate::command_timing_finish;
-use crate::command_timing_start;
+use crate::command_timing_scope;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::display_messages::{
     print_compiler_messages, print_terse_compiler_messages,
@@ -20,7 +20,7 @@ use crate::projects::command_status::{
     CommandStatus, benchmark_diagnostic_counts, emit_benchmark_status,
 };
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
-use crate::timed_manual_finish;
+use crate::timing_scope;
 use saying::say;
 use std::time::{Duration, Instant};
 
@@ -35,16 +35,17 @@ struct CheckOutcome {
 }
 
 pub(crate) fn run_check(path: &str, options: CheckOptions) -> CommandStatus {
-    command_timing_start!(timing_session, crate::timing::TimingCommandKind::Check);
-    #[cfg(feature = "timers")]
-    let command_start = crate::timing::start_pipeline_timing();
+    command_timing_scope!(timing_session, crate::timing::TimingCommandKind::Check);
+    timing_scope!(timing_guard_command_check_total, "command.check.total");
     let outcome = execute_check(path);
     let error_count = outcome.messages.error_count();
     let warning_count = outcome.messages.warning_count();
     let benchmark_counts = benchmark_diagnostic_counts(&outcome.messages);
 
-    #[cfg(feature = "timers")]
-    let rendering_start = crate::timing::start_pipeline_timing();
+    timing_scope!(
+        timing_guard_command_check_message_rendering,
+        "command.check.message_rendering"
+    );
     if options.terse {
         print_terse_compiler_messages(&outcome.messages);
         println!(
@@ -58,9 +59,10 @@ pub(crate) fn run_check(path: &str, options: CheckOptions) -> CommandStatus {
     } else {
         print_compiler_messages(outcome.messages);
     }
-    timed_manual_finish!("command.check.message_rendering", rendering_start);
-    timed_manual_finish!("command.check.total", command_start);
-
+    #[cfg(feature = "timers")]
+    timing_guard_command_check_message_rendering.finish();
+    #[cfg(feature = "timers")]
+    drop(timing_guard_command_check_total);
     command_timing_finish!(timing_session, error_count == 0);
     if let Some((error_count, warning_count)) = benchmark_counts {
         emit_benchmark_status(error_count, warning_count);
@@ -78,15 +80,13 @@ fn execute_check(path: &str) -> CheckOutcome {
     let normalized_path = normalize_entry_path(path);
 
     let mut path_string_table = StringTable::new();
-    #[cfg(feature = "timers")]
-    let path_validation_start = crate::timing::start_pipeline_timing();
+    timing_scope!(
+        timing_guard_command_check_path_validation,
+        "command.check.path_validation"
+    );
     let valid_path = match check_if_valid_path(normalized_path, &mut path_string_table) {
-        Ok(path) => {
-            timed_manual_finish!("command.check.path_validation", path_validation_start);
-            path
-        }
+        Ok(path) => path,
         Err(error) => {
-            timed_manual_finish!("command.check.path_validation", path_validation_start);
             return CheckOutcome {
                 messages: CompilerMessages::from_error(error, path_string_table),
                 duration: start.elapsed(),
@@ -94,16 +94,17 @@ fn execute_check(path: &str) -> CheckOutcome {
         }
     };
 
-    #[cfg(feature = "timers")]
-    let builder_construction_start = crate::timing::start_pipeline_timing();
-    let project_builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
-    timed_manual_finish!(
-        "command.check.builder_construction",
-        builder_construction_start,
+    timing_scope!(
+        timing_guard_command_check_builder_construction,
+        "command.check.builder_construction"
     );
-
+    let project_builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
     #[cfg(feature = "timers")]
-    let bootstrap_start = crate::timing::start_pipeline_timing();
+    timing_guard_command_check_builder_construction.finish();
+    timing_scope!(
+        timing_guard_command_check_bootstrap,
+        "command.check.bootstrap"
+    );
     let BuildBootstrap {
         mut config,
         style_directives,
@@ -111,12 +112,8 @@ fn execute_check(path: &str) -> CheckOutcome {
         mut frontend_surface,
         validated_directory_output_settings,
     } = match bootstrap_project_build(&project_builder, valid_path) {
-        Ok(bootstrap) => {
-            timed_manual_finish!("command.check.bootstrap", bootstrap_start);
-            bootstrap
-        }
+        Ok(bootstrap) => bootstrap,
         Err(messages) => {
-            timed_manual_finish!("command.check.bootstrap", bootstrap_start);
             return CheckOutcome {
                 messages,
                 duration: start.elapsed(),
@@ -124,8 +121,10 @@ fn execute_check(path: &str) -> CheckOutcome {
         }
     };
 
-    #[cfg(feature = "timers")]
-    let compile_frontend_start = crate::timing::start_pipeline_timing();
+    timing_scope!(
+        timing_guard_command_check_compile_project_frontend,
+        "command.check.compile_project_frontend"
+    );
     let messages = match compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
@@ -134,21 +133,11 @@ fn execute_check(path: &str) -> CheckOutcome {
         &mut frontend_surface,
         &mut string_table,
     ) {
-        Ok(frontend) => {
-            timed_manual_finish!(
-                "command.check.compile_project_frontend",
-                compile_frontend_start,
-            );
-            frontend.into_render_messages(&mut string_table)
-        }
-        Err(messages) => {
-            timed_manual_finish!(
-                "command.check.compile_project_frontend",
-                compile_frontend_start,
-            );
-            messages
-        }
+        Ok(frontend) => frontend.into_render_messages(&mut string_table),
+        Err(messages) => messages,
     };
+    #[cfg(feature = "timers")]
+    timing_guard_command_check_compile_project_frontend.finish();
 
     CheckOutcome {
         messages,

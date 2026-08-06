@@ -12,6 +12,8 @@
 //! into a central `SourceRecord` table addressed by dense `SourceId` values. Owned and unrooted collections
 //! store only `SourceId`s, so the index is the sole source inventory/ownership owner and later
 //! consumers resolve source data through it rather than through duplicated per-module records.
+#[cfg(feature = "timers")]
+use crate::timing_scope;
 
 use super::module_identity::{
     ModuleId, ModuleIdentityRecord, ModuleIdentityTable, module_root_role_for_file_name,
@@ -34,9 +36,6 @@ use crate::compiler_frontend::source_packages::root_file::{
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::counter_observation;
 use crate::projects::settings::Config;
-#[cfg(feature = "timers")]
-use crate::timed_manual_finish;
-
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs;
@@ -547,7 +546,10 @@ impl SourceTreeIndex {
         string_table: &mut StringTable,
     ) -> Result<Self, CompilerMessages> {
         #[cfg(feature = "timers")]
-        let discovery_start = crate::timing::start_pipeline_timing();
+        timing_scope!(
+            timing_guard_stage0_source_tree_index_discovery,
+            "stage0.source_tree_index.discovery"
+        );
 
         let SourceTreeBoundary {
             entry_root,
@@ -865,9 +867,6 @@ impl SourceTreeIndex {
         }
 
         record_discovery_metrics(&stats);
-
-        #[cfg(feature = "timers")]
-        timed_manual_finish!("stage0.source_tree_index.discovery", discovery_start);
 
         let module_identities = ModuleIdentityTable::from_records(records);
         let module_roots = module_identities.derive_module_root_table();

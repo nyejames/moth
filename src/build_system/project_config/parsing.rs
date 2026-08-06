@@ -6,10 +6,10 @@
 //! WHY: config uses normal Moth syntax, but bootstrap must finish before source-package discovery.
 //! Reusing tokenizer → headers → dependency sort → AST preserves constant folding and type
 //! checking without constructing a second import graph or package resolver.
+use crate::timing_scope;
 
 use crate::build_system::create_project_modules::extract_source_code;
 use crate::build_system::project_config::ProjectConfigParseServices;
-use crate::timed_manual_finish;
 use std::sync::Arc;
 
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
@@ -63,18 +63,16 @@ pub(super) fn parse_config_file(
     services: &ProjectConfigParseServices<'_>,
     string_table: &mut StringTable,
 ) -> Result<ParsedConfigFile, CompilerMessages> {
-    #[cfg(feature = "timers")]
-    let parse_total_start = crate::timing::start_pipeline_timing();
+    timing_scope!(timing_guard_config_parse_total, "config.parse.total");
     let mut errors = Vec::new();
 
-    #[cfg(feature = "timers")]
-    let canonicalize_start = crate::timing::start_pipeline_timing();
+    timing_scope!(
+        timing_guard_config_parse_canonicalize,
+        "config.parse.canonicalize"
+    );
     let canonical_config = match std::fs::canonicalize(config_path) {
         Ok(canonical_config) => canonical_config,
         Err(error) => {
-            timed_manual_finish!("config.parse.canonicalize", canonicalize_start);
-            timed_manual_finish!("config.parse.total", parse_total_start);
-
             return Err(CompilerMessages::from_error(
                 CompilerError::file_error(
                     config_path,
@@ -85,7 +83,6 @@ pub(super) fn parse_config_file(
             ));
         }
     };
-    timed_manual_finish!("config.parse.canonicalize", canonicalize_start);
 
     // -------------------------
     //  Authored Config Identity
@@ -94,7 +91,6 @@ pub(super) fn parse_config_file(
     // tokenization, AST entry identity and validation ownership.
     let authored_scope =
         InternedPath::try_from_filesystem_path(config_path, string_table).map_err(|non_utf8| {
-            timed_manual_finish!("config.parse.total", parse_total_start);
             CompilerMessages::from_error(
                 CompilerError::file_error(
                     &non_utf8.path,
@@ -111,8 +107,10 @@ pub(super) fn parse_config_file(
     // -------------------------
     //  Tokenize and Prepare Config
     // -------------------------
-    #[cfg(feature = "timers")]
-    let prepare_files_start = crate::timing::start_pipeline_timing();
+    timing_scope!(
+        timing_guard_config_parse_prepare_files_total,
+        "config.parse.prepare_files_total"
+    );
     let prepared_output = prepare_config_file(
         &canonical_config,
         authored_scope.clone(),
@@ -122,10 +120,8 @@ pub(super) fn parse_config_file(
         string_table,
     )?;
     let prepared_outputs = prepared_output.into_iter().collect::<Vec<_>>();
-    timed_manual_finish!("config.parse.prepare_files_total", prepare_files_start);
 
     if !errors.is_empty() {
-        timed_manual_finish!("config.parse.total", parse_total_start);
         return Err(CompilerMessages::from_diagnostics(
             errors,
             string_table.clone(),
@@ -138,8 +134,7 @@ pub(super) fn parse_config_file(
     // WHY: syntax preparation is provider-independent and binding resolves retained shells
     // against provider interfaces. Both phases share the same config-specific duplicate-key
     // diagnostic routing, so the error path is extracted once.
-    #[cfg(feature = "timers")]
-    let headers_start = crate::timing::start_pipeline_timing();
+    timing_scope!(timing_guard_config_parse_headers, "config.parse.headers");
 
     let collect_header_diagnostics =
         |bag: DiagnosticBag,
@@ -162,8 +157,6 @@ pub(super) fn parse_config_file(
         Ok(prepared) => prepared,
         Err(bag) => {
             collect_header_diagnostics(bag, &mut errors, &authored_scope);
-            timed_manual_finish!("config.parse.headers", headers_start);
-            timed_manual_finish!("config.parse.total", parse_total_start);
             return Err(CompilerMessages::from_diagnostics(
                 errors,
                 string_table.clone(),
@@ -182,35 +175,31 @@ pub(super) fn parse_config_file(
         Ok(headers) => headers,
         Err(bag) => {
             collect_header_diagnostics(bag, &mut errors, &authored_scope);
-            timed_manual_finish!("config.parse.headers", headers_start);
-            timed_manual_finish!("config.parse.total", parse_total_start);
             return Err(CompilerMessages::from_diagnostics(
                 errors,
                 string_table.clone(),
             ));
         }
     };
-    timed_manual_finish!("config.parse.headers", headers_start);
 
     // -------------------------
     //  Dependency Sorting
     // -------------------------
-    #[cfg(feature = "timers")]
-    let dependency_sort_start = crate::timing::start_pipeline_timing();
+    timing_scope!(
+        timing_guard_config_parse_dependency_sort,
+        "config.parse.dependency_sort"
+    );
 
     let sorted = match resolve_module_dependencies(bound_headers, string_table) {
         Ok(sorted) => sorted,
         Err(bag) => {
             errors.extend(bag.into_diagnostics());
-            timed_manual_finish!("config.parse.dependency_sort", dependency_sort_start);
-            timed_manual_finish!("config.parse.total", parse_total_start);
             return Err(CompilerMessages::from_diagnostics(
                 errors,
                 string_table.clone(),
             ));
         }
     };
-    timed_manual_finish!("config.parse.dependency_sort", dependency_sort_start);
 
     // -------------------------
     //  Authored Key-Name Spans
@@ -223,8 +212,7 @@ pub(super) fn parse_config_file(
     // -------------------------
     //  AST Construction
     // -------------------------
-    #[cfg(feature = "timers")]
-    let ast_start = crate::timing::start_pipeline_timing();
+    timing_scope!(timing_guard_config_parse_ast, "config.parse.ast");
 
     let external_package_registry = Arc::new(services.frontend_surface.binding_packages.clone());
     let config_root = canonical_config.parent().ok_or_else(|| {
@@ -263,17 +251,13 @@ pub(super) fn parse_config_file(
             timing_context: None,
         },
     );
-    timed_manual_finish!("config.parse.ast", ast_start);
 
     let ast = match ast_result {
         Ok(build_result) => build_result.ast,
         Err(messages) => {
-            timed_manual_finish!("config.parse.total", parse_total_start);
             return Err(messages);
         }
     };
-
-    timed_manual_finish!("config.parse.total", parse_total_start);
 
     Ok(ParsedConfigFile {
         ast,

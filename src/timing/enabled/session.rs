@@ -109,7 +109,7 @@ impl TimingSession {
         let command = self.command;
         let snapshot = self.finish();
         if let Some(command) = command {
-            super::render_command_timing_summary(&snapshot, command, succeeded);
+            super::command::render_command_timing_summary(&snapshot, command, succeeded);
         }
     }
 }

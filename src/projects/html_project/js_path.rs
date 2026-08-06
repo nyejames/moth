@@ -28,7 +28,7 @@ use crate::projects::html_project::document_shell::render_html_document_shell;
 use crate::projects::html_project::external_js::runtime_glue::generate_module_glue;
 use crate::projects::html_project::output_plan::derive_logical_html_path;
 use crate::projects::html_project::page_metadata::extract_html_page_metadata;
-use crate::timing_guard;
+use crate::timing_scope;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -122,7 +122,7 @@ pub(crate) fn compile_html_module_js(
     );
 
     let mut js_module = {
-        timing_guard!("backend.js.lower_hir");
+        timing_scope!(timing_guard_backend_js_lower_hir, "backend.js.lower_hir");
         lower_hir_to_js(
             input.hir_module,
             input.borrow_analysis,
@@ -145,7 +145,10 @@ pub(crate) fn compile_html_module_js(
                 Arc::clone(&linked.generated_function_names),
             );
             let linked_js = {
-                timing_guard!("backend.js.lower_linked_hir");
+                timing_scope!(
+                    timing_guard_backend_js_lower_linked_hir,
+                    "backend.js.lower_linked_hir"
+                );
                 lower_hir_to_js(
                     &linked.module.executable.hir,
                     &linked.module.executable.borrow_analysis,
@@ -216,7 +219,10 @@ pub(crate) fn compile_html_module_js(
     // Generate glue modules and import preamble only for external module exports referenced by
     // emitted JS. In HTML page bundles, JS lowering has already filtered unreachable wrappers.
     let glue_result = {
-        timing_guard!("backend.js.generate_module_glue");
+        timing_scope!(
+            timing_guard_backend_js_generate_module_glue,
+            "backend.js.generate_module_glue"
+        );
         generate_module_glue(
             module,
             external_imports,
@@ -236,7 +242,10 @@ pub(crate) fn compile_html_module_js(
     };
 
     let html = {
-        timing_guard!("backend.js.render_html_document");
+        timing_scope!(
+            timing_guard_backend_js_render_html_document,
+            "backend.js.render_html_document"
+        );
         render_html_document(&mut HtmlDocumentRenderInput {
             hir_module: input.hir_module,
             const_fragments: input.const_fragments,

@@ -100,38 +100,6 @@ macro_rules! benchmark_timer_log {
     };
 }
 
-/// Record one AST aggregate stage whenever `timers` is active, keeping the
-/// human prose detailed-only.
-///
-/// WHAT: records the stable metric and emits the `MOTH_BENCH timing` line
-///      under `timers`; prints the existing human message only under
-///      `detailed_timers`.
-/// WHY:  the basic summary promotes these existing detailed-only metrics
-///       without double recording when both features are active.
-#[macro_export]
-#[cfg(feature = "timers")]
-macro_rules! timed_ast_stage {
-    ($time:expr, $metric_name:expr, $human_msg:expr) => {{
-        let elapsed = $time.elapsed();
-        #[allow(unused_variables)]
-        let output_suppressed = $crate::timing::record_pipeline_timing($metric_name, elapsed);
-        #[cfg(feature = "detailed_timers")]
-        {
-            if $crate::timing::detailed_prose_enabled(output_suppressed) {
-                saying::say!($human_msg, Green #elapsed);
-            }
-        }
-    }};
-}
-
-#[macro_export]
-#[cfg(not(feature = "timers"))]
-macro_rules! timed_ast_stage {
-    ($time:expr, $metric_name:expr, $human_msg:expr) => {
-        // Nothing
-    };
-}
-
 #[cfg(feature = "detailed_timers")]
 pub fn log_aggregated_duration(label: &str, duration: Duration) {
     if detailed_timer_output_enabled() {
@@ -186,7 +154,7 @@ pub fn log_benchmark_counter(metric_name: &'static str, value: f64) {
 
 #[cfg(feature = "detailed_timers")]
 pub fn detailed_timer_output_enabled() -> bool {
-    crate::timing::output_enabled() && crate::timing::current_output_mode().emits_human_prose()
+    crate::timing::detailed_timer_output_enabled()
 }
 
 // Headers Logging

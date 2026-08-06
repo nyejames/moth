@@ -5,7 +5,6 @@
 //! WHY:  the enabled expansion must mirror the disabled one for control flow
 //!       while adding collector evidence.
 
-use crate::timed_ast_stage;
 use crate::timing::{TimingCommandKind, start_benchmark_collection};
 use std::cell::Cell;
 
@@ -29,12 +28,12 @@ fn timings_named<'a>(
 }
 
 #[test]
-fn pipeline_timer_records_one_observation_and_runs_expression_once() {
+fn timed_stage_records_one_observation_and_runs_expression_once() {
     let _test_guard = collector_test_guard();
     let timing_session = start_benchmark_collection(true);
 
     let runs = Cell::new(0);
-    let value = pipeline_timer!("test.metric", {
+    let value = timed_stage!("test.metric", {
         runs.set(runs.get() + 1);
         42
     });
@@ -48,16 +47,24 @@ fn pipeline_timer_records_one_observation_and_runs_expression_once() {
 }
 
 #[test]
-fn labeled_pipeline_timer_records_observation_and_passes_value_through() {
+fn timed_stage_attributed_records_observation_and_passes_value_through() {
     let _test_guard = collector_test_guard();
     let timing_session = start_benchmark_collection(true);
 
-    let value = labeled_pipeline_timer!("test.labeled", "prose label ", 7);
+    let boundary = crate::timing::register_timing_boundary(
+        crate::timing::TimingBoundaryKind::MainProject,
+        || "test-project".to_owned(),
+    );
+    let value = timed_stage_attributed!(
+        "test.attributed",
+        Some(crate::timing::TimingContext::for_boundary(boundary)),
+        7
+    );
 
     let snapshot = timing_session.finish();
 
     assert_eq!(value, 7);
-    let observations = timings_named(&snapshot, "test.labeled");
+    let observations = timings_named(&snapshot, "test.attributed");
     assert_eq!(observations.len(), 1);
 }
 
@@ -67,7 +74,7 @@ fn timing_guard_records_observation_when_scope_ends() {
     let timing_session = start_benchmark_collection(true);
 
     {
-        timing_guard!("test.guard");
+        timing_scope!(timing_guard, "test.guard");
     }
 
     let snapshot = timing_session.finish();
@@ -77,12 +84,13 @@ fn timing_guard_records_observation_when_scope_ends() {
 }
 
 #[test]
-fn timed_manual_finish_records_started_stage() {
+fn timing_scope_records_started_stage() {
     let _test_guard = collector_test_guard();
     let timing_session = start_benchmark_collection(true);
 
-    let start = crate::timing::start_pipeline_timing();
-    timed_manual_finish!("test.manual", start);
+    {
+        timing_scope!(timing_guard, "test.manual");
+    }
 
     let snapshot = timing_session.finish();
 
@@ -91,7 +99,7 @@ fn timed_manual_finish_records_started_stage() {
 }
 
 #[test]
-fn timed_manual_finish_attributed_stores_context() {
+fn timing_scope_attributed_stores_context() {
     let _test_guard = collector_test_guard();
     let timing_session = start_benchmark_collection(true);
 
@@ -100,12 +108,13 @@ fn timed_manual_finish_attributed_stores_context() {
         || "test-project".to_owned(),
     );
     let module = crate::timing::register_timing_module(boundary, 0, "", 2, 1024);
-    let start = crate::timing::start_pipeline_timing();
-    timed_manual_finish_attributed!(
-        "test.labeled_manual",
-        start,
-        Some(crate::timing::TimingContext::for_module(module)),
-    );
+    {
+        timing_scope_attributed!(
+            timing_guard,
+            "test.labeled_manual",
+            Some(crate::timing::TimingContext::for_module(module)),
+        );
+    }
 
     let snapshot = timing_session.finish();
 
@@ -122,14 +131,15 @@ fn sentinel_boundary_observations_are_dropped() {
     let _test_guard = collector_test_guard();
     let timing_session = start_benchmark_collection(true);
 
-    let start = crate::timing::start_pipeline_timing();
-    timed_manual_finish_attributed!(
-        "test.sentinel",
-        start,
-        Some(crate::timing::TimingContext::for_boundary(
-            crate::timing::NO_TIMING_BOUNDARY
-        )),
-    );
+    {
+        timing_scope_attributed!(
+            timing_guard,
+            "test.sentinel",
+            Some(crate::timing::TimingContext::for_boundary(
+                crate::timing::NO_TIMING_BOUNDARY
+            )),
+        );
+    }
 
     let snapshot = timing_session.finish();
 
@@ -180,7 +190,7 @@ fn timed_ast_stage_records_exactly_once_without_double_recording() {
     let timing_session = start_benchmark_collection(true);
 
     let start = std::time::Instant::now();
-    timed_ast_stage!(
+    crate::timed_ast_stage!(
         start,
         "ast.test_aggregate",
         "AST/test aggregate completed in: "
@@ -389,12 +399,13 @@ fn stale_context_from_an_older_session_is_dropped() {
     let _ = first.finish();
 
     let second = start_benchmark_collection(true);
-    let start = crate::timing::start_pipeline_timing();
-    timed_manual_finish_attributed!(
-        "test.stale",
-        start,
-        Some(crate::timing::TimingContext::for_boundary(boundary)),
-    );
+    {
+        timing_scope_attributed!(
+            timing_guard,
+            "test.stale",
+            Some(crate::timing::TimingContext::for_boundary(boundary)),
+        );
+    }
 
     let snapshot = second.finish();
     assert!(
@@ -520,12 +531,13 @@ fn raw_benchmark_without_attribution_skips_metadata_tables() {
         || panic!("boundary names must not be built without attribution"),
     );
     let module = crate::timing::register_timing_module(boundary, 0, "entry", 1, 128);
-    let start = crate::timing::start_pipeline_timing();
-    timed_manual_finish_attributed!(
-        "raw.metric",
-        start,
-        Some(crate::timing::TimingContext::for_module(module)),
-    );
+    {
+        timing_scope_attributed!(
+            timing_guard,
+            "raw.metric",
+            Some(crate::timing::TimingContext::for_module(module)),
+        );
+    }
 
     let snapshot = session.finish();
 

@@ -16,9 +16,9 @@ fn evaluation_counter() -> Rc<Cell<usize>> {
 }
 
 #[test]
-fn pipeline_timer_does_not_evaluate_metric_expression() {
+fn timed_stage_does_not_evaluate_metric_expression() {
     let metric_evaluated = evaluation_counter();
-    let value = pipeline_timer!(
+    let value = timed_stage!(
         {
             metric_evaluated.set(metric_evaluated.get() + 1);
             "test.metric"
@@ -31,25 +31,25 @@ fn pipeline_timer_does_not_evaluate_metric_expression() {
 }
 
 #[test]
-fn labeled_pipeline_timer_does_not_evaluate_label_expression() {
-    let label_evaluated = evaluation_counter();
-    let value = labeled_pipeline_timer!(
+fn timed_stage_attributed_does_not_evaluate_context_expression() {
+    let context_evaluated = evaluation_counter();
+    let value = timed_stage_attributed!(
         "test.metric",
         {
-            label_evaluated.set(label_evaluated.get() + 1);
-            "label"
+            context_evaluated.set(context_evaluated.get() + 1);
+            None
         },
         42
     );
 
     assert_eq!(value, 42);
-    assert_eq!(label_evaluated.get(), 0);
+    assert_eq!(context_evaluated.get(), 0);
 }
 
 #[test]
-fn timing_guard_does_not_evaluate_metric_expression() {
+fn timing_scope_does_not_evaluate_metric_expression() {
     let metric_evaluated = evaluation_counter();
-    timing_guard!({
+    timing_scope!(timing_guard, {
         metric_evaluated.set(metric_evaluated.get() + 1);
         "test.guard"
     });
@@ -58,37 +58,37 @@ fn timing_guard_does_not_evaluate_metric_expression() {
 }
 
 #[test]
-fn timed_manual_finish_does_not_evaluate_arguments() {
+fn record_timing_duration_does_not_evaluate_arguments() {
     let metric_evaluated = evaluation_counter();
-    let start_evaluated = evaluation_counter();
-    timed_manual_finish!(
+    let duration_evaluated = evaluation_counter();
+    record_timing_duration!(
         {
             metric_evaluated.set(metric_evaluated.get() + 1);
             "test.manual"
         },
         {
-            start_evaluated.set(start_evaluated.get() + 1);
-            ()
+            duration_evaluated.set(duration_evaluated.get() + 1);
+            std::time::Duration::ZERO
         }
     );
 
     assert_eq!(metric_evaluated.get(), 0);
-    assert_eq!(start_evaluated.get(), 0);
+    assert_eq!(duration_evaluated.get(), 0);
 }
 
 #[test]
-fn timed_manual_finish_attributed_does_not_evaluate_arguments() {
+fn record_attributed_duration_does_not_evaluate_arguments() {
     let metric_evaluated = evaluation_counter();
-    let start_evaluated = evaluation_counter();
+    let duration_evaluated = evaluation_counter();
     let context_evaluated = evaluation_counter();
-    timed_manual_finish_attributed!(
+    record_attributed_duration!(
         {
             metric_evaluated.set(metric_evaluated.get() + 1);
             "test.manual"
         },
         {
-            start_evaluated.set(start_evaluated.get() + 1);
-            ()
+            duration_evaluated.set(duration_evaluated.get() + 1);
+            std::time::Duration::ZERO
         },
         {
             context_evaluated.set(context_evaluated.get() + 1);
@@ -97,7 +97,7 @@ fn timed_manual_finish_attributed_does_not_evaluate_arguments() {
     );
 
     assert_eq!(metric_evaluated.get(), 0);
-    assert_eq!(start_evaluated.get(), 0);
+    assert_eq!(duration_evaluated.get(), 0);
     assert_eq!(context_evaluated.get(), 0);
 }
 
@@ -105,7 +105,7 @@ fn timed_manual_finish_attributed_does_not_evaluate_arguments() {
 fn command_timing_macros_expand_to_nothing() {
     let mut runs = 0;
     for _ in 0..3 {
-        command_timing_start!(timing_session, crate::timing::TimingCommandKind::Build);
+        command_timing_scope!(timing_session, crate::timing::TimingCommandKind::Build);
         runs += 1;
         command_timing_finish!(timing_session, true);
     }
@@ -177,9 +177,9 @@ fn timed_frontend_substep_expands_to_production_expression() {
 }
 
 #[test]
-fn pipeline_timer_runs_wrapped_expression_exactly_once() {
+fn timed_stage_runs_wrapped_expression_exactly_once() {
     let runs = evaluation_counter();
-    let value = pipeline_timer!("test.metric", {
+    let value = timed_stage!("test.metric", {
         runs.set(runs.get() + 1);
         42
     });
@@ -189,15 +189,15 @@ fn pipeline_timer_runs_wrapped_expression_exactly_once() {
 }
 
 #[test]
-fn pipeline_timer_passes_ok_result_through_unchanged() {
-    let result: Result<u32, &str> = pipeline_timer!("test.metric", Ok(7));
+fn timed_stage_passes_ok_result_through_unchanged() {
+    let result: Result<u32, &str> = timed_stage!("test.metric", Ok(7));
 
     assert_eq!(result, Ok(7));
 }
 
 #[test]
-fn pipeline_timer_passes_error_through_unchanged() {
-    let result: Result<u32, &str> = pipeline_timer!("test.metric", Err("boom"));
+fn timed_stage_passes_error_through_unchanged() {
+    let result: Result<u32, &str> = timed_stage!("test.metric", Err("boom"));
 
     assert_eq!(result, Err("boom"));
 }
@@ -217,4 +217,26 @@ fn timer_facade_sources_never_use_cfg_timer_macro() {
             "timer facade must use #[cfg] macro definitions, not runtime cfg! checks"
         );
     }
+}
+
+#[test]
+fn timing_scope_multi_does_not_evaluate_entries() {
+    let entries_evaluated = evaluation_counter();
+    timing_scope_multi!(timing_guard, {
+        entries_evaluated.set(entries_evaluated.get() + 1);
+        &[]
+    });
+
+    assert_eq!(entries_evaluated.get(), 0);
+}
+
+#[test]
+fn command_timing_scope_does_not_evaluate_command_expression() {
+    let command_evaluated = evaluation_counter();
+    command_timing_scope!(timing_session, {
+        command_evaluated.set(command_evaluated.get() + 1);
+        crate::timing::TimingCommandKind::Build
+    });
+
+    assert_eq!(command_evaluated.get(), 0);
 }

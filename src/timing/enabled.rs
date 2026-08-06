@@ -18,8 +18,11 @@
 
 pub(crate) mod attribution;
 pub(crate) mod collector;
+pub(crate) mod command;
+pub(crate) mod counter_summary;
 pub(crate) mod mode;
 pub(crate) mod render;
+pub(crate) mod schema;
 pub(crate) mod session;
 pub(crate) mod summary;
 
@@ -29,9 +32,9 @@ pub(crate) use attribution::{
     NO_TIMING_BOUNDARY, TimingBoundaryId, TimingBoundaryKind, TimingBoundaryRecord, TimingContext,
     TimingModuleKey, TimingModuleRecord,
 };
+pub(crate) use command::{render_command_timing_summary, start_command_session};
 pub(crate) use mode::TimerOutputMode;
 pub(crate) use session::{TimingCollectionPurpose, TimingCommandKind, TimingSession};
-
 use std::time::Duration;
 
 // ---------------------------------------------------------------------------
@@ -171,6 +174,14 @@ pub(crate) fn detailed_prose_enabled(output_suppressed: bool) -> bool {
     !output_suppressed && current_output_mode().emits_human_prose()
 }
 
+/// Whether verbose human prose is enabled for prose-only call sites.
+///
+/// Used by developer logging macros that print without recording; the record
+/// paths use `detailed_prose_enabled` with the captured suppression flag.
+pub(crate) fn detailed_timer_output_enabled() -> bool {
+    output_enabled() && current_output_mode().emits_human_prose()
+}
+
 /// Emit one stable `MOTH_BENCH timing` line to stdout if the output mode
 /// permits and output is not suppressed.
 ///
@@ -198,7 +209,7 @@ pub(crate) fn emit_bench_timing_line(
 /// Record a pipeline-stage timing and emit the stable bench line when
 /// appropriate.
 ///
-/// Used by the `pipeline_timer!` macro. The timing is always recorded in the
+/// Used by the `timed_stage!` macro. The timing is always recorded in the
 /// collector (when a scope is active); the stdout line depends on the output
 /// mode and suppression flag.
 pub(crate) fn record_pipeline_timing(metric: &'static str, duration: Duration) -> bool {
@@ -313,6 +324,7 @@ pub(crate) fn record_started_pipeline_timing_attributed(
 pub(crate) struct PipelineTimingGuard {
     metric: &'static str,
     start: PipelineTimingStart,
+    finished: bool,
 }
 
 impl PipelineTimingGuard {
@@ -321,13 +333,99 @@ impl PipelineTimingGuard {
         Self {
             metric,
             start: start_pipeline_timing(),
+            finished: false,
         }
+    }
+
+    /// Record the stage now and suppress the drop record.
+    ///
+    /// Used at the original finish point of a manual start/finish pair so the
+    /// measured boundary stays identical; error paths still record on drop.
+    pub(crate) fn finish(mut self) {
+        record_started_pipeline_timing(self.metric, self.start);
+        self.finished = true;
     }
 }
 
+/// RAII guard that records an attributed pipeline-stage timing when dropped.
+///
+/// WHAT: captures a start instant and records the elapsed duration under the
+///      given metric with its attribution context when the guard drops.
+/// WHY:  scopes with many early returns need one record path that covers
+///       every exit without scattering explicit record calls.
+pub(crate) struct PipelineTimingGuardAttributed {
+    metric: &'static str,
+    start: PipelineTimingStart,
+    context: Option<TimingContext>,
+    finished: bool,
+}
+
+impl PipelineTimingGuardAttributed {
+    /// Start timing a stage that will be recorded when the guard drops.
+    pub(crate) fn new(metric: &'static str, context: Option<TimingContext>) -> Self {
+        Self {
+            metric,
+            start: start_pipeline_timing(),
+            context,
+            finished: false,
+        }
+    }
+
+    /// Record the stage now and suppress the drop record.
+    pub(crate) fn finish(mut self) {
+        record_started_pipeline_timing_attributed(self.metric, self.start, self.context);
+        self.finished = true;
+    }
+}
+
+/// RAII guard that records several metrics from one captured duration.
+///
+/// WHAT: captures a start instant and records every entry with the same
+///      elapsed duration when the guard drops.
+/// WHY:  shared measurement boundaries must never let the second metric
+///       include the first record's overhead.
+pub(crate) struct PipelineTimingGuardMulti<'a> {
+    entries: &'a [(&'static str, Option<TimingContext>)],
+    start: PipelineTimingStart,
+    finished: bool,
+}
+
+impl<'a> PipelineTimingGuardMulti<'a> {
+    /// Start timing a stage that records several metrics when the guard drops.
+    pub(crate) fn new(entries: &'a [(&'static str, Option<TimingContext>)]) -> Self {
+        Self {
+            entries,
+            start: start_pipeline_timing(),
+            finished: false,
+        }
+    }
+
+    /// Record the shared duration now and suppress the drop record.
+    pub(crate) fn finish(mut self) {
+        record_pipeline_timing_multi(self.entries, self.start.elapsed());
+        self.finished = true;
+    }
+}
+
+impl<'a> Drop for PipelineTimingGuardMulti<'a> {
+    fn drop(&mut self) {
+        if !self.finished {
+            record_pipeline_timing_multi(self.entries, self.start.elapsed());
+        }
+    }
+}
+impl Drop for PipelineTimingGuardAttributed {
+    fn drop(&mut self) {
+        if !self.finished {
+            record_started_pipeline_timing_attributed(self.metric, self.start, self.context);
+        }
+    }
+}
 impl Drop for PipelineTimingGuard {
     fn drop(&mut self) {
-        record_started_pipeline_timing(self.metric, self.start);
+        if !self.finished {
+            record_started_pipeline_timing(self.metric, self.start);
+        }
     }
 }
 
@@ -368,323 +466,6 @@ impl Drop for AstStageTimingGuard {
             record_pipeline_timing_attributed(self.metric, elapsed, self.context);
         if detailed_prose_enabled(output_suppressed) {
             saying::say!(self.prose_label, Green #elapsed);
-        }
-    }
-}
-/// Record a pipeline-stage timing with a human-readable label and emit the
-/// stable bench line when appropriate.
-///
-/// Used by the `labeled_pipeline_timer!` macro. The human label is printed
-/// inline only in verbose mode; the stable bench line depends on the output
-/// mode and suppression flag.
-pub(crate) fn record_labeled_pipeline_timing(
-    metric: &'static str,
-    duration: Duration,
-    label: &str,
-) -> bool {
-    let mode = current_output_mode();
-    let output_suppressed = record_timing(metric, duration);
-
-    if !output_suppressed && mode.emits_human_prose() {
-        saying::say!(label, Green #duration);
-    }
-
-    emit_bench_timing_line(metric, duration, output_suppressed);
-    output_suppressed
-}
-
-// ---------------------------------------------------------------------------
-//  Counter summary
-// ---------------------------------------------------------------------------
-
-#[cfg(feature = "benchmark_counters")]
-struct CounterSummaryGroup {
-    label: &'static str,
-    metrics: &'static [(&'static str, &'static str)],
-}
-
-#[cfg(feature = "benchmark_counters")]
-const COUNTER_SUMMARY_GROUPS: &[CounterSummaryGroup] = &[
-    CounterSummaryGroup {
-        label: "inputs",
-        metrics: &[
-            ("module_count", "modules"),
-            ("source_file_count", "files"),
-            ("source_byte_count", "bytes"),
-            ("prepared_file_count", "prepared"),
-            ("token_count", "tokens"),
-            ("header_count", "headers"),
-            ("import_count", "imports"),
-            ("top_level_declaration_count", "decls"),
-        ],
-    },
-    CounterSummaryGroup {
-        label: "stage0",
-        metrics: &[
-            ("source_tree_index.discovery_runs", "source scans"),
-            ("source_tree_index.dirs_visited", "dirs"),
-            ("source_tree_index.dirs_skipped", "skipped dirs"),
-            ("source_tree_index.files_seen", "files seen"),
-            ("source_tree_index.module_roots_found", "roots"),
-            (
-                "stage0.reachable_discovery.reachable_files",
-                "reachable files",
-            ),
-            ("stage0.reachable_discovery.import_edges", "import edges"),
-            ("stage0_source_cache_hit_count", "source hits"),
-            ("stage0_source_cache_miss_count", "source misses"),
-            ("stage0_source_bytes_loaded", "bytes loaded"),
-        ],
-    },
-    CounterSummaryGroup {
-        label: "scheduling",
-        metrics: &[
-            ("module_compilation_serial_count", "serial modules"),
-            ("module_compilation_parallel_task_count", "parallel tasks"),
-            ("file_preparation_serial_module_count", "serial file prep"),
-            (
-                "file_preparation_parallel_module_count",
-                "parallel file prep",
-            ),
-            (
-                "file_preparation_strategy_parallel_per_file_count",
-                "per-file strategy",
-            ),
-            (
-                "file_preparation_strategy_chunked_count",
-                "chunked strategy",
-            ),
-        ],
-    },
-    CounterSummaryGroup {
-        label: "frontend",
-        metrics: &[
-            ("dependency_header_count", "dep headers"),
-            ("dependency_edge_count", "dep edges"),
-            ("dependency_visit_count", "dep visits"),
-            ("ast_header_count", "AST headers"),
-            ("ast_function_count", "functions"),
-            ("ast_struct_count", "structs"),
-            ("ast_choice_count", "choices"),
-            ("ast_constant_count", "constants"),
-            ("ast_receiver_method_count", "receiver methods"),
-            ("ast_generic_instance_count", "generic instances"),
-            ("hir_block_count", "HIR blocks"),
-            ("hir_statement_count", "HIR statements"),
-            ("hir_function_count", "HIR functions"),
-            ("borrow_function_count", "borrow functions"),
-            ("borrow_block_count", "borrow blocks"),
-            ("borrow_conflict_check_count", "borrow checks"),
-            ("borrow_state_join_count", "borrow joins"),
-            ("borrow_place_access_count", "borrow places"),
-        ],
-    },
-    CounterSummaryGroup {
-        label: "scope/type",
-        metrics: &[
-            ("actual_scope_frames", "scope frames"),
-            ("scope_arena_capacity", "scope capacity"),
-            (
-                "type_environment_substitute_type_id_calls",
-                "type substitutions",
-            ),
-            (
-                "type_environment_substitution_cache_lookups",
-                "substitution lookups",
-            ),
-            ("type_compatibility_cache_lookups", "compat lookups"),
-            ("type_compatibility_cache_misses", "compat misses"),
-        ],
-    },
-    CounterSummaryGroup {
-        label: "string/remap",
-        metrics: &[
-            ("string_table_full_clones", "full clones"),
-            ("string_table_merge_source_entries_scanned", "merge scanned"),
-            ("string_table_delta_merge_calls", "delta merges"),
-            ("string_table_delta_entries_scanned", "delta scanned"),
-            (
-                "string_table_delta_non_identity_remaps",
-                "non-identity remaps",
-            ),
-            ("module_remap_string_ids_calls", "module remaps"),
-            ("file_prepare_output_remap_calls", "file output remaps"),
-            ("file_prepare_error_remap_calls", "file error remaps"),
-        ],
-    },
-    CounterSummaryGroup {
-        label: "templates/tir",
-        metrics: &[
-            ("template_count", "templates"),
-            ("const_template_count", "const"),
-            ("runtime_template_count", "runtime"),
-            ("ast_template_atoms_parsed", "atoms"),
-            (
-                "ast_templates_folded_during_finalization",
-                "finalized folds",
-            ),
-            ("ast_template_tir_sync_attempts", "TIR sync attempts"),
-            ("ast_template_tir_sync_successes", "TIR sync success"),
-            ("ast_tir_templates_created", "TIR templates"),
-            ("ast_tir_nodes_created", "TIR nodes"),
-            ("ast_tir_text_bytes_recorded", "TIR text bytes"),
-            ("ast_tir_fold_nodes_visited", "TIR fold nodes"),
-        ],
-    },
-    CounterSummaryGroup {
-        label: "external packages",
-        metrics: &[
-            ("external_package_registry_clone_count", "registry clones"),
-            ("external_package_definition_clone_count", "package clones"),
-            (
-                "external_function_definition_clone_count",
-                "function clones",
-            ),
-            ("external_symbol_path_clone_count", "symbol clones"),
-            ("external_abi_parameter_clone_count", "ABI clones"),
-        ],
-    },
-];
-
-/// Render a concise grouped counter summary from a collected snapshot.
-///
-/// Aggregates counter observations by metric name (summing repeated samples,
-/// e.g. per-module discovery counters) and returns a small fixed set of
-/// stage-oriented lines. Stable `MOTH_BENCH counter` output remains the full
-/// machine-readable path; the human summary is deliberately compact.
-#[cfg(feature = "benchmark_counters")]
-pub(crate) fn render_counter_summary(snapshot: &BenchmarkObservationSnapshot) -> Vec<String> {
-    if snapshot.counters.is_empty() {
-        return Vec::new();
-    }
-
-    let mut aggregates = std::collections::BTreeMap::<&str, f64>::new();
-    for metric in &snapshot.counters {
-        *aggregates.entry(metric.name).or_default() += metric.value;
-    }
-
-    let mut lines = Vec::with_capacity(COUNTER_SUMMARY_GROUPS.len() + 2);
-    lines.push("Counter summary:".to_owned());
-
-    for group in COUNTER_SUMMARY_GROUPS {
-        if let Some(line) = render_counter_summary_group(&aggregates, group) {
-            lines.push(line);
-        }
-    }
-
-    let other_nonzero_count = aggregates
-        .iter()
-        .filter(|(name, value)| **value != 0.0 && !counter_summary_includes_metric(name))
-        .count();
-
-    if other_nonzero_count > 0 {
-        lines.push(format!(
-            "  other nonzero counters: {other_nonzero_count} (see MOTH_BENCH lines)"
-        ));
-    }
-
-    if lines.len() == 1 {
-        lines.push("  no nonzero counters".to_owned());
-    }
-
-    lines
-}
-
-#[cfg(feature = "benchmark_counters")]
-fn render_counter_summary_group(
-    aggregates: &std::collections::BTreeMap<&str, f64>,
-    group: &CounterSummaryGroup,
-) -> Option<String> {
-    let mut parts = Vec::new();
-
-    for (metric_name, label) in group.metrics {
-        let value = aggregates.get(metric_name).copied().unwrap_or(0.0);
-        if value == 0.0 {
-            continue;
-        }
-        parts.push(format!("{label} {}", format_counter_summary_value(value)));
-    }
-
-    if parts.is_empty() {
-        None
-    } else {
-        Some(format!("  {}: {}", group.label, parts.join(", ")))
-    }
-}
-
-#[cfg(feature = "benchmark_counters")]
-fn counter_summary_includes_metric(name: &str) -> bool {
-    COUNTER_SUMMARY_GROUPS.iter().any(|group| {
-        group
-            .metrics
-            .iter()
-            .any(|(metric_name, _label)| *metric_name == name)
-    })
-}
-
-#[cfg(feature = "benchmark_counters")]
-fn format_counter_summary_value(value: f64) -> String {
-    if value.fract() == 0.0 {
-        format!("{value:.0}")
-    } else {
-        format!("{value:.2}")
-    }
-}
-
-// ---------------------------------------------------------------------------
-//  Timing summary and command scope
-// ---------------------------------------------------------------------------
-
-/// Start a command-level timing collection session.
-///
-/// WHAT: begins collecting timing observations for one CLI command or dev
-///      cycle with an explicit command kind.
-/// WHY:  the summary rendered after `check`, `build` and dev cycles reads from
-///      this session. The command kind is owned by the session, never inferred
-///      from whichever metric happened to be recorded.
-pub(crate) fn start_command_session(command: TimingCommandKind) -> TimingSession {
-    // Bench and Silent modes print stable lines or nothing; they never build a
-    // command snapshot that no consumer will render.
-    if !current_output_mode().collects_snapshot() {
-        return TimingSession::rejected();
-    }
-
-    collector::start_session(
-        Some(command),
-        TimingCollectionPurpose::HumanSummary,
-        false,
-        true,
-    )
-}
-
-/// Render a structured timing summary from an already-drained snapshot.
-/// WHAT: prints the human summary when the output mode requests one, plus the
-///      concise counter summary when `MOTH_COUNTERS` asks for it.
-/// WHY:  the command kind is explicit so a malformed or incomplete snapshot can
-///       never be mislabelled as another command.
-pub(crate) fn render_command_timing_summary(
-    snapshot: &BenchmarkObservationSnapshot,
-    command: TimingCommandKind,
-    succeeded: bool,
-) {
-    let mode = current_output_mode();
-
-    if mode.emits_summary() {
-        let report = summary::build_timing_summary(snapshot, command, succeeded);
-        render::render_timing_summary_report(&report);
-    }
-
-    // Counter summary is owned by `benchmark_counters` and reuses the snapshot
-    // just drained by the timing summary. It only prints when `MOTH_COUNTERS`
-    // requests the concise summary view; the legacy full dump is printed inline
-    // while counters are logged, not here.
-    #[cfg(feature = "benchmark_counters")]
-    {
-        let counter_mode = crate::timing::current_counter_output_mode();
-        if counter_mode.emits_counter_summary() {
-            for line in render_counter_summary(snapshot) {
-                saying::say!(line);
-            }
         }
     }
 }

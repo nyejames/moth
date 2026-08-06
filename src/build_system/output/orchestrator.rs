@@ -4,6 +4,7 @@
 //! emission, stale cleanup, and manifest persistence.
 //! WHY: callers should choose a validated output plan and write mode while the output subsystem
 //! keeps the mutation order and safety boundaries in one current path.
+use crate::timing_scope;
 
 use super::manifest::{OutputCleanupFinalization, finalize_output_cleanup, prepare_output_cleanup};
 use super::policy::OutputPlan;
@@ -12,7 +13,6 @@ use crate::build_system::build::Project;
 use crate::build_system::utils::file_error_messages;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::timed_manual_finish;
 
 use std::fs;
 
@@ -39,14 +39,10 @@ pub(crate) fn write_project_outputs(
     options: &WriteOptions,
     string_table: &StringTable,
 ) -> Result<(), CompilerMessages> {
-    #[cfg(feature = "timers")]
-    let write_total_start = crate::timing::start_pipeline_timing();
+    timing_scope!(timing_guard_output_write_total, "output.write_total");
 
     // Keep the aggregate output timing visible even when filesystem validation or writes fail.
-    let result = write_project_outputs_inner(project, options, string_table);
-    timed_manual_finish!("output.write_total", write_total_start);
-
-    result
+    write_project_outputs_inner(project, options, string_table)
 }
 
 fn write_project_outputs_inner(
@@ -62,9 +58,8 @@ fn write_project_outputs_inner(
     // WHY: a late invalid or duplicate path must not leave earlier files already written.
     let prepared_write = {
         #[cfg(feature = "timers")]
-        let preflight_start = crate::timing::start_pipeline_timing();
+        timing_scope!(timing_guard_output_preflight, "output.preflight");
         let result = prepare_output_write(project, &options.output_plan, string_table);
-        timed_manual_finish!("output.preflight", preflight_start);
         result?
     };
 
@@ -80,7 +75,10 @@ fn write_project_outputs_inner(
     // proceed while preserving stale artifacts.
     let cleanup_state = {
         #[cfg(feature = "timers")]
-        let prepare_start = crate::timing::start_pipeline_timing();
+        timing_scope!(
+            timing_guard_output_prepare_cleanup,
+            "output.prepare_cleanup"
+        );
         let result = prepare_output_cleanup(
             output_root,
             options.output_plan.project_root(),
@@ -90,13 +88,12 @@ fn write_project_outputs_inner(
             &project.cleanup_policy,
             string_table,
         );
-        timed_manual_finish!("output.prepare_cleanup", prepare_start);
         result?
     };
 
     {
         #[cfg(feature = "timers")]
-        let create_root_start = crate::timing::start_pipeline_timing();
+        timing_scope!(timing_guard_output_create_root, "output.create_root");
         let result = fs::create_dir_all(output_root).map_err(|error| {
             file_error_messages(
                 output_root,
@@ -107,7 +104,6 @@ fn write_project_outputs_inner(
                 string_table,
             )
         });
-        timed_manual_finish!("output.create_root", create_root_start);
         result?;
     }
 
@@ -117,10 +113,12 @@ fn write_project_outputs_inner(
 
     {
         #[cfg(feature = "timers")]
-        let emit_files_start = crate::timing::start_pipeline_timing();
+        timing_scope!(
+            timing_guard_output_emit_files_total,
+            "output.emit_files_total"
+        );
         let result =
             emit_prepared_output_files(project, &prepared_write, options.write_mode, string_table);
-        timed_manual_finish!("output.emit_files_total", emit_files_start);
         result?;
     }
 
@@ -132,7 +130,10 @@ fn write_project_outputs_inner(
     // drive deletion under uncertain metadata.
     {
         #[cfg(feature = "timers")]
-        let finalize_start = crate::timing::start_pipeline_timing();
+        timing_scope!(
+            timing_guard_output_finalize_cleanup,
+            "output.finalize_cleanup"
+        );
         let finalization = OutputCleanupFinalization {
             output_root,
             manifest_destination: &prepared_write.manifest_destination,
@@ -144,7 +145,6 @@ fn write_project_outputs_inner(
             string_table,
         };
         let result = finalize_output_cleanup(&cleanup_state, &finalization);
-        timed_manual_finish!("output.finalize_cleanup", finalize_start);
         result?;
     }
 
