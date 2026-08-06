@@ -227,10 +227,10 @@ body {
             ),
             linear-gradient(
                 145deg,
-                #c7eafc 0%,
-                #d9e6ff 15%,
+                #c7e3fc 0%,
+                #c4d3f2 12%,
                 #c8d9fb 91%,
-                #bac9ff 100%
+                #adbfff 100%
             );
 
         background-repeat: no-repeat;
@@ -254,11 +254,11 @@ h1 {
 }
 
 .container code:not(.codeblock) {
-    color: light-dark(hsl(261, 100%, 56%), #c444aff9);
+    color: light-dark(hsl(331, 100%, 50%), #f062d4f9);
     font-family: var(--moth-font-family-monospace);
-    margin-left: 0.25em;
-    margin-right: 0.2em;
-    font-weight: 600;
+    margin-left: 0.2em;
+    margin-right: 0.15em;
+    font-weight: 400;
 }
 
 .container pre {
@@ -284,8 +284,6 @@ td {
     vertical-align: top;
     text-align: left;
 }
-
-
 
 @media (min-width: 576px) {
     .container {
@@ -621,6 +619,8 @@ cargo run <span class='moth-code-operator'>-</span><span class='moth-code-operat
              <td style=""><p> Documentation check</p></td> <td style=""><p> <code>cargo run --quiet -- check docs --terse</code></p></td> <td style=""><p> Moth docs-source checking inside the full gate</p></td>
         </tr><tr style="">
              <td style=""><p> Benchmark sanity check</p></td> <td style=""><p> <code>cargo run --package xtask --bin xtask -- bench-ci</code></p></td> <td style=""><p> Complete benchmark preflight followed by bounded non-recording measurements</p></td>
+        </tr><tr style="">
+             <td style=""><p> Timer erasure gate</p></td> <td style=""><p> <code>just timers-erasure-check</code></p></td> <td style=""><p> Builds a no-timer release binary and rejects timer-only markers and         source-level closure wrappers</p></td>
         </tr>
             
 </table><ul><li><code>ci-clippy</code> uses the pinned Rust toolchain configured in the <code>justfile</code>.</li><li>Warnings are denied.</li><li>It checks the complete workspace on the native host, Linux x64 and Windows x64 targets.</li><li>The workspace test command includes the compiler, CLI and <code>xtask</code> packages.</li><li><code>bench-ci</code> preflights every benchmark manifest case once, then measures only the quick CLI and frontend subsets with three iterations.</li><li><code>bench-ci</code> does not update local history or tracked benchmark summaries.</li></ul><p>The integration command loads the complete canonical suite and applies the shared hard-policy evaluator before selection or compilation. This makes missing ownership, duplicate primaries and other hard suite-policy findings part of the normal validation gate. Run the audit command when the JSON inventory under <code>target/test-reports/</code> is also required:</p><pre style=""><code class='codeblock'>cargo run <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>quiet <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span> tests <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>audit</code></pre><h3>Documentation-only release-build gate</h3><p>A slice is documentation-only only when every modified file is documentation source or generated documentation.</p><p>Allowed examples include:</p><ul><li>files under <code>docs/**</code></li><li>an explicitly requested root documentation file such as <code>README.md</code>, <code>CONTRIBUTING.md</code> or <code>AGENTS.md</code></li><li>generated files under <code>docs/release/**</code></li></ul><p>A documentation-only slice must not change Rust, tests, libraries, build configuration, manifests, scripts, benchmark code or fixtures, compiler configuration or other executable project sources.</p><p>For a strictly documentation-only slice, run one documentation release build using a current compiler.</p><p>The direct release-binary form is:</p><pre style=""><code class='codeblock'>moth build docs <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>release</code></pre><p>If no suitable release build is available, use <code>cargo run --quiet -- build docs --release</code> instead.</p><p>Then:</p><ul><li>inspect every changed route</li><li>inspect the generated diff</li><li>verify links, tables and code examples</li><li>confirm generated output came from source changes</li><li>confirm the changed-file list contains documentation only.</li></ul><p>Do not additionally run <code>just validate</code>, Clippy, unit tests, integration tests or benchmark checks for a documentation-only slice. A Cargo invocation of the compiler is an alternative way to run the same documentation gate, not an extra gate.</p><p>If any non-documentation file changed, the documentation-only exception does not apply. Use the full code-bearing gate.</p><h3>Fast iteration commands</h3><table style="">
