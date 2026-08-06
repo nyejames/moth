@@ -217,6 +217,8 @@ impl FrontendProject {
                 ModuleRootRole::Normal,
                 FrontendBuildProfile::Dev,
                 Default::default(),
+                #[cfg(feature = "timers")]
+                None,
             )
             .expect("AST construction should succeed")
             .ast
@@ -299,6 +301,8 @@ fn frontend_diagnostics_preserve_string_table_context() {
         ModuleRootRole::Normal,
         FrontendBuildProfile::Dev,
         Default::default(),
+        #[cfg(feature = "timers")]
+        None,
     ) else {
         panic!("const host calls should fail during AST construction");
     };

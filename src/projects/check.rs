@@ -35,7 +35,7 @@ struct CheckOutcome {
 }
 
 pub(crate) fn run_check(path: &str, options: CheckOptions) -> CommandStatus {
-    command_timing_start!();
+    command_timing_start!(timing_session, crate::timing::TimingCommandKind::Check);
     #[cfg(feature = "timers")]
     let command_start = crate::timing::start_pipeline_timing();
     let outcome = execute_check(path);
@@ -61,7 +61,7 @@ pub(crate) fn run_check(path: &str, options: CheckOptions) -> CommandStatus {
     timed_manual_finish!("command.check.message_rendering", rendering_start);
     timed_manual_finish!("command.check.total", command_start);
 
-    command_timing_finish!(error_count == 0);
+    command_timing_finish!(timing_session, error_count == 0);
     if let Some((error_count, warning_count)) = benchmark_counts {
         emit_benchmark_status(error_count, warning_count);
     }

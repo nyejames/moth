@@ -519,7 +519,7 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
         &canonical_entry,
         local_table,
         source_byte_count,
-        crate::timing::TimingModuleContext::default(),
+        None,
     );
     #[cfg(not(feature = "timers"))]
     let prepared_result = preparation_context.prepare_module(
@@ -570,7 +570,7 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
     let semantic_result = compile_context.compile_module_semantic(
         prepared,
         &canonical_entry,
-        crate::timing::TimingModuleContext::default(),
+        None,
         generated_store.session(),
     );
     #[cfg(not(feature = "timers"))]
@@ -692,7 +692,7 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
         &canonical_entry,
         local_table,
         source_byte_count,
-        crate::timing::TimingModuleContext::default(),
+        None,
     );
     #[cfg(not(feature = "timers"))]
     let prepared_result = preparation_context.prepare_module(
@@ -724,7 +724,7 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
     let semantic_result = compile_context.compile_module_semantic(
         prepared,
         &canonical_entry,
-        crate::timing::TimingModuleContext::default(),
+        None,
         generated_store.session(),
     );
     #[cfg(not(feature = "timers"))]
@@ -1545,9 +1545,7 @@ fn resolve_and_validate_active_root_rejects_mismatched_expected_origin() {
 #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
 #[test]
 fn chunked_file_preparation_skips_identity_payload_remap() {
-    use crate::compiler_frontend::compiler_messages::compiler_dev_logging::{
-        start_benchmark_collection, stop_and_collect_benchmark_observations,
-    };
+    use crate::compiler_frontend::compiler_messages::compiler_dev_logging::start_benchmark_collection;
     use crate::compiler_frontend::instrumentation::{
         capture_frontend_counters_for_test, log_frontend_counters, reset_frontend_counters,
     };
@@ -1556,7 +1554,7 @@ fn chunked_file_preparation_skips_identity_payload_remap() {
     let _counter_capture = capture_frontend_counters_for_test();
 
     reset_frontend_counters();
-    start_benchmark_collection(true);
+    let timing_session = start_benchmark_collection(true);
 
     let file_sources = chunked_fixture_sources();
     let file_source_refs = fixture_source_refs(&file_sources);
@@ -1579,7 +1577,7 @@ fn chunked_file_preparation_skips_identity_payload_remap() {
         .expect("chunked preparation should succeed");
 
     log_frontend_counters();
-    let observations = stop_and_collect_benchmark_observations();
+    let observations = timing_session.finish();
 
     assert_counter_value(
         &observations.counters,

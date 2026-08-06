@@ -1,10 +1,13 @@
 //! Timer and counter output-mode selection.
 //!
-//! WHAT: owns parsing of the `MOTH_TIMERS` and `MOTH_COUNTERS` environment
-//!      variables and the emission predicates shared by the collector and
-//!      renderers.
-//! WHY:  one small owner keeps mode policy out of collector state so output
-//!       policy can change without touching observation storage.
+//! WHAT: owns parsing of the `MOTH_TIMERS` environment variable, the
+//!      per-process cached mode and the emission predicates shared by the
+//!      collector and renderers.
+//! WHY:  one small owner keeps mode policy out of collector state, and one
+//!       cached parse per process keeps stage recording free of repeated
+//!       environment queries.
+
+use std::sync::Mutex;
 
 /// Output mode controlling how timing information reaches the user.
 ///
@@ -61,8 +64,38 @@ impl TimerOutputMode {
         matches!(self, Self::Summary | Self::Verbose)
     }
 
+    /// Whether a command session should collect a snapshot at all.
+    ///
+    /// Bench and Silent modes print stable lines or nothing; they never build
+    /// a command snapshot that no consumer will render.
+    pub(crate) fn collects_snapshot(self) -> bool {
+        matches!(self, Self::Summary | Self::Verbose)
+    }
+
     /// Whether human timer prose should be printed inline during compilation.
     pub(crate) fn emits_human_prose(self) -> bool {
         matches!(self, Self::Verbose)
     }
+}
+
+/// The current output mode, parsed once per process.
+///
+/// The cache is a tiny mutex-protected slot, not the collector: recording
+/// never re-reads the environment, and tests can override the mode.
+#[cfg(feature = "timers")]
+pub(crate) fn current_output_mode() -> TimerOutputMode {
+    let mut guard = CACHED_MODE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *guard.get_or_insert_with(TimerOutputMode::from_env)
+}
+
+#[cfg(feature = "timers")]
+static CACHED_MODE: Mutex<Option<TimerOutputMode>> = Mutex::new(None);
+
+#[cfg(all(feature = "timers", test))]
+pub(crate) fn set_output_mode_for_test(mode: TimerOutputMode) {
+    *CACHED_MODE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(mode);
 }

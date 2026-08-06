@@ -336,6 +336,7 @@ impl CompilerFrontend {
         root_role: ModuleRootRole,
         build_profile: FrontendBuildProfile,
         capacity_estimate: FrontendArenaCapacityEstimate,
+        #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
     ) -> Result<AstBuildResult, CompilerMessages> {
         let interned_entry_file = match self.source_files.get_by_canonical_path(entry_file_path) {
             Some(identity) => identity.logical_path.clone(),
@@ -375,6 +376,8 @@ impl CompilerFrontend {
                 path_format_config: self.path_format_config.clone(),
                 template_const_loop_iteration_limit: self.template_const_loop_iteration_limit,
                 capacity_estimate,
+                #[cfg(feature = "timers")]
+                timing_context,
             },
         )
     }

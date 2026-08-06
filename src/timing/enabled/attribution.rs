@@ -1,42 +1,56 @@
 //! Compact command-local boundary and module attribution identities.
 //!
-//! WHAT: owns the dense ids, registered boundary/module records and the
-//!      explicit context value passed through build orchestration while
-//!      `timers` is active.
-//! WHY:  attribution must be deterministic and keyed by graph order, never by
-//!       worker completion or event insertion order. These types exist only
-//!       when `timers` is selected, so no timing-only field or ABI argument
-//!       survives in a no-timer build.
+//! WHAT: owns the session-scoped dense ids, registered boundary/module
+//!      records and the typed attribution context passed through build
+//!      orchestration while `timers` is active.
+//! WHY:  attribution must be deterministic, keyed by graph order and scoped
+//!       to one collection session. Every id carries its session generation,
+//!       so a stale context from an older command can never attach to a newer
+//!       report. These types exist only when `timers` is selected, so no
+//!       timing-only field or ABI argument survives in a no-timer build.
 //!
 //! Boundary records are registered by the build system in deterministic
 //! package order, then the main project; module records are registered inside
 //! each boundary's compile call in deterministic wave order. Timing
 //! observations carry only the compact ids, never paths or labels.
 
-/// Dense handle for one compilation boundary inside one command run.
-///
-/// The numeric value is a registration-table slot, never a persistent or
-/// cross-command identity.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub(crate) struct TimingBoundaryId(u32);
+use super::session::TimingSessionId;
 
-/// Sentinel id returned when no collection scope is active.
+/// Dense handle for one compilation boundary inside one command session.
 ///
-/// A compile that starts before a collection scope can later finish inside
-/// one; this sentinel never matches a real registration slot, so its late
-/// observations and registrations are dropped instead of polluting boundary
-/// zero of the first active scope.
-pub(crate) const NO_TIMING_BOUNDARY: TimingBoundaryId = TimingBoundaryId(u32::MAX);
+/// The session generation makes the handle unrepresentable outside its owning
+/// collection; the index is a registration-table slot.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub(crate) struct TimingBoundaryId {
+    session: TimingSessionId,
+    index: u32,
+}
+
+/// Sentinel id returned when no collection session is active.
+///
+/// A compile that starts before a session can later finish inside one; the
+/// sentinel's session generation never matches a live session, so its late
+/// observations and registrations are dropped instead of polluting the first
+/// active session.
+pub(crate) const NO_TIMING_BOUNDARY: TimingBoundaryId = TimingBoundaryId {
+    session: TimingSessionId::from_raw(u64::MAX),
+    index: u32::MAX,
+};
 
 impl TimingBoundaryId {
-    /// Build a boundary id from its registration-table slot.
-    pub(crate) fn from_index(index: u32) -> Self {
-        Self(index)
+    /// Build a boundary id from its owning session and table slot.
+    pub(crate) fn from_session(session: TimingSessionId, index: u32) -> Self {
+        Self { session, index }
     }
 
     /// The registration-table slot for this boundary.
     pub(crate) fn index(self) -> usize {
-        self.0 as usize
+        self.index as usize
+    }
+
+    /// The session generation that owns this boundary.
+    pub(crate) fn session(self) -> TimingSessionId {
+        self.session
     }
 }
 
@@ -66,8 +80,28 @@ pub(crate) struct TimingBoundaryRecord {
 /// boundaries never collide even when both contain a module with index zero.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub(crate) struct TimingModuleKey {
-    pub(crate) boundary: TimingBoundaryId,
-    pub(crate) module_index: u32,
+    boundary: TimingBoundaryId,
+    module_index: u32,
+}
+
+impl TimingModuleKey {
+    /// Build a module key inside a registered boundary.
+    pub(crate) fn new(boundary: TimingBoundaryId, module_index: u32) -> Self {
+        Self {
+            boundary,
+            module_index,
+        }
+    }
+
+    /// The owning boundary.
+    pub(crate) fn boundary(self) -> TimingBoundaryId {
+        self.boundary
+    }
+
+    /// The boundary's dense module index.
+    pub(crate) fn module_index(self) -> u32 {
+        self.module_index
+    }
 }
 
 /// One registered module with its logical display identity and source facts.
@@ -85,29 +119,49 @@ pub(crate) struct TimingModuleRecord {
 
 /// Explicit attribution context passed through compilation.
 ///
-/// The boundary is always present for build-orchestration observations; the
-/// module is present for per-module frontend observations. Passing the ids
-/// explicitly keeps attribution independent of thread scheduling.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct TimingModuleContext {
-    pub(crate) boundary: Option<TimingBoundaryId>,
-    pub(crate) module: Option<TimingModuleKey>,
+/// The boundary variant names boundary-level work; the module variant names
+/// per-module frontend work. Passing the ids explicitly keeps attribution
+/// independent of thread scheduling.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TimingContext {
+    /// Work owned by one compilation boundary.
+    Boundary(TimingBoundaryId),
+    /// Work owned by one module inside a boundary.
+    Module(TimingModuleKey),
 }
 
-impl TimingModuleContext {
-    /// Context for a boundary-level observation with no module attribution.
+impl TimingContext {
+    /// Context for a boundary-level observation.
     pub(crate) fn for_boundary(boundary: TimingBoundaryId) -> Self {
-        Self {
-            boundary: Some(boundary),
-            module: None,
-        }
+        Self::Boundary(boundary)
     }
 
     /// Context for one module observation.
     pub(crate) fn for_module(key: TimingModuleKey) -> Self {
-        Self {
-            boundary: Some(key.boundary),
-            module: Some(key),
+        Self::Module(key)
+    }
+
+    /// The session generation required by this context.
+    pub(crate) fn session(self) -> TimingSessionId {
+        match self {
+            Self::Boundary(boundary) => boundary.session(),
+            Self::Module(key) => key.boundary().session(),
+        }
+    }
+
+    /// The boundary named by this context, when it names one.
+    pub(crate) fn boundary(self) -> Option<TimingBoundaryId> {
+        match self {
+            Self::Boundary(boundary) => Some(boundary),
+            Self::Module(key) => Some(key.boundary()),
+        }
+    }
+
+    /// The module named by this context, when it names one.
+    pub(crate) fn module(self) -> Option<TimingModuleKey> {
+        match self {
+            Self::Boundary(_) => None,
+            Self::Module(key) => Some(key),
         }
     }
 }

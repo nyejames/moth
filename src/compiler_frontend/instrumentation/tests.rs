@@ -13,9 +13,7 @@ use super::{
 };
 
 #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
-use crate::compiler_frontend::compiler_messages::compiler_dev_logging::{
-    start_benchmark_collection, stop_and_collect_benchmark_observations,
-};
+use crate::compiler_frontend::compiler_messages::compiler_dev_logging::start_benchmark_collection;
 
 #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
 use std::sync::{Arc, Barrier};
@@ -26,7 +24,7 @@ fn ast_counters_record_stable_metrics_when_stdout_is_suppressed() {
     let _guard = super::lock_counter_test();
 
     reset_ast_counters();
-    start_benchmark_collection(true);
+    let timing_session = start_benchmark_collection(true);
 
     add_ast_counter(AstCounter::ScopeContextsCreated, 3);
 
@@ -65,7 +63,7 @@ fn ast_counters_record_stable_metrics_when_stdout_is_suppressed() {
 
     log_ast_counters();
 
-    let observations = stop_and_collect_benchmark_observations();
+    let observations = timing_session.finish();
 
     assert_counter_value(&observations.counters, "ast_scope_contexts_created", 3.0);
     assert_counter_value(
@@ -197,7 +195,7 @@ fn ast_counters_record_stable_metrics_when_stdout_is_suppressed() {
 fn ast_counters_are_isolated_per_thread() {
     let _guard = super::lock_counter_test();
 
-    start_benchmark_collection(true);
+    let timing_session = start_benchmark_collection(true);
 
     // Synchronize the two worker threads so each resets and adds its own value
     // before either thread logs. With process-global counters this would always
@@ -224,7 +222,7 @@ fn ast_counters_are_isolated_per_thread() {
     thread_a.join().expect("thread A panicked");
     thread_b.join().expect("thread B panicked");
 
-    let observations = stop_and_collect_benchmark_observations();
+    let observations = timing_session.finish();
 
     let scope_values: Vec<f64> = observations
         .counters
@@ -245,7 +243,7 @@ fn frontend_counters_record_scheduling_metrics_when_stdout_is_suppressed() {
     let _counter_capture = capture_frontend_counters_for_test();
 
     reset_frontend_counters();
-    start_benchmark_collection(true);
+    let timing_session = start_benchmark_collection(true);
 
     add_frontend_counter(FrontendCounter::ModuleCompilationSerialCount, 1);
     add_frontend_counter(FrontendCounter::ModuleCompilationParallelTaskCount, 2);
@@ -275,7 +273,7 @@ fn frontend_counters_record_scheduling_metrics_when_stdout_is_suppressed() {
 
     log_frontend_counters();
 
-    let observations = stop_and_collect_benchmark_observations();
+    let observations = timing_session.finish();
 
     assert_counter_value(
         &observations.counters,
@@ -377,7 +375,7 @@ fn ast_body_root_and_scope_counters_record_stable_metrics() {
     let _counter_capture = capture_frontend_counters_for_test();
 
     reset_frontend_counters();
-    start_benchmark_collection(true);
+    let timing_session = start_benchmark_collection(true);
 
     add_frontend_counter(FrontendCounter::AstFunctionBodyRootCount, 5);
     add_frontend_counter(FrontendCounter::AstStartBodyRootCount, 1);
@@ -386,7 +384,7 @@ fn ast_body_root_and_scope_counters_record_stable_metrics() {
 
     log_frontend_counters();
 
-    let observations = stop_and_collect_benchmark_observations();
+    let observations = timing_session.finish();
 
     assert_counter_value(&observations.counters, "ast_function_body_root_count", 5.0);
     assert_counter_value(&observations.counters, "ast_start_body_root_count", 1.0);

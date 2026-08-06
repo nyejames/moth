@@ -97,7 +97,6 @@ impl DevBuildExecutor for ProjectBuildExecutor {
         entry_file: &Path,
         flags: &[Flag],
     ) -> Result<BuildResult, CompilerMessages> {
-        timing_guard!("command.dev.build_and_write");
         let entry_path = entry_file.to_str().ok_or_else(|| {
             dev_server_error_messages(
                 entry_file,
@@ -146,7 +145,7 @@ pub fn run_single_build_cycle(
     entry_file: &Path,
     flags: &[Flag],
 ) -> BuildCycleReport {
-    command_timing_start!();
+    command_timing_start!(timing_session, crate::timing::TimingCommandKind::Dev);
     #[cfg(feature = "detailed_timers")]
     let cycle_start = crate::timing::start_pipeline_timing();
     let build_outcome = build_once(executor, entry_file, flags);
@@ -219,7 +218,7 @@ pub fn run_single_build_cycle(
     #[cfg(feature = "detailed_timers")]
     timed_manual_finish!("command.dev.cycle", cycle_start);
     #[cfg(feature = "timers")]
-    let timing_snapshot = crate::timing::drain_command_timing_snapshot();
+    let timing_snapshot = timing_session.finish();
     BuildCycleReport {
         version,
         build_ok: build_succeeded,
@@ -278,7 +277,11 @@ pub fn run_builds_until_stable(
         }
         #[cfg(feature = "timers")]
         if let Some(snapshot) = &report.timing_snapshot {
-            crate::timing::render_command_timing_summary(snapshot, report.build_ok);
+            crate::timing::render_command_timing_summary(
+                snapshot,
+                crate::timing::TimingCommandKind::Dev,
+                report.build_ok,
+            );
         }
 
         // Queue one immediate follow-up build when the watch revision advances during a build.
@@ -359,19 +362,24 @@ fn build_once(
     entry_file: &Path,
     flags: &[Flag],
 ) -> BuildOutcome {
-    let mut build_result = match executor.build_and_write(entry_file, flags) {
-        Ok(build_result) => build_result,
-        Err(messages) => {
-            return BuildOutcome {
-                build_succeeded: false,
-                entry_page_rel: None,
-                html_site_config: None,
-                diagnostics_summary: format_compiler_messages(&messages),
-                success_messages: None,
-                failed_build: Some(BuildFailure::CompilerMessages(messages)),
-                watch_scope: None,
-                output_dir: None,
-            };
+    let mut build_result = {
+        // The dev total is owned by the orchestration around the executor trait
+        // call, so every DevBuildExecutor implementation receives the same metric.
+        timing_guard!("command.dev.build_and_write");
+        match executor.build_and_write(entry_file, flags) {
+            Ok(build_result) => build_result,
+            Err(messages) => {
+                return BuildOutcome {
+                    build_succeeded: false,
+                    entry_page_rel: None,
+                    html_site_config: None,
+                    diagnostics_summary: format_compiler_messages(&messages),
+                    success_messages: None,
+                    failed_build: Some(BuildFailure::CompilerMessages(messages)),
+                    watch_scope: None,
+                    output_dir: None,
+                };
+            }
         }
     };
     let output_dir = build_result

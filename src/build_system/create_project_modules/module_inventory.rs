@@ -523,11 +523,9 @@ fn discover_modules_serial_provider_capable(
             .stable_origin()
             .clone();
         #[cfg(feature = "timers")]
-        let timing_context =
-            crate::timing::TimingModuleContext::for_module(crate::timing::TimingModuleKey {
-                boundary: timing_boundary,
-                module_index: seed.module_id.index() as u32,
-            });
+        let timing_context = Some(crate::timing::TimingContext::for_module(
+            crate::timing::TimingModuleKey::new(timing_boundary, seed.module_id.index() as u32),
+        ));
         let mut syntax = preparation_context.begin_syntax_discovery(
             stable_origin,
             source_origin_lookup,

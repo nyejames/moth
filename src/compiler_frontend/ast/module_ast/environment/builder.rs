@@ -84,12 +84,12 @@ use crate::compiler_frontend::traits::evidence::{
 use crate::compiler_frontend::traits::ids::TraitId;
 use crate::compiler_frontend::traits::syntax::TraitReferenceSyntax;
 use crate::compiler_frontend::value_mode::ValueMode;
-use crate::{timed_ast_stage, timer_log};
+use crate::{timed_ast_stage_guard, timer_log};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
-#[cfg(feature = "timers")]
+#[cfg(feature = "detailed_timers")]
 use std::time::Instant;
 
 pub(in crate::compiler_frontend::ast) mod import_projection;
@@ -257,8 +257,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         self.resolved_struct_fields_by_path = resolved_struct_fields_by_path;
         self.struct_source_by_path = struct_source_by_path;
 
-        #[cfg(feature = "timers")]
-        let environment_start = Instant::now();
+        timed_ast_stage_guard!(
+            timing_guard,
+            "ast_build_environment_ms",
+            self.context.timing_context,
+            "AST/build environment completed in: "
+        );
 
         // ------------------------------------
         //  Register builtin semantic types
@@ -509,14 +513,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             string_table,
         )
         .map_err(|error| self.error_messages(error, string_table))?;
-
-        timed_ast_stage!(
-            environment_start,
-            "ast_build_environment_ms",
-            "AST/build environment completed in: "
-        );
-        #[cfg(feature = "timers")]
-        let _ = environment_start;
 
         // Extract generic declarations before `self` is consumed by `finish_environment`.
         let generic_declarations_by_path =

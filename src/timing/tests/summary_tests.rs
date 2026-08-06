@@ -10,14 +10,15 @@ use crate::timing::enabled::render::{
     boundary_row_text, boundary_section_title, render_row_text, report_title_text,
     slowest_module_text,
 };
+use crate::timing::enabled::session::TimingSessionId;
 use crate::timing::enabled::summary::{
-    TimingBoundarySummary, TimingCommandKind, TimingEmphasis, TimingMeasurementKind,
-    TimingReportItem, TimingSlowestModuleSummary, TimingSummaryReport, TimingSummaryRow,
-    TimingSummarySection, build_timing_summary,
+    TimingBoundarySummary, TimingEmphasis, TimingMeasurementKind, TimingReportItem,
+    TimingSlowestModuleSummary, TimingSummaryReport, TimingSummaryRow, TimingSummarySection,
+    build_timing_summary,
 };
 use crate::timing::{
     BenchmarkObservationSnapshot, TimingBoundaryId, TimingBoundaryKind, TimingBoundaryRecord,
-    TimingModuleContext, TimingModuleKey, TimingModuleRecord, TimingObservation,
+    TimingCommandKind, TimingContext, TimingModuleKey, TimingModuleRecord, TimingObservation,
 };
 use std::borrow::Cow;
 use std::time::Duration;
@@ -29,14 +30,17 @@ fn snapshot_with(entries: &[(&'static str, f64)]) -> BenchmarkObservationSnapsho
             .map(|(name, millis)| TimingObservation {
                 name,
                 duration: Duration::from_secs_f64(millis / 1000.0),
-                boundary: None,
-                module: None,
+                context: None,
             })
             .collect(),
         counters: Vec::new(),
         boundaries: Vec::new(),
         modules: Vec::new(),
     }
+}
+
+fn boundary_id(index: u32) -> TimingBoundaryId {
+    TimingBoundaryId::from_session(TimingSessionId::from_raw(0), index)
 }
 
 fn section_items(report: &TimingSummaryReport) -> Vec<&TimingSummarySection> {
@@ -87,25 +91,21 @@ fn build_snapshot() -> BenchmarkObservationSnapshot {
 fn report_items_follow_architecture_order() {
     let mut snapshot = build_snapshot();
     snapshot.boundaries.push(boundary_record(0, "@html", 1));
-    snapshot.modules.push(module_record(
-        TimingBoundaryId::from_index(0),
-        0,
-        "@html",
-        1,
-        512,
-    ));
+    snapshot
+        .modules
+        .push(module_record(boundary_id(0), 0, "@html", 1, 512));
     snapshot.timings.push(attributed_observation(
         "frontend.module.semantic_total",
         5.0,
-        TimingModuleContext::for_module(TimingModuleKey {
-            boundary: TimingBoundaryId::from_index(0),
-            module_index: 0,
-        }),
+        Some(TimingContext::for_module(TimingModuleKey::new(
+            boundary_id(0),
+            0,
+        ))),
     ));
     snapshot.timings.push(attributed_observation(
         "build.boundary.compile",
         3.0,
-        TimingModuleContext::for_boundary(TimingBoundaryId::from_index(0)),
+        Some(TimingContext::for_boundary(boundary_id(0))),
     ));
 
     let report = build_timing_summary(&snapshot, TimingCommandKind::Build, true);
@@ -259,20 +259,12 @@ fn single_file_check_shows_compile_frontend_fallback() {
 #[test]
 fn frontend_heading_shows_registered_module_count() {
     let mut snapshot = build_snapshot();
-    snapshot.modules.push(module_record(
-        TimingBoundaryId::from_index(0),
-        0,
-        "moth_docs/site",
-        1,
-        512,
-    ));
-    snapshot.modules.push(module_record(
-        TimingBoundaryId::from_index(0),
-        1,
-        "moth_docs/api",
-        1,
-        1024,
-    ));
+    snapshot
+        .modules
+        .push(module_record(boundary_id(0), 0, "moth_docs/site", 1, 512));
+    snapshot
+        .modules
+        .push(module_record(boundary_id(0), 1, "moth_docs/api", 1, 1024));
 
     let report = build_timing_summary(&snapshot, TimingCommandKind::Build, true);
     let sections = section_items(&report);
@@ -302,14 +294,12 @@ fn public_interface_repeated_samples_sum_into_one_row() {
     snapshot.timings.push(TimingObservation {
         name: "frontend.public_interface",
         duration: Duration::from_millis(8),
-        boundary: None,
-        module: None,
+        context: None,
     });
     snapshot.timings.push(TimingObservation {
         name: "frontend.public_interface",
         duration: Duration::from_millis(4),
-        boundary: None,
-        module: None,
+        context: None,
     });
 
     let report = build_timing_summary(&snapshot, TimingCommandKind::Build, true);
@@ -333,20 +323,17 @@ fn generated_borrow_work_is_classified_once() {
     snapshot.timings.push(TimingObservation {
         name: "frontend.generated_functions",
         duration: Duration::from_millis(6),
-        boundary: None,
-        module: None,
+        context: None,
     });
     snapshot.timings.push(TimingObservation {
         name: "frontend.borrow.generated",
         duration: Duration::from_millis(2),
-        boundary: None,
-        module: None,
+        context: None,
     });
     snapshot.timings.push(TimingObservation {
         name: "frontend.borrow.exact_generated",
         duration: Duration::from_millis(3),
-        boundary: None,
-        module: None,
+        context: None,
     });
 
     let report = build_timing_summary(&snapshot, TimingCommandKind::Build, true);
@@ -382,23 +369,21 @@ fn generated_borrow_work_is_classified_once() {
 #[test]
 fn ast_children_show_tir_and_constant_finalization_labels() {
     let mut snapshot = build_snapshot();
+    let module = TimingModuleKey::new(boundary_id(0), 0);
     snapshot.timings.push(TimingObservation {
         name: "ast_build_environment_ms",
         duration: Duration::from_millis(30),
-        boundary: None,
-        module: None,
+        context: Some(TimingContext::for_module(module)),
     });
     snapshot.timings.push(TimingObservation {
         name: "ast_emit_nodes_ms",
         duration: Duration::from_millis(40),
-        boundary: None,
-        module: None,
+        context: Some(TimingContext::for_module(module)),
     });
     snapshot.timings.push(TimingObservation {
         name: "ast_finalize_ms",
         duration: Duration::from_millis(20),
-        boundary: None,
-        module: None,
+        context: Some(TimingContext::for_module(module)),
     });
 
     let report = build_timing_summary(&snapshot, TimingCommandKind::Build, true);
@@ -436,8 +421,7 @@ fn ast_children_hidden_below_significance_threshold() {
     snapshot.timings.push(TimingObservation {
         name: "ast_finalize_ms",
         duration: Duration::from_secs_f64(0.0005),
-        boundary: None,
-        module: None,
+        context: None,
     });
 
     let report = build_timing_summary(&snapshot, TimingCommandKind::Build, true);
@@ -466,8 +450,7 @@ fn js_lowering_aggregates_entry_and_linked_observations() {
     snapshot.timings.push(TimingObservation {
         name: "backend.js.lower_linked_hir",
         duration: Duration::from_millis(3),
-        boundary: None,
-        module: None,
+        context: None,
     });
 
     let report = build_timing_summary(&snapshot, TimingCommandKind::Build, true);
@@ -495,14 +478,12 @@ fn wasm_and_tracked_asset_children_appear_when_significant() {
     snapshot.timings.push(TimingObservation {
         name: "backend.wasm.total",
         duration: Duration::from_millis(2),
-        boundary: None,
-        module: None,
+        context: None,
     });
     snapshot.timings.push(TimingObservation {
         name: "backend.html.tracked_assets_emit",
         duration: Duration::from_millis(1),
-        boundary: None,
-        module: None,
+        context: None,
     });
 
     let report = build_timing_summary(&snapshot, TimingCommandKind::Build, true);
@@ -582,8 +563,7 @@ fn unknown_metrics_stay_hidden_from_basic_output() {
     snapshot.timings.push(TimingObservation {
         name: "backend.html.tracked_assets_emit",
         duration: Duration::from_millis(50),
-        boundary: None,
-        module: None,
+        context: None,
     });
 
     let report = build_timing_summary(&snapshot, TimingCommandKind::Build, true);
@@ -683,7 +663,7 @@ fn failed_command_title_records_duration_without_changing_metrics() {
     let failed = build_timing_summary(&snapshot, TimingCommandKind::Build, false);
     let succeeded = build_timing_summary(&snapshot, TimingCommandKind::Build, true);
 
-    assert_eq!(failed.title, "Build timings · failed after");
+    assert_eq!(failed.title, "Build timings · failed");
     assert_eq!(failed.command_total, succeeded.command_total);
 }
 
@@ -693,8 +673,7 @@ fn repeated_rows_show_aggregate_duration_without_sample_noise() {
     snapshot.timings.push(TimingObservation {
         name: "frontend.file_prepare",
         duration: Duration::from_millis(1),
-        boundary: None,
-        module: None,
+        context: None,
     });
 
     let report = build_timing_summary(&snapshot, TimingCommandKind::Build, true);
@@ -774,7 +753,7 @@ fn explicit_row_suffix_renders_only_when_set() {
 
 fn boundary_record(id: u32, display_name: &str, module_count: u64) -> TimingBoundaryRecord {
     TimingBoundaryRecord {
-        id: TimingBoundaryId::from_index(id),
+        id: TimingBoundaryId::from_session(TimingSessionId::from_raw(0), id),
         kind: TimingBoundaryKind::SourcePackage,
         display_name: display_name.to_owned(),
         module_count,
@@ -789,10 +768,7 @@ fn module_record(
     source_byte_count: u64,
 ) -> TimingModuleRecord {
     TimingModuleRecord {
-        key: TimingModuleKey {
-            boundary,
-            module_index,
-        },
+        key: TimingModuleKey::new(boundary, module_index),
         logical_identity: logical_identity.to_owned(),
         source_file_count,
         source_byte_count,
@@ -802,43 +778,42 @@ fn module_record(
 fn attributed_observation(
     name: &'static str,
     millis: f64,
-    context: TimingModuleContext,
+    context: Option<TimingContext>,
 ) -> TimingObservation {
     TimingObservation {
         name,
         duration: Duration::from_secs_f64(millis / 1000.0),
-        boundary: context.boundary,
-        module: context.module,
+        context,
     }
 }
 
 #[test]
 fn boundary_rows_separate_packages_and_project_totals() {
-    let html = TimingBoundaryId::from_index(0);
-    let project = TimingBoundaryId::from_index(1);
+    let html = boundary_id(0);
+    let project = boundary_id(1);
     let snapshot = BenchmarkObservationSnapshot {
         timings: vec![
             attributed_observation(
                 "build.boundary.inventory",
                 2.0,
-                TimingModuleContext::for_boundary(html),
+                Some(TimingContext::for_boundary(html)),
             ),
             attributed_observation(
                 "build.boundary.compile",
                 3.0,
-                TimingModuleContext::for_boundary(html),
+                Some(TimingContext::for_boundary(html)),
             ),
             attributed_observation(
                 "build.boundary.inventory",
                 40.0,
-                TimingModuleContext::for_boundary(project),
+                Some(TimingContext::for_boundary(project)),
             ),
             attributed_observation(
                 "build.boundary.compile",
                 300.0,
-                TimingModuleContext::for_boundary(project),
+                Some(TimingContext::for_boundary(project)),
             ),
-            attributed_observation("command.build.total", 500.0, TimingModuleContext::default()),
+            attributed_observation("command.build.total", 500.0, None),
         ],
         counters: Vec::new(),
         boundaries: vec![
@@ -862,27 +837,27 @@ fn boundary_rows_separate_packages_and_project_totals() {
 
 #[test]
 fn boundary_rows_follow_registration_order() {
-    let first = TimingBoundaryId::from_index(0);
-    let second = TimingBoundaryId::from_index(1);
-    let project = TimingBoundaryId::from_index(2);
+    let first = boundary_id(0);
+    let second = boundary_id(1);
+    let project = boundary_id(2);
     let snapshot = BenchmarkObservationSnapshot {
         timings: vec![
             attributed_observation(
                 "build.boundary.compile",
                 1.0,
-                TimingModuleContext::for_boundary(project),
+                Some(TimingContext::for_boundary(project)),
             ),
             attributed_observation(
                 "build.boundary.compile",
                 1.0,
-                TimingModuleContext::for_boundary(first),
+                Some(TimingContext::for_boundary(first)),
             ),
             attributed_observation(
                 "build.boundary.compile",
                 1.0,
-                TimingModuleContext::for_boundary(second),
+                Some(TimingContext::for_boundary(second)),
             ),
-            attributed_observation("command.build.total", 100.0, TimingModuleContext::default()),
+            attributed_observation("command.build.total", 100.0, None),
         ],
         counters: Vec::new(),
         boundaries: vec![
@@ -914,30 +889,24 @@ fn boundary_rows_follow_registration_order() {
 
 #[test]
 fn same_module_index_in_two_boundaries_does_not_collide() {
-    let html = TimingBoundaryId::from_index(0);
-    let project = TimingBoundaryId::from_index(1);
-    let html_module = TimingModuleKey {
-        boundary: html,
-        module_index: 0,
-    };
-    let project_module = TimingModuleKey {
-        boundary: project,
-        module_index: 0,
-    };
+    let html = boundary_id(0);
+    let project = boundary_id(1);
+    let html_module = TimingModuleKey::new(html, 0);
+    let project_module = TimingModuleKey::new(project, 0);
 
     let snapshot = BenchmarkObservationSnapshot {
         timings: vec![
             attributed_observation(
                 "frontend.module.semantic_total",
                 4.0,
-                TimingModuleContext::for_module(html_module),
+                Some(TimingContext::for_module(html_module)),
             ),
             attributed_observation(
                 "frontend.module.semantic_total",
                 9.0,
-                TimingModuleContext::for_module(project_module),
+                Some(TimingContext::for_module(project_module)),
             ),
-            attributed_observation("command.build.total", 100.0, TimingModuleContext::default()),
+            attributed_observation("command.build.total", 100.0, None),
         ],
         counters: Vec::new(),
         boundaries: vec![
@@ -960,33 +929,30 @@ fn same_module_index_in_two_boundaries_does_not_collide() {
 
 #[test]
 fn shuffled_events_do_not_change_boundary_or_slowest_module() {
-    let html = TimingBoundaryId::from_index(0);
-    let html_module = TimingModuleKey {
-        boundary: html,
-        module_index: 0,
-    };
+    let html = boundary_id(0);
+    let html_module = TimingModuleKey::new(html, 0);
     let mut entries = [
         (
             "build.boundary.inventory",
             2.0,
-            TimingModuleContext::for_boundary(html),
+            Some(TimingContext::for_boundary(html)),
         ),
         (
             "build.boundary.compile",
             3.0,
-            TimingModuleContext::for_boundary(html),
+            Some(TimingContext::for_boundary(html)),
         ),
         (
             "frontend.file_prepare",
             1.5,
-            TimingModuleContext::for_module(html_module),
+            Some(TimingContext::for_module(html_module)),
         ),
         (
             "frontend.module.semantic_total",
             6.0,
-            TimingModuleContext::for_module(html_module),
+            Some(TimingContext::for_module(html_module)),
         ),
-        ("command.build.total", 100.0, TimingModuleContext::default()),
+        ("command.build.total", 100.0, None),
     ];
 
     let ordered = BenchmarkObservationSnapshot {
@@ -1017,33 +983,27 @@ fn shuffled_events_do_not_change_boundary_or_slowest_module() {
 
 #[test]
 fn slowest_module_uses_preparation_plus_semantic_total() {
-    let project = TimingBoundaryId::from_index(0);
-    let first = TimingModuleKey {
-        boundary: project,
-        module_index: 0,
-    };
-    let second = TimingModuleKey {
-        boundary: project,
-        module_index: 1,
-    };
+    let project = boundary_id(0);
+    let first = TimingModuleKey::new(project, 0);
+    let second = TimingModuleKey::new(project, 1);
     let snapshot = BenchmarkObservationSnapshot {
         timings: vec![
             attributed_observation(
                 "frontend.file_prepare",
                 3.0,
-                TimingModuleContext::for_module(first),
+                Some(TimingContext::for_module(first)),
             ),
             attributed_observation(
                 "frontend.module.semantic_total",
                 5.0,
-                TimingModuleContext::for_module(first),
+                Some(TimingContext::for_module(first)),
             ),
             attributed_observation(
                 "frontend.module.semantic_total",
                 6.0,
-                TimingModuleContext::for_module(second),
+                Some(TimingContext::for_module(second)),
             ),
-            attributed_observation("command.build.total", 100.0, TimingModuleContext::default()),
+            attributed_observation("command.build.total", 100.0, None),
         ],
         counters: Vec::new(),
         boundaries: vec![boundary_record(0, "moth_docs", 2)],
@@ -1063,19 +1023,16 @@ fn slowest_module_uses_preparation_plus_semantic_total() {
 
 #[test]
 fn slowest_module_identity_uses_logical_path_not_absolute_path() {
-    let project = TimingBoundaryId::from_index(0);
-    let module = TimingModuleKey {
-        boundary: project,
-        module_index: 0,
-    };
+    let project = boundary_id(0);
+    let module = TimingModuleKey::new(project, 0);
     let snapshot = BenchmarkObservationSnapshot {
         timings: vec![
             attributed_observation(
                 "frontend.module.semantic_total",
                 10.0,
-                TimingModuleContext::for_module(module),
+                Some(TimingContext::for_module(module)),
             ),
-            attributed_observation("command.build.total", 100.0, TimingModuleContext::default()),
+            attributed_observation("command.build.total", 100.0, None),
         ],
         counters: Vec::new(),
         boundaries: vec![boundary_record(0, "moth_docs", 1)],
@@ -1100,15 +1057,15 @@ fn slowest_module_identity_uses_logical_path_not_absolute_path() {
 
 #[test]
 fn only_registered_boundaries_produce_rows() {
-    let html = TimingBoundaryId::from_index(0);
+    let html = boundary_id(0);
     let snapshot = BenchmarkObservationSnapshot {
         timings: vec![
             attributed_observation(
                 "build.boundary.compile",
                 5.0,
-                TimingModuleContext::for_boundary(html),
+                Some(TimingContext::for_boundary(html)),
             ),
-            attributed_observation("command.build.total", 100.0, TimingModuleContext::default()),
+            attributed_observation("command.build.total", 100.0, None),
         ],
         counters: Vec::new(),
         boundaries: vec![boundary_record(0, "@html", 1)],
@@ -1132,5 +1089,43 @@ fn boundary_section_heading_marks_accumulated_work() {
     assert_eq!(
         boundary_section_title(),
         "Compilation boundaries · accumulated work"
+    );
+}
+
+#[test]
+fn config_and_generated_ast_observations_never_enter_module_ast_children() {
+    let mut snapshot = build_snapshot();
+    snapshot.timings.push(TimingObservation {
+        name: "ast_build_environment_ms",
+        duration: Duration::from_millis(90),
+        context: None,
+    });
+    snapshot.timings.push(TimingObservation {
+        name: "ast_emit_nodes_ms",
+        duration: Duration::from_millis(90),
+        context: None,
+    });
+    snapshot.timings.push(TimingObservation {
+        name: "ast_finalize_ms",
+        duration: Duration::from_millis(90),
+        context: None,
+    });
+
+    let report = build_timing_summary(&snapshot, TimingCommandKind::Build, true);
+    let sections = section_items(&report);
+    let frontend = sections
+        .iter()
+        .find(|section| section.title.starts_with("Frontend work"))
+        .expect("frontend section should exist");
+    let ast = frontend
+        .rows
+        .iter()
+        .find(|row| row.label == "Semantic frontend / AST")
+        .expect("AST row should exist");
+
+    assert!(
+        ast.children.is_empty(),
+        "config and generated AST work must not appear as module AST children: {:?}",
+        ast.children
     );
 }

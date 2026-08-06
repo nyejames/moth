@@ -134,6 +134,8 @@ pub(crate) fn parse_single_file_ast_build_result(
             path_format_config: PathStringFormatConfig::default(),
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             capacity_estimate: Default::default(),
+            #[cfg(feature = "timers")]
+            timing_context: None,
         },
     )
     .map_err(|messages| {

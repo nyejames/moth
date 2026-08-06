@@ -20,13 +20,17 @@ pub(crate) mod attribution;
 pub(crate) mod collector;
 pub(crate) mod mode;
 pub(crate) mod render;
+pub(crate) mod session;
 pub(crate) mod summary;
 
+#[allow(unused_imports)]
+/// Re-exported for tests that construct sentinel contexts directly.
 pub(crate) use attribution::{
-    NO_TIMING_BOUNDARY, TimingBoundaryId, TimingBoundaryKind, TimingBoundaryRecord,
-    TimingModuleContext, TimingModuleKey, TimingModuleRecord,
+    NO_TIMING_BOUNDARY, TimingBoundaryId, TimingBoundaryKind, TimingBoundaryRecord, TimingContext,
+    TimingModuleKey, TimingModuleRecord,
 };
 pub(crate) use mode::TimerOutputMode;
+pub(crate) use session::{TimingCollectionPurpose, TimingCommandKind, TimingSession};
 
 use std::time::Duration;
 
@@ -39,10 +43,8 @@ use std::time::Duration;
 pub(crate) struct TimingObservation {
     pub(crate) name: &'static str,
     pub(crate) duration: Duration,
-    /// Compilation boundary for this observation, when attributed.
-    pub(crate) boundary: Option<TimingBoundaryId>,
-    /// Dense module key inside the boundary, when attributed.
-    pub(crate) module: Option<TimingModuleKey>,
+    /// Compact attribution context for this observation, when attributed.
+    pub(crate) context: Option<TimingContext>,
 }
 
 /// One named counter metric value captured during a benchmark collection scope.
@@ -50,11 +52,8 @@ pub(crate) struct TimingObservation {
 /// Counters remain `f64` values; only timing observations carry `Duration`.
 #[derive(Debug, Clone)]
 pub(crate) struct BenchmarkObservationMetric {
-    pub(crate) name: String,
+    pub(crate) name: &'static str,
     pub(crate) value: f64,
-    /// Optional attribution label preserved in raw observations for detailed
-    /// tooling. Never appears in stable `MOTH_BENCH counter` lines.
-    pub(crate) label: Option<String>,
 }
 
 /// Snapshot of all observations captured in one collection scope.
@@ -96,28 +95,50 @@ impl TimingMetricSummary {
 //  Public collection API
 // ---------------------------------------------------------------------------
 
-/// Start a benchmark collection scope.
+/// Start a raw benchmark collection session.
 ///
 /// When `suppress_output` is true, stdout is suppressed while observations
 /// are still recorded in the collector. This is used by in-process frontend
-/// benchmarks that read observations programmatically.
-pub(crate) fn start_benchmark_collection(suppress_output: bool) {
-    collector::start_collection(suppress_output);
+/// benchmarks that read observations programmatically. A nested start is
+/// rejected and returns an inactive session that preserves any outer scope.
+pub(crate) fn start_benchmark_collection(suppress_output: bool) -> TimingSession {
+    collector::start_session(
+        None,
+        TimingCollectionPurpose::RawBenchmark,
+        suppress_output,
+        true,
+    )
 }
 
-/// Stop the current collection scope and return all captured observations.
+/// Start a raw benchmark collection session without attribution metadata.
 ///
-/// Returns an empty snapshot when no scope was active.
-pub(crate) fn stop_and_collect_benchmark_observations() -> BenchmarkObservationSnapshot {
-    collector::stop_and_collect()
+/// Records every raw metric while skipping boundary/module record tables;
+/// used by in-process frontend benchmarks that export only metric names and
+/// durations.
+pub(crate) fn start_raw_benchmark_collection(suppress_output: bool) -> TimingSession {
+    collector::start_session(
+        None,
+        TimingCollectionPurpose::RawBenchmark,
+        suppress_output,
+        false,
+    )
+}
+
+/// Stop a benchmark collection session and return all captured observations.
+///
+/// Returns an empty snapshot for a rejected or already-finished session.
+pub(crate) fn stop_and_collect_benchmark_observations(
+    session: TimingSession,
+) -> BenchmarkObservationSnapshot {
+    session::stop_session(session)
 }
 
 /// Record one timing observation in the active collection scope.
 ///
-/// Called by `compiler_dev_logging::log_benchmark_timing` and by the
-/// `pipeline_timer!` / `labeled_pipeline_timer!` macros.
-pub(crate) fn record_timing(name: &'static str, duration: Duration) {
-    collector::record_timing(name, duration);
+/// Returns whether stdout is currently suppressed by the active session,
+/// so the caller can print stable lines without a second collector lock.
+pub(crate) fn record_timing(name: &'static str, duration: Duration) -> bool {
+    collector::record_timing(name, duration)
 }
 
 /// Record one counter observation in the active collection scope.
@@ -127,8 +148,8 @@ pub(crate) fn record_timing(name: &'static str, duration: Duration) {
 /// this is only active when both `timers` and `benchmark_counters` are on.
 /// `detailed_timers` alone no longer routes counters here.
 #[cfg(feature = "benchmark_counters")]
-pub(crate) fn record_counter(name: &'static str, value: f64) {
-    collector::record_counter(name, value);
+pub(crate) fn record_counter(name: &'static str, value: f64) -> bool {
+    collector::record_counter(name, value)
 }
 
 /// Whether stdout output is currently allowed (not suppressed by an
@@ -137,9 +158,17 @@ pub(crate) fn output_enabled() -> bool {
     collector::output_enabled()
 }
 
-/// The current timer output mode parsed from `MOTH_TIMERS`.
+/// The current timer output mode, parsed once per process.
 pub(crate) fn current_output_mode() -> TimerOutputMode {
-    TimerOutputMode::from_env()
+    mode::current_output_mode()
+}
+
+/// Whether verbose human prose should print for one recorded event.
+///
+/// Takes the suppression flag captured while recording so callers never
+/// take a second collector lock just to decide whether to print.
+pub(crate) fn detailed_prose_enabled(output_suppressed: bool) -> bool {
+    !output_suppressed && current_output_mode().emits_human_prose()
 }
 
 /// Emit one stable `MOTH_BENCH timing` line to stdout if the output mode
@@ -149,14 +178,18 @@ pub(crate) fn current_output_mode() -> TimerOutputMode {
 /// benchmark observation parser can grep without depending on human prose.
 /// WHY: separating the stable metric line from colored human output lets
 /// compiler logging change its prose without silently breaking attribution.
-pub(crate) fn emit_bench_timing_line(name: &'static str, duration: Duration) {
+pub(crate) fn emit_bench_timing_line(
+    name: &'static str,
+    duration: Duration,
+    output_suppressed: bool,
+) {
     if name.trim().is_empty() {
         return;
     }
 
-    let mode = TimerOutputMode::from_env();
+    let mode = current_output_mode();
 
-    if output_enabled() && mode.emits_bench_lines() {
+    if !output_suppressed && mode.emits_bench_lines() {
         let millis = duration.as_secs_f64() * 1000.0;
         saying::say!("MOTH_BENCH timing ", name, "=", #millis, "ms");
     }
@@ -168,9 +201,10 @@ pub(crate) fn emit_bench_timing_line(name: &'static str, duration: Duration) {
 /// Used by the `pipeline_timer!` macro. The timing is always recorded in the
 /// collector (when a scope is active); the stdout line depends on the output
 /// mode and suppression flag.
-pub(crate) fn record_pipeline_timing(metric: &'static str, duration: Duration) {
-    record_timing(metric, duration);
-    emit_bench_timing_line(metric, duration);
+pub(crate) fn record_pipeline_timing(metric: &'static str, duration: Duration) -> bool {
+    let output_suppressed = record_timing(metric, duration);
+    emit_bench_timing_line(metric, duration, output_suppressed);
+    output_suppressed
 }
 
 /// Register one compilation boundary in deterministic registration order.
@@ -180,7 +214,7 @@ pub(crate) fn record_pipeline_timing(metric: &'static str, duration: Duration) {
 /// returns a sentinel id; every subsequent attributed call is also dropped.
 pub(crate) fn register_timing_boundary(
     kind: TimingBoundaryKind,
-    display_name: String,
+    display_name: impl FnOnce() -> String,
 ) -> TimingBoundaryId {
     collector::register_boundary(kind, display_name)
 }
@@ -217,10 +251,26 @@ pub(crate) fn register_timing_module(
 pub(crate) fn record_pipeline_timing_attributed(
     metric: &'static str,
     duration: Duration,
-    context: TimingModuleContext,
-) {
-    collector::record_attributed_timing(metric, duration, context);
-    emit_bench_timing_line(metric, duration);
+    context: Option<TimingContext>,
+) -> bool {
+    let output_suppressed = collector::record_attributed_timing(metric, duration, context);
+    emit_bench_timing_line(metric, duration, output_suppressed);
+    output_suppressed
+}
+
+/// Record several metrics from one captured duration.
+///
+/// Used when two stable metrics intentionally share one measurement boundary,
+/// so the second metric never includes the first record's overhead.
+pub(crate) fn record_pipeline_timing_multi(
+    entries: &[(&'static str, Option<TimingContext>)],
+    duration: Duration,
+) -> bool {
+    let output_suppressed = collector::record_attributed_timing_multi(entries, duration);
+    for (metric, _) in entries {
+        emit_bench_timing_line(metric, duration, output_suppressed);
+    }
+    output_suppressed
 }
 
 /// Opaque start token for manually timed pipeline stages.
@@ -237,17 +287,20 @@ pub(crate) fn start_pipeline_timing() -> PipelineTimingStart {
 }
 
 /// Record a manually timed pipeline stage from a previously captured start token.
-pub(crate) fn record_started_pipeline_timing(metric: &'static str, start: PipelineTimingStart) {
-    record_pipeline_timing(metric, start.elapsed());
+pub(crate) fn record_started_pipeline_timing(
+    metric: &'static str,
+    start: PipelineTimingStart,
+) -> bool {
+    record_pipeline_timing(metric, start.elapsed())
 }
 
 /// Record a manually timed pipeline stage with attribution context.
 pub(crate) fn record_started_pipeline_timing_attributed(
     metric: &'static str,
     start: PipelineTimingStart,
-    context: TimingModuleContext,
-) {
-    record_pipeline_timing_attributed(metric, start.elapsed(), context);
+    context: Option<TimingContext>,
+) -> bool {
+    record_pipeline_timing_attributed(metric, start.elapsed(), context)
 }
 
 /// RAII guard that records a pipeline-stage timing when dropped.
@@ -278,6 +331,46 @@ impl Drop for PipelineTimingGuard {
     }
 }
 
+/// RAII guard that records one AST aggregate stage on every exit.
+///
+/// WHAT: captures a start instant and records the metric with its attribution
+///      context when the guard drops, including error paths that return early.
+/// WHY:  AST aggregate stages previously recorded only after success, so a
+///       failed environment, emission or finalization pass left no child
+///       evidence in the basic report.
+pub(crate) struct AstStageTimingGuard {
+    metric: &'static str,
+    start: PipelineTimingStart,
+    context: Option<TimingContext>,
+    prose_label: &'static str,
+}
+
+impl AstStageTimingGuard {
+    /// Start timing one AST aggregate stage.
+    pub(crate) fn new(
+        metric: &'static str,
+        context: Option<TimingContext>,
+        prose_label: &'static str,
+    ) -> Self {
+        Self {
+            metric,
+            start: start_pipeline_timing(),
+            context,
+            prose_label,
+        }
+    }
+}
+
+impl Drop for AstStageTimingGuard {
+    fn drop(&mut self) {
+        let elapsed = self.start.elapsed();
+        let output_suppressed =
+            record_pipeline_timing_attributed(self.metric, elapsed, self.context);
+        if detailed_prose_enabled(output_suppressed) {
+            saying::say!(self.prose_label, Green #elapsed);
+        }
+    }
+}
 /// Record a pipeline-stage timing with a human-readable label and emit the
 /// stable bench line when appropriate.
 ///
@@ -288,14 +381,16 @@ pub(crate) fn record_labeled_pipeline_timing(
     metric: &'static str,
     duration: Duration,
     label: &str,
-) {
-    let mode = TimerOutputMode::from_env();
+) -> bool {
+    let mode = current_output_mode();
+    let output_suppressed = record_timing(metric, duration);
 
-    if output_enabled() && mode.emits_human_prose() {
+    if !output_suppressed && mode.emits_human_prose() {
         saying::say!(label, Green #duration);
     }
 
-    record_pipeline_timing(metric, duration);
+    emit_bench_timing_line(metric, duration, output_suppressed);
+    output_suppressed
 }
 
 // ---------------------------------------------------------------------------
@@ -465,7 +560,7 @@ pub(crate) fn render_counter_summary(snapshot: &BenchmarkObservationSnapshot) ->
 
     let mut aggregates = std::collections::BTreeMap::<&str, f64>::new();
     for metric in &snapshot.counters {
-        *aggregates.entry(metric.name.as_str()).or_default() += metric.value;
+        *aggregates.entry(metric.name).or_default() += metric.value;
     }
 
     let mut lines = Vec::with_capacity(COUNTER_SUMMARY_GROUPS.len() + 2);
@@ -540,71 +635,41 @@ fn format_counter_summary_value(value: f64) -> String {
 //  Timing summary and command scope
 // ---------------------------------------------------------------------------
 
-/// Start a command-level timing collection scope.
+/// Start a command-level timing collection session.
 ///
-/// WHAT: begins collecting timing observations for a single CLI command run so
-///      that `print_command_timing_summary` can render a concise summary.
-/// WHY:  the summary printed after `check` and `build` reads from this scope.
-///       Call this at the top of a command handler, before any stage work begins.
-pub(crate) fn start_command_timing() {
-    start_benchmark_collection(false);
-}
+/// WHAT: begins collecting timing observations for one CLI command or dev
+///      cycle with an explicit command kind.
+/// WHY:  the summary rendered after `check`, `build` and dev cycles reads from
+///      this session. The command kind is owned by the session, never inferred
+///      from whichever metric happened to be recorded.
+pub(crate) fn start_command_session(command: TimingCommandKind) -> TimingSession {
+    // Bench and Silent modes print stable lines or nothing; they never build a
+    // command snapshot that no consumer will render.
+    if !current_output_mode().collects_snapshot() {
+        return TimingSession::rejected();
+    }
 
-/// Stop the command timing scope and print the structured timing summary when
-/// the output mode requests one.
-///
-/// WHAT: collects all recorded timings and prints the human-readable summary
-///      after normal diagnostics/success output so timer prose never obscures
-///      compiler messages.
-/// WHY:  callers must print diagnostics first, then call this. In `Bench` mode
-///      the summary is skipped (stable `MOTH_BENCH timing` lines were already
-///      emitted inline). In `Silent` mode nothing is printed. The collection
-///      scope is always stopped to clean up even when no summary is shown.
-///      `succeeded` only changes the human title; stable metrics are unchanged.
-pub(crate) fn print_command_timing_summary(succeeded: bool) {
-    let snapshot = stop_and_collect_benchmark_observations();
-    render_command_timing_summary(&snapshot, succeeded);
-}
-
-/// Drain the current command timing scope without rendering.
-///
-/// WHAT: stops the collection and returns the snapshot so a caller can print
-///      its own status line first and render the summary afterwards.
-/// WHY:  the dev server prints its one-line build status before the structured
-///       report; draining inside the cycle keeps one collection per cycle and
-///       guarantees no cross-cycle leakage.
-pub(crate) fn drain_command_timing_snapshot() -> BenchmarkObservationSnapshot {
-    stop_and_collect_benchmark_observations()
+    collector::start_session(
+        Some(command),
+        TimingCollectionPurpose::HumanSummary,
+        false,
+        true,
+    )
 }
 
 /// Render a structured timing summary from an already-drained snapshot.
-///
 /// WHAT: prints the human summary when the output mode requests one, plus the
 ///      concise counter summary when `MOTH_COUNTERS` asks for it.
-/// WHY:  callers that print their own status line first (the dev server) reuse
-///       the same rendering path as `print_command_timing_summary`.
+/// WHY:  the command kind is explicit so a malformed or incomplete snapshot can
+///       never be mislabelled as another command.
 pub(crate) fn render_command_timing_summary(
     snapshot: &BenchmarkObservationSnapshot,
+    command: TimingCommandKind,
     succeeded: bool,
 ) {
-    let mode = TimerOutputMode::from_env();
+    let mode = current_output_mode();
 
     if mode.emits_summary() {
-        let command = if snapshot
-            .timings
-            .iter()
-            .any(|observation| observation.name == "command.dev.build_and_write")
-        {
-            summary::TimingCommandKind::Dev
-        } else if snapshot
-            .timings
-            .iter()
-            .any(|observation| observation.name == "command.build.total")
-        {
-            summary::TimingCommandKind::Build
-        } else {
-            summary::TimingCommandKind::Check
-        };
         let report = summary::build_timing_summary(snapshot, command, succeeded);
         render::render_timing_summary_report(&report);
     }
@@ -615,7 +680,7 @@ pub(crate) fn render_command_timing_summary(
     // while counters are logged, not here.
     #[cfg(feature = "benchmark_counters")]
     {
-        let counter_mode = crate::timing::CounterOutputMode::from_env();
+        let counter_mode = crate::timing::current_counter_output_mode();
         if counter_mode.emits_counter_summary() {
             for line in render_counter_summary(snapshot) {
                 saying::say!(line);

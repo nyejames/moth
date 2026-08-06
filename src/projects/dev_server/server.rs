@@ -66,7 +66,11 @@ pub fn run_dev_server(
     }
     #[cfg(feature = "timers")]
     if let Some(snapshot) = &initial_build_report.timing_snapshot {
-        crate::timing::render_command_timing_summary(snapshot, initial_build_report.build_ok);
+        crate::timing::render_command_timing_summary(
+            snapshot,
+            crate::timing::TimingCommandKind::Dev,
+            initial_build_report.build_ok,
+        );
     }
 
     let bind_addr = format!("{}:{}", options.host, options.port);

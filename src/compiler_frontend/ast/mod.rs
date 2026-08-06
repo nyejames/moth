@@ -167,10 +167,8 @@ use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
-use crate::timed_ast_stage;
+use crate::timed_ast_stage_guard;
 use rustc_hash::FxHashMap;
-#[cfg(feature = "timers")]
-use std::time::Instant;
 
 /// Resolved choice definition carried from AST to HIR for pre-registration.
 ///
@@ -332,33 +330,31 @@ impl Ast {
         let generic_template_count = environment.lookups.generic_declarations_by_path.len();
         let receiver_method_count = environment.lookups.receiver_methods.by_function_path.len();
 
-        #[cfg(feature = "timers")]
-        let node_emission_start = Instant::now();
-        let emitted = AstEmitter::new(&phase_context, &mut environment, header_count)
-            .emit(headers, string_table)?;
+        let emitted = {
+            timed_ast_stage_guard!(
+                timing_guard,
+                "ast_emit_nodes_ms",
+                phase_context.timing_context,
+                "AST/emit nodes completed in: "
+            );
+            AstEmitter::new(&phase_context, &mut environment, header_count)
+                .emit(headers, string_table)?
+        };
         let generic_instance_count = emitted.generic_instance_count;
-        timed_ast_stage!(
-            node_emission_start,
-            "ast_emit_nodes_ms",
-            "AST/emit nodes completed in: "
-        );
-        #[cfg(feature = "timers")]
-        let _ = node_emission_start;
 
-        #[cfg(feature = "timers")]
-        let finalization_start = Instant::now();
-        let build_result = AstFinalizer::new(&phase_context, environment).finalize(
-            emitted,
-            &top_level_const_fragments,
-            string_table,
-        )?;
-        timed_ast_stage!(
-            finalization_start,
-            "ast_finalize_ms",
-            "AST/finalize completed in: "
-        );
-        #[cfg(feature = "timers")]
-        let _ = finalization_start;
+        let build_result = {
+            timed_ast_stage_guard!(
+                timing_guard,
+                "ast_finalize_ms",
+                phase_context.timing_context,
+                "AST/finalize completed in: "
+            );
+            AstFinalizer::new(&phase_context, environment).finalize(
+                emitted,
+                &top_level_const_fragments,
+                string_table,
+            )?
+        };
 
         ast_header_counts.record();
         add_frontend_counter(

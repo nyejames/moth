@@ -259,6 +259,8 @@ pub(super) fn parse_config_file(
             path_format_config: PathStringFormatConfig::default(),
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             capacity_estimate: Default::default(),
+            #[cfg(feature = "timers")]
+            timing_context: None,
         },
     );
     timed_manual_finish!("config.parse.ast", ast_start);

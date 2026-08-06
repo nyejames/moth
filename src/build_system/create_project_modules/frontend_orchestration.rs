@@ -9,7 +9,7 @@ use crate::build_system::build::{
     ModuleExternalImport, ModuleLinkFacts, ModuleRootActivity, ModuleSemanticDraft,
     ResolvedConstFragment,
 };
-use crate::{timed_frontend_stage, timed_frontend_substep};
+use crate::{timed_frontend_stage, timed_frontend_stage_with_child, timed_frontend_substep};
 
 use crate::builder_surface::external_import_providers::provider::BuilderRuntimePackageMetadata;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
@@ -231,7 +231,7 @@ pub(super) struct ModuleSyntaxDiscovery<'a> {
     source_byte_count: usize,
     contains_moth_template: bool,
     #[cfg(feature = "timers")]
-    timing_context: crate::timing::TimingModuleContext,
+    timing_context: Option<crate::timing::TimingContext>,
 }
 
 // -------------------------
@@ -354,7 +354,7 @@ impl ModulePreparationContext<'_> {
         candidate_source_paths: impl ExactSizeIterator<Item = &'a Path>,
         entry_file_path: &Path,
         mut string_table: StringTable,
-        #[cfg(feature = "timers")] timing_context: crate::timing::TimingModuleContext,
+        #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
     ) -> Result<ModuleSyntaxDiscovery<'a>, CompilerMessages> {
         let source_files = SourceFileTable::build(
             candidate_source_paths,
@@ -409,7 +409,7 @@ impl ModulePreparationContext<'_> {
         entry_file_path: &Path,
         mut string_table: StringTable,
         source_byte_count: usize,
-        #[cfg(feature = "timers")] timing_context: crate::timing::TimingModuleContext,
+        #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
     ) -> Result<PreparedModule, CompilerMessages> {
         let mut warnings = Vec::new();
         let contains_moth_template = module.iter().any(PreparedSourceInput::is_moth_template);
@@ -1064,7 +1064,7 @@ impl FrontendModuleBuildContext<'_> {
         &self,
         prepared: PreparedModule,
         entry_file_path: &Path,
-        #[cfg(feature = "timers")] timing_context: crate::timing::TimingModuleContext,
+        #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
         mut generated_worklist: GeneratedFunctionWorklist<'_>,
     ) -> Result<ModuleCompilationOutcome, CompilerError> {
         let PreparedModule {
@@ -1216,6 +1216,8 @@ impl FrontendModuleBuildContext<'_> {
                         active_root_role,
                         capacity_estimate,
                         &mut warnings,
+                        #[cfg(feature = "timers")]
+                        timing_context,
                     )
                 },)?;
 
@@ -1247,8 +1249,9 @@ impl FrontendModuleBuildContext<'_> {
             //    borrow validation, while provenance, re-export interfaces, cross-module call
             //    lowering and future generated-generic summaries remain for later phases.
             //    Folded constant values are now owned by each constant declaration record.
-            let public_interface_build = timed_frontend_stage!(
+            let public_interface_build = timed_frontend_stage_with_child!(
                 "frontend.public_interface",
+                "frontend.public_interface.projection",
                 "Public interface built in: ",
                 timing_context,
                 PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {
@@ -1460,8 +1463,9 @@ impl FrontendModuleBuildContext<'_> {
             // generated summaries belong to the future sidecar worklist, distinct from these
             // direct concrete summaries. Private functions and implicit start retain local
             // summaries but never enter declaration records.
-            let public_interface = timed_frontend_stage!(
+            let public_interface = timed_frontend_stage_with_child!(
                 "frontend.public_interface",
+                "frontend.public_interface.finalization",
                 "Public interface finalized in: ",
                 timing_context,
                 {
@@ -1648,6 +1652,9 @@ impl FrontendModuleBuildContext<'_> {
         })
     }
 
+    // The timing context is a cfg-gated parameter that disappears from
+    // no-timer builds; bundling it would add a context struct for one field.
+    #[allow(clippy::too_many_arguments)]
     fn build_ast(
         &self,
         compiler: &mut CompilerFrontend,
@@ -1656,6 +1663,7 @@ impl FrontendModuleBuildContext<'_> {
         root_role: ModuleRootRole,
         capacity_estimate: FrontendArenaCapacityEstimate,
         warnings: &mut Vec<CompilerDiagnostic>,
+        #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
     ) -> Result<AstBuildResult, CompilerMessages> {
         match compiler.headers_to_ast(
             sorted,
@@ -1663,6 +1671,8 @@ impl FrontendModuleBuildContext<'_> {
             root_role,
             self.build_profile,
             capacity_estimate,
+            #[cfg(feature = "timers")]
+            timing_context,
         ) {
             Ok(build_result) => {
                 warnings.extend(build_result.ast.warnings.clone());

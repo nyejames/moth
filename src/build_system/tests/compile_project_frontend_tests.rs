@@ -144,7 +144,7 @@ fn directory_frontend_registers_package_and_project_boundaries() {
         PackageOrigin::Builder,
     );
 
-    crate::timing::start_benchmark_collection(true);
+    let timing_session = crate::timing::start_benchmark_collection(true);
     let frontend = compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
@@ -154,7 +154,7 @@ fn directory_frontend_registers_package_and_project_boundaries() {
         &mut string_table,
     )
     .expect("a clean source package and project should compile");
-    let snapshot = crate::timing::stop_and_collect_benchmark_observations();
+    let snapshot = timing_session.finish();
     drop(frontend);
 
     let package_boundary = snapshot
@@ -198,26 +198,34 @@ fn directory_frontend_registers_package_and_project_boundaries() {
     );
     assert!(snapshot.timings.iter().any(|observation| {
         observation.name == "build.boundary.inventory"
-            && observation.boundary == Some(package_boundary)
+            && observation.context
+                == Some(crate::timing::TimingContext::for_boundary(package_boundary))
     }));
     assert!(snapshot.timings.iter().any(|observation| {
         observation.name == "build.boundary.inventory"
-            && observation.boundary == Some(project_boundary)
+            && observation
+                .context
+                .and_then(crate::timing::TimingContext::boundary)
+                == Some(project_boundary)
     }));
     assert!(snapshot.timings.iter().any(|observation| {
         observation.name == "build.boundary.compile"
-            && observation.boundary == Some(package_boundary)
+            && observation.context
+                == Some(crate::timing::TimingContext::for_boundary(package_boundary))
     }));
     assert!(snapshot.timings.iter().any(|observation| {
         observation.name == "build.boundary.compile"
-            && observation.boundary == Some(project_boundary)
+            && observation
+                .context
+                .and_then(crate::timing::TimingContext::boundary)
+                == Some(project_boundary)
     }));
 
     let own_modules = snapshot
         .modules
         .iter()
         .filter(|module| {
-            module.key.boundary == package_boundary || module.key.boundary == project_boundary
+            module.key.boundary() == package_boundary || module.key.boundary() == project_boundary
         })
         .collect::<Vec<_>>();
     assert_eq!(own_modules.len(), 2);
@@ -256,7 +264,8 @@ fn directory_frontend_registers_package_and_project_boundaries() {
         .filter(|observation| {
             observation.name == "frontend.module.semantic_total"
                 && observation
-                    .module
+                    .context
+                    .and_then(crate::timing::TimingContext::module)
                     .is_some_and(|key| own_module_keys.contains(&key))
         })
         .count();
@@ -269,7 +278,14 @@ fn directory_frontend_registers_package_and_project_boundaries() {
                 .timings
                 .iter()
                 .filter(|observation| observation.name == "frontend.module.semantic_total")
-                .map(|observation| (observation.boundary, observation.module))
+                .map(|observation| (
+                    observation
+                        .context
+                        .and_then(crate::timing::TimingContext::boundary),
+                    observation
+                        .context
+                        .and_then(crate::timing::TimingContext::module),
+                ))
                 .collect::<Vec<_>>(),
             snapshot
                 .boundaries
@@ -285,19 +301,17 @@ fn directory_frontend_registers_package_and_project_boundaries() {
     );
     assert!(snapshot.timings.iter().any(|observation| {
         observation.name == "frontend.module.semantic_total"
-            && observation.module
-                == Some(crate::timing::TimingModuleKey {
-                    boundary: package_boundary,
-                    module_index: 0,
-                })
+            && observation.context
+                == Some(crate::timing::TimingContext::for_module(
+                    crate::timing::TimingModuleKey::new(package_boundary, 0),
+                ))
     }));
     assert!(snapshot.timings.iter().any(|observation| {
         observation.name == "frontend.module.semantic_total"
-            && observation.module
-                == Some(crate::timing::TimingModuleKey {
-                    boundary: project_boundary,
-                    module_index: 0,
-                })
+            && observation.context
+                == Some(crate::timing::TimingContext::for_module(
+                    crate::timing::TimingModuleKey::new(project_boundary, 0),
+                ))
     }));
 
     fs::remove_dir_all(&dir).expect("should remove temp dir");
@@ -318,7 +332,7 @@ fn directory_frontend_records_incremental_file_prepare_with_module_attribution()
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
 
-    crate::timing::start_benchmark_collection(true);
+    let timing_session = crate::timing::start_benchmark_collection(true);
     let frontend = compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
@@ -328,7 +342,7 @@ fn directory_frontend_records_incremental_file_prepare_with_module_attribution()
         &mut string_table,
     )
     .expect("a clean directory project should compile");
-    let snapshot = crate::timing::stop_and_collect_benchmark_observations();
+    let snapshot = timing_session.finish();
     drop(frontend);
 
     let project_boundary = snapshot
@@ -342,7 +356,10 @@ fn directory_frontend_records_incremental_file_prepare_with_module_attribution()
         .iter()
         .filter(|observation| {
             observation.name == "frontend.file_prepare"
-                && observation.boundary == Some(project_boundary)
+                && observation
+                    .context
+                    .and_then(crate::timing::TimingContext::boundary)
+                    == Some(project_boundary)
         })
         .collect::<Vec<_>>();
 
@@ -351,9 +368,10 @@ fn directory_frontend_records_incremental_file_prepare_with_module_attribution()
         "incremental directory discovery must record frontend.file_prepare for the project boundary"
     );
     assert!(
-        prepare_observations
-            .iter()
-            .all(|observation| observation.module.is_some()),
+        prepare_observations.iter().all(|observation| observation
+            .context
+            .and_then(crate::timing::TimingContext::module)
+            .is_some()),
         "every project-boundary preparation observation must carry the owning module"
     );
 
@@ -374,7 +392,7 @@ fn single_file_frontend_records_file_prepare_with_module_attribution() {
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
 
-    crate::timing::start_benchmark_collection(true);
+    let timing_session = crate::timing::start_benchmark_collection(true);
     let frontend = compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
@@ -384,7 +402,7 @@ fn single_file_frontend_records_file_prepare_with_module_attribution() {
         &mut string_table,
     )
     .expect("a clean single-file project should compile");
-    let snapshot = crate::timing::stop_and_collect_benchmark_observations();
+    let snapshot = timing_session.finish();
     drop(frontend);
 
     let project_boundary = snapshot
@@ -398,7 +416,10 @@ fn single_file_frontend_records_file_prepare_with_module_attribution() {
         .iter()
         .filter(|observation| {
             observation.name == "frontend.file_prepare"
-                && observation.boundary == Some(project_boundary)
+                && observation
+                    .context
+                    .and_then(crate::timing::TimingContext::boundary)
+                    == Some(project_boundary)
         })
         .collect::<Vec<_>>();
     assert!(
@@ -413,13 +434,21 @@ fn single_file_frontend_records_file_prepare_with_module_attribution() {
             .timings
             .iter()
             .filter(|observation| observation.name == "frontend.file_prepare")
-            .map(|observation| (observation.boundary, observation.module))
+            .map(|observation| (
+                observation
+                    .context
+                    .and_then(crate::timing::TimingContext::boundary),
+                observation
+                    .context
+                    .and_then(crate::timing::TimingContext::module),
+            ))
             .collect::<Vec<_>>()
     );
     assert!(
-        prepare_observations
-            .iter()
-            .all(|observation| observation.module.is_some()),
+        prepare_observations.iter().all(|observation| observation
+            .context
+            .and_then(crate::timing::TimingContext::module)
+            .is_some()),
         "single-file preparation must carry the synthetic module key"
     );
 
@@ -440,7 +469,7 @@ fn ast_aggregate_metrics_recorded_with_timers() {
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
 
-    crate::timing::start_benchmark_collection(true);
+    let timing_session = crate::timing::start_benchmark_collection(true);
     let frontend = compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
@@ -450,7 +479,7 @@ fn ast_aggregate_metrics_recorded_with_timers() {
         &mut string_table,
     )
     .expect("a clean single-file project should compile");
-    let snapshot = crate::timing::stop_and_collect_benchmark_observations();
+    let snapshot = timing_session.finish();
     drop(frontend);
 
     for metric in [
@@ -484,7 +513,7 @@ fn ast_aggregate_metrics_are_not_double_recorded_with_detailed_timers() {
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
 
-    crate::timing::start_benchmark_collection(true);
+    let timing_session = crate::timing::start_benchmark_collection(true);
     let frontend = compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
@@ -494,7 +523,7 @@ fn ast_aggregate_metrics_are_not_double_recorded_with_detailed_timers() {
         &mut string_table,
     )
     .expect("a clean single-file project should compile");
-    let snapshot = crate::timing::stop_and_collect_benchmark_observations();
+    let snapshot = timing_session.finish();
     drop(frontend);
 
     for metric in [
@@ -1643,7 +1672,7 @@ fn linked_module_js_lowering_is_observed_separately() {
         PackageOrigin::Builder,
     );
 
-    crate::timing::start_benchmark_collection(true);
+    let timing_session = crate::timing::start_benchmark_collection(true);
     let modules = compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
@@ -1666,7 +1695,7 @@ fn linked_module_js_lowering_is_observed_separately() {
             &mut string_table,
         )
         .expect("HTML build should succeed with module-owned registry");
-    let snapshot = crate::timing::stop_and_collect_benchmark_observations();
+    let snapshot = timing_session.finish();
     drop(project);
 
     assert!(

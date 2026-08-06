@@ -7,7 +7,10 @@
 //!       raw metrics stay available to detailed and benchmark output but never
 //!       appear in the basic report by accident.
 
-use super::{BenchmarkObservationSnapshot, TimingBoundaryId, TimingMetricSummary, TimingModuleKey};
+use super::{
+    BenchmarkObservationSnapshot, TimingBoundaryId, TimingCommandKind, TimingContext,
+    TimingMetricSummary, TimingModuleKey,
+};
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -79,7 +82,7 @@ pub(crate) struct TimingSlowestModuleSummary {
 #[derive(Debug, Clone)]
 pub(crate) struct TimingSummaryReport {
     /// Heading text without the duration, for example `Build timings` or
-    /// `Build timings · failed after`. The renderer prints the duration
+    /// `Build timings · failed`. The renderer prints the duration
     /// separately in the total colour role.
     pub(crate) title: String,
     pub(crate) command_total: Duration,
@@ -97,14 +100,6 @@ pub(crate) enum TimingReportItem {
     Section(TimingSummarySection),
     CompilationBoundaries(Vec<TimingBoundarySummary>),
     SlowestModule(TimingSlowestModuleSummary),
-}
-
-/// Which command produced the snapshot.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum TimingCommandKind {
-    Build,
-    Check,
-    Dev,
 }
 
 /// One raw metric's basic-mode presentation policy.
@@ -284,7 +279,16 @@ const BASIC_METRIC_POLICY: &[MetricPolicy] = &[
         kind: TimingMeasurementKind::Accumulated,
         section: SectionId::Frontend,
         emphasis: TimingEmphasis::Ordinary,
-        children: &[],
+        children: &[
+            MetricChildPolicy {
+                metric: "frontend.public_interface.projection",
+                label: "Projection",
+            },
+            MetricChildPolicy {
+                metric: "frontend.public_interface.finalization",
+                label: "Finalization",
+            },
+        ],
         fallback: false,
         command: None,
     },
@@ -385,7 +389,7 @@ pub(crate) fn build_timing_summary(
     let title = if succeeded {
         format!("{command_word} timings")
     } else {
-        format!("{command_word} timings · failed after")
+        format!("{command_word} timings · failed")
     };
 
     TimingSummaryReport {
@@ -436,7 +440,7 @@ fn aggregate_boundary_totals(
         if matches!(
             observation.name,
             "build.boundary.inventory" | "build.boundary.compile"
-        ) && let Some(boundary) = observation.boundary
+        ) && let Some(TimingContext::Boundary(boundary)) = observation.context
         {
             *totals.entry(boundary).or_insert(Duration::ZERO) += observation.duration;
         }
@@ -482,7 +486,7 @@ fn build_slowest_module_summary(
     let mut semantic_total = BTreeMap::<TimingModuleKey, Duration>::new();
 
     for observation in &snapshot.timings {
-        let Some(module) = observation.module else {
+        let Some(TimingContext::Module(module)) = observation.context else {
             continue;
         };
         match observation.name {
@@ -535,7 +539,7 @@ fn build_pipeline_section(
                 c == command || (command == TimingCommandKind::Dev && c == TimingCommandKind::Build)
             })
     }) {
-        push_policy_row(&mut rows, aggregates, policy);
+        push_policy_row(&mut rows, aggregates, &BTreeMap::new(), policy);
     }
 
     if !directory_mode {
@@ -543,7 +547,7 @@ fn build_pipeline_section(
             .iter()
             .filter(|policy| policy.section == SectionId::Pipeline && policy.fallback)
         {
-            push_policy_row(&mut rows, aggregates, policy);
+            push_policy_row(&mut rows, aggregates, &BTreeMap::new(), policy);
         }
     }
 
@@ -562,6 +566,7 @@ fn build_pipeline_section(
 fn push_policy_row(
     rows: &mut Vec<TimingSummaryRow>,
     aggregates: &BTreeMap<&'static str, TimingMetricSummary>,
+    module_ast_children: &BTreeMap<&'static str, TimingMetricSummary>,
     policy: &MetricPolicy,
 ) {
     let total = policy
@@ -576,7 +581,12 @@ fn push_policy_row(
 
     let mut children = Vec::new();
     for child in policy.children {
-        if let Some(summary) = aggregates.get(child.metric)
+        let child_aggregates = if child.metric.starts_with("ast_") {
+            module_ast_children
+        } else {
+            aggregates
+        };
+        if let Some(summary) = child_aggregates.get(child.metric)
             && is_significant_child(summary.total, total)
         {
             children.push(TimingSummaryRow {
@@ -648,17 +658,42 @@ fn push_other_row(
     }
 }
 
+/// Aggregate the AST child metrics from module-attributed observations only.
+///
+/// Config parsing and generated materialisation also record the raw `ast_*`
+/// metrics; those observations stay available in raw and detailed output but
+/// must never appear as children of a module's `frontend.ast` row.
+fn aggregate_module_ast_children(
+    snapshot: &BenchmarkObservationSnapshot,
+) -> BTreeMap<&'static str, TimingMetricSummary> {
+    let mut aggregates = BTreeMap::new();
+    for observation in &snapshot.timings {
+        if matches!(
+            observation.name,
+            "ast_build_environment_ms" | "ast_emit_nodes_ms" | "ast_finalize_ms"
+        ) && matches!(observation.context, Some(TimingContext::Module(_)))
+        {
+            aggregates
+                .entry(observation.name)
+                .or_insert_with(TimingMetricSummary::default)
+                .record(observation.duration);
+        }
+    }
+    aggregates
+}
+
 fn build_frontend_section(
     aggregates: &BTreeMap<&'static str, TimingMetricSummary>,
     snapshot: &BenchmarkObservationSnapshot,
 ) -> Option<TimingSummarySection> {
     let mut rows = Vec::new();
+    let module_ast_children = aggregate_module_ast_children(snapshot);
 
     for policy in BASIC_METRIC_POLICY
         .iter()
         .filter(|policy| policy.section == SectionId::Frontend)
     {
-        push_policy_row(&mut rows, aggregates, policy);
+        push_policy_row(&mut rows, aggregates, &module_ast_children, policy);
     }
 
     if rows.is_empty() {

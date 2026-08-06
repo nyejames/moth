@@ -108,6 +108,8 @@ fn compile_one_source(
             crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
             FrontendBuildProfile::Dev,
             Default::default(),
+            #[cfg(feature = "timers")]
+            None,
         )?
         .ast;
     warnings.extend(ast.warnings.clone());

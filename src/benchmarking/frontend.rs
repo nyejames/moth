@@ -118,9 +118,10 @@ pub fn run_frontend_benchmark(
     let project_builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
 
     #[cfg(feature = "timers")]
-    crate::compiler_frontend::compiler_messages::compiler_dev_logging::start_benchmark_collection(
-        true,
-    );
+    let timing_session =
+        crate::compiler_frontend::compiler_messages::compiler_dev_logging::start_raw_benchmark_collection(
+            true,
+        );
 
     let BuildBootstrap {
         mut config,
@@ -132,7 +133,7 @@ pub fn run_frontend_benchmark(
         Ok(bootstrap) => bootstrap,
         Err(messages) => {
             #[cfg(feature = "timers")]
-            let _ = crate::compiler_frontend::compiler_messages::compiler_dev_logging::stop_and_collect_benchmark_observations();
+            let _ = timing_session.finish();
 
             return Err(FrontendBenchmarkError {
                 message: format_compiler_messages(&messages),
@@ -158,8 +159,7 @@ pub fn run_frontend_benchmark(
     };
 
     #[cfg(feature = "timers")]
-    let raw_observations =
-        crate::compiler_frontend::compiler_messages::compiler_dev_logging::stop_and_collect_benchmark_observations();
+    let raw_observations = timing_session.finish();
 
     #[cfg(not(feature = "timers"))]
     let stages: Vec<FrontendBenchmarkStage> = Vec::new();
@@ -196,7 +196,7 @@ pub fn run_frontend_benchmark(
         .counters
         .into_iter()
         .map(|metric| FrontendBenchmarkCounter {
-            name: metric.name,
+            name: metric.name.to_owned(),
             value: metric.value,
         })
         .collect();

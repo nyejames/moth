@@ -157,7 +157,7 @@ pub fn start_cli() -> process::ExitCode {
 }
 
 fn run_build_command(path: &str, flags: &[Flag]) -> CommandStatus {
-    command_timing_start!();
+    command_timing_start!(timing_session, crate::timing::TimingCommandKind::Build);
     let start = Instant::now();
     let project_builder = build::ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
     let (status, diagnostic_counts) = match build::build_project(&project_builder, path, flags) {
@@ -175,7 +175,7 @@ fn run_build_command(path: &str, flags: &[Flag]) -> CommandStatus {
                             )),
                             &build_result.string_table,
                         );
-                        command_timing_finish!(false);
+                        command_timing_finish!(timing_session, false);
                         return CommandStatus::Failure;
                     }
                 };
@@ -185,7 +185,7 @@ fn run_build_command(path: &str, flags: &[Flag]) -> CommandStatus {
                         Err(error) => {
                             timed_manual_finish!("command.build.total", start);
                             print_formatted_error(error, &build_result.string_table);
-                            command_timing_finish!(false);
+                            command_timing_finish!(timing_session, false);
                             return CommandStatus::Failure;
                         }
                     };
@@ -236,7 +236,7 @@ fn run_build_command(path: &str, flags: &[Flag]) -> CommandStatus {
             (CommandStatus::Failure, diagnostic_counts)
         }
     };
-    command_timing_finish!(matches!(status, CommandStatus::Success));
+    command_timing_finish!(timing_session, matches!(status, CommandStatus::Success));
     if let Some((error_count, warning_count)) = diagnostic_counts {
         emit_benchmark_status(error_count, warning_count);
     }

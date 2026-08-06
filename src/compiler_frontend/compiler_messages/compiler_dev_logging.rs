@@ -12,7 +12,7 @@
 //! (`timer_log!`, `benchmark_timer_log!`, `log_aggregated_duration`) stay gated by
 //! `detailed_timers`.
 
-#[cfg(feature = "benchmark_counters")]
+#[cfg(all(feature = "timers", feature = "benchmark_counters"))]
 use crate::counter_observation;
 
 #[cfg(feature = "detailed_timers")]
@@ -31,7 +31,7 @@ use std::time::Duration;
 #[allow(unused_imports)]
 pub(crate) use crate::timing::{
     BenchmarkObservationMetric, BenchmarkObservationSnapshot, start_benchmark_collection,
-    stop_and_collect_benchmark_observations,
+    start_raw_benchmark_collection, stop_and_collect_benchmark_observations,
 };
 
 // TOKEN LOGGING MACROS
@@ -82,13 +82,13 @@ macro_rules! timer_log {
 macro_rules! benchmark_timer_log {
     ($time:expr, $metric_name:expr, $human_msg:expr) => {{
         let elapsed = $time.elapsed();
-        if $crate::compiler_frontend::compiler_messages::compiler_dev_logging::detailed_timer_output_enabled() {
-            saying::say!($human_msg, Green #elapsed);
-        }
-        $crate::compiler_frontend::compiler_messages::compiler_dev_logging::log_benchmark_timing(
+        let output_suppressed = $crate::compiler_frontend::compiler_messages::compiler_dev_logging::log_benchmark_timing(
             $metric_name,
             elapsed,
         );
+        if $crate::timing::detailed_prose_enabled(output_suppressed) {
+            saying::say!($human_msg, Green #elapsed);
+        }
     }};
 }
 
@@ -113,11 +113,11 @@ macro_rules! benchmark_timer_log {
 macro_rules! timed_ast_stage {
     ($time:expr, $metric_name:expr, $human_msg:expr) => {{
         let elapsed = $time.elapsed();
-        $crate::timing::record_pipeline_timing($metric_name, elapsed);
+        #[allow(unused_variables)]
+        let output_suppressed = $crate::timing::record_pipeline_timing($metric_name, elapsed);
         #[cfg(feature = "detailed_timers")]
         {
-            if $crate::compiler_frontend::compiler_messages::compiler_dev_logging::detailed_timer_output_enabled()
-            {
+            if $crate::timing::detailed_prose_enabled(output_suppressed) {
                 saying::say!($human_msg, Green #elapsed);
             }
         }
@@ -146,15 +146,16 @@ pub fn log_aggregated_duration(label: &str, duration: Duration) {
 /// WHY: separating the stable metric line from colored human output lets compiler
 /// logging change its prose without silently breaking performance attribution.
 #[cfg(feature = "detailed_timers")]
-pub fn log_benchmark_timing(metric_name: &'static str, duration: Duration) {
+pub fn log_benchmark_timing(metric_name: &'static str, duration: Duration) -> bool {
     if metric_name.trim().is_empty() {
-        return;
+        return false;
     }
 
-    crate::timing::emit_bench_timing_line(metric_name, duration);
-
-    // Delegate timing storage to the central timing collector.
-    crate::timing::record_timing(metric_name, duration);
+    // Record first so the suppression flag comes from the same collector lock
+    // that stored the observation.
+    let output_suppressed = crate::timing::record_timing(metric_name, duration);
+    crate::timing::emit_bench_timing_line(metric_name, duration, output_suppressed);
+    output_suppressed
 }
 
 /// Emit one stable, machine-readable benchmark counter observation.
@@ -176,8 +177,11 @@ pub fn log_benchmark_counter(metric_name: &'static str, value: f64) {
         return;
     }
 
-    crate::timing::emit_bench_counter_line(metric_name, value);
-    counter_observation!(metric_name, value);
+    #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
+    let output_suppressed = counter_observation!(metric_name, value);
+    #[cfg(not(all(feature = "timers", feature = "benchmark_counters")))]
+    let output_suppressed = false;
+    crate::timing::emit_bench_counter_line(metric_name, value, output_suppressed);
 }
 
 #[cfg(feature = "detailed_timers")]

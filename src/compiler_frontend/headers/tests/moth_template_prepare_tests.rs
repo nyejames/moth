@@ -178,6 +178,8 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable) {
             path_format_config: PathStringFormatConfig::default(),
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             capacity_estimate: Default::default(),
+            #[cfg(feature = "timers")]
+            timing_context: None,
         },
     )
     .expect("Moth template content constant should build through AST")
@@ -387,6 +389,8 @@ impl MothTemplateScopeFixture {
                 path_format_config: PathStringFormatConfig::default(),
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
                 capacity_estimate: Default::default(),
+                #[cfg(feature = "timers")]
+                timing_context: None,
             },
         )
         .map_err(|messages| {
@@ -1754,6 +1758,8 @@ fn moth_template_folded_output_matches_authored_markdown_template() {
             path_format_config: PathStringFormatConfig::default(),
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             capacity_estimate: Default::default(),
+            #[cfg(feature = "timers")]
+            timing_context: None,
         },
     )
     .expect("authored md template constant should build through AST")

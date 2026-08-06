@@ -68,6 +68,14 @@ pub struct AstBuildContext<'a> {
 
     /// Module-level frontend arena capacity policy gathered before AST construction.
     pub capacity_estimate: FrontendArenaCapacityEstimate,
+
+    /// Timer-only attribution context for this AST build.
+    ///
+    /// Module AST construction carries the module key; config and generated
+    /// materialisation pass `None` so their raw observations never appear as
+    /// module AST children in the basic report.
+    #[cfg(feature = "timers")]
+    pub(crate) timing_context: Option<crate::timing::TimingContext>,
 }
 
 /// Narrowed phase-local view of `AstBuildContext` without the mutable `StringTable`.
@@ -89,6 +97,10 @@ pub(crate) struct AstPhaseContext<'a> {
 
     /// Shared module-local TIR store for this AST phase.
     pub(crate) template_ir_store: Rc<RefCell<TemplateIrStore>>,
+
+    /// Timer-only attribution context for this AST phase.
+    #[cfg(feature = "timers")]
+    pub(crate) timing_context: Option<crate::timing::TimingContext>,
 }
 
 impl<'a> AstPhaseContext<'a> {
@@ -110,6 +122,8 @@ impl<'a> AstPhaseContext<'a> {
             path_format_config,
             template_const_loop_iteration_limit,
             capacity_estimate,
+            #[cfg(feature = "timers")]
+            timing_context,
         } = context;
 
         let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::with_capacity_estimate(
@@ -128,6 +142,8 @@ impl<'a> AstPhaseContext<'a> {
                 template_const_loop_iteration_limit,
                 capacity_estimate,
                 template_ir_store,
+                #[cfg(feature = "timers")]
+                timing_context,
             },
             string_table,
         )

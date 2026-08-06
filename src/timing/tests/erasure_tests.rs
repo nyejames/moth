@@ -92,7 +92,7 @@ fn timed_manual_finish_attributed_does_not_evaluate_arguments() {
         },
         {
             context_evaluated.set(context_evaluated.get() + 1);
-            crate::timing::TimingModuleContext::default()
+            None
         }
     );
 
@@ -105,9 +105,9 @@ fn timed_manual_finish_attributed_does_not_evaluate_arguments() {
 fn command_timing_macros_expand_to_nothing() {
     let mut runs = 0;
     for _ in 0..3 {
-        command_timing_start!();
+        command_timing_start!(timing_session, crate::timing::TimingCommandKind::Build);
         runs += 1;
-        command_timing_finish!(true);
+        command_timing_finish!(timing_session, true);
     }
 
     assert_eq!(runs, 3);
@@ -116,7 +116,7 @@ fn command_timing_macros_expand_to_nothing() {
 #[test]
 fn command_timing_finish_discards_success_expression() {
     let succeeded_evaluated = evaluation_counter();
-    command_timing_finish!({
+    command_timing_finish!(timing_session, {
         succeeded_evaluated.set(succeeded_evaluated.get() + 1);
         true
     });
@@ -143,7 +143,7 @@ fn timed_frontend_stage_expands_to_production_expression() {
         },
         {
             context_evaluated.set(context_evaluated.get() + 1);
-            crate::timing::TimingModuleContext::default()
+            None
         },
         42
     );

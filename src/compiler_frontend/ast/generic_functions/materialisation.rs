@@ -703,6 +703,8 @@ impl GenericTemplateArtefact {
             path_format_config: PathStringFormatConfig::default(),
             template_const_loop_iteration_limit,
             capacity_estimate: FrontendArenaCapacityEstimate::default(),
+            #[cfg(feature = "timers")]
+            timing_context: None,
         };
         let (phase_context, string_table_ref) = AstPhaseContext::from_build_context(build_context);
         let import_environment = self
@@ -2737,6 +2739,8 @@ impl ModuleMaterialisationPreparation {
             path_format_config: self.path_format_config.clone(),
             template_const_loop_iteration_limit: self.template_const_loop_iteration_limit,
             capacity_estimate: self.capacity_estimate,
+            #[cfg(feature = "timers")]
+            timing_context: None,
         };
         let (phase_context, string_table_ref) = AstPhaseContext::from_build_context(build_context);
         let mut environment = self
