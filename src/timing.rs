@@ -10,7 +10,8 @@
 //! Three output products share one collector:
 //! - `MOTH_TIMERS=summary` prints the curated human report (pipeline,
 //!   compilation boundaries, frontend, backend, slowest module).
-//! - `MOTH_TIMERS=bench` emits stable `MOTH_BENCH timing` lines only.
+//! - `MOTH_TIMERS=bench` emits one `MOTH_BENCH timing-schema 1` header and one
+//!   final aggregate set of stable `MOTH_BENCH timing` lines in schema order.
 //! - `MOTH_TIMERS=verbose` keeps detailed inline prose and ends with the
 //!   curated report.
 //!
@@ -25,19 +26,42 @@
 //!   expression only and guard/command macros expand to nothing. No timer
 //!   type, collector or renderer exists in that build, and no timer-only
 //!   function ABI or field survives at a call site.
-//! - `benchmark_counters` alone never enables the collector; counter storage
-//!   still requires `timers`.
+//! - `benchmark_counters` alone never enables the collector; collector-backed
+//!   counter storage still requires `timers`, while direct counter logging can
+//!   emit stable lines in a counter-only build.
 //!
 //! Stage boundaries: this facade owns timing and counter infrastructure only.
 //! It must not import or depend on frontend, analysis, IR, or backend modules.
 
-// Counter summary helpers are only called from the command timing summary
-// (gated by `timers`); suppress dead-code warnings for `benchmark_counters`-only
-// builds where no command summary runs.
-#![cfg_attr(
-    all(feature = "benchmark_counters", not(feature = "timers")),
-    allow(dead_code)
-)]
+/// Start one detailed-only prose timer from the timing implementation owner.
+///
+/// Detailed AST microstage logging predates the typed pipeline guards and is
+/// intentionally kept as human evidence rather than a schema metric. Keeping
+/// its clock creation here prevents frontend modules from owning timer types or
+/// direct clock calls.
+#[cfg(feature = "detailed_timers")]
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct DetailedTimerStart(Option<std::time::Instant>);
+
+#[cfg(feature = "detailed_timers")]
+impl DetailedTimerStart {
+    /// Return elapsed time only when the detailed channel captured a start.
+    pub(crate) fn elapsed(&self) -> Option<std::time::Duration> {
+        self.0.map(|start| start.elapsed())
+    }
+}
+
+#[cfg(feature = "detailed_timers")]
+pub(crate) fn start_detailed_timer() -> DetailedTimerStart {
+    if !enabled::runtime::detailed_active() {
+        return DetailedTimerStart(None);
+    }
+
+    #[cfg(test)]
+    enabled::runtime::record_timing_clock_read_for_test();
+
+    DetailedTimerStart(Some(std::time::Instant::now()))
+}
 
 #[cfg(feature = "timers")]
 mod enabled;
@@ -47,26 +71,72 @@ mod enabled;
 /// lib-only builds where the collector paths are exercised only by tests.
 #[allow(unused_imports)]
 pub(crate) use enabled::{
-    AstStageTimingGuard, BenchmarkObservationMetric, BenchmarkObservationSnapshot,
-    NO_TIMING_BOUNDARY, PipelineTimingGuard, PipelineTimingGuardAttributed,
-    PipelineTimingGuardMulti, PipelineTimingStart, TimerOutputMode, TimingBoundaryId,
-    TimingBoundaryKind, TimingBoundaryRecord, TimingCommandKind, TimingContext,
-    TimingMetricSummary, TimingModuleKey, TimingModuleRecord, TimingObservation, TimingSession,
-    TimingSessionStartError, detailed_prose_enabled, detailed_timer_output_enabled,
-    emit_bench_timing_line, output_enabled, record_pipeline_timing,
-    record_pipeline_timing_attributed, record_pipeline_timing_multi,
-    record_started_pipeline_timing, record_started_pipeline_timing_attributed,
-    register_timing_boundary, register_timing_module, render_command_timing_summary,
-    start_benchmark_collection, start_command_session, start_detailed_timing,
-    start_pipeline_timing, start_raw_benchmark_collection, stop_and_collect_benchmark_observations,
-    timing_attribution_active,
+    BenchmarkObservationMetric, BenchmarkObservationSnapshot, NO_TIMING_BOUNDARY,
+    PipelineTimingGuard, PipelineTimingGuardAttributed, PipelineTimingGuardMulti,
+    PipelineTimingStart, TimerOutputMode, TimingBoundaryId, TimingBoundaryKind,
+    TimingBoundaryRecord, TimingCommandKind, TimingContext, TimingMetric, TimingMetricAggregate,
+    TimingModuleKey, TimingModuleRecord, TimingSession, TimingSessionStartError,
+    detailed_prose_enabled, detailed_timer_output_enabled, emit_detailed_metric_prose,
+    finalize_timing_module_source_facts, record_pipeline_timing, record_pipeline_timing_attributed,
+    record_pipeline_timing_multi, record_started_pipeline_timing,
+    record_started_pipeline_timing_attributed, register_timing_boundary, register_timing_module,
+    register_timing_module_for_preparation, render_command_timing_summary, start_command_session,
+    start_pipeline_timing, start_raw_benchmark_collection, timing_attribution_active,
 };
+
+#[cfg(all(feature = "timers", test))]
+pub(crate) use enabled::start_benchmark_collection;
+
+#[cfg(feature = "timers")]
+pub(crate) use enabled::schema::{
+    TIMING_BUILD_PIPELINE_METRIC_NAMES, TIMING_CHECK_PIPELINE_METRIC_NAMES,
+    TIMING_COMMAND_BUILD_TOTAL_NAME, TIMING_COMMAND_CHECK_TOTAL_NAME,
+    TIMING_FRONTEND_AST_EMIT_NAME, TIMING_FRONTEND_AST_ENVIRONMENT_NAME,
+    TIMING_FRONTEND_AST_FINALISE_NAME, TIMING_FRONTEND_AST_TOTAL_NAME,
+    TIMING_FRONTEND_BORROW_CONVERGE_NAME, TIMING_FRONTEND_BORROW_INITIAL_NAME,
+    TIMING_FRONTEND_HIR_NAME, TIMING_FRONTEND_ORDER_DECLARATIONS_NAME,
+    TIMING_FRONTEND_PREPARE_NAME, TIMING_SCHEMA_METRIC_NAMES, benchmark_label_for_name,
+};
+
+#[cfg(feature = "timers")]
+pub use enabled::schema::TIMING_SCHEMA_VERSION;
 
 #[cfg(all(feature = "timers", test))]
 pub(crate) use enabled::start_command_session_with_configuration;
 
 #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
 pub(crate) use enabled::record_counter;
+
+// ---------------------------------------------------------------------------
+//  Detailed human prose
+// ---------------------------------------------------------------------------
+
+/// Print one detailed-only microstage using the timer's captured start.
+#[macro_export]
+#[cfg(feature = "detailed_timers")]
+macro_rules! timer_log {
+    ($time:expr, $message:expr) => {{
+        if let Some(elapsed) = $time.elapsed() {
+            if $crate::timing::detailed_timer_output_enabled() {
+                saying::say!($message, Green #elapsed);
+            }
+        }
+    }};
+}
+
+#[macro_export]
+#[cfg(not(feature = "detailed_timers"))]
+macro_rules! timer_log {
+    ($time:expr, $message:expr) => {};
+}
+
+/// Print a captured detailed aggregate duration without taking a second clock.
+#[cfg(feature = "detailed_timers")]
+pub(crate) fn log_aggregated_duration(label: &str, duration: std::time::Duration) {
+    if detailed_timer_output_enabled() {
+        saying::say!(label, Green #duration);
+    }
+}
 
 // ---------------------------------------------------------------------------
 //  Counter output mode (feature = "benchmark_counters")
@@ -126,6 +196,7 @@ impl CounterOutputMode {
 
     /// Whether the concise grouped counter summary should be printed after
     /// compilation.
+    #[cfg(feature = "timers")]
     pub(crate) fn emits_counter_summary(self) -> bool {
         matches!(self, Self::Summary)
     }
@@ -220,7 +291,7 @@ macro_rules! counter_observation {
 #[macro_export]
 #[cfg(feature = "timers")]
 macro_rules! timed_stage {
-    ($metric:expr, $expression:expr) => {{
+    ($metric:expr, $expression:expr $(,)?) => {{
         let timing_start = $crate::timing::start_pipeline_timing();
         let timing_result = $expression;
         if let Some(elapsed) = timing_start.elapsed() {
@@ -233,7 +304,7 @@ macro_rules! timed_stage {
 #[macro_export]
 #[cfg(not(feature = "timers"))]
 macro_rules! timed_stage {
-    ($metric:expr, $expression:expr) => {{ $expression }};
+    ($metric:expr, $expression:expr $(,)?) => {{ $expression }};
 }
 
 /// Time one expression and record a stable metric with attribution context.
@@ -243,7 +314,7 @@ macro_rules! timed_stage {
 #[macro_export]
 #[cfg(feature = "timers")]
 macro_rules! timed_stage_attributed {
-    ($metric:expr, $context:expr, $expression:expr) => {{
+    ($metric:expr, $context:expr, $expression:expr $(,)?) => {{
         let timing_start = $crate::timing::start_pipeline_timing();
         let timing_result = $expression;
         if let Some(elapsed) = timing_start.elapsed() {
@@ -261,7 +332,7 @@ macro_rules! timed_stage_attributed {
 #[macro_export]
 #[cfg(not(feature = "timers"))]
 macro_rules! timed_stage_attributed {
-    ($metric:expr, $context:expr, $expression:expr) => {{ $expression }};
+    ($metric:expr, $context:expr, $expression:expr $(,)?) => {{ $expression }};
 }
 
 /// Start a named scope guard that records its metric when the scope ends.
@@ -306,13 +377,15 @@ macro_rules! timing_scope_multi {
 #[cfg(feature = "timers")]
 macro_rules! timing_scope_attributed {
     ($binding:ident, $metric:expr, $context:expr $(,)?) => {
-        let timing_context = if $crate::timing::timing_attribution_active() {
-            $context
-        } else {
-            None
-        };
         #[allow(unused_variables)]
-        let $binding = $crate::timing::PipelineTimingGuardAttributed::new($metric, timing_context);
+        let $binding = $crate::timing::PipelineTimingGuardAttributed::new(
+            $metric,
+            if $crate::timing::timing_attribution_active() {
+                $context
+            } else {
+                None
+            },
+        );
     };
 }
 
@@ -358,171 +431,19 @@ macro_rules! record_attributed_duration {
     ($metric:expr, $duration:expr, $context:expr) => {};
 }
 
-/// Time one frontend stage through an erasing wrapper.
-///
-/// The stage argument is a direct production expression, not a closure. The
-/// metric, prose label and attribution context are only evaluated while
-/// `timers` is active; the disabled expansion is the production expression
-/// itself, so no timing wrapper survives in that build.
+/// Finish a named timing scope exactly once.
 #[macro_export]
 #[cfg(feature = "timers")]
-macro_rules! timed_frontend_stage {
-    ($metric:expr, $prose_label:expr, $context:expr, $stage:expr $(,)?) => {{
-        let timing_start = $crate::timing::start_pipeline_timing();
-        let timing_result = $stage;
-        if let Some(elapsed) = timing_start.elapsed() {
-            let timing_context = if $crate::timing::timing_attribution_active() {
-                $context
-            } else {
-                None
-            };
-            #[allow(unused_variables)]
-            let output_suppressed = $crate::timing::record_pipeline_timing_attributed(
-                $metric,
-                elapsed,
-                timing_context,
-            );
-
-            // Human prose stays gated by detailed_timers for verbose developer output.
-            #[cfg(feature = "detailed_timers")]
-            {
-                if $crate::timing::detailed_prose_enabled(output_suppressed) {
-                    saying::say!($prose_label, Green #elapsed);
-                }
-            }
-        }
-        timing_result
-    }};
-}
-
-#[macro_export]
-#[cfg(not(feature = "timers"))]
-macro_rules! timed_frontend_stage {
-    ($metric:expr, $prose_label:expr, $context:expr, $stage:expr $(,)?) => {{ $stage }};
-}
-
-/// Time one frontend stage and record a child metric from the same duration.
-///
-/// The aggregate metric keeps its existing name and boundary; the child metric
-/// is recorded with the same captured duration so the human report can show
-/// projection or finalization evidence without redefining the aggregate.
-#[macro_export]
-#[cfg(feature = "timers")]
-macro_rules! timed_frontend_stage_with_child {
-    ($metric:expr, $child_metric:expr, $prose_label:expr, $context:expr, $stage:expr $(,)?) => {{
-        let timing_start = $crate::timing::start_pipeline_timing();
-        let timing_result = $stage;
-        if let Some(elapsed) = timing_start.elapsed() {
-            let timing_context = if $crate::timing::timing_attribution_active() {
-                $context
-            } else {
-                None
-            };
-            #[allow(unused_variables)]
-            let output_suppressed = $crate::timing::record_pipeline_timing_multi(
-                &[($metric, timing_context), ($child_metric, timing_context)],
-                elapsed,
-            );
-
-            // Human prose stays gated by detailed_timers for verbose developer output.
-            #[cfg(feature = "detailed_timers")]
-            {
-                if $crate::timing::detailed_prose_enabled(output_suppressed) {
-                    saying::say!($prose_label, Green #elapsed);
-                }
-            }
-        }
-        timing_result
-    }};
-}
-
-#[macro_export]
-#[cfg(not(feature = "timers"))]
-macro_rules! timed_frontend_stage_with_child {
-    ($metric:expr, $child_metric:expr, $prose_label:expr, $context:expr, $stage:expr $(,)?) => {{ $stage }};
-}
-
-/// Record one AST aggregate stage whenever `timers` is active, keeping the
-/// human prose detailed-only.
-///
-/// WHAT: records the stable metric and emits the `MOTH_BENCH timing` line
-///      under `timers`; prints the existing human message only under
-///      `detailed_timers`.
-/// WHY:  the basic summary promotes these existing detailed-only metrics
-///       without double recording when both features are active.
-#[macro_export]
-#[cfg(feature = "timers")]
-macro_rules! timed_ast_stage {
-    ($time:expr, $metric_name:expr, $human_msg:expr) => {{
-        let elapsed = $time.elapsed();
-        #[allow(unused_variables)]
-        let output_suppressed = $crate::timing::record_pipeline_timing($metric_name, elapsed);
-        #[cfg(feature = "detailed_timers")]
-        {
-            if $crate::timing::detailed_prose_enabled(output_suppressed) {
-                saying::say!($human_msg, Green #elapsed);
-            }
-        }
-    }};
-}
-
-#[macro_export]
-#[cfg(not(feature = "timers"))]
-macro_rules! timed_ast_stage {
-    ($time:expr, $metric_name:expr, $human_msg:expr) => {
-        // Nothing
-    };
-}
-
-/// Start a scope-guarded AST aggregate timing that records on every exit.
-///
-/// The guard records the metric with its attribution context when the scope
-/// ends, including early-return error paths. When `timers` is off the
-/// expansion emits no statement and no guard type exists.
-#[macro_export]
-#[cfg(feature = "timers")]
-macro_rules! timed_ast_stage_guard {
-    ($binding:ident, $metric:expr, $context:expr, $prose_label:expr) => {
-        let timing_context = if $crate::timing::timing_attribution_active() {
-            $context
-        } else {
-            None
-        };
-        #[allow(unused_variables)]
-        let $binding =
-            $crate::timing::AstStageTimingGuard::new($metric, timing_context, $prose_label);
+macro_rules! finish_timing_scope {
+    ($binding:expr $(,)?) => {
+        $binding.finish();
     };
 }
 
 #[macro_export]
 #[cfg(not(feature = "timers"))]
-macro_rules! timed_ast_stage_guard {
-    ($binding:ident, $metric:expr, $context:expr, $prose_label:expr) => {};
-}
-
-/// Time one detailed frontend substep through an erasing macro.
-///
-/// The substep argument is a direct production expression, not a closure.
-/// With `detailed_timers` disabled, or with no active detailed channel, the
-/// expansion executes that expression without a clock read.
-#[macro_export]
-#[cfg(feature = "detailed_timers")]
-macro_rules! timed_frontend_substep {
-    ($metric:expr, $prose_label:expr, $substep:expr $(,)?) => {{
-        if let Some(timing_start) = $crate::timing::start_detailed_timing() {
-            let timing_result = $substep;
-            $crate::benchmark_timer_log!(timing_start, $metric, $prose_label);
-            timing_result
-        } else {
-            $substep
-        }
-    }};
-}
-
-#[macro_export]
-#[cfg(not(feature = "detailed_timers"))]
-macro_rules! timed_frontend_substep {
-    ($metric:expr, $prose_label:expr, $substep:expr $(,)?) => {{ $substep }};
+macro_rules! finish_timing_scope {
+    ($binding:expr $(,)?) => {};
 }
 
 /// Start the command-level timing collection scope with an explicit command kind.
@@ -551,7 +472,7 @@ macro_rules! command_timing_scope {
 /// neither the session nor the expression is evaluated.
 #[macro_export]
 #[cfg(feature = "timers")]
-macro_rules! command_timing_finish {
+macro_rules! finish_command_timing {
     ($session:expr, $succeeded:expr) => {
         $session.render_summary($succeeded);
     };
@@ -559,7 +480,7 @@ macro_rules! command_timing_finish {
 
 #[macro_export]
 #[cfg(not(feature = "timers"))]
-macro_rules! command_timing_finish {
+macro_rules! finish_command_timing {
     ($session:expr, $succeeded:expr) => {};
 }
 

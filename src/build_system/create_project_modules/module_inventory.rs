@@ -60,6 +60,8 @@ struct ModuleCompilationJobDraft {
     entry_point: PathBuf,
     string_table_base_len: usize,
     prepared: PreparedModule,
+    #[cfg(feature = "timers")]
+    timing_module_key: crate::timing::TimingModuleKey,
     #[cfg(test)]
     input_files: Vec<super::prepared_source::PreparedSourceInput>,
 }
@@ -78,6 +80,8 @@ pub(crate) struct ModuleCompilationJob {
     pub(crate) entry_point: PathBuf,
     pub(crate) string_table_base_len: usize,
     pub(crate) prepared: PreparedModule,
+    #[cfg(feature = "timers")]
+    pub(crate) timing_module_key: crate::timing::TimingModuleKey,
     #[cfg(test)]
     pub(crate) input_files: Vec<super::prepared_source::PreparedSourceInput>,
 }
@@ -430,6 +434,8 @@ fn order_discovered_modules_by_compile_waves(
                 entry_point: draft.entry_point,
                 string_table_base_len: draft.string_table_base_len,
                 prepared: draft.prepared,
+                #[cfg(feature = "timers")]
+                timing_module_key: draft.timing_module_key,
                 #[cfg(test)]
                 input_files: draft.input_files,
             });
@@ -512,20 +518,33 @@ fn discover_modules_serial_provider_capable(
                 )
             })?;
 
+        #[cfg(feature = "timers")]
+        let stable_origin = project_module_graph
+            .node(seed.module_id)
+            .stable_origin()
+            .clone();
+        #[cfg(feature = "timers")]
+        let timing_logical_module_path = stable_origin.logical_module_path().to_owned();
+        #[cfg(feature = "timers")]
+        let timing_module_key = crate::timing::register_timing_module_for_preparation(
+            timing_boundary,
+            seed.module_id.index() as u32,
+            &timing_logical_module_path,
+        );
+
         let fork = string_table.fork_for_module();
         let (local_string_table, string_table_base_len) = fork.into_parts();
         let preparation_context = ModulePreparationContext {
             style_directives,
             project_path_resolver: Some(project_path_resolver.clone()),
         };
+        #[cfg(not(feature = "timers"))]
         let stable_origin = project_module_graph
             .node(seed.module_id)
             .stable_origin()
             .clone();
         #[cfg(feature = "timers")]
-        let timing_context = Some(crate::timing::TimingContext::for_module(
-            crate::timing::TimingModuleKey::new(timing_boundary, seed.module_id.index() as u32),
-        ));
+        let timing_context = Some(crate::timing::TimingContext::for_module(timing_module_key));
         let mut syntax = preparation_context.begin_syntax_discovery(
             stable_origin,
             source_origin_lookup,
@@ -634,6 +653,12 @@ fn discover_modules_serial_provider_capable(
             }
         }
         let prepared = syntax.finish()?;
+        #[cfg(feature = "timers")]
+        crate::timing::finalize_timing_module_source_facts(
+            timing_module_key,
+            prepared.source_file_count as u64,
+            prepared.source_byte_count as u64,
+        );
         let graph_location_remap =
             string_table.merge_delta_from(&prepared.string_table, string_table_base_len);
         for edge in &mut resolved_edges[module_edge_start..] {
@@ -656,6 +681,8 @@ fn discover_modules_serial_provider_capable(
             entry_point: seed.entry_path.clone(),
             string_table_base_len,
             prepared,
+            #[cfg(feature = "timers")]
+            timing_module_key,
             #[cfg(test)]
             input_files,
         });

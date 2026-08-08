@@ -39,6 +39,8 @@ pub struct FrontendBenchmarkOptions {
 /// Report produced by a successful frontend benchmark run.
 #[derive(Debug, Clone)]
 pub struct FrontendBenchmarkReport {
+    /// Timing observation schema used by the stage list.
+    pub timing_schema_version: u32,
     pub total_ms: f64,
     pub warning_count: usize,
     pub warning_codes: Vec<String>,
@@ -96,11 +98,11 @@ pub fn run_frontend_benchmark(
     // fail as tooling when another owner is active, never compile into that
     // owner's snapshot and then report misleading stage timings.
     #[cfg(feature = "timers")]
-    let timing_session = crate::compiler_frontend::compiler_messages::compiler_dev_logging::
-        start_raw_benchmark_collection(true)
-        .map_err(|error| FrontendBenchmarkError {
+    let timing_session = crate::timing::start_raw_benchmark_collection(true).map_err(|error| {
+        FrontendBenchmarkError {
             message: format!("Could not start frontend benchmark timing session: {error}"),
-        })?;
+        }
+    })?;
 
     let path = options
         .entry_path
@@ -160,7 +162,7 @@ pub fn run_frontend_benchmark(
     };
 
     #[cfg(feature = "timers")]
-    let raw_observations = timing_session.finish();
+    let snapshot = timing_session.finish();
 
     #[cfg(not(feature = "timers"))]
     let stages: Vec<FrontendBenchmarkStage> = Vec::new();
@@ -183,17 +185,18 @@ pub fn run_frontend_benchmark(
         .collect();
 
     #[cfg(feature = "timers")]
-    let stages = raw_observations
+    let stages = snapshot
         .timings
         .into_iter()
-        .map(|observation| FrontendBenchmarkStage {
-            name: observation.name.to_owned(),
-            duration_ms: observation.duration.as_secs_f64() * 1000.0,
+        .filter(|aggregate| aggregate.samples > 0)
+        .map(|aggregate| FrontendBenchmarkStage {
+            name: aggregate.metric.descriptor().stable_name.to_owned(),
+            duration_ms: aggregate.total.as_secs_f64() * 1000.0,
         })
         .collect();
 
     #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
-    let counters = raw_observations
+    let counters = snapshot
         .counters
         .into_iter()
         .map(|metric| FrontendBenchmarkCounter {
@@ -202,7 +205,13 @@ pub fn run_frontend_benchmark(
         })
         .collect();
 
+    #[cfg(feature = "timers")]
+    let timing_schema_version = crate::benchmarking::TIMING_SCHEMA_VERSION;
+    #[cfg(not(feature = "timers"))]
+    let timing_schema_version = 0;
+
     Ok(FrontendBenchmarkReport {
+        timing_schema_version,
         total_ms,
         warning_count,
         warning_codes,

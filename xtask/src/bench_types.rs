@@ -12,7 +12,14 @@ use std::num::NonZeroUsize;
 ///
 /// Increment this only when measurement methodology or workload fingerprint
 /// semantics change enough to make direct comparisons invalid.
-pub const BENCHMARK_PROTOCOL_VERSION: u32 = 3;
+pub const BENCHMARK_PROTOCOL_VERSION: u32 = 4;
+
+/// Timing observation schema expected from the compiler benchmark facade.
+///
+/// The compiler owns the value; xtask mirrors it through the public
+/// in-process benchmark API so CLI and frontend observations share one
+/// comparability identity.
+pub const BENCHMARK_TIMING_SCHEMA_VERSION: u32 = moth::benchmarking::TIMING_SCHEMA_VERSION;
 
 /// Selects which manifest cases proceed to measured benchmark iterations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -181,6 +188,8 @@ pub struct BenchmarkMeasurementIdentity {
     pub source_fingerprint: String,
     /// Case measurement fingerprint covering source, protocol, runner and expectation.
     pub measurement_fingerprint: String,
+    /// Timing schema used to produce the observations.
+    pub timing_schema_version: u32,
 }
 
 /// Closed set of public benchmark groups.
@@ -284,6 +293,8 @@ pub struct BenchmarkMetric {
 /// Local-only detailed observations for one benchmark case.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct BenchmarkCaseObservations {
+    /// Timing schema used by the stage observations; zero marks legacy data.
+    pub timing_schema_version: u32,
     pub stage_timings: Vec<BenchmarkMetric>,
     pub counters: Vec<BenchmarkMetric>,
 }
@@ -485,6 +496,10 @@ pub struct BenchmarkComparison {
     pub measurement_changed_case_count: usize,
     /// Measurement-changed stable IDs in current manifest order.
     pub measurement_changed_case_ids: Vec<String>,
+    /// Number of matching stable IDs whose timing schema changed.
+    pub timing_schema_changed_case_count: usize,
+    /// Timing-schema-changed stable IDs in current manifest order.
+    pub timing_schema_changed_case_ids: Vec<String>,
     /// Per-case comparisons for overlapping cases.
     pub cases: Vec<BenchmarkCaseComparison>,
     /// Per-current-group comparison counts and average movement.
@@ -522,32 +537,25 @@ impl BenchmarkComparison {
         thresholds: &BenchmarkThresholds,
     ) -> Self {
         let Some(previous_cases) = previous else {
-            return Self::baseline(
-                current.len(),
-                0,
-                false,
-                Vec::new(),
-                Vec::new(),
-                current,
-                None,
-            );
+            return Self::baseline(false, Vec::new(), Vec::new(), Vec::new(), current, None);
         };
 
         let matched_cases = match_cases(current, previous_cases, thresholds);
         let cases = matched_cases.comparable;
         let workload_changed_case_ids = matched_cases.workload_changed_case_ids;
         let measurement_changed_case_ids = matched_cases.measurement_changed_case_ids;
+        let timing_schema_changed_case_ids = matched_cases.timing_schema_changed_case_ids;
         let workload_changed_case_count = workload_changed_case_ids.len();
         let measurement_changed_case_count = measurement_changed_case_ids.len();
+        let timing_schema_changed_case_count = timing_schema_changed_case_ids.len();
         let case_set_changed = case_ids_changed(current, previous_cases);
 
         if cases.is_empty() {
             return Self::baseline(
-                current.len(),
-                previous_cases.len(),
                 case_set_changed,
                 workload_changed_case_ids,
                 measurement_changed_case_ids,
+                timing_schema_changed_case_ids,
                 current,
                 Some(previous_cases),
             );
@@ -594,6 +602,8 @@ impl BenchmarkComparison {
             workload_changed_case_ids,
             measurement_changed_case_count,
             measurement_changed_case_ids,
+            timing_schema_changed_case_count,
+            timing_schema_changed_case_ids,
             cases,
             groups,
         };
@@ -603,14 +613,15 @@ impl BenchmarkComparison {
     }
 
     fn baseline(
-        current_case_count: usize,
-        previous_case_count: usize,
         case_set_changed: bool,
         workload_changed_case_ids: Vec<String>,
         measurement_changed_case_ids: Vec<String>,
+        timing_schema_changed_case_ids: Vec<String>,
         current: &[BenchmarkCaseResult],
         previous: Option<&[BenchmarkCaseResult]>,
     ) -> Self {
+        let current_case_count = current.len();
+        let previous_case_count = previous.map_or(0, <[BenchmarkCaseResult]>::len);
         let groups = previous
             .map(|previous_cases| compare_groups(current, previous_cases, &[]))
             .unwrap_or_else(|| baseline_groups(current));
@@ -629,6 +640,8 @@ impl BenchmarkComparison {
             workload_changed_case_ids,
             measurement_changed_case_count: measurement_changed_case_ids.len(),
             measurement_changed_case_ids,
+            timing_schema_changed_case_count: timing_schema_changed_case_ids.len(),
+            timing_schema_changed_case_ids,
             cases: Vec::new(),
             groups,
             current_suite_average_ms: Self::mean_of_case_means(current),
@@ -709,6 +722,10 @@ impl BenchmarkComparison {
             self.measurement_changed_case_ids.len(),
             self.measurement_changed_case_count
         );
+        debug_assert_eq!(
+            self.timing_schema_changed_case_ids.len(),
+            self.timing_schema_changed_case_count
+        );
     }
 
     /// Format the run-entry summary line for display in monthly summaries.
@@ -723,6 +740,15 @@ impl BenchmarkComparison {
     ///   stayed within their thresholds.
     /// - terse faster/slower/mixed/case-set-changed lines otherwise.
     pub fn format_run_change_line(&self) -> String {
+        if !self.case_set_changed
+            && self.compared_case_count == 0
+            && self.workload_changed_case_count == 0
+            && self.measurement_changed_case_count == 0
+            && self.timing_schema_changed_case_count > 0
+        {
+            return self.format_timing_schema_changed_segment();
+        }
+
         let timing_line = if self.case_set_changed {
             self.format_case_set_changed_line()
         } else {
@@ -767,7 +793,10 @@ impl BenchmarkComparison {
             }
         };
 
-        if self.workload_changed_case_count == 0 && self.measurement_changed_case_count == 0 {
+        if self.workload_changed_case_count == 0
+            && self.measurement_changed_case_count == 0
+            && self.timing_schema_changed_case_count == 0
+        {
             timing_line
         } else {
             let mut segments = Vec::new();
@@ -776,6 +805,9 @@ impl BenchmarkComparison {
             }
             if self.measurement_changed_case_count > 0 {
                 segments.push(self.format_measurement_changed_segment());
+            }
+            if self.timing_schema_changed_case_count > 0 {
+                segments.push(self.format_timing_schema_changed_segment());
             }
             format!("{timing_line}; {}", segments.join("; "))
         }
@@ -796,6 +828,8 @@ impl BenchmarkComparison {
         } else {
             let comparison_state = if self.workload_changed_case_count > 0 {
                 "no comparable unchanged workloads"
+            } else if self.timing_schema_changed_case_count > 0 {
+                "timing schema changed"
             } else {
                 "no shared cases"
             };
@@ -837,6 +871,21 @@ impl BenchmarkComparison {
         )
     }
 
+    fn format_timing_schema_changed_segment(&self) -> String {
+        let case_label = if self.timing_schema_changed_case_count == 1 {
+            "case"
+        } else {
+            "cases"
+        };
+
+        format!(
+            "timing schema changed: {} {} ({})",
+            self.timing_schema_changed_case_count,
+            case_label,
+            self.timing_schema_changed_case_ids.join(", ")
+        )
+    }
+
     /// Compare a quick current subset against only the same previous IDs.
     ///
     /// Intentional selection differences do not become removals, while a
@@ -864,6 +913,7 @@ struct MatchedCases {
     comparable: Vec<BenchmarkCaseComparison>,
     workload_changed_case_ids: Vec<String>,
     measurement_changed_case_ids: Vec<String>,
+    timing_schema_changed_case_ids: Vec<String>,
 }
 
 fn match_cases(
@@ -874,6 +924,7 @@ fn match_cases(
     let mut cases = Vec::new();
     let mut workload_changed_case_ids = Vec::new();
     let mut measurement_changed_case_ids = Vec::new();
+    let mut timing_schema_changed_case_ids = Vec::new();
 
     for current_case in current {
         let Some(previous_case) = previous
@@ -894,6 +945,13 @@ fn match_cases(
                 continue;
             }
         };
+
+        if current_identity.timing_schema_version != BENCHMARK_TIMING_SCHEMA_VERSION
+            || previous_identity.timing_schema_version != BENCHMARK_TIMING_SCHEMA_VERSION
+        {
+            timing_schema_changed_case_ids.push(current_case.case_id.clone());
+            continue;
+        }
 
         if current_identity.source_fingerprint != previous_identity.source_fingerprint {
             workload_changed_case_ids.push(current_case.case_id.clone());
@@ -930,6 +988,7 @@ fn match_cases(
         comparable: cases,
         workload_changed_case_ids,
         measurement_changed_case_ids,
+        timing_schema_changed_case_ids,
     }
 }
 
@@ -1351,109 +1410,7 @@ pub fn calculate_stage_movement(comparison: &BenchmarkComparison) -> Vec<Benchma
 
 /// Convert a raw stage metric name to a short friendly label.
 pub fn friendly_stage_label(stage_name: &str) -> &str {
-    match stage_name {
-        // Dotted top-level command-phase metrics (timers feature).
-        "command.check.path_validation" => "check path",
-        "command.check.builder_construction" => "check builder",
-        "command.check.bootstrap" => "check bootstrap",
-        "command.check.compile_project_frontend" => "check frontend",
-        "command.check.message_rendering" => "check render",
-        "command.check.total" => "check total",
-        "command.build.output_write" => "build output",
-        "command.build.total" => "build total",
-        "build_project.path_validation" => "build path",
-        "build_project.bootstrap" => "build bootstrap",
-        "build_project.compile_project_frontend" => "build frontend",
-        "build_project.backend" => "backend",
-        "build_project.total" => "build project",
-        // Dotted bootstrap and output metrics.
-        "bootstrap.total" => "bootstrap",
-        "bootstrap.config_init" => "config init",
-        "bootstrap.symbol_preseed" => "symbol preseed",
-        "bootstrap.backend_libraries" => "backend libraries",
-        "bootstrap.style_directives" => "style directives",
-        "bootstrap.load_project_config" => "load config",
-        "bootstrap.backend_config_validate" => "backend config",
-        "output.write_total" => "output write",
-        "output.prepare_cleanup" => "output prep",
-        "output.create_root" => "output root",
-        "output.emit_files_total" => "emit files",
-        "output.emit_file" => "emit file",
-        "output.finalize_cleanup" => "output cleanup",
-        // Dotted Stage 0 and config metrics.
-        "config.load_total" => "config load",
-        "config.file_exists_check" => "config exists",
-        "config.parse_project_config_file" => "config parse",
-        "config.parse.total" => "config parse",
-        "config.parse.canonicalize" => "config path",
-        "config.parse.path_resolver" => "config resolver",
-        "config.parse.source_set" => "config sources",
-        "config.parse.prepare_files_total" => "config files",
-        "config.parse.headers" => "config headers",
-        "config.parse.dependency_sort" => "config sort",
-        "config.parse.ast" => "config ast",
-        "stage0.single_file.total" => "stage0 single",
-        "stage0.single_file.entry_canonicalize" => "entry path",
-        "stage0.single_file.path_resolver" => "path resolver",
-        "stage0.single_file.reachable_files" => "reachable files",
-        "stage0.single_file.string_table_fork" => "string table fork",
-        "stage0.single_file.compile_module" => "compile module",
-        "stage0.single_file.merge_delta" => "merge delta",
-        "stage0.directory.total" => "stage0 dir",
-        "stage0.directory.path_resolver" => "path resolver",
-        "stage0.directory.module_inventory" => "module inventory",
-        "stage0.directory.module_compile_batch" => "module compile",
-        "stage0.directory.result_sort" => "result sort",
-        "stage0.directory.failure_aggregation" => "failure aggregation",
-        "stage0.directory.success_merge" => "success merge",
-        "stage0.module_root_discovery.total" => "module roots",
-        "stage0.reachable_discovery.total" => "reachable discovery",
-        "stage0.reachable_discovery.import_scan" => "import scan",
-        "stage0.reachable_discovery.import_resolve" => "import resolve",
-        "stage0.reachable_discovery.provider_imports" => "provider imports",
-        "stage0.reachable_discovery.source_load" => "source load",
-        // Dotted frontend-stage metrics (timers feature).
-        "frontend.module.total" => "frontend module",
-        "frontend.file_prepare" => "file prep",
-        "frontend.dependency_sort" => "sort",
-        "frontend.ast" => "ast",
-        "frontend.hir" => "hir",
-        "frontend.borrow" => "borrow",
-        // Dotted backend metrics.
-        "backend.html.total" => "html backend",
-        "backend.html.site_config" => "site config",
-        "backend.html.document_config" => "document config",
-        "backend.html.entry_path_plan" => "entry plan",
-        "backend.html.module_compile_total" => "html modules",
-        "backend.html.external_runtime_assets" => "runtime assets",
-        "backend.html.external_runtime_glue" => "runtime glue",
-        "backend.html.tracked_assets_plan" => "asset plan",
-        "backend.html.tracked_assets_emit" => "asset emit",
-        "backend.js.lower_hir" => "js lower",
-        "backend.js.lower_linked_hir" => "js linked lower",
-        "backend.js.generate_module_glue" => "js glue",
-        "backend.js.render_html_document" => "html render",
-        "backend.wasm.total" => "wasm backend",
-        "backend.wasm.lower_wasm" => "wasm lower",
-        "backend.wasm.bootstrap_js" => "wasm bootstrap",
-        "backend.wasm.artifact_assembly" => "wasm artifacts",
-        // Legacy detailed_timers metric names.
-        "tokenize_ms" => "tokenize",
-        "headers_ms" => "headers",
-        "file_prepare_ms" => "file prep",
-        "dependency_sort_ms" => "sort",
-        "ast_ms" => "ast",
-        "ast_build_environment_ms" => "ast env",
-        "ast_emit_nodes_ms" => "ast emit",
-        "ast_finalize_ms" => "ast finalize",
-        "ast_function_body_parse_ms" => "ast func bodies",
-        "ast_start_body_parse_ms" => "ast start body",
-        "ast_const_template_parse_ms" => "ast const parse",
-        "ast_const_template_fold_ms" => "ast const fold",
-        "hir_ms" => "hir",
-        "borrow_ms" => "borrow",
-        _ => stage_name,
-    }
+    moth::benchmarking::timing_metric_label(stage_name)
 }
 
 /// Format a stage movement line for terminal or summary output.

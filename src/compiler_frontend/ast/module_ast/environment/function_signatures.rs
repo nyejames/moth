@@ -47,7 +47,7 @@ use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 
 #[cfg(feature = "detailed_timers")]
-use crate::compiler_frontend::compiler_messages::compiler_dev_logging::detailed_timer_output_enabled;
+use crate::timing::detailed_timer_output_enabled;
 
 use rustc_hash::FxHashMap;
 use std::rc::Rc;

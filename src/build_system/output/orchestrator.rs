@@ -39,7 +39,10 @@ pub(crate) fn write_project_outputs(
     options: &WriteOptions,
     string_table: &StringTable,
 ) -> Result<(), CompilerMessages> {
-    timing_scope!(timing_guard_output_write_total, "output.write.total");
+    timing_scope!(
+        timing_guard_output_write_total,
+        crate::timing::TimingMetric::OutputWriteTotal
+    );
 
     // Keep the aggregate output timing visible even when filesystem validation or writes fail.
     write_project_outputs_inner(project, options, string_table)

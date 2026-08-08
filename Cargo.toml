@@ -9,11 +9,13 @@ resolver = "2"
 
 [features]
 # Timer and developer-instrumentation features. `timers` enables the
-# command/build/dev timing collector and the concise human summary;
-# `detailed_timers` adds verbose inline prose and detailed AST substage
-# timings; `benchmark_counters` adds high-volume local diagnostic counters
-# when combined with `timers`. A build without `timers` performs no
-# timer-system runtime work (see `just timers-erasure-check`).
+# schema-v1 command/build/dev timing collector, final aggregate benchmark
+# records and concise human summary; `detailed_timers` adds verbose inline
+# prose and detailed AST substage timings; `benchmark_counters` enables
+# high-volume local diagnostic counters, including direct counter output in a
+# counter-only build and collector-backed counters when combined with
+# `timers`. A build without `timers` performs no timer-system runtime work (see
+# `just timers-erasure-check`).
 timers = []
 detailed_timers = ["timers"]
 benchmark_counters = []

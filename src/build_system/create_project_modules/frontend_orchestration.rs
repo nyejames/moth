@@ -9,7 +9,7 @@ use crate::build_system::build::{
     ModuleExternalImport, ModuleLinkFacts, ModuleRootActivity, ModuleSemanticDraft,
     ResolvedConstFragment,
 };
-use crate::timed_frontend_stage;
+use crate::timed_stage_attributed;
 
 use crate::builder_surface::external_import_providers::provider::BuilderRuntimePackageMetadata;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
@@ -430,8 +430,10 @@ impl ModulePreparationContext<'_> {
         // 2. Prepare all files against one local string-table per worker chunk. Moth files
         //    parse retained Stage 0 tokens, Moth template tokenizes its body once and plain Markdown
         //    bypasses tokenization. Merge/remap once before aggregating header syntax.
-        let (prepared_header_syntax, file_warnings) =
-            timed_frontend_stage!("frontend.prepare", "Files Prepared in: ", timing_context, {
+        let (prepared_header_syntax, file_warnings) = timed_stage_attributed!(
+            crate::timing::TimingMetric::FrontendPrepare,
+            timing_context,
+            {
                 self.prepare_module_files(
                     &mut string_table,
                     &source_files,
@@ -440,7 +442,8 @@ impl ModulePreparationContext<'_> {
                     active_root_role,
                     source_byte_count,
                 )
-            },)?;
+            }
+        )?;
         warnings.extend(file_warnings);
 
         // 3. Build the immutable per-file source-origin side table from the origin input. For
@@ -929,9 +932,8 @@ impl ModuleSyntaxDiscovery<'_> {
             runtime_fragment_offset: 0,
         };
 
-        let output = match timed_frontend_stage!(
-            "frontend.prepare",
-            "Files Prepared in: ",
+        let output = match timed_stage_attributed!(
+            crate::timing::TimingMetric::FrontendPrepare,
             self.timing_context,
             CompilerFrontend::prepare_file_frontend_local(
                 &prepare_context,
@@ -975,9 +977,8 @@ impl ModuleSyntaxDiscovery<'_> {
             .map(|(_, output)| output)
             .collect::<Vec<_>>();
         let source_file_count = prepared_outputs.len();
-        let prepared_header_syntax = timed_frontend_stage!(
-            "frontend.prepare",
-            "Files Prepared in: ",
+        let prepared_header_syntax = timed_stage_attributed!(
+            crate::timing::TimingMetric::FrontendPrepare,
             self.timing_context,
             prepare_header_syntax(prepared_outputs, &mut self.string_table),
         )
@@ -1075,9 +1076,8 @@ impl FrontendModuleBuildContext<'_> {
 
         let compile_result = (|| {
             // 1. Bind retained header syntax against provider interfaces.
-            let module_headers = timed_frontend_stage!(
-                "frontend.bind_headers",
-                "Headers bound in: ",
+            let module_headers = timed_stage_attributed!(
+                crate::timing::TimingMetric::FrontendBindHeaders,
                 timing_context,
                 {
                     Self::bind_retained_headers(
@@ -1087,7 +1087,7 @@ impl FrontendModuleBuildContext<'_> {
                         self.source_provider_imports,
                         &warnings,
                     )
-                },
+                }
             )?;
 
             let capacity_estimate = record_frontend_capacity_estimate(
@@ -1097,11 +1097,10 @@ impl FrontendModuleBuildContext<'_> {
             );
 
             // 2. Resolve dependencies and sort headers for linear processing.
-            let sorted = timed_frontend_stage!(
-                "frontend.order_declarations",
-                "Dependency graph created in: ",
+            let sorted = timed_stage_attributed!(
+                crate::timing::TimingMetric::FrontendOrderDeclarations,
                 timing_context,
-                Self::sort_headers(&mut compiler, module_headers, &warnings),
+                Self::sort_headers(&mut compiler, module_headers, &warnings)
             )?;
 
             let root_activity = ModuleRootActivity {
@@ -1212,9 +1211,8 @@ impl FrontendModuleBuildContext<'_> {
             //    borrow validation, while provenance, re-export interfaces, cross-module call
             //    lowering and future generated-generic summaries remain for later phases.
             //    Folded constant values are now owned by each constant declaration record.
-            let public_interface_build = timed_frontend_stage!(
-                "frontend.public_interface.project",
-                "Public interface built in: ",
+            let public_interface_build = timed_stage_attributed!(
+                crate::timing::TimingMetric::FrontendPublicInterfaceProject,
                 timing_context,
                 PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {
                     export_seed,
@@ -1306,11 +1304,10 @@ impl FrontendModuleBuildContext<'_> {
                 .collect::<Vec<_>>();
 
             // 6. Lower AST to Higher-level Intermediate Representation (HIR).
-            let hir_lowering = timed_frontend_stage!(
-                "frontend.hir",
-                "HIR generated in: ",
+            let hir_lowering = timed_stage_attributed!(
+                crate::timing::TimingMetric::FrontendHir,
                 timing_context,
-                Self::lower_hir(&mut compiler, module_ast, &warnings, function_origin_lookup),
+                Self::lower_hir(&mut compiler, module_ast, &warnings, function_origin_lookup)
             )?;
             let HirLoweringResult {
                 mut hir_module,
@@ -1328,11 +1325,10 @@ impl FrontendModuleBuildContext<'_> {
             }
 
             // 8. Run static analysis (Borrow Checker).
-            let bootstrap_borrow_analysis = timed_frontend_stage!(
-                "frontend.borrow.initial",
-                "Borrow checking completed in: ",
+            let bootstrap_borrow_analysis = timed_stage_attributed!(
+                crate::timing::TimingMetric::FrontendBorrowInitial,
                 timing_context,
-                Self::check_borrows(&compiler, &hir_module, &warnings),
+                Self::check_borrows(&compiler, &hir_module, &warnings)
             )?;
             install_exact_concrete_call_summaries(
                 &mut materialisation_context_builder,
@@ -1340,9 +1336,8 @@ impl FrontendModuleBuildContext<'_> {
                 &bootstrap_borrow_analysis,
             )
             .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
-            timed_frontend_stage!(
-                "frontend.generated.materialise",
-                "Generated functions materialized in: ",
+            timed_stage_attributed!(
+                crate::timing::TimingMetric::FrontendGeneratedMaterialise,
                 timing_context,
                 self.materialise_generated_request_roots(
                     &generated_request_ids,
@@ -1352,7 +1347,7 @@ impl FrontendModuleBuildContext<'_> {
                     entry_file_path,
                     #[cfg(feature = "timers")]
                     timing_context,
-                ),
+                )
             )?;
             hir_module.generated_call_summaries = generated_worklist
                 .summaries_for(
@@ -1370,11 +1365,10 @@ impl FrontendModuleBuildContext<'_> {
                 .max(1);
             let mut stable_borrow_analysis = None;
             for _ in 0..convergence_limit {
-                let borrow_analysis = timed_frontend_stage!(
-                    "frontend.borrow.converge",
-                    "Exact generated-call borrow checking completed in: ",
+                let borrow_analysis = timed_stage_attributed!(
+                    crate::timing::TimingMetric::FrontendBorrowConverge,
                     timing_context,
-                    Self::check_borrows(&compiler, &hir_module, &warnings),
+                    Self::check_borrows(&compiler, &hir_module, &warnings)
                 )?;
                 let concrete_summaries_changed = install_exact_concrete_call_summaries(
                     &mut materialisation_context_builder,
@@ -1382,15 +1376,14 @@ impl FrontendModuleBuildContext<'_> {
                     &borrow_analysis,
                 )
                 .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
-                let generated_summaries_changed = timed_frontend_stage!(
-                    "frontend.generated.borrow_recheck",
-                    "Generated borrow rechecks completed in: ",
+                let generated_summaries_changed = timed_stage_attributed!(
+                    crate::timing::TimingMetric::FrontendGeneratedBorrowRecheck,
                     timing_context,
                     self.recheck_generated_borrows(
                         &mut generated_worklist,
                         materialisation_context_builder.context(),
                         &compiler,
-                    ),
+                    )
                 )?;
                 hir_module.generated_call_summaries = generated_worklist
                     .summaries_for(
@@ -1427,9 +1420,8 @@ impl FrontendModuleBuildContext<'_> {
             // generated summaries belong to the future sidecar worklist, distinct from these
             // direct concrete summaries. Private functions and implicit start retain local
             // summaries but never enter declaration records.
-            let public_interface = timed_frontend_stage!(
-                "frontend.public_interface.finalise",
-                "Public interface finalized in: ",
+            let public_interface = timed_stage_attributed!(
+                crate::timing::TimingMetric::FrontendPublicInterfaceFinalise,
                 timing_context,
                 {
                     let local_public_interface = public_interface_draft
@@ -1445,7 +1437,7 @@ impl FrontendModuleBuildContext<'_> {
                     .map_err(|error| {
                         CompilerMessages::from_error_ref(error, &compiler.string_table)
                     })
-                },
+                }
             )?;
             let materialisation_context = materialisation_context_builder
                 .freeze(&public_interface)

@@ -1,47 +1,42 @@
 //! Checked benchmark observation parsing and aggregation.
 //!
-//! WHAT: validates stable live timing and counter records, retains an explicit
-//! legacy-history parser, and checks measured metric sets before averaging.
+//! WHAT: validates stable live timing and counter records, and checks measured
+//! metric sets before averaging.
 //! WHY: malformed or incomplete timing evidence must stop a benchmark before
 //! its result can reach local history or tracked summaries.
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 
-use crate::bench_types::{BenchmarkCaseObservations, BenchmarkMetric};
-use crate::benchmark_manifest::CliBenchmarkCommand;
-
-const LEGACY_STAGE_PREFIXES: [(&str, &str); 10] = [
-    ("Tokenized in:", "tokenize_ms"),
-    ("Headers Parsed in:", "headers_ms"),
-    ("Files Prepared in:", "file_prepare_ms"),
-    ("Dependency graph created in:", "dependency_sort_ms"),
-    ("AST created in:", "ast_ms"),
-    ("HIR generated in:", "hir_ms"),
-    ("Borrow checking completed in:", "borrow_ms"),
-    (
-        "AST/build environment completed in:",
-        "ast_build_environment_ms",
-    ),
-    ("AST/emit nodes completed in:", "ast_emit_nodes_ms"),
-    ("AST/finalize completed in:", "ast_finalize_ms"),
-];
+use crate::bench_types::{
+    BENCHMARK_TIMING_SCHEMA_VERSION, BenchmarkCaseObservations, BenchmarkMetric,
+};
+use crate::benchmark_manifest::{BenchmarkRunner, CliBenchmarkCommand};
 
 const STABLE_TIMING_PREFIX: &str = "MOTH_BENCH timing";
 const STABLE_TIMING_FIELDS_PREFIX: &str = "MOTH_BENCH timing ";
+const STABLE_TIMING_SCHEMA_PREFIX: &str = "MOTH_BENCH timing-schema ";
 const STABLE_COUNTER_PREFIX: &str = "MOTH_BENCH counter";
 const STABLE_COUNTER_FIELDS_PREFIX: &str = "MOTH_BENCH counter ";
-
-/// Selects whether observations come from a live command or old captured output.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum BenchmarkObservationSource {
-    LiveCli(CliBenchmarkCommand),
-    LegacyHistory,
-}
 
 /// A malformed or internally inconsistent benchmark observation set.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum BenchmarkObservationError {
+    MalformedTimingSchemaLine {
+        line: String,
+    },
+    DuplicateTimingSchema,
+    MissingTimingSchema,
+    UnsupportedTimingSchema {
+        version: u32,
+    },
+    TimingSchemaMismatch {
+        expected: u32,
+        actual: u32,
+    },
+    DuplicateTimingMetric {
+        metric_name: String,
+    },
     MalformedTimingLine {
         line: String,
     },
@@ -52,6 +47,13 @@ pub(crate) enum BenchmarkObservationError {
         metric_kind: &'static str,
         metric_name: String,
     },
+    UnknownTimingMetric {
+        metric_name: String,
+    },
+    TimingMetricOutOfOrder {
+        previous_metric_name: String,
+        metric_name: String,
+    },
     InvalidMetricValue {
         metric_kind: &'static str,
         metric_name: String,
@@ -60,6 +62,7 @@ pub(crate) enum BenchmarkObservationError {
     MissingRequiredTiming {
         metric_name: &'static str,
     },
+    MissingTimingMetrics,
     MissingFrontendStages,
     NoMeasuredIterations,
     TimingMetricSetMismatch {
@@ -76,6 +79,39 @@ pub(crate) enum BenchmarkObservationError {
 impl Display for BenchmarkObservationError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::MalformedTimingSchemaLine { line } => {
+                write!(
+                    formatter,
+                    "malformed MOTH_BENCH timing-schema record: {line}"
+                )
+            }
+            Self::DuplicateTimingSchema => {
+                write!(
+                    formatter,
+                    "found more than one MOTH_BENCH timing-schema record"
+                )
+            }
+            Self::MissingTimingSchema => {
+                write!(formatter, "missing MOTH_BENCH timing-schema record")
+            }
+            Self::UnsupportedTimingSchema { version } => {
+                write!(
+                    formatter,
+                    "unsupported MOTH_BENCH timing schema version {version}"
+                )
+            }
+            Self::TimingSchemaMismatch { expected, actual } => {
+                write!(
+                    formatter,
+                    "timing schema changed: expected {expected}, got {actual}"
+                )
+            }
+            Self::DuplicateTimingMetric { metric_name } => {
+                write!(
+                    formatter,
+                    "timing metric '{metric_name}' was emitted more than once"
+                )
+            }
             Self::MalformedTimingLine { line } => {
                 write!(formatter, "malformed MOTH_BENCH timing record: {line}")
             }
@@ -91,6 +127,16 @@ impl Display for BenchmarkObservationError {
                     "{metric_kind} metric name must be non-empty and contain no whitespace or control characters, got '{metric_name}'"
                 )
             }
+            Self::UnknownTimingMetric { metric_name } => {
+                write!(formatter, "unknown timing schema metric '{metric_name}'")
+            }
+            Self::TimingMetricOutOfOrder {
+                previous_metric_name,
+                metric_name,
+            } => write!(
+                formatter,
+                "timing metric '{metric_name}' was emitted after '{previous_metric_name}' outside schema order"
+            ),
             Self::InvalidMetricValue {
                 metric_kind,
                 metric_name,
@@ -103,6 +149,9 @@ impl Display for BenchmarkObservationError {
             }
             Self::MissingRequiredTiming { metric_name } => {
                 write!(formatter, "missing required timing metric '{metric_name}'")
+            }
+            Self::MissingTimingMetrics => {
+                write!(formatter, "current timing evidence contains no metrics")
             }
             Self::MissingFrontendStages => {
                 write!(
@@ -145,21 +194,33 @@ impl Display for BenchmarkObservationError {
 
 impl std::error::Error for BenchmarkObservationError {}
 
-/// Parse checked stdout observations for one explicit source.
+/// Parse checked stdout observations for one CLI command.
 ///
-/// Live CLI output accepts stable records only and requires the command's
-/// top-level timing. Legacy history may additionally recover known human
-/// timing prose, with stable records taking precedence for matching names.
+/// Live output accepts stable schema-v1 records only and requires the
+/// command's top-level timing. Pre-v1 history is decoded by the history owner
+/// as schema-less legacy data and never enters this parser.
 pub(crate) fn parse_stdout_observations(
     stdout: &str,
-    source: BenchmarkObservationSource,
+    command: CliBenchmarkCommand,
 ) -> Result<BenchmarkCaseObservations, BenchmarkObservationError> {
+    let mut timing_schema_version = None;
     let mut stable_timings = Vec::new();
-    let mut legacy_timings = Vec::new();
     let mut counters = Vec::new();
 
     for raw_line in stdout.lines() {
         let line = strip_ansi_codes(raw_line);
+
+        if line.starts_with(STABLE_TIMING_SCHEMA_PREFIX) {
+            if timing_schema_version.is_some() {
+                return Err(BenchmarkObservationError::DuplicateTimingSchema);
+            }
+            let version = parse_timing_schema_line(&line)?;
+            if version != BENCHMARK_TIMING_SCHEMA_VERSION {
+                return Err(BenchmarkObservationError::UnsupportedTimingSchema { version });
+            }
+            timing_schema_version = Some(version);
+            continue;
+        }
 
         if line.starts_with(STABLE_TIMING_PREFIX) {
             stable_timings.push(parse_stable_timing_line(&line)?);
@@ -170,34 +231,23 @@ pub(crate) fn parse_stdout_observations(
             counters.push(parse_stable_counter_line(&line)?);
             continue;
         }
-
-        if source == BenchmarkObservationSource::LegacyHistory
-            && let Some(legacy) = parse_legacy_stage_timing(line.trim())?
-        {
-            legacy_timings.push(legacy);
-        }
     }
 
-    let mut stage_timings = sum_metrics_by_name(stable_timings, "timing")?;
-
-    if source == BenchmarkObservationSource::LegacyHistory {
-        let stable_names: HashSet<&str> = stage_timings
-            .iter()
-            .map(|metric| metric.name.as_str())
-            .collect();
-        legacy_timings.retain(|metric| !stable_names.contains(metric.name.as_str()));
-        stage_timings.extend(sum_metrics_by_name(legacy_timings, "timing")?);
-        stage_timings.sort_by(|left, right| left.name.cmp(&right.name));
+    if timing_schema_version.is_none() {
+        return Err(BenchmarkObservationError::MissingTimingSchema);
     }
+
+    validate_current_timing_metrics(&stable_timings)?;
+
+    let stage_timings = sum_metrics_by_name(stable_timings, "timing")?;
 
     let observations = BenchmarkCaseObservations {
+        timing_schema_version: timing_schema_version.unwrap_or(0),
         stage_timings,
         counters: sum_metrics_by_name(counters, "counter")?,
     };
 
-    if let BenchmarkObservationSource::LiveCli(command) = source {
-        require_cli_total(&observations, command)?;
-    }
+    require_cli_total(&observations, command)?;
 
     Ok(observations)
 }
@@ -209,6 +259,13 @@ pub(crate) fn validate_frontend_observations(
     if observations.stage_timings.is_empty() {
         return Err(BenchmarkObservationError::MissingFrontendStages);
     }
+    if observations.timing_schema_version != BENCHMARK_TIMING_SCHEMA_VERSION {
+        return Err(BenchmarkObservationError::TimingSchemaMismatch {
+            expected: BENCHMARK_TIMING_SCHEMA_VERSION,
+            actual: observations.timing_schema_version,
+        });
+    }
+    validate_current_timing_metrics(&observations.stage_timings)?;
 
     normalize_observations(observations)
 }
@@ -223,7 +280,26 @@ pub(crate) fn average_observations(
 
     let mut normalized = Vec::with_capacity(observations.len());
     for observation in observations {
+        if observation.timing_schema_version == BENCHMARK_TIMING_SCHEMA_VERSION {
+            validate_current_timing_metrics(&observation.stage_timings)?;
+        }
         normalized.push(normalize_observations(observation.clone())?);
+    }
+
+    let timing_schema_version = normalized[0].timing_schema_version;
+    if timing_schema_version != BENCHMARK_TIMING_SCHEMA_VERSION {
+        return Err(BenchmarkObservationError::TimingSchemaMismatch {
+            expected: BENCHMARK_TIMING_SCHEMA_VERSION,
+            actual: timing_schema_version,
+        });
+    }
+    for observation in normalized.iter().skip(1) {
+        if observation.timing_schema_version != timing_schema_version {
+            return Err(BenchmarkObservationError::TimingSchemaMismatch {
+                expected: timing_schema_version,
+                actual: observation.timing_schema_version,
+            });
+        }
     }
 
     let expected_timing_names = metric_name_set(&normalized[0].stage_timings);
@@ -252,6 +328,7 @@ pub(crate) fn average_observations(
     let iteration_count = normalized.len();
 
     Ok(BenchmarkCaseObservations {
+        timing_schema_version,
         stage_timings: average_metrics(
             normalized.iter().map(|item| &item.stage_timings),
             iteration_count,
@@ -271,8 +348,8 @@ fn require_cli_total(
     command: CliBenchmarkCommand,
 ) -> Result<(), BenchmarkObservationError> {
     let required_name = match command {
-        CliBenchmarkCommand::Check => "command.check.total",
-        CliBenchmarkCommand::Build => "command.build.total",
+        CliBenchmarkCommand::Check => moth::benchmarking::TIMING_COMMAND_CHECK_TOTAL_NAME,
+        CliBenchmarkCommand::Build => moth::benchmarking::TIMING_COMMAND_BUILD_TOTAL_NAME,
     };
 
     if observations
@@ -292,35 +369,120 @@ fn normalize_observations(
     observations: BenchmarkCaseObservations,
 ) -> Result<BenchmarkCaseObservations, BenchmarkObservationError> {
     Ok(BenchmarkCaseObservations {
+        timing_schema_version: observations.timing_schema_version,
         stage_timings: sum_metrics_by_name(observations.stage_timings, "timing")?,
         counters: sum_metrics_by_name(observations.counters, "counter")?,
     })
 }
 
-fn parse_legacy_stage_timing(
-    line: &str,
-) -> Result<Option<BenchmarkMetric>, BenchmarkObservationError> {
-    for (prefix, name) in LEGACY_STAGE_PREFIXES {
-        let Some(rest) = line.strip_prefix(prefix) else {
-            continue;
-        };
-
-        let value = parse_legacy_duration_to_ms(rest.trim()).ok_or_else(|| {
-            BenchmarkObservationError::InvalidMetricValue {
-                metric_kind: "timing",
-                metric_name: name.to_owned(),
-                value: rest.trim().to_owned(),
-            }
+fn parse_timing_schema_line(line: &str) -> Result<u32, BenchmarkObservationError> {
+    let version_text = line
+        .strip_prefix(STABLE_TIMING_SCHEMA_PREFIX)
+        .filter(|text| !text.is_empty() && text.chars().all(|ch| ch.is_ascii_digit()))
+        .ok_or_else(|| BenchmarkObservationError::MalformedTimingSchemaLine {
+            line: line.to_owned(),
         })?;
-        validate_metric_value("timing", name, value, rest.trim())?;
 
-        return Ok(Some(BenchmarkMetric {
-            name: name.to_owned(),
-            value,
-        }));
+    version_text
+        .parse::<u32>()
+        .map_err(|_| BenchmarkObservationError::MalformedTimingSchemaLine {
+            line: line.to_owned(),
+        })
+}
+
+pub(crate) fn validate_current_timing_metrics(
+    metrics: &[BenchmarkMetric],
+) -> Result<(), BenchmarkObservationError> {
+    validate_current_timing_metric_names(metrics.iter().map(|metric| metric.name.as_str()))
+}
+
+/// Validate the complete evidence contract for one current-schema persistence case.
+///
+/// Live observation paths perform their own runner-specific checks while parsing. History
+/// readers and writers repeat the contract at the persistence boundary so incomplete current
+/// records cannot become durable evidence after a hand-written or corrupted JSONL edit.
+pub(crate) fn validate_current_timing_evidence<'a, I>(
+    metric_names: I,
+    required_metric_name: Option<&'static str>,
+) -> Result<(), BenchmarkObservationError>
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    let metric_names = metric_names.into_iter().collect::<Vec<_>>();
+    if metric_names.is_empty() {
+        return Err(BenchmarkObservationError::MissingTimingMetrics);
     }
 
-    Ok(None)
+    validate_current_timing_metric_names(metric_names.iter().copied())?;
+    if let Some(required_metric_name) = required_metric_name
+        && !metric_names.contains(&required_metric_name)
+    {
+        return Err(BenchmarkObservationError::MissingRequiredTiming {
+            metric_name: required_metric_name,
+        });
+    }
+
+    Ok(())
+}
+
+/// Return the command-total identity required by a typed benchmark runner.
+pub(crate) fn required_command_total_for_runner(runner: &BenchmarkRunner) -> Option<&'static str> {
+    match runner {
+        BenchmarkRunner::Cli { command, .. } => Some(match command {
+            CliBenchmarkCommand::Check => moth::benchmarking::TIMING_COMMAND_CHECK_TOTAL_NAME,
+            CliBenchmarkCommand::Build => moth::benchmarking::TIMING_COMMAND_BUILD_TOTAL_NAME,
+        }),
+        BenchmarkRunner::Frontend { .. } => None,
+    }
+}
+
+/// Return the command-total identity required by a persisted profile case.
+pub(crate) fn required_command_total_for_name(command: &str) -> Option<&'static str> {
+    match command {
+        "check" => Some(moth::benchmarking::TIMING_COMMAND_CHECK_TOTAL_NAME),
+        "build" => Some(moth::benchmarking::TIMING_COMMAND_BUILD_TOTAL_NAME),
+        _ => None,
+    }
+}
+
+/// Validate current-schema timing identities independent of the persistence
+/// record type that carries their names.
+pub(crate) fn validate_current_timing_metric_names<'a, I>(
+    metric_names: I,
+) -> Result<(), BenchmarkObservationError>
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    let mut names = HashSet::new();
+    let mut previous = None;
+    for metric_name in metric_names {
+        if !names.insert(metric_name) {
+            return Err(BenchmarkObservationError::DuplicateTimingMetric {
+                metric_name: metric_name.to_owned(),
+            });
+        }
+
+        let Some(index) = moth::benchmarking::TIMING_SCHEMA_METRIC_NAMES
+            .iter()
+            .position(|name| *name == metric_name)
+        else {
+            return Err(BenchmarkObservationError::UnknownTimingMetric {
+                metric_name: metric_name.to_owned(),
+            });
+        };
+
+        if let Some((previous_index, previous_name)) = previous
+            && index < previous_index
+        {
+            return Err(BenchmarkObservationError::TimingMetricOutOfOrder {
+                previous_metric_name: previous_name,
+                metric_name: metric_name.to_owned(),
+            });
+        }
+        previous = Some((index, metric_name.to_owned()));
+    }
+
+    Ok(())
 }
 
 fn parse_stable_timing_line(line: &str) -> Result<BenchmarkMetric, BenchmarkObservationError> {
@@ -439,13 +601,25 @@ fn average_metrics<'a>(
     iteration_count: usize,
     metric_kind: &'static str,
 ) -> Result<Vec<BenchmarkMetric>, BenchmarkObservationError> {
-    let mut sums_by_name: BTreeMap<String, f64> = BTreeMap::new();
+    let mut indices_by_name: HashMap<String, usize> = HashMap::new();
+    let mut sums = Vec::new();
 
     for metrics in metrics_by_iteration {
         for metric in metrics {
-            let sum = sums_by_name.entry(metric.name.clone()).or_default();
-            *sum += metric.value;
-            if !sum.is_finite() {
+            let index = match indices_by_name.get(&metric.name) {
+                Some(index) => *index,
+                None => {
+                    let index = sums.len();
+                    indices_by_name.insert(metric.name.clone(), index);
+                    sums.push(BenchmarkMetric {
+                        name: metric.name.clone(),
+                        value: 0.0,
+                    });
+                    index
+                }
+            };
+            sums[index].value += metric.value;
+            if !sums[index].value.is_finite() {
                 return Err(BenchmarkObservationError::MetricSumNotFinite {
                     metric_kind,
                     metric_name: metric.name.clone(),
@@ -454,20 +628,18 @@ fn average_metrics<'a>(
         }
     }
 
-    Ok(sums_by_name
-        .into_iter()
-        .map(|(name, sum)| BenchmarkMetric {
-            name,
-            value: sum / iteration_count as f64,
-        })
-        .collect())
+    for metric in &mut sums {
+        metric.value /= iteration_count as f64;
+    }
+    Ok(sums)
 }
 
 fn sum_metrics_by_name(
     metrics: Vec<BenchmarkMetric>,
     metric_kind: &'static str,
 ) -> Result<Vec<BenchmarkMetric>, BenchmarkObservationError> {
-    let mut sums_by_name: BTreeMap<String, f64> = BTreeMap::new();
+    let mut indices_by_name: HashMap<String, usize> = HashMap::new();
+    let mut sums = Vec::new();
 
     for metric in metrics {
         validate_metric_name(metric_kind, &metric.name)?;
@@ -478,9 +650,20 @@ fn sum_metrics_by_name(
             &metric.value.to_string(),
         )?;
 
-        let sum = sums_by_name.entry(metric.name.clone()).or_default();
-        *sum += metric.value;
-        if !sum.is_finite() {
+        let index = match indices_by_name.get(&metric.name) {
+            Some(index) => *index,
+            None => {
+                let index = sums.len();
+                indices_by_name.insert(metric.name.clone(), index);
+                sums.push(BenchmarkMetric {
+                    name: metric.name.clone(),
+                    value: 0.0,
+                });
+                index
+            }
+        };
+        sums[index].value += metric.value;
+        if !sums[index].value.is_finite() {
             return Err(BenchmarkObservationError::MetricSumNotFinite {
                 metric_kind,
                 metric_name: metric.name,
@@ -488,53 +671,11 @@ fn sum_metrics_by_name(
         }
     }
 
-    Ok(sums_by_name
-        .into_iter()
-        .map(|(name, value)| BenchmarkMetric { name, value })
-        .collect())
+    Ok(sums)
 }
 
 fn metric_name_set(metrics: &[BenchmarkMetric]) -> BTreeSet<String> {
     metrics.iter().map(|metric| metric.name.clone()).collect()
-}
-
-fn parse_legacy_duration_to_ms(text: &str) -> Option<f64> {
-    let trimmed = text.trim();
-    let value = parse_leading_number(trimmed)?;
-    let unit = trimmed
-        .trim_start_matches(|ch: char| ch.is_ascii_digit() || ch == '.')
-        .trim();
-
-    if unit.starts_with("ns") {
-        Some(value / 1_000_000.0)
-    } else if unit.starts_with("us") || unit.starts_with("µs") {
-        Some(value / 1_000.0)
-    } else if unit.starts_with("ms") {
-        Some(value)
-    } else if unit.starts_with('s') {
-        Some(value * 1_000.0)
-    } else {
-        None
-    }
-}
-
-fn parse_leading_number(text: &str) -> Option<f64> {
-    let end = text
-        .char_indices()
-        .find_map(|(index, ch)| {
-            if ch.is_ascii_digit() || ch == '.' {
-                None
-            } else {
-                Some(index)
-            }
-        })
-        .unwrap_or(text.len());
-
-    if end == 0 {
-        return None;
-    }
-
-    text[..end].parse().ok()
 }
 
 fn strip_ansi_codes(text: &str) -> String {

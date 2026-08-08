@@ -101,7 +101,7 @@ pub fn compile_project_frontend(
     //  Dispatch: Single File vs. Directory
     // ---------------------------------------
 
-    let result = timed_stage!("build.frontend.total", {
+    let result = timed_stage!(crate::timing::TimingMetric::BuildFrontendTotal, {
         if config.entry_dir.is_dir() {
             compilation::compile_directory_frontend(
                 config,

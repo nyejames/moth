@@ -69,7 +69,7 @@ pub fn run_moth_command(
         .args(args)
         // Stable machine-readable timing lines for benchmark parsing.
         // The subprocess is built with the concise `timers` feature, so
-        // MOTH_TIMERS=bench emits MOTH_BENCH timing lines without verbose
+        // MOTH_TIMERS=bench emits the final MOTH_BENCH timing aggregate records without verbose
         // human prose. MOTH_COUNTERS=off suppresses counter output so
         // normal benchmark runs stay low-noise. MOTH_BENCH_STATUS=1 requests
         // the exact diagnostic-count record checked by benchmark execution.

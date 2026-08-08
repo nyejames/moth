@@ -11,7 +11,9 @@
 //! WHY:  Provides a compact, human-readable, tracked record of benchmark
 //!       trends without committing raw per-case data.
 
-use crate::bench_history::{LocalRunRecord, read_local_runs, to_case_results, to_group_stats};
+use crate::bench_history::{
+    LocalRunRecord, TimingSchemaIdentity, read_local_runs, to_case_results, to_group_stats,
+};
 use crate::bench_types::{
     BENCHMARK_PROTOCOL_VERSION, BenchmarkChangeKind, BenchmarkComparison, BenchmarkGroupStats,
     BenchmarkRun, BenchmarkThresholds, SuiteStats, calculate_stage_movement,
@@ -27,12 +29,13 @@ const SECTION_SEPARATOR: &str = "---------------------";
 /// WHAT: Structured form of the "# Suite / Display (ID): Date" heading + body
 /// WHY: Enables safe replacement of consecutive no-change entries and
 ///      keeps CLI and frontend run entries separate.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 struct SummaryRunEntry {
     suite_kind_label: String,
     display_name: String,
     public_system_id: String,
     timestamp_text: String,
+    timing_schema: TimingSchemaIdentity,
     body: String,
     raw: String,
 }
@@ -186,6 +189,7 @@ fn comparable_summary_record(
         && record.suite_kind == suite_kind
         && record.thread_count == thread_count
         && record.benchmark_protocol_version == BENCHMARK_PROTOCOL_VERSION
+        && !TimingSchemaIdentity::from_record(record).is_mixed()
 }
 
 /// Build the file path for a given month key.
@@ -242,11 +246,22 @@ fn generate_system_block(
     let latest_groups = to_group_stats(latest);
 
     let change_text = format_initial_to_latest_change(initial, latest, run_count);
+    let initial_schema = TimingSchemaIdentity::from_record(initial);
+    let latest_schema = TimingSchemaIdentity::from_record(latest);
+    let initial_schema_line = if initial_schema == latest_schema {
+        String::new()
+    } else {
+        format!(
+            "Initial timing schema: {}\n",
+            initial_schema.display_label()
+        )
+    };
 
     format!(
         "## {} / {} ({})
 Change since initial benchmark: {}
-Initial: {}
+Timing schema: {}
+{}Initial: {}
 Latest: {}
 Case spread latest: {}
 ",
@@ -254,6 +269,8 @@ Case spread latest: {}
         display_name,
         public_system_id,
         change_text,
+        latest_schema.display_label(),
+        initial_schema_line,
         format_group_average_list(&initial_suite, &initial_groups),
         format_group_average_list(&latest_suite, &latest_groups),
         format_case_spread_ms(latest_suite.case_spread_ms),
@@ -275,6 +292,12 @@ fn format_initial_to_latest_change(
         return "baseline".to_string();
     }
 
+    if TimingSchemaIdentity::from_record(initial).is_mixed()
+        || TimingSchemaIdentity::from_record(latest).is_mixed()
+    {
+        return "not comparable: mixed timing schemas".to_string();
+    }
+
     let initial_cases = to_case_results(initial);
     let latest_cases = to_case_results(latest);
     let comparison = BenchmarkComparison::new(&latest_cases, Some(&initial_cases));
@@ -284,7 +307,10 @@ fn format_initial_to_latest_change(
 
 /// Render a plain, non-bold comparison line for the monthly top block.
 fn format_month_change_line(comparison: &BenchmarkComparison) -> String {
-    if comparison.case_set_changed || comparison.workload_changed_case_count > 0 {
+    if comparison.case_set_changed
+        || comparison.workload_changed_case_count > 0
+        || comparison.timing_schema_changed_case_count > 0
+    {
         return comparison.format_run_change_line().replace("**", "");
     }
 
@@ -329,7 +355,13 @@ fn format_month_change_line(comparison: &BenchmarkComparison) -> String {
 /// Avg: all ~68ms, Core ~100ms, Docs ~55ms
 /// ```
 fn generate_run_entry(run: &BenchmarkRun, comparison: &BenchmarkComparison) -> SummaryRunEntry {
+    let timing_schema = TimingSchemaIdentity::from_versions(run.cases.iter().map(|case| {
+        case.identity
+            .as_ref()
+            .map(|identity| identity.timing_schema_version)
+    }));
     let mut body_lines = vec![
+        format!("Timing schema: {}", timing_schema.display_label()),
         comparison.format_run_change_line(),
         format_group_average_line(&run.suite, &run.groups),
     ];
@@ -351,6 +383,7 @@ fn generate_run_entry(run: &BenchmarkRun, comparison: &BenchmarkComparison) -> S
         display_name: run.system.display_name.clone(),
         public_system_id: run.system.public_system_id.clone(),
         timestamp_text: run.timestamp.format_run_header(),
+        timing_schema,
         body: body.clone(),
         raw: format!(
             "# {} / {} ({}): {}\n{}\n",
@@ -649,9 +682,38 @@ fn parse_run_entry(raw: &str) -> Option<SummaryRunEntry> {
         display_name,
         public_system_id,
         timestamp_text,
+        timing_schema: timing_schema_from_summary_body(&body),
         body,
         raw: raw.to_string(),
     })
+}
+
+/// Recover the explicit schema label from a generated or legacy entry.
+///
+/// Legacy entries have no schema line and remain readable as missing identity;
+/// they are never promoted to a current-schema claim by this parser.
+fn timing_schema_from_summary_body(body: &str) -> TimingSchemaIdentity {
+    let Some(line) = body
+        .lines()
+        .find(|line| line.starts_with("Timing schema: "))
+    else {
+        return TimingSchemaIdentity::Missing;
+    };
+    let value = line.trim_start_matches("Timing schema: ");
+    if value.starts_with("mixed") {
+        return TimingSchemaIdentity::Mixed;
+    }
+    if value.starts_with("legacy/missing") {
+        return TimingSchemaIdentity::Missing;
+    }
+    match value
+        .split_whitespace()
+        .next()
+        .and_then(|value| value.parse::<u32>().ok())
+    {
+        Some(version) if version != 0 => TimingSchemaIdentity::Version(version),
+        _ => TimingSchemaIdentity::Missing,
+    }
 }
 
 /// Determine whether a parsed entry represents a no-measurable-change run.
@@ -660,8 +722,7 @@ fn is_no_measurable_change_entry(entry: &SummaryRunEntry) -> bool {
         || entry
             .body
             .lines()
-            .next()
-            .is_some_and(|line| line.starts_with("no measurable change"))
+            .any(|line| line.starts_with("no measurable change"))
 }
 
 /// Append a new run entry, or replace the latest stable no-change entry for the same system.
@@ -677,7 +738,8 @@ fn append_or_replace_run_entry(
     comparison: &BenchmarkComparison,
 ) {
     let is_replaceable_no_change = !comparison.case_set_changed
-        && comparison.change_kind == BenchmarkChangeKind::NoMeasurableChange;
+        && comparison.change_kind == BenchmarkChangeKind::NoMeasurableChange
+        && comparison.timing_schema_changed_case_count == 0;
 
     if is_replaceable_no_change {
         let latest_same_system = existing_runs.iter().rposition(|entry| match entry {
@@ -690,7 +752,10 @@ fn append_or_replace_run_entry(
 
         if let Some(index) = latest_same_system {
             let should_replace = match &existing_runs[index] {
-                ParsedSummaryRunEntry::Parsed(entry) => is_no_measurable_change_entry(entry),
+                ParsedSummaryRunEntry::Parsed(entry) => {
+                    entry.timing_schema == new_entry.timing_schema
+                        && is_no_measurable_change_entry(entry)
+                }
                 ParsedSummaryRunEntry::Raw(_) => false,
             };
 

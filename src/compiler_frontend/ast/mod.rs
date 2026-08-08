@@ -171,7 +171,7 @@ use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
-use crate::timed_ast_stage_guard;
+use crate::timing_scope_attributed;
 use rustc_hash::FxHashMap;
 
 /// Resolved choice definition carried from AST to HIR for pre-registration.
@@ -323,11 +323,10 @@ impl Ast {
         let ast_header_counts = AstHeaderCounterSnapshot::from_headers(&headers);
         let (phase_context, string_table) = AstPhaseContext::from_build_context(context);
 
-        timed_ast_stage_guard!(
+        timing_scope_attributed!(
             timing_guard_ast_total,
             phase_context.timing_metric_family.total(),
-            phase_context.timing_context,
-            "AST construction completed in: "
+            phase_context.timing_context
         );
 
         let mut environment = AstModuleEnvironmentBuilder::new(&phase_context).build(
@@ -342,11 +341,10 @@ impl Ast {
         let receiver_method_count = environment.lookups.receiver_methods.by_function_path.len();
 
         let emitted = {
-            timed_ast_stage_guard!(
+            timing_scope_attributed!(
                 timing_guard,
                 phase_context.timing_metric_family.emit(),
-                phase_context.timing_context,
-                "AST/emit nodes completed in: "
+                phase_context.timing_context
             );
             AstEmitter::new(&phase_context, &mut environment, header_count)
                 .emit(headers, string_table)?
@@ -354,11 +352,10 @@ impl Ast {
         let generic_instance_count = emitted.generic_instance_count;
 
         let build_result = {
-            timed_ast_stage_guard!(
+            timing_scope_attributed!(
                 timing_guard,
                 phase_context.timing_metric_family.finalise(),
-                phase_context.timing_context,
-                "AST/finalize completed in: "
+                phase_context.timing_context
             );
             AstFinalizer::new(&phase_context, environment).finalize(
                 emitted,

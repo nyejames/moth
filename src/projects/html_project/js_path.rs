@@ -124,7 +124,7 @@ pub(crate) fn compile_html_module_js(
     let mut js_module = {
         timing_scope!(
             timing_guard_backend_js_lower_entry,
-            "backend.js.lower_entry"
+            crate::timing::TimingMetric::BackendJsLowerEntry
         );
         lower_hir_to_js(
             input.hir_module,
@@ -150,7 +150,7 @@ pub(crate) fn compile_html_module_js(
             let linked_js = {
                 timing_scope!(
                     timing_guard_backend_js_lower_linked,
-                    "backend.js.lower_linked"
+                    crate::timing::TimingMetric::BackendJsLowerLinked
                 );
                 lower_hir_to_js(
                     &linked.module.executable.hir,

@@ -129,7 +129,7 @@ pub(crate) fn compile_single_file_frontend(
 
     timing_scope!(
         timing_guard_stage0_single_file_total,
-        "stage0.single_file.total"
+        crate::timing::TimingMetric::Stage0SingleFileTotal
     );
 
     // 2. Resolve canonical entry path.
@@ -220,7 +220,7 @@ pub(crate) fn compile_single_file_frontend(
     );
     timing_scope_attributed!(
         timing_guard_build_boundary_inventory,
-        "boundary.inventory",
+        crate::timing::TimingMetric::BoundaryInventory,
         Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
     );
     let input_files = match source_discovery::collect_reachable_input_files(
@@ -249,7 +249,7 @@ pub(crate) fn compile_single_file_frontend(
 
     timing_scope_attributed!(
         timing_guard_boundary_compile,
-        "boundary.compile",
+        crate::timing::TimingMetric::BoundaryCompile,
         Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
     );
 
@@ -342,7 +342,7 @@ pub(crate) fn compile_single_file_frontend(
 
     timing_scope_attributed!(
         timing_guard_frontend_module_semantic_total,
-        "frontend.module.semantic_total",
+        crate::timing::TimingMetric::FrontendModuleSemanticTotal,
         timing_module_context,
     );
     #[cfg(feature = "timers")]
@@ -486,8 +486,6 @@ struct DirectoryModuleCompileContext<'a> {
     source_package_imports: &'a [ResolvedSourcePackageImport],
     source_package_import_index: &'a FxHashMap<(ModuleId, ImportShellId), usize>,
     completed_packages: &'a CompletedSourcePackageRegistry,
-    #[cfg(feature = "timers")]
-    timing_boundary: crate::timing::TimingBoundaryId,
 }
 
 struct SourcePackageModuleInventory {
@@ -705,15 +703,15 @@ impl<'a> DirectoryModuleCompileContext<'a> {
             entry_point,
             string_table_base_len: base_len,
             prepared,
+            #[cfg(feature = "timers")]
+            timing_module_key,
             ..
         } = job;
 
         // The dense graph `ModuleId` is the module key inside this boundary, so attribution
         // stays deterministic and independent of worker completion order.
         #[cfg(feature = "timers")]
-        let module_context = Some(crate::timing::TimingContext::for_module(
-            crate::timing::TimingModuleKey::new(self.timing_boundary, job.module_id.index() as u32),
-        ));
+        let module_context = Some(crate::timing::TimingContext::for_module(timing_module_key));
 
         // Semantic compilation is provider-dependent: it binds retained `PreparedHeaderSyntax`
         // against provider interfaces, then resolves dependencies, builds AST, lowers HIR and
@@ -750,7 +748,7 @@ impl<'a> DirectoryModuleCompileContext<'a> {
         // failures, so the task outcome carries the retained `ModuleDiagnostics` unchanged.
         timing_scope_attributed!(
             timing_guard_frontend_module_semantic_total_2,
-            "frontend.module.semantic_total",
+            crate::timing::TimingMetric::FrontendModuleSemanticTotal,
             module_context,
         );
         #[cfg(feature = "timers")]
@@ -796,39 +794,9 @@ fn compile_module_waves(
     source_package_imports: &[ResolvedSourcePackageImport],
     completed_packages: &CompletedSourcePackageRegistry,
     string_table: &mut StringTable,
-    #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
 ) -> Result<CompiledGraphBoundary, CompilerMessages> {
     let mut provider_store = ModuleArtifactStore::new(graph.nodes().len());
     let mut generated_store = BoundaryGeneratedFunctionStore::default();
-
-    // Register every module in deterministic wave order before semantic work starts. The dense
-    // graph `ModuleId` is the module key, so registration order never affects attribution.
-    #[cfg(feature = "timers")]
-    for wave in &module_waves {
-        for job in wave {
-            let module_origin = job
-                .prepared
-                .source_module_origins
-                .origin_for(job.prepared.active_root_file_id)
-                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?
-                .ok_or_else(|| {
-                    CompilerMessages::from_error_ref(
-                        CompilerError::compiler_error(format!(
-                            "module timing registration: active root file id {} has no module origin",
-                            job.prepared.active_root_file_id.0
-                        )),
-                        string_table,
-                    )
-                })?;
-            crate::timing::register_timing_module(
-                timing_boundary,
-                job.module_id.index() as u32,
-                module_origin.logical_module_path(),
-                job.prepared.source_file_count as u64,
-                job.prepared.source_byte_count as u64,
-            );
-        }
-    }
 
     // One direct lookup index per boundary so module binding never scans every provider edge,
     // source-package import or completed package for each retained import shell.
@@ -941,8 +909,6 @@ fn compile_module_waves(
                     source_package_imports,
                     source_package_import_index: &source_package_import_index,
                     completed_packages,
-                    #[cfg(feature = "timers")]
-                    timing_boundary,
                 };
                 compile_context.compile(job, generated_store.session())
             };
@@ -1160,7 +1126,7 @@ pub(crate) fn compile_directory_frontend(
     // and deterministic package ordering before any module semantics run.
     timing_scope!(
         timing_guard_stage0_directory_inventory,
-        "stage0.directory.inventory"
+        crate::timing::TimingMetric::Stage0DirectoryInventory
     );
 
     // 1. Setup path resolution based on config settings.
@@ -1216,7 +1182,7 @@ pub(crate) fn compile_directory_frontend(
         );
         timing_scope_attributed!(
             timing_guard_build_boundary_inventory_2,
-            "boundary.inventory",
+            crate::timing::TimingMetric::BoundaryInventory,
             Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
         );
         let package_waves = match module_inventory::discover_all_modules_in_package(
@@ -1276,7 +1242,7 @@ pub(crate) fn compile_directory_frontend(
     );
     timing_scope_attributed!(
         timing_guard_build_boundary_inventory_3,
-        "boundary.inventory",
+        crate::timing::TimingMetric::BoundaryInventory,
         Some(crate::timing::TimingContext::for_boundary(
             project_timing_boundary
         )),
@@ -1313,7 +1279,7 @@ pub(crate) fn compile_directory_frontend(
     // provider stores; only the stable public interface crosses into a consuming boundary.
     timing_scope!(
         timing_guard_stage0_directory_compile,
-        "stage0.directory.compile"
+        crate::timing::TimingMetric::Stage0DirectoryCompile
     );
     let mut completed_source_packages = CompletedSourcePackageRegistry::new();
     for inventory in source_package_inventories {
@@ -1331,7 +1297,7 @@ pub(crate) fn compile_directory_frontend(
         } = inventory;
         timing_scope_attributed!(
             timing_guard_build_boundary_compile,
-            "boundary.compile",
+            crate::timing::TimingMetric::BoundaryCompile,
             Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
         );
         let compiled = compile_module_waves(
@@ -1347,8 +1313,6 @@ pub(crate) fn compile_directory_frontend(
             &source_package_imports,
             &completed_source_packages,
             string_table,
-            #[cfg(feature = "timers")]
-            timing_boundary,
         );
         let boundary = compiled?;
         #[cfg(feature = "timers")]
@@ -1377,7 +1341,7 @@ pub(crate) fn compile_directory_frontend(
         module_waves.into_parts();
     timing_scope_attributed!(
         timing_guard_build_boundary_compile_2,
-        "boundary.compile",
+        crate::timing::TimingMetric::BoundaryCompile,
         Some(crate::timing::TimingContext::for_boundary(
             project_timing_boundary
         )),
@@ -1395,8 +1359,6 @@ pub(crate) fn compile_directory_frontend(
         &project_source_package_imports,
         &completed_source_packages,
         string_table,
-        #[cfg(feature = "timers")]
-        project_timing_boundary,
     );
     let project_boundary = compiled_project?;
     #[cfg(feature = "timers")]

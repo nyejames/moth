@@ -18,10 +18,11 @@
 //! `enabled`. It must not import build-system, frontend, analysis, IR or
 //! backend compiler modules.
 
-// The `enabled` module broad-allow is removed in Phase 3; until the registry
-// has a live production consumer, a targeted allow keeps `cargo check
-// --features timers` quiet for helpers exercised only by tests today.
-#![cfg_attr(feature = "timers", allow(dead_code))]
+/// Version of the stable timing observation contract.
+///
+/// Benchmark tooling uses this value to make timing observations comparable
+/// only when the compiler and benchmark parser agree on the same schema.
+pub const TIMING_SCHEMA_VERSION: u32 = 1;
 
 /// One versioned contract for timing metric identity and meaning.
 ///
@@ -35,8 +36,6 @@
 ///
 /// Adding an independent metric that preserves every existing meaning may stay
 /// within the same schema; record that decision in the plan checkpoint.
-pub(crate) const TIMING_SCHEMA_VERSION: u32 = 1;
-
 /// The session command kind reused for command applicability and command-total
 /// ownership, so the registry never duplicates the session's command enum.
 pub(crate) use super::session::TimingCommandKind as TimingCommand;
@@ -138,7 +137,7 @@ pub(crate) enum TimingPipelineStage {
 /// Whether a metric supplies command-accounting wall time or only evidence.
 ///
 /// The concise summary consumes these typed roles instead of maintaining a
-/// second list of raw metric names.
+/// second list of stable metric descriptors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TimingAccountingRole {
     /// The command's headline total.
@@ -183,6 +182,12 @@ macro_rules! timing_metrics {
             /// Every metric in canonical schema order.
             pub(crate) const ALL: &'static [TimingMetric] = &[$(TimingMetric::$variant,)*];
         }
+
+        /// Stable names in the same canonical order as `TimingMetric::ALL`.
+        ///
+        /// Benchmark tooling consumes this narrow inventory for binary
+        /// erasure checks; the metric names still have one owner here.
+        pub(crate) const TIMING_SCHEMA_METRIC_NAMES: &'static [&'static str] = &[$($name,)*];
 
         pub(crate) const TIMING_METRIC_DESCRIPTORS: &[TimingMetricDescriptor] = &[
             $(TimingMetricDescriptor {
@@ -358,6 +363,112 @@ timing_metrics! {
         Some(TimingParent::Metric(TimingMetric::BuildOutputTotal)), TimingAccountingRole::Evidence;
 }
 
+/// The schema-owned pipeline rows used for build command wall accounting.
+///
+/// Benchmark tooling consumes these references through `src/benchmarking` so
+/// it cannot reconstruct command ownership from a second list of strings.
+pub(crate) const TIMING_BUILD_PIPELINE_METRIC_NAMES: &[&str] = &[
+    TimingMetric::BuildBootstrapTotal.descriptor().stable_name,
+    TimingMetric::BuildFrontendTotal.descriptor().stable_name,
+    TimingMetric::BuildBackendTotal.descriptor().stable_name,
+    TimingMetric::BuildOutputTotal.descriptor().stable_name,
+];
+
+/// The schema-owned pipeline rows that can contribute to check wall
+/// accounting. Backend and output are build-only, so they do not apply here.
+pub(crate) const TIMING_CHECK_PIPELINE_METRIC_NAMES: &[&str] = &[
+    TimingMetric::BuildBootstrapTotal.descriptor().stable_name,
+    TimingMetric::BuildFrontendTotal.descriptor().stable_name,
+];
+
+pub(crate) const TIMING_COMMAND_BUILD_TOTAL_NAME: &str =
+    TimingMetric::CommandBuildTotal.descriptor().stable_name;
+pub(crate) const TIMING_COMMAND_CHECK_TOTAL_NAME: &str =
+    TimingMetric::CommandCheckTotal.descriptor().stable_name;
+pub(crate) const TIMING_FRONTEND_PREPARE_NAME: &str =
+    TimingMetric::FrontendPrepare.descriptor().stable_name;
+pub(crate) const TIMING_FRONTEND_ORDER_DECLARATIONS_NAME: &str =
+    TimingMetric::FrontendOrderDeclarations
+        .descriptor()
+        .stable_name;
+pub(crate) const TIMING_FRONTEND_AST_TOTAL_NAME: &str =
+    TimingMetric::FrontendAstTotal.descriptor().stable_name;
+pub(crate) const TIMING_FRONTEND_AST_ENVIRONMENT_NAME: &str = TimingMetric::FrontendAstEnvironment
+    .descriptor()
+    .stable_name;
+pub(crate) const TIMING_FRONTEND_AST_EMIT_NAME: &str =
+    TimingMetric::FrontendAstEmit.descriptor().stable_name;
+pub(crate) const TIMING_FRONTEND_AST_FINALISE_NAME: &str =
+    TimingMetric::FrontendAstFinalise.descriptor().stable_name;
+pub(crate) const TIMING_FRONTEND_HIR_NAME: &str =
+    TimingMetric::FrontendHir.descriptor().stable_name;
+pub(crate) const TIMING_FRONTEND_BORROW_INITIAL_NAME: &str =
+    TimingMetric::FrontendBorrowInitial.descriptor().stable_name;
+pub(crate) const TIMING_FRONTEND_BORROW_CONVERGE_NAME: &str = TimingMetric::FrontendBorrowConverge
+    .descriptor()
+    .stable_name;
+
+/// Return the concise benchmark label owned by the typed schema.
+pub(crate) const fn benchmark_label(metric: TimingMetric) -> &'static str {
+    match metric {
+        TimingMetric::CommandBuildTotal => "build total",
+        TimingMetric::CommandCheckTotal => "check total",
+        TimingMetric::CommandDevBuildWrite => "dev build/write",
+        TimingMetric::CommandDevCycle => "dev cycle",
+        TimingMetric::BuildBootstrapTotal => "bootstrap",
+        TimingMetric::BuildFrontendTotal => "frontend",
+        TimingMetric::BuildBackendTotal => "backend",
+        TimingMetric::BuildOutputTotal => "output",
+        TimingMetric::Stage0DirectoryInventory => "directory inventory",
+        TimingMetric::Stage0DirectoryCompile => "directory compile",
+        TimingMetric::Stage0SingleFileTotal => "single-file frontend",
+        TimingMetric::BoundaryInventory => "boundary inventory",
+        TimingMetric::BoundaryCompile => "boundary compile",
+        TimingMetric::FrontendPrepare => "prepare",
+        TimingMetric::FrontendBindHeaders => "bind headers",
+        TimingMetric::FrontendOrderDeclarations => "order declarations",
+        TimingMetric::FrontendAstTotal => "AST",
+        TimingMetric::FrontendAstEnvironment => "AST environment",
+        TimingMetric::FrontendAstEmit => "AST emit",
+        TimingMetric::FrontendAstFinalise => "AST finalise",
+        TimingMetric::FrontendPublicInterfaceProject => "project public interface",
+        TimingMetric::FrontendHir => "HIR",
+        TimingMetric::FrontendBorrowInitial => "initial borrow",
+        TimingMetric::FrontendBorrowConverge => "borrow convergence",
+        TimingMetric::FrontendGeneratedMaterialise => "generated materialise",
+        TimingMetric::FrontendGeneratedBorrowRecheck => "generated borrow recheck",
+        TimingMetric::FrontendPublicInterfaceFinalise => "final public interface",
+        TimingMetric::FrontendModuleSemanticTotal => "module semantics",
+        TimingMetric::ConfigAstTotal => "config AST",
+        TimingMetric::ConfigAstEnvironment => "config AST environment",
+        TimingMetric::ConfigAstEmit => "config AST emit",
+        TimingMetric::ConfigAstFinalise => "config AST finalise",
+        TimingMetric::FrontendGeneratedAstTotal => "generated AST",
+        TimingMetric::FrontendGeneratedAstEnvironment => "generated AST environment",
+        TimingMetric::FrontendGeneratedAstEmit => "generated AST emit",
+        TimingMetric::FrontendGeneratedAstFinalise => "generated AST finalise",
+        TimingMetric::BackendJsLowerEntry => "JS entry lowering",
+        TimingMetric::BackendJsLowerLinked => "JS linked lowering",
+        TimingMetric::BackendHtmlRender => "HTML render",
+        TimingMetric::BackendWasmTotal => "Wasm backend",
+        TimingMetric::BackendWasmLower => "Wasm lowering",
+        TimingMetric::BackendWasmArtifacts => "Wasm artifacts",
+        TimingMetric::BackendAssetsPlan => "asset planning",
+        TimingMetric::BackendAssetsEmit => "asset emission",
+        TimingMetric::OutputWriteTotal => "output write",
+    }
+}
+
+pub(crate) fn benchmark_label_for_name(name: &str) -> &str {
+    TimingMetric::ALL
+        .iter()
+        .find(|metric| metric.descriptor().stable_name == name)
+        .map_or(name, |metric| benchmark_label(*metric))
+}
+
+/// Number of dense timing slots in every global and attributed accumulator.
+pub(crate) const TIMING_METRIC_COUNT: usize = TimingMetric::ALL.len();
+
 impl TimingMetric {
     /// The descriptor for this metric.
     pub(crate) const fn descriptor(self) -> &'static TimingMetricDescriptor {
@@ -373,19 +484,13 @@ impl TimingMetric {
     }
 
     /// The metric at a dense index, when the index is in range.
+    #[cfg(test)]
     pub(crate) fn from_index(index: usize) -> Option<TimingMetric> {
         TimingMetric::ALL.get(index).copied()
     }
 
-    /// Look up a metric by its exact stable name.
-    pub(crate) fn from_name(name: &str) -> Option<TimingMetric> {
-        TimingMetric::ALL
-            .iter()
-            .find(|metric| metric.descriptor().stable_name == name)
-            .copied()
-    }
-
     /// Whether this metric answers a command's reported total.
+    #[cfg(test)]
     pub(crate) const fn is_command_total(self) -> bool {
         matches!(
             self,
@@ -417,6 +522,44 @@ impl TimingMetric {
             TimingCommandScope::BuildOrDev => {
                 matches!(command, TimingCommand::Build | TimingCommand::Dev)
             }
+        }
+    }
+
+    /// Return the detailed human prefix for metrics that historically exposed
+    /// an inline stage message. The label remains presentation-only and never
+    /// becomes part of the stable metric identity.
+    pub(crate) const fn detailed_prose_label(self) -> Option<&'static str> {
+        match self {
+            TimingMetric::FrontendPrepare => Some("Files Prepared in: "),
+            TimingMetric::FrontendBindHeaders => Some("Headers bound in: "),
+            TimingMetric::FrontendOrderDeclarations => Some("Dependency graph created in: "),
+            TimingMetric::FrontendPublicInterfaceProject => Some("Public interface built in: "),
+            TimingMetric::FrontendHir => Some("HIR generated in: "),
+            TimingMetric::FrontendBorrowInitial => Some("Borrow checking completed in: "),
+            TimingMetric::FrontendGeneratedMaterialise => {
+                Some("Generated functions materialized in: ")
+            }
+            TimingMetric::FrontendBorrowConverge => {
+                Some("Exact generated-call borrow checking completed in: ")
+            }
+            TimingMetric::FrontendGeneratedBorrowRecheck => {
+                Some("Generated borrow rechecks completed in: ")
+            }
+            TimingMetric::FrontendPublicInterfaceFinalise => {
+                Some("Public interface finalized in: ")
+            }
+            TimingMetric::FrontendAstTotal => Some("AST construction completed in: "),
+            TimingMetric::FrontendAstEnvironment => Some("AST/build environment completed in: "),
+            TimingMetric::FrontendAstEmit => Some("AST/emit nodes completed in: "),
+            TimingMetric::FrontendAstFinalise => Some("AST/finalize completed in: "),
+            TimingMetric::FrontendGeneratedAstTotal => {
+                Some("Generated AST construction completed in: ")
+            }
+            TimingMetric::FrontendGeneratedAstEmit => Some("Generated AST emission completed in: "),
+            TimingMetric::FrontendGeneratedAstFinalise => {
+                Some("Generated AST finalisation completed in: ")
+            }
+            _ => None,
         }
     }
 }

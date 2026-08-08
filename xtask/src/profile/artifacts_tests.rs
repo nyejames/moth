@@ -16,13 +16,14 @@ fn test_observation() -> ProfileObservation {
         command_args: vec!["test.moth".to_string()],
         wall_ms: 1234.5,
         observations: BenchmarkCaseObservations {
+            timing_schema_version: 1,
             stage_timings: vec![
                 BenchmarkMetric {
-                    name: "ast_ms".to_string(),
+                    name: "frontend.ast.total".to_string(),
                     value: 812.0,
                 },
                 BenchmarkMetric {
-                    name: "headers_ms".to_string(),
+                    name: "frontend.bind_headers".to_string(),
                     value: 200.0,
                 },
             ],
@@ -44,6 +45,7 @@ fn test_case_manifest(case_id: &str, summary_path: Option<String>) -> ProfileCas
             workload_id: "workload".to_string(),
             source_fingerprint: "source".to_string(),
             measurement_fingerprint: "measurement".to_string(),
+            timing_schema_version: 1,
         },
         group_name: "core".to_string(),
         command: "check".to_string(),
@@ -282,7 +284,7 @@ fn detailed_observations_file_matches_plan_schema() {
     assert!(json.contains(r#""wall_ms": 1234.5"#));
     assert!(json.contains(r#""check"#));
     assert!(json.contains(r#""test.moth""#));
-    assert!(json.contains(r#""name": "ast_ms""#));
+    assert!(json.contains(r#""name": "frontend.ast.total""#));
     assert!(json.contains(r#""value": 812"#));
     assert!(json.contains(r#""name": "token_count""#));
     assert!(json.contains(r#""value": 12000"#));

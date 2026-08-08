@@ -2,6 +2,10 @@
 
 use super::*;
 use crate::bench_types::{BenchmarkMeasurementIdentity, BenchmarkMetric, GitRevision};
+use crate::profile::drift::{
+    DriftCaseInput, DriftHotFunction, compute_drift, format_drift_markdown,
+};
+use std::collections::HashMap;
 
 /// Build a test history record with one case.
 fn test_record(run_id: &str) -> ProfileHistoryRecord {
@@ -24,6 +28,7 @@ fn test_record(run_id: &str) -> ProfileHistoryRecord {
                 workload_id: "fixture".to_string(),
                 source_fingerprint: "abc123".to_string(),
                 measurement_fingerprint: "def456".to_string(),
+                timing_schema_version: 1,
             },
             group_name: "core".to_string(),
             command: "check".to_string(),
@@ -31,10 +36,16 @@ fn test_record(run_id: &str) -> ProfileHistoryRecord {
             observation_wall_ms: 1234.5,
             sample_count: 500,
             sample_weight: 500.0,
-            stage_timings: vec![BenchmarkMetric {
-                name: "ast_ms".to_string(),
-                value: 812.0,
-            }],
+            stage_timings: vec![
+                BenchmarkMetric {
+                    name: "command.check.total".to_string(),
+                    value: 1234.5,
+                },
+                BenchmarkMetric {
+                    name: "frontend.ast.total".to_string(),
+                    value: 812.0,
+                },
+            ],
             counters: vec![BenchmarkMetric {
                 name: "token_count".to_string(),
                 value: 12000.0,
@@ -74,6 +85,7 @@ fn test_record_b(run_id: &str) -> ProfileHistoryRecord {
                 workload_id: "fixture".to_string(),
                 source_fingerprint: "def567".to_string(),
                 measurement_fingerprint: "ghi789".to_string(),
+                timing_schema_version: 1,
             },
             group_name: "core".to_string(),
             command: "check".to_string(),
@@ -81,10 +93,16 @@ fn test_record_b(run_id: &str) -> ProfileHistoryRecord {
             observation_wall_ms: 1400.0,
             sample_count: 600,
             sample_weight: 600.0,
-            stage_timings: vec![BenchmarkMetric {
-                name: "ast_ms".to_string(),
-                value: 900.0,
-            }],
+            stage_timings: vec![
+                BenchmarkMetric {
+                    name: "command.check.total".to_string(),
+                    value: 1400.0,
+                },
+                BenchmarkMetric {
+                    name: "frontend.ast.total".to_string(),
+                    value: 900.0,
+                },
+            ],
             counters: vec![BenchmarkMetric {
                 name: "token_count".to_string(),
                 value: 13000.0,
@@ -114,6 +132,27 @@ fn current_records(records: Vec<StoredProfileHistoryRecord>) -> Vec<ProfileHisto
             }
         })
         .collect()
+}
+
+fn drift_input(case: &HistoryCaseRecord) -> DriftCaseInput {
+    DriftCaseInput {
+        case_id: case.case_id.clone(),
+        identity: case.identity.clone(),
+        command: case.command.clone(),
+        args: case.args.clone(),
+        stage_timings: case.stage_timings.clone(),
+        counters: case.counters.clone(),
+        hot_functions: case
+            .hot_functions
+            .iter()
+            .map(|function| DriftHotFunction {
+                name: function.name.clone(),
+                bucket_label: function.bucket_label.clone(),
+                inclusive_samples: function.inclusive_samples,
+                inclusive_pct: function.inclusive_pct,
+            })
+            .collect(),
+    }
 }
 
 #[test]
@@ -150,6 +189,77 @@ fn append_multiple_records_and_read_all() {
     assert_eq!(records[0].run_id, "2026-06-18T10-30-abc1234");
     assert_eq!(records[1].run_id, "2026-06-18T11-00-def5678");
     assert_eq!(records[1].sample_rate_hz, Some(1000.0));
+}
+
+#[test]
+fn current_profile_history_rejects_obsolete_timing_metric_names() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let path = temp_dir.path().join("profile-runs.jsonl");
+    let mut record = test_record("2026-06-18T10-30-abc1234");
+    record.cases[0].stage_timings[1].name = "ast_ms".to_string();
+
+    let error = append_profile_run(&path, &record)
+        .expect_err("current profile history must reject provisional timing names");
+    assert!(error.contains("unknown timing schema metric 'ast_ms'"));
+
+    let invalid_line = serde_json::to_string(&record).expect("record should serialize");
+    std::fs::write(&path, invalid_line).expect("invalid profile history fixture should be written");
+    assert!(
+        read_profile_runs(&path)
+            .expect("profile history should remain readable")
+            .is_empty(),
+        "current profile history with provisional timing names must be skipped"
+    );
+}
+
+#[test]
+fn current_profile_history_rejects_empty_timing_evidence_on_append_and_read() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let path = temp_dir.path().join("profile-runs.jsonl");
+    let mut record = test_record("2026-06-18T10-30-empty");
+    record.cases[0].stage_timings.clear();
+
+    let error = append_profile_run(&path, &record)
+        .expect_err("current profile history must reject empty timing evidence");
+    assert!(error.contains("no metrics"), "unexpected error: {error}");
+    assert!(!path.exists());
+
+    let invalid_line = serde_json::to_string(&record).expect("record should serialize");
+    std::fs::write(&path, invalid_line).expect("invalid profile history fixture should be written");
+    assert!(
+        read_profile_runs(&path)
+            .expect("profile history should remain readable")
+            .is_empty(),
+        "current profile history with empty timing evidence must be skipped"
+    );
+}
+
+#[test]
+fn current_profile_history_rejects_missing_command_total_on_append_and_read() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let path = temp_dir.path().join("profile-runs.jsonl");
+    let mut record = test_record("2026-06-18T10-30-missing-total");
+    record.cases[0].stage_timings = vec![BenchmarkMetric {
+        name: "frontend.ast.total".to_string(),
+        value: 812.0,
+    }];
+
+    let error = append_profile_run(&path, &record)
+        .expect_err("current profile history must require its command total");
+    assert!(
+        error.contains("command.check.total"),
+        "unexpected error: {error}"
+    );
+    assert!(!path.exists());
+
+    let invalid_line = serde_json::to_string(&record).expect("record should serialize");
+    std::fs::write(&path, invalid_line).expect("invalid profile history fixture should be written");
+    assert!(
+        read_profile_runs(&path)
+            .expect("profile history should remain readable")
+            .is_empty(),
+        "current profile history without its command total must be skipped"
+    );
 }
 
 #[test]
@@ -216,9 +326,9 @@ fn roundtrip_preserves_case_data() {
     assert_eq!(case.observation_wall_ms, 1234.5);
     assert_eq!(case.sample_count, 500);
     assert_eq!(case.sample_weight, 500.0);
-    assert_eq!(case.stage_timings.len(), 1);
-    assert_eq!(case.stage_timings[0].name, "ast_ms");
-    assert_eq!(case.stage_timings[0].value, 812.0);
+    assert_eq!(case.stage_timings.len(), 2);
+    assert_eq!(case.stage_timings[1].name, "frontend.ast.total");
+    assert_eq!(case.stage_timings[1].value, 812.0);
     assert_eq!(case.counters.len(), 1);
     assert_eq!(case.counters[0].name, "token_count");
     assert_eq!(case.counters[0].value, 12000.0);
@@ -312,6 +422,93 @@ fn append_rejects_unknown_revision_record() {
 }
 
 #[test]
+fn append_rejects_different_timing_schema() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let path = temp_dir.path().join("profile-runs.jsonl");
+
+    let mut record = test_record("2026-06-18T10-30-schema");
+    record.cases[0].identity.timing_schema_version = 2;
+
+    let error = append_profile_run(&path, &record)
+        .expect_err("new profile records must use the current timing schema");
+    assert!(error.contains("incompatible current timing schema"));
+    assert!(!path.exists());
+}
+
+#[test]
+fn append_rejects_incompatible_format_version() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let path = temp_dir.path().join("profile-runs.jsonl");
+
+    let mut record = test_record("2026-06-18T10-30-format");
+    record.format_version = HISTORY_FORMAT_VERSION - 1;
+
+    let error = append_profile_run(&path, &record)
+        .expect_err("new profile records must use the current history format");
+    assert!(error.contains("format version"));
+    assert!(!path.exists());
+}
+
+#[test]
+fn append_rejects_incompatible_protocol_version() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let path = temp_dir.path().join("profile-runs.jsonl");
+
+    let mut record = test_record("2026-06-18T10-30-protocol");
+    record.profile_protocol_version = PROFILE_PROTOCOL_VERSION - 1;
+
+    let error = append_profile_run(&path, &record)
+        .expect_err("new profile records must use the current profile protocol");
+    assert!(error.contains("protocol version"));
+    assert!(!path.exists());
+}
+
+#[test]
+fn persisted_schema_mismatch_reaches_profile_drift_without_numeric_comparison() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let path = temp_dir.path().join("profile-runs.jsonl");
+
+    let mut previous = test_record("2026-06-18T10-30-previous");
+    previous.cases[0].identity.timing_schema_version = 2;
+    previous.cases[0].stage_timings[1].value = 1.0;
+    previous.cases[0].counters[0].value = 1.0;
+    previous.cases[0].hot_functions[0].inclusive_pct = 1.0;
+
+    let mut current = test_record("2026-06-18T11-00-current");
+    current.cases[0].stage_timings[1].value = 999.0;
+    current.cases[0].counters[0].value = 999999.0;
+    current.cases[0].hot_functions[0].inclusive_pct = 90.0;
+
+    let previous_json = serde_json::to_string(&previous).expect("previous record should serialize");
+    let current_json = serde_json::to_string(&current).expect("current record should serialize");
+    std::fs::write(&path, format!("{previous_json}\n{current_json}\n"))
+        .expect("profile history fixture should be written");
+
+    let records = current_records(read_profile_runs(&path).expect("profile history should read"));
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0].cases[0].identity.timing_schema_version, 2);
+
+    let report = compute_drift(
+        &[drift_input(&records[1].cases[0])],
+        &records[0],
+        &HashMap::from([(String::from("check_foo_bst"), 999.0)]),
+    );
+
+    assert_eq!(report.timing_schema_changed_case_ids, ["check_foo_bst"]);
+    assert!(report.measurement_changed_case_ids.is_empty());
+    assert!(report.function_increases.is_empty());
+    assert!(report.function_decreases.is_empty());
+    assert!(report.stage_movements.is_empty());
+    assert!(report.counter_movements.is_empty());
+    assert_eq!(
+        format_drift_markdown(&report)
+            .matches("timing schema changed")
+            .count(),
+        1
+    );
+}
+
+#[test]
 fn unicode_and_escaping_roundtrip_through_serde() {
     let temp_dir = tempfile::tempdir().expect("tempdir");
     let path = temp_dir.path().join("profile-runs.jsonl");
@@ -341,6 +538,24 @@ fn non_finite_data_fails_serialization() {
         .expect_err("non-finite observations must be rejected before writing");
     assert!(error.contains("finite"));
     assert!(!path.exists());
+}
+
+#[test]
+fn non_finite_sample_rate_fails_serialization() {
+    for (index, sample_rate_hz) in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY]
+        .into_iter()
+        .enumerate()
+    {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let path = temp_dir.path().join(format!("profile-runs-{index}.jsonl"));
+        let mut record = test_record("2026-06-18T10-30-invalid-rate");
+        record.sample_rate_hz = Some(sample_rate_hz);
+
+        let error = append_profile_run(&path, &record)
+            .expect_err("non-finite sample rates must be rejected before writing");
+        assert!(error.contains("finite"));
+        assert!(!path.exists());
+    }
 }
 
 #[test]

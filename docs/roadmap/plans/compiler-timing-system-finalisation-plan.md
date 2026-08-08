@@ -2,8 +2,8 @@
 
 ## Status
 
-- **Plan state:** authoritative replacement plan, Phase 3 implementation complete and checkpoint committed
-- **Committed correction baseline:** `3abc75f6f`
+- **Plan state:** Phase 8 complete; final audit clean; final checkpoint committed
+- **Committed correction baseline:** `b837829cb`
 - **Intended repository path:** `docs/roadmap/plans/compiler-timing-system-finalisation-plan.md`
 - **Roadmap status:** do not add this plan to `docs/roadmap/roadmap.md` unless the coordinator requests it separately
 - **Primary invariant:** a compiler built without `timers` performs no timer-system runtime work
@@ -29,39 +29,45 @@ ACTIVE_PLAN:
 PROGRESS_RECORD:
 - WORK_ID: `compiler-timing-finalisation`
 - WORK_SOURCE: this plan and the 2026-08-08 Phase 0/1 correction review
-- BASE_REVISION: `3abc75f6f`
-- STATUS: active
-- CURRENT_SCOPE: Phase 3 checkpoint complete and ready for Phase 4
-- COMPLETED: Phase 0/1 correction checkpoint committed as `3abc75f6f`; Phase 2 committed as `a9b970bb6` with immutable runtime configuration, explicit session channels, fallible raw-session ownership, atomic inactive fast paths and focused lifecycle regressions while retaining raw event snapshots. Metric-only raw sessions skip facade attribution-context expressions. The final audit's stale multi-record output gap is covered by `multi_record_outcome_rejects_stale_contexts_before_bench_emission`. The retained Phase 3 candidate has been fully diff-inspected, its AST timing-family visibility path corrected, provisional production names migrated to schema-v1 identities, obsolete live timers removed, summary command applicability corrected, and focused regression coverage added. The stale counter expectation in `chunked_file_preparation_skips_identity_payload_remap` was corrected after confirming the same expectation failed at the accepted Phase 2 baseline. The existing forced output-plan failure regression now also asserts `build.output.total`.
-- VALIDATION: Phase 3 passes `cargo fmt --all --check`; the five-feature check matrix (`cargo check --no-default-features`, `timers`, `detailed_timers`, `timers,benchmark_counters` and `benchmark_counters`); `cargo test --features timers,benchmark_counters --lib -- --format terse` (4,185 tests); `cargo test --features detailed_timers --lib -- --format terse` (4,176 tests); the timing-focused suite (81 tests); the focused frontend suite (38 tests); the forced output-plan regression; `just timers-erasure-check`; and the complete `just validate` gate. The final gate passed native, Linux-x64 and Windows-x64 Clippy, workspace tests (4,174, 17 and 601 passing test groups), 1,818 integration cases, docs checking, all 60 benchmark preflights and timer erasure.
-- AUDITS: Phase 0/1 final auditor found one low-severity `§ 12` cross-reference; corrected to `§ 10`. Phase 2 interim audit found two low-severity gaps: restore one-lock multi-recording and add runtime-gated macro regressions. Both are corrected. The Phase 3 interim auditor route was attempted twice and the configured `final_auditor` route was attempted twice. Every attempt terminated before handoff with HTTP 429 from the only eligible Ollama provider, with no worktree changes. The coordinator completed a local final audit covering registry identity, stale names, stage ownership, attribution, exact-once AST totals, backend/output applicability, failure-path guards, tests, erasure and documentation accuracy. No code findings remain; the independent route limitation is recorded explicitly.
-- BLOCKERS: No code blockers remain after the AST timing-family visibility correction. The independent auditor could not produce a handoff because the only eligible provider repeatedly returned HTTP 429; the Codex provider remained disabled by configured routing. Phase 3 is accepted with that audit limitation recorded.
-- NOTES: Phase 0 and Phase 1 were committed together in `77a45e790708f76f8b96267991a0370a3ecfc9c8`; their correction review became the accepted checkpoint `3abc75f6f`. Phase 2 is its own accepted checkpoint. The candidate was explicitly retained after complete diff inspection, validated locally and accepted as the Phase 3 checkpoint.
+- BASE_REVISION: `b837829cb`
+- STATUS: complete
+- CURRENT_SCOPE: Phase 8 closeout complete after accepted Phase 7, completed documentation, full validation and independent final audit
+- COMPLETED: Phase 0/1 correction checkpoint committed as `3abc75f6f`; Phase 2 committed as `a9b970bb6` with immutable runtime configuration, explicit session channels, fallible raw-session ownership, atomic inactive fast paths and focused lifecycle regressions while retaining raw event snapshots. Metric-only raw sessions skip facade attribution-context expressions. The final audit's stale multi-record snapshot gap is covered by `multi_record_outcome_rejects_stale_contexts_before_snapshot_aggregation`. The retained Phase 3 candidate was fully diff-inspected and accepted in `240ee6722` after its AST timing-family visibility path was corrected, provisional production names migrated to schema-v1 identities, obsolete live timers removed, summary command applicability corrected and focused regression coverage added. Phase 4 is committed as `dc1df6663`: all production timer arguments use `TimingMetric`; `enabled/mod.rs` owns the typed facade and `guard.rs` owns exact-once guards; old raw recording/specialized macro APIs and timing prose in `compiler_dev_logging` were removed; typed erasure, guard, multi-duration and inactive-clock tests pass. Phase 5 replaces global and attributed event storage with dense `TimingMetric`-indexed atomic totals and sample counts, quiesces admitted recorders before snapshot extraction, stores only typed schema-order rows, and carries registered module keys through Stage 0 preparation and compilation. Phase 6 replaces the stable-name summary bridge with typed metric policies and dense typed report totals, derives command accounting from `TimingAccountingRole::Pipeline`, reports duplicate/over-accounted spans without saturating `Other`, preserves deterministic boundary/frontend/slowest-module rendering, and removes unused row emphasis/suffix state. Phase 7 emits one schema header and final typed aggregate set, carries schema identity through CLI/frontend fingerprints and benchmark/profile history, classifies mismatches as non-comparable, validates persisted numeric finiteness, routes benchmark/report labels and CLI pipeline accounting through schema-owned metadata, and derives the no-timer binary/source metric inventory from the registry. Phase 8 corrections remove the obsolete live prose parser and its erasure exemption, separate Stage 0 module placeholder registration from complete duplicate registration, reject conflicting module metadata without mutation, align benchmark documentation with `frontend.prepare` and schema-owned pipeline rows, validate current-schema persistence, reject duplicate frontend aggregates, harden post-drain finalization, route profile and benchmark report prose through schema identity, preserve schema-aware monthly no-change replacement, correct compiler logging ownership documentation, add Public interface summary coverage, require non-empty runner-complete current-schema evidence at benchmark/profile persistence boundaries, and narrow current-schema literal erasure to the schema owner and tests.
+- VALIDATION: Final Phase 8 candidate passes `cargo fmt --all -- --check`, `git diff --check`, all five feature checks (`--no-default-features`, `timers`, `detailed_timers`, `timers,benchmark_counters`, `benchmark_counters`), timer-focused tests in timers (99) and detailed timers (100), the full `xtask` suite (641), `just timers-erasure-check` (no-timer binary clean at 7,935,056 bytes, source audit clean across `src` and `xtask/src`), `just bench-check` (29 cases, baseline, approximately 29ms average), `just bench-frontend-check` (31 cases, baseline, approximately 92ms average), `cargo run --quiet -- build docs --release` (68 files), and `just validate` (cross-target Clippy, 4,193 workspace tests, 17 CLI tests, 641 xtask tests, 1,818 integration cases, docs check, 60-case benchmark preflight with 8 CLI and 10 frontend quick measurements, and erasure gate).
+- PHASE8_CORRECTIONS: The final-audit corrections remove the obsolete live prose parser and its erasure exemption, separate Stage 0 module placeholder registration from complete duplicate registration, reject conflicting module metadata without mutation, align benchmark documentation with `frontend.prepare` and schema-owned pipeline rows, preserve timing schema identity in profile JSON, local benchmark reports and tracked monthly summaries with mixed-schema rejection, correct schema-aware monthly no-change replacement and compiler logging ownership documentation, correct frontend singular/plural headings and recursive summary-column alignment, repair the comparison-state count and collector lock rationale, close live timing parsing over the schema registry and canonical order, route local report labels through the schema owner, derive command-specific pipeline titles and aligned/bounded summary fields, remove the compiler-message timing compatibility re-export and broad counter-only dead-code allowance, document counter-only output plus silent command timing accurately, make fallback or stale module-finalization callbacks harmless across collection generations, validate current-schema history names/uniqueness/order at persistence boundaries, reject duplicate frontend aggregates before averaging, route profile human prose through schema labels, add the Public interface child policy and threshold/order regressions, correct singular aggregate wording in xtask comments, and update frontend benchmark fixtures to schema-v1 metric identities.
+- PHASE8_LATEST_CORRECTION: Exclude Stage 0 module records whose source facts never finalized from slowest-module evidence and winner selection. Add the malformed-directory failure-path regression and the direct unfinished-facts summary regression. Then require non-empty schema-ordered timing evidence plus the runner command total when current benchmark/profile history is appended or read, add append/read regressions for empty and incomplete records, and narrow current-schema literal erasure to the schema owner and tests. Update the final closeout inventory to 99/100 focused timing tests, 4,193 workspace tests and 641 xtask tests.
+- AUDITS: Phase 0/1 final auditor found one low-severity `§ 12` cross-reference; corrected to `§ 10`. Phase 2 interim audit found two low-severity gaps: restore one-lock multi-recording and add runtime-gated macro regressions. Both are corrected. Phase 3's configured audit routes were unavailable after repeated HTTP 429 responses before handoff; that limitation is recorded. Phase 4's configured interim auditor was attempted twice through `implementation-agent` and both attempts ended before handoff with HTTP 429 from the only eligible Ollama provider; neither changed the worktree. Phase 5's configured interim auditor was attempted through `implementation-agent` and ended before handoff with HTTP 429; it did not change the worktree. The coordinator's local Phase 5 audit found and removed the obsolete duplicate module-registration loop, then revalidated all feature checks and full timer suites. Phase 6's configured auditor was attempted through `implementation-agent` as runtime `20260808T132814Z-feb3de41` and ended before handoff because the only eligible Ollama provider returned HTTP 429; it made no worktree changes. The coordinator's local Phase 6 audit found no raw-string summary bridge, metric-name inference, additive evidence accounting, unchecked `Other` subtraction, nondeterministic dynamic section construction or renderer-only row state. Phase 7 audit `20260808T151827Z-35a2666d` found and the coordinator corrected an incomplete raw metric erasure heuristic. Rerun `20260808T153043Z-dc2c95a7` found and the coordinator corrected xtask source-audit scope, the stale pre-v1 benchmark-report taxonomy/attribution fallback, and this capsule's stale test count. Rerun `20260808T160309Z-31b560e0` found and the coordinator corrected equal-obsolete-schema comparison in benchmark matching and profile drift, with regressions covering matching, reporting and drift. Rerun `20260808T161405Z-4d9935dc` found and the coordinator corrected report counter aggregation bypassing comparable cases and moved schema-version ownership into `timing/enabled/schema.rs`; focused tests and the feature matrix now pass. Rerun `20260808T163410Z-2e184e51` found stale per-record benchmark-emission wording in the multi-record regression and capsule; renamed the test and updated its comment, assertion and capsule reference. Rerun `20260808T165932Z-e614dfca` found obsolete-schema stage rows still rendered in slowest-case report details; the report was corrected to render stage rows only for the current schema and mismatch-output regressions were added. Final interim audit `20260808T171735Z-65c52cc1` independently reviewed the corrected Phase 7 candidate and returned `audit_clean` with no findings, test gaps or documentation drift.
+- AUDIT_PHASE8_FINAL: Final auditor `20260808T181041Z-31ba4b66` found profile report schema identity omission, basic-summary singular/plural and recursive-width defects, a stale comparison-state count, and a stale collector lock rationale. All four findings are corrected; focused suites, the full validation gate, feature matrix, benchmark checks and docs rebuild are green. The final independent rerun `20260808T215526Z-5ee9420e` returned `audit_clean`.
+- AUDIT_PHASE8_RERUN: Final auditor `20260808T183337Z-e40a8a19` found five required corrections: registry-closed canonical live timing parsing, schema-owned labels in local benchmark reports, command-specific/aligned/bounded basic summary rendering, removal of the compiler-message timing compatibility proxy and broad counter-only dead-code allowance, and accurate counter-only/silent-mode feature documentation. All five were corrected. Final auditor `20260808T191058Z-01e3e1fa` then found five additional corrections: current-schema persistence registry validation, duplicate frontend aggregate rejection, post-drain module-finalization no-op handling, schema-owned profile prose labels, and Public interface child/order/threshold coverage, plus two stale xtask comments. Final auditor `20260808T195410Z-26ac3eb7` found that local benchmark reports and tracked monthly summaries discarded timing schema identity. Final auditor `20260808T210917Z-a78a4ffb` found that unfinished Stage 0 placeholders could win slowest-module selection and that the closeout record contained a stale xtask count. The summary now excludes unfinished source-fact records, build-system and summary regressions cover the failure path, and the closeout count is 636. Final auditor `20260808T213137Z-2bccfe68` found that persistence validation accepted empty current-schema evidence or omitted CLI command totals, and that production history adapters were exempted from the current-schema literal erasure rule. A shared non-empty/required-total validator, benchmark/profile append/read regressions, and the narrowed source allowlist now correct both findings. Final auditor `20260808T215526Z-5ee9420e` independently returned `audit_clean` with no correctness, architecture, regression, test-coverage or documentation findings after reviewing the complete Phase 8 diff and supplied validation evidence.
+- BLOCKERS: none; the complete validation gate is green and the independent final auditor returned clean.
+- AUDIT_LATEST: Final auditor `20260808T215526Z-5ee9420e` returned `audit_clean` after reviewing the complete Phase 8 diff, touched tests, generated documentation provenance, schema/lifecycle/persistence/report/erasure ownership and plan consistency. It found no correctness, architecture, regression, test-coverage or documentation findings. The latest xtask suite passes 641 tests; the complete validation gate, feature matrix, focused suites, docs build, erasure check and deliberate benchmark checks are green.
+- NOTES: Phase 0 and Phase 1 were committed together in `77a45e790708f76f8b96267991a0370a3ecfc9c8`; their correction review became the accepted checkpoint `3abc75f6f`. Phase 2 was accepted as `a9b970bb6`. Phase 3 was accepted as `240ee6722`; Phase 4 was accepted as `dc1df6663`; Phase 5 was accepted as `f19d9898e`; Phase 6 was accepted as `011629580`. Continue one coherent phase per checkpoint.
 
 CURRENT_SLICE:
-- Phase: Phase 3 semantic call-site migration
-- Goal: migrate production timing call sites to v1 names and semantic endpoints while retaining raw event storage
-- Non-goals: typed facade, dense collector and typed summary-policy work
+- Phase: Phase 8 documentation, final audit and closeout
+- Goal: independently audit the documented implementation, record the final inventory and checkpoints, and leave a clean worktree
+- Non-goals: unrelated compiler behavior, counter redesign or new timing features
 
 LAST_GOOD_COMMIT:
-- `a9b970bb6`
+- `b837829cb`
 
 CURRENT_WORKTREE_STATE:
 - Confirmed clean on `main` at `a9b970bb6` before the attempted Phase 3 work
 - Phase 0 and Phase 1 were committed together
 - Phase 0/1 correction checkpoint committed separately
 - Phase 2 deliberately retains the raw event vector and passed its final audit cycle and serial full validation gate
-- The retained, compiled and fully validated Phase 3 candidate across command, build-system, frontend, AST, backend and summary code plus focused tests is committed. The worktree is clean. The independent audit route limitation is recorded above.
-- No typed facade or dense collector work has started
+- The retained, compiled and fully validated Phase 3 candidate across command, build-system, frontend, AST, backend and summary code plus focused tests is committed in the current baseline. The worktree was clean at reconciliation. The independent audit route limitation is recorded above.
+- The Phase 4 typed-facade candidate is committed as `dc1df6663`; the Phase 5 dense-collector candidate is committed as `f19d9898e` after local audit and validation; the Phase 6 typed summary checkpoint is committed as `011629580`. The accepted Phase 7 candidate plus corrected Phase 8 code/documentation changes and the regenerated validation route are committed in the final coordinator checkpoint. All final-auditor finding sets and the full-gate lifecycle correction are resolved, the independent final auditor is clean, the complete validation gate is green, and no Phase 3 candidate remains unvalidated or unclassified. The worktree is clean.
 
 BLOCKERS / RISKS:
-- The Phase 3 candidate was retained explicitly after reconciliation and has passed the local audit and full validation gate
-- raw metric call sites intentionally remain until corrected Phase 3; no compatibility mapper may be introduced before then
-- preserve raw event snapshots until Phase 5; do not introduce a parallel collector
+- Phase 4 deleted raw recording APIs rather than introducing a compatibility mapper or dual facade
+- Phase 6 records accounting issues in the pure report model and suppresses `Other` when the policy cannot account safely; production debug builds assert the invariant, while unit tests retain explicit issue coverage because process-global instrumentation tests may overlap
+- attributed accumulator storage preserves session-stale rejection and deterministic boundary/module metadata without a record-path lifecycle mutex
+- snapshots retain only typed dense timing aggregates; no raw timing compatibility parser or parallel collector remains
 - inactive channels must avoid timing clocks and collector locks
 
 NEXT_ACTION:
-- Begin Phase 4 typed-facade and collector work from the accepted Phase 3 checkpoint.
+- none; the final coordinator checkpoint is committed and the worktree is clean.
 ```
 
 ---
@@ -1220,16 +1226,16 @@ Replace every final raw string at call sites with `TimingMetric` in one
 buildable change. Then delete string recording and guard APIs. There is no
 dual facade or fallback mapper.
 
-- [ ] Move enabled implementation to the final module layout, including
+- [x] Move enabled implementation to the final module layout, including
   `guard.rs`, and remove the old broad `enabled.rs` allowances.
-- [ ] Make every expression macro, guard, multi-span and direct-record facade
+- [x] Make every expression macro, guard, multi-span and direct-record facade
   accept `TimingMetric`.
-- [ ] Keep disabled macro arms as direct production expressions or no
+- [x] Keep disabled macro arms as direct production expressions or no
   statements, without evaluating metric/context/command expressions.
-- [ ] Move detailed timer prose out of `compiler_dev_logging` and ensure it
+- [x] Move detailed timer prose out of `compiler_dev_logging` and ensure it
   uses the captured stored duration.
-- [ ] Delete string recording APIs, raw parent names and old macro surfaces.
-- [ ] Test no-feature erasure, value/error pass-through, exactly-once guards,
+- [x] Delete string recording APIs, raw parent names and old macro surfaces.
+- [x] Test no-feature erasure, value/error pass-through, exactly-once guards,
   multi-metric equality and inactive clock avoidance.
 
 Checkpoint only after no production timer call can provide a raw metric name.
@@ -1241,13 +1247,13 @@ With all recording typed, replace the event vector with dense
 `TimingMetric::ALL`; dynamic boundary/module records receive dense attributed
 slots only for allowed metric kinds.
 
-- [ ] Store global and attributed totals atomically without record-path
+- [x] Store global and attributed totals atomically without record-path
   allocation, formatting, hashing or a global collector mutex.
-- [ ] Stop recording before deterministic snapshot extraction.
-- [ ] Build schema-order aggregates with sample counts where useful.
-- [ ] Retain only typed metrics in snapshots and expose no raw compatibility
+- [x] Stop recording before deterministic snapshot extraction.
+- [x] Build schema-order aggregates with sample counts where useful.
+- [x] Retain only typed metrics in snapshots and expose no raw compatibility
   parser.
-- [ ] Test exact parallel additions, schema-order snapshots, attribution
+- [x] Test exact parallel additions, schema-order snapshots, attribution
   validation and no-allocation/no-lock inactive behavior.
 
 Checkpoint only after collector/session tests, all feature combinations,
@@ -1259,31 +1265,34 @@ Build the concise report from typed descriptors and one policy owner. Command
 accounting consumes only `TimingAccountingRole::Pipeline` spans. Nested and
 accumulated evidence never becomes additive command time.
 
-- [ ] Construct display, parent, threshold and command-accounting policy from
+- [x] Construct display, parent, threshold and command-accounting policy from
   typed schema identities.
-- [ ] Detect duplicate or over-accounted command spans rather than saturating
+- [x] Detect duplicate or over-accounted command spans rather than saturating
   `Other`.
-- [ ] Render boundaries, frontend rows and slowest modules deterministically
+- [x] Render boundaries, frontend rows and slowest modules deterministically
   without absolute paths.
-- [ ] Keep report construction pure and terminal styling in `render.rs` only.
+- [x] Keep report construction pure and terminal styling in `render.rs` only.
 
 ## Phase 7 - Benchmark schema reset and erasure hardening
 
-- [ ] Emit exactly one `MOTH_BENCH timing-schema 1` record and final aggregate
+- [x] Emit exactly one `MOTH_BENCH timing-schema 1` record and final aggregate
   metric lines in schema order.
-- [ ] Include the timing schema in CLI and frontend benchmark identities and
+- [x] Include the timing schema in CLI and frontend benchmark identities and
   reject mismatches as non-comparable.
-- [ ] Reset pre-v1 timing history without numeric migration.
-- [ ] Extend source and binary erasure checks for the final typed facade.
+- [x] Reset pre-v1 timing history without numeric migration.
+- [x] Extend source and binary erasure checks for the final typed facade.
 
 ## Phase 8 - Documentation, final audit and closeout
 
-- [ ] Update timer, benchmark, feature and validation documentation from the
+- [x] Update timer, benchmark, feature and validation documentation from the
   final implementation only.
-- [ ] Rebuild required documentation and inspect generated routes.
-- [ ] Run final zero-cost, architecture and benchmark-schema audits.
-- [ ] Record validation, accepted deferrals, final inventory and checkpoints.
-- [ ] Leave the worktree clean and stop for coordinator acceptance.
+- [x] Rebuild required documentation and inspect generated routes.
+- [x] Run final zero-cost, architecture and benchmark-schema audits. Independent
+  final auditor `20260808T215526Z-5ee9420e` returned `audit_clean` with no
+  correctness, architecture, regression, test-coverage or documentation findings.
+- [x] Record validation, accepted deferrals, final inventory and checkpoints.
+- [x] Leave the worktree clean and stop for coordinator acceptance after the
+  final checkpoint commit.
 
 ---
 
@@ -2008,6 +2017,40 @@ Make schema v1 and its ownership reloadable. Close both superseded plans and thi
 - [ ] Stop for coordinator acceptance.
 
 ---
+
+## Final closeout record
+
+This record is the final Phase 8 handoff. The schema table in the Phase 1
+closeout is the complete inventory: schema v1 contains 45 typed metrics in the
+canonical order owned by `src/timing/enabled/schema.rs`. It includes command,
+build-system, Stage 0, boundary, frontend, AST, public-interface, HIR, borrow,
+generated-function, backend, Wasm, asset and output evidence. No provisional
+`_ms` identity or live prose-parser path remains.
+
+Accepted checkpoints, in order:
+
+1. Phase 0/1 correction: `3abc75f6f`
+2. Phase 2 runtime/session channels: `a9b970bb6`
+3. Phase 3 semantic migration: `240ee6722`
+4. Phase 4 typed facade: `dc1df6663`
+5. Phase 5 dense collector: `f19d9898e`
+6. Phase 6 typed summary: `011629580`
+7. Phase 7 benchmark schema and erasure hardening: `b837829cb`
+8. Phase 8 final checkpoint: coordinator commit after the clean independent final audit
+
+The benchmark protocol reset is deliberate: schema v1 observations are
+comparable only with current schema v1 identities; pre-v1 records remain
+readable where required for local history but are non-comparable and never
+numerically migrated. The accepted deferrals are listed immediately below.
+The final validation record is the command evidence in the active context
+capsule, including the five-feature matrix, 99/100 focused timing tests, 641
+`xtask` tests, 4,193 workspace tests, 1,818 integration cases, 60-case
+preflight, both deliberate benchmark checks, docs release generation and timer
+erasure.
+
+The previously reported unstaged 23-file Phase 3 migration candidate was
+inspected, compiled, validated and accepted as `240ee6722`; no unvalidated or
+unclassified Phase 3 candidate remains.
 
 # Deliberately deferred
 

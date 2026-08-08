@@ -28,8 +28,6 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 use crate::timer_log;
 use std::rc::Rc;
-#[cfg(feature = "detailed_timers")]
-use std::time::Instant;
 
 #[cfg(debug_assertions)]
 use super::debug_type_validation::debug_validate_type_ids_for_hir;
@@ -87,7 +85,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         //  Collect doc fragments
         // ----------------------------
         #[cfg(feature = "detailed_timers")]
-        let doc_fragments_start = Instant::now();
+        let doc_fragments_start = crate::timing::start_detailed_timer();
         let doc_fragments = collect_and_strip_comment_templates(
             &mut emitted.ast,
             project_path_resolver,
@@ -111,7 +109,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         //  Collect const top-level fragments
         // ----------------------------
         #[cfg(feature = "detailed_timers")]
-        let const_fragments_start = Instant::now();
+        let const_fragments_start = crate::timing::start_detailed_timer();
         let const_top_level_fragments = collect_const_top_level_fragments(
             top_level_const_fragments,
             &emitted.const_templates_by_path,
@@ -128,7 +126,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         //  Propagate reactive template metadata
         // ----------------------------
         #[cfg(feature = "detailed_timers")]
-        let reactive_template_metadata_start = Instant::now();
+        let reactive_template_metadata_start = crate::timing::start_detailed_timer();
         self.propagate_reactive_template_metadata(&mut emitted.ast)
             .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
         timer_log!(
@@ -142,7 +140,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         //  Normalize AST templates for HIR
         // ----------------------------
         #[cfg(feature = "detailed_timers")]
-        let ast_template_normalization_start = Instant::now();
+        let ast_template_normalization_start = crate::timing::start_detailed_timer();
         self.normalize_ast_templates_for_hir(&mut emitted.ast, project_path_resolver, string_table)
             .map_err(|error| {
                 self.template_normalization_error_messages(error, &emitted.warnings, string_table)
@@ -165,7 +163,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         // functions, generic structs and generic receiver methods have no emitted declaration
         // node, so their retained defaults are normalized in place through the same helper.
         #[cfg(feature = "detailed_timers")]
-        let public_default_synchronization_start = Instant::now();
+        let public_default_synchronization_start = crate::timing::start_detailed_timer();
         self.synchronize_normalized_public_defaults(
             &emitted.ast,
             project_path_resolver,
@@ -185,7 +183,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         //  Normalize module constants
         // ----------------------------
         #[cfg(feature = "detailed_timers")]
-        let module_constant_normalization_start = Instant::now();
+        let module_constant_normalization_start = crate::timing::start_detailed_timer();
         let projected_const_templates = self
             .project_const_templates(project_path_resolver, string_table)
             .map_err(|error| {
@@ -207,7 +205,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         //  Validate type boundaries
         // ----------------------------
         #[cfg(feature = "detailed_timers")]
-        let type_boundary_validation_start = Instant::now();
+        let type_boundary_validation_start = crate::timing::start_detailed_timer();
         self.validate_no_unresolved_executable_types(&emitted.ast, &module_constants, string_table)
             .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
         timer_log!(
@@ -221,7 +219,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         //  Collect const facts
         // ----------------------------
         #[cfg(feature = "detailed_timers")]
-        let const_fact_collection_start = Instant::now();
+        let const_fact_collection_start = crate::timing::start_detailed_timer();
         let start_function_path = self.context.root_role.has_implicit_start().then(|| {
             self.context
                 .entry_dir
@@ -254,7 +252,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         //  Merge builtin AST nodes
         // ----------------------------
         #[cfg(feature = "detailed_timers")]
-        let builtin_merge_start = Instant::now();
+        let builtin_merge_start = crate::timing::start_detailed_timer();
         if !self.environment.lookups.builtin_struct_ast_nodes.is_empty() {
             let mut ast_nodes = self.environment.lookups.builtin_struct_ast_nodes.clone();
             ast_nodes.extend(emitted.ast);

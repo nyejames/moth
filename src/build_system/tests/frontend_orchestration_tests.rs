@@ -1545,10 +1545,10 @@ fn resolve_and_validate_active_root_rejects_mismatched_expected_origin() {
 #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
 #[test]
 fn chunked_file_preparation_skips_identity_payload_remap() {
-    use crate::compiler_frontend::compiler_messages::compiler_dev_logging::start_benchmark_collection;
     use crate::compiler_frontend::instrumentation::{
         capture_frontend_counters_for_test, log_frontend_counters, reset_frontend_counters,
     };
+    use crate::timing::start_benchmark_collection;
 
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let _counter_capture = capture_frontend_counters_for_test();
@@ -1600,7 +1600,7 @@ fn chunked_file_preparation_skips_identity_payload_remap() {
 
 #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
 fn assert_counter_value(
-    counters: &[crate::compiler_frontend::compiler_messages::compiler_dev_logging::BenchmarkObservationMetric],
+    counters: &[crate::timing::BenchmarkObservationMetric],
     name: &str,
     expected: f64,
 ) {

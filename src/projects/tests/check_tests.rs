@@ -14,7 +14,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_tests::test_support::temp_dir;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 #[cfg(feature = "timers")]
-use crate::timing::start_benchmark_collection;
+use crate::timing::{TimingMetric, start_benchmark_collection};
 use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -70,7 +70,10 @@ fn successful_check_finishes_bootstrap_before_frontend() {
     assert!(!outcome.messages.has_errors());
     assert_timing_sequence(
         &snapshot,
-        &["build.bootstrap.total", "build.frontend.total"],
+        &[
+            TimingMetric::BuildBootstrapTotal,
+            TimingMetric::BuildFrontendTotal,
+        ],
     );
 
     fs::remove_dir_all(&root).expect("should remove temporary project root");
@@ -96,10 +99,10 @@ fn config_ast_timers_use_dedicated_identities() {
     assert_timing_sequence(
         &snapshot,
         &[
-            "config.ast.environment",
-            "config.ast.emit",
-            "config.ast.finalise",
-            "config.ast.total",
+            TimingMetric::ConfigAstTotal,
+            TimingMetric::ConfigAstEnvironment,
+            TimingMetric::ConfigAstEmit,
+            TimingMetric::ConfigAstFinalise,
         ],
     );
 
@@ -109,27 +112,21 @@ fn config_ast_timers_use_dedicated_identities() {
 #[cfg(feature = "timers")]
 fn assert_timing_sequence(
     snapshot: &crate::timing::BenchmarkObservationSnapshot,
-    expected_names: &[&'static str],
+    expected_metrics: &[TimingMetric],
 ) {
-    // The session is serialized against other explicit collector tests, but
-    // ordinary compiler tests may still emit timer observations in parallel.
-    // Locate this command's sequential records instead of comparing unrelated
-    // first occurrences of a shared metric name.
-    let mut expected = expected_names.iter().copied();
-    let mut next_expected = expected.next();
-
-    for observation in &snapshot.timings {
-        if Some(observation.name) == next_expected {
-            next_expected = expected.next();
-            if next_expected.is_none() {
-                return;
-            }
-        }
-    }
-
-    panic!(
-        "missing ordered timing sequence: {}",
-        expected_names.join(" -> ")
+    let positions = expected_metrics
+        .iter()
+        .map(|metric| {
+            snapshot
+                .timings
+                .iter()
+                .position(|aggregate| aggregate.metric == *metric && aggregate.samples > 0)
+                .unwrap_or_else(|| panic!("missing timing metric {:?}", metric))
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        positions.windows(2).all(|window| window[0] < window[1]),
+        "timing metrics must follow canonical schema order: {expected_metrics:?}"
     );
 }
 

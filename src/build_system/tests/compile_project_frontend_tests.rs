@@ -30,6 +30,35 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+#[cfg(feature = "timers")]
+fn boundary_has_timing(
+    snapshot: &crate::timing::BenchmarkObservationSnapshot,
+    boundary: crate::timing::TimingBoundaryId,
+    metric: crate::timing::TimingMetric,
+) -> bool {
+    snapshot
+        .boundaries
+        .iter()
+        .find(|record| record.id == boundary)
+        .is_some_and(|record| {
+            record
+                .timings
+                .iter()
+                .any(|aggregate| aggregate.metric == metric && aggregate.samples > 0)
+        })
+}
+
+#[cfg(feature = "timers")]
+fn module_has_timing(
+    module: &crate::timing::TimingModuleRecord,
+    metric: crate::timing::TimingMetric,
+) -> bool {
+    module
+        .timings
+        .iter()
+        .any(|aggregate| aggregate.metric == metric && aggregate.samples > 0)
+}
+
 #[test]
 fn directory_graph_retains_independent_diagnostics_without_blocked_consumer_cascades() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
@@ -107,6 +136,52 @@ fn directory_graph_retains_independent_diagnostics_without_blocked_consumer_casc
     );
 
     fs::remove_dir_all(&dir).expect("should remove temp dir");
+}
+
+#[cfg(feature = "timers")]
+#[test]
+fn failed_directory_preparation_keeps_unfinished_module_metadata_out_of_completion() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let dir = temp_dir("timing_failed_directory_preparation");
+    fs::create_dir_all(&dir).expect("should create project directory");
+    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(dir.join("@page.moth"), "import\n#[:ok]\n").expect("should write malformed entry");
+
+    let mut config = Config::new(dir.clone());
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut string_table = StringTable::new();
+    let timing_session =
+        crate::timing::start_benchmark_collection(true).expect("timing session should start");
+
+    let result = compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut BuilderSurface::with_mandatory_core(),
+        &mut string_table,
+    );
+    assert!(
+        result.is_err(),
+        "malformed Stage 0 input should fail preparation"
+    );
+
+    let snapshot = timing_session.finish();
+    let unfinished_modules = snapshot
+        .modules
+        .iter()
+        .filter(|module| !module.source_facts_finalized)
+        .collect::<Vec<_>>();
+    assert_eq!(unfinished_modules.len(), 1);
+    let unfinished = unfinished_modules[0];
+    assert_eq!(unfinished.source_file_count, 0);
+    assert_eq!(unfinished.source_byte_count, 0);
+    assert!(module_has_timing(
+        unfinished,
+        crate::timing::TimingMetric::FrontendPrepare
+    ));
+
+    fs::remove_dir_all(&dir).expect("should remove project directory");
 }
 
 #[cfg(feature = "timers")]
@@ -197,30 +272,26 @@ fn directory_frontend_registers_package_and_project_boundaries() {
         "one module per boundary (package {package_boundary:?}, project {project_boundary:?}): {:#?}",
         snapshot.modules
     );
-    assert!(snapshot.timings.iter().any(|observation| {
-        observation.name == "boundary.inventory"
-            && observation.context
-                == Some(crate::timing::TimingContext::for_boundary(package_boundary))
-    }));
-    assert!(snapshot.timings.iter().any(|observation| {
-        observation.name == "boundary.inventory"
-            && observation
-                .context
-                .and_then(crate::timing::TimingContext::boundary)
-                == Some(project_boundary)
-    }));
-    assert!(snapshot.timings.iter().any(|observation| {
-        observation.name == "boundary.compile"
-            && observation.context
-                == Some(crate::timing::TimingContext::for_boundary(package_boundary))
-    }));
-    assert!(snapshot.timings.iter().any(|observation| {
-        observation.name == "boundary.compile"
-            && observation
-                .context
-                .and_then(crate::timing::TimingContext::boundary)
-                == Some(project_boundary)
-    }));
+    assert!(boundary_has_timing(
+        &snapshot,
+        package_boundary,
+        crate::timing::TimingMetric::BoundaryInventory
+    ));
+    assert!(boundary_has_timing(
+        &snapshot,
+        project_boundary,
+        crate::timing::TimingMetric::BoundaryInventory
+    ));
+    assert!(boundary_has_timing(
+        &snapshot,
+        package_boundary,
+        crate::timing::TimingMetric::BoundaryCompile
+    ));
+    assert!(boundary_has_timing(
+        &snapshot,
+        project_boundary,
+        crate::timing::TimingMetric::BoundaryCompile
+    ));
 
     let own_modules = snapshot
         .modules
@@ -251,23 +322,13 @@ fn directory_frontend_registers_package_and_project_boundaries() {
         "module identities must never contain checkout-specific paths"
     );
 
-    // Filter to observations whose module key was actually registered by this
-    // compile. Unrelated parallel tests can record into the shared collector,
-    // but their module keys never resolve to this snapshot's module table.
-    let own_module_keys = snapshot
-        .modules
+    let semantic_total_count = own_modules
         .iter()
-        .map(|module| module.key)
-        .collect::<std::collections::HashSet<_>>();
-    let semantic_total_count = snapshot
-        .timings
-        .iter()
-        .filter(|observation| {
-            observation.name == "frontend.module.semantic_total"
-                && observation
-                    .context
-                    .and_then(crate::timing::TimingContext::module)
-                    .is_some_and(|key| own_module_keys.contains(&key))
+        .filter(|module| {
+            module_has_timing(
+                module,
+                crate::timing::TimingMetric::FrontendModuleSemanticTotal,
+            )
         })
         .count();
     assert_eq!(
@@ -276,17 +337,13 @@ fn directory_frontend_registers_package_and_project_boundaries() {
         "every compilation mode records one semantic total per module (package {package_boundary:?}, project {project_boundary:?}): {:#?}",
         (
             snapshot
-                .timings
+                .modules
                 .iter()
-                .filter(|observation| observation.name == "frontend.module.semantic_total")
-                .map(|observation| (
-                    observation
-                        .context
-                        .and_then(crate::timing::TimingContext::boundary),
-                    observation
-                        .context
-                        .and_then(crate::timing::TimingContext::module),
+                .filter(|module| module_has_timing(
+                    module,
+                    crate::timing::TimingMetric::FrontendModuleSemanticTotal,
                 ))
+                .map(|module| module.key)
                 .collect::<Vec<_>>(),
             snapshot
                 .boundaries
@@ -300,19 +357,19 @@ fn directory_frontend_registers_package_and_project_boundaries() {
                 .collect::<Vec<_>>(),
         )
     );
-    assert!(snapshot.timings.iter().any(|observation| {
-        observation.name == "frontend.module.semantic_total"
-            && observation.context
-                == Some(crate::timing::TimingContext::for_module(
-                    crate::timing::TimingModuleKey::new(package_boundary, 0),
-                ))
+    assert!(own_modules.iter().any(|module| {
+        module.key.boundary() == package_boundary
+            && module_has_timing(
+                module,
+                crate::timing::TimingMetric::FrontendModuleSemanticTotal,
+            )
     }));
-    assert!(snapshot.timings.iter().any(|observation| {
-        observation.name == "frontend.module.semantic_total"
-            && observation.context
-                == Some(crate::timing::TimingContext::for_module(
-                    crate::timing::TimingModuleKey::new(project_boundary, 0),
-                ))
+    assert!(own_modules.iter().any(|module| {
+        module.key.boundary() == project_boundary
+            && module_has_timing(
+                module,
+                crate::timing::TimingMetric::FrontendModuleSemanticTotal,
+            )
     }));
 
     fs::remove_dir_all(&dir).expect("should remove temp dir");
@@ -353,27 +410,23 @@ fn directory_frontend_records_incremental_file_prepare_with_module_attribution()
         .find(|boundary| boundary.display_name == config.project_name)
         .expect("the main project boundary should be registered")
         .id;
-    let prepare_observations = snapshot
-        .timings
+    let prepare_modules = snapshot
+        .modules
         .iter()
-        .filter(|observation| {
-            observation.name == "frontend.prepare"
-                && observation
-                    .context
-                    .and_then(crate::timing::TimingContext::boundary)
-                    == Some(project_boundary)
+        .filter(|module| {
+            module.key.boundary() == project_boundary
+                && module_has_timing(module, crate::timing::TimingMetric::FrontendPrepare)
         })
         .collect::<Vec<_>>();
 
     assert!(
-        !prepare_observations.is_empty(),
+        !prepare_modules.is_empty(),
         "incremental directory discovery must record frontend.prepare for the project boundary"
     );
     assert!(
-        prepare_observations.iter().all(|observation| observation
-            .context
-            .and_then(crate::timing::TimingContext::module)
-            .is_some()),
+        prepare_modules
+            .iter()
+            .all(|module| module.key.boundary() == project_boundary),
         "every project-boundary preparation observation must carry the owning module"
     );
 
@@ -414,44 +467,36 @@ fn single_file_frontend_records_file_prepare_with_module_attribution() {
         .find(|boundary| boundary.display_name == config.project_name)
         .expect("the synthetic single-file boundary should be registered")
         .id;
-    let prepare_observations = snapshot
-        .timings
+    let prepare_modules = snapshot
+        .modules
         .iter()
-        .filter(|observation| {
-            observation.name == "frontend.prepare"
-                && observation
-                    .context
-                    .and_then(crate::timing::TimingContext::boundary)
-                    == Some(project_boundary)
+        .filter(|module| {
+            module.key.boundary() == project_boundary
+                && module_has_timing(module, crate::timing::TimingMetric::FrontendPrepare)
         })
         .collect::<Vec<_>>();
     assert!(
-        !prepare_observations.is_empty(),
-        "single-file preparation must record frontend.prepare: boundaries={:#?} observations={:#?}",
+        !prepare_modules.is_empty(),
+        "single-file preparation must record frontend.prepare: boundaries={:#?} modules={:#?}",
         snapshot
             .boundaries
             .iter()
             .map(|boundary| (boundary.id, boundary.display_name.as_str()))
             .collect::<Vec<_>>(),
         snapshot
-            .timings
+            .modules
             .iter()
-            .filter(|observation| observation.name == "frontend.prepare")
-            .map(|observation| (
-                observation
-                    .context
-                    .and_then(crate::timing::TimingContext::boundary),
-                observation
-                    .context
-                    .and_then(crate::timing::TimingContext::module),
+            .filter(|module| module_has_timing(
+                module,
+                crate::timing::TimingMetric::FrontendPrepare
             ))
+            .map(|module| module.key)
             .collect::<Vec<_>>()
     );
     assert!(
-        prepare_observations.iter().all(|observation| observation
-            .context
-            .and_then(crate::timing::TimingContext::module)
-            .is_some()),
+        prepare_modules
+            .iter()
+            .all(|module| module.key.boundary() == project_boundary),
         "single-file preparation must carry the synthetic module key"
     );
 
@@ -492,17 +537,19 @@ fn ast_aggregate_metrics_recorded_with_timers() {
         "frontend.ast.finalise",
     ] {
         assert!(
-            snapshot
-                .timings
-                .iter()
-                .any(|observation| observation.name == metric),
+            snapshot.timings.iter().any(|aggregate| {
+                aggregate.metric.descriptor().stable_name == metric && aggregate.samples > 0
+            }),
             "{metric} must be recorded whenever timers is enabled"
         );
     }
     let ast_total_count = snapshot
         .timings
         .iter()
-        .filter(|observation| observation.name == "frontend.ast.total")
+        .filter(|aggregate| {
+            aggregate.metric.descriptor().stable_name == "frontend.ast.total"
+                && aggregate.samples > 0
+        })
         .count();
     assert_eq!(
         ast_total_count, 1,
@@ -548,7 +595,9 @@ fn ast_aggregate_metrics_are_not_double_recorded_with_detailed_timers() {
         let count = snapshot
             .timings
             .iter()
-            .filter(|observation| observation.name == metric)
+            .filter(|aggregate| {
+                aggregate.metric.descriptor().stable_name == metric && aggregate.samples > 0
+            })
             .count();
         assert!(
             count >= 1,
@@ -558,7 +607,10 @@ fn ast_aggregate_metrics_are_not_double_recorded_with_detailed_timers() {
     let ast_total_count = snapshot
         .timings
         .iter()
-        .filter(|observation| observation.name == "frontend.ast.total")
+        .filter(|aggregate| {
+            aggregate.metric.descriptor().stable_name == "frontend.ast.total"
+                && aggregate.samples > 0
+        })
         .count();
     assert_eq!(
         ast_total_count, 1,
@@ -1723,17 +1775,17 @@ fn linked_module_js_lowering_is_observed_separately() {
     drop(project);
 
     assert!(
-        snapshot
-            .timings
-            .iter()
-            .any(|observation| observation.name == "backend.js.lower_linked"),
+        snapshot.timings.iter().any(|aggregate| {
+            aggregate.metric.descriptor().stable_name == "backend.js.lower_linked"
+                && aggregate.samples > 0
+        }),
         "linked-module JS lowering must be observed separately from entry lowering"
     );
     assert!(
-        snapshot
-            .timings
-            .iter()
-            .any(|observation| observation.name == "backend.js.lower_entry"),
+        snapshot.timings.iter().any(|aggregate| {
+            aggregate.metric.descriptor().stable_name == "backend.js.lower_entry"
+                && aggregate.samples > 0
+        }),
         "entry-module JS lowering must remain observed"
     );
 

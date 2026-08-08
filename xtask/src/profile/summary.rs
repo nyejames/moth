@@ -27,6 +27,10 @@ use std::fs;
 
 use crate::bench_time::BenchmarkTimestamp;
 use crate::bench_types::BenchmarkMetric;
+use moth::benchmarking::{
+    TIMING_FRONTEND_AST_TOTAL_NAME, TIMING_FRONTEND_BORROW_INITIAL_NAME, TIMING_FRONTEND_HIR_NAME,
+    TIMING_FRONTEND_ORDER_DECLARATIONS_NAME, TIMING_FRONTEND_PREPARE_NAME, timing_metric_label,
+};
 
 use super::artifacts::ProfileRunPaths;
 use super::hotspots::HotspotExtractionResult;
@@ -66,6 +70,7 @@ pub(crate) struct CaseSummaryData<'a> {
 #[derive(Debug)]
 pub(crate) struct RootProfileHotspots {
     pub(crate) format_version: u32,
+    pub(crate) timing_schema_version: u32,
     pub(crate) run_id: String,
     pub(crate) timestamp: String,
     pub(crate) commit: Option<String>,
@@ -79,6 +84,7 @@ pub(crate) struct RootProfileHotspots {
 #[derive(Debug)]
 pub(crate) struct RootCaseHotspots {
     pub(crate) case_id: String,
+    pub(crate) timing_schema_version: u32,
     pub(crate) command: String,
     pub(crate) args: Vec<String>,
     pub(crate) observation_wall_ms: f64,
@@ -119,7 +125,7 @@ pub(crate) struct BucketSummaryEntry {
 // ---------------------------------------------------------------------------
 
 /// Current format version for summary artifacts.
-const SUMMARY_FORMAT_VERSION: u32 = 2;
+const SUMMARY_FORMAT_VERSION: u32 = 3;
 
 /// Maximum number of stage timings to show in root summary case entries.
 const ROOT_TOP_STAGES: usize = 3;
@@ -147,6 +153,7 @@ pub(crate) fn generate_case_summary(
     run_paths: &ProfileRunPaths,
     data: &CaseSummaryData<'_>,
 ) -> Result<(), String> {
+    validate_timing_schema(std::slice::from_ref(data))?;
     let md = format_enriched_case_summary(data, run_paths);
 
     let case_paths = run_paths.case_paths(&data.observation.case_id);
@@ -175,6 +182,7 @@ pub(crate) fn generate_root_hotspots_json(
     filter: ProfileFilterMode,
     samply_rate_hz: Option<f64>,
 ) -> Result<(), String> {
+    validate_timing_schema(cases)?;
     let root = build_root_hotspots(cases, run_id, commit, filter, samply_rate_hz);
     let json = format_root_hotspots_json(&root)?;
 
@@ -203,6 +211,7 @@ pub(crate) fn generate_agent_summary(
     run_id: &str,
     filter: ProfileFilterMode,
 ) -> Result<(), String> {
+    validate_timing_schema(cases)?;
     let md = format_agent_summary_md(cases, run_id, filter);
 
     let path = run_paths.root.join("agent-summary.md");
@@ -250,6 +259,27 @@ pub(crate) fn append_drift_to_agent_summary(
 //  Root hotspots JSON
 // ---------------------------------------------------------------------------
 
+/// Require every profile report input to use the current timing schema.
+///
+/// Profile artifacts contain schema-owned stage names and values. Keeping the
+/// check at the report boundary makes those artifacts self-describing and
+/// prevents a mixed-schema run from producing a misleading aggregate report.
+fn validate_timing_schema(cases: &[CaseSummaryData<'_>]) -> Result<(), String> {
+    for data in cases {
+        let actual = data.observation.observations.timing_schema_version;
+        if actual != moth::benchmarking::TIMING_SCHEMA_VERSION {
+            return Err(format!(
+                "profile case '{}' uses timing schema {}, expected {}",
+                data.observation.case_id,
+                actual,
+                moth::benchmarking::TIMING_SCHEMA_VERSION,
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 /// Build the root hotspots data structure from per-case data.
 fn build_root_hotspots(
     cases: &[CaseSummaryData<'_>],
@@ -265,6 +295,7 @@ fn build_root_hotspots(
 
     RootProfileHotspots {
         format_version: SUMMARY_FORMAT_VERSION,
+        timing_schema_version: moth::benchmarking::TIMING_SCHEMA_VERSION,
         run_id: run_id.to_string(),
         timestamp: BenchmarkTimestamp::now().format_run_header(),
         commit: commit.map(|s| s.to_string()),
@@ -310,6 +341,7 @@ fn build_root_case_hotspots(data: &CaseSummaryData<'_>) -> RootCaseHotspots {
 
     RootCaseHotspots {
         case_id: obs.case_id.clone(),
+        timing_schema_version: obs.observations.timing_schema_version,
         command: obs.command.clone(),
         args: obs.command_args.clone(),
         observation_wall_ms: round_2dp(obs.wall_ms),
@@ -406,6 +438,7 @@ fn format_root_hotspots_json(root: &RootProfileHotspots) -> Result<String, Strin
 
             serde_json::json!({
                 "case_id": case.case_id,
+                "timing_schema_version": case.timing_schema_version,
                 "command": case.command,
                 "args": args_json,
                 "observation_wall_ms": case.observation_wall_ms,
@@ -427,6 +460,7 @@ fn format_root_hotspots_json(root: &RootProfileHotspots) -> Result<String, Strin
 
     let output = serde_json::json!({
         "format_version": root.format_version,
+        "timing_schema_version": root.timing_schema_version,
         "run_id": root.run_id,
         "timestamp": root.timestamp,
         "commit": root.commit,
@@ -457,6 +491,11 @@ fn format_agent_summary_md(
     lines.push(String::new());
     lines.push(format!("Run: {}", run_id));
     lines.push(format!("Filter: {}", filter.display_label()));
+    let timing_schema_version = cases
+        .first()
+        .map(|data| data.observation.observations.timing_schema_version)
+        .unwrap_or(moth::benchmarking::TIMING_SCHEMA_VERSION);
+    lines.push(format!("Timing schema: {timing_schema_version}"));
     lines.push(format!("Cases: {}", cases.len()));
     lines.push(String::new());
 
@@ -524,7 +563,8 @@ fn append_agent_case_entry(lines: &mut Vec<String>, data: &CaseSummaryData<'_>, 
     {
         lines.push(format!(
             "- Top stage: {} ~{:.0}ms",
-            top_stage.name, top_stage.value
+            timing_metric_label(&top_stage.name),
+            top_stage.value
         ));
     }
 
@@ -587,6 +627,10 @@ fn format_enriched_case_summary(data: &CaseSummaryData<'_>, run_paths: &ProfileR
     ));
     lines.push(format!("Group: {}", obs.group_name));
     lines.push(format!("Filter: {}", filter.display_label()));
+    lines.push(format!(
+        "Timing schema: {}",
+        obs.observations.timing_schema_version
+    ));
     lines.push(format!("Wall time: ~{:.0}ms", obs.wall_ms));
     lines.push(format!("Sample count: {}", hotspots.total_sample_count));
     lines.push(format!(
@@ -602,7 +646,11 @@ fn format_enriched_case_summary(data: &CaseSummaryData<'_>, run_paths: &ProfileR
         lines.push("## Stage timings".to_string());
         lines.push(String::new());
         for metric in &obs.observations.stage_timings {
-            lines.push(format!("- {}: ~{:.0}ms", metric.name, metric.value));
+            lines.push(format!(
+                "- {}: ~{:.0}ms",
+                timing_metric_label(&metric.name),
+                metric.value
+            ));
         }
         lines.push(String::new());
     }
@@ -791,7 +839,7 @@ fn generate_hint(data: &CaseSummaryData<'_>) -> String {
     // Stage-specific hints.
     if let Some(stage) = top_stage {
         // AST + AST bucket: suggest AST owner paths.
-        if stage.name == "ast_ms" && top_func.bucket.label == "AST" {
+        if stage.name == TIMING_FRONTEND_AST_TOTAL_NAME && top_func.bucket.label == "AST" {
             let paths = format_paths(&top_func.bucket.suggested_paths);
             return format!(
                 "AST profile and stage timer agree; inspect repeated type/environment work \
@@ -801,7 +849,7 @@ fn generate_hint(data: &CaseSummaryData<'_>) -> String {
         }
 
         // File prepare + tokenizer/header bucket.
-        if stage.name == "file_prepare_ms"
+        if stage.name == TIMING_FRONTEND_PREPARE_NAME
             && (top_func.bucket.label == "Tokenization"
                 || top_func.bucket.label == "Header parsing"
                 || top_func.bucket.label == "Build system")
@@ -814,7 +862,7 @@ fn generate_hint(data: &CaseSummaryData<'_>) -> String {
         }
 
         // HIR + HIR bucket.
-        if stage.name == "hir_ms" && top_func.bucket.label == "HIR" {
+        if stage.name == TIMING_FRONTEND_HIR_NAME && top_func.bucket.label == "HIR" {
             let paths = format_paths(&top_func.bucket.suggested_paths);
             return format!(
                 "HIR generation and profile agree; inspect HIR lowering logic.{}",
@@ -823,7 +871,9 @@ fn generate_hint(data: &CaseSummaryData<'_>) -> String {
         }
 
         // Borrow + borrow bucket.
-        if stage.name == "borrow_ms" && top_func.bucket.label == "Borrow validation" {
+        if stage.name == TIMING_FRONTEND_BORROW_INITIAL_NAME
+            && top_func.bucket.label == "Borrow validation"
+        {
             let paths = format_paths(&top_func.bucket.suggested_paths);
             return format!(
                 "Borrow validation dominates; inspect borrow state representation.{}",
@@ -832,7 +882,9 @@ fn generate_hint(data: &CaseSummaryData<'_>) -> String {
         }
 
         // Dependency sort + dependency sorting bucket.
-        if stage.name == "dependency_sort_ms" && top_func.bucket.label == "Dependency sorting" {
+        if stage.name == TIMING_FRONTEND_ORDER_DECLARATIONS_NAME
+            && top_func.bucket.label == "Dependency sorting"
+        {
             return "Dependency sorting dominates; inspect graph traversal and edge handling."
                 .to_string();
         }
@@ -842,7 +894,9 @@ fn generate_hint(data: &CaseSummaryData<'_>) -> String {
             let paths = format_paths(&top_func.bucket.suggested_paths);
             return format!(
                 "Top stage is `{}`; hottest function is in {} bucket.{}",
-                stage.name, top_func.bucket.label, paths
+                timing_metric_label(&stage.name),
+                top_func.bucket.label,
+                paths
             );
         }
     }

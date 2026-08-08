@@ -9,7 +9,7 @@
 #[cfg(feature = "benchmark_counters")]
 use crate::timing::CounterOutputMode;
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicU16, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering};
 
 /// Output mode controlling how timing information reaches the user.
 ///
@@ -107,6 +107,7 @@ impl TimingChannels {
     }
 
     /// Whether detailed timer evidence is active.
+    #[cfg(test)]
     pub(crate) const fn detailed(self) -> bool {
         self.bits & Self::DETAILED != 0
     }
@@ -122,6 +123,7 @@ impl TimingChannels {
     }
 
     /// Whether detailed timer prose is emitted during compilation.
+    #[cfg(test)]
     pub(crate) const fn human_prose(self) -> bool {
         self.bits & Self::HUMAN_PROSE != 0
     }
@@ -323,15 +325,59 @@ const ACTIVE_COUNTER_BENCH_OUTPUT: u16 = 1 << 7;
 const ACTIVE_COUNTER_HUMAN_PROSE: u16 = 1 << 8;
 
 static ACTIVE_CHANNEL_BITS: AtomicU16 = AtomicU16::new(0);
+static ACTIVE_SESSION_ID: AtomicU64 = AtomicU64::new(0);
+static ACTIVE_RECORDERS: AtomicU64 = AtomicU64::new(0);
+static ACTIVE_OUTPUT_SUPPRESSED: AtomicBool = AtomicBool::new(false);
 
 /// Publish a newly owned session's active channels before compiler work begins.
-pub(crate) fn activate_session(configuration: TimingSessionConfiguration) {
+pub(crate) fn activate_session(id: u64, configuration: TimingSessionConfiguration) {
+    ACTIVE_OUTPUT_SUPPRESSED.store(configuration.suppress_output(), Ordering::Relaxed);
+    ACTIVE_SESSION_ID.store(id, Ordering::Release);
     ACTIVE_CHANNEL_BITS.store(configuration.active_bits(), Ordering::Release);
 }
 
 /// Clear active channels after the matching session stops or drops.
 pub(crate) fn deactivate_session() {
     ACTIVE_CHANNEL_BITS.store(0, Ordering::Release);
+    ACTIVE_SESSION_ID.store(0, Ordering::Release);
+    ACTIVE_OUTPUT_SUPPRESSED.store(false, Ordering::Relaxed);
+}
+
+/// Begin one lock-free record admission window for the current session.
+pub(crate) fn begin_record() -> Option<u64> {
+    loop {
+        let session = ACTIVE_SESSION_ID.load(Ordering::Acquire);
+        if session == 0 {
+            return None;
+        }
+
+        ACTIVE_RECORDERS.fetch_add(1, Ordering::Acquire);
+        if ACTIVE_SESSION_ID.load(Ordering::Acquire) == session {
+            return Some(session);
+        }
+
+        ACTIVE_RECORDERS.fetch_sub(1, Ordering::Release);
+        if ACTIVE_SESSION_ID.load(Ordering::Acquire) == 0 {
+            return None;
+        }
+    }
+}
+
+/// End one lock-free record admission window.
+pub(crate) fn end_record() {
+    ACTIVE_RECORDERS.fetch_sub(1, Ordering::Release);
+}
+
+/// Wait until records admitted before deactivation have completed.
+pub(crate) fn wait_for_records() {
+    while ACTIVE_RECORDERS.load(Ordering::Acquire) != 0 {
+        std::hint::spin_loop();
+    }
+}
+
+/// Whether the active session suppresses caller-owned output.
+pub(crate) fn output_suppressed() -> bool {
+    ACTIVE_OUTPUT_SUPPRESSED.load(Ordering::Relaxed)
 }
 
 fn channel_active(bit: u16) -> bool {
@@ -356,11 +402,6 @@ pub(crate) fn attribution_active() -> bool {
 /// Whether detailed metric collection is active.
 pub(crate) fn detailed_active() -> bool {
     channel_active(TimingChannels::DETAILED)
-}
-
-/// Whether timing benchmark lines are active for the current session.
-pub(crate) fn timing_bench_output_active() -> bool {
-    channel_active(TimingChannels::BENCH_OUTPUT)
 }
 
 /// Whether detailed timer prose is active for the current session.

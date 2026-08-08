@@ -84,13 +84,11 @@ use crate::compiler_frontend::traits::evidence::{
 use crate::compiler_frontend::traits::ids::TraitId;
 use crate::compiler_frontend::traits::syntax::TraitReferenceSyntax;
 use crate::compiler_frontend::value_mode::ValueMode;
-use crate::{timed_ast_stage_guard, timer_log};
+use crate::{timer_log, timing_scope_attributed};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
-#[cfg(feature = "detailed_timers")]
-use std::time::Instant;
 
 pub(in crate::compiler_frontend::ast) mod import_projection;
 
@@ -257,11 +255,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         self.resolved_struct_fields_by_path = resolved_struct_fields_by_path;
         self.struct_source_by_path = struct_source_by_path;
 
-        timed_ast_stage_guard!(
+        timing_scope_attributed!(
             timing_guard,
             self.context.timing_metric_family.environment(),
-            self.context.timing_context,
-            "AST/build environment completed in: "
+            self.context.timing_context
         );
 
         // ------------------------------------
@@ -281,7 +278,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         //  Resolve type aliases
         // ----------------------
         #[cfg(feature = "detailed_timers")]
-        let type_alias_resolution_start = Instant::now();
+        let type_alias_resolution_start = crate::timing::start_detailed_timer();
         self.resolve_type_aliases(sorted_headers, string_table)?;
         timer_log!(
             type_alias_resolution_start,
@@ -296,7 +293,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // WHAT: register identities early so trait requirement signatures and dynamic
         // trait annotations can reference nominal types before fields are resolved.
         #[cfg(feature = "detailed_timers")]
-        let shell_registration_start = Instant::now();
+        let shell_registration_start = crate::timing::start_detailed_timer();
         self.register_nominal_shells(sorted_headers, string_table)?;
         timer_log!(
             shell_registration_start,
@@ -315,7 +312,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // Evidence validation stays after receiver catalog construction because it needs
         // resolved receiver methods.
         #[cfg(feature = "detailed_timers")]
-        let trait_resolution_start = Instant::now();
+        let trait_resolution_start = crate::timing::start_detailed_timer();
         let trait_environment = self.resolve_trait_definitions(sorted_headers, string_table)?;
         self.resolve_imported_generic_parameter_bounds(&trait_environment)
             .map_err(|error| self.error_messages(error, string_table))?;
@@ -334,7 +331,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // WHY: static trait metadata must be available so ordinary type annotations can
         // reject trait names without falling through to an unknown-type diagnostic.
         #[cfg(feature = "detailed_timers")]
-        let member_resolution_start = Instant::now();
+        let member_resolution_start = crate::timing::start_detailed_timer();
         self.resolve_nominal_members_and_constants(
             sorted_headers,
             &trait_environment,
@@ -351,7 +348,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         //  Resolve nominal generic bound traits
         // --------------------------------------
         #[cfg(feature = "detailed_timers")]
-        let nominal_bound_resolution_start = Instant::now();
+        let nominal_bound_resolution_start = crate::timing::start_detailed_timer();
         self.resolve_nominal_generic_bounds(sorted_headers, &trait_environment, string_table)?;
         timer_log!(
             nominal_bound_resolution_start,
@@ -364,7 +361,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         //  Resolve function signatures
         // -----------------------------
         #[cfg(feature = "detailed_timers")]
-        let function_signatures_start = Instant::now();
+        let function_signatures_start = crate::timing::start_detailed_timer();
         self.resolve_function_signatures(sorted_headers, &trait_environment, string_table)?;
         timer_log!(
             function_signatures_start,
@@ -377,7 +374,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         //  Build receiver catalog
         // ------------------------
         #[cfg(feature = "detailed_timers")]
-        let receiver_catalog_start = Instant::now();
+        let receiver_catalog_start = crate::timing::start_detailed_timer();
         let receiver_methods = self.build_receiver_catalog(sorted_headers, string_table)?;
         self.validate_receiver_method_visibility_invariants(&receiver_methods, string_table)?;
         timer_log!(
@@ -410,7 +407,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         //  Validate trait evidence
         // ---------------------------
         #[cfg(feature = "detailed_timers")]
-        let trait_evidence_start = Instant::now();
+        let trait_evidence_start = crate::timing::start_detailed_timer();
         validate_trait_evidence(
             ValidateTraitEvidenceInput {
                 sorted_headers,
@@ -437,7 +434,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         //  Validate bounded nominal instantiations
         // -----------------------------------------
         #[cfg(feature = "detailed_timers")]
-        let nominal_bound_surface_start = Instant::now();
+        let nominal_bound_surface_start = crate::timing::start_detailed_timer();
         self.validate_nominal_generic_bound_surfaces(
             sorted_headers,
             &trait_environment,
@@ -455,7 +452,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         //  Validate public export surfaces
         // --------------------------------
         #[cfg(feature = "detailed_timers")]
-        let public_surface_start = Instant::now();
+        let public_surface_start = crate::timing::start_detailed_timer();
         self.validate_public_export_surfaces(sorted_headers, &trait_environment, string_table)?;
         timer_log!(
             public_surface_start,
@@ -473,7 +470,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // by public export entries are also included. Donor-local TypeIds stay inside the Ast
         // handoff and never enter a cross-module artefact.
         #[cfg(feature = "detailed_timers")]
-        let public_type_roots_start = Instant::now();
+        let public_type_roots_start = crate::timing::start_detailed_timer();
 
         // Build the set of re-exported source declaration paths targeted by public export entries.
         // These are declarations from private files re-exported through the root's `export:`

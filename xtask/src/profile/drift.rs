@@ -21,7 +21,8 @@
 //! - Profile JSON parsing or hotspot extraction (see `parse.rs`, `hotspots.rs`)
 //! - Agent summaries and enriched per-case summaries (see `summary.rs`)
 
-use crate::bench_types::BenchmarkMetric;
+use crate::bench_types::{BENCHMARK_TIMING_SCHEMA_VERSION, BenchmarkMetric};
+use moth::benchmarking::timing_metric_label;
 
 use super::history::{
     HistoryHotFunction, PROFILE_PROTOCOL_VERSION, ProfileHistoryRecord, StoredProfileHistoryRecord,
@@ -72,6 +73,8 @@ pub struct DriftReport {
     pub previous_run_id: Option<String>,
     /// Case IDs whose source fingerprint changed (workload changed).
     pub workload_changed_case_ids: Vec<String>,
+    /// Case IDs whose timing schema changed and therefore cannot be compared.
+    pub timing_schema_changed_case_ids: Vec<String>,
     /// Case IDs whose source matches but measurement fingerprint changed.
     pub measurement_changed_case_ids: Vec<String>,
     /// Significant function increases (inclusive pct grew).
@@ -200,6 +203,7 @@ pub fn compute_drift(
     let mut ignored_stage_count = 0usize;
     let mut ignored_counter_count = 0usize;
     let mut workload_changed_case_ids = Vec::new();
+    let mut timing_schema_changed_case_ids = Vec::new();
     let mut measurement_changed_case_ids = Vec::new();
 
     for current in current_cases {
@@ -214,6 +218,12 @@ pub fn compute_drift(
 
         // Compare identity to classify the case. Current records always carry
         // a typed identity; legacy records never reach this comparison.
+        if current.identity.timing_schema_version != BENCHMARK_TIMING_SCHEMA_VERSION
+            || previous_case.identity.timing_schema_version != BENCHMARK_TIMING_SCHEMA_VERSION
+        {
+            timing_schema_changed_case_ids.push(current.case_id.clone());
+            continue;
+        }
         if current.identity.source_fingerprint != previous_case.identity.source_fingerprint {
             workload_changed_case_ids.push(current.case_id.clone());
             continue;
@@ -340,6 +350,7 @@ pub fn compute_drift(
     DriftReport {
         previous_run_id: Some(previous.run_id.clone()),
         workload_changed_case_ids,
+        timing_schema_changed_case_ids,
         measurement_changed_case_ids,
         function_increases,
         function_decreases,
@@ -356,6 +367,7 @@ pub fn no_previous_drift_report() -> DriftReport {
     DriftReport {
         previous_run_id: None,
         workload_changed_case_ids: Vec::new(),
+        timing_schema_changed_case_ids: Vec::new(),
         measurement_changed_case_ids: Vec::new(),
         function_increases: Vec::new(),
         function_decreases: Vec::new(),
@@ -576,6 +588,16 @@ pub fn format_drift_markdown(report: &DriftReport) -> String {
         lines.push(String::new());
     }
 
+    if !report.timing_schema_changed_case_ids.is_empty() {
+        lines.push("## timing schema changed".to_string());
+        lines.push(String::new());
+        lines.push(format!(
+            "Cases with changed timing schema (not comparable): {}",
+            report.timing_schema_changed_case_ids.join(", ")
+        ));
+        lines.push(String::new());
+    }
+
     if !report.measurement_changed_case_ids.is_empty() {
         lines.push("## Measurement changed".to_string());
         lines.push(String::new());
@@ -713,6 +735,14 @@ pub fn format_drift_summary_section(report: &DriftReport) -> String {
         lines.push(String::new());
     }
 
+    if !report.timing_schema_changed_case_ids.is_empty() {
+        lines.push(format!(
+            "timing schema changed: {} (new baseline required)",
+            report.timing_schema_changed_case_ids.join(", ")
+        ));
+        lines.push(String::new());
+    }
+
     if !report.measurement_changed_case_ids.is_empty() {
         lines.push(format!(
             "Measurement changed: {} (new baseline required)",
@@ -779,7 +809,7 @@ pub fn format_drift_summary_section(report: &DriftReport) -> String {
         for drift in &stages {
             lines.push(format!(
                 "- `{}` in {}: {:.0}ms → {:.0}ms ({:+.0}ms)",
-                drift.stage_name,
+                timing_metric_label(&drift.stage_name),
                 drift.case_id,
                 drift.previous_ms,
                 drift.current_ms,
@@ -824,7 +854,11 @@ fn format_function_drift_row(drift: &FunctionDrift) -> String {
 fn format_stage_drift_row(drift: &StageDrift) -> String {
     format!(
         "| {} | {} | {:.0}ms | {:.0}ms | {:+.0}ms |",
-        drift.case_id, drift.stage_name, drift.current_ms, drift.previous_ms, drift.delta_ms,
+        drift.case_id,
+        timing_metric_label(&drift.stage_name),
+        drift.current_ms,
+        drift.previous_ms,
+        drift.delta_ms,
     )
 }
 

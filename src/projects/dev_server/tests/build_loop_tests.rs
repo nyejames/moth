@@ -716,7 +716,8 @@ fn dev_cycle_records_build_and_write_and_drains_one_collection_per_build() {
             snapshot
                 .timings
                 .iter()
-                .filter(|observation| observation.name == "command.dev.build_write")
+                .filter(|observation| observation.metric.descriptor().stable_name
+                    == "command.dev.build_write")
                 .count(),
             1,
             "each dev cycle records exactly one build-and-write observation"
@@ -728,7 +729,8 @@ fn dev_cycle_records_build_and_write_and_drains_one_collection_per_build() {
             first_snapshot
                 .timings
                 .iter()
-                .filter(|observation| observation.name == "command.dev.cycle")
+                .filter(|observation| observation.metric.descriptor().stable_name
+                    == "command.dev.cycle")
                 .count(),
             1,
             "each dev cycle records exactly one full-cycle observation"
@@ -737,7 +739,8 @@ fn dev_cycle_records_build_and_write_and_drains_one_collection_per_build() {
             second_snapshot
                 .timings
                 .iter()
-                .filter(|observation| observation.name == "command.dev.cycle")
+                .filter(|observation| observation.metric.descriptor().stable_name
+                    == "command.dev.cycle")
                 .count(),
             1,
             "cycle observations must not leak across builds"

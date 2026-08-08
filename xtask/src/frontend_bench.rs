@@ -116,6 +116,7 @@ pub(crate) fn report_to_observations(
     report: &FrontendBenchmarkReport,
 ) -> Result<crate::bench_types::BenchmarkCaseObservations, BenchmarkObservationError> {
     validate_frontend_observations(crate::bench_types::BenchmarkCaseObservations {
+        timing_schema_version: report.timing_schema_version,
         stage_timings: report
             .stages
             .iter()

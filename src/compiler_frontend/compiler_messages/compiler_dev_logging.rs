@@ -1,38 +1,18 @@
-//! Developer-oriented logging and benchmark observation helpers.
+//! Developer-oriented logging, compiler dumps and benchmark counters.
 //!
-//! WHAT: provides feature-gated macros (`token_log!`, `timer_log!`, `hir_log!`) and benchmark
-//!       snapshot types for debugging compiler internals without affecting release builds.
-//! WHY: keeping developer instrumentation behind feature flags keeps normal builds deterministic,
-//!      quiet, and free of debug output overhead.
+//! WHAT: provides feature-gated compiler dump macros and the optional
+//!       benchmark-counter logging entry point without affecting release builds.
+//! WHY: keeping developer instrumentation behind feature flags keeps normal
+//!      builds deterministic, quiet, and free of debug output overhead.
 //!
-//! The benchmark observation collector (timings + counters) is owned by `crate::timing`.
-//! This module re-exports the shared types and collection APIs under `timers` so both
-//! timer-only and `detailed_timers` call sites compile. Counter-specific logging
-//! (`log_benchmark_counter`) is gated by `benchmark_counters`; timer prose helpers
-//! (`timer_log!`, `benchmark_timer_log!`, `log_aggregated_duration`) stay gated by
-//! `detailed_timers`.
+//! Timing snapshots, timing collection APIs and detailed timer prose belong
+//! exclusively to `crate::timing`; this module does not provide a compatibility
+//! surface for them. Counter-specific logging (`log_benchmark_counter`) is
+//! gated by `benchmark_counters` and delegates storage/output policy to the
+//! timing owner when timers are also active.
 
 #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
 use crate::counter_observation;
-
-#[cfg(feature = "detailed_timers")]
-use std::time::Duration;
-
-// Re-export the shared observation types and collection APIs from the central
-// timing module so existing imports from `compiler_dev_logging` keep working.
-// Gated by `timers` because the collection scope serves stage timings (available
-// under `timers`) and counters (available under `benchmark_counters`); both
-// in-process benchmark callers and test code import through this path.
-//
-// The types are re-exported for test code that references them via the
-// `compiler_dev_logging` path. They appear unused during `cargo check`
-// (which does not compile tests), so suppress the expected warning.
-#[cfg(feature = "timers")]
-#[allow(unused_imports)]
-pub(crate) use crate::timing::{
-    BenchmarkObservationMetric, BenchmarkObservationSnapshot, start_benchmark_collection,
-    start_raw_benchmark_collection, stop_and_collect_benchmark_observations,
-};
 
 // TOKEN LOGGING MACROS
 #[macro_export]
@@ -49,59 +29,6 @@ macro_rules! token_log {
     ($($arg:tt)*) => {
         // Nothing
     };
-}
-
-// Extra timer logging
-#[macro_export]
-#[cfg(feature = "detailed_timers")]
-macro_rules! timer_log {
-    ($time:expr, $msg:expr) => {{
-        if $crate::compiler_frontend::compiler_messages::compiler_dev_logging::detailed_timer_output_enabled() {
-            saying::say!($msg, Green #$time.elapsed());
-        }
-    }};
-}
-
-#[macro_export]
-#[cfg(not(feature = "detailed_timers"))]
-macro_rules! timer_log {
-    ($time:expr, $msg:expr) => {
-        // Nothing
-    };
-}
-
-/// Benchmark-aware timer macro: prints the existing human message, then emits a stable
-/// machine-readable `MOTH_BENCH timing` line for benchmark observation parsing.
-///
-/// WHAT: wraps one stage/timer so it produces both developer-readable colored output and
-/// a grep-friendly metric that survives prose refactors.
-/// WHY: only benchmark-significant stages should use this; tiny substage timers should
-/// keep using `timer_log!` so local history is not flooded with unstable micro-events.
-#[macro_export]
-#[cfg(feature = "detailed_timers")]
-macro_rules! benchmark_timer_log {
-    ($time:expr, $metric_name:expr, $human_msg:expr) => {{
-        let elapsed = $time.elapsed();
-        let output_suppressed = $crate::timing::record_pipeline_timing($metric_name, elapsed);
-        if $crate::timing::detailed_prose_enabled(output_suppressed) {
-            saying::say!($human_msg, Green #elapsed);
-        }
-    }};
-}
-
-#[macro_export]
-#[cfg(not(feature = "detailed_timers"))]
-macro_rules! benchmark_timer_log {
-    ($time:expr, $metric_name:expr, $human_msg:expr) => {
-        // Nothing
-    };
-}
-
-#[cfg(feature = "detailed_timers")]
-pub fn log_aggregated_duration(label: &str, duration: Duration) {
-    if detailed_timer_output_enabled() {
-        saying::say!(label, Green #duration);
-    }
 }
 
 /// Emit one stable, machine-readable benchmark counter observation.
@@ -128,11 +55,6 @@ pub fn log_benchmark_counter(metric_name: &'static str, value: f64) {
     #[cfg(not(all(feature = "timers", feature = "benchmark_counters")))]
     let output_suppressed = false;
     crate::timing::emit_bench_counter_line(metric_name, value, output_suppressed);
-}
-
-#[cfg(feature = "detailed_timers")]
-pub fn detailed_timer_output_enabled() -> bool {
-    crate::timing::detailed_timer_output_enabled()
 }
 
 // Headers Logging

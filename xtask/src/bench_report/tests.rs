@@ -101,7 +101,7 @@ fn report_includes_only_frontend_history_when_only_frontend_runs_exist() {
         vec![case_record(
             "docs",
             20.0,
-            vec![metric("ast_ms", 12.0)],
+            vec![metric("frontend.ast.total", 12.0)],
             vec![],
         )],
     )];
@@ -113,7 +113,47 @@ fn report_includes_only_frontend_history_when_only_frontend_runs_exist() {
         report.suites[0].suite_kind,
         BenchmarkSuiteKind::FrontendPhases
     );
-    assert_eq!(report.suites[0].slowest_cases[0].stages[0].name, "ast_ms");
+    assert_eq!(
+        report.suites[0].slowest_cases[0].stages[0].name,
+        "frontend.ast.total"
+    );
+    let rendered = format_benchmark_report(&report);
+    assert!(rendered.contains("AST ~12ms"));
+    assert!(rendered.contains("Timing schema: 1"));
+    assert!(!rendered.contains("frontend.ast.total ~12ms"));
+}
+
+#[test]
+fn report_uses_schema_labels_for_stage_movement() {
+    let system = test_system("SYSTEM-A");
+    let previous = run_record(
+        "2026-05-01T12:00",
+        BenchmarkSuiteKind::FrontendPhases,
+        "SYSTEM-A",
+        vec![case_record(
+            "docs",
+            20.0,
+            vec![metric("frontend.ast.total", 10.0)],
+            vec![],
+        )],
+    );
+    let current = run_record(
+        "2026-05-02T12:00",
+        BenchmarkSuiteKind::FrontendPhases,
+        "SYSTEM-A",
+        vec![case_record(
+            "docs",
+            24.0,
+            vec![metric("frontend.ast.total", 20.0)],
+            vec![],
+        )],
+    );
+
+    let report = calculate_benchmark_report(&[previous, current], Some(&system));
+    let rendered = format_benchmark_report(&report);
+
+    assert!(rendered.contains("AST"));
+    assert!(!rendered.contains("frontend.ast.total"));
 }
 
 #[test]
@@ -126,7 +166,7 @@ fn report_handles_missing_counters_from_old_records() {
         vec![case_record(
             "docs",
             20.0,
-            vec![metric("ast_ms", 10.0)],
+            vec![metric("frontend.ast.total", 10.0)],
             vec![],
         )],
     );
@@ -137,7 +177,7 @@ fn report_handles_missing_counters_from_old_records() {
         vec![case_record(
             "docs",
             24.0,
-            vec![metric("ast_ms", 13.0)],
+            vec![metric("frontend.ast.total", 13.0)],
             vec![metric("ast_header_count", 10.0)],
         )],
     );
@@ -145,12 +185,10 @@ fn report_handles_missing_counters_from_old_records() {
     let report = calculate_benchmark_report(&[previous, current], Some(&system));
     let suite = &report.suites[0];
 
-    assert_eq!(suite.stage_movements[0].stage_name, "ast_ms");
-    assert!(
-        suite.ratios.iter().any(|ratio| {
-            ratio.name == "frontend.ast/ast_header_count" && ratio.case_id == "docs"
-        })
-    );
+    assert_eq!(suite.stage_movements[0].stage_name, "frontend.ast.total");
+    assert!(suite.ratios.iter().any(|ratio| {
+        ratio.name == "frontend.ast.total/ast_header_count" && ratio.case_id == "docs"
+    }));
 }
 
 #[test]
@@ -163,7 +201,7 @@ fn report_calculates_ratios_from_dotted_stage_metrics() {
         vec![case_record(
             "docs",
             20.0,
-            vec![metric("frontend.file_prepare", 8.0)],
+            vec![metric("frontend.prepare", 8.0)],
             vec![metric("source_file_count", 4.0)],
         )],
     )];
@@ -171,7 +209,7 @@ fn report_calculates_ratios_from_dotted_stage_metrics() {
     let report = calculate_benchmark_report(&runs, Some(&system));
 
     assert!(report.suites[0].ratios.iter().any(|ratio| {
-        ratio.name == "frontend.file_prepare/source_file_count" && ratio.case_id == "docs"
+        ratio.name == "frontend.prepare/source_file_count" && ratio.case_id == "docs"
     }));
 }
 
@@ -232,7 +270,7 @@ fn report_skips_zero_denominator_ratios() {
         vec![case_record(
             "docs",
             20.0,
-            vec![metric("file_prepare_ms", 8.0)],
+            vec![metric("frontend.prepare", 8.0)],
             vec![metric("source_file_count", 0.0)],
         )],
     )];
@@ -240,6 +278,153 @@ fn report_skips_zero_denominator_ratios() {
     let report = calculate_benchmark_report(&runs, Some(&system));
 
     assert!(report.suites[0].ratios.is_empty());
+}
+
+#[test]
+fn report_does_not_derive_current_numbers_from_mismatched_or_legacy_timing() {
+    let system = test_system("SYSTEM-A");
+    let mut mismatched = case_record(
+        "mismatched",
+        1_000.0,
+        vec![
+            metric("build.bootstrap.total", 20.0),
+            metric("build.frontend.total", 15.0),
+            metric("frontend.prepare", 300.0),
+        ],
+        vec![metric("source_file_count", 3.0)],
+    );
+    mismatched.timing_schema_version = Some(2);
+
+    let mut legacy = case_record(
+        "legacy",
+        1_000.0,
+        vec![metric("file_prepare_ms", 300.0)],
+        vec![metric("source_file_count", 3.0)],
+    );
+    legacy.timing_schema_version = None;
+
+    let runs = vec![run_record(
+        "2026-05-01T12:00",
+        BenchmarkSuiteKind::EndToEndCli,
+        "SYSTEM-A",
+        vec![mismatched, legacy],
+    )];
+
+    let report = calculate_benchmark_report(&runs, Some(&system));
+
+    assert!(report.suites[0].unattributed_cases.is_empty());
+    assert!(
+        report.suites[0]
+            .slowest_cases
+            .iter()
+            .all(|case| case.stages.is_empty())
+    );
+    assert!(report.suites[0].ratios.is_empty());
+    let rendered = format_benchmark_report(&report);
+    assert!(!rendered.contains("frontend.prepare"));
+    assert!(!rendered.contains("file_prepare_ms"));
+}
+
+#[test]
+fn report_marks_equal_non_current_schema_history_non_comparable() {
+    let system = test_system("SYSTEM-A");
+    let mut previous_case = case_record(
+        "same_legacy_schema",
+        900.0,
+        vec![
+            metric("build.bootstrap.total", 20.0),
+            metric("build.frontend.total", 30.0),
+        ],
+        vec![metric("token_count", 10.0)],
+    );
+    previous_case.timing_schema_version = Some(2);
+
+    let mut current_case = case_record(
+        "same_legacy_schema",
+        1_200.0,
+        vec![
+            metric("build.bootstrap.total", 200.0),
+            metric("build.frontend.total", 300.0),
+        ],
+        vec![metric("token_count", 100.0)],
+    );
+    current_case.timing_schema_version = Some(2);
+
+    let runs = vec![
+        run_record(
+            "2026-05-01T12:00",
+            BenchmarkSuiteKind::EndToEndCli,
+            "SYSTEM-A",
+            vec![previous_case],
+        ),
+        run_record(
+            "2026-05-02T12:00",
+            BenchmarkSuiteKind::EndToEndCli,
+            "SYSTEM-A",
+            vec![current_case],
+        ),
+    ];
+
+    let report = calculate_benchmark_report(&runs, Some(&system));
+    let suite = &report.suites[0];
+
+    assert_eq!(suite.comparison.compared_case_count, 0);
+    assert_eq!(suite.comparison.timing_schema_changed_case_count, 1);
+    assert!(suite.stage_movements.is_empty());
+    assert!(suite.unattributed_cases.is_empty());
+    assert!(suite.counter_movements.is_empty());
+    assert!(suite.ratios.is_empty());
+    assert!(suite.investigation_hints.is_empty());
+    assert!(
+        suite
+            .slowest_cases
+            .iter()
+            .all(|case| case.stages.is_empty())
+    );
+    let rendered = format_benchmark_report(&report);
+    assert!(rendered.contains("timing schema changed"));
+    assert!(rendered.contains("Timing schema: 2 (obsolete; non-comparable)"));
+    assert!(!rendered.contains("build.bootstrap.total"));
+}
+
+#[test]
+fn report_explicitly_omits_mixed_schema_runs() {
+    let system = test_system("SYSTEM-A");
+    let mut current_schema = case_record(
+        "current_schema",
+        100.0,
+        vec![metric("frontend.ast.total", 10.0)],
+        vec![metric("token_count", 10.0)],
+    );
+    current_schema.timing_schema_version = Some(1);
+    let mut obsolete_schema = case_record(
+        "obsolete_schema",
+        200.0,
+        vec![metric("frontend.ast.total", 20.0)],
+        vec![metric("token_count", 20.0)],
+    );
+    obsolete_schema.timing_schema_version = Some(2);
+
+    let report = calculate_benchmark_report(
+        &[run_record(
+            "2026-05-01T12:00",
+            BenchmarkSuiteKind::FrontendPhases,
+            "SYSTEM-A",
+            vec![current_schema, obsolete_schema],
+        )],
+        Some(&system),
+    );
+
+    let suite = &report.suites[0];
+    assert_eq!(suite.timing_schema, TimingSchemaIdentity::Mixed);
+    assert!(suite.slowest_cases.is_empty());
+    assert!(suite.stage_movements.is_empty());
+    assert!(suite.counter_movements.is_empty());
+    let rendered = format_benchmark_report(&report);
+    assert!(rendered.contains("Timing schema: mixed (non-comparable; omitted)"));
+    assert!(rendered.contains("no aggregate comparison"));
+    assert!(!rendered.contains("current_schema"));
+    assert!(!rendered.contains("obsolete_schema"));
 }
 
 #[test]
@@ -253,11 +438,10 @@ fn report_flags_unattributed_cli_wall_time() {
             "check_root_file",
             1_000.0,
             vec![
-                metric("command.check.path_validation", 10.0),
-                metric("command.check.builder_construction", 5.0),
-                metric("command.check.bootstrap", 20.0),
-                metric("command.check.compile_project_frontend", 15.0),
-                metric("command.check.message_rendering", 2.0),
+                metric("build.bootstrap.total", 20.0),
+                metric("build.frontend.total", 15.0),
+                metric("stage0.directory.inventory", 500.0),
+                metric("frontend.ast.total", 300.0),
             ],
             vec![],
         )],
@@ -278,41 +462,45 @@ fn report_flags_unattributed_cli_wall_time() {
 #[test]
 fn report_flags_unattributed_build_wall_time() {
     let system = test_system("SYSTEM-A");
+    let mut case = case_record(
+        "build_module_root",
+        1_000.0,
+        vec![
+            metric("build.bootstrap.total", 5.0),
+            metric("build.frontend.total", 200.0),
+            metric("build.backend.total", 150.0),
+            metric("build.output.total", 20.0),
+            // Nested evidence that must not be added to wall accounting.
+            metric("stage0.directory.compile", 405.0),
+            metric("output.write.total", 19.5),
+        ],
+        vec![],
+    );
+    case.runner = BenchmarkRunner::Cli {
+        command: CliBenchmarkCommand::Build,
+        args: vec!["build_module_root".to_string()],
+    };
+
     let runs = vec![run_record(
         "2026-05-01T12:00",
         BenchmarkSuiteKind::EndToEndCli,
         "SYSTEM-A",
-        vec![case_record(
-            "build_module_root",
-            1_000.0,
-            vec![
-                metric("build_project.path_validation", 5.0),
-                metric("build_project.bootstrap", 30.0),
-                metric("build_project.compile_project_frontend", 200.0),
-                metric("build_project.backend", 150.0),
-                metric("command.build.output_write", 20.0),
-                // Nested totals that must NOT be summed to avoid double-counting.
-                metric("build_project.total", 405.0),
-                metric("command.build.total", 425.0),
-                metric("output.write_total", 19.5),
-            ],
-            vec![],
-        )],
+        vec![case],
     )];
 
     let report = calculate_benchmark_report(&runs, Some(&system));
     let rendered = format_benchmark_report(&report);
 
-    // Attributed sum = 5 + 30 + 200 + 150 + 20 = 405ms; wall = 1000ms;
-    // unattributed = 595ms which exceeds the 100ms threshold.
+    // Attributed sum = 5 + 200 + 150 + 20 = 375ms; wall = 1000ms;
+    // unattributed = 625ms; nested evidence is intentionally excluded.
     assert_eq!(report.suites[0].unattributed_cases.len(), 1);
     assert_eq!(
         report.suites[0].unattributed_cases[0].name,
         "build_module_root"
     );
     let unattributed = &report.suites[0].unattributed_cases[0];
-    assert!((unattributed.unattributed_ms - 595.0).abs() < 0.01);
-    assert!((unattributed.unattributed_ratio - 0.595).abs() < 0.001);
+    assert!((unattributed.unattributed_ms - 625.0).abs() < 0.01);
+    assert!((unattributed.unattributed_ratio - 0.625).abs() < 0.001);
     assert!(rendered.contains("Unattributed wall time:"));
     assert!(rendered.contains("build_module_root"));
 }
@@ -389,6 +577,7 @@ fn case_record(
         workload_id: Some(format!("{name}_workload")),
         source_fingerprint: Some(format!("{name}_source_fp")),
         measurement_fingerprint: Some(format!("{name}_measurement_fp")),
+        timing_schema_version: Some(1),
         group_name: "test".to_string(),
         runner: BenchmarkRunner::Cli {
             command: CliBenchmarkCommand::Check,
@@ -437,10 +626,16 @@ fn test_profile_record(run_id: &str, system_uuid: &str) -> ProfileHistoryRecord 
             observation_wall_ms: 1234.5,
             sample_count: 500,
             sample_weight: 500.0,
-            stage_timings: vec![BenchmarkMetric {
-                name: "ast_ms".to_string(),
-                value: 812.0,
-            }],
+            stage_timings: vec![
+                BenchmarkMetric {
+                    name: "command.check.total".to_string(),
+                    value: 1234.5,
+                },
+                BenchmarkMetric {
+                    name: "frontend.ast.total".to_string(),
+                    value: 812.0,
+                },
+            ],
             counters: vec![BenchmarkMetric {
                 name: "token_count".to_string(),
                 value: 12000.0,
@@ -465,6 +660,7 @@ fn test_identity() -> BenchmarkMeasurementIdentity {
         workload_id: "foo".to_string(),
         source_fingerprint: "aaaa1111aaaa1111".to_string(),
         measurement_fingerprint: "bbbb2222bbbb2222".to_string(),
+        timing_schema_version: 1,
     }
 }
 
@@ -492,10 +688,16 @@ fn test_profile_record_shifted(run_id: &str, system_uuid: &str) -> ProfileHistor
             observation_wall_ms: 1500.0,
             sample_count: 600,
             sample_weight: 600.0,
-            stage_timings: vec![BenchmarkMetric {
-                name: "ast_ms".to_string(),
-                value: 900.0,
-            }],
+            stage_timings: vec![
+                BenchmarkMetric {
+                    name: "command.check.total".to_string(),
+                    value: 1500.0,
+                },
+                BenchmarkMetric {
+                    name: "frontend.ast.total".to_string(),
+                    value: 900.0,
+                },
+            ],
             counters: vec![BenchmarkMetric {
                 name: "token_count".to_string(),
                 value: 13000.0,
@@ -575,7 +777,7 @@ fn format_top_drift_item_shows_drift_when_comparable_previous_exists() {
         command: "check".to_string(),
         args: vec!["foo.moth".to_string()],
         stage_timings: vec![BenchmarkMetric {
-            name: "ast_ms".to_string(),
+            name: "frontend.ast.total".to_string(),
             value: 900.0,
         }],
         counters: vec![BenchmarkMetric {

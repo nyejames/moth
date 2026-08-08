@@ -198,7 +198,7 @@ impl BackendBuilder for HtmlProjectBuilder {
         {
             timing_scope!(
                 timing_guard_backend_html_tracked_assets_plan,
-                "backend.assets.plan"
+                crate::timing::TimingMetric::BackendAssetsPlan
             );
             for (module, html_output_path) in &compiled_html_output_paths {
                 let planned_assets =
@@ -239,7 +239,7 @@ impl BackendBuilder for HtmlProjectBuilder {
         {
             timing_scope!(
                 timing_guard_backend_html_tracked_assets_emit,
-                "backend.assets.emit"
+                crate::timing::TimingMetric::BackendAssetsEmit
             );
             output_files.extend(emit_tracked_assets(&tracked_assets, string_table)?);
         }

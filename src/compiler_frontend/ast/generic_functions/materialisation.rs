@@ -714,11 +714,10 @@ impl GenericTemplateArtefact {
             timing_metric_family: crate::compiler_frontend::ast::AstTimingMetricFamily::Generated,
         };
         let (phase_context, string_table_ref) = AstPhaseContext::from_build_context(build_context);
-        crate::timed_ast_stage_guard!(
+        crate::timing_scope_attributed!(
             timing_guard_generated_ast_total,
-            "frontend.generated.ast.total",
-            timing_context,
-            "Generated AST construction completed in: "
+            crate::timing::TimingMetric::FrontendGeneratedAstTotal,
+            timing_context
         );
         let import_environment = self
             .materialise_import_environment(
@@ -795,21 +794,19 @@ impl GenericTemplateArtefact {
             call_location,
         };
         let emitted = {
-            crate::timed_ast_stage_guard!(
+            crate::timing_scope_attributed!(
                 timing_guard_generated_ast_emit,
-                "frontend.generated.ast.emit",
-                timing_context,
-                "Generated AST emission completed in: "
+                crate::timing::TimingMetric::FrontendGeneratedAstEmit,
+                timing_context
             );
             AstEmitter::new(&phase_context, &mut environment, 1)
                 .emit_generated_request(request, string_table_ref)?
         };
         let mut build_result = {
-            crate::timed_ast_stage_guard!(
+            crate::timing_scope_attributed!(
                 timing_guard_generated_ast_finalise,
-                "frontend.generated.ast.finalise",
-                timing_context,
-                "Generated AST finalisation completed in: "
+                crate::timing::TimingMetric::FrontendGeneratedAstFinalise,
+                timing_context
             );
             AstFinalizer::new(&phase_context, environment).finalize(
                 emitted,
@@ -2775,11 +2772,10 @@ impl ModuleMaterialisationPreparation {
             timing_metric_family: crate::compiler_frontend::ast::AstTimingMetricFamily::Generated,
         };
         let (phase_context, string_table_ref) = AstPhaseContext::from_build_context(build_context);
-        crate::timed_ast_stage_guard!(
+        crate::timing_scope_attributed!(
             timing_guard_generated_ast_total,
-            "frontend.generated.ast.total",
-            timing_context,
-            "Generated AST construction completed in: "
+            crate::timing::TimingMetric::FrontendGeneratedAstTotal,
+            timing_context
         );
         let mut environment = self
             .build_environment(&phase_context, string_table_ref)
@@ -2819,22 +2815,20 @@ impl ModuleMaterialisationPreparation {
             call_location,
         };
         let emitted = {
-            crate::timed_ast_stage_guard!(
+            crate::timing_scope_attributed!(
                 timing_guard_generated_ast_emit,
-                "frontend.generated.ast.emit",
-                timing_context,
-                "Generated AST emission completed in: "
+                crate::timing::TimingMetric::FrontendGeneratedAstEmit,
+                timing_context
             );
             AstEmitter::new(&phase_context, &mut environment, 1)
                 .emit_generated_request(request, string_table_ref)?
         };
 
         let mut build_result = {
-            crate::timed_ast_stage_guard!(
+            crate::timing_scope_attributed!(
                 timing_guard_generated_ast_finalise,
-                "frontend.generated.ast.finalise",
-                timing_context,
-                "Generated AST finalisation completed in: "
+                crate::timing::TimingMetric::FrontendGeneratedAstFinalise,
+                timing_context
             );
             AstFinalizer::new(&phase_context, environment).finalize(
                 emitted,

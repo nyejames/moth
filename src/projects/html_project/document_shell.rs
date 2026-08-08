@@ -42,7 +42,7 @@ pub(crate) fn render_html_document_shell(
     script_html: String,
     import_map_html: Option<String>,
 ) -> Result<String, CompilerError> {
-    timed_stage!("backend.html.render", {
+    timed_stage!(crate::timing::TimingMetric::BackendHtmlRender, {
         let resolved = resolve_html_document(
             config,
             page_metadata,

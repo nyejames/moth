@@ -27,6 +27,7 @@ fn make_observation(
         command_args: vec!["test.moth".to_string()],
         wall_ms,
         observations: BenchmarkCaseObservations {
+            timing_schema_version: 1,
             stage_timings,
             counters,
         },
@@ -108,7 +109,7 @@ fn hint_ast_stage_with_ast_bucket() {
         "test_case",
         1000.0,
         vec![BenchmarkMetric {
-            name: "ast_ms".to_string(),
+            name: "frontend.ast.total".to_string(),
             value: 800.0,
         }],
         vec![],
@@ -142,7 +143,7 @@ fn hint_file_prepare_stage_with_tokenization_bucket() {
         "test_case",
         1000.0,
         vec![BenchmarkMetric {
-            name: "file_prepare_ms".to_string(),
+            name: "frontend.prepare".to_string(),
             value: 600.0,
         }],
         vec![],
@@ -357,7 +358,7 @@ fn root_hotspots_json_is_valid() {
         "test_case",
         1200.0,
         vec![BenchmarkMetric {
-            name: "ast_ms".to_string(),
+            name: "frontend.ast.total".to_string(),
             value: 800.0,
         }],
         vec![BenchmarkMetric {
@@ -392,6 +393,7 @@ fn root_hotspots_json_is_valid() {
     let parsed: serde_json::Value = serde_json::from_str(&json).expect("JSON should parse");
     assert!(parsed.is_object());
     assert_eq!(parsed["format_version"], SUMMARY_FORMAT_VERSION);
+    assert_eq!(parsed["timing_schema_version"], 1);
     assert_eq!(parsed["run_id"], "2026-06-18T10-30-abc123");
     assert_eq!(parsed["case_count"], 1);
     assert_eq!(parsed["filter"], "terse");
@@ -400,6 +402,7 @@ fn root_hotspots_json_is_valid() {
     let cases = parsed["cases"].as_array().expect("cases should be array");
     assert_eq!(cases.len(), 1);
     assert_eq!(cases[0]["case_id"], "test_case");
+    assert_eq!(cases[0]["timing_schema_version"], 1);
     assert!(cases[0].get("case_name").is_none());
     assert_eq!(cases[0]["observation_wall_ms"], 1200.0);
     assert!(!cases[0]["hot_functions"].as_array().unwrap().is_empty());
@@ -415,7 +418,7 @@ fn agent_summary_contains_case_id() {
         "check_benchmarks_test_bst",
         500.0,
         vec![BenchmarkMetric {
-            name: "ast_ms".to_string(),
+            name: "frontend.ast.total".to_string(),
             value: 300.0,
         }],
         vec![],
@@ -433,7 +436,27 @@ fn agent_summary_contains_case_id() {
     assert!(md.contains("check_benchmarks_test_bst"));
     assert!(md.contains("Profiling agent summary"));
     assert!(md.contains("Strongest signals"));
+    assert!(md.contains("Timing schema: 1"));
     assert!(md.contains("~500ms"));
+    assert!(md.contains("Top stage: AST ~300ms"));
+    assert!(!md.contains("frontend.ast.total"));
+}
+
+#[test]
+fn report_schema_validation_rejects_non_current_case_data() {
+    let mut obs = make_observation("legacy_schema_case", 100.0, vec![], vec![]);
+    obs.observations.timing_schema_version = 2;
+    let hotspots = make_hotspots(vec![], vec![]);
+    let data = CaseSummaryData {
+        observation: &obs,
+        hotspots: &hotspots,
+        profile_relative_path: "cases/legacy_schema_case/profile.json.gz".to_string(),
+        filter: ProfileFilterMode::Terse,
+    };
+
+    let error = validate_timing_schema(&[data]).expect_err("obsolete schema must be rejected");
+    assert!(error.contains("legacy_schema_case"));
+    assert!(error.contains("expected 1"));
 }
 
 #[test]
@@ -481,7 +504,7 @@ fn enriched_case_summary_includes_hotspots_and_samply_command() {
         "test_case",
         1200.0,
         vec![BenchmarkMetric {
-            name: "ast_ms".to_string(),
+            name: "frontend.ast.total".to_string(),
             value: 800.0,
         }],
         vec![BenchmarkMetric {
@@ -515,7 +538,10 @@ fn enriched_case_summary_includes_hotspots_and_samply_command() {
 
     let md = format_enriched_case_summary(&data, &run_paths);
     assert!(md.contains("test_case"));
+    assert!(md.contains("Timing schema: 1"));
     assert!(md.contains("Sample count: 1000"));
+    assert!(md.contains("- AST: ~800ms"));
+    assert!(!md.contains("frontend.ast.total"));
     assert!(md.contains("Hot functions"));
     assert!(md.contains("resolve_type"));
     assert!(md.contains("AST"));

@@ -11,6 +11,7 @@ fn test_identity() -> BenchmarkMeasurementIdentity {
         workload_id: "foo".to_string(),
         source_fingerprint: "aaaa1111aaaa1111".to_string(),
         measurement_fingerprint: "bbbb2222bbbb2222".to_string(),
+        timing_schema_version: 1,
     }
 }
 
@@ -40,11 +41,11 @@ fn test_previous_record() -> ProfileHistoryRecord {
             sample_weight: 500.0,
             stage_timings: vec![
                 BenchmarkMetric {
-                    name: "ast_ms".to_string(),
+                    name: "frontend.ast.total".to_string(),
                     value: 500.0,
                 },
                 BenchmarkMetric {
-                    name: "headers_ms".to_string(),
+                    name: "frontend.bind_headers".to_string(),
                     value: 200.0,
                 },
             ],
@@ -85,11 +86,11 @@ fn test_current_increased() -> DriftCaseInput {
         args: vec!["foo.moth".to_string()],
         stage_timings: vec![
             BenchmarkMetric {
-                name: "ast_ms".to_string(),
+                name: "frontend.ast.total".to_string(),
                 value: 600.0,
             },
             BenchmarkMetric {
-                name: "headers_ms".to_string(),
+                name: "frontend.bind_headers".to_string(),
                 value: 200.0,
             },
         ],
@@ -123,11 +124,11 @@ fn test_current_decreased() -> DriftCaseInput {
         args: vec!["foo.moth".to_string()],
         stage_timings: vec![
             BenchmarkMetric {
-                name: "ast_ms".to_string(),
+                name: "frontend.ast.total".to_string(),
                 value: 400.0,
             },
             BenchmarkMetric {
-                name: "headers_ms".to_string(),
+                name: "frontend.bind_headers".to_string(),
                 value: 200.0,
             },
         ],
@@ -160,7 +161,7 @@ fn test_current_noise() -> DriftCaseInput {
         command: "check".to_string(),
         args: vec!["foo.moth".to_string()],
         stage_timings: vec![BenchmarkMetric {
-            name: "ast_ms".to_string(),
+            name: "frontend.ast.total".to_string(),
             value: 505.0,
         }],
         counters: vec![BenchmarkMetric {
@@ -320,13 +321,13 @@ fn significant_stage_increase_detected() {
 
     let report = compute_drift(&current, &previous, &wall_times);
 
-    // ast_ms: 500 -> 600, delta = +100ms.
+    // frontend.ast.total: 500 -> 600, delta = +100ms.
     // Threshold: max(500 * 0.05, 1.0) = 25ms. 100ms > 25ms => significant.
     assert!(
         report
             .stage_movements
             .iter()
-            .any(|s| s.stage_name == "ast_ms")
+            .any(|s| s.stage_name == "frontend.ast.total")
     );
 }
 
@@ -339,14 +340,14 @@ fn tiny_stage_change_is_noise() {
 
     let report = compute_drift(&current, &previous, &wall_times);
 
-    // ast_ms: 500 -> 505, delta = +5ms.
+    // frontend.ast.total: 500 -> 505, delta = +5ms.
     // Threshold: max(500 * 0.05, 1.0) = 25ms. 5ms < 25ms => noise.
     // Second path: 5/500 = 1%, need 5% AND 10ms. 1% < 5% => noise.
     assert!(
         report
             .stage_movements
             .iter()
-            .all(|s| s.stage_name != "ast_ms")
+            .all(|s| s.stage_name != "frontend.ast.total")
     );
 }
 
@@ -359,12 +360,12 @@ fn stage_decrease_detected() {
 
     let report = compute_drift(&current, &previous, &wall_times);
 
-    // ast_ms: 500 -> 400, delta = -100ms.
+    // frontend.ast.total: 500 -> 400, delta = -100ms.
     // Threshold: max(500 * 0.05, 1.0) = 25ms. 100ms > 25ms => significant.
     let stage = report
         .stage_movements
         .iter()
-        .find(|s| s.stage_name == "ast_ms");
+        .find(|s| s.stage_name == "frontend.ast.total");
     assert!(stage.is_some());
     assert!(stage.unwrap().delta_ms < 0.0);
 }
@@ -673,6 +674,7 @@ fn no_previous_report_has_no_items() {
     let report = no_previous_drift_report();
     assert!(report.previous_run_id.is_none());
     assert!(report.workload_changed_case_ids.is_empty());
+    assert!(report.timing_schema_changed_case_ids.is_empty());
     assert!(report.measurement_changed_case_ids.is_empty());
     assert!(report.function_increases.is_empty());
     assert!(report.function_decreases.is_empty());
@@ -706,6 +708,8 @@ fn drift_markdown_with_significant_items() {
     assert!(md.contains("Compared with: 2026-06-18T10-30-abc1234"));
     assert!(md.contains("## Significant increases"));
     assert!(md.contains("## Significant stage movement"));
+    assert!(md.contains("| check_foo_bst | AST |"));
+    assert!(!md.contains("| check_foo_bst | frontend.ast.total |"));
     assert!(md.contains("## Ignored noise"));
 }
 
@@ -729,6 +733,53 @@ fn drift_summary_section_with_items() {
 
     assert!(md.contains("## Drift"));
     assert!(md.contains("Compared with:"));
+}
+
+#[test]
+fn timing_schema_change_is_not_reported_as_measurement_or_numeric_drift() {
+    let previous = test_previous_record();
+    let mut current_case = test_current_increased();
+    current_case.identity.timing_schema_version = 2;
+    current_case.identity.measurement_fingerprint = "changed-measurement".to_string();
+    let current = vec![current_case];
+    let mut wall_times = HashMap::new();
+    wall_times.insert("check_foo_bst".to_string(), 1200.0);
+
+    let report = compute_drift(&current, &previous, &wall_times);
+
+    assert_eq!(report.timing_schema_changed_case_ids, ["check_foo_bst"]);
+    assert!(report.workload_changed_case_ids.is_empty());
+    assert!(report.measurement_changed_case_ids.is_empty());
+    assert!(report.function_increases.is_empty());
+    assert!(report.function_decreases.is_empty());
+    assert!(report.stage_movements.is_empty());
+    assert!(report.counter_movements.is_empty());
+
+    let markdown = format_drift_markdown(&report);
+    assert_eq!(markdown.matches("timing schema changed").count(), 1);
+    let summary = format_drift_summary_section(&report);
+    assert_eq!(summary.matches("timing schema changed").count(), 1);
+}
+
+#[test]
+fn equal_non_current_timing_schema_is_not_reported_as_numeric_drift() {
+    let mut previous = test_previous_record();
+    previous.cases[0].identity.timing_schema_version = 2;
+    let mut current_case = test_current_increased();
+    current_case.identity.timing_schema_version = 2;
+    let current = vec![current_case];
+    let mut wall_times = HashMap::new();
+    wall_times.insert("check_foo_bst".to_string(), 1200.0);
+
+    let report = compute_drift(&current, &previous, &wall_times);
+
+    assert_eq!(report.timing_schema_changed_case_ids, ["check_foo_bst"]);
+    assert!(report.workload_changed_case_ids.is_empty());
+    assert!(report.measurement_changed_case_ids.is_empty());
+    assert!(report.function_increases.is_empty());
+    assert!(report.function_decreases.is_empty());
+    assert!(report.stage_movements.is_empty());
+    assert!(report.counter_movements.is_empty());
 }
 
 #[test]

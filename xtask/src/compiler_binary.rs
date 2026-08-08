@@ -82,7 +82,7 @@ impl CompilerBinary {
 /// Build the compiler with release profile and concise timers
 ///
 /// WHAT: builds with the `timers` feature so the benchmark subprocess emits
-/// stable MOTH_BENCH timing lines under MOTH_TIMERS=bench without the verbose
+/// stable MOTH_BENCH timing aggregate records under MOTH_TIMERS=bench without the verbose
 /// human prose and AST substage timings that detailed_timers adds.
 /// WHY:  keeps benchmark output low-noise while still capturing all top-level
 /// pipeline-stage metrics for attribution and regression detection.

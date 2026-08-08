@@ -360,7 +360,8 @@ count=$((count + 1))
 printf '%s
 ' "$count" > "$count_file"
 if [ "$count" -eq 1 ]; then
-  printf 'MOTH_BENCH timing command.build.total=1ms
+  printf 'MOTH_BENCH timing-schema 1
+MOTH_BENCH timing command.build.total=1ms
 MOTH_BENCH status errors=0 warnings=0
 '
   exit 0
@@ -408,7 +409,7 @@ fn artifact_write_failure_still_calls_explicit_finish() {
     let compiler_path = repo.path().join("mock-moth");
     write_executable(
         &compiler_path,
-        "#!/bin/sh\nmkdir -p project/dev\nprintf 'MOTH_BENCH timing command.build.total=1ms\nMOTH_BENCH status errors=0 warnings=0\n'\nexit 0\n",
+        "#!/bin/sh\nmkdir -p project/dev\nprintf 'MOTH_BENCH timing-schema 1\nMOTH_BENCH timing command.build.total=1ms\nMOTH_BENCH status errors=0 warnings=0\n'\nexit 0\n",
     );
     let compiler = CompilerBinary {
         path: compiler_path,

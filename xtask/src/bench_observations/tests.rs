@@ -7,15 +7,14 @@ fn parses_exact_live_check_and_build_metrics() {
         (CliBenchmarkCommand::Build, "command.build.total"),
     ] {
         let stdout = format!(
-            "MOTH_BENCH timing frontend.ast=2.5ms\nMOTH_BENCH timing {required_name}=8ms\n"
+            "MOTH_BENCH timing-schema 1\nMOTH_BENCH timing {required_name}=8ms\nMOTH_BENCH timing frontend.ast.total=2.5ms\n"
         );
 
-        let observations =
-            parse_stdout_observations(&stdout, BenchmarkObservationSource::LiveCli(command))
-                .expect("exact live timing records should parse");
+        let observations = parse_stdout_observations(&stdout, command)
+            .expect("exact live timing records should parse");
 
         assert_metric_value(&observations.stage_timings, required_name, 8.0);
-        assert_metric_value(&observations.stage_timings, "frontend.ast", 2.5);
+        assert_metric_value(&observations.stage_timings, "frontend.ast.total", 2.5);
     }
 }
 
@@ -29,11 +28,8 @@ fn malformed_stable_timing_lines_fail_closed() {
         "MOTH_BENCH timing command.check.total=1ms trailing",
         "MOTH_BENCH timing command.check.total=1ms=2ms",
     ] {
-        let error = parse_stdout_observations(
-            line,
-            BenchmarkObservationSource::LiveCli(CliBenchmarkCommand::Check),
-        )
-        .expect_err("malformed stable timing records must fail");
+        let error = parse_stdout_observations(line, CliBenchmarkCommand::Check)
+            .expect_err("malformed stable timing records must fail");
 
         assert!(
             matches!(
@@ -47,14 +43,122 @@ fn malformed_stable_timing_lines_fail_closed() {
 }
 
 #[test]
+fn live_timing_names_and_order_are_registry_closed() {
+    let unknown = parse_stdout_observations(
+        concat!(
+            "MOTH_BENCH timing-schema 1\n",
+            "MOTH_BENCH timing command.check.total=8ms\n",
+            "MOTH_BENCH timing frontend.ast=2ms\n",
+        ),
+        CliBenchmarkCommand::Check,
+    )
+    .expect_err("provisional timing names must be rejected");
+    assert_eq!(
+        unknown,
+        BenchmarkObservationError::UnknownTimingMetric {
+            metric_name: "frontend.ast".to_owned()
+        }
+    );
+
+    let reversed = parse_stdout_observations(
+        concat!(
+            "MOTH_BENCH timing-schema 1\n",
+            "MOTH_BENCH timing frontend.ast.total=2ms\n",
+            "MOTH_BENCH timing command.check.total=8ms\n",
+        ),
+        CliBenchmarkCommand::Check,
+    )
+    .expect_err("timing rows must follow schema order");
+    assert_eq!(
+        reversed,
+        BenchmarkObservationError::TimingMetricOutOfOrder {
+            previous_metric_name: "frontend.ast.total".to_owned(),
+            metric_name: "command.check.total".to_owned(),
+        }
+    );
+
+    let sparse = parse_stdout_observations(
+        concat!(
+            "MOTH_BENCH timing-schema 1\n",
+            "MOTH_BENCH timing command.check.total=8ms\n",
+            "MOTH_BENCH timing frontend.prepare=2ms\n",
+            "MOTH_BENCH timing frontend.ast.total=3ms\n",
+        ),
+        CliBenchmarkCommand::Check,
+    )
+    .expect("valid sparse schema order should parse");
+    assert_eq!(
+        sparse
+            .stage_timings
+            .iter()
+            .map(|metric| metric.name.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "command.check.total",
+            "frontend.prepare",
+            "frontend.ast.total"
+        ]
+    );
+}
+
+#[test]
+fn timing_schema_header_is_required_once_and_current() {
+    let missing = parse_stdout_observations(
+        "MOTH_BENCH timing command.check.total=1ms",
+        CliBenchmarkCommand::Check,
+    )
+    .expect_err("live timing observations require a schema header");
+    assert_eq!(missing, BenchmarkObservationError::MissingTimingSchema);
+
+    let duplicate = parse_stdout_observations(
+        concat!(
+            "MOTH_BENCH timing-schema 1\n",
+            "MOTH_BENCH timing-schema 1\n",
+            "MOTH_BENCH timing command.check.total=1ms"
+        ),
+        CliBenchmarkCommand::Check,
+    )
+    .expect_err("duplicate schema headers must fail");
+    assert_eq!(duplicate, BenchmarkObservationError::DuplicateTimingSchema);
+
+    let future = parse_stdout_observations(
+        "MOTH_BENCH timing-schema 2\nMOTH_BENCH timing command.check.total=1ms",
+        CliBenchmarkCommand::Check,
+    )
+    .expect_err("future schema headers must fail closed");
+    assert_eq!(
+        future,
+        BenchmarkObservationError::UnsupportedTimingSchema { version: 2 }
+    );
+}
+
+#[test]
+fn final_timing_records_must_not_repeat_a_metric() {
+    let error = parse_stdout_observations(
+        concat!(
+            "MOTH_BENCH timing-schema 1\n",
+            "MOTH_BENCH timing command.check.total=1ms\n",
+            "MOTH_BENCH timing command.check.total=2ms"
+        ),
+        CliBenchmarkCommand::Check,
+    )
+    .expect_err("final aggregate timing records must be unique");
+
+    assert_eq!(
+        error,
+        BenchmarkObservationError::DuplicateTimingMetric {
+            metric_name: "command.check.total".to_owned()
+        }
+    );
+}
+
+#[test]
 fn non_finite_and_negative_values_fail() {
     for value in ["NaN", "inf", "-1"] {
-        let timing_stdout = format!("MOTH_BENCH timing command.check.total={value}ms");
-        let timing_error = parse_stdout_observations(
-            &timing_stdout,
-            BenchmarkObservationSource::LiveCli(CliBenchmarkCommand::Check),
-        )
-        .expect_err("invalid timing values must fail");
+        let timing_stdout =
+            format!("MOTH_BENCH timing-schema 1\nMOTH_BENCH timing command.check.total={value}ms");
+        let timing_error = parse_stdout_observations(&timing_stdout, CliBenchmarkCommand::Check)
+            .expect_err("invalid timing values must fail");
         assert!(matches!(
             timing_error,
             BenchmarkObservationError::InvalidMetricValue {
@@ -63,13 +167,11 @@ fn non_finite_and_negative_values_fail() {
             }
         ));
 
-        let counter_stdout =
-            format!("MOTH_BENCH timing command.check.total=1ms\nMOTH_BENCH counter work={value}");
-        let counter_error = parse_stdout_observations(
-            &counter_stdout,
-            BenchmarkObservationSource::LiveCli(CliBenchmarkCommand::Check),
-        )
-        .expect_err("invalid counter values must fail");
+        let counter_stdout = format!(
+            "MOTH_BENCH timing-schema 1\nMOTH_BENCH timing command.check.total=1ms\nMOTH_BENCH counter work={value}"
+        );
+        let counter_error = parse_stdout_observations(&counter_stdout, CliBenchmarkCommand::Check)
+            .expect_err("invalid counter values must fail");
         assert!(matches!(
             counter_error,
             BenchmarkObservationError::InvalidMetricValue {
@@ -83,8 +185,8 @@ fn non_finite_and_negative_values_fail() {
 #[test]
 fn required_cli_total_metric_must_match_command() {
     let check_error = parse_stdout_observations(
-        "MOTH_BENCH timing frontend.ast=1ms",
-        BenchmarkObservationSource::LiveCli(CliBenchmarkCommand::Check),
+        "MOTH_BENCH timing-schema 1\nMOTH_BENCH timing frontend.ast.total=1ms",
+        CliBenchmarkCommand::Check,
     )
     .expect_err("check total is required");
     assert_eq!(
@@ -95,8 +197,8 @@ fn required_cli_total_metric_must_match_command() {
     );
 
     let build_error = parse_stdout_observations(
-        "MOTH_BENCH timing command.check.total=1ms",
-        BenchmarkObservationSource::LiveCli(CliBenchmarkCommand::Build),
+        "MOTH_BENCH timing-schema 1\nMOTH_BENCH timing command.check.total=1ms",
+        CliBenchmarkCommand::Build,
     )
     .expect_err("build total is required");
     assert_eq!(
@@ -108,36 +210,37 @@ fn required_cli_total_metric_must_match_command() {
 }
 
 #[test]
-fn repeated_timing_names_sum_within_one_iteration() {
+fn repeated_final_timing_names_are_rejected() {
     let stdout = concat!(
-        "MOTH_BENCH timing frontend.ast=2ms\n",
-        "MOTH_BENCH timing frontend.ast=3ms\n",
+        "MOTH_BENCH timing-schema 1\n",
+        "MOTH_BENCH timing frontend.ast.total=2ms\n",
+        "MOTH_BENCH timing frontend.ast.total=3ms\n",
         "MOTH_BENCH timing command.check.total=8ms\n",
     );
 
-    let observations = parse_stdout_observations(
-        stdout,
-        BenchmarkObservationSource::LiveCli(CliBenchmarkCommand::Check),
-    )
-    .expect("repeated module metrics should parse");
+    let error = parse_stdout_observations(stdout, CliBenchmarkCommand::Check)
+        .expect_err("repeated final aggregate metrics must be rejected");
 
-    assert_metric_value(&observations.stage_timings, "frontend.ast", 5.0);
+    assert_eq!(
+        error,
+        BenchmarkObservationError::DuplicateTimingMetric {
+            metric_name: "frontend.ast.total".to_owned()
+        }
+    );
 }
 
 #[test]
 fn stable_counters_parse_and_sum_when_present() {
     let stdout = concat!(
+        "MOTH_BENCH timing-schema 1\n",
         "MOTH_BENCH timing command.check.total=8ms\n",
         "MOTH_BENCH counter work=2\n",
         "MOTH_BENCH counter work=3\n",
         "MOTH_BENCH counter cache_hits=4.5\n",
     );
 
-    let observations = parse_stdout_observations(
-        stdout,
-        BenchmarkObservationSource::LiveCli(CliBenchmarkCommand::Check),
-    )
-    .expect("valid optional counters should parse");
+    let observations = parse_stdout_observations(stdout, CliBenchmarkCommand::Check)
+        .expect("valid optional counters should parse");
 
     assert_metric_value(&observations.counters, "work", 5.0);
     assert_metric_value(&observations.counters, "cache_hits", 4.5);
@@ -147,16 +250,14 @@ fn stable_counters_parse_and_sum_when_present() {
 fn stable_records_allow_unrelated_surrounding_output_and_emitter_ansi_reset() {
     let stdout = concat!(
         "Checking project\n",
+        "MOTH_BENCH timing-schema 1\u{1b}[0m\n",
         "MOTH_BENCH timing command.check.total=8ms\u{1b}[0m\n",
         "MOTH_BENCH counter work=3\u{1b}[0m\n",
         "Finished\n",
     );
 
-    let observations = parse_stdout_observations(
-        stdout,
-        BenchmarkObservationSource::LiveCli(CliBenchmarkCommand::Check),
-    )
-    .expect("stable records should parse after emitter ANSI normalization");
+    let observations = parse_stdout_observations(stdout, CliBenchmarkCommand::Check)
+        .expect("stable records should parse after emitter ANSI normalization");
 
     assert_metric_value(&observations.stage_timings, "command.check.total", 8.0);
     assert_metric_value(&observations.counters, "work", 3.0);
@@ -165,7 +266,7 @@ fn stable_records_allow_unrelated_surrounding_output_and_emitter_ansi_reset() {
 #[test]
 fn stable_timing_metric_set_mismatch_fails_before_averaging() {
     let observations = vec![
-        observations(&[("command.check.total", 8.0), ("frontend.ast", 2.0)]),
+        observations(&[("command.check.total", 8.0), ("frontend.ast.total", 2.0)]),
         observations(&[("command.check.total", 9.0), ("frontend.hir", 3.0)]),
     ];
 
@@ -176,8 +277,25 @@ fn stable_timing_metric_set_mismatch_fails_before_averaging() {
         error,
         BenchmarkObservationError::TimingMetricSetMismatch {
             iteration: 2,
-            missing: vec!["frontend.ast".to_owned()],
+            missing: vec!["frontend.ast.total".to_owned()],
             additional: vec!["frontend.hir".to_owned()],
+        }
+    );
+}
+
+#[test]
+fn averaging_rejects_duplicate_current_timing_aggregates() {
+    let observations = vec![observations(&[
+        ("command.check.total", 8.0),
+        ("command.check.total", 2.0),
+    ])];
+
+    let error = average_observations(&observations)
+        .expect_err("duplicate current timing aggregates must fail before averaging");
+    assert_eq!(
+        error,
+        BenchmarkObservationError::DuplicateTimingMetric {
+            metric_name: "command.check.total".to_owned()
         }
     );
 }
@@ -186,17 +304,20 @@ fn stable_timing_metric_set_mismatch_fails_before_averaging() {
 fn consistent_metric_sets_average_correctly() {
     let observations = vec![
         BenchmarkCaseObservations {
+            timing_schema_version: BENCHMARK_TIMING_SCHEMA_VERSION,
             stage_timings: vec![
                 metric("command.check.total", 8.0),
-                metric("frontend.ast", 2.0),
-                metric("frontend.ast", 3.0),
+                metric("frontend.bind_headers", 2.0),
+                metric("frontend.ast.total", 3.0),
             ],
             counters: vec![metric("work", 4.0)],
         },
         BenchmarkCaseObservations {
+            timing_schema_version: BENCHMARK_TIMING_SCHEMA_VERSION,
             stage_timings: vec![
-                metric("frontend.ast", 7.0),
                 metric("command.check.total", 12.0),
+                metric("frontend.bind_headers", 7.0),
+                metric("frontend.ast.total", 9.0),
             ],
             counters: Vec::new(),
         },
@@ -206,64 +327,9 @@ fn consistent_metric_sets_average_correctly() {
         average_observations(&observations).expect("consistent metric sets should average");
 
     assert_metric_value(&averaged.stage_timings, "command.check.total", 10.0);
-    assert_metric_value(&averaged.stage_timings, "frontend.ast", 6.0);
+    assert_metric_value(&averaged.stage_timings, "frontend.bind_headers", 4.5);
+    assert_metric_value(&averaged.stage_timings, "frontend.ast.total", 6.0);
     assert_metric_value(&averaged.counters, "work", 2.0);
-}
-
-#[test]
-fn legacy_prose_is_accepted_only_by_explicit_history_path() {
-    let stdout = concat!(
-        "AST created in: \u{1b}[32m2ms\u{1b}[0m\n",
-        "HIR generated in: 3ms\n",
-    );
-
-    let live_error = parse_stdout_observations(
-        stdout,
-        BenchmarkObservationSource::LiveCli(CliBenchmarkCommand::Check),
-    )
-    .expect_err("live execution must not accept legacy-only prose");
-    assert_eq!(
-        live_error,
-        BenchmarkObservationError::MissingRequiredTiming {
-            metric_name: "command.check.total"
-        }
-    );
-
-    let legacy = parse_stdout_observations(stdout, BenchmarkObservationSource::LegacyHistory)
-        .expect("explicit legacy history path should retain old prose");
-    assert_metric_value(&legacy.stage_timings, "ast_ms", 2.0);
-    assert_metric_value(&legacy.stage_timings, "hir_ms", 3.0);
-}
-
-#[test]
-fn legacy_history_preserves_supported_duration_units() {
-    let stdout = concat!(
-        "Tokenized in: 335.834µs\n",
-        "Headers Parsed in: 0.002s\n",
-        "AST created in: 1ms\n",
-    );
-
-    let observations = parse_stdout_observations(stdout, BenchmarkObservationSource::LegacyHistory)
-        .expect("legacy duration units should remain readable");
-
-    assert_metric_value(&observations.stage_timings, "tokenize_ms", 0.335834);
-    assert_metric_value(&observations.stage_timings, "headers_ms", 2.0);
-    assert_metric_value(&observations.stage_timings, "ast_ms", 1.0);
-}
-
-#[test]
-fn stable_metrics_take_precedence_only_in_legacy_history_path() {
-    let stdout = concat!(
-        "MOTH_BENCH timing ast_ms=10ms\n",
-        "AST created in: 2ms\n",
-        "HIR generated in: 3ms\n",
-    );
-
-    let observations = parse_stdout_observations(stdout, BenchmarkObservationSource::LegacyHistory)
-        .expect("mixed old history should parse");
-
-    assert_metric_value(&observations.stage_timings, "ast_ms", 10.0);
-    assert_metric_value(&observations.stage_timings, "hir_ms", 3.0);
 }
 
 #[test]
@@ -275,7 +341,8 @@ fn frontend_observations_require_valid_nonempty_stages_and_validate_counters() {
 
     for invalid_value in [f64::NAN, f64::INFINITY, -1.0] {
         let stage_error = validate_frontend_observations(BenchmarkCaseObservations {
-            stage_timings: vec![metric("frontend.ast", invalid_value)],
+            timing_schema_version: BENCHMARK_TIMING_SCHEMA_VERSION,
+            stage_timings: vec![metric("frontend.ast.total", invalid_value)],
             counters: Vec::new(),
         })
         .expect_err("invalid frontend stage must fail");
@@ -288,7 +355,8 @@ fn frontend_observations_require_valid_nonempty_stages_and_validate_counters() {
         ));
 
         let counter_error = validate_frontend_observations(BenchmarkCaseObservations {
-            stage_timings: vec![metric("frontend.ast", 1.0)],
+            timing_schema_version: BENCHMARK_TIMING_SCHEMA_VERSION,
+            stage_timings: vec![metric("frontend.ast.total", 1.0)],
             counters: vec![metric("work", invalid_value)],
         })
         .expect_err("invalid frontend counter must fail");
@@ -306,10 +374,11 @@ fn frontend_observations_require_valid_nonempty_stages_and_validate_counters() {
 fn malformed_stable_counter_line_fails() {
     let error = parse_stdout_observations(
         concat!(
+            "MOTH_BENCH timing-schema 1\n",
             "MOTH_BENCH timing command.check.total=1ms\n",
             "MOTH_BENCH counter work=1 trailing\n",
         ),
-        BenchmarkObservationSource::LiveCli(CliBenchmarkCommand::Check),
+        CliBenchmarkCommand::Check,
     )
     .expect_err("malformed counter must fail");
 
@@ -324,6 +393,7 @@ fn malformed_stable_counter_line_fails() {
 
 fn observations(stages: &[(&str, f64)]) -> BenchmarkCaseObservations {
     BenchmarkCaseObservations {
+        timing_schema_version: BENCHMARK_TIMING_SCHEMA_VERSION,
         stage_timings: stages
             .iter()
             .map(|(name, value)| metric(name, *value))

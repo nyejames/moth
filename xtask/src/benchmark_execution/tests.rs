@@ -310,6 +310,7 @@ fn inconsistent_measured_metric_sets_use_typed_observation_failure() {
     let context = BenchmarkExecutionContext::new(&manifest, &compiler, &workspace);
     let observations = vec![
         BenchmarkCaseObservations {
+            timing_schema_version: 1,
             stage_timings: vec![BenchmarkMetric {
                 name: "command.check.total".to_owned(),
                 value: 1.0,
@@ -317,8 +318,9 @@ fn inconsistent_measured_metric_sets_use_typed_observation_failure() {
             counters: Vec::new(),
         },
         BenchmarkCaseObservations {
+            timing_schema_version: 1,
             stage_timings: vec![BenchmarkMetric {
-                name: "frontend.ast".to_owned(),
+                name: "frontend.ast.total".to_owned(),
                 value: 1.0,
             }],
             counters: Vec::new(),
@@ -333,7 +335,11 @@ fn inconsistent_measured_metric_sets_use_typed_observation_failure() {
         BenchmarkFailureKind::ObservationInfrastructureFailure { .. }
     ));
     assert!(failure.to_string().contains("missing: command.check.total"));
-    assert!(failure.to_string().contains("additional: frontend.ast"));
+    assert!(
+        failure
+            .to_string()
+            .contains("additional: frontend.ast.total")
+    );
 }
 
 #[test]
@@ -650,7 +656,7 @@ fn create_expected_invocation_executable(path: &Path, expected_args: &[&str]) {
         command => panic!("unexpected mock benchmark command: {command:?}"),
     };
     let script = format!(
-        "#!/bin/sh\n{checks}\nif [ \"$#\" -ne \"{}\" ]; then exit 9; fi\nprintf '%s\\n' 'MOTH_BENCH timing {required_timing}=1ms' 'MOTH_BENCH status errors=0 warnings=0'\n",
+        "#!/bin/sh\n{checks}\nif [ \"$#\" -ne \"{}\" ]; then exit 9; fi\nprintf '%s\\n' 'MOTH_BENCH timing-schema 1' 'MOTH_BENCH timing {required_timing}=1ms' 'MOTH_BENCH status errors=0 warnings=0'\n",
         expected_args.len(),
     );
 
@@ -676,7 +682,7 @@ fn create_expected_invocation_executable(path: &Path, expected_args: &[&str]) {
         command => panic!("unexpected mock benchmark command: {command:?}"),
     };
     let script = format!(
-        "@echo off\r\n{checks}\r\nif not \"%~{}\"==\"\" exit /b 9\r\necho MOTH_BENCH timing {required_timing}=1ms\r\necho MOTH_BENCH status errors=0 warnings=0\r\n",
+        "@echo off\r\n{checks}\r\nif not \"%~{}\"==\"\" exit /b 9\r\necho MOTH_BENCH timing-schema 1\r\necho MOTH_BENCH timing {required_timing}=1ms\r\necho MOTH_BENCH status errors=0 warnings=0\r\n",
         expected_args.len() + 1,
     );
 

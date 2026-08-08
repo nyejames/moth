@@ -58,6 +58,11 @@ fn timing_scope_does_not_evaluate_metric_expression() {
 }
 
 #[test]
+fn finish_timing_scope_does_not_evaluate_binding_expression() {
+    finish_timing_scope!({ panic!("disabled timing scope must not evaluate its binding") });
+}
+
+#[test]
 fn record_timing_duration_does_not_evaluate_arguments() {
     let metric_evaluated = evaluation_counter();
     let duration_evaluated = evaluation_counter();
@@ -107,16 +112,16 @@ fn command_timing_macros_expand_to_nothing() {
     for _ in 0..3 {
         command_timing_scope!(timing_session, crate::timing::TimingCommandKind::Build);
         runs += 1;
-        command_timing_finish!(timing_session, true);
+        finish_command_timing!(timing_session, true);
     }
 
     assert_eq!(runs, 3);
 }
 
 #[test]
-fn command_timing_finish_discards_success_expression() {
+fn finish_command_timing_discards_success_expression() {
     let succeeded_evaluated = evaluation_counter();
-    command_timing_finish!(timing_session, {
+    finish_command_timing!(timing_session, {
         succeeded_evaluated.set(succeeded_evaluated.get() + 1);
         true
     });
@@ -125,21 +130,16 @@ fn command_timing_finish_discards_success_expression() {
 }
 
 #[test]
-fn timed_frontend_stage_expands_to_production_expression() {
+fn timed_stage_attributed_expands_to_production_expression() {
     let metric_evaluated = evaluation_counter();
-    let prose_evaluated = evaluation_counter();
     let context_evaluated = evaluation_counter();
 
     // A non-callable value only compiles when the disabled expansion is the
     // production expression itself rather than a closure invocation.
-    let value: u32 = timed_frontend_stage!(
+    let value: u32 = timed_stage_attributed!(
         {
             metric_evaluated.set(metric_evaluated.get() + 1);
             "frontend.test"
-        },
-        {
-            prose_evaluated.set(prose_evaluated.get() + 1);
-            "Test stage: "
         },
         {
             context_evaluated.set(context_evaluated.get() + 1);
@@ -150,39 +150,40 @@ fn timed_frontend_stage_expands_to_production_expression() {
 
     assert_eq!(value, 42);
     assert_eq!(metric_evaluated.get(), 0);
-    assert_eq!(prose_evaluated.get(), 0);
     assert_eq!(context_evaluated.get(), 0);
 }
 
 #[test]
-fn timed_frontend_substep_expands_to_production_expression() {
+fn timing_scope_attributed_erases_metric_and_context_expressions() {
     let metric_evaluated = evaluation_counter();
-    let prose_evaluated = evaluation_counter();
-
-    let value: u32 = timed_frontend_substep!(
+    timing_scope_attributed!(
+        timing_guard,
         {
             metric_evaluated.set(metric_evaluated.get() + 1);
             "frontend.substep"
         },
         {
-            prose_evaluated.set(prose_evaluated.get() + 1);
-            "Substep: "
-        },
-        42
+            metric_evaluated.set(metric_evaluated.get() + 1);
+            None
+        }
     );
 
-    assert_eq!(value, 42);
     assert_eq!(metric_evaluated.get(), 0);
-    assert_eq!(prose_evaluated.get(), 0);
 }
 
 #[test]
 fn timed_stage_runs_wrapped_expression_exactly_once() {
     let runs = evaluation_counter();
-    let value = timed_stage!("test.metric", {
-        runs.set(runs.get() + 1);
-        42
-    });
+    let value = timed_stage!(
+        {
+            let _ = "test.metric";
+            "test.metric"
+        },
+        {
+            runs.set(runs.get() + 1);
+            42
+        }
+    );
 
     assert_eq!(value, 42);
     assert_eq!(runs.get(), 1);
@@ -206,7 +207,7 @@ fn timed_stage_passes_error_through_unchanged() {
 fn timer_facade_sources_never_use_cfg_timer_macro() {
     let facade_sources = [
         include_str!("../../timing.rs"),
-        include_str!("../enabled.rs"),
+        include_str!("../enabled/mod.rs"),
         include_str!("../enabled/runtime.rs"),
         include_str!("../enabled/collector.rs"),
     ];

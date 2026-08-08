@@ -9,7 +9,9 @@
 //! attached to that workload. This hash detects change deterministically; it
 //! does not provide cryptographic security.
 
-use crate::bench_types::{BENCHMARK_PROTOCOL_VERSION, BenchmarkMeasurementIdentity};
+use crate::bench_types::{
+    BENCHMARK_PROTOCOL_VERSION, BENCHMARK_TIMING_SCHEMA_VERSION, BenchmarkMeasurementIdentity,
+};
 use crate::benchmark_manifest::{
     BENCHMARK_MANIFEST_SCHEMA_VERSION, BenchmarkCase, BenchmarkExpectation,
     BenchmarkFingerprintMode, BenchmarkManifest, BenchmarkRunner, BenchmarkWorkload,
@@ -79,6 +81,7 @@ impl BenchmarkFingerprints {
             workload_id: workload.id.clone(),
             source_fingerprint: source_fingerprint.to_string(),
             measurement_fingerprint: measurement_fingerprint.to_string(),
+            timing_schema_version: BENCHMARK_TIMING_SCHEMA_VERSION,
         })
     }
 }
@@ -384,6 +387,7 @@ fn compute_measurement_fingerprint(
     fingerprint.write_field(b"moth.case-measurement-fingerprint");
     fingerprint.write_u32(MEASUREMENT_FINGERPRINT_VERSION);
     fingerprint.write_u32(BENCHMARK_PROTOCOL_VERSION);
+    fingerprint.write_u32(BENCHMARK_TIMING_SCHEMA_VERSION);
 
     fingerprint.write_field(&source_fingerprint.first_lane.to_le_bytes());
     fingerprint.write_field(&source_fingerprint.second_lane.to_le_bytes());

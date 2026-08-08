@@ -9,13 +9,13 @@ use crate::build_system::BuildProfile;
 use crate::build_system::build::{BuildBootstrap, ProjectBuilder, bootstrap_project_build};
 use crate::build_system::create_project_modules::compile_project_frontend;
 use crate::build_system::path_validation::check_if_valid_path;
-use crate::command_timing_finish;
 use crate::command_timing_scope;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::display_messages::{
     print_compiler_messages, print_terse_compiler_messages,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::finish_command_timing;
 use crate::projects::command_status::{
     CommandStatus, benchmark_diagnostic_counts, emit_benchmark_status,
 };
@@ -36,7 +36,10 @@ struct CheckOutcome {
 
 pub(crate) fn run_check(path: &str, options: CheckOptions) -> CommandStatus {
     command_timing_scope!(timing_session, crate::timing::TimingCommandKind::Check);
-    timing_scope!(timing_guard_command_check_total, "command.check.total");
+    timing_scope!(
+        timing_guard_command_check_total,
+        crate::timing::TimingMetric::CommandCheckTotal
+    );
     let outcome = execute_check(path);
     let error_count = outcome.messages.error_count();
     let warning_count = outcome.messages.warning_count();
@@ -57,7 +60,7 @@ pub(crate) fn run_check(path: &str, options: CheckOptions) -> CommandStatus {
     }
     #[cfg(feature = "timers")]
     timing_guard_command_check_total.finish();
-    command_timing_finish!(timing_session, error_count == 0);
+    finish_command_timing!(timing_session, error_count == 0);
     if let Some((error_count, warning_count)) = benchmark_counts {
         emit_benchmark_status(error_count, warning_count);
     }

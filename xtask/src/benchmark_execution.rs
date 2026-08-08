@@ -8,9 +8,7 @@
 use std::fmt::{Display, Formatter};
 use std::path::{Path, PathBuf};
 
-use crate::bench_observations::{
-    BenchmarkObservationSource, average_observations, parse_stdout_observations,
-};
+use crate::bench_observations::{average_observations, parse_stdout_observations};
 use crate::bench_types::BenchmarkCaseObservations;
 use crate::benchmark_manifest::{
     BenchmarkCase, BenchmarkEntryKind, BenchmarkExpectation, BenchmarkManifest,
@@ -260,21 +258,18 @@ fn execute_cli_case(
     validate_clean_expectation(context, case, benchmark_status, Vec::new(), Some(&run))?;
     validate_total_duration(context, case, run.duration_ms, Some(&run), benchmark_status)?;
 
-    let observations = parse_stdout_observations(
-        &run.stdout,
-        BenchmarkObservationSource::LiveCli(invocation.command),
-    )
-    .map_err(|error| {
-        process_failure(
-            context,
-            case,
-            BenchmarkFailureKind::ObservationInfrastructureFailure {
-                message: error.to_string(),
-            },
-            &run,
-            Some(benchmark_status),
-        )
-    })?;
+    let observations =
+        parse_stdout_observations(&run.stdout, invocation.command).map_err(|error| {
+            process_failure(
+                context,
+                case,
+                BenchmarkFailureKind::ObservationInfrastructureFailure {
+                    message: error.to_string(),
+                },
+                &run,
+                Some(benchmark_status),
+            )
+        })?;
 
     // A successful directory build must not leave an undeclared output
     // manifest behind. The bounded recursive scan runs once at finalisation.

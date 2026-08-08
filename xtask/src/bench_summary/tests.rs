@@ -22,6 +22,7 @@ fn benchmark_group_case(case_name: &str, group_name: &str, mean_ms: f64) -> Benc
             workload_id: format!("{case_name}_workload"),
             source_fingerprint: format!("{case_name}_source_fp"),
             measurement_fingerprint: format!("{case_name}_measurement_fp"),
+            timing_schema_version: 1,
         }),
         group_name: group_name.to_string(),
         runner: BenchmarkRunner::Cli {
@@ -77,6 +78,7 @@ fn local_record_from_cases(cases: Vec<BenchmarkCaseResult>) -> LocalRunRecord {
                     .identity
                     .as_ref()
                     .map(|id| id.measurement_fingerprint.clone()),
+                timing_schema_version: case.identity.as_ref().map(|id| id.timing_schema_version),
                 group_name: case.group_name,
                 runner: case.runner,
                 mean_ms: case.mean_ms,
@@ -124,6 +126,7 @@ fn local_record(average_ms: f64, case_spread_ms: f64) -> LocalRunRecord {
             workload_id: Some("docs".to_string()),
             source_fingerprint: Some("docs_source_fp".to_string()),
             measurement_fingerprint: Some("docs_measurement_fp".to_string()),
+            timing_schema_version: Some(1),
             group_name: "docs".to_string(),
             runner: BenchmarkRunner::Cli {
                 command: CliBenchmarkCommand::Check,
@@ -205,6 +208,7 @@ fn test_format_group_average_line() {
                 workload_id: "a_workload".to_string(),
                 source_fingerprint: "a_source_fp".to_string(),
                 measurement_fingerprint: "a_measurement_fp".to_string(),
+                timing_schema_version: 1,
             }),
             group_name: "core".to_string(),
             runner: BenchmarkRunner::Cli {
@@ -222,6 +226,7 @@ fn test_format_group_average_line() {
                 workload_id: "b_workload".to_string(),
                 source_fingerprint: "b_source_fp".to_string(),
                 measurement_fingerprint: "b_measurement_fp".to_string(),
+                timing_schema_version: 1,
             }),
             group_name: "docs".to_string(),
             runner: BenchmarkRunner::Cli {
@@ -253,9 +258,46 @@ fn test_generate_system_block_with_change() {
     assert!(
         block.contains("Change since initial benchmark: -12ms avg; 1 faster, 0 slower; 1/1 cases")
     );
+    assert!(block.contains("Timing schema: 1"));
     assert!(block.contains("Initial: all ~80ms, Core ~120ms, Docs ~60ms"));
     assert!(block.contains("Latest: all ~68ms, Core ~108ms, Docs ~48ms"));
     assert!(block.contains("Case spread latest: ~9ms"));
+}
+
+#[test]
+fn test_generate_system_block_labels_obsolete_initial_schema_without_drift() {
+    let mut initial = local_record(80.0, 6.0);
+    initial.cases[0].timing_schema_version = Some(2);
+    let latest = local_record(80.0, 6.0);
+
+    let block = generate_system_block("End-to-end CLI", "macOS M1", "B7F2A9", &initial, &latest, 2);
+
+    assert!(block.contains("Timing schema: 1"));
+    assert!(block.contains("Initial timing schema: 2 (obsolete; non-comparable)"));
+    assert!(block.contains("timing schema changed"));
+    assert!(!block.contains("faster"));
+    assert!(!block.contains("slower"));
+}
+
+#[test]
+fn mixed_schema_records_are_excluded_from_monthly_selection() {
+    let mixed = local_record_from_cases(vec![
+        benchmark_case("current", 80.0),
+        benchmark_case("obsolete", 90.0),
+    ]);
+    let mut mixed = mixed;
+    mixed.cases[1].timing_schema_version = Some(2);
+
+    assert_eq!(
+        TimingSchemaIdentity::from_record(&mixed),
+        TimingSchemaIdentity::Mixed
+    );
+    assert!(!comparable_summary_record(
+        &mixed,
+        "B7F2A9",
+        "end_to_end_cli",
+        None,
+    ));
 }
 
 #[test]
@@ -346,8 +388,9 @@ fn test_generate_run_entry_with_delta() {
     assert_eq!(entry.timestamp_text, "May 10th - 15:21");
     assert_eq!(
         entry.body,
-        "**-10ms avg**; 1 faster, 0 slower; 1/1 cases\nAvg: all ~110ms, ungrouped ~110ms"
+        "Timing schema: 1\n**-10ms avg**; 1 faster, 0 slower; 1/1 cases\nAvg: all ~110ms, ungrouped ~110ms"
     );
+    assert_eq!(entry.timing_schema, TimingSchemaIdentity::Version(1));
     assert!(
         entry
             .to_markdown()
@@ -364,7 +407,7 @@ fn test_generate_run_entry_baseline() {
     let entry = generate_run_entry(&run, &comparison);
     assert_eq!(
         entry.body,
-        "**baseline**; 1 cases, avg ~110ms\nAvg: all ~110ms, ungrouped ~110ms"
+        "Timing schema: 1\n**baseline**; 1 cases, avg ~110ms\nAvg: all ~110ms, ungrouped ~110ms"
     );
 }
 
@@ -376,6 +419,7 @@ fn test_generate_run_entry_with_stage_movement() {
             workload_id: "a_workload".to_string(),
             source_fingerprint: "a_source_fp".to_string(),
             measurement_fingerprint: "a_measurement_fp".to_string(),
+            timing_schema_version: 1,
         }),
         group_name: "ungrouped".to_string(),
         runner: BenchmarkRunner::Cli {
@@ -386,8 +430,9 @@ fn test_generate_run_entry_with_stage_movement() {
         median_ms: 110.0,
         stddev_ms: 0.0,
         observations: BenchmarkCaseObservations {
+            timing_schema_version: 1,
             stage_timings: vec![BenchmarkMetric {
-                name: "ast_ms".to_string(),
+                name: "frontend.ast.total".to_string(),
                 value: 55.0,
             }],
             counters: vec![],
@@ -399,6 +444,7 @@ fn test_generate_run_entry_with_stage_movement() {
             workload_id: "a_workload".to_string(),
             source_fingerprint: "a_source_fp".to_string(),
             measurement_fingerprint: "a_measurement_fp".to_string(),
+            timing_schema_version: 1,
         }),
         group_name: "ungrouped".to_string(),
         runner: BenchmarkRunner::Cli {
@@ -409,8 +455,9 @@ fn test_generate_run_entry_with_stage_movement() {
         median_ms: 100.0,
         stddev_ms: 0.0,
         observations: BenchmarkCaseObservations {
+            timing_schema_version: 1,
             stage_timings: vec![BenchmarkMetric {
-                name: "ast_ms".to_string(),
+                name: "frontend.ast.total".to_string(),
                 value: 50.0,
             }],
             counters: vec![],
@@ -421,7 +468,7 @@ fn test_generate_run_entry_with_stage_movement() {
 
     let entry = generate_run_entry(&run, &comparison);
     assert!(entry.body.contains("Stage movement:"));
-    assert!(entry.body.contains("ast +5ms"));
+    assert!(entry.body.contains("AST +5ms"));
 }
 
 #[test]
@@ -432,6 +479,7 @@ fn test_generate_run_entry_baseline_hides_stage_movement() {
             workload_id: "a_workload".to_string(),
             source_fingerprint: "a_source_fp".to_string(),
             measurement_fingerprint: "a_measurement_fp".to_string(),
+            timing_schema_version: 1,
         }),
         group_name: "ungrouped".to_string(),
         runner: BenchmarkRunner::Cli {
@@ -442,8 +490,9 @@ fn test_generate_run_entry_baseline_hides_stage_movement() {
         median_ms: 110.0,
         stddev_ms: 0.0,
         observations: BenchmarkCaseObservations {
+            timing_schema_version: 1,
             stage_timings: vec![BenchmarkMetric {
-                name: "ast_ms".to_string(),
+                name: "frontend.ast.total".to_string(),
                 value: 55.0,
             }],
             counters: vec![],
@@ -578,6 +627,7 @@ fn test_build_summary_content_new_file() {
         timestamp_text: "May 10th - 15:21".to_string(),
         body: "**baseline** (+/- 0ms)".to_string(),
         raw: "# macOS M1 (B7F2A9): May 10th - 15:21\n**baseline** (+/- 0ms)\n".to_string(),
+        ..SummaryRunEntry::default()
     })];
 
     let content = build_summary_content("May 2026", &[block], &entries);
@@ -600,6 +650,7 @@ fn test_build_summary_content_appends_run() {
             timestamp_text: "May 10th - 15:21".to_string(),
             body: "**baseline** (+/- 0ms)".to_string(),
             raw: "# macOS M1 (B7F2A9): May 10th - 15:21\n**baseline** (+/- 0ms)\n".to_string(),
+            ..SummaryRunEntry::default()
         }),
         ParsedSummaryRunEntry::Parsed(SummaryRunEntry {
             suite_kind_label: "End-to-end CLI".to_string(),
@@ -608,6 +659,7 @@ fn test_build_summary_content_appends_run() {
             timestamp_text: "May 10th - 16:04".to_string(),
             body: "**-10ms** (+/- 5ms)".to_string(),
             raw: "# macOS M1 (B7F2A9): May 10th - 16:04\n**-10ms** (+/- 5ms)\n".to_string(),
+            ..SummaryRunEntry::default()
         }),
     ];
 
@@ -638,6 +690,7 @@ fn test_build_summary_content_multiple_systems() {
         timestamp_text: "May 10th - 15:21".to_string(),
         body: "**baseline** (+/- 0ms)".to_string(),
         raw: "# macOS M1 (B7F2A9): May 10th - 15:21\n**baseline** (+/- 0ms)\n".to_string(),
+        ..SummaryRunEntry::default()
     })];
 
     let content = build_summary_content("May 2026", &blocks, &entries);
@@ -746,6 +799,7 @@ fn test_append_numeric_after_no_change() {
         timestamp_text: "May 10th - 15:21".to_string(),
         body: "no measurable change since last benchmark".to_string(),
         raw: String::new(),
+        ..SummaryRunEntry::default()
     })];
 
     let new_entry = SummaryRunEntry {
@@ -755,6 +809,7 @@ fn test_append_numeric_after_no_change() {
         timestamp_text: "May 10th - 16:04".to_string(),
         body: "**-10ms** (+/- 5ms)".to_string(),
         raw: String::new(),
+        ..SummaryRunEntry::default()
     };
 
     // Build a comparison that represents Faster (numeric)
@@ -780,6 +835,7 @@ fn test_append_first_no_change() {
         timestamp_text: "May 10th - 15:21".to_string(),
         body: "no measurable change since last benchmark".to_string(),
         raw: String::new(),
+        ..SummaryRunEntry::default()
     };
 
     let current = vec![benchmark_case("a", 100.0)];
@@ -809,6 +865,7 @@ fn test_replace_consecutive_no_change_same_system() {
         timestamp_text: "May 11th - 12:40".to_string(),
         body: "no measurable change since last benchmark".to_string(),
         raw: String::new(),
+        ..SummaryRunEntry::default()
     })];
 
     let new_entry = SummaryRunEntry {
@@ -818,6 +875,7 @@ fn test_replace_consecutive_no_change_same_system() {
         timestamp_text: "May 11th - 13:25".to_string(),
         body: "no measurable change since last benchmark".to_string(),
         raw: String::new(),
+        ..SummaryRunEntry::default()
     };
 
     let current = vec![benchmark_case("a", 100.0)];
@@ -833,6 +891,55 @@ fn test_replace_consecutive_no_change_same_system() {
 }
 
 #[test]
+fn generated_current_schema_no_change_entry_replaces_same_schema() {
+    let cases = vec![benchmark_case("a", 100.0)];
+    let comparison = BenchmarkComparison::new(&cases, Some(&cases));
+    assert_eq!(
+        comparison.change_kind,
+        BenchmarkChangeKind::NoMeasurableChange
+    );
+
+    let first_entry = generate_run_entry(&benchmark_run(cases.clone()), &comparison);
+    let second_entry = generate_run_entry(&benchmark_run(cases), &comparison);
+    assert!(first_entry.body.starts_with("Timing schema: 1\n"));
+
+    let mut entries = vec![ParsedSummaryRunEntry::Parsed(first_entry)];
+    append_or_replace_run_entry(&mut entries, second_entry, &comparison);
+
+    assert_eq!(entries.len(), 1);
+    assert!(entries[0].to_markdown().contains("Timing schema: 1"));
+}
+
+#[test]
+fn no_change_entries_with_other_schema_identities_are_not_replaced() {
+    let current = vec![benchmark_case("a", 100.0)];
+    let comparison = BenchmarkComparison::new(&current, Some(&current));
+    let existing_identity_cases = [
+        TimingSchemaIdentity::Missing,
+        TimingSchemaIdentity::Version(2),
+        TimingSchemaIdentity::Mixed,
+    ];
+
+    for existing_timing_schema in existing_identity_cases {
+        let existing = SummaryRunEntry {
+            suite_kind_label: "End-to-end CLI".to_string(),
+            display_name: "macOS M1".to_string(),
+            public_system_id: "B7F2A9".to_string(),
+            timestamp_text: "May 11th - 12:40".to_string(),
+            timing_schema: existing_timing_schema,
+            body: "Timing schema: obsolete\nno measurable change: avg 0ms; 1/1 cases".to_string(),
+            raw: String::new(),
+        };
+        let new_entry = generate_run_entry(&benchmark_run(current.clone()), &comparison);
+        let mut entries = vec![ParsedSummaryRunEntry::Parsed(existing)];
+
+        append_or_replace_run_entry(&mut entries, new_entry, &comparison);
+
+        assert_eq!(entries.len(), 2);
+    }
+}
+
+#[test]
 fn test_case_set_changed_no_change_appends_instead_of_replacing() {
     let mut runs = vec![ParsedSummaryRunEntry::Parsed(SummaryRunEntry {
         suite_kind_label: "End-to-end CLI".to_string(),
@@ -841,6 +948,7 @@ fn test_case_set_changed_no_change_appends_instead_of_replacing() {
         timestamp_text: "May 11th - 12:40".to_string(),
         body: "no measurable change since last benchmark".to_string(),
         raw: String::new(),
+        ..SummaryRunEntry::default()
     })];
 
     let previous = vec![benchmark_case("a", 100.0)];
@@ -859,6 +967,7 @@ fn test_case_set_changed_no_change_appends_instead_of_replacing() {
         timestamp_text: "May 11th - 13:25".to_string(),
         body: comparison.format_run_change_line(),
         raw: String::new(),
+        ..SummaryRunEntry::default()
     };
 
     append_or_replace_run_entry(&mut runs, new_entry, &comparison);
@@ -878,6 +987,7 @@ fn test_no_replace_for_different_system() {
         timestamp_text: "May 11th - 12:40".to_string(),
         body: "no measurable change since last benchmark".to_string(),
         raw: String::new(),
+        ..SummaryRunEntry::default()
     })];
 
     let new_entry = SummaryRunEntry {
@@ -887,6 +997,7 @@ fn test_no_replace_for_different_system() {
         timestamp_text: "May 11th - 13:25".to_string(),
         body: "no measurable change since last benchmark".to_string(),
         raw: String::new(),
+        ..SummaryRunEntry::default()
     };
 
     let current = vec![benchmark_case("a", 100.0)];
@@ -912,6 +1023,7 @@ fn test_no_change_after_meaningful_change_appends() {
             timestamp_text: "May 11th - 12:40".to_string(),
             body: "no measurable change since last benchmark".to_string(),
             raw: String::new(),
+            ..SummaryRunEntry::default()
         }),
         ParsedSummaryRunEntry::Parsed(SummaryRunEntry {
             suite_kind_label: "End-to-end CLI".to_string(),
@@ -920,6 +1032,7 @@ fn test_no_change_after_meaningful_change_appends() {
             timestamp_text: "May 11th - 13:25".to_string(),
             body: "**-10ms** (+/- 2ms)".to_string(),
             raw: String::new(),
+            ..SummaryRunEntry::default()
         }),
     ];
 
@@ -930,6 +1043,7 @@ fn test_no_change_after_meaningful_change_appends() {
         timestamp_text: "May 11th - 14:00".to_string(),
         body: "no measurable change since last benchmark".to_string(),
         raw: String::new(),
+        ..SummaryRunEntry::default()
     };
 
     let current = vec![benchmark_case("a", 100.0)];

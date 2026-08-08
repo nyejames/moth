@@ -1,7 +1,7 @@
 //! Command timing session orchestration.
 //!
 //! WHAT: owns command-session startup and summary rendering after a command
-//! has drained its raw event snapshot.
+//! has drained its typed timing snapshot.
 //! WHY: command lifecycle policy stays separate from collector storage, and
 //! the immutable session configuration rather than a global mode decides what
 //! each completed command may render.
@@ -22,7 +22,7 @@ pub(crate) fn start_command_session(command: TimingCommandKind) -> TimingSession
 ///
 /// A silent command with no counter channel intentionally owns no collector.
 /// A nested command stays an inactive token rather than replacing an outer
-/// raw collector; instrumentation tests use that outer session to inspect
+/// outer collector; instrumentation tests use that outer session to inspect
 /// command spans without rendering a competing report.
 fn start_command_session_with_config(
     command: TimingCommandKind,
@@ -73,8 +73,9 @@ pub(crate) fn render_command_timing_summary_with_configuration(
         render::render_timing_summary_report(&report);
     }
 
-    // Counter summary is owned by `benchmark_counters` and reuses the raw
-    // event snapshot until Phase 5 replaces it with dense counter aggregates.
+    // Counter summary is owned by `benchmark_counters` and reuses the
+    // session's counter snapshot; counter storage remains independent of
+    // timing aggregate policy.
     #[cfg(feature = "benchmark_counters")]
     if configuration.channels().human_summary()
         && configuration.counter_mode().emits_counter_summary()

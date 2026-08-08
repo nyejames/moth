@@ -99,8 +99,11 @@ Before declaring a non-trivial code-bearing slice complete, run:
     [td:
         [: Timer erasure gate]
         [: `just timers-erasure-check`]
-        [: Builds a no-timer release binary and rejects timer-only markers and
-        source-level closure wrappers]
+        [: Builds a no-timer release binary, scans the schema-owned metric
+        inventory plus timer-only environment and report markers, and audits
+        both `src` and `xtask/src` for direct clocks, collector/runtime calls,
+        `cfg!` timer checks, closure wrappers, unguarded timer-only fields,
+        obsolete timer macros and provisional metric names]
     ]
 ]
 

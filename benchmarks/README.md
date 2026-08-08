@@ -91,12 +91,13 @@ Case IDs identify measurements and reports. CLI profiling also selects cases by 
 
 The source workload fingerprint covers the source fingerprint format version, manifest schema version, workload ID, entry logical path, entry kind, fingerprint mode, normalised root and exclude sets, and every included file path and byte. It does not hash runner declarations, `group` or `quick`. Changing source bytes invalidates every case attached to that workload.
 
-The case measurement fingerprint covers the measurement fingerprint format version, benchmark protocol version, the source workload fingerprint, workload ID, this case's runner kind, command or frontend profile, authored runner arguments and expectation. It does not hash sibling cases. Changing one case's runner changes only that case's measurement fingerprint.
+The case measurement fingerprint covers the measurement fingerprint format version, benchmark protocol version, timing schema version, the source workload fingerprint, workload ID, this case's runner kind, command or frontend profile, authored runner arguments and expectation. It does not hash sibling cases. Changing one case's runner changes only that case's measurement fingerprint.
 
-Comparison output distinguishes three states for each matching case ID:
+Comparison output distinguishes four states for each matching case ID:
 
 - **workload changed**: source fingerprint differs — no speed delta is reported.
-- **measurement changed**: source matches but measurement fingerprint differs — no speed delta is reported.
+- **timing schema changed**: source matches but the timing schema differs — no speed delta or stage movement is reported. The report uses this state even when the numeric timing values happen to be equal.
+- **measurement changed**: source and timing schema match but measurement fingerprint differs — no speed delta is reported.
 - **timing comparable**: both match — speed deltas and stage movement are computed.
 
 Schema 3 accepts only `expectation = "clean"`. A clean case must compile without errors or warnings. Negative diagnostic coverage belongs under `tests/cases/`, not in this manifest.
@@ -119,9 +120,23 @@ A completed `check` or `build` emits exactly one machine status record:
 MOTH_BENCH status errors=<usize> warnings=<usize>
 ```
 
-The executor also requires stable `MOTH_BENCH timing` observations, including the matching `command.check.total` or `command.build.total` metric. Duplicate `MOTH_BENCH status` records are invalid. Malformed timing records are invalid. Repeated timing metric names inside one iteration are valid and summed. The required command total must exist. Measured iterations must expose the same timing metric set; missing or additional timing names across iterations fail the run. A zero process status can't compensate for reported diagnostics, and a clean status can't compensate for a non-zero process status.
+The executor requires exactly one timing schema record and the matching `command.check.total` or `command.build.total` aggregate:
 
-Frontend cases call the production in-process API. The same executor checks typed error and warning facts, a positive finite total duration and a non-empty stable stage set.
+```text
+MOTH_BENCH timing-schema 1
+MOTH_BENCH timing command.check.total=<ms>ms
+```
+
+The compiler emits one final aggregate line for each non-empty metric, in the
+canonical order owned by the timing registry. Duplicate schema or status
+records, duplicate live timing metrics, unsupported schema versions, malformed
+timing records and non-finite values are invalid. The required command total
+must exist. Measured iterations must expose the same timing metric set and
+schema; missing or additional timing names across iterations fail the run. A
+zero process status can't compensate for reported diagnostics, and a clean
+status can't compensate for a non-zero process status.
+
+Frontend cases call the production in-process API. The same executor checks typed error and warning facts, a positive finite total duration, the current timing schema version and a non-empty stable stage set.
 
 ## Output Isolation And Artifact Cleanup
 
@@ -139,9 +154,10 @@ Recorded CLI and frontend runs require an exactly clean committed worktree at st
 
 Normal benchmark commands build the compiler with the concise `timers` feature.
 End-to-end CLI benchmarks run subprocesses with `MOTH_TIMERS=bench` and
-`MOTH_COUNTERS=off` so stdout contains stable timing observations without verbose
-human prose or counter floods. Focused frontend benchmarks run in-process and
-read the same timing collector directly.
+`MOTH_COUNTERS=off` so stdout contains one timing-schema header and the final
+stable aggregate observations without verbose human prose or counter floods.
+Focused frontend benchmarks run in-process and read the same timing collector
+directly.
 
 Feature roles:
 
@@ -149,35 +165,52 @@ Feature roles:
   timing collection. Timers-only builds default to a concise human summary.
 - `detailed_timers`: implies `timers` and adds verbose developer timing prose
   plus detailed AST substage timings. It does not enable counters by itself.
-- `benchmark_counters`: enables high-volume local diagnostic counters when used
-  with `timers`. Normal benchmark runs leave counter stdout off.
+- `benchmark_counters`: enables high-volume local diagnostic counters. In a
+  counter-only build, counter logging can emit direct `MOTH_BENCH counter`
+  lines without timer collection; when combined with `timers`, counters also
+  enter the shared timing session. Normal benchmark runs leave counter stdout
+  off.
 
 Environment controls:
 
 ```text
 MOTH_TIMERS=summary   # concise human summary
-MOTH_TIMERS=bench     # stable MOTH_BENCH timing lines for benchmark tooling
-MOTH_TIMERS=verbose   # human prose plus stable timing lines
-MOTH_TIMERS=off       # collect for in-process consumers, suppress stdout
+MOTH_TIMERS=bench     # schema header plus final aggregate MOTH_BENCH lines
+MOTH_TIMERS=verbose   # human prose plus final aggregate timing lines
+MOTH_TIMERS=off       # disable ordinary command timing and timing output
 
 MOTH_COUNTERS=off     # default
 MOTH_COUNTERS=summary # stable counter lines plus grouped summary
 MOTH_COUNTERS=full    # stable counter lines plus full legacy counter dump
 ```
 
-Counter lines are emitted only when the compiler is built with
-`timers,benchmark_counters` and `MOTH_COUNTERS=summary` or `MOTH_COUNTERS=full`.
-Do not turn counters on for normal before/after benchmark runs unless the active
-investigation specifically needs counter evidence.
+Counter lines are emitted when the compiler has `benchmark_counters` and
+`MOTH_COUNTERS=summary` or `MOTH_COUNTERS=full`. With `timers`, those lines are
+backed by the shared timing session; without `timers`, they are direct output
+from counter logging call sites and no timer aggregate is collected. In-process
+frontend collection uses an explicit caller-owned session configuration rather
+than `MOTH_TIMERS=off`. Do not turn counters on for normal before/after
+benchmark runs unless the active investigation specifically needs counter
+evidence.
 
 ### Timer report model
 
 The human `MOTH_TIMERS=summary` report is a short developer scan, not a fourth
 benchmark system. It shows one command, one set of compilation boundaries, the
 curated frontend and backend sections, and one slowest module. Detailed timers
-keep verbose inline prose and every raw observation; bench mode emits stable
-`MOTH_BENCH timing` lines only. Unknown raw metrics always stay available in
-bench and detailed output but never appear in the basic report by accident.
+keep verbose inline prose; bench mode emits one `MOTH_BENCH timing-schema 1`
+header followed by the non-empty final aggregate `MOTH_BENCH timing` lines.
+Both benchmark output and the concise report consume the typed schema rather
+than inferring architecture from metric strings.
+
+`just bench-report` and the tracked monthly summaries print the timing schema
+identity alongside their latest-run evidence. Current records show
+`Timing schema: 1`; an obsolete but uniform record remains readable and is
+labelled non-comparable, with no speed, stage or counter movement. A record
+whose cases carry mixed schemas is explicitly omitted from aggregate report
+sections rather than being collapsed into one version. Monthly-summary
+rewrites preserve legacy entries without promoting them to a current-schema
+claim.
 
 Rows distinguish wall spans from accumulated work:
 
@@ -200,13 +233,18 @@ command total.
 The zero-cost rule is a hard contract: a compiler built without `timers`
 performs no timer-system clock reads, allocations, formatting, environment
 lookups, collector operations or context propagation. The erasure gate
-(`just timers-erasure-check`) builds a no-timer release binary and rejects
-timer-only markers in its bytes.
+(`just timers-erasure-check`) builds a no-timer release binary, scans the
+schema-owned metric inventory plus timer-only environment and report markers,
+and audits both source roots for direct timer implementation leakage.
 
-Stable metric compatibility is mandatory. Existing metric names and measurement
-boundaries never change; new observations always use new names. Human grouping
-may combine raw metrics without changing them. A benchmark protocol bump is a
-separate deliberate action, never a way to hide an accidental boundary change.
+Timing schema v1 is the compatibility boundary. The typed registry owns stable
+names, semantic boundaries, wall/accumulated/nested meaning and command
+accounting. A change to those meanings requires a schema bump and makes the
+old and new observations non-comparable. Data recorded before v1 is legacy;
+there is no numeric migration or compatibility alias for provisional names.
+Human grouping may combine schema metrics for presentation without changing
+their identities. The benchmark protocol and measurement fingerprints carry
+the schema version so this reset cannot be hidden as a speed movement.
 
 ### Frontend parallelism matrix
 
@@ -263,7 +301,7 @@ Run `just bench-report` first to identify which case and stage are worth profili
 
 Profile history uses its own protocol version (`PROFILE_PROTOCOL_VERSION`, currently 2) and format version (currently 4). Drift comparison selects a previous run only when system UUID, filter mode, sample rate, and profile protocol version all match. Case-level comparison uses source and measurement fingerprints — not command text — as the comparison authority.
 
-When a case's source fingerprint changed since the previous run, drift reports "workload changed" and the case does not contribute to function, stage, or counter drift. When the measurement fingerprint changed (e.g., runner or protocol changed), drift reports "measurement changed" with the same exclusion. Only cases with identical identity contribute to drift aggregates.
+When a case's source fingerprint changed since the previous run, drift reports "workload changed" and the case does not contribute to function, stage, or counter drift. When the timing schema changed, drift reports "timing schema changed" and applies the same exclusion, even if the old and new numeric observations are otherwise equal. When the remaining measurement fingerprint changed (e.g., runner or protocol changed), drift reports "measurement changed" with the same exclusion. Only cases with identical identity contribute to drift aggregates.
 
 Legacy profile history (formats v1 through v3) remains readable but is never selected as a directly comparable previous run because it lacks current protocol version and identity.
 
@@ -275,10 +313,13 @@ CLI wall-clock time is the public rough regression signal. It measures the built
 
 Compiler stage timings are attribution and debugging evidence. They help explain whether obvious movement likely came from command/bootstrap setup, Stage 0 project structure, path resolution, reachable-file discovery, file preparation, dependency sorting, AST, HIR, borrow validation, backend lowering, output writing, or another instrumented stage.
 
-Stage observations are emitted as stable `MOTH_BENCH timing <metric>=<ms>ms`
-lines when the compiler is built with `timers` and run with
-`MOTH_TIMERS=bench` or `MOTH_TIMERS=verbose`. Human timer prose is developer
-output only. Benchmark parsing should prefer the stable metric lines.
+Stage observations are emitted after the completed timing session as one
+`MOTH_BENCH timing-schema 1` header followed by stable
+`MOTH_BENCH timing <metric>=<ms>ms` aggregate lines when the compiler is built
+with `timers` and run with `MOTH_TIMERS=bench` or `MOTH_TIMERS=verbose`. Lines
+follow the timing registry's canonical order and are emitted only for metrics
+with samples. Human timer prose is developer output only; benchmark parsing
+requires the schema header and the aggregate metric set.
 
 Stage 0/bootstrap/path-resolution timings are first-class attribution metrics. A CLI benchmark whose wall time is much larger than the sum of relevant top-level command phases should be treated as an instrumentation gap, not as harmless subprocess noise.
 
@@ -289,14 +330,15 @@ counter output is explicitly requested. Counters are stored in local JSONL and
 used by local report tooling. Raw counter tables must not be added to tracked
 summaries.
 
-The current `frontend.file_prepare` metric is the combined parallel
+The current `frontend.prepare` metric is the schema-owned combined parallel
 file-preparation aggregate: per-file tokenization, header parsing, local
 string-table work, and deterministic merge/remap into the module table.
 Directory projects also record the same metric for incremental Stage 0
 discovery: each per-file header preparation and the final retained
 header-syntax aggregation are attributed to the owning module and boundary.
 Older local records may still contain legacy `file_prepare_ms`,
-`tokenize_ms`, or `headers_ms` observations.
+`tokenize_ms`, or `headers_ms` observations; those schema-less values remain
+non-comparable and do not contribute to current reports.
 
 In-process frontend timings call production compiler paths directly and stop at the documented frontend/backend boundary after HIR and borrow validation. They are useful for compiler refactors, but they are still rough development signals rather than precise measurements.
 
@@ -327,8 +369,9 @@ Groups are public summary labels, not compiler architecture boundaries. The grou
 
 - Benchmark manifest schema: 3
 - Source workload fingerprint version: 3
-- Benchmark protocol version: 3
-- Normal JSONL history format: 7
+- Timing observation schema version: 1
+- Benchmark protocol version: 4
+- Normal JSONL history format: 8
 - Profile protocol version: 2
 - Profile history format: 4
 - Profile run-manifest format: 4
@@ -371,7 +414,10 @@ Stage movement should explain a benchmark result, not replace it. Treat it as a 
 
 Detailed run data is local-only in `benchmarks/local-data/runs.jsonl`. Do not commit raw local history.
 
-Raw records include per-case means, medians, standard deviations, stage timings, counters, suite kind, primary metric name, exact thread identity, system identity and commit metadata when available. Counters include work-volume counters and implementation-pressure counters.
+Raw records include per-case means, medians, standard deviations, timing schema
+version, stage timings, counters, suite kind, primary metric name, exact thread
+identity, system identity and commit metadata when available. Counters include
+work-volume counters and implementation-pressure counters.
 
 The tracked Markdown summaries under `benchmarks/summaries/` are the public record. They must stay concise.
 
@@ -381,10 +427,12 @@ The tracked Markdown summaries under `benchmarks/summaries/` are the public reco
 
 Use it for compact per-case, stage, counter, ratio, and unattributed wall-time
 detail during active optimisation work. The unattributed wall-time section
-compares CLI wall time with the sum of non-nested top-level command phase
-timers, such as `command.check.*`, `build_project.*`, and
-`command.build.output_write`, and flags cases whose visible phase timings no
-longer explain the command cost.
+compares CLI wall time with the sum of the schema-owned, non-nested pipeline
+rows: `build.bootstrap.total`, `build.frontend.total`,
+`build.backend.total` and `build.output.total` where the selected command
+applies them. It flags cases whose visible pipeline evidence no longer
+explains the command cost; the `command.check.total` or `command.build.total`
+row remains the headline command total, not an additional pipeline component.
 
 ## Local Profiling
 
@@ -449,6 +497,12 @@ benchmarks/local-data/
 ```
 
 Profile summaries include symbolication health. If most hot function names are raw `0x...` addresses, the summary marks symbolication as failed and function hotspots should not be treated as actionable. A failed-symbolication case also writes `profile-shape.txt`, which records the profile table shape, first function names, libraries, and native-symbol metadata for parser/debug-info investigation. Stage timings, plus any present counters, from the observation pass are still useful in that state.
+
+`profile-hotspots.json`, the root `agent-summary.md`, and each per-case
+`summary.md` identify timing schema v1 alongside their schema-owned stage
+observations. Profile report generation rejects obsolete or mixed-schema case
+data; profile history remains the authority for cross-run comparability and
+drift exclusion.
 
 ### Drift thresholds
 

@@ -60,6 +60,7 @@ fn make_grouped_case_with_stddev(
             workload_id: format!("{name}_workload"),
             source_fingerprint: format!("{name}_source_fp"),
             measurement_fingerprint: format!("{name}_measurement_fp"),
+            timing_schema_version: 1,
         }),
         group_name: group_name.to_string(),
         runner: BenchmarkRunner::Cli {
@@ -84,6 +85,7 @@ fn make_case_with_observations(
             workload_id: format!("{name}_workload"),
             source_fingerprint: format!("{name}_source_fp"),
             measurement_fingerprint: format!("{name}_measurement_fp"),
+            timing_schema_version: 1,
         }),
         group_name: "ungrouped".to_string(),
         runner: BenchmarkRunner::Cli {
@@ -99,6 +101,7 @@ fn make_case_with_observations(
 
 fn observations_with_stages(stages: &[(&str, f64)]) -> BenchmarkCaseObservations {
     BenchmarkCaseObservations {
+        timing_schema_version: 1,
         stage_timings: stages
             .iter()
             .map(|(name, value)| BenchmarkMetric {
@@ -272,6 +275,52 @@ fn changed_fingerprint_is_excluded_and_reported_without_speed_delta() {
     assert_eq!(
         comparison.format_run_change_line(),
         "no comparable unchanged workloads; workload changed: 2 cases (first, second)"
+    );
+}
+
+#[test]
+fn timing_schema_mismatch_is_incomparable_and_named_explicitly() {
+    let mut current = make_case("schema_case", 80.0);
+    current
+        .identity
+        .as_mut()
+        .expect("fixture identity")
+        .timing_schema_version = 2;
+    let previous = vec![make_case("schema_case", 100.0)];
+
+    let comparison = BenchmarkComparison::new(&[current], Some(&previous));
+
+    assert_eq!(comparison.compared_case_count, 0);
+    assert_eq!(comparison.timing_schema_changed_case_count, 1);
+    assert_eq!(
+        comparison.format_run_change_line(),
+        "timing schema changed: 1 case (schema_case)"
+    );
+}
+
+#[test]
+fn equal_non_current_timing_schemas_are_still_incomparable() {
+    let mut current = make_case("legacy_schema_case", 80.0);
+    current
+        .identity
+        .as_mut()
+        .expect("fixture identity")
+        .timing_schema_version = 2;
+    let mut previous = make_case("legacy_schema_case", 100.0);
+    previous
+        .identity
+        .as_mut()
+        .expect("fixture identity")
+        .timing_schema_version = 2;
+
+    let comparison = BenchmarkComparison::new(&[current], Some(&[previous]));
+
+    assert_eq!(comparison.compared_case_count, 0);
+    assert_eq!(comparison.overall_mean_delta_ms, None);
+    assert_eq!(comparison.timing_schema_changed_case_count, 1);
+    assert_eq!(
+        comparison.format_run_change_line(),
+        "timing schema changed: 1 case (legacy_schema_case)"
     );
 }
 
@@ -517,32 +566,42 @@ fn test_comparison_group_counts_aggregate_by_group() {
 
 #[test]
 fn test_compare_observations_overlapping_stages_only() {
-    let current = observations_with_stages(&[("ast_ms", 55.0), ("hir_ms", 12.0)]);
-    let previous = observations_with_stages(&[("ast_ms", 50.0), ("borrow_ms", 8.0)]);
+    let current = observations_with_stages(&[("frontend.ast.total", 55.0), ("frontend.hir", 12.0)]);
+    let previous = observations_with_stages(&[
+        ("frontend.ast.total", 50.0),
+        ("frontend.borrow.initial", 8.0),
+    ]);
 
     let comparison = compare_observations(&current, &previous, &BenchmarkThresholds::DEFAULT);
 
     assert_eq!(comparison.stage_comparisons.len(), 1);
-    assert_eq!(comparison.stage_comparisons[0].stage_name, "ast_ms");
+    assert_eq!(
+        comparison.stage_comparisons[0].stage_name,
+        "frontend.ast.total"
+    );
     assert_eq!(comparison.stage_comparisons[0].delta_ms, 5.0);
 }
 
 #[test]
 fn test_compare_observations_sorted_by_abs_delta() {
-    let current = observations_with_stages(&[("ast_ms", 55.0), ("hir_ms", 20.0)]);
-    let previous = observations_with_stages(&[("ast_ms", 50.0), ("hir_ms", 10.0)]);
+    let current = observations_with_stages(&[("frontend.ast.total", 55.0), ("frontend.hir", 20.0)]);
+    let previous =
+        observations_with_stages(&[("frontend.ast.total", 50.0), ("frontend.hir", 10.0)]);
 
     let comparison = compare_observations(&current, &previous, &BenchmarkThresholds::DEFAULT);
 
     assert_eq!(comparison.stage_comparisons.len(), 2);
-    assert_eq!(comparison.stage_comparisons[0].stage_name, "hir_ms");
-    assert_eq!(comparison.stage_comparisons[1].stage_name, "ast_ms");
+    assert_eq!(comparison.stage_comparisons[0].stage_name, "frontend.hir");
+    assert_eq!(
+        comparison.stage_comparisons[1].stage_name,
+        "frontend.ast.total"
+    );
 }
 
 #[test]
 fn test_compare_observations_empty_when_no_overlap() {
-    let current = observations_with_stages(&[("ast_ms", 55.0)]);
-    let previous = observations_with_stages(&[("hir_ms", 10.0)]);
+    let current = observations_with_stages(&[("frontend.ast.total", 55.0)]);
+    let previous = observations_with_stages(&[("frontend.hir", 10.0)]);
 
     let comparison = compare_observations(&current, &previous, &BenchmarkThresholds::DEFAULT);
 
@@ -648,18 +707,34 @@ fn test_comparison_large_slow_case_uses_ratio_floor() {
 #[test]
 fn test_calculate_stage_movement_sums_deltas_and_counts() {
     let current = vec![
-        make_case_with_observations("a", 100.0, observations_with_stages(&[("ast_ms", 55.0)])),
-        make_case_with_observations("b", 100.0, observations_with_stages(&[("ast_ms", 45.0)])),
+        make_case_with_observations(
+            "a",
+            100.0,
+            observations_with_stages(&[("frontend.ast.total", 55.0)]),
+        ),
+        make_case_with_observations(
+            "b",
+            100.0,
+            observations_with_stages(&[("frontend.ast.total", 45.0)]),
+        ),
     ];
     let previous = vec![
-        make_case_with_observations("a", 100.0, observations_with_stages(&[("ast_ms", 50.0)])),
-        make_case_with_observations("b", 100.0, observations_with_stages(&[("ast_ms", 50.0)])),
+        make_case_with_observations(
+            "a",
+            100.0,
+            observations_with_stages(&[("frontend.ast.total", 50.0)]),
+        ),
+        make_case_with_observations(
+            "b",
+            100.0,
+            observations_with_stages(&[("frontend.ast.total", 50.0)]),
+        ),
     ];
     let comparison = BenchmarkComparison::new(&current, Some(&previous));
 
     let movements = calculate_stage_movement(&comparison);
     assert_eq!(movements.len(), 1);
-    assert_eq!(movements[0].stage_name, "ast_ms");
+    assert_eq!(movements[0].stage_name, "frontend.ast.total");
     assert_eq!(movements[0].total_delta_ms, 0.0);
     assert_eq!(movements[0].case_count, 2);
     assert_eq!(movements[0].faster_count, 1);
@@ -671,47 +746,47 @@ fn test_calculate_stage_movement_sorts_by_abs_delta() {
     let current = vec![make_case_with_observations(
         "a",
         100.0,
-        observations_with_stages(&[("ast_ms", 55.0), ("hir_ms", 20.0)]),
+        observations_with_stages(&[("frontend.ast.total", 55.0), ("frontend.hir", 20.0)]),
     )];
     let previous = vec![make_case_with_observations(
         "a",
         100.0,
-        observations_with_stages(&[("ast_ms", 50.0), ("hir_ms", 10.0)]),
+        observations_with_stages(&[("frontend.ast.total", 50.0), ("frontend.hir", 10.0)]),
     )];
     let comparison = BenchmarkComparison::new(&current, Some(&previous));
 
     let movements = calculate_stage_movement(&comparison);
     assert_eq!(movements.len(), 2);
-    assert_eq!(movements[0].stage_name, "hir_ms");
-    assert_eq!(movements[1].stage_name, "ast_ms");
+    assert_eq!(movements[0].stage_name, "frontend.hir");
+    assert_eq!(movements[1].stage_name, "frontend.ast.total");
 }
 
 #[test]
 fn test_format_stage_movement_line_limits_to_top_three() {
     let movements = vec![
         BenchmarkStageMovement {
-            stage_name: "ast_ms".to_string(),
+            stage_name: "frontend.ast.total".to_string(),
             total_delta_ms: -5.0,
             case_count: 2,
             faster_count: 2,
             slower_count: 0,
         },
         BenchmarkStageMovement {
-            stage_name: "hir_ms".to_string(),
+            stage_name: "frontend.hir".to_string(),
             total_delta_ms: -3.0,
             case_count: 2,
             faster_count: 2,
             slower_count: 0,
         },
         BenchmarkStageMovement {
-            stage_name: "headers_ms".to_string(),
+            stage_name: "frontend.bind_headers".to_string(),
             total_delta_ms: -2.0,
             case_count: 2,
             faster_count: 2,
             slower_count: 0,
         },
         BenchmarkStageMovement {
-            stage_name: "borrow_ms".to_string(),
+            stage_name: "frontend.borrow.initial".to_string(),
             total_delta_ms: -1.0,
             case_count: 2,
             faster_count: 2,
@@ -720,9 +795,9 @@ fn test_format_stage_movement_line_limits_to_top_three() {
     ];
 
     let line = format_stage_movement_line(&movements, &BenchmarkThresholds::DEFAULT).unwrap();
-    assert!(line.contains("ast"));
-    assert!(line.contains("hir"));
-    assert!(line.contains("headers"));
+    assert!(line.contains("AST"));
+    assert!(line.contains("HIR"));
+    assert!(line.contains("bind headers"));
     assert!(!line.contains("borrow"));
 }
 
@@ -733,7 +808,7 @@ fn test_format_stage_movement_line_hides_below_threshold() {
         ..BenchmarkThresholds::DEFAULT
     };
     let movements = vec![BenchmarkStageMovement {
-        stage_name: "ast_ms".to_string(),
+        stage_name: "frontend.ast.total".to_string(),
         total_delta_ms: -0.5,
         case_count: 1,
         faster_count: 1,
@@ -746,7 +821,7 @@ fn test_format_stage_movement_line_hides_below_threshold() {
 #[test]
 fn test_format_stage_movement_line_uses_friendly_labels() {
     let movements = vec![BenchmarkStageMovement {
-        stage_name: "ast_build_environment_ms".to_string(),
+        stage_name: "frontend.ast.environment".to_string(),
         total_delta_ms: -3.0,
         case_count: 1,
         faster_count: 1,
@@ -754,8 +829,8 @@ fn test_format_stage_movement_line_uses_friendly_labels() {
     }];
 
     let line = format_stage_movement_line(&movements, &BenchmarkThresholds::DEFAULT).unwrap();
-    assert!(line.contains("ast env"));
-    assert!(!line.contains("ast_build_environment_ms"));
+    assert!(line.contains("AST environment"));
+    assert!(!line.contains("frontend.ast.environment"));
 }
 
 #[test]
@@ -765,44 +840,35 @@ fn test_format_stage_movement_line_none_when_empty() {
 
 #[test]
 fn test_friendly_stage_label_maps_known_names() {
-    assert_eq!(friendly_stage_label("tokenize_ms"), "tokenize");
-    assert_eq!(friendly_stage_label("headers_ms"), "headers");
-    assert_eq!(friendly_stage_label("file_prepare_ms"), "file prep");
-    assert_eq!(friendly_stage_label("dependency_sort_ms"), "sort");
-    assert_eq!(friendly_stage_label("ast_ms"), "ast");
-    assert_eq!(friendly_stage_label("ast_build_environment_ms"), "ast env");
-    assert_eq!(friendly_stage_label("ast_emit_nodes_ms"), "ast emit");
-    assert_eq!(friendly_stage_label("ast_finalize_ms"), "ast finalize");
+    assert_eq!(friendly_stage_label("command.check.total"), "check total");
+    assert_eq!(friendly_stage_label("build.frontend.total"), "frontend");
+    assert_eq!(friendly_stage_label("frontend.prepare"), "prepare");
+    assert_eq!(friendly_stage_label("frontend.ast.total"), "AST");
     assert_eq!(
-        friendly_stage_label("ast_function_body_parse_ms"),
-        "ast func bodies"
+        friendly_stage_label("frontend.ast.environment"),
+        "AST environment"
+    );
+    assert_eq!(friendly_stage_label("frontend.ast.emit"), "AST emit");
+    assert_eq!(
+        friendly_stage_label("frontend.ast.finalise"),
+        "AST finalise"
+    );
+    assert_eq!(friendly_stage_label("frontend.hir"), "HIR");
+    assert_eq!(
+        friendly_stage_label("frontend.borrow.initial"),
+        "initial borrow"
     );
     assert_eq!(
-        friendly_stage_label("ast_start_body_parse_ms"),
-        "ast start body"
+        friendly_stage_label("frontend.borrow.converge"),
+        "borrow convergence"
     );
     assert_eq!(
-        friendly_stage_label("ast_const_template_parse_ms"),
-        "ast const parse"
+        friendly_stage_label("backend.js.lower_entry"),
+        "JS entry lowering"
     );
     assert_eq!(
-        friendly_stage_label("ast_const_template_fold_ms"),
-        "ast const fold"
-    );
-    assert_eq!(friendly_stage_label("hir_ms"), "hir");
-    assert_eq!(friendly_stage_label("borrow_ms"), "borrow");
-    assert_eq!(
-        friendly_stage_label("command.check.compile_project_frontend"),
-        "check frontend"
-    );
-    assert_eq!(
-        friendly_stage_label("stage0.module_root_discovery.total"),
-        "module roots"
-    );
-    assert_eq!(friendly_stage_label("backend.js.lower_hir"), "js lower");
-    assert_eq!(
-        friendly_stage_label("backend.js.lower_linked_hir"),
-        "js linked lower"
+        friendly_stage_label("backend.js.lower_linked"),
+        "JS linked lowering"
     );
     assert_eq!(friendly_stage_label("unknown_ms"), "unknown_ms");
 }
@@ -813,30 +879,38 @@ fn test_format_top_current_stages_shows_top_three() {
         "a",
         100.0,
         observations_with_stages(&[
-            ("ast_ms", 80.0),
-            ("hir_ms", 20.0),
-            ("headers_ms", 10.0),
-            ("borrow_ms", 5.0),
+            ("frontend.ast.total", 80.0),
+            ("frontend.hir", 20.0),
+            ("frontend.bind_headers", 10.0),
+            ("frontend.borrow.initial", 5.0),
         ]),
     )];
 
     let line = format_top_current_stages(&cases).unwrap();
     assert!(line.starts_with("Top stages:"));
-    assert!(line.contains("ast ~80ms"));
-    assert!(line.contains("hir ~20ms"));
-    assert!(line.contains("headers ~10ms"));
+    assert!(line.contains("AST ~80ms"));
+    assert!(line.contains("HIR ~20ms"));
+    assert!(line.contains("bind headers ~10ms"));
     assert!(!line.contains("borrow"));
 }
 
 #[test]
 fn test_format_top_current_stages_averages_across_cases() {
     let cases = vec![
-        make_case_with_observations("a", 100.0, observations_with_stages(&[("ast_ms", 80.0)])),
-        make_case_with_observations("b", 100.0, observations_with_stages(&[("ast_ms", 100.0)])),
+        make_case_with_observations(
+            "a",
+            100.0,
+            observations_with_stages(&[("frontend.ast.total", 80.0)]),
+        ),
+        make_case_with_observations(
+            "b",
+            100.0,
+            observations_with_stages(&[("frontend.ast.total", 100.0)]),
+        ),
     ];
 
     let line = format_top_current_stages(&cases).unwrap();
-    assert!(line.contains("ast ~90ms"));
+    assert!(line.contains("AST ~90ms"));
 }
 
 #[test]

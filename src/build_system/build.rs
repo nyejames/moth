@@ -1132,7 +1132,10 @@ pub fn build_project(
     // BUILD PROJECT USING THE APPROPRIATE BUILDER
     // --------------------------------------------
 
-    timing_scope!(timing_guard_build_backend_total, "build.backend.total");
+    timing_scope!(
+        timing_guard_build_backend_total,
+        crate::timing::TimingMetric::BuildBackendTotal
+    );
     let project = match project_builder.backend.build_backend(
         project_compilation,
         &config,
@@ -1192,7 +1195,10 @@ pub(crate) fn bootstrap_project_build(
     project_builder: &ProjectBuilder,
     entry_path: PathBuf,
 ) -> Result<BuildBootstrap, CompilerMessages> {
-    timing_scope!(timing_guard_build_bootstrap_total, "build.bootstrap.total");
+    timing_scope!(
+        timing_guard_build_bootstrap_total,
+        crate::timing::TimingMetric::BuildBootstrapTotal
+    );
 
     let mut config = Config::new(entry_path);
 

@@ -118,7 +118,9 @@ fn failed_output_plan_records_the_build_command_total() {
         snapshot
             .timings
             .iter()
-            .filter(|observation| observation.name == "command.build.total")
+            .filter(
+                |observation| observation.metric.descriptor().stable_name == "command.build.total"
+            )
             .count(),
         1,
         "the failed output-plan path must finish the command total before the session drains"
@@ -127,7 +129,9 @@ fn failed_output_plan_records_the_build_command_total() {
         snapshot
             .timings
             .iter()
-            .filter(|observation| observation.name == "build.output.total")
+            .filter(
+                |observation| observation.metric.descriptor().stable_name == "build.output.total"
+            )
             .count(),
         1,
         "the failed output-plan path must finish the output segment before the session drains"

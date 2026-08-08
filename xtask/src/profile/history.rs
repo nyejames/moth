@@ -23,7 +23,9 @@
 //! - Agent summaries and enriched per-case summaries (see `summary.rs`)
 
 use crate::bench_system::{SystemIdentityMode, load_or_create_system_at};
-use crate::bench_types::{BenchmarkMeasurementIdentity, BenchmarkMetric, GitRevision};
+use crate::bench_types::{
+    BENCHMARK_TIMING_SCHEMA_VERSION, BenchmarkMeasurementIdentity, BenchmarkMetric, GitRevision,
+};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
@@ -200,8 +202,7 @@ pub fn append_profile_run(path: &Path, record: &ProfileHistoryRecord) -> Result<
                 .to_string(),
         );
     }
-    validate_finite(record)?;
-
+    validate_current_record(record)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| {
             format!(
@@ -315,6 +316,9 @@ pub fn build_history_record(
 /// serde_json would silently emit `null` for NaN or infinite floats, so the
 /// finite check happens explicitly before serialization.
 fn validate_finite(record: &ProfileHistoryRecord) -> Result<(), String> {
+    if let Some(sample_rate_hz) = record.sample_rate_hz {
+        super::observations::require_finite(sample_rate_hz, "sample_rate_hz")?;
+    }
     for case in &record.cases {
         super::observations::require_finite(case.observation_wall_ms, "observation_wall_ms")?;
         super::observations::require_finite(case.sample_weight, "sample_weight")?;
@@ -331,6 +335,103 @@ fn validate_finite(record: &ProfileHistoryRecord) -> Result<(), String> {
     Ok(())
 }
 
+/// Validate the current profile record contract before a new record is written.
+///
+/// Historical current-format records use the same structural contract but may
+/// carry another nonzero timing schema so drift comparison can classify them
+/// as explicitly non-comparable.
+fn validate_current_record(record: &ProfileHistoryRecord) -> Result<(), String> {
+    if record.format_version != HISTORY_FORMAT_VERSION {
+        return Err(format!(
+            "profile history record has format version {}, expected {}",
+            record.format_version, HISTORY_FORMAT_VERSION
+        ));
+    }
+    if record.profile_protocol_version != PROFILE_PROTOCOL_VERSION {
+        return Err(format!(
+            "profile history record has protocol version {}, expected {}",
+            record.profile_protocol_version, PROFILE_PROTOCOL_VERSION
+        ));
+    }
+
+    validate_profile_record_shape(record, true)
+}
+
+/// Validate a current-format record read from history without requiring the
+/// timing schema to match this compiler's current schema.
+fn validate_readable_current_record(record: &ProfileHistoryRecord) -> Result<(), String> {
+    if record.profile_protocol_version == 0 {
+        return Err("current profile history record has legacy protocol version 0".to_string());
+    }
+
+    validate_profile_record_shape(record, false)
+}
+
+fn validate_profile_record_shape(
+    record: &ProfileHistoryRecord,
+    require_current_schema: bool,
+) -> Result<(), String> {
+    if record
+        .git_revision
+        .commit
+        .as_deref()
+        .is_none_or(str::is_empty)
+    {
+        return Err("current profile history record has no captured commit".to_string());
+    }
+
+    for case in &record.cases {
+        if case.case_id.is_empty() {
+            return Err("current profile history case has an empty case ID".to_string());
+        }
+        if case.identity.workload_id.is_empty()
+            || case.identity.source_fingerprint.is_empty()
+            || case.identity.measurement_fingerprint.is_empty()
+        {
+            return Err(format!(
+                "current profile history case '{}' has incomplete measurement identity",
+                case.case_id
+            ));
+        }
+        if case.identity.timing_schema_version == 0 {
+            return Err(format!(
+                "current profile history case '{}' has an invalid timing schema",
+                case.case_id
+            ));
+        }
+        if require_current_schema
+            && case.identity.timing_schema_version != BENCHMARK_TIMING_SCHEMA_VERSION
+        {
+            return Err(format!(
+                "current profile history case '{}' has incompatible current timing schema",
+                case.case_id
+            ));
+        }
+        if case.identity.timing_schema_version == BENCHMARK_TIMING_SCHEMA_VERSION {
+            let required_metric =
+                crate::bench_observations::required_command_total_for_name(&case.command)
+                    .ok_or_else(|| {
+                        format!(
+                            "current profile history case '{}' has unsupported command '{}'",
+                            case.case_id, case.command
+                        )
+                    })?;
+            crate::bench_observations::validate_current_timing_evidence(
+                case.stage_timings.iter().map(|metric| metric.name.as_str()),
+                Some(required_metric),
+            )
+            .map_err(|error| {
+                format!(
+                    "current profile history case '{}' has invalid timing metrics: {error}",
+                    case.case_id
+                )
+            })?;
+        }
+    }
+
+    validate_finite(record)
+}
+
 // ---------------------------------------------------------------------------
 //  Profile JSON parsing
 // ---------------------------------------------------------------------------
@@ -343,21 +444,7 @@ fn parse_jsonl_record(line: &str) -> Result<StoredProfileHistoryRecord, String> 
     if format_version == HISTORY_FORMAT_VERSION {
         let record: ProfileHistoryRecord = serde_json::from_str(line)
             .map_err(|error| format!("invalid current profile history record: {error}"))?;
-        if record
-            .git_revision
-            .commit
-            .as_deref()
-            .is_none_or(str::is_empty)
-        {
-            return Err("current profile history record has no captured commit".to_string());
-        }
-        if record
-            .cases
-            .iter()
-            .any(|case| case.identity.workload_id.is_empty())
-        {
-            return Err("current profile history case has an empty workload identity".to_string());
-        }
+        validate_readable_current_record(&record)?;
         return Ok(StoredProfileHistoryRecord::Current(record));
     }
 
@@ -470,8 +557,12 @@ fn build_identity_from_case_object(obj: &str) -> Option<BenchmarkMeasurementIden
     let workload_id = extract_string_field(obj, "workload_id")?;
     let source_fingerprint = extract_string_field(obj, "source_fingerprint")?;
     let measurement_fingerprint = extract_string_field(obj, "measurement_fingerprint")?;
+    let timing_schema_version = extract_u32_field(obj, "timing_schema_version")?;
 
-    if workload_id.is_empty() || source_fingerprint.is_empty() || measurement_fingerprint.is_empty()
+    if workload_id.is_empty()
+        || source_fingerprint.is_empty()
+        || measurement_fingerprint.is_empty()
+        || timing_schema_version != BENCHMARK_TIMING_SCHEMA_VERSION
     {
         return None;
     }
@@ -480,6 +571,7 @@ fn build_identity_from_case_object(obj: &str) -> Option<BenchmarkMeasurementIden
         workload_id,
         source_fingerprint,
         measurement_fingerprint,
+        timing_schema_version,
     })
 }
 

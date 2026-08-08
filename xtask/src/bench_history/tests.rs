@@ -1,7 +1,8 @@
 use super::*;
 use crate::bench_time::BenchmarkTimestamp;
 use crate::bench_types::{
-    BenchmarkMeasurementIdentity, BenchmarkSystem, GitRevision, SuiteStats, calculate_group_stats,
+    BenchmarkComparison, BenchmarkMeasurementIdentity, BenchmarkSystem, GitRevision, SuiteStats,
+    calculate_group_stats,
 };
 use std::fs;
 use std::sync::Mutex;
@@ -26,6 +27,7 @@ fn benchmark_case() -> BenchmarkCaseResult {
             workload_id: "speed_test".to_string(),
             source_fingerprint: "0123456789abcdef0123456789abcdef".to_string(),
             measurement_fingerprint: "fedcba9876543210fedcba9876543210".to_string(),
+            timing_schema_version: 1,
         }),
         group_name: "core".to_string(),
         runner: cli_runner(),
@@ -33,6 +35,7 @@ fn benchmark_case() -> BenchmarkCaseResult {
         median_ms: 39.0,
         stddev_ms: 3.0,
         observations: BenchmarkCaseObservations {
+            timing_schema_version: 1,
             stage_timings: vec![BenchmarkMetric {
                 name: "command.check.total".to_string(),
                 value: 20.5,
@@ -125,8 +128,8 @@ fn v6_roundtrip_preserves_protocol_revision_runner_and_workload_identity() {
     assert_eq!(parsed.cases[0].runner, cli_runner());
 
     let json = fs::read_to_string(path).expect("record should be readable");
-    assert!(json.contains(r#""format_version":7"#));
-    assert!(json.contains(r#""benchmark_protocol_version":3"#));
+    assert!(json.contains(r#""format_version":8"#));
+    assert!(json.contains(r#""benchmark_protocol_version":4"#));
     assert!(json.contains(r#""git_dirty":false"#));
     assert!(json.contains(r#""case_id":"speed_test_check""#));
     assert!(json.contains(r#""workload_id":"speed_test""#));
@@ -296,7 +299,7 @@ fn old_records_never_match_current_protocol() {
     let latest = find_latest_matching_run(&records, "sys-a", BenchmarkSuiteKind::EndToEndCli, None)
         .expect("current protocol record should match");
 
-    assert_eq!(latest.format_version, 7);
+    assert_eq!(latest.format_version, 8);
 }
 
 #[test]
@@ -356,7 +359,7 @@ fn future_and_malformed_versions_are_skipped_without_hiding_valid_records() {
 
     let records = read_local_runs(&path).expect("history should remain readable");
     assert_eq!(records.len(), 1);
-    assert_eq!(records[0].format_version, 7);
+    assert_eq!(records[0].format_version, 8);
 }
 
 #[test]
@@ -369,6 +372,171 @@ fn current_append_rejects_legacy_or_incomplete_records() {
     let error = append_local_run(&path, &record).expect_err("protocol zero must not append");
     assert!(error.contains("legacy protocol"));
     assert!(!path.exists());
+}
+
+#[test]
+fn current_append_rejects_a_different_timing_schema() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let path = directory.path().join("runs.jsonl");
+    let mut record = current_record();
+    record.cases[0].timing_schema_version = Some(2);
+
+    let error = append_local_run(&path, &record)
+        .expect_err("new records must use the current timing schema");
+    assert!(error.contains("incompatible current timing schema"));
+    assert!(!path.exists());
+}
+
+#[test]
+fn current_history_rejects_obsolete_timing_metric_names() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let path = directory.path().join("runs.jsonl");
+    let mut record = current_record();
+    record.cases[0].stage_timings[0].name = "ast_ms".to_string();
+
+    let error = append_local_run(&path, &record)
+        .expect_err("current history must reject provisional timing names");
+    assert!(error.contains("unknown timing schema metric 'ast_ms'"));
+    assert!(!path.exists());
+
+    let invalid_line = serde_json::to_string(&record).expect("record should serialize");
+    fs::write(&path, invalid_line).expect("invalid history fixture should be written");
+    assert!(
+        read_local_runs(&path)
+            .expect("history should remain readable")
+            .is_empty(),
+        "current history with provisional timing names must be skipped"
+    );
+}
+
+#[test]
+fn current_history_rejects_empty_timing_evidence_on_append_and_read() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let path = directory.path().join("runs.jsonl");
+    let mut record = current_record();
+    record.cases[0].stage_timings.clear();
+
+    let error = append_local_run(&path, &record)
+        .expect_err("current history must reject empty timing evidence");
+    assert!(error.contains("no metrics"), "unexpected error: {error}");
+    assert!(!path.exists());
+
+    let invalid_line = serde_json::to_string(&record).expect("record should serialize");
+    fs::write(&path, invalid_line).expect("invalid history fixture should be written");
+    assert!(
+        read_local_runs(&path)
+            .expect("history should remain readable")
+            .is_empty(),
+        "current history with empty timing evidence must be skipped"
+    );
+}
+
+#[test]
+fn current_history_rejects_missing_command_total_on_append_and_read() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let path = directory.path().join("runs.jsonl");
+    let mut record = current_record();
+    record.cases[0].stage_timings = vec![LocalMetricRecord {
+        name: "frontend.ast.total".to_string(),
+        value: 12.0,
+    }];
+
+    let error = append_local_run(&path, &record)
+        .expect_err("current history must require its command total");
+    assert!(
+        error.contains("command.check.total"),
+        "unexpected error: {error}"
+    );
+    assert!(!path.exists());
+
+    let invalid_line = serde_json::to_string(&record).expect("record should serialize");
+    fs::write(&path, invalid_line).expect("invalid history fixture should be written");
+    assert!(
+        read_local_runs(&path)
+            .expect("history should remain readable")
+            .is_empty(),
+        "current history without its command total must be skipped"
+    );
+}
+
+fn assert_non_finite_append_rejected(
+    mut record: LocalRunRecord,
+    mutate: impl FnOnce(&mut LocalRunRecord),
+    field: &str,
+) {
+    let directory = tempdir().expect("temporary directory should be created");
+    let path = directory.path().join("runs.jsonl");
+    mutate(&mut record);
+
+    let error = append_local_run(&path, &record)
+        .expect_err("non-finite current history values must not append");
+    assert!(error.contains("finite"), "{field}: {error}");
+    assert!(
+        !path.exists(),
+        "{field}: malformed history must not create a file"
+    );
+}
+
+#[test]
+fn current_append_rejects_non_finite_persisted_values() {
+    assert_non_finite_append_rejected(
+        current_record(),
+        |record| record.suite_average_ms = f64::NAN,
+        "suite average",
+    );
+    assert_non_finite_append_rejected(
+        current_record(),
+        |record| record.groups[0].average_ms = f64::NAN,
+        "group average",
+    );
+    assert_non_finite_append_rejected(
+        current_record(),
+        |record| record.cases[0].mean_ms = f64::NAN,
+        "case mean",
+    );
+    assert_non_finite_append_rejected(
+        current_record(),
+        |record| record.cases[0].stage_timings[0].value = f64::NAN,
+        "stage timing",
+    );
+    assert_non_finite_append_rejected(
+        current_record(),
+        |record| record.cases[0].counters[0].value = f64::NAN,
+        "counter",
+    );
+}
+
+#[test]
+fn persisted_schema_mismatch_reaches_non_comparable_comparison() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let path = directory.path().join("runs.jsonl");
+    let mut previous = current_record();
+    previous.timestamp = "2026-05-09T15:21".to_string();
+    previous.cases[0].timing_schema_version = Some(2);
+    let current = current_record();
+    let previous_json = serde_json::to_string(&previous).expect("previous record should serialize");
+    let current_json = serde_json::to_string(&current).expect("current record should serialize");
+    fs::write(&path, format!("{previous_json}\n{current_json}\n"))
+        .expect("historical records should be written");
+
+    let records = read_local_runs(&path).expect("historical records should remain readable");
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0].cases[0].timing_schema_version, Some(2));
+
+    let previous_cases = to_case_results(&records[0]);
+    let current_cases = to_case_results(&records[1]);
+    let comparison = BenchmarkComparison::new(&current_cases, Some(&previous_cases));
+
+    assert_eq!(
+        comparison.timing_schema_changed_case_ids,
+        ["speed_test_check"]
+    );
+    assert_eq!(comparison.compared_case_count, 0);
+    assert!(comparison.overall_mean_delta_ms.is_none());
+    assert_eq!(
+        comparison.format_run_change_line(),
+        "timing schema changed: 1 case (speed_test_check)"
+    );
 }
 
 #[test]

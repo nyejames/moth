@@ -28,6 +28,8 @@ use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+#[cfg(feature = "timers")]
+use crate::timing::TimingMetric;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -48,35 +50,35 @@ pub(crate) enum AstTimingMetricFamily {
 
 #[cfg(feature = "timers")]
 impl AstTimingMetricFamily {
-    pub(crate) const fn total(self) -> &'static str {
+    pub(crate) const fn total(self) -> TimingMetric {
         match self {
-            Self::Frontend => "frontend.ast.total",
-            Self::Config => "config.ast.total",
-            Self::Generated => "frontend.generated.ast.total",
+            Self::Frontend => TimingMetric::FrontendAstTotal,
+            Self::Config => TimingMetric::ConfigAstTotal,
+            Self::Generated => TimingMetric::FrontendGeneratedAstTotal,
         }
     }
 
-    pub(crate) const fn environment(self) -> &'static str {
+    pub(crate) const fn environment(self) -> TimingMetric {
         match self {
-            Self::Frontend => "frontend.ast.environment",
-            Self::Config => "config.ast.environment",
-            Self::Generated => "frontend.generated.ast.environment",
+            Self::Frontend => TimingMetric::FrontendAstEnvironment,
+            Self::Config => TimingMetric::ConfigAstEnvironment,
+            Self::Generated => TimingMetric::FrontendGeneratedAstEnvironment,
         }
     }
 
-    pub(crate) const fn emit(self) -> &'static str {
+    pub(crate) const fn emit(self) -> TimingMetric {
         match self {
-            Self::Frontend => "frontend.ast.emit",
-            Self::Config => "config.ast.emit",
-            Self::Generated => "frontend.generated.ast.emit",
+            Self::Frontend => TimingMetric::FrontendAstEmit,
+            Self::Config => TimingMetric::ConfigAstEmit,
+            Self::Generated => TimingMetric::FrontendGeneratedAstEmit,
         }
     }
 
-    pub(crate) const fn finalise(self) -> &'static str {
+    pub(crate) const fn finalise(self) -> TimingMetric {
         match self {
-            Self::Frontend => "frontend.ast.finalise",
-            Self::Config => "config.ast.finalise",
-            Self::Generated => "frontend.generated.ast.finalise",
+            Self::Frontend => TimingMetric::FrontendAstFinalise,
+            Self::Config => TimingMetric::ConfigAstFinalise,
+            Self::Generated => TimingMetric::FrontendGeneratedAstFinalise,
         }
     }
 }

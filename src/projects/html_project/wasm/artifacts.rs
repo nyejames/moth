@@ -99,7 +99,10 @@ pub(crate) fn compile_html_module_wasm(
     logical_html_output_path: &Path,
 ) -> Result<CompiledHtmlWasmModule, CompilerMessages> {
     // Record the full Wasm build duration on every exit path (success or error).
-    timing_scope!(timing_guard_backend_wasm_total, "backend.wasm.total");
+    timing_scope!(
+        timing_guard_backend_wasm_total,
+        crate::timing::TimingMetric::BackendWasmTotal
+    );
 
     // Derive per-route artifact paths from the already-derived logical HTML path.
     // WHY: the builder has already computed the canonical route via derive_logical_html_path.
@@ -133,7 +136,10 @@ pub(crate) fn compile_html_module_wasm(
         Arc::clone(&input.external_package_registry);
 
     let wasm_result = {
-        timing_scope!(timing_guard_backend_wasm_lower_wasm, "backend.wasm.lower");
+        timing_scope!(
+            timing_guard_backend_wasm_lower_wasm,
+            crate::timing::TimingMetric::BackendWasmLower
+        );
         lower_hir_to_wasm_module(
             input.hir_module,
             input.borrow_analysis.borrow_facts(),
@@ -154,7 +160,7 @@ pub(crate) fn compile_html_module_wasm(
     let artifacts = {
         timing_scope!(
             timing_guard_backend_wasm_artifact_assembly,
-            "backend.wasm.artifacts"
+            crate::timing::TimingMetric::BackendWasmArtifacts
         );
         emit_html_wasm_artifacts(
             &build_plan,

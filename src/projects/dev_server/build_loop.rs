@@ -146,7 +146,10 @@ pub fn run_single_build_cycle(
 ) -> BuildCycleReport {
     command_timing_scope!(timing_session, crate::timing::TimingCommandKind::Dev);
     #[cfg(feature = "detailed_timers")]
-    timing_scope!(timing_guard_command_dev_cycle, "command.dev.cycle");
+    timing_scope!(
+        timing_guard_command_dev_cycle,
+        crate::timing::TimingMetric::CommandDevCycle
+    );
     let build_outcome = build_once(executor, entry_file, flags);
     let project_root = dev_server_project_root(entry_file);
     let BuildOutcome {
@@ -367,7 +370,7 @@ fn build_once(
         #[cfg(feature = "timers")]
         timing_scope!(
             timing_guard_command_dev_build_and_write,
-            "command.dev.build_write"
+            crate::timing::TimingMetric::CommandDevBuildWrite
         );
         match executor.build_and_write(entry_file, flags) {
             Ok(build_result) => build_result,

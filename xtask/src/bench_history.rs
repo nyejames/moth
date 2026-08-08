@@ -6,17 +6,18 @@
 //! part of the current benchmark domain.
 
 use crate::bench_types::{
-    BENCHMARK_PROTOCOL_VERSION, BenchmarkCaseObservations, BenchmarkCaseResult,
-    BenchmarkGroupStats, BenchmarkMetric, BenchmarkRun, BenchmarkSuiteKind,
+    BENCHMARK_PROTOCOL_VERSION, BENCHMARK_TIMING_SCHEMA_VERSION, BenchmarkCaseObservations,
+    BenchmarkCaseResult, BenchmarkGroupStats, BenchmarkMetric, BenchmarkRun, BenchmarkSuiteKind,
 };
 use crate::benchmark_manifest::{BenchmarkRunner, CliBenchmarkCommand, FrontendBenchmarkProfile};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 
 /// Current on-disk format version.
-const FORMAT_VERSION: u32 = 7;
+const FORMAT_VERSION: u32 = 8;
 
 /// One benchmark run in the current in-memory history shape.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -59,6 +60,9 @@ pub struct LocalCaseRecord {
     pub workload_id: Option<String>,
     pub source_fingerprint: Option<String>,
     pub measurement_fingerprint: Option<String>,
+    /// Timing schema carried by current records; absent in pre-v1 history.
+    #[serde(default)]
+    pub timing_schema_version: Option<u32>,
     pub group_name: String,
     pub runner: BenchmarkRunner,
     pub mean_ms: f64,
@@ -74,6 +78,69 @@ pub struct LocalCaseRecord {
 pub struct LocalMetricRecord {
     pub name: String,
     pub value: f64,
+}
+
+/// Timing-schema identity carried by a persisted benchmark run.
+///
+/// WHAT: Preserves whether every case in a report belongs to one known schema,
+///       is legacy/missing, or mixes incompatible case schemas.
+/// WHY: Reports must never collapse mixed or obsolete timing evidence into the
+///      current schema's identity. Comparison remains the owner of numeric
+///      compatibility, while this identity keeps rendered reports explicit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum TimingSchemaIdentity {
+    #[default]
+    Missing,
+    Version(u32),
+    Mixed,
+}
+
+impl TimingSchemaIdentity {
+    /// Derive one report identity from the per-case schema values.
+    pub(crate) fn from_versions<I>(versions: I) -> Self
+    where
+        I: IntoIterator<Item = Option<u32>>,
+    {
+        let mut present = BTreeSet::new();
+        let mut missing = false;
+
+        for version in versions {
+            match version.filter(|version| *version != 0) {
+                Some(version) => {
+                    present.insert(version);
+                }
+                None => missing = true,
+            }
+        }
+
+        match (present.len(), missing) {
+            (0, _) => Self::Missing,
+            (1, false) => Self::Version(*present.first().expect("one schema version")),
+            _ => Self::Mixed,
+        }
+    }
+
+    /// Derive the identity of one persisted local run.
+    pub(crate) fn from_record(record: &LocalRunRecord) -> Self {
+        Self::from_versions(record.cases.iter().map(|case| case.timing_schema_version))
+    }
+
+    /// Render the explicit report label for this identity.
+    pub(crate) fn display_label(self) -> String {
+        match self {
+            Self::Missing => "legacy/missing (non-comparable)".to_string(),
+            Self::Version(version) if version == BENCHMARK_TIMING_SCHEMA_VERSION => {
+                version.to_string()
+            }
+            Self::Version(version) => format!("{version} (obsolete; non-comparable)"),
+            Self::Mixed => "mixed (non-comparable; omitted)".to_string(),
+        }
+    }
+
+    /// Whether the identity represents mixed per-case schemas.
+    pub(crate) const fn is_mixed(self) -> bool {
+        matches!(self, Self::Mixed)
+    }
 }
 
 /// Read all compatible runs from a local JSONL file.
@@ -131,7 +198,12 @@ fn parse_history_line(line: &str) -> Result<Option<LocalRunRecord>, String> {
         7 => {
             let record: LocalRunRecord = serde_json::from_value(value)
                 .map_err(|error| format!("invalid v7 record: {error}"))?;
-            validate_v7_record(&record)?;
+            record
+        }
+        8 => {
+            let record: LocalRunRecord = serde_json::from_value(value)
+                .map_err(|error| format!("invalid v8 record: {error}"))?;
+            validate_v8_record(&record)?;
             record
         }
         _ => return Err(format!("unsupported format_version {format_version}")),
@@ -147,30 +219,38 @@ where
     serde_json::from_value(value).map_err(|error| format!("invalid v{version} record: {error}"))
 }
 
-fn validate_v7_record(record: &LocalRunRecord) -> Result<(), String> {
+fn validate_v8_record(record: &LocalRunRecord) -> Result<(), String> {
     if record.format_version != FORMAT_VERSION {
         return Err(format!(
-            "v7 record declared format version {}",
+            "v8 record declared format version {}",
             record.format_version
         ));
     }
     if record.benchmark_protocol_version == 0 {
-        return Err("v7 record has legacy protocol version 0".to_string());
+        return Err("v8 record has legacy protocol version 0".to_string());
     }
+    if record.benchmark_protocol_version != BENCHMARK_PROTOCOL_VERSION {
+        return Err(format!(
+            "v8 record has benchmark protocol version {}, expected {}",
+            record.benchmark_protocol_version, BENCHMARK_PROTOCOL_VERSION
+        ));
+    }
+
+    validate_finite_record(record)?;
 
     for case in &record.cases {
         if case.case_id.is_empty() {
-            return Err("v7 case has empty case_id".to_string());
+            return Err("v8 case has empty case_id".to_string());
         }
         if case.workload_id.as_deref().is_none_or(str::is_empty) {
             return Err(format!(
-                "v7 case '{}' has missing or empty workload_id",
+                "v8 case '{}' has missing or empty workload_id",
                 case.case_id
             ));
         }
         if case.source_fingerprint.as_deref().is_none_or(str::is_empty) {
             return Err(format!(
-                "v7 case '{}' has missing or empty source_fingerprint",
+                "v8 case '{}' has missing or empty source_fingerprint",
                 case.case_id
             ));
         }
@@ -180,7 +260,75 @@ fn validate_v7_record(record: &LocalRunRecord) -> Result<(), String> {
             .is_none_or(str::is_empty)
         {
             return Err(format!(
-                "v7 case '{}' has missing or empty measurement_fingerprint",
+                "v8 case '{}' has missing or empty measurement_fingerprint",
+                case.case_id
+            ));
+        }
+        if case
+            .timing_schema_version
+            .is_none_or(|version| version == 0)
+        {
+            return Err(format!(
+                "v8 case '{}' has missing or invalid timing schema",
+                case.case_id
+            ));
+        }
+        if case.timing_schema_version == Some(BENCHMARK_TIMING_SCHEMA_VERSION) {
+            crate::bench_observations::validate_current_timing_evidence(
+                case.stage_timings.iter().map(|metric| metric.name.as_str()),
+                crate::bench_observations::required_command_total_for_runner(&case.runner),
+            )
+            .map_err(|error| {
+                format!(
+                    "v8 case '{}' has invalid current timing metrics: {error}",
+                    case.case_id
+                )
+            })?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Reject non-finite numeric facts before current history is serialized or
+/// accepted as a readable v8 record. serde_json would otherwise turn NaN and
+/// infinities into null and make the completed run disappear on the next read.
+fn validate_finite_record(record: &LocalRunRecord) -> Result<(), String> {
+    require_finite(record.suite_average_ms, "suite_average_ms")?;
+    require_finite(record.suite_case_spread_ms, "suite_case_spread_ms")?;
+
+    for group in &record.groups {
+        require_finite(group.average_ms, "group average_ms")?;
+    }
+    for case in &record.cases {
+        require_finite(case.mean_ms, "case mean_ms")?;
+        require_finite(case.median_ms, "case median_ms")?;
+        require_finite(case.stddev_ms, "case stddev_ms")?;
+        for metric in case.stage_timings.iter().chain(&case.counters) {
+            require_finite(metric.value, "case metric value")?;
+        }
+    }
+
+    Ok(())
+}
+
+fn require_finite(value: f64, field: &str) -> Result<(), String> {
+    value
+        .is_finite()
+        .then_some(())
+        .ok_or_else(|| format!("{field} must be finite"))
+}
+
+/// Validate the current compiler's persisted benchmark contract before a new
+/// record is written. Historical records may carry another nonzero schema so
+/// comparison can classify them as explicitly non-comparable.
+fn validate_current_record(record: &LocalRunRecord) -> Result<(), String> {
+    validate_v8_record(record)?;
+
+    for case in &record.cases {
+        if case.timing_schema_version != Some(BENCHMARK_TIMING_SCHEMA_VERSION) {
+            return Err(format!(
+                "v8 case '{}' has incompatible current timing schema",
                 case.case_id
             ));
         }
@@ -224,7 +372,7 @@ pub fn find_latest_matching_run<'a>(
 
 /// Append one completed current-format run.
 pub fn append_local_run(path: &Path, record: &LocalRunRecord) -> Result<(), String> {
-    validate_v7_record(record)?;
+    validate_current_record(record)?;
 
     if !record.is_clean_committed() {
         return Err(
@@ -364,6 +512,7 @@ fn local_case_from_result(case: &BenchmarkCaseResult) -> LocalCaseRecord {
             .identity
             .as_ref()
             .map(|id| id.measurement_fingerprint.clone()),
+        timing_schema_version: case.identity.as_ref().map(|id| id.timing_schema_version),
         group_name: case.group_name.clone(),
         runner: case.runner.clone(),
         mean_ms: case.mean_ms,
@@ -398,6 +547,7 @@ pub fn to_case_results(record: &LocalRunRecord) -> Vec<BenchmarkCaseResult> {
             median_ms: case.median_ms,
             stddev_ms: case.stddev_ms,
             observations: BenchmarkCaseObservations {
+                timing_schema_version: case.timing_schema_version.unwrap_or(0),
                 stage_timings: case
                     .stage_timings
                     .iter()
@@ -449,8 +599,12 @@ fn build_identity_from_record(
     let workload_id = case.workload_id.clone()?;
     let source_fingerprint = case.source_fingerprint.clone()?;
     let measurement_fingerprint = case.measurement_fingerprint.clone()?;
+    let timing_schema_version = case.timing_schema_version?;
 
-    if workload_id.is_empty() || source_fingerprint.is_empty() || measurement_fingerprint.is_empty()
+    if workload_id.is_empty()
+        || source_fingerprint.is_empty()
+        || measurement_fingerprint.is_empty()
+        || timing_schema_version == 0
     {
         return None;
     }
@@ -459,6 +613,7 @@ fn build_identity_from_record(
         workload_id,
         source_fingerprint,
         measurement_fingerprint,
+        timing_schema_version,
     })
 }
 
@@ -517,6 +672,7 @@ fn adapt_v6(legacy: LegacyV6Run) -> Result<LocalRunRecord, String> {
             workload_id: case.workload_id,
             source_fingerprint: None,
             measurement_fingerprint: None,
+            timing_schema_version: None,
             group_name: case.group_name,
             runner: case.runner,
             mean_ms: case.mean_ms,
@@ -877,6 +1033,7 @@ fn legacy_case(data: LegacyCaseData) -> Result<LocalCaseRecord, String> {
         workload_id: None,
         source_fingerprint: None,
         measurement_fingerprint: None,
+        timing_schema_version: None,
         group_name: data.group_name,
         runner,
         mean_ms: data.mean_ms,

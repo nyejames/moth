@@ -40,8 +40,8 @@ impl TimingSessionId {
         Self(value)
     }
 
-    /// The raw generation value.
-    pub(crate) fn raw(self) -> u64 {
+    /// Return the opaque generation for the runtime record-admission gate.
+    pub(crate) const fn raw(self) -> u64 {
         self.0
     }
 }
@@ -104,16 +104,19 @@ impl TimingSession {
     }
 
     /// Whether this token owns the active collector scope.
+    #[cfg(test)]
     pub(crate) fn is_active(&self) -> bool {
         self.active
     }
 
     /// The command that owns this session, when it is a command session.
+    #[cfg(test)]
     pub(crate) fn command(&self) -> Option<TimingCommandKind> {
         self.command
     }
 
     /// The channels that configured this session, when it was accepted.
+    #[cfg(test)]
     pub(crate) fn configuration(&self) -> Option<TimingSessionConfiguration> {
         self.configuration
     }
@@ -123,8 +126,15 @@ impl TimingSession {
     /// A rejected or already-finished session returns an empty snapshot and
     /// never drains another session's observations.
     pub(crate) fn finish(mut self) -> BenchmarkObservationSnapshot {
+        let emit_bench_output = self.configuration.is_some_and(|configuration| {
+            configuration.channels().bench_output() && !configuration.suppress_output()
+        });
         self.active = false;
-        collector::finish_session(self.id)
+        let snapshot = collector::finish_session(self.id);
+        if emit_bench_output {
+            super::emit_bench_timing_snapshot(&snapshot);
+        }
+        snapshot
     }
 
     /// Finish the session and render its human summary.
@@ -160,12 +170,4 @@ pub(crate) fn next_session_id() -> TimingSessionId {
     use std::sync::atomic::{AtomicU64, Ordering};
     static NEXT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
     TimingSessionId(NEXT_SESSION_ID.fetch_add(1, Ordering::Relaxed))
-}
-
-/// Drain a session that was handed to an API which no longer owns it.
-///
-/// Kept only for the benchmark observation facade; callers normally call
-/// `TimingSession::finish` directly.
-pub(crate) fn stop_session(session: TimingSession) -> BenchmarkObservationSnapshot {
-    session.finish()
 }

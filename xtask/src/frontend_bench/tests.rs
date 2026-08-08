@@ -1,3 +1,4 @@
+use crate::bench_observations::BenchmarkObservationError;
 use crate::bench_types::BenchmarkGroup;
 
 use moth::benchmarking::{
@@ -13,16 +14,17 @@ use crate::frontend_bench::{report_to_observations, run_one_frontend_case};
 #[test]
 fn report_to_observations_converts_stages_and_counters() {
     let report = FrontendBenchmarkReport {
+        timing_schema_version: moth::benchmarking::TIMING_SCHEMA_VERSION,
         total_ms: 42.0,
         warning_count: 0,
         warning_codes: Vec::new(),
         stages: vec![
             FrontendBenchmarkStage {
-                name: "ast_ms".to_string(),
+                name: "frontend.ast.total".to_string(),
                 duration_ms: 10.0,
             },
             FrontendBenchmarkStage {
-                name: "hir_ms".to_string(),
+                name: "frontend.hir".to_string(),
                 duration_ms: 5.0,
             },
         ],
@@ -41,7 +43,7 @@ fn report_to_observations_converts_stages_and_counters() {
     let ast = observations
         .stage_timings
         .iter()
-        .find(|m| m.name == "ast_ms")
+        .find(|m| m.name == "frontend.ast.total")
         .expect("ast stage should exist");
     assert!((ast.value - 10.0).abs() < 0.001);
 
@@ -56,6 +58,7 @@ fn report_to_observations_converts_stages_and_counters() {
 #[test]
 fn report_to_observations_rejects_empty_stages() {
     let report = FrontendBenchmarkReport {
+        timing_schema_version: moth::benchmarking::TIMING_SCHEMA_VERSION,
         total_ms: 1.0,
         warning_count: 0,
         warning_codes: Vec::new(),
@@ -71,30 +74,35 @@ fn report_to_observations_rejects_empty_stages() {
 #[test]
 fn report_to_observations_sums_repeated_stages_and_validates_values() {
     let report = FrontendBenchmarkReport {
+        timing_schema_version: moth::benchmarking::TIMING_SCHEMA_VERSION,
         total_ms: 1.0,
         warning_count: 0,
         warning_codes: Vec::new(),
         stages: vec![
             FrontendBenchmarkStage {
-                name: "frontend.ast".to_owned(),
+                name: "frontend.ast.total".to_owned(),
                 duration_ms: 2.0,
             },
             FrontendBenchmarkStage {
-                name: "frontend.ast".to_owned(),
+                name: "frontend.ast.total".to_owned(),
                 duration_ms: 3.0,
             },
         ],
         counters: Vec::new(),
     };
 
-    let observations =
-        report_to_observations(&report).expect("repeated frontend stages should sum");
-    assert_eq!(observations.stage_timings.len(), 1);
-    assert_eq!(observations.stage_timings[0].value, 5.0);
+    let error = report_to_observations(&report)
+        .expect_err("repeated frontend timing aggregates must be rejected");
+    assert_eq!(
+        error,
+        BenchmarkObservationError::DuplicateTimingMetric {
+            metric_name: "frontend.ast.total".to_owned()
+        }
+    );
 
     let invalid_report = FrontendBenchmarkReport {
         stages: vec![FrontendBenchmarkStage {
-            name: "frontend.ast".to_owned(),
+            name: "frontend.ast.total".to_owned(),
             duration_ms: f64::NAN,
         }],
         ..report

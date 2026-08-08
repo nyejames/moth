@@ -8,7 +8,6 @@ use crate::build_system::build::BuildResult;
 use crate::build_system::output::{
     OutputPlan, SingleFileOutputPlan, WriteMode, WriteOptions, write_project_outputs,
 };
-use crate::command_timing_finish;
 use crate::command_timing_scope;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, SourceLocation};
@@ -16,6 +15,7 @@ use crate::compiler_frontend::display_messages::{print_compiler_messages, print_
 use crate::compiler_tests::integration_test_runner::{
     BackendId, IntegrationRunSummary, TestRunnerOptions, run_all_test_cases,
 };
+use crate::finish_command_timing;
 use crate::projects::check::{self, CheckOptions};
 use crate::projects::command_status::{
     CommandStatus, benchmark_diagnostic_counts, emit_benchmark_status,
@@ -171,14 +171,20 @@ fn run_build_command_with_output_plan(
 ) -> CommandStatus {
     command_timing_scope!(timing_session, crate::timing::TimingCommandKind::Build);
     let start = Instant::now();
-    timing_scope!(timing_guard_command_build_total, "command.build.total");
+    timing_scope!(
+        timing_guard_command_build_total,
+        crate::timing::TimingMetric::CommandBuildTotal
+    );
     let project_builder = build::ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
     let (status, diagnostic_counts) = match build::build_project(&project_builder, path, flags) {
         Ok(mut build_result) => {
             // Output planning and filesystem emission form one build-pipeline
             // segment. The nested writer records its own `output.write.total`
             // evidence without becoming a second additive command child.
-            timing_scope!(timing_guard_build_output_total, "build.output.total");
+            timing_scope!(
+                timing_guard_build_output_total,
+                crate::timing::TimingMetric::BuildOutputTotal
+            );
             match output_plan_builder(&mut build_result) {
                 Ok(output_plan) => match write_project_outputs(
                     &build_result.project,
@@ -214,7 +220,7 @@ fn run_build_command_with_output_plan(
     };
     #[cfg(feature = "timers")]
     timing_guard_command_build_total.finish();
-    command_timing_finish!(timing_session, matches!(status, CommandStatus::Success));
+    finish_command_timing!(timing_session, matches!(status, CommandStatus::Success));
     if let Some((error_count, warning_count)) = diagnostic_counts {
         emit_benchmark_status(error_count, warning_count);
     }

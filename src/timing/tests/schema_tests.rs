@@ -373,7 +373,11 @@ fn stage0_and_output_evidence_has_one_command_pipeline_owner() {
 /// The generic backend span is the sole command-accounting owner.
 #[test]
 fn backend_evidence_uses_the_generic_pipeline_total() {
-    assert_eq!(TimingMetric::from_name("backend.html.total"), None);
+    assert!(
+        TimingMetric::ALL
+            .iter()
+            .all(|metric| metric.descriptor().stable_name != "backend.html.total")
+    );
     assert_eq!(
         TimingMetric::BackendWasmTotal.descriptor().parent,
         Some(TimingParent::Metric(TimingMetric::BuildBackendTotal))
@@ -407,14 +411,14 @@ fn schema_order_supports_dense_collection_without_name_compatibility() {
     assert!(occupied_slots.into_iter().all(|occupied| occupied));
 }
 
-/// Stable-name lookup round-trips exactly.
+/// Dense schema consumers do not need a raw stable-name compatibility parser.
 #[test]
-fn stable_name_lookup_round_trips() {
-    for &metric in TimingMetric::ALL {
-        let name = metric.descriptor().stable_name;
-        assert_eq!(TimingMetric::from_name(name), Some(metric));
-    }
-    assert_eq!(TimingMetric::from_name("does.not.exist"), None);
+fn dense_schema_has_no_name_compatibility_path() {
+    assert!(
+        TimingMetric::ALL
+            .iter()
+            .all(|metric| !metric.descriptor().stable_name.is_empty())
+    );
     assert_eq!(TimingMetric::from_index(TimingMetric::ALL.len()), None);
     assert_eq!(TimingMetric::from_index(usize::MAX), None);
 }

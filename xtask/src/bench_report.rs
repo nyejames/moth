@@ -6,13 +6,13 @@
 //! per-case, stage, counter, and ratio evidence without writing any files.
 
 use crate::bench_history::{
-    LocalRunRecord, read_local_runs, thread_identity_label, to_case_results,
+    LocalRunRecord, TimingSchemaIdentity, read_local_runs, thread_identity_label, to_case_results,
 };
 use crate::bench_system::{SystemIdentityMode, load_or_create_system_at};
 use crate::bench_types::{
-    BENCHMARK_PROTOCOL_VERSION, BenchmarkCaseResult, BenchmarkComparison, BenchmarkMetric,
-    BenchmarkStageMovement, BenchmarkSuiteKind, BenchmarkSystem, BenchmarkThresholds,
-    calculate_stage_movement,
+    BENCHMARK_PROTOCOL_VERSION, BENCHMARK_TIMING_SCHEMA_VERSION, BenchmarkCaseResult,
+    BenchmarkComparison, BenchmarkMetric, BenchmarkStageMovement, BenchmarkSuiteKind,
+    BenchmarkSystem, BenchmarkThresholds, calculate_stage_movement, friendly_stage_label,
 };
 use crate::benchmark_manifest::{BenchmarkRunner, CliBenchmarkCommand, load_benchmark_manifest};
 use crate::benchmark_run::BenchmarkPaths;
@@ -21,6 +21,14 @@ use crate::profile::drift::{
 };
 use crate::profile::history::{
     ProfileHistoryRecord, StoredProfileHistoryRecord, read_profile_runs,
+};
+use moth::benchmarking::{
+    TIMING_BUILD_PIPELINE_METRIC_NAMES, TIMING_CHECK_PIPELINE_METRIC_NAMES,
+    TIMING_FRONTEND_AST_EMIT_NAME, TIMING_FRONTEND_AST_ENVIRONMENT_NAME,
+    TIMING_FRONTEND_AST_FINALISE_NAME, TIMING_FRONTEND_AST_TOTAL_NAME,
+    TIMING_FRONTEND_BORROW_CONVERGE_NAME, TIMING_FRONTEND_BORROW_INITIAL_NAME,
+    TIMING_FRONTEND_HIR_NAME, TIMING_FRONTEND_ORDER_DECLARATIONS_NAME,
+    TIMING_FRONTEND_PREPARE_NAME,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -37,148 +45,127 @@ const UNATTRIBUTED_RATIO_THRESHOLD: f64 = 0.25;
 
 const RATIO_CATALOG: &[RatioSpec] = &[
     RatioSpec::new(
-        "frontend.file_prepare/source_file_count",
-        "frontend.file_prepare",
+        TIMING_FRONTEND_PREPARE_NAME,
         "source_file_count",
         "ms/file",
         Some("inspect tokenization, header parsing, string-table merge/remap"),
     ),
     RatioSpec::new(
-        "frontend.file_prepare/source_byte_count",
-        "frontend.file_prepare",
+        TIMING_FRONTEND_PREPARE_NAME,
         "source_byte_count",
         "ms/byte",
         None,
     ),
     RatioSpec::new(
-        "frontend.file_prepare/token_count",
-        "frontend.file_prepare",
+        TIMING_FRONTEND_PREPARE_NAME,
         "token_count",
         "ms/token",
         None,
     ),
     RatioSpec::new(
-        "frontend.file_prepare/string_table_delta_entries_scanned",
-        "frontend.file_prepare",
+        TIMING_FRONTEND_PREPARE_NAME,
         "string_table_delta_entries_scanned",
         "ms/delta-entry",
         Some("inspect string-table delta merge/remap pressure"),
     ),
     RatioSpec::new(
-        "frontend.file_prepare/file_prepare_output_remap_calls",
-        "frontend.file_prepare",
+        TIMING_FRONTEND_PREPARE_NAME,
         "file_prepare_output_remap_calls",
         "ms/output-remap",
         Some("inspect unconditional per-file payload remapping"),
     ),
     RatioSpec::new(
-        "frontend.dependency_sort/dependency_edge_count",
-        "frontend.dependency_sort",
+        TIMING_FRONTEND_ORDER_DECLARATIONS_NAME,
         "dependency_edge_count",
         "ms/edge",
         Some("inspect duplicate edges or graph traversal"),
     ),
     RatioSpec::new(
-        "frontend.ast/ast_header_count",
-        "frontend.ast",
+        TIMING_FRONTEND_AST_TOTAL_NAME,
         "ast_header_count",
         "ms/header",
         None,
     ),
     RatioSpec::new(
-        "ast_build_environment_ms/ast_type_resolution_calls",
-        "ast_build_environment_ms",
+        TIMING_FRONTEND_AST_ENVIRONMENT_NAME,
         "ast_type_resolution_calls",
         "ms/type-resolution",
         Some("inspect repeated AST type resolution"),
     ),
     RatioSpec::new(
-        "ast_build_environment_ms/ast_visible_type_lookup_attempts",
-        "ast_build_environment_ms",
+        TIMING_FRONTEND_AST_ENVIRONMENT_NAME,
         "ast_visible_type_lookup_attempts",
         "ms/type-lookup",
         Some("inspect visible type/source lookup paths"),
     ),
     RatioSpec::new(
-        "ast_emit_nodes_ms/ast_template_render_plans_built",
-        "ast_emit_nodes_ms",
+        TIMING_FRONTEND_AST_EMIT_NAME,
         "ast_template_render_plans_built",
         "ms/render-plan",
         Some("inspect template render-plan build pressure"),
     ),
     RatioSpec::new(
-        "ast_emit_nodes_ms/ast_template_render_pieces_built",
-        "ast_emit_nodes_ms",
+        TIMING_FRONTEND_AST_EMIT_NAME,
         "ast_template_render_pieces_built",
         "ms/render-piece",
         None,
     ),
     RatioSpec::new(
-        "ast_finalize_ms/ast_templates_folded_during_finalization",
-        "ast_finalize_ms",
+        TIMING_FRONTEND_AST_FINALISE_NAME,
         "ast_templates_folded_during_finalization",
         "ms/finalized-template",
         Some("inspect template finalization and folding"),
     ),
     RatioSpec::new(
-        "ast_finalize_ms/ast_template_fold_plan_pieces_visited",
-        "ast_finalize_ms",
+        TIMING_FRONTEND_AST_FINALISE_NAME,
         "ast_template_fold_plan_pieces_visited",
         "ms/fold-piece",
         None,
     ),
     RatioSpec::new(
-        "frontend.ast/type_compatibility_cache_lookups",
-        "frontend.ast",
+        TIMING_FRONTEND_AST_TOTAL_NAME,
         "type_compatibility_cache_lookups",
         "ms/lookup",
         None,
     ),
     RatioSpec::new(
-        "frontend.ast/type_compatibility_cache_misses",
-        "frontend.ast",
+        TIMING_FRONTEND_AST_TOTAL_NAME,
         "type_compatibility_cache_misses",
         "ms/miss",
         Some("inspect compatibility caching or repeated type checks"),
     ),
     RatioSpec::new(
-        "frontend.hir/hir_statement_count",
-        "frontend.hir",
+        TIMING_FRONTEND_HIR_NAME,
         "hir_statement_count",
         "ms/statement",
         None,
     ),
     RatioSpec::new(
-        "frontend.borrow/borrow_conflict_check_count",
-        "frontend.borrow",
+        TIMING_FRONTEND_BORROW_INITIAL_NAME,
         "borrow_conflict_check_count",
         "ms/check",
         Some("inspect borrow state representation"),
     ),
     RatioSpec::new(
-        "frontend.borrow/borrow_state_join_count",
-        "frontend.borrow",
+        TIMING_FRONTEND_BORROW_CONVERGE_NAME,
         "borrow_state_join_count",
         "ms/join",
         Some("inspect borrow state join pressure"),
     ),
     RatioSpec::new(
-        "frontend.borrow/borrow_place_access_count",
-        "frontend.borrow",
+        TIMING_FRONTEND_BORROW_INITIAL_NAME,
         "borrow_place_access_count",
         "ms/place-access",
         None,
     ),
     RatioSpec::new(
-        "frontend.borrow/borrow_statement_fact_count",
-        "frontend.borrow",
+        TIMING_FRONTEND_BORROW_INITIAL_NAME,
         "borrow_statement_fact_count",
         "ms/statement-fact",
         None,
     ),
     RatioSpec::new(
-        "frontend.borrow/borrow_value_fact_count",
-        "frontend.borrow",
+        TIMING_FRONTEND_BORROW_INITIAL_NAME,
         "borrow_value_fact_count",
         "ms/value-fact",
         None,
@@ -244,6 +231,7 @@ pub(crate) struct LegacyProfileRunInfo {
 #[derive(Debug, Clone)]
 pub(crate) struct SuiteReport {
     pub(crate) suite_kind: BenchmarkSuiteKind,
+    pub(crate) timing_schema: TimingSchemaIdentity,
     pub(crate) system_display: String,
     pub(crate) public_system_id: String,
     pub(crate) latest_timestamp: String,
@@ -281,7 +269,7 @@ pub(crate) struct CounterMovement {
 
 #[derive(Debug, Clone)]
 pub(crate) struct RatioReport {
-    pub(crate) name: &'static str,
+    pub(crate) name: String,
     pub(crate) case_id: String,
     pub(crate) value: f64,
     pub(crate) unit: &'static str,
@@ -296,7 +284,6 @@ pub(crate) struct InvestigationHint {
 
 #[derive(Debug, Clone, Copy)]
 struct RatioSpec {
-    name: &'static str,
     numerator: &'static str,
     denominator: &'static str,
     unit: &'static str,
@@ -305,14 +292,12 @@ struct RatioSpec {
 
 impl RatioSpec {
     const fn new(
-        name: &'static str,
         numerator: &'static str,
         denominator: &'static str,
         unit: &'static str,
         hint: Option<&'static str>,
     ) -> Self {
         Self {
-            name,
             numerator,
             denominator,
             unit,
@@ -382,6 +367,7 @@ fn select_latest_run<'a>(
             && run.system_uuid == latest.system_uuid
             && run.thread_count == latest.thread_count
             && run.benchmark_protocol_version == BENCHMARK_PROTOCOL_VERSION
+            && !TimingSchemaIdentity::from_record(run).is_mixed()
     });
 
     Some(SelectedRun { latest, previous })
@@ -396,14 +382,23 @@ fn calculate_suite_report(
     suite_kind: BenchmarkSuiteKind,
     selection: SelectedRun<'_>,
 ) -> SuiteReport {
-    let current_cases = to_case_results(selection.latest);
-    let previous_cases = selection.previous.map(to_case_results);
+    let timing_schema = TimingSchemaIdentity::from_record(selection.latest);
+    let current_cases = if timing_schema.is_mixed() {
+        Vec::new()
+    } else {
+        to_case_results(selection.latest)
+    };
+    let previous_cases = selection
+        .previous
+        .filter(|record| !TimingSchemaIdentity::from_record(record).is_mixed())
+        .map(to_case_results);
     let comparison = BenchmarkComparison::new(&current_cases, previous_cases.as_deref());
 
     let slowest_cases = calculate_slowest_cases(&current_cases);
     let unattributed_cases = calculate_unattributed_cases(suite_kind, &current_cases);
     let stage_movements = calculate_meaningful_stage_movements(&comparison);
-    let counter_movements = calculate_counter_movements(&current_cases, previous_cases.as_deref());
+    let counter_movements =
+        calculate_counter_movements(&comparison, &current_cases, previous_cases.as_deref());
     let ratios = calculate_ratios(&current_cases);
     let investigation_hints = calculate_investigation_hints(
         &comparison,
@@ -415,6 +410,7 @@ fn calculate_suite_report(
 
     SuiteReport {
         suite_kind,
+        timing_schema,
         system_display: selection.latest.display_name.clone(),
         public_system_id: selection.latest.public_system_id.clone(),
         latest_timestamp: selection.latest.timestamp.clone(),
@@ -438,7 +434,12 @@ fn calculate_slowest_cases(cases: &[BenchmarkCaseResult]) -> Vec<SlowCaseReport>
         .into_iter()
         .take(SLOW_CASE_LIMIT)
         .map(|case| {
-            let mut stages = case.observations.stage_timings.clone();
+            let mut stages =
+                if case.observations.timing_schema_version == BENCHMARK_TIMING_SCHEMA_VERSION {
+                    case.observations.stage_timings.clone()
+                } else {
+                    Vec::new()
+                };
             stages.sort_by(|left, right| right.value.total_cmp(&left.value));
             stages.truncate(SLOW_CASE_STAGE_LIMIT);
 
@@ -491,71 +492,40 @@ fn calculate_unattributed_cases(
 }
 
 fn attributed_wall_time_ms(case: &BenchmarkCaseResult) -> Option<f64> {
-    // Top-level non-nested pipeline phases for each command. These are the
-    // dotted metrics emitted by the concise `timers` feature under
-    // MOTH_TIMERS=bench. We deliberately exclude `.total` and `_total`
-    // wrapper metrics (e.g. command.check.total, build_project.total,
-    // output.write_total) because they nest the sub-phases listed here and
-    // would double-count if summed alongside them.
-    let command_phase_names = match &case.runner {
+    // Only schema-owned pipeline roles contribute to wall accounting. Nested
+    // evidence and accumulated module work remain visible in the report but
+    // never become additive wall-time estimates.
+    if case.observations.timing_schema_version != BENCHMARK_TIMING_SCHEMA_VERSION {
+        return None;
+    }
+
+    let pipeline_names = match &case.runner {
         BenchmarkRunner::Cli {
             command: CliBenchmarkCommand::Check,
             ..
-        } => &[
-            "command.check.path_validation",
-            "command.check.builder_construction",
-            "command.check.bootstrap",
-            "command.check.compile_project_frontend",
-            "command.check.message_rendering",
-        ][..],
+        } => TIMING_CHECK_PIPELINE_METRIC_NAMES,
         BenchmarkRunner::Cli {
             command: CliBenchmarkCommand::Build,
             ..
-        } => &[
-            "build_project.path_validation",
-            "build_project.bootstrap",
-            "build_project.compile_project_frontend",
-            "build_project.backend",
-            "command.build.output_write",
-        ][..],
+        } => TIMING_BUILD_PIPELINE_METRIC_NAMES,
         _ => &[][..],
     };
 
-    let command_phase_sum = command_phase_names
+    let mut found_pipeline_metric = false;
+    let pipeline_sum = pipeline_names
         .iter()
-        .filter_map(|name| metric_value(&case.observations.stage_timings, name))
+        .filter_map(|name| {
+            let value = metric_value(&case.observations.stage_timings, name);
+            found_pipeline_metric |= value.is_some();
+            value
+        })
         .sum::<f64>();
-    if command_phase_sum > 0.0 {
-        return Some(command_phase_sum);
-    }
 
-    // Legacy benchmark records only carried lower-level frontend stage timers.
-    // Keeping this fallback makes old attribution holes visible in bench-report
-    // instead of hiding them until all command-phase metrics are present.
-    let fallback_sum = case
-        .observations
-        .stage_timings
-        .iter()
-        .filter(|metric| !is_total_wrapper_metric(&metric.name))
-        .map(|metric| metric.value)
-        .sum::<f64>();
-    if fallback_sum > 0.0 {
-        Some(fallback_sum)
+    if found_pipeline_metric {
+        Some(pipeline_sum)
     } else {
         None
     }
-}
-
-/// Whether a metric name is a total/wrapper that nests sub-phases.
-///
-/// WHAT: matches dotted totals (e.g. `command.check.total`,
-/// `build_project.total`, `stage0.single_file.total`) and underscore
-/// totals (e.g. `output.write_total`, `config.load_total`) so the
-/// fallback attribution sum does not double-count nested phases.
-/// WHY: both naming conventions exist in the current metric set;
-/// a single predicate keeps the filter consistent as new stages land.
-fn is_total_wrapper_metric(name: &str) -> bool {
-    name.ends_with(".total") || name.ends_with("_total")
 }
 
 fn calculate_meaningful_stage_movements(
@@ -571,6 +541,7 @@ fn calculate_meaningful_stage_movements(
 }
 
 fn calculate_counter_movements(
+    comparison: &BenchmarkComparison,
     current_cases: &[BenchmarkCaseResult],
     previous_cases: Option<&[BenchmarkCaseResult]>,
 ) -> Vec<CounterMovement> {
@@ -578,8 +549,13 @@ fn calculate_counter_movements(
         return Vec::new();
     };
 
-    let current_totals = sum_counters(current_cases);
-    let previous_totals = sum_counters(previous_cases);
+    let comparable_case_ids: BTreeSet<&str> = comparison
+        .cases
+        .iter()
+        .map(|case| case.case_id.as_str())
+        .collect();
+    let current_totals = sum_counters(current_cases, &comparable_case_ids);
+    let previous_totals = sum_counters(previous_cases, &comparable_case_ids);
     let mut names = BTreeSet::new();
     names.extend(current_totals.keys().cloned());
     names.extend(previous_totals.keys().cloned());
@@ -606,10 +582,17 @@ fn calculate_counter_movements(
     movements
 }
 
-fn sum_counters(cases: &[BenchmarkCaseResult]) -> BTreeMap<String, f64> {
+fn sum_counters(
+    cases: &[BenchmarkCaseResult],
+    comparable_case_ids: &BTreeSet<&str>,
+) -> BTreeMap<String, f64> {
     let mut totals = BTreeMap::new();
 
     for case in cases {
+        if !comparable_case_ids.contains(case.case_id.as_str()) {
+            continue;
+        }
+
         for counter in &case.observations.counters {
             let entry = totals.entry(counter.name.clone()).or_insert(0.0);
             *entry += counter.value;
@@ -639,6 +622,10 @@ fn calculate_ratios(cases: &[BenchmarkCaseResult]) -> Vec<RatioReport> {
     let mut ratios = Vec::new();
 
     for case in cases {
+        if case.observations.timing_schema_version != BENCHMARK_TIMING_SCHEMA_VERSION {
+            continue;
+        }
+
         for spec in RATIO_CATALOG {
             let Some(numerator) = metric_value(&case.observations.stage_timings, spec.numerator)
             else {
@@ -654,7 +641,7 @@ fn calculate_ratios(cases: &[BenchmarkCaseResult]) -> Vec<RatioReport> {
             }
 
             ratios.push(RatioReport {
-                name: spec.name,
+                name: format!("{}/{}", spec.numerator, spec.denominator),
                 case_id: case.case_id.clone(),
                 value: numerator / denominator,
                 unit: spec.unit,
@@ -669,31 +656,10 @@ fn calculate_ratios(cases: &[BenchmarkCaseResult]) -> Vec<RatioReport> {
 }
 
 fn metric_value(metrics: &[BenchmarkMetric], name: &str) -> Option<f64> {
-    let exact = metrics
+    metrics
         .iter()
         .find(|metric| metric.name == name)
-        .map(|metric| metric.value);
-    if exact.is_some() {
-        return exact;
-    }
-
-    legacy_stage_metric_alias(name).and_then(|legacy_name| {
-        metrics
-            .iter()
-            .find(|metric| metric.name == legacy_name)
-            .map(|metric| metric.value)
-    })
-}
-
-fn legacy_stage_metric_alias(name: &str) -> Option<&'static str> {
-    match name {
-        "frontend.file_prepare" => Some("file_prepare_ms"),
-        "frontend.dependency_sort" => Some("dependency_sort_ms"),
-        "frontend.ast" => Some("ast_ms"),
-        "frontend.hir" => Some("hir_ms"),
-        "frontend.borrow" => Some("borrow_ms"),
-        _ => None,
-    }
+        .map(|metric| metric.value)
 }
 
 fn calculate_investigation_hints(
@@ -839,13 +805,23 @@ pub(crate) fn format_benchmark_report(report: &BenchmarkReport) -> String {
             suite.latest_commit.as_deref().unwrap_or("unknown")
         ));
         output.push_str(&format!(
+            "Timing schema: {}\n",
+            suite.timing_schema.display_label()
+        ));
+        output.push_str(&format!(
             "Threads: {}\n",
             thread_identity_label(suite.thread_count)
         ));
-        output.push_str(&format!(
-            "Change: {}\n",
-            suite.comparison.format_run_change_line().replace("**", "")
-        ));
+        if suite.timing_schema.is_mixed() {
+            output.push_str(
+                "Change: not comparable: mixed timing schemas; no aggregate comparison\n",
+            );
+        } else {
+            output.push_str(&format!(
+                "Change: {}\n",
+                suite.comparison.format_run_change_line().replace("**", "")
+            ));
+        }
 
         append_slowest_cases(&mut output, suite);
         append_unattributed_cases(&mut output, suite);
@@ -871,7 +847,13 @@ fn append_slowest_cases(output: &mut String, suite: &SuiteReport) {
         let stage_text = case
             .stages
             .iter()
-            .map(|stage| format!("{} ~{}ms", stage.name, stage.value.round() as i64))
+            .map(|stage| {
+                format!(
+                    "{} ~{}ms",
+                    friendly_stage_label(&stage.name),
+                    stage.value.round() as i64
+                )
+            })
             .collect::<Vec<_>>()
             .join(", ");
 
@@ -923,7 +905,7 @@ fn append_stage_movement(output: &mut String, suite: &SuiteReport) {
     for movement in &suite.stage_movements {
         output.push_str(&format!(
             "  {:<32} {} across {} cases\n",
-            movement.stage_name,
+            friendly_stage_label(&movement.stage_name),
             format_signed_ms(movement.total_delta_ms),
             movement.case_count
         ));

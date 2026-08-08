@@ -1,31 +1,37 @@
 //! In-memory timing and counter observation collector.
 //!
-//! WHAT: stores raw observations for exactly one active collection session and
-//! validates attributed ids against that session's generation.
-//! WHY: Phase 2 keeps the existing event snapshot while moving lifecycle and
-//! channel policy into one explicit owner. The later dense collector replaces
-//! this storage only after every recording call site is typed.
+//! WHAT: owns the lifecycle mutex and dense atomic timing storage for exactly
+//! one active collection session.
+//! WHY: stage recording must not allocate, format or enter a collector mutex;
+//! lifecycle and metadata registration remain serialized while global and
+//! attributed totals use schema-indexed atomic slots.
 
 use super::attribution::{
     NO_TIMING_BOUNDARY, TimingBoundaryId, TimingBoundaryKind, TimingBoundaryRecord, TimingContext,
-    TimingModuleKey, TimingModuleRecord,
+    TimingMetricAccumulator, TimingModuleKey, TimingModuleRecord, acquire_boundary_accumulator,
+    acquire_module_accumulator,
 };
 use super::runtime::{self, TimingSessionConfiguration};
+use super::schema::{TIMING_METRIC_COUNT, TIMING_SCHEMA_VERSION, TimingAttributionKind};
 use super::session::{TimingCommandKind, TimingSession, TimingSessionId, TimingSessionStartError};
-use super::{BenchmarkObservationMetric, BenchmarkObservationSnapshot, TimingObservation};
+use super::{
+    BenchmarkObservationMetric, BenchmarkObservationSnapshot, TimingMetric, TimingMetricAggregate,
+};
 use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 
 struct ActiveCollection {
     id: TimingSessionId,
     configuration: TimingSessionConfiguration,
-    timings: Vec<TimingObservation>,
+    command: Option<TimingCommandKind>,
     counters: Vec<BenchmarkObservationMetric>,
     boundaries: Vec<TimingBoundaryRecord>,
     modules: Vec<TimingModuleRecord>,
 }
 
 static ACTIVE_COLLECTOR: Mutex<Option<ActiveCollection>> = Mutex::new(None);
+static GLOBAL_METRICS: [TimingMetricAccumulator; TIMING_METRIC_COUNT] =
+    [const { TimingMetricAccumulator::new() }; TIMING_METRIC_COUNT];
 
 /// The result of attempting to retain one timing observation.
 ///
@@ -47,12 +53,14 @@ impl TimingRecordOutcome {
     }
 }
 
-/// The result of recording several metrics under one collector lock.
+/// The result of recording several metrics under one admission window.
 ///
-/// The facade uses the captured generation after releasing the lock to emit
-/// benchmark lines only for entries the collector accepted. This keeps stale
-/// contexts out of both the snapshot and terminal output without allocating a
-/// per-entry outcome buffer.
+/// The facade uses the captured generation to reject stale contexts without
+/// allocating a per-entry outcome buffer. Stable benchmark lines are emitted
+/// from the completed session snapshot rather than this record path.
+// This result is consumed by the multi-metric facade path, whose call sites
+// come from macro expansion rather than this library target.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct TimingMultiRecordOutcome {
     session: Option<TimingSessionId>,
@@ -60,6 +68,7 @@ pub(crate) struct TimingMultiRecordOutcome {
     pub(crate) output_suppressed: bool,
 }
 
+#[allow(dead_code)]
 impl TimingMultiRecordOutcome {
     const fn recorded(
         session: TimingSessionId,
@@ -74,26 +83,25 @@ impl TimingMultiRecordOutcome {
     }
 
     /// Whether this outcome retained the entry with its supplied context.
-    pub(crate) fn recorded_entry(self, context: Option<TimingContext>) -> bool {
+    pub(crate) fn recorded_entry(
+        self,
+        metric: TimingMetric,
+        context: Option<TimingContext>,
+    ) -> bool {
         let Some(session) = self.session else {
             return false;
         };
 
-        if !self.attribution_enabled {
-            return true;
-        }
-
-        match context {
-            Some(context) => context.session() == session,
-            None => true,
-        }
+        accepts_attribution(metric, context, session.raw(), self.attribution_enabled)
     }
 }
 
 /// Recover the collector lock after poisoning instead of returning empty data.
 ///
 /// The collector is pure bookkeeping: a previous panic must not silently
-/// erase later observations. No code panics while holding this lock.
+/// erase later observations. Internal invariant checks may panic while this
+/// lock is held, so recovery preserves later bookkeeping after the mutex is
+/// poisoned instead of silently discarding it.
 fn lock_collector() -> MutexGuard<'static, Option<ActiveCollection>> {
     #[cfg(test)]
     COLLECTOR_LOCK_ACQUISITIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -123,12 +131,13 @@ pub(crate) fn try_start_session(
     *guard = Some(ActiveCollection {
         id,
         configuration,
-        timings: Vec::new(),
+        command,
         counters: Vec::new(),
         boundaries: Vec::new(),
         modules: Vec::new(),
     });
-    runtime::activate_session(configuration);
+    reset_global_metrics();
+    runtime::activate_session(id.raw(), configuration);
 
     Ok(TimingSession::active(id, command, configuration))
 }
@@ -143,18 +152,32 @@ pub(crate) fn finish_session(id: TimingSessionId) -> BenchmarkObservationSnapsho
         return BenchmarkObservationSnapshot::default();
     }
 
-    let collection = guard.take().expect("active collection present");
     // Clear the fast-path bits before another session can acquire the
-    // lifecycle lock, so an old finish can never disable a newer session.
+    // lifecycle lock, then wait for every already-admitted record before
+    // extracting the dense slots. The lifecycle lock stays held throughout
+    // this handoff, so another session cannot reset the slots early.
     runtime::deactivate_session();
-    drop(guard);
+    runtime::wait_for_records();
+    let collection = guard.take().expect("active collection present");
 
     let mut snapshot = BenchmarkObservationSnapshot {
-        timings: collection.timings,
+        schema_version: TIMING_SCHEMA_VERSION,
+        command: collection.command,
+        timings: snapshot_global_metrics(),
         counters: collection.counters,
         boundaries: collection.boundaries,
         modules: collection.modules,
     };
+    for boundary in &mut snapshot.boundaries {
+        if let Some(accumulator) = boundary.id.accumulator() {
+            boundary.timings = accumulator.snapshot(TimingAttributionKind::Boundary);
+        }
+    }
+    for module in &mut snapshot.modules {
+        if let Some(accumulator) = module.key.accumulator() {
+            module.timings = accumulator.snapshot(TimingAttributionKind::Module);
+        }
+    }
     recompute_boundary_module_counts(&mut snapshot);
     snapshot
 }
@@ -165,108 +188,104 @@ pub(crate) fn finish_session(id: TimingSessionId) -> BenchmarkObservationSnapsho
 pub(crate) fn abandon_session(id: TimingSessionId) {
     let mut guard = lock_collector();
     if guard.as_ref().is_some_and(|collection| collection.id == id) {
-        *guard = None;
         // This runs under the lifecycle lock for the same reason as finish.
         runtime::deactivate_session();
+        runtime::wait_for_records();
+        *guard = None;
     }
 }
 
-/// Record one un-attributed timing observation.
-pub(crate) fn record_timing(name: &'static str, duration: Duration) -> TimingRecordOutcome {
-    let mut guard = lock_collector();
-    let Some(collection) = guard.as_mut() else {
+/// Record one un-attributed timing aggregate without entering the lifecycle
+/// collector mutex.
+pub(crate) fn record_timing(metric: TimingMetric, duration: Duration) -> TimingRecordOutcome {
+    let Some(_session) = runtime::begin_record() else {
         return TimingRecordOutcome::default();
     };
-    if !collection.configuration.channels().metrics() {
+    if !runtime::metrics_active() {
+        runtime::end_record();
         return TimingRecordOutcome::default();
     }
 
-    collection.timings.push(TimingObservation {
-        name,
-        duration,
-        context: None,
-    });
-    TimingRecordOutcome::recorded(collection.configuration.suppress_output())
+    GLOBAL_METRICS[metric.index()].record(duration);
+    let output_suppressed = runtime::output_suppressed();
+    runtime::end_record();
+    TimingRecordOutcome::recorded(output_suppressed)
 }
 
 /// Record one timing observation with compact boundary/module context.
 ///
 /// Attribution-off sessions keep the metric but deliberately discard its
-/// context. A stale context rejects the entire observation, including any
-/// later benchmark-line emission by the facade.
+/// context. A stale or wrong-kind context rejects the entire observation,
+/// including its eventual final benchmark aggregate.
 pub(crate) fn record_attributed_timing(
-    name: &'static str,
+    metric: TimingMetric,
     duration: Duration,
     context: Option<TimingContext>,
 ) -> TimingRecordOutcome {
-    let mut guard = lock_collector();
-    let Some(collection) = guard.as_mut() else {
+    let Some(session) = runtime::begin_record() else {
         return TimingRecordOutcome::default();
     };
-    if !collection.configuration.channels().metrics() {
+    if !runtime::metrics_active() {
+        runtime::end_record();
         return TimingRecordOutcome::default();
     }
 
-    let context = if collection.configuration.channels().attribution() {
-        match context {
-            Some(context) if context.session() != collection.id => {
-                return TimingRecordOutcome::default();
-            }
-            context => context,
-        }
-    } else {
-        None
-    };
+    let attribution_enabled = runtime::attribution_active();
+    if !accepts_attribution(metric, context, session, attribution_enabled) {
+        runtime::end_record();
+        return TimingRecordOutcome::default();
+    }
 
-    collection.timings.push(TimingObservation {
-        name,
-        duration,
-        context,
-    });
-    TimingRecordOutcome::recorded(collection.configuration.suppress_output())
+    GLOBAL_METRICS[metric.index()].record(duration);
+    if attribution_enabled && let Some(context) = context {
+        context
+            .accumulator()
+            .expect("accepted attributed context has storage")
+            .record(metric, duration);
+    }
+    let output_suppressed = runtime::output_suppressed();
+    runtime::end_record();
+    TimingRecordOutcome::recorded(output_suppressed)
 }
 
-/// Record several timing observations while holding the collector lock once.
+/// Record several timing aggregates under one lock-free admission window.
 ///
-/// The caller receives the active generation needed to emit stable benchmark
-/// lines after releasing the lock. Entries with stale contexts are skipped,
-/// matching single-record behaviour without adding a temporary allocation.
+/// Entries with stale contexts are skipped, matching single-record behaviour
+/// without adding a temporary allocation.
+#[allow(dead_code)]
 pub(crate) fn record_attributed_timing_multi(
-    entries: &[(&'static str, Option<TimingContext>)],
+    entries: &[(TimingMetric, Option<TimingContext>)],
     duration: Duration,
 ) -> TimingMultiRecordOutcome {
-    let mut guard = lock_collector();
-    let Some(collection) = guard.as_mut() else {
+    let Some(session_raw) = runtime::begin_record() else {
         return TimingMultiRecordOutcome::default();
     };
-    if !collection.configuration.channels().metrics() {
+    if !runtime::metrics_active() {
+        runtime::end_record();
         return TimingMultiRecordOutcome::default();
     }
 
-    let attribution_enabled = collection.configuration.channels().attribution();
+    let attribution_enabled = runtime::attribution_active();
     let outcome = TimingMultiRecordOutcome::recorded(
-        collection.id,
+        TimingSessionId::from_raw(session_raw),
         attribution_enabled,
-        collection.configuration.suppress_output(),
+        runtime::output_suppressed(),
     );
 
-    for &(name, context) in entries {
-        let context = if attribution_enabled {
-            match context {
-                Some(context) if context.session() != collection.id => continue,
-                context => context,
-            }
-        } else {
-            None
-        };
-
-        collection.timings.push(TimingObservation {
-            name,
-            duration,
-            context,
-        });
+    for &(metric, context) in entries {
+        if !accepts_attribution(metric, context, session_raw, attribution_enabled) {
+            continue;
+        }
+        GLOBAL_METRICS[metric.index()].record(duration);
+        if attribution_enabled && let Some(context) = context {
+            context
+                .accumulator()
+                .expect("accepted attributed context has storage")
+                .record(metric, duration);
+        }
     }
 
+    runtime::end_record();
     outcome
 }
 
@@ -287,21 +306,26 @@ pub(crate) fn register_boundary(
         return NO_TIMING_BOUNDARY;
     }
 
-    let id = TimingBoundaryId::from_session(collection.id, collection.boundaries.len() as u32);
+    let index = collection.boundaries.len();
+    let accumulator = acquire_boundary_accumulator(index);
+    let id = TimingBoundaryId::with_accumulator(collection.id, index as u32, accumulator);
     collection.boundaries.push(TimingBoundaryRecord {
         id,
         kind,
         display_name: display_name(),
         module_count: 0,
+        timings: Vec::new(),
     });
     id
 }
 
-/// Register one module inside a boundary and return its dense key.
+/// Register one fully described module inside a boundary and return its dense
+/// key.
 ///
 /// The module index is the boundary's graph-owned dense `ModuleId`, so the
-/// same index in two boundaries stays distinct. Duplicate registrations are
-/// ignored and return the existing key, keeping records deterministic.
+/// same index in two boundaries stays distinct. Exact duplicate registrations
+/// return the existing key. Conflicting logical identity or source metadata
+/// is an internal invariant failure and never mutates the existing record.
 pub(crate) fn register_module(
     boundary: TimingBoundaryId,
     module_index: u32,
@@ -309,38 +333,146 @@ pub(crate) fn register_module(
     source_file_count: u64,
     source_byte_count: u64,
 ) -> TimingModuleKey {
-    let key = TimingModuleKey::new(boundary, module_index);
+    register_module_with_metadata(
+        boundary,
+        module_index,
+        logical_module_path,
+        source_file_count,
+        source_byte_count,
+        true,
+    )
+}
+
+/// Register a module before Stage 0 has finished collecting its source facts.
+///
+/// The preparation lifecycle is explicit so it cannot be mistaken for a
+/// conflicting duplicate of a complete registration. Call
+/// [`finalize_module_source_facts`] exactly once the prepared module is known.
+pub(crate) fn register_module_for_preparation(
+    boundary: TimingBoundaryId,
+    module_index: u32,
+    logical_module_path: &str,
+) -> TimingModuleKey {
+    register_module_with_metadata(boundary, module_index, logical_module_path, 0, 0, false)
+}
+
+fn register_module_with_metadata(
+    boundary: TimingBoundaryId,
+    module_index: u32,
+    logical_module_path: &str,
+    source_file_count: u64,
+    source_byte_count: u64,
+    source_facts_finalized: bool,
+) -> TimingModuleKey {
+    let fallback_key = TimingModuleKey::new(boundary, module_index);
 
     let mut guard = lock_collector();
     let Some(collection) = guard.as_mut() else {
-        return key;
+        return fallback_key;
     };
     if !collection.configuration.channels().attribution() || boundary.session() != collection.id {
-        return key;
+        return fallback_key;
     }
     let Some(boundary_record) = collection.boundaries.get(boundary.index()) else {
-        return key;
+        return fallback_key;
     };
-    if boundary_record.id != boundary {
-        return key;
+    if boundary_record.id != boundary
+        || !same_accumulator(boundary_record.id.accumulator(), boundary.accumulator())
+    {
+        return fallback_key;
     }
-    if collection.modules.iter().any(|record| record.key == key) {
-        return key;
-    }
-
     let logical_identity = if logical_module_path.is_empty() {
         boundary_record.display_name.clone()
     } else {
         format!("{}/{}", boundary_record.display_name, logical_module_path)
     };
+    if let Some(index) = collection.modules.iter().position(|record| {
+        record.key.boundary() == boundary && record.key.module_index() == module_index
+    }) {
+        let record = &collection.modules[index];
+        assert_eq!(
+            record.logical_identity, logical_identity,
+            "timing module registration changed logical identity"
+        );
+        assert_eq!(
+            record.source_file_count, source_file_count,
+            "timing module registration changed source file count"
+        );
+        assert_eq!(
+            record.source_byte_count, source_byte_count,
+            "timing module registration changed source byte count"
+        );
+        assert_eq!(
+            record.source_facts_finalized, source_facts_finalized,
+            "timing module registration changed source-fact lifecycle"
+        );
+        return record.key;
+    }
+
+    let accumulator = acquire_module_accumulator(collection.modules.len());
+    let key = TimingModuleKey::with_accumulator(boundary, module_index, accumulator);
     collection.modules.push(TimingModuleRecord {
         key,
         logical_identity,
         source_file_count,
         source_byte_count,
+        source_facts_finalized,
+        timings: Vec::new(),
     });
     collection.boundaries[boundary.index()].module_count += 1;
     key
+}
+
+/// Finalize the source facts for a module registered before preparation.
+///
+/// Exact repeated finalization is idempotent. A conflicting finalization is an
+/// internal invariant failure and is checked before any record mutation.
+pub(crate) fn finalize_module_source_facts(
+    key: TimingModuleKey,
+    source_file_count: u64,
+    source_byte_count: u64,
+) {
+    let mut guard = lock_collector();
+    let Some(collection) = guard.as_mut() else {
+        // Preparation can finish after the owning collection has drained.
+        // The callback belongs to that completed session and must not panic
+        // or affect a later collection.
+        return;
+    };
+    // Preparation can outlive the collection that registered the key. A new
+    // collection may already be active when that stale callback arrives, so
+    // its old session generation must not mutate or panic in the new report.
+    let Some(record) = collection
+        .modules
+        .iter_mut()
+        .find(|record| record.key == key)
+    else {
+        return;
+    };
+
+    if record.source_facts_finalized {
+        assert_eq!(
+            record.source_file_count, source_file_count,
+            "timing module finalization changed source file count"
+        );
+        assert_eq!(
+            record.source_byte_count, source_byte_count,
+            "timing module finalization changed source byte count"
+        );
+        return;
+    }
+
+    assert_eq!(
+        record.source_file_count, 0,
+        "timing module placeholder has non-zero source file count"
+    );
+    assert_eq!(
+        record.source_byte_count, 0,
+        "timing module placeholder has non-zero source byte count"
+    );
+    record.source_file_count = source_file_count;
+    record.source_byte_count = source_byte_count;
+    record.source_facts_finalized = true;
 }
 
 /// Record one counter observation when the counter channel is active.
@@ -380,13 +512,86 @@ pub(crate) fn output_enabled() -> bool {
 /// The retained counter is validated here so a duplicate registration or a
 /// future re-registration path cannot drift from the actual record table.
 fn recompute_boundary_module_counts(snapshot: &mut BenchmarkObservationSnapshot) {
-    let mut counts = std::collections::BTreeMap::<TimingBoundaryId, u64>::new();
+    let mut counts = std::collections::BTreeMap::<(TimingSessionId, usize), u64>::new();
     for record in &snapshot.modules {
-        *counts.entry(record.key.boundary()).or_default() += 1;
+        let boundary = record.key.boundary();
+        *counts
+            .entry((boundary.session(), boundary.index()))
+            .or_default() += 1;
     }
     for boundary in &mut snapshot.boundaries {
-        boundary.module_count = counts.get(&boundary.id).copied().unwrap_or(0);
+        boundary.module_count = counts
+            .get(&(boundary.id.session(), boundary.id.index()))
+            .copied()
+            .unwrap_or(0);
     }
+}
+
+/// Validate the typed context against the metric's schema attribution kind.
+///
+/// When attribution is disabled the caller intentionally discards context and
+/// records only the global slot. When it is enabled, a context must name the
+/// current session, carry registered storage and match the metric's declared
+/// boundary/module kind; this keeps invalid attribution out of both global and
+/// attributed aggregates.
+fn accepts_attribution(
+    metric: TimingMetric,
+    context: Option<TimingContext>,
+    session_raw: u64,
+    attribution_enabled: bool,
+) -> bool {
+    if !attribution_enabled {
+        return true;
+    }
+
+    // A caller may intentionally record a typed metric without requesting an
+    // attribution row. Keep that global evidence while reserving attributed
+    // slots for a registered context of the metric's declared kind.
+    if context.is_none() {
+        return true;
+    }
+
+    let session = TimingSessionId::from_raw(session_raw);
+    match metric.descriptor().attribution {
+        TimingAttributionKind::None => context.is_none(),
+        TimingAttributionKind::Boundary => matches!(
+            context,
+            Some(TimingContext::Boundary(boundary))
+                if boundary.session() == session
+                    && boundary.accumulator().is_some()
+        ),
+        TimingAttributionKind::Module => matches!(
+            context,
+            Some(TimingContext::Module(module))
+                if module.boundary().session() == session
+                    && module.accumulator().is_some()
+        ),
+    }
+}
+
+fn same_accumulator(
+    left: Option<&'static super::attribution::TimingAttributionAccumulator>,
+    right: Option<&'static super::attribution::TimingAttributionAccumulator>,
+) -> bool {
+    match (left, right) {
+        (Some(left), Some(right)) => std::ptr::eq(left, right),
+        (None, None) => true,
+        _ => false,
+    }
+}
+
+fn reset_global_metrics() {
+    for metric in &GLOBAL_METRICS {
+        metric.reset();
+    }
+}
+
+fn snapshot_global_metrics() -> Vec<TimingMetricAggregate> {
+    TimingMetric::ALL
+        .iter()
+        .copied()
+        .map(|metric| GLOBAL_METRICS[metric.index()].snapshot(metric))
+        .collect()
 }
 
 #[cfg(test)]
