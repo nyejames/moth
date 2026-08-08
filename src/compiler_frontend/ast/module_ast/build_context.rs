@@ -32,6 +32,55 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
+/// Exact schema-v1 metric family for one AST construction path.
+///
+/// Frontend modules, `config.moth`, and generated materialisation all use the
+/// same AST implementation but have deliberately distinct timing identities.
+/// Keeping that choice in the AST context prevents a config or generated AST
+/// span from being misreported as module-attributed frontend work.
+#[cfg(feature = "timers")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AstTimingMetricFamily {
+    Frontend,
+    Config,
+    Generated,
+}
+
+#[cfg(feature = "timers")]
+impl AstTimingMetricFamily {
+    pub(crate) const fn total(self) -> &'static str {
+        match self {
+            Self::Frontend => "frontend.ast.total",
+            Self::Config => "config.ast.total",
+            Self::Generated => "frontend.generated.ast.total",
+        }
+    }
+
+    pub(crate) const fn environment(self) -> &'static str {
+        match self {
+            Self::Frontend => "frontend.ast.environment",
+            Self::Config => "config.ast.environment",
+            Self::Generated => "frontend.generated.ast.environment",
+        }
+    }
+
+    pub(crate) const fn emit(self) -> &'static str {
+        match self {
+            Self::Frontend => "frontend.ast.emit",
+            Self::Config => "config.ast.emit",
+            Self::Generated => "frontend.generated.ast.emit",
+        }
+    }
+
+    pub(crate) const fn finalise(self) -> &'static str {
+        match self {
+            Self::Frontend => "frontend.ast.finalise",
+            Self::Config => "config.ast.finalise",
+            Self::Generated => "frontend.generated.ast.finalise",
+        }
+    }
+}
+
 /// Shared dependencies and configuration required to build one module AST.
 ///
 /// WHAT: holds all immutable registries, the mutable string table, and path/build settings
@@ -76,6 +125,10 @@ pub struct AstBuildContext<'a> {
     /// module AST children in the basic report.
     #[cfg(feature = "timers")]
     pub(crate) timing_context: Option<crate::timing::TimingContext>,
+
+    /// Selects the schema-v1 identity family for this AST construction.
+    #[cfg(feature = "timers")]
+    pub(crate) timing_metric_family: AstTimingMetricFamily,
 }
 
 /// Narrowed phase-local view of `AstBuildContext` without the mutable `StringTable`.
@@ -101,6 +154,10 @@ pub(crate) struct AstPhaseContext<'a> {
     /// Timer-only attribution context for this AST phase.
     #[cfg(feature = "timers")]
     pub(crate) timing_context: Option<crate::timing::TimingContext>,
+
+    /// Exact stable metric names selected by the owning AST path.
+    #[cfg(feature = "timers")]
+    pub(crate) timing_metric_family: AstTimingMetricFamily,
 }
 
 impl<'a> AstPhaseContext<'a> {
@@ -124,6 +181,8 @@ impl<'a> AstPhaseContext<'a> {
             capacity_estimate,
             #[cfg(feature = "timers")]
             timing_context,
+            #[cfg(feature = "timers")]
+            timing_metric_family,
         } = context;
 
         let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::with_capacity_estimate(
@@ -144,6 +203,8 @@ impl<'a> AstPhaseContext<'a> {
                 template_ir_store,
                 #[cfg(feature = "timers")]
                 timing_context,
+                #[cfg(feature = "timers")]
+                timing_metric_family,
             },
             string_table,
         )

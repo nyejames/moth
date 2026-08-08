@@ -716,7 +716,7 @@ fn dev_cycle_records_build_and_write_and_drains_one_collection_per_build() {
             snapshot
                 .timings
                 .iter()
-                .filter(|observation| observation.name == "command.dev.build_and_write")
+                .filter(|observation| observation.name == "command.dev.build_write")
                 .count(),
             1,
             "each dev cycle records exactly one build-and-write observation"

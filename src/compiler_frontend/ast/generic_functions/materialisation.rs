@@ -116,6 +116,9 @@ pub(crate) struct ModuleMaterialisationInput<'a> {
     pub(crate) build_profile: FrontendBuildProfile,
     pub(crate) project_path_resolver: Option<ProjectPathResolver>,
     pub(crate) template_const_loop_iteration_limit: usize,
+    /// The requesting module owns generated work in schema-v1 attribution.
+    #[cfg(feature = "timers")]
+    pub(crate) timing_context: Option<crate::timing::TimingContext>,
 }
 
 /// Owned frozen token buffer retained by one generic declaration artefact.
@@ -675,6 +678,8 @@ impl GenericTemplateArtefact {
             build_profile,
             project_path_resolver,
             template_const_loop_iteration_limit,
+            #[cfg(feature = "timers")]
+            timing_context,
         } = input;
         let project_path_resolver = project_path_resolver.ok_or_else(|| {
             CompilerMessages::from_error_ref(
@@ -704,9 +709,17 @@ impl GenericTemplateArtefact {
             template_const_loop_iteration_limit,
             capacity_estimate: FrontendArenaCapacityEstimate::default(),
             #[cfg(feature = "timers")]
-            timing_context: None,
+            timing_context,
+            #[cfg(feature = "timers")]
+            timing_metric_family: crate::compiler_frontend::ast::AstTimingMetricFamily::Generated,
         };
         let (phase_context, string_table_ref) = AstPhaseContext::from_build_context(build_context);
+        crate::timed_ast_stage_guard!(
+            timing_guard_generated_ast_total,
+            "frontend.generated.ast.total",
+            timing_context,
+            "Generated AST construction completed in: "
+        );
         let import_environment = self
             .materialise_import_environment(
                 &source_file,
@@ -781,13 +794,29 @@ impl GenericTemplateArtefact {
             instance_path: instance_path.clone(),
             call_location,
         };
-        let emitted = AstEmitter::new(&phase_context, &mut environment, 1)
-            .emit_generated_request(request, string_table_ref)?;
-        let mut build_result = AstFinalizer::new(&phase_context, environment).finalize(
-            emitted,
-            &[],
-            string_table_ref,
-        )?;
+        let emitted = {
+            crate::timed_ast_stage_guard!(
+                timing_guard_generated_ast_emit,
+                "frontend.generated.ast.emit",
+                timing_context,
+                "Generated AST emission completed in: "
+            );
+            AstEmitter::new(&phase_context, &mut environment, 1)
+                .emit_generated_request(request, string_table_ref)?
+        };
+        let mut build_result = {
+            crate::timed_ast_stage_guard!(
+                timing_guard_generated_ast_finalise,
+                "frontend.generated.ast.finalise",
+                timing_context,
+                "Generated AST finalisation completed in: "
+            );
+            AstFinalizer::new(&phase_context, environment).finalize(
+                emitted,
+                &[],
+                string_table_ref,
+            )?
+        };
         build_result
             .materialisation_context
             .inherit_nominal_blueprints(requester_context)
@@ -2713,6 +2742,7 @@ impl ModuleMaterialisationPreparation {
         requester_context: &ModuleMaterialisationPreparation,
         requester_call_location: &crate::compiler_frontend::tokenizer::tokens::SourceLocation,
         project_path_resolver: Option<ProjectPathResolver>,
+        #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
     ) -> Result<MaterialisedGenericAst, CompilerMessages> {
         let template = self
             .template_for_identity(identity.declaration())
@@ -2740,9 +2770,17 @@ impl ModuleMaterialisationPreparation {
             template_const_loop_iteration_limit: self.template_const_loop_iteration_limit,
             capacity_estimate: self.capacity_estimate,
             #[cfg(feature = "timers")]
-            timing_context: None,
+            timing_context,
+            #[cfg(feature = "timers")]
+            timing_metric_family: crate::compiler_frontend::ast::AstTimingMetricFamily::Generated,
         };
         let (phase_context, string_table_ref) = AstPhaseContext::from_build_context(build_context);
+        crate::timed_ast_stage_guard!(
+            timing_guard_generated_ast_total,
+            "frontend.generated.ast.total",
+            timing_context,
+            "Generated AST construction completed in: "
+        );
         let mut environment = self
             .build_environment(&phase_context, string_table_ref)
             .map_err(|error| CompilerMessages::from_error_ref(error, &self.string_table))?;
@@ -2780,14 +2818,30 @@ impl ModuleMaterialisationPreparation {
             instance_path: instance_path.clone(),
             call_location,
         };
-        let emitted = AstEmitter::new(&phase_context, &mut environment, 1)
-            .emit_generated_request(request, string_table_ref)?;
+        let emitted = {
+            crate::timed_ast_stage_guard!(
+                timing_guard_generated_ast_emit,
+                "frontend.generated.ast.emit",
+                timing_context,
+                "Generated AST emission completed in: "
+            );
+            AstEmitter::new(&phase_context, &mut environment, 1)
+                .emit_generated_request(request, string_table_ref)?
+        };
 
-        let mut build_result = AstFinalizer::new(&phase_context, environment).finalize(
-            emitted,
-            &[],
-            string_table_ref,
-        )?;
+        let mut build_result = {
+            crate::timed_ast_stage_guard!(
+                timing_guard_generated_ast_finalise,
+                "frontend.generated.ast.finalise",
+                timing_context,
+                "Generated AST finalisation completed in: "
+            );
+            AstFinalizer::new(&phase_context, environment).finalize(
+                emitted,
+                &[],
+                string_table_ref,
+            )?
+        };
         build_result
             .materialisation_context
             .inherit_nominal_blueprints(self)

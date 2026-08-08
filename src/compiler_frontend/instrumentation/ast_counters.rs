@@ -185,8 +185,7 @@ mod detailed {
         // Stable `MOTH_BENCH counter` lines (summary/full) are emitted inside
         // `log_benchmark_counter`, so `off` and `summary` stay quiet of per-line
         // prose here.
-        let print_human_counters =
-            crate::timing::current_counter_output_mode().emits_human_counter_prose();
+        let print_human_counters = crate::timing::counter_human_prose_enabled();
 
         if print_human_counters {
             saying::say!("AST/churn counters:");

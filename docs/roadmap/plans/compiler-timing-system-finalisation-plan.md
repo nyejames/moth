@@ -2,15 +2,15 @@
 
 ## Status
 
-- **Plan state:** authoritative replacement plan, not started
-- **Committed repository anchor:** `e739d4f1ba418cffbfce74a139ba86414c624465`
+- **Plan state:** authoritative replacement plan, Phase 3 implementation complete and checkpoint committed
+- **Committed correction baseline:** `3abc75f6f`
 - **Intended repository path:** `docs/roadmap/plans/compiler-timing-system-finalisation-plan.md`
 - **Roadmap status:** do not add this plan to `docs/roadmap/roadmap.md` unless the coordinator requests it separately
 - **Primary invariant:** a compiler built without `timers` performs no timer-system runtime work
 - **Timing compatibility stance:** this plan deliberately establishes timing schema v1. Timing data recorded before v1 is legacy and non-comparable
-- **Authority:** this plan supersedes:
-  - `docs/roadmap/plans/compiler-timing-summary-and-zero-cost-instrumentation-plan.md`
-  - `docs/roadmap/plans/compiler-timing-final-review-corrections.md`
+- **Historical-plan policy:** the two earlier timing-plan files were deliberately removed in
+  `77a45e790708f76f8b96267991a0370a3ecfc9c8`; Git history retains them. This plan is the
+  single current timing authority and must not claim that deleted files remain marked in place.
 
 The earlier plans established the concise report, zero-cost feature boundary, project/package attribution, initial session ownership and several frontend/backend observations. This plan owns the final architecture, naming, measurement boundaries and implementation path.
 
@@ -26,199 +26,42 @@ Refresh this block after every accepted slice and before compaction.
 ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-timing-system-finalisation-plan.md`
 
-CURRENT_SLICE:
-- Phase: 0
-- Checklist item: reconcile the large uncommitted Phase 4 migration with this replacement design
-- Goal: preserve useful work, remove transitional drift and restore one buildable implementation path
-- Non-goals: final metric migration, benchmark recording, roadmap insertion
-
 PROGRESS_RECORD:
 - WORK_ID: `compiler-timing-finalisation`
-- WORK_SOURCE: this plan
-- BASE_REVISION: `e739d4f1ba418cffbfce74a139ba86414c624465`
-- HEAD_REVISION: `34cf62911` (current worktree dirty)
-- STATUS: in progress
-- CURRENT_SCOPE: Phase 1 timing schema v1 completed and audited; commit checkpoint, then Phase 2
-- PIPELINE: launcher installed at `~/.local/bin`, `validate-config` + `doctor` clean, routes auditor/explorer/final_auditor/involved_worker/simple_worker
-- AUTHORITIES: read `AGENTS.md`, `compiler-design-overview.md`, `build-system-design.md`, `style-guide.mtf`, `testing.mtf`, `validation.mtf`, `benchmarks/README.md`
-- UNCOMMITTED (Phase 1 slice, pending checkpoint commit); full diff saved to `/tmp/compiler-timing-phase4-in-progress.patch`
-  - untracked: `src/timing/enabled/schema.rs`, `src/timing/tests/schema_tests.rs`; `type-stress.html` (unrelated user file, preserve untouched)
-  - modified: `src/timing/enabled.rs` (`mod schema;`), `src/timing/tests/mod.rs` (`mod schema_tests;`), this plan (capsule, checklist, closeout table)
-  - committed: Phase 0 reconciliation checkpoint `a30effed2`
-  - schema inventory verified against `/tmp/inventory-raw.txt` (74 provisional names, extraction diff clean)
-  - 46 v1 metrics = 35 Basic + 11 Detailed; stable names match plan §3 exactly
-  - schema module absent in a no-`timers` build (erasure check clean)
-- NEXT_ACTION: commit the accepted Phase 1 checkpoint, then begin Phase 2 (rebuild session, runtime and aggregate collection)
-- AUDITS:
-  - 2026-08-07 Phase 1 final_auditor route completed (run 20260807T095857Z-b7159c64): verdict findings -> all resolved; scope: schema.rs/schema_tests.rs, wiring, erasure boundary, session reuse, summary disjointness, plan closeout; found registry correct, plan-coincident, drift-proof, no doc drift except one stale test count now fixed
-  - 2026-08-07 Phase 1 interim auditor route completed (run 20260807T095359Z-da99d88e): verdict `findings` (2 low optional, both resolved): reworded the stale `TimingMetricDescriptor.parent` comment; added `registry_size_matches_plan_closeout` test pinning 46/35/11
-  - 2026-08-07 Phase 0 read-only auditor route completed (run 20260807T000334Z-04ac5112): verdict "audit pass with required fixes"; findings addressed:
-  - removed dead `record_labeled_pipeline_timing` (stale `labeled_pipeline_timer!` backing helper, no callers) from `src/timing/enabled.rs`
-  - added optional trailing comma `$(,)?` to the `command_timing_scope!` enabled arm for parity with the disabled arm (src/timing.rs)
-  - post-fix: five-feature check matrix, `cargo clippy --features timers`, timing lib tests (57 pass), `just timers-erasure-check` (7935056 bytes), `cargo fmt --all --check`, `git diff --check` all clean
-- BLOCKERS: none
-- SESSION_NOTES 2026-08-07:
-  - read the plan's authoritative design and full Phase 0 checklist after compaction
-  - root-fixed the parallel timing flake: unified the two independent test locks
-    (`lock_timing_tests` in tests/mod.rs and `lock_counter_test` in
-    instrumentation) into one facade-owned `lock_instrumentation_tests` in
-    `src/timing.rs`; frontend and timing suites now share one fence
-  - `cargo test --features timers --lib timing` passes 5/5 parallel runs (57 tests)
-  - full lib suite passes under default, `timers`, `detailed_timers`,
-    `benchmark_counters` (4146/4147/4100/4098 passed); `benchmark_counters,timers`
-    has one pre-existing failure `chunked_file_preparation_skips_identity_payload_remap`
-    that ALSO fails at the clean committed HEAD 34cf62911 (not introduced here)
-  - five-feature check matrix passes; `cargo fmt --all --check` passes;
-    `git diff --check` passes; `just timers-erasure-check` passes
-  - marked `compiler-timing-final-review-corrections.md` superseded and linked to
-    this plan (the earlier summary-plan was already removed by the anchor commit)
-  - macro surface audited: all seven old names (`pipeline_timer!`,
-    `labeled_pipeline_timer!`, `timing_guard!`, `timed_manual_finish!`,
-    `timed_manual_finish_attributed!`, `command_timing_start!`) replaced by the
-    plan's final surface; no mixed old/new surface remains
-  - full diff (23 mods + 3 untracked) re-saved to /tmp/compiler-timing-phase4-in-progress.patch
+- WORK_SOURCE: this plan and the 2026-08-08 Phase 0/1 correction review
+- BASE_REVISION: `3abc75f6f`
+- STATUS: active
+- CURRENT_SCOPE: Phase 3 checkpoint complete and ready for Phase 4
+- COMPLETED: Phase 0/1 correction checkpoint committed as `3abc75f6f`; Phase 2 committed as `a9b970bb6` with immutable runtime configuration, explicit session channels, fallible raw-session ownership, atomic inactive fast paths and focused lifecycle regressions while retaining raw event snapshots. Metric-only raw sessions skip facade attribution-context expressions. The final audit's stale multi-record output gap is covered by `multi_record_outcome_rejects_stale_contexts_before_bench_emission`. The retained Phase 3 candidate has been fully diff-inspected, its AST timing-family visibility path corrected, provisional production names migrated to schema-v1 identities, obsolete live timers removed, summary command applicability corrected, and focused regression coverage added. The stale counter expectation in `chunked_file_preparation_skips_identity_payload_remap` was corrected after confirming the same expectation failed at the accepted Phase 2 baseline. The existing forced output-plan failure regression now also asserts `build.output.total`.
+- VALIDATION: Phase 3 passes `cargo fmt --all --check`; the five-feature check matrix (`cargo check --no-default-features`, `timers`, `detailed_timers`, `timers,benchmark_counters` and `benchmark_counters`); `cargo test --features timers,benchmark_counters --lib -- --format terse` (4,185 tests); `cargo test --features detailed_timers --lib -- --format terse` (4,176 tests); the timing-focused suite (81 tests); the focused frontend suite (38 tests); the forced output-plan regression; `just timers-erasure-check`; and the complete `just validate` gate. The final gate passed native, Linux-x64 and Windows-x64 Clippy, workspace tests (4,174, 17 and 601 passing test groups), 1,818 integration cases, docs checking, all 60 benchmark preflights and timer erasure.
+- AUDITS: Phase 0/1 final auditor found one low-severity `§ 12` cross-reference; corrected to `§ 10`. Phase 2 interim audit found two low-severity gaps: restore one-lock multi-recording and add runtime-gated macro regressions. Both are corrected. The Phase 3 interim auditor route was attempted twice and the configured `final_auditor` route was attempted twice. Every attempt terminated before handoff with HTTP 429 from the only eligible Ollama provider, with no worktree changes. The coordinator completed a local final audit covering registry identity, stale names, stage ownership, attribution, exact-once AST totals, backend/output applicability, failure-path guards, tests, erasure and documentation accuracy. No code findings remain; the independent route limitation is recorded explicitly.
+- BLOCKERS: No code blockers remain after the AST timing-family visibility correction. The independent auditor could not produce a handoff because the only eligible provider repeatedly returned HTTP 429; the Codex provider remained disabled by configured routing. Phase 3 is accepted with that audit limitation recorded.
+- NOTES: Phase 0 and Phase 1 were committed together in `77a45e790708f76f8b96267991a0370a3ecfc9c8`; their correction review became the accepted checkpoint `3abc75f6f`. Phase 2 is its own accepted checkpoint. The candidate was explicitly retained after complete diff inspection, validated locally and accepted as the Phase 3 checkpoint.
+
+CURRENT_SLICE:
+- Phase: Phase 3 semantic call-site migration
+- Goal: migrate production timing call sites to v1 names and semantic endpoints while retaining raw event storage
+- Non-goals: typed facade, dense collector and typed summary-policy work
 
 LAST_GOOD_COMMIT:
-- `e739d4f1ba418cffbfce74a139ba86414c624465`
+- `a9b970bb6`
 
 CURRENT_WORKTREE_STATE:
-- GitHub can verify only the committed anchor
-- User-reported uncommitted work:
-  - new facade macros added:
-    - `timed_stage!`
-    - `timed_stage_attributed!`
-    - `timing_scope!`
-    - `timing_scope_attributed!`
-    - `timing_scope_multi!`
-    - `record_timing_duration!`
-    - `record_attributed_duration!`
-    - `command_timing_scope!`
-  - old facade macros deleted
-  - production call sites migrated broadly to guards
-  - counter summary and command orchestration split into dedicated modules
-  - guard `finish()` calls restored in `build.rs`, `check.rs`, `compilation.rs` and `source_discovery.rs`
-  - remaining reported call-site work:
-    - `project_config/parsing.rs`
-    - `project_config.rs`
-    - `output/orchestrator.rs`
-    - `source_tree_index.rs`
-  - validation is incomplete
-  - `just timers-erasure-check` was running when work paused
-- Confirm branch, exact diff and unrelated changes before editing
-- Save the uncommitted diff under `/tmp` before restructuring it
-
-RELEVANT_DOCS_THIS_SLICE:
-- `AGENTS.md`
-- `docs/compiler-design-overview.md`
-- `docs/build-system-design.md`
-- `docs/src/docs/codebase/style-guide/style-guide.mtf`
-- `docs/src/docs/codebase/style-guide/testing.mtf`
-- `docs/src/docs/codebase/style-guide/validation.mtf`
-- `benchmarks/README.md`
-- the two superseded timer plans for implementation history only
-
-RELEVANT_CODE:
-- `src/timing.rs`: compile-erasing facade
-- `src/timing/enabled.rs`: current enabled implementation entry point
-- `src/timing/enabled/session.rs`: owned session lifecycle
-- `src/timing/enabled/collector.rs`: process-global collection
-- `src/timing/enabled/mode.rs`: cached output mode
-- `src/timing/enabled/attribution.rs`: boundary and module identities
-- `src/timing/enabled/summary.rs`: basic report policy and aggregation
-- `src/timing/enabled/render.rs`: saying-based renderer
-- `src/compiler_frontend/compiler_messages/compiler_dev_logging.rs`: remaining detailed timer ownership
-- `src/compiler_frontend/ast/mod.rs`: AST environment, emission and finalisation timing
-- `src/compiler_frontend/ast/module_ast/build_context.rs`: timer-only AST context
-- `src/compiler_frontend/ast/module_ast/environment/builder.rs`: AST environment boundary
-- `src/compiler_frontend/ast/generic_functions/materialisation.rs`: generated AST path
-- `src/build_system/create_project_modules/compilation.rs`: Stage 0 and boundary timing
-- `src/build_system/create_project_modules/frontend_orchestration.rs`: frontend stage timing
-- `src/build_system/project_config.rs`
-- `src/build_system/project_config/parsing.rs`
-- `src/build_system/output/orchestrator.rs`
-- `src/build_system/create_project_modules/source_discovery.rs`
-- `src/build_system/create_project_modules/source_tree_index.rs`
-- `src/projects/cli.rs`
-- `src/projects/check.rs`
-- `src/projects/dev_server/build_loop.rs`
-- `src/projects/dev_server/server.rs`
-- `src/projects/html_project/js_path.rs`
-- `src/projects/html_project/wasm/artifacts.rs`
-- `src/benchmarking/frontend.rs`
-- `xtask/src/timers_erasure_check.rs`
-- benchmark parser, fingerprint and report owners under `xtask/src/`
-
-ACCEPTANCE_CRITERIA:
-- no-timer builds contain no timer clock reads, types, state, context, labels, environment queries, collector calls or timer-only strings
-- timing schema v1 has one typed metric registry and documented semantic boundaries
-- every recorded metric is named and owned by the stage whose work it measures
-- config AST, module AST and generated AST work use distinct metric identities
-- command, boundary, module and nested stage timing cannot be confused by string-prefix inference
-- session start, finish, drop and nested-start behaviour is explicit and tested
-- disabled and inactive timer modes avoid unnecessary clock reads and locks
-- record paths perform no formatting or allocation
-- raw benchmark output is deterministic and tagged with timing schema v1
-- the basic report has one policy owner for display and command accounting
-- detailed timers retain deeper evidence without changing basic metrics
-- old benchmark data is never compared as if it used timing schema v1
-- the worktree contains one current implementation path with no compatibility wrappers
-
-DECISIONS_ALREADY_MADE:
-- decision: zero runtime cost without `timers` is non-negotiable
-  - reason: developer instrumentation must not affect ordinary compiler builds
-  - source/user/date: Nye, 2026-08-05 and reaffirmed 2026-08-06
-- decision: historical timing compatibility is no longer a design constraint
-  - reason: early-alpha provisional data is less valuable than correct long-term stage ownership
-  - source/user/date: Nye, 2026-08-06
-- decision: this plan establishes the first stable timing schema
-  - reason: future comparisons need an explicit semantic baseline
-  - source/user/date: Nye, 2026-08-06
-- decision: basic timers, detailed timers and benchmark tooling remain distinct products
-  - reason: the human summary must stay quick to scan and must not become a second benchmark system
-  - source/user/date: accepted timer design, 2026-08-05
-- decision: attribution remains explicit and thread-scheduling independent
-  - reason: future Rayon work must not lose or invent package/module ownership
-  - source/user/date: accepted timer design, 2026-08-05
-- decision: no thread-local attribution or nested tracing framework
-  - reason: timer ownership should remain explicit and narrow
-  - source/user/date: accepted correction direction, 2026-08-06
-- decision: the plan stays outside the roadmap for now
-  - reason: the coordinator chooses the execution pause point
-  - source/user/date: Nye, 2026-08-05
+- Confirmed clean on `main` at `a9b970bb6` before the attempted Phase 3 work
+- Phase 0 and Phase 1 were committed together
+- Phase 0/1 correction checkpoint committed separately
+- Phase 2 deliberately retains the raw event vector and passed its final audit cycle and serial full validation gate
+- The retained, compiled and fully validated Phase 3 candidate across command, build-system, frontend, AST, backend and summary code plus focused tests is committed. The worktree is clean. The independent audit route limitation is recorded above.
+- No typed facade or dense collector work has started
 
 BLOCKERS / RISKS:
-- the uncommitted Phase 4 diff is large and cannot be reviewed through GitHub
-- blanket guard migration may have widened scopes accidentally
-- the committed collector still has incomplete nested raw-session ownership
-- the committed mode cache and collector still use mutexes on active paths
-- counter-summary collection and timer output modes are coupled incorrectly
-- old raw metric names and `_ms` suffixes are provisional
-- existing benchmark history must be invalidated deliberately
-- instrumentation overlaps active build/frontend files, so resume only from the current worktree after re-reading project authorities
-
-VALIDATION_STATE:
-- committed Phase 3 checkpoint reports:
-  - five-feature Cargo check matrix
-  - thousands of no-feature, timer and detailed-timer tests
-  - Clippy with warnings denied
-  - `just timers-erasure-check`
-  - `just validate`
-  - docs, failed-AST, single-file and dev smokes
-- GitHub exposes no Actions status rows for the checkpoint
-- uncommitted Phase 4 validation is incomplete
-
-DOCS_IMPACT:
-- add this plan
-- mark both older timer plans superseded by this plan
-- update `benchmarks/README.md`
-- update timer module docs and Cargo feature comments
-- update validation documentation if the erasure gate changes
-- update `index.md` if timing modules move from `enabled.rs` to `enabled/mod.rs`
-- no progress-matrix change
-- no roadmap insertion
+- The Phase 3 candidate was retained explicitly after reconciliation and has passed the local audit and full validation gate
+- raw metric call sites intentionally remain until corrected Phase 3; no compatibility mapper may be introduced before then
+- preserve raw event snapshots until Phase 5; do not introduce a parallel collector
+- inactive channels must avoid timing clocks and collector locks
 
 NEXT_ACTION:
-- execute Phase 0 exactly, then stop for checkpoint review
+- Begin Phase 4 typed-facade and collector work from the accepted Phase 3 checkpoint.
 ```
 
 ---
@@ -387,6 +230,8 @@ pub(crate) struct TimingMetricDescriptor {
     pub(crate) level: TimingLevel,
     pub(crate) relation: TimingRelation,
     pub(crate) attribution: TimingAttributionKind,
+    pub(crate) parent: Option<TimingParent>,
+    pub(crate) accounting: TimingAccountingRole,
 }
 ```
 
@@ -408,6 +253,23 @@ pub(crate) enum TimingAttributionKind {
     None,
     Boundary,
     Module,
+}
+
+pub(crate) enum TimingParent {
+    Metric(TimingMetric),
+    SummaryGroup(TimingSummaryGroup),
+}
+
+pub(crate) enum TimingSummaryGroup {
+    PublicInterface,
+    BorrowValidation,
+    GeneratedFunctions,
+}
+
+pub(crate) enum TimingAccountingRole {
+    CommandTotal,
+    Pipeline(TimingPipelineStage),
+    Evidence,
 }
 ```
 
@@ -504,7 +366,6 @@ frontend.generated.ast.finalise
 
 | Stable name | Meaning |
 |---|---|
-| `backend.html.total` | complete HTML backend work |
 | `backend.js.lower_entry` | entry-module HIR to JS lowering |
 | `backend.js.lower_linked` | linked-module HIR to JS lowering |
 | `backend.html.render` | HTML document rendering |
@@ -514,6 +375,11 @@ frontend.generated.ast.finalise
 | `backend.assets.plan` | tracked/runtime asset planning |
 | `backend.assets.emit` | tracked/runtime asset emission |
 | `output.write.total` | complete output write orchestration |
+
+`build.backend.total` is the sole generic selected-backend pipeline span.
+There is no `backend.html.total`: HTML, JS, Wasm and asset metrics are
+evidence nested below the generic pipeline span. Backend and output metrics
+apply to `Build` and `Dev`, never `Check`.
 
 Config, bootstrap and output microstages remain detailed-only unless evidence shows they belong in the basic report.
 
@@ -533,6 +399,18 @@ Tracked assets = plan + emit
 ```
 
 Record a parent total separately only when it measures a wider real span that includes gaps or work not represented by its children.
+
+`TimingParent::Metric` identifies a real measured containing span.
+`TimingParent::SummaryGroup` identifies only a typed human aggregate of
+disjoint accumulated work. It never pretends that an unmeasured aggregate row
+was a parent duration.
+
+`TimingAccountingRole` records command-accounting ownership in the schema:
+the command total, each unique top-level pipeline segment, or non-accounted
+evidence. Stage 0 directory and single-file spans are nested evidence under
+`build.frontend.total`; `output.write.total` is nested under
+`build.output.total`; boundary inventory and compile remain accumulated Stage
+0 attribution evidence and never command-accounting children.
 
 ---
 
@@ -758,7 +636,7 @@ command_timing_scope!(binding, command_kind)
 finish_command_timing!(binding, succeeded)
 ```
 
-Names may be adjusted once during Phase 3 for consistency. There must be one final shape.
+Names may be adjusted once during corrected Phase 4 for consistency. There must be one final shape.
 
 ### Expression macros
 
@@ -834,8 +712,9 @@ Detailed prose must print the same captured duration stored in the collector.
 
 - inventory measures source discovery, graph/inventory construction and retained preparation owned by that pass
 - compile measures package and project module compilation
-- boundary inventory and compile are accumulated attributed work
-- single-file timing uses its own coherent owner rather than imitating directory internals
+- directory inventory and compile are nested evidence under `build.frontend.total`
+- single-file timing is the alternative nested frontend path under `build.frontend.total`
+- boundary inventory and compile are accumulated Stage 0 attributed work, never command-accounting children
 
 ### AST
 
@@ -858,6 +737,7 @@ Config and generated materialisation use separate metric IDs. Basic module AST c
 
 - project and finalisation are separate recorded leaves
 - the basic `Public interface` row sums them
+- both leaves are `Accumulated` under `TimingSummaryGroup::PublicInterface`
 - do not record a duplicate aggregate span with the same values
 
 ### Borrow and generated work
@@ -873,10 +753,15 @@ The human report may group them, but raw schema keeps their owners separate.
 
 ### Backend
 
+- `build.backend.total` is the one selected-backend command-pipeline span
+- `backend.html.total` does not exist because it would duplicate the generic span
 - `backend.wasm.total` means complete Wasm route build and is displayed as `Wasm build`
 - Wasm lowering alone uses `backend.wasm.lower`
 - tracked assets group plan and emission or label emission precisely
 - JS entry and linked lowering remain distinct raw metrics
+- HTML, JS, Wasm and asset evidence is nested under `build.backend.total`
+- output write evidence is nested under `build.output.total`
+- backend and output evidence applies to build and dev, never check
 - backend parent totals may overlap nested evidence and are never added together in command accounting
 
 ### Failure paths
@@ -1049,92 +934,38 @@ Each phase is a stable checkpoint sized for one coding-agent context. Every phas
 
 ---
 
-# Phase 0 - Reconcile the uncommitted migration and install this authority
+# Phase 0 - Reconcile the migration and install this authority
 
-## Context
+## Recorded deviation
 
-The current worktree contains a large uncommitted Phase 4 migration that GitHub cannot inspect. Preserve it before deciding what remains useful. Do not continue the mechanical guard-finish pass under the superseded plan.
+Phase 0 and Phase 1 were committed together in
+`77a45e790708f76f8b96267991a0370a3ecfc9c8`, so the intended review gate did
+not occur between them. Do not rewrite history. This correction review acts
+as the missed gate, then later phases return to one accepted checkpoint per
+phase.
 
-## Checklist
+## Accepted retained foundation
 
-### Preserve and inspect
+- declarative dense metric enum and descriptor table
+- `TIMING_SCHEMA_VERSION = 1` with no legacy aliases
+- separate config, module and generated AST identities
+- dedicated `command.rs` and `counter_summary.rs`
+- exact-once named guards and direct-expression disabled macro arms
+- explicit facade re-exports and the enabled-only schema module
+- unified instrumentation test lock and all pre-v1 timing-data reset policy
 
-- [x] Re-read the required project authorities after compaction.
-- [ ] Run:
-  - [x] `git status --short`
-  - [x] `git branch --show-current`
-  - [x] `git log -1 --oneline`
-  - [x] `git diff --stat`
-  - [x] `git diff --check`
-- [ ] Save:
-  - [x] `git diff > /tmp/compiler-timing-phase4-in-progress.patch`
-  - [x] a changed-file list under `/tmp`
-- [x] Record every unrelated change in the active capsule.
-- [x] Do not stash, reset or discard the diff without preserving the patch.
+## Reconciliation record
 
-### Classify uncommitted work
-
-For each changed file, classify the work as:
-
-- [x] retain unchanged
-- [x] retain but adapt to typed metrics
-- [x] replace because guard scope is wrong
-- [x] revert to the committed anchor and reimplement later
-- [x] unrelated and preserve untouched
-
-Expected likely retention:
-
-- [x] dedicated `command.rs`
-- [x] dedicated `counter_summary.rs`
-- [x] named guard types with exact-once finish semantics
-- [x] direct-expression disabled macro arms
-- [x] explicit module split work
-
-Expected rework:
-
-- [x] string metric arguments
-- [x] blanket guard call-site migration
-- [x] explicit `.finish()` placements made only to mimic old boundaries
-- [x] old compatibility comments
-- [x] old macro names retained through wrappers
-
-### Establish one buildable path
-
-- [x] Add this plan to `docs/roadmap/plans/`.
-- [x] Mark both older timer plans `superseded` and link to this plan.
-- [x] Update the capsule with the exact worktree.
-- [x] Make the current tree compile without introducing duplicate timer APIs.
-- [ ] If the broad migration cannot be made coherent in this slice:
-  - [ ] restore affected call sites to `e739d4f1...`
-  - [ ] retain the saved patch as reference
-  - [ ] keep only the clean module/facade pieces
-- [x] Do not commit a mixed old/new macro surface.
-
-## Audit
-
-- [x] Confirm one owner for every retained macro and enabled module.
-- [x] Confirm no timer data enters semantic artefacts.
-- [x] Confirm no uncommitted call-site span is accepted merely because it matches an old boundary.
-- [x] Confirm the replacement plan is the only active authority.
-
-## Style review
-
-- [x] No transitional wrappers.
-- [x] No broad lint allowances added.
-- [x] Module files have concise WHAT/WHY documentation.
-- [x] The plan capsule is accurate enough to resume after compaction.
-
-## Validation
-
-- [x] `cargo fmt --all --check`
-- [x] minimum five-feature `cargo check` matrix
-- [x] focused no-feature erasure tests
-- [x] `git diff --check`
-
-## Checkpoint
-
-- [ ] Commit the reconciliation checkpoint.
-- [ ] Stop for review before Phase 1.
+- [x] Confirm the worktree was clean at
+  `77a45e790708f76f8b96267991a0370a3ecfc9c8` before corrections.
+- [x] Preserve the committed implementation rather than reverting it.
+- [x] Record that the historic timer-plan files were deleted and remain
+  available through Git history.
+- [x] Remove the accidental roadmap entry because no separate coordinator
+  approval made this plan roadmap-active.
+- [x] Refresh the active context capsule with the actual baseline and risks.
+- [x] Accept this correction review after the focused validation and final
+  audit; its one documentation finding was corrected.
 
 ---
 
@@ -1176,10 +1007,10 @@ Metric identity must be settled before collector and call-site work. This phase 
 - [x] stable names are unique
 - [x] names follow lowercase dotted syntax
 - [x] no `_ms` suffix remains
-- [x] every basic metric has a human owner
+- [x] every basic command-accounting span has a unique typed pipeline role
 - [x] every attributed metric permits the supplied context kind
 - [x] every command total is unique
-- [x] every nested row has a valid parent policy
+- [x] every metric parent is typed and every virtual group is a typed summary group
 - [x] schema order is deterministic
 
 ### Plan refresh
@@ -1204,7 +1035,8 @@ Metric identity must be settled before collector and call-site work. This phase 
 
 ## Validation
 
-- [x] schema unit tests (12 tests, `cargo test --features timers --lib timing` -> 69 passed)
+- [x] At the original `77a45e790708f76f8b96267991a0370a3ecfc9c8`
+  checkpoint: schema unit tests (12 tests, `cargo test --features timers --lib timing` -> 69 passed).
 - [x] five-feature check matrix
 - [x] no-feature build proves the schema module is absent
 - [x] `cargo fmt --all --check`
@@ -1212,93 +1044,255 @@ Metric identity must be settled before collector and call-site work. This phase 
 
 ## Checkpoint
 
-- [x] Stop for review before Phase 2; commit schema v1 when the reviewer approves.
+- [x] The original checkpoint was committed with Phase 0 in
+  `77a45e790708f76f8b96267991a0370a3ecfc9c8`.
+- [x] Complete the correction review before Phase 2.
+
+## Phase 0/1 correction checkpoint
+
+- [x] Replace string parents with `TimingParent::Metric` and
+  `TimingParent::SummaryGroup`.
+- [x] Make public-interface leaves accumulated
+  `TimingSummaryGroup::PublicInterface` evidence.
+- [x] Record typed command-accounting roles and reject duplicate Basic
+  pipeline spans.
+- [x] Remove duplicate `backend.html.total` and attach HTML, JS, Wasm and
+  asset evidence to `build.backend.total`.
+- [x] Make backend and output metrics `BuildOrDev`; check never records them.
+- [x] Define Stage 0/frontend, output/build-output and boundary/Stage-0
+  relationships.
+- [x] Replace leaking check/config guards with endpoint-timed expressions or
+  blocks and test their completion order.
+- [x] Converge failed output-plan construction through the build-command total
+  and test it.
+- [x] Reconcile roadmap, historical-plan policy and the active context.
+- [x] Reorder the remaining phases to remove the typed-schema/collector gap.
+- [x] Run the correction validation matrix and audits.
+- [x] Create correction checkpoint `3abc75f6f` before starting Phase 2.
 
 ## Phase 1 closeout - final v1 metric table
 
 The registry implemented in `src/timing/enabled/schema.rs` is the account of
 record for timing schema v1. Level: `Basic` (concise report) or `Detailed`
 (verbose/bench only). Relation: `WallSpan`, `Accumulated` or `NestedEvidence`.
-Parent values reference another metric's stable name or a well-known human
-aggregate row key (`frontend.public_interface`, `frontend.borrow`,
-`frontend.generated`).
+Parent values are typed `Metric(...)` spans or `Group(...)` human aggregates.
+Accounting is `CommandTotal`, `Pipeline(...)` or non-accounted `Evidence`.
 
-| Stable name | Level | Relation | Attribution | Command scope | Owner |
-|---|---|---|---|---|---|
-| `command.build.total` | Basic | WallSpan | None | BuildOnly | Command |
-| `command.check.total` | Basic | WallSpan | None | CheckOnly | Command |
-| `command.dev.build_write` | Basic | WallSpan | None | DevOnly | Command |
-| `command.dev.cycle` | Detailed | WallSpan | None | DevOnly | Command |
-| `build.bootstrap.total` | Basic | WallSpan | None | Universal | BuildSystem |
-| `build.frontend.total` | Basic | WallSpan | None | Universal | BuildSystem |
-| `build.backend.total` | Basic | WallSpan | None | BuildOrDev | BuildSystem |
-| `build.output.total` | Basic | WallSpan | None | BuildOrDev | BuildSystem |
-| `stage0.directory.inventory` | Basic | WallSpan | None | Universal | Stage0 |
-| `stage0.directory.compile` | Basic | WallSpan | None | Universal | Stage0 |
-| `stage0.single_file.total` | Basic | WallSpan | None | Universal | Stage0 |
-| `boundary.inventory` | Basic | Accumulated | Boundary | Universal | BuildSystem |
-| `boundary.compile` | Basic | Accumulated | Boundary | Universal | BuildSystem |
-| `frontend.prepare` | Basic | Accumulated | Module | Universal | Frontend |
-| `frontend.bind_headers` | Basic | Accumulated | Module | Universal | Frontend |
-| `frontend.order_declarations` | Basic | Accumulated | Module | Universal | Frontend |
-| `frontend.ast.total` | Basic | Accumulated | Module | Universal | Frontend |
-| `frontend.ast.environment` | Basic | NestedEvidence | Module | Universal | Frontend |
-| `frontend.ast.emit` | Basic | NestedEvidence | Module | Universal | Frontend |
-| `frontend.ast.finalise` | Basic | NestedEvidence | Module | Universal | Frontend |
-| `frontend.public_interface.project` | Basic | NestedEvidence | Module | Universal | Frontend |
-| `frontend.hir` | Basic | Accumulated | Module | Universal | Frontend |
-| `frontend.borrow.initial` | Basic | Accumulated | Module | Universal | Frontend |
-| `frontend.borrow.converge` | Basic | Accumulated | Module | Universal | Frontend |
-| `frontend.generated.materialise` | Basic | Accumulated | Module | Universal | Frontend |
-| `frontend.generated.borrow_recheck` | Basic | Accumulated | Module | Universal | Frontend |
-| `frontend.public_interface.finalise` | Basic | NestedEvidence | Module | Universal | Frontend |
-| `frontend.module.semantic_total` | Basic | Accumulated | Module | Universal | Frontend |
-| `config.ast.total` | Detailed | WallSpan | None | Universal | BuildSystem |
-| `config.ast.environment` | Detailed | NestedEvidence | None | Universal | BuildSystem |
-| `config.ast.emit` | Detailed | NestedEvidence | None | Universal | BuildSystem |
-| `config.ast.finalise` | Detailed | NestedEvidence | None | Universal | BuildSystem |
-| `frontend.generated.ast.total` | Detailed | Accumulated | Module | Universal | Frontend |
-| `frontend.generated.ast.environment` | Detailed | NestedEvidence | Module | Universal | Frontend |
-| `frontend.generated.ast.emit` | Detailed | NestedEvidence | Module | Universal | Frontend |
-| `frontend.generated.ast.finalise` | Detailed | NestedEvidence | Module | Universal | Frontend |
-| `backend.html.total` | Basic | WallSpan | None | BuildOnly | Backend |
-| `backend.js.lower_entry` | Basic | NestedEvidence | None | BuildOnly | Backend |
-| `backend.js.lower_linked` | Basic | NestedEvidence | None | BuildOnly | Backend |
-| `backend.html.render` | Basic | NestedEvidence | None | BuildOnly | Backend |
-| `backend.wasm.total` | Basic | WallSpan | None | BuildOnly | Backend |
-| `backend.wasm.lower` | Detailed | NestedEvidence | None | BuildOnly | Backend |
-| `backend.wasm.artifacts` | Detailed | NestedEvidence | None | BuildOnly | Backend |
-| `backend.assets.plan` | Basic | NestedEvidence | None | BuildOnly | Backend |
-| `backend.assets.emit` | Basic | NestedEvidence | None | BuildOnly | Backend |
-| `output.write.total` | Basic | WallSpan | None | BuildOnly | BuildSystem |
+| Stable name | Level | Relation | Attribution | Scope | Parent | Accounting | Owner |
+|---|---|---|---|---|---|---|---|
+| `command.build.total` | Basic | WallSpan | None | BuildOnly | — | CommandTotal | Command |
+| `command.check.total` | Basic | WallSpan | None | CheckOnly | — | CommandTotal | Command |
+| `command.dev.build_write` | Basic | WallSpan | None | DevOnly | — | CommandTotal | Command |
+| `command.dev.cycle` | Detailed | WallSpan | None | DevOnly | — | Evidence | Command |
+| `build.bootstrap.total` | Basic | WallSpan | None | Universal | — | Pipeline(Bootstrap) | BuildSystem |
+| `build.frontend.total` | Basic | WallSpan | None | Universal | — | Pipeline(Frontend) | BuildSystem |
+| `build.backend.total` | Basic | WallSpan | None | BuildOrDev | — | Pipeline(Backend) | BuildSystem |
+| `build.output.total` | Basic | WallSpan | None | BuildOrDev | — | Pipeline(Output) | BuildSystem |
+| `stage0.directory.inventory` | Basic | NestedEvidence | None | Universal | Metric(`build.frontend.total`) | Evidence | Stage0 |
+| `stage0.directory.compile` | Basic | NestedEvidence | None | Universal | Metric(`build.frontend.total`) | Evidence | Stage0 |
+| `stage0.single_file.total` | Basic | NestedEvidence | None | Universal | Metric(`build.frontend.total`) | Evidence | Stage0 |
+| `boundary.inventory` | Basic | Accumulated | Boundary | Universal | — | Evidence | Stage0 |
+| `boundary.compile` | Basic | Accumulated | Boundary | Universal | — | Evidence | Stage0 |
+| `frontend.prepare` | Basic | Accumulated | Module | Universal | — | Evidence | Frontend |
+| `frontend.bind_headers` | Basic | Accumulated | Module | Universal | — | Evidence | Frontend |
+| `frontend.order_declarations` | Basic | Accumulated | Module | Universal | — | Evidence | Frontend |
+| `frontend.ast.total` | Basic | Accumulated | Module | Universal | — | Evidence | Frontend |
+| `frontend.ast.environment` | Basic | NestedEvidence | Module | Universal | Metric(`frontend.ast.total`) | Evidence | Frontend |
+| `frontend.ast.emit` | Basic | NestedEvidence | Module | Universal | Metric(`frontend.ast.total`) | Evidence | Frontend |
+| `frontend.ast.finalise` | Basic | NestedEvidence | Module | Universal | Metric(`frontend.ast.total`) | Evidence | Frontend |
+| `frontend.public_interface.project` | Basic | Accumulated | Module | Universal | Group(PublicInterface) | Evidence | Frontend |
+| `frontend.hir` | Basic | Accumulated | Module | Universal | — | Evidence | Frontend |
+| `frontend.borrow.initial` | Basic | Accumulated | Module | Universal | Group(BorrowValidation) | Evidence | Frontend |
+| `frontend.borrow.converge` | Basic | Accumulated | Module | Universal | Group(BorrowValidation) | Evidence | Frontend |
+| `frontend.generated.materialise` | Basic | Accumulated | Module | Universal | Group(GeneratedFunctions) | Evidence | Frontend |
+| `frontend.generated.borrow_recheck` | Basic | Accumulated | Module | Universal | Group(GeneratedFunctions) | Evidence | Frontend |
+| `frontend.public_interface.finalise` | Basic | Accumulated | Module | Universal | Group(PublicInterface) | Evidence | Frontend |
+| `frontend.module.semantic_total` | Basic | Accumulated | Module | Universal | — | Evidence | Frontend |
+| `config.ast.total` | Detailed | NestedEvidence | None | Universal | Metric(`build.bootstrap.total`) | Evidence | BuildSystem |
+| `config.ast.environment` | Detailed | NestedEvidence | None | Universal | Metric(`config.ast.total`) | Evidence | BuildSystem |
+| `config.ast.emit` | Detailed | NestedEvidence | None | Universal | Metric(`config.ast.total`) | Evidence | BuildSystem |
+| `config.ast.finalise` | Detailed | NestedEvidence | None | Universal | Metric(`config.ast.total`) | Evidence | BuildSystem |
+| `frontend.generated.ast.total` | Detailed | Accumulated | Module | Universal | Group(GeneratedFunctions) | Evidence | Frontend |
+| `frontend.generated.ast.environment` | Detailed | NestedEvidence | Module | Universal | Metric(`frontend.generated.ast.total`) | Evidence | Frontend |
+| `frontend.generated.ast.emit` | Detailed | NestedEvidence | Module | Universal | Metric(`frontend.generated.ast.total`) | Evidence | Frontend |
+| `frontend.generated.ast.finalise` | Detailed | NestedEvidence | Module | Universal | Metric(`frontend.generated.ast.total`) | Evidence | Frontend |
+| `backend.js.lower_entry` | Basic | NestedEvidence | None | BuildOrDev | Metric(`build.backend.total`) | Evidence | Backend |
+| `backend.js.lower_linked` | Basic | NestedEvidence | None | BuildOrDev | Metric(`build.backend.total`) | Evidence | Backend |
+| `backend.html.render` | Basic | NestedEvidence | None | BuildOrDev | Metric(`build.backend.total`) | Evidence | Backend |
+| `backend.wasm.total` | Basic | NestedEvidence | None | BuildOrDev | Metric(`build.backend.total`) | Evidence | Backend |
+| `backend.wasm.lower` | Detailed | NestedEvidence | None | BuildOrDev | Metric(`backend.wasm.total`) | Evidence | Backend |
+| `backend.wasm.artifacts` | Detailed | NestedEvidence | None | BuildOrDev | Metric(`backend.wasm.total`) | Evidence | Backend |
+| `backend.assets.plan` | Basic | NestedEvidence | None | BuildOrDev | Metric(`build.backend.total`) | Evidence | Backend |
+| `backend.assets.emit` | Basic | NestedEvidence | None | BuildOrDev | Metric(`build.backend.total`) | Evidence | Backend |
+| `output.write.total` | Basic | NestedEvidence | None | BuildOrDev | Metric(`build.output.total`) | Evidence | BuildSystem |
 
-Parent relationships implemented in the registry:
-
-- `frontend.ast.environment`, `frontend.ast.emit`, `frontend.ast.finalise` ->
-  `frontend.ast.total`
-- `frontend.public_interface.project`, `frontend.public_interface.finalise` ->
-  `frontend.public_interface` (aggregate row, no metric)
-- `frontend.borrow.initial`, `frontend.borrow.converge` -> `frontend.borrow`
-  (aggregate row, no metric)
-- `frontend.generated.materialise`, `frontend.generated.borrow_recheck`,
-  `frontend.generated.ast.total` -> `frontend.generated` (aggregate row, no metric)
-- `frontend.generated.ast.environment`, `frontend.generated.ast.emit`,
-  `frontend.generated.ast.finalise` -> `frontend.generated.ast.total`
-- `config.ast.environment`, `config.ast.emit`, `config.ast.finalise` ->
-  `config.ast.total`
-- `backend.js.lower_entry`, `backend.js.lower_linked`, `backend.html.render`,
-  `backend.assets.plan`, `backend.assets.emit` -> `backend.html.total`
-- `backend.wasm.lower`, `backend.wasm.artifacts` -> `backend.wasm.total`
+The correction checkpoint intentionally removes `backend.html.total`. It also
+records the stage/output parent and accounting rules in the descriptor table,
+not in summary string lists.
 
 ### Deliberate compatibility reset
 
 Timing data recorded before schema v1 is legacy and non-comparable. The schema
 carries no numeric migration and no aliases for provisional names. Benchmark
-reports must label a schema mismatch as non-comparable (see § 12).
+reports must label a schema mismatch as non-comparable (see § 10).
 
 ---
 
-# Phase 2 - Rebuild session, runtime and aggregate collection
+# Corrected remaining phase order
+
+The pre-correction sequence put dense collection ahead of the typed facade.
+That would require a string-to-v1 mapper, dual collectors or a silent drop
+path. None is acceptable. The following sequence is now authoritative; the
+historical details after it remain only as implementation notes.
+
+## Phase 2 - Runtime and session channels, retaining event storage
+
+Keep the current raw event storage temporarily. Implement active channel
+selection, fallible raw-session ownership, lock-free mode reads and inactive
+clock avoidance without changing the recording identity from raw final-name
+strings to a compatibility mapping.
+
+- [x] Move timer mode parsing into `runtime.rs` with pure parsing tests.
+- [x] Represent metrics, counters, attribution, detailed output, bench output
+  and human summary as explicit session channels.
+- [x] Make raw benchmark session start fallible and reject nested starts before
+  compiler work.
+- [x] Preserve generation-scoped finish/drop cleanup and reject stale context.
+- [x] Avoid timer clocks and collector locks when the relevant channel is off.
+- [x] Retain the existing event snapshot until Phase 5. Do not add a
+  string-to-`TimingMetric` compatibility mapper.
+- [x] Test active/inactive channels, nested/raw sessions, stale finishes and
+  counter-only combinations.
+
+Checkpoint only after runtime/session tests, the five-feature matrix, erasure
+check and the full code-bearing validation gate pass.
+
+## Handoff at the Phase 3 boundary
+
+The accepted implementation baseline is `a9b970bb6`. Phase 2 deliberately
+retains the raw string event vector, so Phase 3 must finish semantic migration
+before Phase 4 makes recording typed and before Phase 5 replaces storage.
+
+At this pause, the worktree contains an uncommitted candidate migration across
+command, build-system, Stage 0, config, frontend, AST, backend, dev and summary
+owners. It is not validated or audited and is not accepted progress. The next
+coordinator must make its disposition explicit before editing:
+
+1. discard it and start Phase 3 from the clean `a9b970bb6` baseline, or
+2. retain it as a candidate, inspect the complete diff, compile it and accept
+   only coherent, tested portions through the normal audit checkpoint.
+
+Do not start Phase 4 or Phase 5 while raw names remain, and do not add a
+string-to-typed compatibility mapper, a second collector or a dual facade.
+After reconciliation, work through the Phase 3 checklist below in ownership
+order: command lifecycle, build and Stage 0, config, frontend and AST, then
+backend, output and dev. Finish with the focused migration regressions, the
+required audit cycle and one Phase 3 checkpoint. The next checkpoint must
+refresh this capsule with the exact command results and audit disposition.
+
+## Phase 3 - Semantic call-site migration to v1 names and boundaries
+
+While the current raw event collector still accepts strings, migrate every
+production timer call site to its final v1 stable name and semantic endpoint.
+This phase makes the later all-at-once typed-facade migration mechanical.
+
+- [x] Commands: one command session finish point, command totals before
+  rendering, and partial failure evidence.
+- [x] Build/Stage 0: bootstrap, frontend, backend and output owner spans;
+  nested directory/single-file evidence and accumulated boundary evidence.
+- [x] Config: final `config.ast.*` identities, expression/block endpoints and
+  no leaked later-stage duration.
+- [x] Frontend: final module, AST, public-interface, HIR, borrow and generated
+  identities with explicit module attribution.
+- [x] Backend/dev: generic `build.backend.total`, nested HTML/JS/Wasm/assets,
+  `BuildOrDev` evidence, nested output write and one dev build/write owner.
+- [x] Delete live timers that do not exist in schema v1 rather than preserving
+  provisional names.
+- [x] Add build/check/dev success and failure, directory/single-file,
+  config-heavy, generic-heavy and backend boundary tests.
+
+Checkpoint only after every production name appears in the v1 registry and no
+provisional production timing name remains.
+
+## Phase 4 - Typed facade checkpoint
+
+Replace every final raw string at call sites with `TimingMetric` in one
+buildable change. Then delete string recording and guard APIs. There is no
+dual facade or fallback mapper.
+
+- [ ] Move enabled implementation to the final module layout, including
+  `guard.rs`, and remove the old broad `enabled.rs` allowances.
+- [ ] Make every expression macro, guard, multi-span and direct-record facade
+  accept `TimingMetric`.
+- [ ] Keep disabled macro arms as direct production expressions or no
+  statements, without evaluating metric/context/command expressions.
+- [ ] Move detailed timer prose out of `compiler_dev_logging` and ensure it
+  uses the captured stored duration.
+- [ ] Delete string recording APIs, raw parent names and old macro surfaces.
+- [ ] Test no-feature erasure, value/error pass-through, exactly-once guards,
+  multi-metric equality and inactive clock avoidance.
+
+Checkpoint only after no production timer call can provide a raw metric name.
+
+## Phase 5 - Dense aggregate collector
+
+With all recording typed, replace the event vector with dense
+`TimingMetric::index()` accumulators. Snapshot order follows
+`TimingMetric::ALL`; dynamic boundary/module records receive dense attributed
+slots only for allowed metric kinds.
+
+- [ ] Store global and attributed totals atomically without record-path
+  allocation, formatting, hashing or a global collector mutex.
+- [ ] Stop recording before deterministic snapshot extraction.
+- [ ] Build schema-order aggregates with sample counts where useful.
+- [ ] Retain only typed metrics in snapshots and expose no raw compatibility
+  parser.
+- [ ] Test exact parallel additions, schema-order snapshots, attribution
+  validation and no-allocation/no-lock inactive behavior.
+
+Checkpoint only after collector/session tests, all feature combinations,
+erasure and full validation pass.
+
+## Phase 6 - Typed summary policy and rendering
+
+Build the concise report from typed descriptors and one policy owner. Command
+accounting consumes only `TimingAccountingRole::Pipeline` spans. Nested and
+accumulated evidence never becomes additive command time.
+
+- [ ] Construct display, parent, threshold and command-accounting policy from
+  typed schema identities.
+- [ ] Detect duplicate or over-accounted command spans rather than saturating
+  `Other`.
+- [ ] Render boundaries, frontend rows and slowest modules deterministically
+  without absolute paths.
+- [ ] Keep report construction pure and terminal styling in `render.rs` only.
+
+## Phase 7 - Benchmark schema reset and erasure hardening
+
+- [ ] Emit exactly one `MOTH_BENCH timing-schema 1` record and final aggregate
+  metric lines in schema order.
+- [ ] Include the timing schema in CLI and frontend benchmark identities and
+  reject mismatches as non-comparable.
+- [ ] Reset pre-v1 timing history without numeric migration.
+- [ ] Extend source and binary erasure checks for the final typed facade.
+
+## Phase 8 - Documentation, final audit and closeout
+
+- [ ] Update timer, benchmark, feature and validation documentation from the
+  final implementation only.
+- [ ] Rebuild required documentation and inspect generated routes.
+- [ ] Run final zero-cost, architecture and benchmark-schema audits.
+- [ ] Record validation, accepted deferrals, final inventory and checkpoints.
+- [ ] Leave the worktree clean and stop for coordinator acceptance.
+
+---
+
+# Historical pre-correction phase detail (superseded)
+
+The sections below preserve the prior checklist wording for reference. They do
+not define execution order. Follow the corrected phase order above.
+
+## Historical Phase 2 - Rebuild session, runtime and aggregate collection
 
 ## Context
 
@@ -1308,23 +1302,23 @@ The committed session generation work is valuable. The runtime now needs explici
 
 ### Runtime configuration
 
-- [ ] Move timer mode parsing into `runtime.rs`.
-- [ ] Use `OnceLock` or equivalent for lock-free production reads.
-- [ ] Add pure parsing functions.
-- [ ] Replace permanent test mutation with explicit session config or scoped restoration.
-- [ ] Add active channel bits.
-- [ ] `begin_metric` avoids `Instant` when the metric is inactive.
+- [x] Move timer mode parsing into `runtime.rs`.
+- [x] Use `OnceLock` or equivalent for lock-free production reads.
+- [x] Add pure parsing functions.
+- [x] Replace permanent test mutation with explicit session config or scoped restoration.
+- [x] Add active channel bits.
+- [x] `begin_metric` avoids `Instant` when the metric is inactive.
 
 ### Session lifecycle
 
-- [ ] Keep generation-scoped session IDs.
-- [ ] Keep matching finish/drop cleanup.
-- [ ] Make raw benchmark start fallible.
-- [ ] Reject nested raw sessions before compiler work.
-- [ ] Keep one active process session.
-- [ ] Store command kind explicitly.
-- [ ] Store collection channels explicitly.
-- [ ] Remove unused `TimingCollectionPurpose` if channels fully own behavior.
+- [x] Keep generation-scoped session IDs.
+- [x] Keep matching finish/drop cleanup.
+- [x] Make raw benchmark start fallible.
+- [x] Reject nested raw sessions before compiler work.
+- [x] Keep one active process session.
+- [x] Store command kind explicitly.
+- [x] Store collection channels explicitly.
+- [x] Remove unused `TimingCollectionPurpose` because channels own behavior.
 
 ### Collector
 
@@ -1338,55 +1332,55 @@ The committed session generation work is valuable. The runtime now needs explici
 
 ### Counters
 
-- [ ] Support counter-only collection.
-- [ ] Preserve `benchmark_counters` independence.
-- [ ] Counter summary works with timer Summary, Bench and Silent modes.
-- [ ] Counter names remain static internally.
+- [x] Support counter-only collection.
+- [x] Preserve `benchmark_counters` independence.
+- [x] Counter summary works with timer Summary, Bench and Silent modes.
+- [x] Counter names remain static internally.
 
 ### Record outcome
 
-- [ ] Return structured outcome where prose needs it.
-- [ ] A dropped stale context never changes output suppression.
-- [ ] Invalid attribution is rejected without emitting a line.
+- [x] Return structured outcome where prose needs it.
+- [x] A dropped stale context never changes output suppression.
+- [x] Invalid attribution is rejected without emitting a line.
 
 ## Tests
 
-- [ ] nested start cannot replace the outer session
-- [ ] raw nested start returns an error
-- [ ] rejected raw work does not enter an outer snapshot
-- [ ] stale finish cannot drain a new session
-- [ ] inactive mode captures no clock
-- [ ] inactive mode takes no collector lock
-- [ ] Bench mode has no attribution metadata
-- [ ] Silent plus counter Summary collects counters only
+- [x] nested start cannot replace the outer session
+- [x] raw nested start returns an error
+- [x] rejected raw work does not enter an outer snapshot
+- [x] stale finish cannot drain a new session
+- [x] inactive mode captures no clock
+- [x] inactive mode takes no collector lock
+- [x] Bench mode has no attribution metadata
+- [x] Silent plus counter Summary collects counters only
 - [ ] schema-order snapshot is deterministic
 - [ ] parallel metric additions produce exact totals
 - [ ] poisoned lifecycle lock recovery is deliberate
 
 ## Audit
 
-- [ ] No thread-local state.
-- [ ] No unsafe code unless separately justified and approved.
+- [x] No thread-local state.
+- [x] No unsafe code unless separately justified and approved.
 - [ ] Record path allocates nothing.
 - [ ] Record path formats nothing.
-- [ ] Lifecycle state has one owner.
-- [ ] Session generation reaches attribution validation.
+- [x] Lifecycle state has one owner.
+- [x] Session generation reaches attribution validation.
 
 ## Style review
 
-- [ ] Use enums instead of boolean-heavy public APIs.
-- [ ] Keep atomics internal.
-- [ ] Keep lifecycle and aggregate storage separate.
+- [x] Use enums instead of boolean-heavy public APIs.
+- [x] Keep atomics internal.
+- [x] Keep lifecycle and aggregate storage separate.
 - [ ] Remove stale event-log terminology.
 
 ## Validation
 
-- [ ] collector/session/runtime unit tests
-- [ ] five-feature check matrix
-- [ ] timers and detailed-timers test suites
-- [ ] counters feature combinations
-- [ ] `just timers-erasure-check`
-- [ ] `just validate`
+- [x] collector/session/runtime unit tests
+- [x] five-feature check matrix
+- [x] timers and detailed-timers test suites
+- [x] counters feature combinations
+- [x] `just timers-erasure-check`
+- [x] `just validate`
 
 ## Checkpoint
 
@@ -1394,7 +1388,7 @@ The committed session generation work is valuable. The runtime now needs explici
 
 ---
 
-# Phase 3 - Finalise the compile-erasing facade and module layout
+## Historical Phase 3 - Finalise the compile-erasing facade and module layout
 
 ## Context
 
@@ -1477,7 +1471,7 @@ For every final macro:
 
 ---
 
-# Phase 4 - Migrate command, build, Stage 0, config and output timing
+## Historical Phase 4 - Migrate command, build, Stage 0, config and output timing
 
 ## Context
 
@@ -1568,7 +1562,7 @@ Choose semantic v1 boundaries. Do not preserve accidental legacy endpoints.
 
 ---
 
-# Phase 5 - Migrate frontend, AST, generated work and borrow timing
+## Historical Phase 5 - Migrate frontend, AST, generated work and borrow timing
 
 ## Context
 
@@ -1667,7 +1661,7 @@ This phase establishes the most important long-term compiler-stage breakdown.
 
 ---
 
-# Phase 6 - Migrate backend, assets, output children and dev timing
+## Historical Phase 6 - Migrate backend, assets, output children and dev timing
 
 ## Context
 
@@ -1751,7 +1745,7 @@ Backend metrics should expose meaningful build owners without flooding the basic
 
 ---
 
-# Phase 7 - Rebuild summary policy and renderer over schema v1
+## Historical Phase 7 - Rebuild summary policy and renderer over schema v1
 
 ## Context
 
@@ -1843,7 +1837,7 @@ The summary should consume typed aggregates and one policy table. It must not in
 
 ---
 
-# Phase 8 - Reset benchmark timing identity and strengthen erasure
+## Historical Phase 8 - Reset benchmark timing identity and strengthen erasure
 
 ## Context
 
@@ -1923,7 +1917,7 @@ The benchmark system must understand timing schema v1. Old data is deliberately 
 
 ---
 
-# Phase 9 - Documentation, final audits and closeout
+## Historical Phase 9 - Documentation, final audits and closeout
 
 ## Context
 
@@ -1945,8 +1939,9 @@ Make schema v1 and its ownership reloadable. Close both superseded plans and thi
 - [ ] Update timing module docs.
 - [ ] Update validation docs for the strengthened erasure gate.
 - [ ] Update `index.md` for moved timing modules.
-- [ ] Mark the original timer summary plan superseded.
-- [ ] Mark the correction plan superseded.
+- [x] Historical-plan policy: the two earlier timing-plan files were removed at
+  `77a45e790708f76f8b96267991a0370a3ecfc9c8` and remain available through
+  Git history; do not claim they are marked in place.
 - [ ] Record final schema table and checkpoint in this plan.
 - [ ] Do not add to roadmap.
 - [ ] Do not update progress matrix.
@@ -2066,5 +2061,6 @@ The timer system is finalised when:
 - the erasure gate protects both source structure and the release binary
 - documentation names the final owners
 - all required validation is green
-- both older timer plans are marked superseded
+- the historical-plan policy accurately records that the older plan files were
+  removed and remain available through Git history
 - this plan is marked complete

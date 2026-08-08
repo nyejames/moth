@@ -7,8 +7,9 @@
 //!       benchmark output, and the whole timing system assumes these rules.
 
 use crate::timing::enabled::schema::{
-    TIMING_METRIC_DESCRIPTORS, TIMING_SCHEMA_VERSION, TimingAttributionKind, TimingCommand,
-    TimingLevel, TimingMetric, TimingRelation,
+    TIMING_METRIC_DESCRIPTORS, TIMING_SCHEMA_VERSION, TimingAccountingRole, TimingAttributionKind,
+    TimingCommand, TimingLevel, TimingMetric, TimingMetricOwner, TimingParent, TimingPipelineStage,
+    TimingRelation, TimingSummaryGroup,
 };
 
 /// Every metric and its descriptor table entry must agree in count and order.
@@ -93,10 +94,10 @@ fn schema_version_is_v1_and_levels_are_well_formed() {
 }
 
 /// The registry count and Basic/Detailed split match the plan's closeout
-/// record (46 metrics, 35 Basic + 11 Detailed).
+/// record (45 metrics, 34 Basic + 11 Detailed).
 #[test]
 fn registry_size_matches_plan_closeout() {
-    assert_eq!(TimingMetric::ALL.len(), 46);
+    assert_eq!(TimingMetric::ALL.len(), 45);
     let basic = TimingMetric::ALL
         .iter()
         .filter(|metric| metric.descriptor().level == TimingLevel::Basic)
@@ -105,24 +106,52 @@ fn registry_size_matches_plan_closeout() {
         .iter()
         .filter(|metric| metric.descriptor().level == TimingLevel::Detailed)
         .count();
-    assert_eq!(basic, 35);
+    assert_eq!(basic, 34);
     assert_eq!(detailed, 11);
 }
 
-/// Every basic metric has a human owner and a concrete semantic role.
+/// Every command-accounting metric owns one distinct pipeline segment.
+///
+/// A summary later consumes this typed policy directly. The registry therefore
+/// cannot retain a second Basic metric that measures the same command-child
+/// span under a backend- or output-specific name.
 #[test]
-fn every_basic_metric_has_a_human_owner_row() {
+fn basic_command_accounting_metrics_have_unique_semantic_spans() {
+    let mut pipeline_stages = std::collections::HashSet::new();
+
     for &metric in TimingMetric::ALL {
         let descriptor = metric.descriptor();
-        if descriptor.level == TimingLevel::Basic {
-            assert!(
-                is_basic_metric_supposed(metric),
-                "{} ({}) must be wired into the concise report",
-                descriptor.stable_name,
-                metric.index()
-            );
+        match descriptor.accounting {
+            TimingAccountingRole::CommandTotal => {
+                assert_eq!(descriptor.level, TimingLevel::Basic);
+                assert!(metric.is_command_total());
+                assert_eq!(descriptor.relation, TimingRelation::WallSpan);
+                assert!(descriptor.parent.is_none());
+            }
+            TimingAccountingRole::Pipeline(stage) => {
+                assert_eq!(descriptor.level, TimingLevel::Basic);
+                assert_eq!(descriptor.relation, TimingRelation::WallSpan);
+                assert_eq!(descriptor.attribution, TimingAttributionKind::None);
+                assert!(descriptor.parent.is_none());
+                assert!(
+                    pipeline_stages.insert(stage),
+                    "{} duplicates the {stage:?} command-pipeline span",
+                    descriptor.stable_name
+                );
+            }
+            TimingAccountingRole::Evidence => {}
         }
     }
+
+    assert_eq!(
+        pipeline_stages,
+        std::collections::HashSet::from([
+            TimingPipelineStage::Bootstrap,
+            TimingPipelineStage::Frontend,
+            TimingPipelineStage::Backend,
+            TimingPipelineStage::Output,
+        ])
+    );
 }
 
 /// Every attributed metric permits exactly the context kind it declares.
@@ -188,35 +217,23 @@ fn every_command_total_is_unique() {
     }
 }
 
-/// Every parent policy must be coherent.
-///
-/// Nested evidence rows always declare a parent. Accumulated rows may group
-/// under a well-known aggregate row key (e.g. `frontend.borrow`), which has no
-/// dedicated metric of its own. Wall-span rows must never declare a parent.
+/// Parents use either a real metric identity or a typed virtual summary group.
 #[test]
-fn every_parent_policy_is_coherent() {
-    for metric in TimingMetric::ALL {
+fn parent_policy_uses_typed_metric_and_summary_group_identities() {
+    let mut summary_groups = std::collections::HashSet::new();
+
+    for &metric in TimingMetric::ALL {
         let descriptor = metric.descriptor();
+
         match descriptor.relation {
             TimingRelation::NestedEvidence => {
-                let parent = descriptor
-                    .parent
-                    .unwrap_or_else(|| panic!("nested {} lacks a parent", descriptor.stable_name));
                 assert!(
-                    parent_valid(parent),
-                    "{} parent policy references unknown parent '{parent}'",
+                    matches!(descriptor.parent, Some(TimingParent::Metric(_))),
+                    "nested {} must name a containing metric",
                     descriptor.stable_name
                 );
             }
-            TimingRelation::Accumulated => {
-                if let Some(parent) = descriptor.parent {
-                    assert!(
-                        parent_valid(parent),
-                        "{} groups under unknown parent '{parent}'",
-                        descriptor.stable_name
-                    );
-                }
-            }
+            TimingRelation::Accumulated => {}
             TimingRelation::WallSpan => {
                 assert!(
                     descriptor.parent.is_none(),
@@ -225,7 +242,146 @@ fn every_parent_policy_is_coherent() {
                 );
             }
         }
+
+        match descriptor.parent {
+            Some(TimingParent::Metric(parent)) => {
+                assert_ne!(
+                    metric, parent,
+                    "{} cannot parent itself",
+                    descriptor.stable_name
+                );
+
+                // The parent is a typed `TimingMetric`, which guarantees it
+                // exists in the descriptor table. A child cannot apply to a
+                // command where its enclosing span cannot be recorded.
+                for command in [
+                    TimingCommand::Build,
+                    TimingCommand::Check,
+                    TimingCommand::Dev,
+                ] {
+                    if metric.applies_to(command) {
+                        assert!(
+                            parent.applies_to(command),
+                            "{} applies to {command:?} outside parent {}",
+                            descriptor.stable_name,
+                            parent.descriptor().stable_name
+                        );
+                    }
+                }
+            }
+            Some(TimingParent::SummaryGroup(group)) => {
+                assert_eq!(
+                    descriptor.relation,
+                    TimingRelation::Accumulated,
+                    "{} may use a virtual group only for accumulated evidence",
+                    descriptor.stable_name
+                );
+                summary_groups.insert(group);
+            }
+            None => {}
+        }
     }
+
+    assert_eq!(
+        summary_groups,
+        std::collections::HashSet::from([
+            TimingSummaryGroup::PublicInterface,
+            TimingSummaryGroup::BorrowValidation,
+            TimingSummaryGroup::GeneratedFunctions,
+        ])
+    );
+}
+
+/// Public-interface leaves are disjoint accumulated work, not nested evidence.
+#[test]
+fn public_interface_leaves_use_the_typed_public_interface_group() {
+    for metric in [
+        TimingMetric::FrontendPublicInterfaceProject,
+        TimingMetric::FrontendPublicInterfaceFinalise,
+    ] {
+        let descriptor = metric.descriptor();
+        assert_eq!(descriptor.relation, TimingRelation::Accumulated);
+        assert_eq!(
+            descriptor.parent,
+            Some(TimingParent::SummaryGroup(
+                TimingSummaryGroup::PublicInterface
+            ))
+        );
+    }
+}
+
+/// Backend and output evidence is valid for build and dev, never check.
+#[test]
+fn backend_and_output_metrics_apply_to_build_and_dev_not_check() {
+    const BACKEND_AND_OUTPUT_METRICS: &[TimingMetric] = &[
+        TimingMetric::BuildBackendTotal,
+        TimingMetric::BuildOutputTotal,
+        TimingMetric::BackendJsLowerEntry,
+        TimingMetric::BackendJsLowerLinked,
+        TimingMetric::BackendHtmlRender,
+        TimingMetric::BackendWasmTotal,
+        TimingMetric::BackendWasmLower,
+        TimingMetric::BackendWasmArtifacts,
+        TimingMetric::BackendAssetsPlan,
+        TimingMetric::BackendAssetsEmit,
+        TimingMetric::OutputWriteTotal,
+    ];
+
+    for &metric in BACKEND_AND_OUTPUT_METRICS {
+        assert!(metric.applies_to(TimingCommand::Build));
+        assert!(metric.applies_to(TimingCommand::Dev));
+        assert!(!metric.applies_to(TimingCommand::Check));
+    }
+}
+
+/// Stage 0 and output evidence stays beneath its generic pipeline owner.
+#[test]
+fn stage0_and_output_evidence_has_one_command_pipeline_owner() {
+    for metric in [
+        TimingMetric::Stage0DirectoryInventory,
+        TimingMetric::Stage0DirectoryCompile,
+        TimingMetric::Stage0SingleFileTotal,
+    ] {
+        assert_eq!(metric.descriptor().relation, TimingRelation::NestedEvidence);
+        assert_eq!(
+            metric.descriptor().parent,
+            Some(TimingParent::Metric(TimingMetric::BuildFrontendTotal))
+        );
+    }
+
+    assert_eq!(
+        TimingMetric::OutputWriteTotal.descriptor().parent,
+        Some(TimingParent::Metric(TimingMetric::BuildOutputTotal))
+    );
+    assert_eq!(
+        TimingMetric::OutputWriteTotal.descriptor().relation,
+        TimingRelation::NestedEvidence
+    );
+
+    for metric in [
+        TimingMetric::BoundaryInventory,
+        TimingMetric::BoundaryCompile,
+    ] {
+        let descriptor = metric.descriptor();
+        assert_eq!(descriptor.owner, TimingMetricOwner::Stage0);
+        assert_eq!(descriptor.relation, TimingRelation::Accumulated);
+        assert_eq!(descriptor.parent, None);
+        assert_eq!(descriptor.accounting, TimingAccountingRole::Evidence);
+    }
+}
+
+/// The generic backend span is the sole command-accounting owner.
+#[test]
+fn backend_evidence_uses_the_generic_pipeline_total() {
+    assert_eq!(TimingMetric::from_name("backend.html.total"), None);
+    assert_eq!(
+        TimingMetric::BackendWasmTotal.descriptor().parent,
+        Some(TimingParent::Metric(TimingMetric::BuildBackendTotal))
+    );
+    assert_eq!(
+        TimingMetric::BackendWasmTotal.descriptor().relation,
+        TimingRelation::NestedEvidence
+    );
 }
 
 /// Enum order, descriptor order and `ALL` agree inline.
@@ -238,6 +394,19 @@ fn schema_order_is_deterministic() {
     }
 }
 
+/// A future dense collector can index every slot without translating names.
+#[test]
+fn schema_order_supports_dense_collection_without_name_compatibility() {
+    let mut occupied_slots = vec![false; TimingMetric::ALL.len()];
+
+    for &metric in TimingMetric::ALL {
+        assert!(!occupied_slots[metric.index()]);
+        occupied_slots[metric.index()] = true;
+    }
+
+    assert!(occupied_slots.into_iter().all(|occupied| occupied));
+}
+
 /// Stable-name lookup round-trips exactly.
 #[test]
 fn stable_name_lookup_round_trips() {
@@ -248,60 +417,4 @@ fn stable_name_lookup_round_trips() {
     assert_eq!(TimingMetric::from_name("does.not.exist"), None);
     assert_eq!(TimingMetric::from_index(TimingMetric::ALL.len()), None);
     assert_eq!(TimingMetric::from_index(usize::MAX), None);
-}
-
-// ---------------------------------------------------------------------
-// Private test policy
-// ---------------------------------------------------------------------
-
-/// Whether a basic metric has a role in the concise human report.
-fn is_basic_metric_supposed(metric: TimingMetric) -> bool {
-    matches!(
-        metric,
-        TimingMetric::CommandBuildTotal
-            | TimingMetric::CommandCheckTotal
-            | TimingMetric::CommandDevBuildWrite
-            | TimingMetric::BuildBootstrapTotal
-            | TimingMetric::BuildFrontendTotal
-            | TimingMetric::BuildBackendTotal
-            | TimingMetric::BuildOutputTotal
-            | TimingMetric::Stage0DirectoryInventory
-            | TimingMetric::Stage0DirectoryCompile
-            | TimingMetric::Stage0SingleFileTotal
-            | TimingMetric::BoundaryInventory
-            | TimingMetric::BoundaryCompile
-            | TimingMetric::FrontendPrepare
-            | TimingMetric::FrontendBindHeaders
-            | TimingMetric::FrontendOrderDeclarations
-            | TimingMetric::FrontendAstTotal
-            | TimingMetric::FrontendAstEnvironment
-            | TimingMetric::FrontendAstEmit
-            | TimingMetric::FrontendAstFinalise
-            | TimingMetric::FrontendPublicInterfaceProject
-            | TimingMetric::FrontendHir
-            | TimingMetric::FrontendBorrowInitial
-            | TimingMetric::FrontendBorrowConverge
-            | TimingMetric::FrontendGeneratedMaterialise
-            | TimingMetric::FrontendGeneratedBorrowRecheck
-            | TimingMetric::FrontendPublicInterfaceFinalise
-            | TimingMetric::FrontendModuleSemanticTotal
-            | TimingMetric::BackendHtmlTotal
-            | TimingMetric::BackendJsLowerEntry
-            | TimingMetric::BackendJsLowerLinked
-            | TimingMetric::BackendHtmlRender
-            | TimingMetric::BackendWasmTotal
-            | TimingMetric::BackendAssetsPlan
-            | TimingMetric::BackendAssetsEmit
-            | TimingMetric::OutputWriteTotal
-    )
-}
-
-/// The definitive parent check: a parent is valid when it is another metric's
-/// stable name or a well-known human aggregate row key.
-fn parent_valid(parent: &str) -> bool {
-    TimingMetric::from_name(parent).is_some()
-        || matches!(
-            parent,
-            "frontend.public_interface" | "frontend.borrow" | "frontend.generated"
-        )
 }

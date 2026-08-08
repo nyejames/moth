@@ -20,8 +20,8 @@ pub(crate) mod attribution;
 pub(crate) mod collector;
 pub(crate) mod command;
 pub(crate) mod counter_summary;
-pub(crate) mod mode;
 pub(crate) mod render;
+pub(crate) mod runtime;
 pub(crate) mod schema;
 pub(crate) mod session;
 pub(crate) mod summary;
@@ -32,9 +32,11 @@ pub(crate) use attribution::{
     NO_TIMING_BOUNDARY, TimingBoundaryId, TimingBoundaryKind, TimingBoundaryRecord, TimingContext,
     TimingModuleKey, TimingModuleRecord,
 };
+#[cfg(test)]
+pub(crate) use command::start_command_session_with_configuration;
 pub(crate) use command::{render_command_timing_summary, start_command_session};
-pub(crate) use mode::TimerOutputMode;
-pub(crate) use session::{TimingCollectionPurpose, TimingCommandKind, TimingSession};
+pub(crate) use runtime::TimerOutputMode;
+pub(crate) use session::{TimingCommandKind, TimingSession, TimingSessionStartError};
 use std::time::Duration;
 
 // ---------------------------------------------------------------------------
@@ -61,11 +63,10 @@ pub(crate) struct BenchmarkObservationMetric {
 
 /// Snapshot of all observations captured in one collection scope.
 ///
-/// `timings` is populated when the `timers` feature is active.
-/// `counters` is only populated when both `timers` and `benchmark_counters`
-/// are active, because counter storage reuses the same collector and is gated
-/// behind `benchmark_counters`. `detailed_timers` alone no longer populates
-/// counters.
+/// `timings` is populated only while the owning session enables metrics.
+/// `counters` is populated only while a `benchmark_counters` session enables
+/// its counter channel. Both reuse this collector; `detailed_timers` alone
+/// never enables counters.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct BenchmarkObservationSnapshot {
     pub(crate) timings: Vec<TimingObservation>,
@@ -101,15 +102,15 @@ impl TimingMetricSummary {
 /// Start a raw benchmark collection session.
 ///
 /// When `suppress_output` is true, stdout is suppressed while observations
-/// are still recorded in the collector. This is used by in-process frontend
-/// benchmarks that read observations programmatically. A nested start is
-/// rejected and returns an inactive session that preserves any outer scope.
-pub(crate) fn start_benchmark_collection(suppress_output: bool) -> TimingSession {
-    collector::start_session(
+/// are still recorded in the collector. This is used by tests and in-process
+/// tooling that read observations programmatically. A nested raw start
+/// returns an error before the caller can enter compiler work.
+pub(crate) fn start_benchmark_collection(
+    suppress_output: bool,
+) -> Result<TimingSession, TimingSessionStartError> {
+    collector::try_start_session(
         None,
-        TimingCollectionPurpose::RawBenchmark,
-        suppress_output,
-        true,
+        runtime::TimingSessionConfiguration::raw_benchmark(suppress_output, true),
     )
 }
 
@@ -117,13 +118,14 @@ pub(crate) fn start_benchmark_collection(suppress_output: bool) -> TimingSession
 ///
 /// Records every raw metric while skipping boundary/module record tables;
 /// used by in-process frontend benchmarks that export only metric names and
-/// durations.
-pub(crate) fn start_raw_benchmark_collection(suppress_output: bool) -> TimingSession {
-    collector::start_session(
+/// durations. A busy collector is reported to the caller instead of creating
+/// a rejected token that could silently record into an outer session.
+pub(crate) fn start_raw_benchmark_collection(
+    suppress_output: bool,
+) -> Result<TimingSession, TimingSessionStartError> {
+    collector::try_start_session(
         None,
-        TimingCollectionPurpose::RawBenchmark,
-        suppress_output,
-        false,
+        runtime::TimingSessionConfiguration::raw_benchmark(suppress_output, false),
     )
 }
 
@@ -136,23 +138,19 @@ pub(crate) fn stop_and_collect_benchmark_observations(
     session::stop_session(session)
 }
 
-/// Record one timing observation in the active collection scope.
-///
-/// Returns whether stdout is currently suppressed by the active session,
-/// so the caller can print stable lines without a second collector lock.
-pub(crate) fn record_timing(name: &'static str, duration: Duration) -> bool {
-    collector::record_timing(name, duration)
-}
-
 /// Record one counter observation in the active collection scope.
 ///
 /// Called by `compiler_dev_logging::log_benchmark_counter` and by the
-/// Stage 0 discovery paths. Counter storage reuses the `timers` collector, so
-/// this is only active when both `timers` and `benchmark_counters` are on.
-/// `detailed_timers` alone no longer routes counters here.
+/// Stage 0 discovery paths. Counter storage reuses the `timers` collector and
+/// records only while the active session enables its counter channel.
+/// `detailed_timers` alone never routes counters here.
 #[cfg(feature = "benchmark_counters")]
 pub(crate) fn record_counter(name: &'static str, value: f64) -> bool {
-    collector::record_counter(name, value)
+    if !runtime::counters_active() {
+        return false;
+    }
+
+    collector::record_counter(name, value).output_suppressed
 }
 
 /// Whether stdout output is currently allowed (not suppressed by an
@@ -161,17 +159,12 @@ pub(crate) fn output_enabled() -> bool {
     collector::output_enabled()
 }
 
-/// The current timer output mode, parsed once per process.
-pub(crate) fn current_output_mode() -> TimerOutputMode {
-    mode::current_output_mode()
-}
-
 /// Whether verbose human prose should print for one recorded event.
 ///
 /// Takes the suppression flag captured while recording so callers never
 /// take a second collector lock just to decide whether to print.
 pub(crate) fn detailed_prose_enabled(output_suppressed: bool) -> bool {
-    !output_suppressed && current_output_mode().emits_human_prose()
+    !output_suppressed && runtime::timer_human_prose_active()
 }
 
 /// Whether verbose human prose is enabled for prose-only call sites.
@@ -179,7 +172,7 @@ pub(crate) fn detailed_prose_enabled(output_suppressed: bool) -> bool {
 /// Used by developer logging macros that print without recording; the record
 /// paths use `detailed_prose_enabled` with the captured suppression flag.
 pub(crate) fn detailed_timer_output_enabled() -> bool {
-    output_enabled() && current_output_mode().emits_human_prose()
+    runtime::timer_human_prose_active() && output_enabled()
 }
 
 /// Emit one stable `MOTH_BENCH timing` line to stdout if the output mode
@@ -198,9 +191,7 @@ pub(crate) fn emit_bench_timing_line(
         return;
     }
 
-    let mode = current_output_mode();
-
-    if !output_suppressed && mode.emits_bench_lines() {
+    if !output_suppressed && runtime::timing_bench_output_active() {
         let millis = duration.as_secs_f64() * 1000.0;
         saying::say!("MOTH_BENCH timing ", name, "=", #millis, "ms");
     }
@@ -213,9 +204,15 @@ pub(crate) fn emit_bench_timing_line(
 /// collector (when a scope is active); the stdout line depends on the output
 /// mode and suppression flag.
 pub(crate) fn record_pipeline_timing(metric: &'static str, duration: Duration) -> bool {
-    let output_suppressed = record_timing(metric, duration);
-    emit_bench_timing_line(metric, duration, output_suppressed);
-    output_suppressed
+    if !runtime::metrics_active() {
+        return false;
+    }
+
+    let outcome = collector::record_timing(metric, duration);
+    if outcome.recorded {
+        emit_bench_timing_line(metric, duration, outcome.output_suppressed);
+    }
+    outcome.output_suppressed
 }
 
 /// Register one compilation boundary in deterministic registration order.
@@ -227,6 +224,10 @@ pub(crate) fn register_timing_boundary(
     kind: TimingBoundaryKind,
     display_name: impl FnOnce() -> String,
 ) -> TimingBoundaryId {
+    if !runtime::attribution_active() {
+        return NO_TIMING_BOUNDARY;
+    }
+
     collector::register_boundary(kind, display_name)
 }
 
@@ -243,6 +244,10 @@ pub(crate) fn register_timing_module(
     source_file_count: u64,
     source_byte_count: u64,
 ) -> TimingModuleKey {
+    if !runtime::attribution_active() {
+        return TimingModuleKey::new(boundary, module_index);
+    }
+
     collector::register_module(
         boundary,
         module_index,
@@ -264,9 +269,15 @@ pub(crate) fn record_pipeline_timing_attributed(
     duration: Duration,
     context: Option<TimingContext>,
 ) -> bool {
-    let output_suppressed = collector::record_attributed_timing(metric, duration, context);
-    emit_bench_timing_line(metric, duration, output_suppressed);
-    output_suppressed
+    if !runtime::metrics_active() {
+        return false;
+    }
+
+    let outcome = collector::record_attributed_timing(metric, duration, context);
+    if outcome.recorded {
+        emit_bench_timing_line(metric, duration, outcome.output_suppressed);
+    }
+    outcome.output_suppressed
 }
 
 /// Record several metrics from one captured duration.
@@ -277,24 +288,68 @@ pub(crate) fn record_pipeline_timing_multi(
     entries: &[(&'static str, Option<TimingContext>)],
     duration: Duration,
 ) -> bool {
-    let output_suppressed = collector::record_attributed_timing_multi(entries, duration);
-    for (metric, _) in entries {
-        emit_bench_timing_line(metric, duration, output_suppressed);
+    if !runtime::metrics_active() {
+        return false;
     }
-    output_suppressed
+
+    let outcome = collector::record_attributed_timing_multi(entries, duration);
+    for &(metric, context) in entries {
+        if outcome.recorded_entry(context) {
+            emit_bench_timing_line(metric, duration, outcome.output_suppressed);
+        }
+    }
+    outcome.output_suppressed
 }
 
 /// Opaque start token for manually timed pipeline stages.
 ///
-/// WHAT: stores an `Instant` only when the `timers` feature is active.
-/// WHY: command/build orchestration sometimes needs to record a duration after
-///      branching over error paths, where expression-wrapping macros would make
-///      the control flow harder to read.
-pub(crate) type PipelineTimingStart = std::time::Instant;
+/// WHAT: carries an `Instant` only while the metrics channel is active.
+/// WHY: command/build orchestration sometimes needs a start token across
+/// branching error paths, but inactive timer modes must not read a clock.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct PipelineTimingStart(Option<std::time::Instant>);
 
-/// Start a manually recorded pipeline stage.
+impl PipelineTimingStart {
+    /// Return the captured duration when this session enabled metric timing.
+    pub(crate) fn elapsed(&self) -> Option<Duration> {
+        self.0.map(|start| start.elapsed())
+    }
+}
+
+/// Start a manually recorded pipeline stage only when metrics are active.
 pub(crate) fn start_pipeline_timing() -> PipelineTimingStart {
-    std::time::Instant::now()
+    if !runtime::metrics_active() {
+        return PipelineTimingStart(None);
+    }
+
+    #[cfg(test)]
+    runtime::record_timing_clock_read_for_test();
+
+    PipelineTimingStart(Some(std::time::Instant::now()))
+}
+
+/// Start one detailed-only measurement when its session channel is active.
+///
+/// Detailed frontend substeps do not belong to the ordinary pipeline clock
+/// path, but they follow the same inactive-channel rule.
+pub(crate) fn start_detailed_timing() -> Option<std::time::Instant> {
+    if !runtime::detailed_active() {
+        return None;
+    }
+
+    #[cfg(test)]
+    runtime::record_timing_clock_read_for_test();
+
+    Some(std::time::Instant::now())
+}
+
+/// Whether the active session retains timing attribution metadata.
+///
+/// The facade uses this before evaluating context expressions so raw benchmark
+/// callers that requested metric-only collection avoid building unused module
+/// or boundary context.
+pub(crate) fn timing_attribution_active() -> bool {
+    runtime::attribution_active()
 }
 
 /// Record a manually timed pipeline stage from a previously captured start token.
@@ -302,7 +357,9 @@ pub(crate) fn record_started_pipeline_timing(
     metric: &'static str,
     start: PipelineTimingStart,
 ) -> bool {
-    record_pipeline_timing(metric, start.elapsed())
+    start
+        .elapsed()
+        .is_some_and(|duration| record_pipeline_timing(metric, duration))
 }
 
 /// Record a manually timed pipeline stage with attribution context.
@@ -311,7 +368,9 @@ pub(crate) fn record_started_pipeline_timing_attributed(
     start: PipelineTimingStart,
     context: Option<TimingContext>,
 ) -> bool {
-    record_pipeline_timing_attributed(metric, start.elapsed(), context)
+    start
+        .elapsed()
+        .is_some_and(|duration| record_pipeline_timing_attributed(metric, duration, context))
 }
 
 /// RAII guard that records a pipeline-stage timing when dropped.
@@ -402,15 +461,19 @@ impl<'a> PipelineTimingGuardMulti<'a> {
 
     /// Record the shared duration now and suppress the drop record.
     pub(crate) fn finish(mut self) {
-        record_pipeline_timing_multi(self.entries, self.start.elapsed());
+        if let Some(duration) = self.start.elapsed() {
+            record_pipeline_timing_multi(self.entries, duration);
+        }
         self.finished = true;
     }
 }
 
 impl<'a> Drop for PipelineTimingGuardMulti<'a> {
     fn drop(&mut self) {
-        if !self.finished {
-            record_pipeline_timing_multi(self.entries, self.start.elapsed());
+        if !self.finished
+            && let Some(duration) = self.start.elapsed()
+        {
+            record_pipeline_timing_multi(self.entries, duration);
         }
     }
 }
@@ -461,11 +524,12 @@ impl AstStageTimingGuard {
 
 impl Drop for AstStageTimingGuard {
     fn drop(&mut self) {
-        let elapsed = self.start.elapsed();
-        let output_suppressed =
-            record_pipeline_timing_attributed(self.metric, elapsed, self.context);
-        if detailed_prose_enabled(output_suppressed) {
-            saying::say!(self.prose_label, Green #elapsed);
+        if let Some(elapsed) = self.start.elapsed() {
+            let output_suppressed =
+                record_pipeline_timing_attributed(self.metric, elapsed, self.context);
+            if detailed_prose_enabled(output_suppressed) {
+                saying::say!(self.prose_label, Green #elapsed);
+            }
         }
     }
 }

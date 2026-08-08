@@ -6,8 +6,6 @@
 //! WHY: config uses normal Moth syntax, but bootstrap must finish before source-package discovery.
 //! Reusing tokenizer → headers → dependency sort → AST preserves constant folding and type
 //! checking without constructing a second import graph or package resolver.
-use crate::timing_scope;
-
 use crate::build_system::create_project_modules::extract_source_code;
 use crate::build_system::project_config::ProjectConfigParseServices;
 use std::sync::Arc;
@@ -63,13 +61,8 @@ pub(super) fn parse_config_file(
     services: &ProjectConfigParseServices<'_>,
     string_table: &mut StringTable,
 ) -> Result<ParsedConfigFile, CompilerMessages> {
-    timing_scope!(timing_guard_config_parse_total, "config.parse.total");
     let mut errors = Vec::new();
 
-    timing_scope!(
-        timing_guard_config_parse_canonicalize,
-        "config.parse.canonicalize"
-    );
     let canonical_config = match std::fs::canonicalize(config_path) {
         Ok(canonical_config) => canonical_config,
         Err(error) => {
@@ -107,10 +100,6 @@ pub(super) fn parse_config_file(
     // -------------------------
     //  Tokenize and Prepare Config
     // -------------------------
-    timing_scope!(
-        timing_guard_config_parse_prepare_files_total,
-        "config.parse.prepare_files_total"
-    );
     let prepared_output = prepare_config_file(
         &canonical_config,
         authored_scope.clone(),
@@ -134,8 +123,6 @@ pub(super) fn parse_config_file(
     // WHY: syntax preparation is provider-independent and binding resolves retained shells
     // against provider interfaces. Both phases share the same config-specific duplicate-key
     // diagnostic routing, so the error path is extracted once.
-    timing_scope!(timing_guard_config_parse_headers, "config.parse.headers");
-
     let collect_header_diagnostics =
         |bag: DiagnosticBag,
          errors: &mut Vec<CompilerDiagnostic>,
@@ -153,25 +140,18 @@ pub(super) fn parse_config_file(
             }
         };
 
-    let prepared = match prepare_header_syntax(prepared_outputs, string_table) {
-        Ok(prepared) => prepared,
-        Err(bag) => {
-            collect_header_diagnostics(bag, &mut errors, &authored_scope);
-            return Err(CompilerMessages::from_diagnostics(
-                errors,
-                string_table.clone(),
-            ));
-        }
+    let header_result = match prepare_header_syntax(prepared_outputs, string_table) {
+        Ok(prepared) => bind_module_headers(
+            prepared,
+            &services.frontend_surface.binding_packages,
+            &ExternalImportResolutionTable::default(),
+            &crate::compiler_frontend::public_interface::SourceProviderImportSet::default(),
+            None,
+            string_table,
+        ),
+        Err(bag) => Err(bag),
     };
-
-    let bound_headers = match bind_module_headers(
-        prepared,
-        &services.frontend_surface.binding_packages,
-        &ExternalImportResolutionTable::default(),
-        &crate::compiler_frontend::public_interface::SourceProviderImportSet::default(),
-        None,
-        string_table,
-    ) {
+    let bound_headers = match header_result {
         Ok(headers) => headers,
         Err(bag) => {
             collect_header_diagnostics(bag, &mut errors, &authored_scope);
@@ -185,11 +165,6 @@ pub(super) fn parse_config_file(
     // -------------------------
     //  Dependency Sorting
     // -------------------------
-    timing_scope!(
-        timing_guard_config_parse_dependency_sort,
-        "config.parse.dependency_sort"
-    );
-
     let sorted = match resolve_module_dependencies(bound_headers, string_table) {
         Ok(sorted) => sorted,
         Err(bag) => {
@@ -212,8 +187,6 @@ pub(super) fn parse_config_file(
     // -------------------------
     //  AST Construction
     // -------------------------
-    timing_scope!(timing_guard_config_parse_ast, "config.parse.ast");
-
     let external_package_registry = Arc::new(services.frontend_surface.binding_packages.clone());
     let config_root = canonical_config.parent().ok_or_else(|| {
         CompilerMessages::from_error_ref(
@@ -249,6 +222,8 @@ pub(super) fn parse_config_file(
             capacity_estimate: Default::default(),
             #[cfg(feature = "timers")]
             timing_context: None,
+            #[cfg(feature = "timers")]
+            timing_metric_family: crate::compiler_frontend::ast::AstTimingMetricFamily::Config,
         },
     );
 

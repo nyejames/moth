@@ -6,6 +6,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 
 - [moth CLI entry](src/main.rs)
 - [crate module surface](src/lib.rs)
+- [timing facade](src/timing.rs) and [enabled runtime](src/timing/enabled/runtime.rs): compile-erasing timing/counter entry points, immutable process configuration, command/raw session channels and inactive fast-path policy.
 - [Moth source packages](packages/): compiler-shipped source-backed packages.
     - [@html Builder package](packages/html/@mod.moth): HTML helper templates (`canvas`, `p`, `h1`-`h6`, `div`, `table`, etc.) and the `Canvas`/`get_canvas` wrapper. Internal helpers live in [packages/html/private_helpers.moth](packages/html/private_helpers.moth).
     - [Core binding packages](src/builder_surface/core_packages/): compiler-owned operations and prelude visibility policy.

@@ -2,7 +2,7 @@
 //!
 //! WHAT: compiles project modules through the frontend pipeline for single-file and directory entries.
 //! WHY: separating the two flows keeps each path readable as orchestration over named steps.
-use crate::{timing_scope, timing_scope_attributed, timing_scope_multi};
+use crate::{timing_scope, timing_scope_attributed};
 
 use crate::build_system::build::{CompiledModuleArtifact, ModuleSemanticDraft};
 use crate::build_system::output::ValidatedDirectoryOutputSettings;
@@ -133,10 +133,6 @@ pub(crate) fn compile_single_file_frontend(
     );
 
     // 2. Resolve canonical entry path.
-    timing_scope!(
-        timing_guard_stage0_single_file_entry_canonicalize,
-        "stage0.single_file.entry_canonicalize"
-    );
     let entry_path = match fs::canonicalize(&config.entry_dir) {
         Ok(path) => path,
         Err(error) => {
@@ -149,18 +145,11 @@ pub(crate) fn compile_single_file_frontend(
             return Err(CompilerMessages::from_error_ref(file_error, string_table));
         }
     };
-    #[cfg(feature = "timers")]
-    timing_guard_stage0_single_file_entry_canonicalize.finish();
-
     let source_root = entry_path
         .parent()
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
 
     // 3. Initialize path resolver for imports.
-    timing_scope!(
-        timing_guard_stage0_single_file_path_resolver,
-        "stage0.single_file.path_resolver"
-    );
     // Build one independent source-package boundary index per registered package. The traversal
     // owns direct root discovery and sibling collision checks, so the resolver view is derived
     // from indexed facts and no separate package-root or package-tree scan remains.
@@ -214,9 +203,6 @@ pub(crate) fn compile_single_file_frontend(
             return Err(CompilerMessages::from_error_ref(error, string_table));
         }
     };
-    #[cfg(feature = "timers")]
-    timing_guard_stage0_single_file_path_resolver.finish();
-
     // 4. Discover all transitively reachable files.
     let mut external_imports = source_discovery::ExternalImportDiscoveryState {
         external_packages: &mut builder_surface.binding_packages,
@@ -234,12 +220,8 @@ pub(crate) fn compile_single_file_frontend(
     );
     timing_scope_attributed!(
         timing_guard_build_boundary_inventory,
-        "build.boundary.inventory",
+        "boundary.inventory",
         Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
-    );
-    timing_scope!(
-        timing_guard_stage0_single_file_reachable_files,
-        "stage0.single_file.reachable_files"
     );
     let input_files = match source_discovery::collect_reachable_input_files(
         &entry_path,
@@ -255,9 +237,6 @@ pub(crate) fn compile_single_file_frontend(
     };
     #[cfg(feature = "timers")]
     timing_guard_build_boundary_inventory.finish();
-    #[cfg(feature = "timers")]
-    timing_guard_stage0_single_file_reachable_files.finish();
-
     // Share the effective external package registry immutably for the rest of the frontend
     // pipeline so each stage does not need its own deep clone.
     let external_packages = Arc::new(builder_surface.binding_packages.clone());
@@ -265,24 +244,14 @@ pub(crate) fn compile_single_file_frontend(
     // 5. Run the module compilation pipeline with a local string-table delta.
     add_frontend_counter(FrontendCounter::ModuleCompilationSerialCount, 1);
 
-    timing_scope!(
-        timing_guard_stage0_single_file_string_table_fork,
-        "stage0.single_file.string_table_fork"
-    );
     let string_table_fork = string_table.fork_for_module();
     let (local_table, base_len) = string_table_fork.into_parts();
-    #[cfg(feature = "timers")]
-    timing_guard_stage0_single_file_string_table_fork.finish();
 
-    #[cfg(feature = "timers")]
-    let timing_entries = &[
-        (
-            "build.boundary.compile",
-            Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
-        ),
-        ("stage0.single_file.compile_module", None),
-    ];
-    timing_scope_multi!(timing_guard_single_file_compile, timing_entries);
+    timing_scope_attributed!(
+        timing_guard_boundary_compile,
+        "boundary.compile",
+        Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
+    );
 
     // Record module-input counters before preparation so the frontend module
     // total can be attributed even when preparation fails.
@@ -301,13 +270,6 @@ pub(crate) fn compile_single_file_frontend(
     );
     #[cfg(feature = "timers")]
     let timing_module_context = Some(crate::timing::TimingContext::for_module(timing_module_key));
-
-    // Record the total frontend time for this module (success or error).
-    timing_scope_attributed!(
-        timing_guard_frontend_module_total,
-        "frontend.module.total",
-        timing_module_context,
-    );
 
     // Single-file compilation is a separate synthetic-module mode: it builds one deterministic
     // normal-module origin from the configured project identity, the empty logical module path
@@ -443,18 +405,10 @@ pub(crate) fn compile_single_file_frontend(
         }
     };
     #[cfg(feature = "timers")]
-    timing_guard_frontend_module_total.finish();
-    #[cfg(feature = "timers")]
-    timing_guard_single_file_compile.finish();
+    timing_guard_boundary_compile.finish();
 
     // 6. Merge local results back into the global build context.
-    timing_scope!(
-        timing_guard_stage0_single_file_merge_delta,
-        "stage0.single_file.merge_delta"
-    );
     let remap = string_table.merge_delta_from(&result.string_table, base_len);
-    #[cfg(feature = "timers")]
-    timing_guard_stage0_single_file_merge_delta.finish();
     let ModuleSemanticDraft {
         mut module,
         mut generated_worklist_delta,
@@ -761,13 +715,6 @@ impl<'a> DirectoryModuleCompileContext<'a> {
             crate::timing::TimingModuleKey::new(self.timing_boundary, job.module_id.index() as u32),
         ));
 
-        // Record the total frontend time for this module (success or error).
-        timing_scope_attributed!(
-            timing_guard_frontend_module_total_2,
-            "frontend.module.total",
-            module_context
-        );
-
         // Semantic compilation is provider-dependent: it binds retained `PreparedHeaderSyntax`
         // against provider interfaces, then resolves dependencies, builds AST, lowers HIR and
         // runs borrow validation.
@@ -827,8 +774,6 @@ impl<'a> DirectoryModuleCompileContext<'a> {
             }
             Err(error) => DirectoryModuleTaskOutcome::Infrastructure(error),
         };
-        #[cfg(feature = "timers")]
-        timing_guard_frontend_module_total_2.finish();
         DirectoryModuleTaskResult {
             module_id,
             string_table_base_len: base_len,
@@ -1211,16 +1156,14 @@ pub(crate) fn compile_directory_frontend(
     builder_surface: &mut BuilderSurface,
     string_table: &mut StringTable,
 ) -> Result<ProjectFrontendCompilation, CompilerMessages> {
+    // Directory inventory owns graph construction, source-package discovery,
+    // and deterministic package ordering before any module semantics run.
     timing_scope!(
-        timing_guard_stage0_directory_total,
-        "stage0.directory.total"
+        timing_guard_stage0_directory_inventory,
+        "stage0.directory.inventory"
     );
 
     // 1. Setup path resolution based on config settings.
-    timing_scope!(
-        timing_guard_stage0_directory_path_resolver,
-        "stage0.directory.path_resolver"
-    );
     let mut project_setup = match project_roots::build_project_path_resolver_with_index(
         config,
         validated_output_settings,
@@ -1247,10 +1190,6 @@ pub(crate) fn compile_directory_frontend(
         resolution_table: &mut builder_surface.external_import_resolution_table,
     };
 
-    timing_scope!(
-        timing_guard_stage0_directory_module_inventory,
-        "stage0.directory.module_inventory"
-    );
     let mut source_package_inventories = Vec::new();
     for (import_prefix, package_index) in project_setup
         .module_namespace_set
@@ -1277,7 +1216,7 @@ pub(crate) fn compile_directory_frontend(
         );
         timing_scope_attributed!(
             timing_guard_build_boundary_inventory_2,
-            "build.boundary.inventory",
+            "boundary.inventory",
             Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
         );
         let package_waves = match module_inventory::discover_all_modules_in_package(
@@ -1337,7 +1276,7 @@ pub(crate) fn compile_directory_frontend(
     );
     timing_scope_attributed!(
         timing_guard_build_boundary_inventory_3,
-        "build.boundary.inventory",
+        "boundary.inventory",
         Some(crate::timing::TimingContext::for_boundary(
             project_timing_boundary
         )),
@@ -1360,11 +1299,10 @@ pub(crate) fn compile_directory_frontend(
     };
     #[cfg(feature = "timers")]
     timing_guard_build_boundary_inventory_3.finish();
-    #[cfg(feature = "timers")]
-    timing_guard_stage0_directory_module_inventory.finish();
-
     let source_package_inventories =
         order_source_package_inventories(source_package_inventories, string_table)?;
+    #[cfg(feature = "timers")]
+    timing_guard_stage0_directory_inventory.finish();
 
     // Share the effective external package registry immutably across all boundary compilations;
     // directory modules may compile in parallel and can safely read the same Arc.
@@ -1374,8 +1312,8 @@ pub(crate) fn compile_directory_frontend(
     // their immutable facade interfaces. Each boundary owns independent dense IDs, graphs and
     // provider stores; only the stable public interface crosses into a consuming boundary.
     timing_scope!(
-        timing_guard_stage0_directory_module_compile_batch,
-        "stage0.directory.module_compile_batch"
+        timing_guard_stage0_directory_compile,
+        "stage0.directory.compile"
     );
     let mut completed_source_packages = CompletedSourcePackageRegistry::new();
     for inventory in source_package_inventories {
@@ -1393,7 +1331,7 @@ pub(crate) fn compile_directory_frontend(
         } = inventory;
         timing_scope_attributed!(
             timing_guard_build_boundary_compile,
-            "build.boundary.compile",
+            "boundary.compile",
             Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
         );
         let compiled = compile_module_waves(
@@ -1439,7 +1377,7 @@ pub(crate) fn compile_directory_frontend(
         module_waves.into_parts();
     timing_scope_attributed!(
         timing_guard_build_boundary_compile_2,
-        "build.boundary.compile",
+        "boundary.compile",
         Some(crate::timing::TimingContext::for_boundary(
             project_timing_boundary
         )),
@@ -1464,7 +1402,7 @@ pub(crate) fn compile_directory_frontend(
     #[cfg(feature = "timers")]
     timing_guard_build_boundary_compile_2.finish();
     #[cfg(feature = "timers")]
-    timing_guard_stage0_directory_module_compile_batch.finish();
+    timing_guard_stage0_directory_compile.finish();
 
     ProjectFrontendCompilation::new(project_boundary, completed_source_packages)
         .map_err(|error| CompilerMessages::from_error_ref(error, string_table))

@@ -82,10 +82,7 @@ macro_rules! timer_log {
 macro_rules! benchmark_timer_log {
     ($time:expr, $metric_name:expr, $human_msg:expr) => {{
         let elapsed = $time.elapsed();
-        let output_suppressed = $crate::compiler_frontend::compiler_messages::compiler_dev_logging::log_benchmark_timing(
-            $metric_name,
-            elapsed,
-        );
+        let output_suppressed = $crate::timing::record_pipeline_timing($metric_name, elapsed);
         if $crate::timing::detailed_prose_enabled(output_suppressed) {
             saying::say!($human_msg, Green #elapsed);
         }
@@ -105,25 +102,6 @@ pub fn log_aggregated_duration(label: &str, duration: Duration) {
     if detailed_timer_output_enabled() {
         saying::say!(label, Green #duration);
     }
-}
-
-/// Emit one stable, machine-readable benchmark observation line.
-///
-/// WHAT: prints a plain `MOTH_BENCH timing <metric>=<millis>ms` line that the benchmark
-/// observation parser can grep without depending on human prose.
-/// WHY: separating the stable metric line from colored human output lets compiler
-/// logging change its prose without silently breaking performance attribution.
-#[cfg(feature = "detailed_timers")]
-pub fn log_benchmark_timing(metric_name: &'static str, duration: Duration) -> bool {
-    if metric_name.trim().is_empty() {
-        return false;
-    }
-
-    // Record first so the suppression flag comes from the same collector lock
-    // that stored the observation.
-    let output_suppressed = crate::timing::record_timing(metric_name, duration);
-    crate::timing::emit_bench_timing_line(metric_name, duration, output_suppressed);
-    output_suppressed
 }
 
 /// Emit one stable, machine-readable benchmark counter observation.

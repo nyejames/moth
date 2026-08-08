@@ -259,7 +259,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
         timed_ast_stage_guard!(
             timing_guard,
-            "ast_build_environment_ms",
+            self.context.timing_metric_family.environment(),
             self.context.timing_context,
             "AST/build environment completed in: "
         );

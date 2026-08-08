@@ -13,6 +13,8 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_tests::test_support::temp_dir;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
+#[cfg(feature = "timers")]
+use crate::timing::start_benchmark_collection;
 use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -45,6 +47,90 @@ fn check_compiles_single_file_without_writing_artifacts() {
     );
 
     fs::remove_dir_all(&root).expect("should remove temp dir");
+}
+
+/// Check records its bootstrap and frontend boundaries in owner order.
+#[cfg(feature = "timers")]
+#[test]
+fn successful_check_finishes_bootstrap_before_frontend() {
+    let _test_guard = crate::timing::lock_instrumentation_tests();
+    let root = temp_dir("check_timer_stage_boundaries");
+    fs::create_dir_all(&root).expect("should create temporary project root");
+    let entry_file = root.join("main.moth");
+    fs::write(&entry_file, "value = 1\n").expect("should write source file");
+
+    let timing_session = start_benchmark_collection(true).expect("timing session should start");
+    let outcome = execute_check(
+        entry_file
+            .to_str()
+            .expect("temporary path should be valid UTF-8"),
+    );
+    let snapshot = timing_session.finish();
+
+    assert!(!outcome.messages.has_errors());
+    assert_timing_sequence(
+        &snapshot,
+        &["build.bootstrap.total", "build.frontend.total"],
+    );
+
+    fs::remove_dir_all(&root).expect("should remove temporary project root");
+}
+
+/// Config AST stages use their dedicated v1 identities and finish in owner order.
+#[cfg(feature = "timers")]
+#[test]
+fn config_ast_timers_use_dedicated_identities() {
+    let _test_guard = crate::timing::lock_instrumentation_tests();
+    let root = temp_dir("check_config_timer_stage_boundaries");
+    let source_root = root.join("src");
+    fs::create_dir_all(&source_root).expect("should create source root");
+    fs::write(root.join("config.moth"), "entry_root #= \"src\"\n")
+        .expect("should write config file");
+    fs::write(source_root.join("@page.moth"), "value = 1\n").expect("should write source file");
+
+    let timing_session = start_benchmark_collection(true).expect("timing session should start");
+    let outcome = execute_check(root.to_str().expect("temporary path should be valid UTF-8"));
+    let snapshot = timing_session.finish();
+
+    assert!(!outcome.messages.has_errors());
+    assert_timing_sequence(
+        &snapshot,
+        &[
+            "config.ast.environment",
+            "config.ast.emit",
+            "config.ast.finalise",
+            "config.ast.total",
+        ],
+    );
+
+    fs::remove_dir_all(&root).expect("should remove temporary project root");
+}
+
+#[cfg(feature = "timers")]
+fn assert_timing_sequence(
+    snapshot: &crate::timing::BenchmarkObservationSnapshot,
+    expected_names: &[&'static str],
+) {
+    // The session is serialized against other explicit collector tests, but
+    // ordinary compiler tests may still emit timer observations in parallel.
+    // Locate this command's sequential records instead of comparing unrelated
+    // first occurrences of a shared metric name.
+    let mut expected = expected_names.iter().copied();
+    let mut next_expected = expected.next();
+
+    for observation in &snapshot.timings {
+        if Some(observation.name) == next_expected {
+            next_expected = expected.next();
+            if next_expected.is_none() {
+                return;
+            }
+        }
+    }
+
+    panic!(
+        "missing ordered timing sequence: {}",
+        expected_names.join(" -> ")
+    );
 }
 
 #[test]

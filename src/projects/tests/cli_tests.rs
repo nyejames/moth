@@ -1,5 +1,7 @@
 //! Tests for CLI command parsing and validation.
 
+#[cfg(feature = "timers")]
+use super::run_build_command_with_output_plan;
 use super::{
     Command, build_warnings_messages, compact_whitespace, get_command, help_build_flag_entries,
     integration_run_status, is_standalone_version_request, run_build_command,
@@ -8,6 +10,8 @@ use crate::build_system::BuildProfile;
 use crate::build_system::build::{BuildResult, FileKind, OutputFile, Project};
 use crate::build_system::output::{BuilderKind, CleanupPolicy, OutputOwner};
 use crate::compiler_frontend::Flag;
+#[cfg(feature = "timers")]
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, RuleDiagnosticKind,
 };
@@ -21,6 +25,8 @@ use crate::projects::command_status::CommandStatus;
 use crate::projects::dev_server::DevServerOptions;
 use crate::projects::html_project::new_html_project::NewHtmlProjectOptions;
 use crate::projects::settings::Config;
+#[cfg(feature = "timers")]
+use crate::timing::start_benchmark_collection;
 use std::fs;
 use std::path::PathBuf;
 
@@ -82,6 +88,52 @@ fn build_command_writes_the_validated_directory_output_plan() {
     assert!(!root.join("dev/index.html").exists());
 
     fs::remove_dir_all(&root).expect("should remove temp dir");
+}
+
+/// An output-plan failure still reaches the command's single timing finish.
+#[cfg(feature = "timers")]
+#[test]
+fn failed_output_plan_records_the_build_command_total() {
+    let _test_guard = crate::timing::lock_instrumentation_tests();
+    let root = temp_dir("cli_failed_output_plan_timer");
+    fs::create_dir_all(&root).expect("should create temporary project root");
+    let entry_file = root.join("main.moth");
+    fs::write(&entry_file, "value = 1\n").expect("should write source file");
+
+    // The outer raw session intentionally makes the inner command session a
+    // rejected no-op. Stage guards still record into the outer session, which
+    // lets this unit test inspect the command total without rendering it.
+    let timing_session = start_benchmark_collection(true).expect("timing session should start");
+    let status = run_build_command_with_output_plan(
+        entry_file
+            .to_str()
+            .expect("temporary path should be valid UTF-8"),
+        &[],
+        |_| Err(CompilerError::compiler_error("forced output-plan failure")),
+    );
+    let snapshot = timing_session.finish();
+
+    assert_eq!(status, CommandStatus::Failure);
+    assert_eq!(
+        snapshot
+            .timings
+            .iter()
+            .filter(|observation| observation.name == "command.build.total")
+            .count(),
+        1,
+        "the failed output-plan path must finish the command total before the session drains"
+    );
+    assert_eq!(
+        snapshot
+            .timings
+            .iter()
+            .filter(|observation| observation.name == "build.output.total")
+            .count(),
+        1,
+        "the failed output-plan path must finish the output segment before the session drains"
+    );
+
+    fs::remove_dir_all(&root).expect("should remove temporary project root");
 }
 
 #[test]

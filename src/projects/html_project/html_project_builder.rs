@@ -91,26 +91,11 @@ impl BackendBuilder for HtmlProjectBuilder {
         flags: &[Flag],
         string_table: &mut StringTable,
     ) -> Result<Project, CompilerMessages> {
-        // Record the full backend build duration on every exit path (success or error).
-        timing_scope!(timing_guard_backend_html_total, "backend.html.total");
+        parse_html_site_config(config, string_table)
+            .map_err(|error| error.into_messages(string_table.clone()))?;
 
-        {
-            timing_scope!(
-                timing_guard_backend_html_site_config,
-                "backend.html.site_config"
-            );
-            parse_html_site_config(config, string_table)
-                .map_err(|error| error.into_messages(string_table.clone()))?;
-        }
-
-        let document_config = {
-            timing_scope!(
-                timing_guard_backend_html_document_config,
-                "backend.html.document_config"
-            );
-            parse_html_document_config(config, string_table)
-                .map_err(|error| error.into_messages(string_table.clone()))?
-        };
+        let document_config = parse_html_document_config(config, string_table)
+            .map_err(|error| error.into_messages(string_table.clone()))?;
 
         if project_compilation.module_count() == 0 {
             return Err(CompilerMessages::from_error(
@@ -122,13 +107,7 @@ impl BackendBuilder for HtmlProjectBuilder {
         }
 
         let wasm_enabled = flags.contains(&Flag::HtmlWasm);
-        let entry_paths = {
-            timing_scope!(
-                timing_guard_backend_html_entry_path_plan,
-                "backend.html.entry_path_plan"
-            );
-            HtmlEntryPathPlan::from_config(config, string_table)?
-        };
+        let entry_paths = HtmlEntryPathPlan::from_config(config, string_table)?;
 
         let mut output_files = Vec::new();
         let mut output_paths = HashSet::new();
@@ -139,63 +118,56 @@ impl BackendBuilder for HtmlProjectBuilder {
         let mut compiled_html_output_paths = Vec::with_capacity(artifact_entries.len());
         let mut warnings = Vec::new();
 
-        {
-            timing_scope!(
-                timing_guard_backend_html_module_compile_total,
-                "backend.html.module_compile_total"
-            );
-            for entry in artifact_entries.iter().cloned() {
-                let module = entry.module;
-                // Derive the canonical page route once. Both JS-only and HTML+Wasm output modes
-                // consume this same path — downstream code must not re-derive route semantics.
-                let logical_html_output_path = html_output_path(
-                    &module.metadata.entry_point,
-                    entry_paths.resolved_entry_root.as_deref(),
-                    string_table,
-                )
-                .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
+        for entry in artifact_entries.iter().cloned() {
+            let module = entry.module;
+            // Derive the canonical page route once. Both JS-only and HTML+Wasm output modes
+            // consume this same path — downstream code must not re-derive route semantics.
+            let logical_html_output_path = html_output_path(
+                &module.metadata.entry_point,
+                entry_paths.resolved_entry_root.as_deref(),
+                string_table,
+            )
+            .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
 
-                let compiled_artifacts = self.compile_one_module(
-                    module,
-                    entry.reachability,
-                    entry.external_imports,
-                    &entry.linked_modules,
-                    Arc::clone(&entry.source_function_names),
-                    Arc::clone(&entry.module_private_function_names),
-                    Arc::clone(&entry.generated_function_names),
-                    Arc::clone(&entry.all_generated_function_names),
-                    &logical_html_output_path,
-                    config.project_name.as_str(),
-                    &document_config,
-                    build_profile,
-                    wasm_enabled,
-                    string_table,
-                )?;
+            let compiled_artifacts = self.compile_one_module(
+                module,
+                entry.reachability,
+                entry.external_imports,
+                &entry.linked_modules,
+                Arc::clone(&entry.source_function_names),
+                Arc::clone(&entry.module_private_function_names),
+                Arc::clone(&entry.generated_function_names),
+                Arc::clone(&entry.all_generated_function_names),
+                &logical_html_output_path,
+                config.project_name.as_str(),
+                &document_config,
+                build_profile,
+                wasm_enabled,
+                string_table,
+            )?;
 
-                let html_output_path = compiled_artifacts.html_output_path.clone();
-                for output_file in compiled_artifacts.output_files {
-                    let output_path = output_file.relative_output_path().to_path_buf();
-                    if let Some(existing_entry_point) = output_path_owners.get(&output_path) {
-                        return Err(duplicate_output_path_error(
-                            &module.metadata.entry_point,
-                            existing_entry_point,
-                            &output_path,
-                            string_table,
-                        ));
-                    }
-                    output_paths.insert(output_path.clone());
-                    output_path_owners
-                        .insert(output_path.clone(), module.metadata.entry_point.clone());
-                    output_files.push(output_file);
+            let html_output_path = compiled_artifacts.html_output_path.clone();
+            for output_file in compiled_artifacts.output_files {
+                let output_path = output_file.relative_output_path().to_path_buf();
+                if let Some(existing_entry_point) = output_path_owners.get(&output_path) {
+                    return Err(duplicate_output_path_error(
+                        &module.metadata.entry_point,
+                        existing_entry_point,
+                        &output_path,
+                        string_table,
+                    ));
                 }
-                compiled_html_output_paths.push((module, html_output_path.clone()));
+                output_paths.insert(output_path.clone());
+                output_path_owners.insert(output_path.clone(), module.metadata.entry_point.clone());
+                output_files.push(output_file);
+            }
+            compiled_html_output_paths.push((module, html_output_path.clone()));
 
-                if entry_paths.is_homepage_entry(&module.metadata.entry_point) {
-                    has_directory_homepage = true;
-                    entry_page_rel = Some(html_output_path.clone());
-                } else if !entry_paths.is_directory_build() && entry_page_rel.is_none() {
-                    entry_page_rel = Some(html_output_path);
-                }
+            if entry_paths.is_homepage_entry(&module.metadata.entry_point) {
+                has_directory_homepage = true;
+                entry_page_rel = Some(html_output_path.clone());
+            } else if !entry_paths.is_directory_build() && entry_page_rel.is_none() {
+                entry_page_rel = Some(html_output_path);
             }
         }
 
@@ -209,36 +181,24 @@ impl BackendBuilder for HtmlProjectBuilder {
             artifact_entries.iter().map(|entry| entry.external_imports),
         );
 
-        {
-            timing_scope!(
-                timing_guard_backend_html_external_runtime_assets,
-                "backend.html.external_runtime_assets"
-            );
-            output_files.extend(emit_external_js_runtime_assets(
-                &runtime_emission_plan,
-                &mut output_paths,
-                string_table,
-            )?);
-        }
+        output_files.extend(emit_external_js_runtime_assets(
+            &runtime_emission_plan,
+            &mut output_paths,
+            string_table,
+        )?);
 
-        {
-            timing_scope!(
-                timing_guard_backend_html_external_runtime_glue,
-                "backend.html.external_runtime_glue"
-            );
-            output_files.extend(emit_build_runtime_modules(
-                &runtime_emission_plan,
-                &mut output_paths,
-                string_table,
-            )?);
-        }
+        output_files.extend(emit_build_runtime_modules(
+            &runtime_emission_plan,
+            &mut output_paths,
+            string_table,
+        )?);
 
         let mut tracked_assets = Vec::new();
         let mut tracked_asset_sources_by_output: HashMap<PathBuf, PathBuf> = HashMap::new();
         {
             timing_scope!(
                 timing_guard_backend_html_tracked_assets_plan,
-                "backend.html.tracked_assets_plan"
+                "backend.assets.plan"
             );
             for (module, html_output_path) in &compiled_html_output_paths {
                 let planned_assets =
@@ -279,7 +239,7 @@ impl BackendBuilder for HtmlProjectBuilder {
         {
             timing_scope!(
                 timing_guard_backend_html_tracked_assets_emit,
-                "backend.html.tracked_assets_emit"
+                "backend.assets.emit"
             );
             output_files.extend(emit_tracked_assets(&tracked_assets, string_table)?);
         }

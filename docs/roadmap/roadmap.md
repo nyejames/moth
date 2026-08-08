@@ -11,7 +11,6 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 
 ## Active implementation work
 
-- [New timer summary refactoring](docs/roadmap/plans/compiler-timing-system-finalisation-plan.md)
 - [Canonical module compilation and scoped packages — Phase 5 closeout](./plans/canonical-module-compilation-and-scoped-packages-plan.md)
 
 ## Queued implementation chain

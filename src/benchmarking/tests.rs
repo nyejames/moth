@@ -153,6 +153,37 @@ fn frontend_benchmark_fails_for_missing_file() {
     assert!(result.is_err(), "benchmark should fail for missing file");
 }
 
+/// A frontend benchmark must acquire its raw session before path validation or
+/// compiler setup, otherwise an outer caller-owned snapshot could receive its
+/// observations.
+#[cfg(feature = "timers")]
+#[test]
+fn frontend_benchmark_rejects_a_busy_raw_session_before_compilation() {
+    let _guard = BENCHMARK_TEST_MUTEX.lock().expect("test mutex should lock");
+    let _counter_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let outer =
+        crate::timing::start_benchmark_collection(true).expect("outer timing session should start");
+
+    let result = run_frontend_benchmark(FrontendBenchmarkOptions {
+        entry_path: PathBuf::from("/definitely/does/not/exist.moth"),
+        build_profile: FrontendBenchmarkBuildProfile::Dev,
+    });
+
+    let error = result.expect_err("busy raw benchmark should fail before compiler work");
+    assert!(
+        error
+            .to_string()
+            .contains("Could not start frontend benchmark timing session"),
+        "busy raw-session failures must identify the tooling boundary: {error}"
+    );
+
+    let outer_snapshot = outer.finish();
+    assert!(
+        outer_snapshot.timings.is_empty() && outer_snapshot.counters.is_empty(),
+        "the rejected benchmark must not record path or compiler work into the outer session"
+    );
+}
+
 #[test]
 fn frontend_benchmark_fails_for_invalid_syntax() {
     let _guard = BENCHMARK_TEST_MUTEX.lock().expect("test mutex should lock");

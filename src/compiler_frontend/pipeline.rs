@@ -378,6 +378,9 @@ impl CompilerFrontend {
                 capacity_estimate,
                 #[cfg(feature = "timers")]
                 timing_context,
+                #[cfg(feature = "timers")]
+                timing_metric_family:
+                    crate::compiler_frontend::ast::AstTimingMetricFamily::Frontend,
             },
         )
     }

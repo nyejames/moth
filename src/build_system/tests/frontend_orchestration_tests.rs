@@ -1554,7 +1554,7 @@ fn chunked_file_preparation_skips_identity_payload_remap() {
     let _counter_capture = capture_frontend_counters_for_test();
 
     reset_frontend_counters();
-    let timing_session = start_benchmark_collection(true);
+    let timing_session = start_benchmark_collection(true).expect("timing session should start");
 
     let file_sources = chunked_fixture_sources();
     let file_source_refs = fixture_source_refs(&file_sources);
@@ -1579,21 +1579,22 @@ fn chunked_file_preparation_skips_identity_payload_remap() {
     log_frontend_counters();
     let observations = timing_session.finish();
 
+    // Each chunk forks the already-tokenized base string table, so both chunk merges are
+    // identity remaps and neither chunk needs to rewrite prepared payload IDs.
     assert_counter_value(
         &observations.counters,
         "file_preparation_identity_remap_count",
-        1.0,
+        2.0,
     );
     assert_counter_value(
         &observations.counters,
         "file_preparation_non_identity_remap_count",
-        1.0,
+        0.0,
     );
     assert_counter_value(
         &observations.counters,
         "file_prepare_output_remap_calls",
-        (super::FILE_PREPARATION_ALWAYS_PARALLEL_FILE_COUNT
-            - super::FILE_PREPARATION_MIN_CHUNK_SIZE) as f64,
+        0.0,
     );
 }
 

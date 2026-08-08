@@ -8,6 +8,7 @@
 
 use crate::projects::html_project::document_config::HtmlDocumentConfig;
 use crate::projects::html_project::page_metadata::HtmlPageMetadata;
+use crate::timed_stage;
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -41,17 +42,19 @@ pub(crate) fn render_html_document_shell(
     script_html: String,
     import_map_html: Option<String>,
 ) -> Result<String, CompilerError> {
-    let resolved = resolve_html_document(
-        config,
-        page_metadata,
-        logical_html_path,
-        project_name,
-        body_html,
-        script_html,
-        import_map_html,
-    )?;
+    timed_stage!("backend.html.render", {
+        let resolved = resolve_html_document(
+            config,
+            page_metadata,
+            logical_html_path,
+            project_name,
+            body_html,
+            script_html,
+            import_map_html,
+        )?;
 
-    Ok(render_resolved_document(&resolved))
+        Ok(render_resolved_document(&resolved))
+    })
 }
 
 fn resolve_html_document(

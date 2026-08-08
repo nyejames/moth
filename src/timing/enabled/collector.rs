@@ -1,28 +1,24 @@
 //! In-memory timing and counter observation collector.
 //!
-//! WHAT: stores observations for exactly one active collection session and
-//!      validates every attributed id against that session's generation.
-//! WHY:  subprocess-free frontend benchmarks need programmatic access to the
-//!       same metrics that CLI benchmarks extract from stable `MOTH_BENCH`
-//!       lines, and command reports must never mix evidence from two sessions.
-//!       Session ownership turns nested collection attempts into rejected
-//!       tokens instead of silent replacement of an active report.
+//! WHAT: stores raw observations for exactly one active collection session and
+//! validates attributed ids against that session's generation.
+//! WHY: Phase 2 keeps the existing event snapshot while moving lifecycle and
+//! channel policy into one explicit owner. The later dense collector replaces
+//! this storage only after every recording call site is typed.
 
 use super::attribution::{
     NO_TIMING_BOUNDARY, TimingBoundaryId, TimingBoundaryKind, TimingBoundaryRecord, TimingContext,
     TimingModuleKey, TimingModuleRecord,
 };
-use super::session::{TimingCollectionPurpose, TimingCommandKind, TimingSession, TimingSessionId};
+use super::runtime::{self, TimingSessionConfiguration};
+use super::session::{TimingCommandKind, TimingSession, TimingSessionId, TimingSessionStartError};
 use super::{BenchmarkObservationMetric, BenchmarkObservationSnapshot, TimingObservation};
 use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 
 struct ActiveCollection {
     id: TimingSessionId,
-    command: Option<TimingCommandKind>,
-    purpose: TimingCollectionPurpose,
-    suppress_output: bool,
-    attribution: bool,
+    configuration: TimingSessionConfiguration,
     timings: Vec<TimingObservation>,
     counters: Vec<BenchmarkObservationMetric>,
     boundaries: Vec<TimingBoundaryRecord>,
@@ -31,61 +27,116 @@ struct ActiveCollection {
 
 static ACTIVE_COLLECTOR: Mutex<Option<ActiveCollection>> = Mutex::new(None);
 
+/// The result of attempting to retain one timing observation.
+///
+/// Keeping this structured inside timing avoids emitting benchmark output for
+/// a stale attributed context, while ordinary facade callers still receive
+/// the compact suppression flag they need for human prose.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct TimingRecordOutcome {
+    pub(crate) recorded: bool,
+    pub(crate) output_suppressed: bool,
+}
+
+impl TimingRecordOutcome {
+    const fn recorded(output_suppressed: bool) -> Self {
+        Self {
+            recorded: true,
+            output_suppressed,
+        }
+    }
+}
+
+/// The result of recording several metrics under one collector lock.
+///
+/// The facade uses the captured generation after releasing the lock to emit
+/// benchmark lines only for entries the collector accepted. This keeps stale
+/// contexts out of both the snapshot and terminal output without allocating a
+/// per-entry outcome buffer.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct TimingMultiRecordOutcome {
+    session: Option<TimingSessionId>,
+    attribution_enabled: bool,
+    pub(crate) output_suppressed: bool,
+}
+
+impl TimingMultiRecordOutcome {
+    const fn recorded(
+        session: TimingSessionId,
+        attribution_enabled: bool,
+        output_suppressed: bool,
+    ) -> Self {
+        Self {
+            session: Some(session),
+            attribution_enabled,
+            output_suppressed,
+        }
+    }
+
+    /// Whether this outcome retained the entry with its supplied context.
+    pub(crate) fn recorded_entry(self, context: Option<TimingContext>) -> bool {
+        let Some(session) = self.session else {
+            return false;
+        };
+
+        if !self.attribution_enabled {
+            return true;
+        }
+
+        match context {
+            Some(context) => context.session() == session,
+            None => true,
+        }
+    }
+}
+
 /// Recover the collector lock after poisoning instead of returning empty data.
 ///
 /// The collector is pure bookkeeping: a previous panic must not silently
 /// erase later observations. No code panics while holding this lock.
 fn lock_collector() -> MutexGuard<'static, Option<ActiveCollection>> {
+    #[cfg(test)]
+    COLLECTOR_LOCK_ACQUISITIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
     ACTIVE_COLLECTOR
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// Start a new collection session.
+/// Try to start a new collection session without replacing an existing one.
 ///
-/// When another session is already active the new token is rejected and the
-/// outer session is preserved untouched; the caller must treat a rejected
-/// token as inactive and skip recording through it.
-pub(crate) fn start_session(
+/// Command startup may deliberately turn this error into an inactive session
+/// because a test can own a surrounding raw collector. Explicit raw benchmark
+/// APIs instead surface the error before entering compiler work.
+pub(crate) fn try_start_session(
     command: Option<TimingCommandKind>,
-    purpose: TimingCollectionPurpose,
-    suppress_output: bool,
-    attribution: bool,
-) -> TimingSession {
+    configuration: TimingSessionConfiguration,
+) -> Result<TimingSession, TimingSessionStartError> {
+    debug_assert!(configuration.has_collection());
+
     let mut guard = lock_collector();
     if guard.is_some() {
-        return rejected_session();
+        return Err(TimingSessionStartError::CollectorBusy);
     }
 
     let id = super::session::next_session_id();
     *guard = Some(ActiveCollection {
         id,
-        command,
-        purpose,
-        suppress_output,
-        attribution,
+        configuration,
         timings: Vec::new(),
         counters: Vec::new(),
         boundaries: Vec::new(),
         modules: Vec::new(),
     });
-    active_session(id, command)
-}
+    runtime::activate_session(configuration);
 
-/// A rejected token for a nested or otherwise refused session start.
-fn rejected_session() -> TimingSession {
-    TimingSession::rejected()
-}
-
-/// An accepted token owning the given active scope.
-fn active_session(id: TimingSessionId, command: Option<TimingCommandKind>) -> TimingSession {
-    TimingSession::active(id, command)
+    Ok(TimingSession::active(id, command, configuration))
 }
 
 /// Drain the active scope only when it belongs to the given session.
 pub(crate) fn finish_session(id: TimingSessionId) -> BenchmarkObservationSnapshot {
     let mut guard = lock_collector();
-    let Some(collection) = guard.as_mut() else {
+    let Some(collection) = guard.as_ref() else {
         return BenchmarkObservationSnapshot::default();
     };
     if collection.id != id {
@@ -93,6 +144,11 @@ pub(crate) fn finish_session(id: TimingSessionId) -> BenchmarkObservationSnapsho
     }
 
     let collection = guard.take().expect("active collection present");
+    // Clear the fast-path bits before another session can acquire the
+    // lifecycle lock, so an old finish can never disable a newer session.
+    runtime::deactivate_session();
+    drop(guard);
+
     let mut snapshot = BenchmarkObservationSnapshot {
         timings: collection.timings,
         counters: collection.counters,
@@ -110,88 +166,115 @@ pub(crate) fn abandon_session(id: TimingSessionId) {
     let mut guard = lock_collector();
     if guard.as_ref().is_some_and(|collection| collection.id == id) {
         *guard = None;
+        // This runs under the lifecycle lock for the same reason as finish.
+        runtime::deactivate_session();
     }
 }
 
-/// Record one timing observation if a collection session is active.
-///
-/// Returns whether stdout is suppressed by the active session.
-pub(crate) fn record_timing(name: &'static str, duration: Duration) -> bool {
+/// Record one un-attributed timing observation.
+pub(crate) fn record_timing(name: &'static str, duration: Duration) -> TimingRecordOutcome {
     let mut guard = lock_collector();
     let Some(collection) = guard.as_mut() else {
-        return false;
+        return TimingRecordOutcome::default();
     };
+    if !collection.configuration.channels().metrics() {
+        return TimingRecordOutcome::default();
+    }
+
     collection.timings.push(TimingObservation {
         name,
         duration,
         context: None,
     });
-    collection.suppress_output
+    TimingRecordOutcome::recorded(collection.configuration.suppress_output())
 }
 
 /// Record one timing observation with compact boundary/module context.
 ///
-/// The ids drive structured summary attribution and never appear in stable
-/// `MOTH_BENCH timing` lines, so benchmark parsing is unaffected. Context
-/// from another session or the sentinel is dropped rather than stored.
-/// Returns whether stdout is suppressed by the active session.
+/// Attribution-off sessions keep the metric but deliberately discard its
+/// context. A stale context rejects the entire observation, including any
+/// later benchmark-line emission by the facade.
 pub(crate) fn record_attributed_timing(
     name: &'static str,
     duration: Duration,
     context: Option<TimingContext>,
-) -> bool {
+) -> TimingRecordOutcome {
     let mut guard = lock_collector();
     let Some(collection) = guard.as_mut() else {
-        return false;
+        return TimingRecordOutcome::default();
     };
-
-    if let Some(context) = context
-        && context.session() != collection.id
-    {
-        return false;
+    if !collection.configuration.channels().metrics() {
+        return TimingRecordOutcome::default();
     }
+
+    let context = if collection.configuration.channels().attribution() {
+        match context {
+            Some(context) if context.session() != collection.id => {
+                return TimingRecordOutcome::default();
+            }
+            context => context,
+        }
+    } else {
+        None
+    };
 
     collection.timings.push(TimingObservation {
         name,
         duration,
         context,
     });
-    collection.suppress_output
+    TimingRecordOutcome::recorded(collection.configuration.suppress_output())
 }
 
-/// Record several timing observations from one captured duration.
+/// Record several timing observations while holding the collector lock once.
 ///
-/// Each entry carries its own attribution context; entries from another
-/// session are skipped. Returns whether stdout is suppressed.
+/// The caller receives the active generation needed to emit stable benchmark
+/// lines after releasing the lock. Entries with stale contexts are skipped,
+/// matching single-record behaviour without adding a temporary allocation.
 pub(crate) fn record_attributed_timing_multi(
     entries: &[(&'static str, Option<TimingContext>)],
     duration: Duration,
-) -> bool {
+) -> TimingMultiRecordOutcome {
     let mut guard = lock_collector();
     let Some(collection) = guard.as_mut() else {
-        return false;
+        return TimingMultiRecordOutcome::default();
     };
+    if !collection.configuration.channels().metrics() {
+        return TimingMultiRecordOutcome::default();
+    }
 
-    for (name, context) in entries {
-        if let Some(context) = context
-            && context.session() != collection.id
-        {
-            continue;
-        }
+    let attribution_enabled = collection.configuration.channels().attribution();
+    let outcome = TimingMultiRecordOutcome::recorded(
+        collection.id,
+        attribution_enabled,
+        collection.configuration.suppress_output(),
+    );
+
+    for &(name, context) in entries {
+        let context = if attribution_enabled {
+            match context {
+                Some(context) if context.session() != collection.id => continue,
+                context => context,
+            }
+        } else {
+            None
+        };
+
         collection.timings.push(TimingObservation {
             name,
             duration,
-            context: *context,
+            context,
         });
     }
-    collection.suppress_output
+
+    outcome
 }
 
-/// Register one compilation boundary inside the active session.
+/// Register one compilation boundary inside the active attributed session.
 ///
-/// Returns the sentinel id when no collection session is active; attributed
-/// observations carrying that sentinel are dropped because its session
-/// generation never matches a live session.
+/// The facade checks the atomic attribution bit before entering here, but the
+/// configuration check keeps the lifecycle owner correct if a finish races a
+/// registration call.
 pub(crate) fn register_boundary(
     kind: TimingBoundaryKind,
     display_name: impl FnOnce() -> String,
@@ -200,11 +283,11 @@ pub(crate) fn register_boundary(
     let Some(collection) = guard.as_mut() else {
         return NO_TIMING_BOUNDARY;
     };
+    if !collection.configuration.channels().attribution() {
+        return NO_TIMING_BOUNDARY;
+    }
 
     let id = TimingBoundaryId::from_session(collection.id, collection.boundaries.len() as u32);
-    if !collection.attribution {
-        return id;
-    }
     collection.boundaries.push(TimingBoundaryRecord {
         id,
         kind,
@@ -218,8 +301,7 @@ pub(crate) fn register_boundary(
 ///
 /// The module index is the boundary's graph-owned dense `ModuleId`, so the
 /// same index in two boundaries stays distinct. Duplicate registrations are
-/// ignored and return the existing key, keeping module records and boundary
-/// counts deterministic.
+/// ignored and return the existing key, keeping records deterministic.
 pub(crate) fn register_module(
     boundary: TimingBoundaryId,
     module_index: u32,
@@ -233,10 +315,7 @@ pub(crate) fn register_module(
     let Some(collection) = guard.as_mut() else {
         return key;
     };
-    if boundary.session() != collection.id {
-        return key;
-    }
-    if !collection.attribution {
+    if !collection.configuration.channels().attribution() || boundary.session() != collection.id {
         return key;
     }
     let Some(boundary_record) = collection.boundaries.get(boundary.index()) else {
@@ -264,30 +343,34 @@ pub(crate) fn register_module(
     key
 }
 
-/// Record one counter observation if a collection session is active.
-///
-/// The public `record_counter` wrapper is gated behind `benchmark_counters`,
-/// so this is only reached when both `timers` (the collector) and
-/// `benchmark_counters` are active. `detailed_timers` alone no longer routes
-/// counters here.
-pub(crate) fn record_counter(name: &'static str, value: f64) -> bool {
+/// Record one counter observation when the counter channel is active.
+pub(crate) fn record_counter(name: &'static str, value: f64) -> TimingRecordOutcome {
     let mut guard = lock_collector();
     let Some(collection) = guard.as_mut() else {
-        return false;
+        return TimingRecordOutcome::default();
     };
+    if !collection.configuration.channels().counters() {
+        return TimingRecordOutcome::default();
+    }
+
     collection
         .counters
         .push(BenchmarkObservationMetric { name, value });
-    collection.suppress_output
+    TimingRecordOutcome::recorded(collection.configuration.suppress_output())
 }
 
 /// Whether stdout output is currently allowed.
 ///
 /// Returns false when an in-process collection session has suppressed output.
-/// Returns true when no session is active (normal CLI compilation).
+/// It first checks the active-channel bit so ordinary inactive call sites do
+/// not take the collector mutex.
 pub(crate) fn output_enabled() -> bool {
+    if !runtime::collection_active() {
+        return true;
+    }
+
     match lock_collector().as_ref() {
-        Some(collection) => !collection.suppress_output,
+        Some(collection) => !collection.configuration.suppress_output(),
         None => true,
     }
 }
@@ -304,4 +387,22 @@ fn recompute_boundary_module_counts(snapshot: &mut BenchmarkObservationSnapshot)
     for boundary in &mut snapshot.boundaries {
         boundary.module_count = counts.get(&boundary.id).copied().unwrap_or(0);
     }
+}
+
+#[cfg(test)]
+use std::sync::atomic::AtomicUsize;
+
+#[cfg(test)]
+static COLLECTOR_LOCK_ACQUISITIONS: AtomicUsize = AtomicUsize::new(0);
+
+/// Reset the test-only collector lock counter.
+#[cfg(test)]
+pub(crate) fn reset_lock_acquisitions_for_test() {
+    COLLECTOR_LOCK_ACQUISITIONS.store(0, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Return the test-only collector lock acquisition count.
+#[cfg(test)]
+pub(crate) fn lock_acquisitions_for_test() -> usize {
+    COLLECTOR_LOCK_ACQUISITIONS.load(std::sync::atomic::Ordering::Relaxed)
 }

@@ -1078,13 +1078,8 @@ pub fn build_project(
     entry_path: &str,
     flags: &[Flag],
 ) -> Result<BuildResult, CompilerMessages> {
-    timing_scope!(timing_guard_build_project_total, "build_project.total");
     let build_profile = BuildProfile::from_flags(flags);
     let mut path_string_table = StringTable::new();
-    timing_scope!(
-        timing_guard_build_project_path_validation,
-        "build_project.path_validation"
-    );
     let valid_path = match check_if_valid_path(entry_path, &mut path_string_table) {
         Ok(path) => path,
         Err(error) => {
@@ -1092,18 +1087,11 @@ pub fn build_project(
         }
     };
 
-    #[cfg(feature = "timers")]
-    timing_guard_build_project_path_validation.finish();
-
     // --------------------------------------------
     //   PERFORM THE CORE COMPILER FRONTEND BUILD
     // --------------------------------------------
     // This discovers all the modules, parses the config,
     // and compiles each module to HIR for backend lowering.
-    timing_scope!(
-        timing_guard_build_project_bootstrap,
-        "build_project.bootstrap"
-    );
     let BuildBootstrap {
         mut config,
         style_directives,
@@ -1117,12 +1105,6 @@ pub fn build_project(
         }
     };
 
-    #[cfg(feature = "timers")]
-    timing_guard_build_project_bootstrap.finish();
-    timing_scope!(
-        timing_guard_build_project_compile_project_frontend,
-        "build_project.compile_project_frontend"
-    );
     let frontend_compilation = match compile_project_frontend(
         &mut config,
         build_profile,
@@ -1136,8 +1118,6 @@ pub fn build_project(
             return Err(messages);
         }
     };
-    #[cfg(feature = "timers")]
-    timing_guard_build_project_compile_project_frontend.finish();
     if frontend_compilation.has_diagnosed_or_blocked() {
         return Err(frontend_compilation.into_render_messages(&mut string_table));
     }
@@ -1152,7 +1132,7 @@ pub fn build_project(
     // BUILD PROJECT USING THE APPROPRIATE BUILDER
     // --------------------------------------------
 
-    timing_scope!(timing_guard_build_project_backend, "build_project.backend");
+    timing_scope!(timing_guard_build_backend_total, "build.backend.total");
     let project = match project_builder.backend.build_backend(
         project_compilation,
         &config,
@@ -1167,7 +1147,7 @@ pub fn build_project(
         }
     };
     #[cfg(feature = "timers")]
-    timing_guard_build_project_backend.finish();
+    timing_guard_build_backend_total.finish();
 
     warnings.extend(project.warnings.iter().cloned());
 
@@ -1212,41 +1192,22 @@ pub(crate) fn bootstrap_project_build(
     project_builder: &ProjectBuilder,
     entry_path: PathBuf,
 ) -> Result<BuildBootstrap, CompilerMessages> {
-    timing_scope!(timing_guard_bootstrap_total, "bootstrap.total");
+    timing_scope!(timing_guard_build_bootstrap_total, "build.bootstrap.total");
 
-    timing_scope!(timing_guard_bootstrap_config_init, "bootstrap.config_init");
     let mut config = Config::new(entry_path);
-    #[cfg(feature = "timers")]
-    timing_guard_bootstrap_config_init.finish();
 
     // Seed the build table with the compiler-owned symbols that per-file frontend tables will
     // also need as a stable prefix once file preparation becomes independent.
-    timing_scope!(
-        timing_guard_bootstrap_symbol_preseed,
-        "bootstrap.symbol_preseed"
-    );
     let preseeded = CompilerSymbolSet::preseeded_table(FILE_MIN_UNIQUE_SYMBOLS_CAPACITY);
     let mut string_table = preseeded.string_table;
     // The bootstrap path only needs the preseeded table today. File-local preparation will keep
     // these typed IDs alongside its local outputs once fixed-symbol IDs are consumed directly.
     let _compiler_symbol_ids = preseeded.compiler_symbol_ids;
-    #[cfg(feature = "timers")]
-    timing_guard_bootstrap_symbol_preseed.finish();
 
     // Compute the builder's frontend surface once so config loading and frontend compilation
     // see the same set of allowed config keys, external packages, and source-backed packages.
-    timing_scope!(
-        timing_guard_bootstrap_frontend_surface,
-        "bootstrap.frontend_surface"
-    );
     let frontend_surface = project_builder.backend.frontend_surface();
-    #[cfg(feature = "timers")]
-    timing_guard_bootstrap_frontend_surface.finish();
 
-    timing_scope!(
-        timing_guard_bootstrap_style_directives,
-        "bootstrap.style_directives"
-    );
     let frontend_style_directives = project_builder.backend.frontend_style_directives();
     let style_directives = match StyleDirectiveRegistry::merged(&frontend_style_directives) {
         Ok(style_directives) => style_directives,
@@ -1254,18 +1215,12 @@ pub(crate) fn bootstrap_project_build(
             return Err(CompilerMessages::from_error(error, string_table.clone()));
         }
     };
-    #[cfg(feature = "timers")]
-    timing_guard_bootstrap_style_directives.finish();
     // WHAT: Load and validate project config before compilation begins (Stage 0).
     // WHY: Backends and serving code both depend on the same validated config surface.
     let config_services = ProjectConfigParseServices {
         style_directives: &style_directives,
         frontend_surface: &frontend_surface,
     };
-    timing_scope!(
-        timing_guard_bootstrap_load_project_config,
-        "bootstrap.load_project_config"
-    );
     let validated_directory_output_settings =
         match load_project_config(&mut config, &config_services, &mut string_table) {
             Ok(settings) => settings,
@@ -1273,22 +1228,14 @@ pub(crate) fn bootstrap_project_build(
                 return Err(messages);
             }
         };
-    #[cfg(feature = "timers")]
-    timing_guard_bootstrap_load_project_config.finish();
     // WHAT: Validate backend-specific config requirements before compilation.
     // WHY: Backends should reject unsupported settings before frontend compilation does work.
-    timing_scope!(
-        timing_guard_bootstrap_backend_config_validate,
-        "bootstrap.backend_config_validate"
-    );
     if let Err(error) = project_builder
         .backend
         .validate_project_config(&config, &mut string_table)
     {
         return Err(error.into_messages(string_table.clone()));
     }
-    #[cfg(feature = "timers")]
-    timing_guard_bootstrap_backend_config_validate.finish();
 
     Ok(BuildBootstrap {
         config,

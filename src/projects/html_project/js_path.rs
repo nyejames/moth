@@ -122,7 +122,10 @@ pub(crate) fn compile_html_module_js(
     );
 
     let mut js_module = {
-        timing_scope!(timing_guard_backend_js_lower_hir, "backend.js.lower_hir");
+        timing_scope!(
+            timing_guard_backend_js_lower_entry,
+            "backend.js.lower_entry"
+        );
         lower_hir_to_js(
             input.hir_module,
             input.borrow_analysis,
@@ -146,8 +149,8 @@ pub(crate) fn compile_html_module_js(
             );
             let linked_js = {
                 timing_scope!(
-                    timing_guard_backend_js_lower_linked_hir,
-                    "backend.js.lower_linked_hir"
+                    timing_guard_backend_js_lower_linked,
+                    "backend.js.lower_linked"
                 );
                 lower_hir_to_js(
                     &linked.module.executable.hir,
@@ -218,21 +221,15 @@ pub(crate) fn compile_html_module_js(
 
     // Generate glue modules and import preamble only for external module exports referenced by
     // emitted JS. In HTML page bundles, JS lowering has already filtered unreachable wrappers.
-    let glue_result = {
-        timing_scope!(
-            timing_guard_backend_js_generate_module_glue,
-            "backend.js.generate_module_glue"
-        );
-        generate_module_glue(
-            module,
-            external_imports,
-            &js_module.referenced_external_functions,
-            input.external_package_registry.as_ref(),
-            &output_path,
-            input.build_profile.is_release(),
-        )
-        .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?
-    };
+    let glue_result = generate_module_glue(
+        module,
+        external_imports,
+        &js_module.referenced_external_functions,
+        input.external_package_registry.as_ref(),
+        &output_path,
+        input.build_profile.is_release(),
+    )
+    .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
 
     let use_module_script = glue_result.bundle_import_preamble.is_some();
     let bundle_with_imports = if let Some(ref preamble) = glue_result.bundle_import_preamble {
@@ -241,26 +238,20 @@ pub(crate) fn compile_html_module_js(
         js_module.source.clone()
     };
 
-    let html = {
-        timing_scope!(
-            timing_guard_backend_js_render_html_document,
-            "backend.js.render_html_document"
-        );
-        render_html_document(&mut HtmlDocumentRenderInput {
-            hir_module: input.hir_module,
-            const_fragments: input.const_fragments,
-            string_table,
-            document_config: input.document_config,
-            logical_html_path: &output_path,
-            project_name: input.project_name,
-            js_bundle: &bundle_with_imports,
-            function_names: &js_module.function_name_by_id,
-            entry_runtime_fragment_count: input.root_activity.runtime_fragment_count,
-            uses_reactive_runtime_fragments,
-            import_map_html: glue_result.import_map_html,
-            use_module_script,
-        })?
-    };
+    let html = render_html_document(&mut HtmlDocumentRenderInput {
+        hir_module: input.hir_module,
+        const_fragments: input.const_fragments,
+        string_table,
+        document_config: input.document_config,
+        logical_html_path: &output_path,
+        project_name: input.project_name,
+        js_bundle: &bundle_with_imports,
+        function_names: &js_module.function_name_by_id,
+        entry_runtime_fragment_count: input.root_activity.runtime_fragment_count,
+        uses_reactive_runtime_fragments,
+        import_map_html: glue_result.import_map_html,
+        use_module_script,
+    })?;
 
     let mut output_files = Vec::with_capacity(1 + glue_result.glue_output_files.len());
     output_files.push(OutputFile::new(output_path.clone(), FileKind::Html(html)));

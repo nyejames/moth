@@ -69,7 +69,7 @@ use std::rc::Rc;
 
 #[cfg(feature = "detailed_timers")]
 use crate::compiler_frontend::compiler_messages::compiler_dev_logging::{
-    detailed_timer_output_enabled, log_aggregated_duration, log_benchmark_timing,
+    detailed_timer_output_enabled, log_aggregated_duration,
 };
 #[cfg(feature = "detailed_timers")]
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
@@ -456,25 +456,18 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 "AST/node emission/function bodies parsed in: ",
                 total_function_body_parse_time,
             );
-            log_benchmark_timing("ast_function_body_parse_ms", total_function_body_parse_time);
             log_aggregated_duration(
                 "AST/node emission/start bodies parsed in: ",
                 total_start_body_parse_time,
             );
-            log_benchmark_timing("ast_start_body_parse_ms", total_start_body_parse_time);
             log_aggregated_duration(
                 "AST/node emission/const templates parsed in: ",
-                total_const_template_parse_time,
-            );
-            log_benchmark_timing(
-                "ast_const_template_parse_ms",
                 total_const_template_parse_time,
             );
             log_aggregated_duration(
                 "AST/node emission/const templates folded in: ",
                 total_const_template_fold_time,
             );
-            log_benchmark_timing("ast_const_template_fold_ms", total_const_template_fold_time);
             if detailed_timer_output_enabled() {
                 saying::say!(
                     "AST/node emission/headers emitted: \n functions = ", Dark Green function_headers_emitted,

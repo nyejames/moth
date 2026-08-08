@@ -71,19 +71,20 @@ fn slowest_module_item(report: &TimingSummaryReport) -> Option<&TimingSlowestMod
 fn build_snapshot() -> BenchmarkObservationSnapshot {
     snapshot_with(&[
         ("command.build.total", 100.0),
-        ("build_project.bootstrap", 10.0),
-        ("stage0.directory.module_inventory", 20.0),
-        ("stage0.directory.module_compile_batch", 30.0),
-        ("build_project.backend", 15.0),
-        ("output.write_total", 5.0),
-        ("frontend.file_prepare", 8.0),
-        ("frontend.header_bind", 4.0),
-        ("frontend.dependency_sort", 2.0),
-        ("frontend.ast", 50.0),
+        ("build.bootstrap.total", 10.0),
+        ("stage0.directory.inventory", 20.0),
+        ("stage0.directory.compile", 30.0),
+        ("build.frontend.total", 50.0),
+        ("build.backend.total", 15.0),
+        ("build.output.total", 5.0),
+        ("frontend.prepare", 8.0),
+        ("frontend.bind_headers", 4.0),
+        ("frontend.order_declarations", 2.0),
+        ("frontend.ast.total", 50.0),
         ("frontend.hir", 3.0),
-        ("frontend.borrow", 1.0),
-        ("backend.js.lower_hir", 2.0),
-        ("backend.js.render_html_document", 1.0),
+        ("frontend.borrow.initial", 1.0),
+        ("backend.js.lower_entry", 2.0),
+        ("backend.html.render", 1.0),
     ])
 }
 
@@ -103,7 +104,7 @@ fn report_items_follow_architecture_order() {
         ))),
     ));
     snapshot.timings.push(attributed_observation(
-        "build.boundary.compile",
+        "boundary.compile",
         3.0,
         Some(TimingContext::for_boundary(boundary_id(0))),
     ));
@@ -140,14 +141,48 @@ fn headings_keep_total_in_a_separate_field() {
 
     let check_snapshot = snapshot_with(&[
         ("command.check.total", 60.0),
-        ("command.check.bootstrap", 5.0),
-        ("stage0.directory.module_inventory", 10.0),
-        ("stage0.directory.module_compile_batch", 20.0),
+        ("build.bootstrap.total", 5.0),
+        ("stage0.directory.inventory", 10.0),
+        ("stage0.directory.compile", 20.0),
     ]);
     let check_report = build_timing_summary(&check_snapshot, TimingCommandKind::Check, true);
     assert_eq!(check_report.title, "Check timings");
     assert_eq!(check_report.command_total, Duration::from_millis(60));
     assert_eq!(report_title_text(&check_report), "Check timings  60.00ms");
+}
+
+#[test]
+fn check_summary_excludes_build_only_backend_and_output_metrics() {
+    let snapshot = snapshot_with(&[
+        ("command.check.total", 100.0),
+        ("build.bootstrap.total", 10.0),
+        ("build.frontend.total", 20.0),
+        ("build.backend.total", 40.0),
+        ("build.output.total", 30.0),
+        ("backend.js.lower_entry", 20.0),
+    ]);
+
+    let report = build_timing_summary(&snapshot, TimingCommandKind::Check, true);
+    let pipeline = section_items(&report)[0];
+
+    assert!(
+        pipeline
+            .rows
+            .iter()
+            .all(|row| row.label != "Backend" && row.label != "Output")
+    );
+    let other = pipeline
+        .rows
+        .iter()
+        .find(|row| row.label == "Other")
+        .expect("check pipeline should retain unmeasured work in Other");
+    assert_eq!(other.total, Duration::from_millis(70));
+    assert!(report.items.iter().all(|item| {
+        !matches!(
+            item,
+            TimingReportItem::Section(section) if section.title == "Backend"
+        )
+    }));
 }
 
 #[test]
@@ -172,7 +207,7 @@ fn other_is_bounded_and_never_negative() {
         .find(|row| row.label == "Other")
         .expect("Other should be present");
 
-    // 100 - (10 + 20 + 30 + 15 + 5) = 20ms.
+    // 100 - (10 + 50 + 15 + 5) = 20ms.
     assert_eq!(other.total.as_millis(), 20);
 }
 
@@ -180,11 +215,12 @@ fn other_is_bounded_and_never_negative() {
 fn other_is_omitted_when_insignificant() {
     let snapshot = snapshot_with(&[
         ("command.build.total", 100.0),
-        ("build_project.bootstrap", 10.0),
-        ("stage0.directory.module_inventory", 20.0),
-        ("stage0.directory.module_compile_batch", 30.0),
-        ("build_project.backend", 15.0),
-        ("output.write_total", 24.9),
+        ("build.bootstrap.total", 10.0),
+        ("stage0.directory.inventory", 20.0),
+        ("stage0.directory.compile", 30.0),
+        ("build.frontend.total", 50.0),
+        ("build.backend.total", 15.0),
+        ("build.output.total", 24.9),
     ]);
     let report = build_timing_summary(&snapshot, TimingCommandKind::Build, true);
     let pipeline = section_items(&report)[0];
@@ -196,29 +232,32 @@ fn other_is_omitted_when_insignificant() {
 }
 
 #[test]
-fn single_file_build_shows_compile_frontend_fallback() {
+fn single_file_build_shows_frontend_parent_and_evidence() {
     let snapshot = snapshot_with(&[
         ("command.build.total", 100.0),
-        ("build_project.bootstrap", 10.0),
+        ("build.bootstrap.total", 10.0),
+        ("build.frontend.total", 40.0),
         ("stage0.single_file.total", 40.0),
-        ("build_project.backend", 15.0),
-        ("output.write_total", 5.0),
+        ("build.backend.total", 15.0),
+        ("build.output.total", 5.0),
     ]);
     let report = build_timing_summary(&snapshot, TimingCommandKind::Build, true);
     let pipeline = section_items(&report)[0];
 
-    let compile_frontend = pipeline
+    let frontend = pipeline
         .rows
         .iter()
-        .find(|row| row.label == "Compile frontend")
-        .expect("single-file builds should show one Compile frontend row");
-    assert_eq!(compile_frontend.total, Duration::from_millis(40));
+        .find(|row| row.label == "Frontend")
+        .expect("single-file builds should show the frontend parent row");
+    assert_eq!(frontend.total, Duration::from_millis(40));
+    assert_eq!(frontend.children[0].label, "Single-file frontend");
+    assert_eq!(frontend.children[0].total, Duration::from_millis(40));
     assert!(
         pipeline
             .rows
             .iter()
-            .all(|row| row.label != "Discover and prepare graph"),
-        "directory rows must not appear in single-file mode"
+            .all(|row| row.label != "Directory inventory" && row.label != "Directory compile"),
+        "directory evidence must not appear in single-file mode"
     );
 
     // 100 - (10 + 40 + 15 + 5) = 30ms.
@@ -226,33 +265,36 @@ fn single_file_build_shows_compile_frontend_fallback() {
         .rows
         .iter()
         .find(|row| row.label == "Other")
-        .expect("Other should account the single-file fallback");
+        .expect("Other should account the unmeasured single-file work");
     assert_eq!(other.total, Duration::from_millis(30));
 }
 
 #[test]
-fn single_file_check_shows_compile_frontend_fallback() {
+fn single_file_check_shows_frontend_parent_and_evidence() {
     let snapshot = snapshot_with(&[
         ("command.check.total", 60.0),
-        ("command.check.bootstrap", 5.0),
+        ("build.bootstrap.total", 5.0),
+        ("build.frontend.total", 30.0),
         ("stage0.single_file.total", 30.0),
     ]);
     let report = build_timing_summary(&snapshot, TimingCommandKind::Check, true);
     let pipeline = section_items(&report)[0];
 
-    let compile_frontend = pipeline
+    let frontend = pipeline
         .rows
         .iter()
-        .find(|row| row.label == "Compile frontend")
-        .expect("single-file checks should show one Compile frontend row");
-    assert_eq!(compile_frontend.total, Duration::from_millis(30));
+        .find(|row| row.label == "Frontend")
+        .expect("single-file checks should show the frontend parent row");
+    assert_eq!(frontend.total, Duration::from_millis(30));
+    assert_eq!(frontend.children[0].label, "Single-file frontend");
+    assert_eq!(frontend.children[0].total, Duration::from_millis(30));
 
     // 60 - (5 + 30) = 25ms.
     let other = pipeline
         .rows
         .iter()
         .find(|row| row.label == "Other")
-        .expect("Other should account the single-file fallback");
+        .expect("Other should account the unmeasured single-file work");
     assert_eq!(other.total, Duration::from_millis(25));
 }
 
@@ -292,12 +334,12 @@ fn frontend_heading_omits_count_when_no_modules_registered() {
 fn public_interface_repeated_samples_sum_into_one_row() {
     let mut snapshot = build_snapshot();
     snapshot.timings.push(TimingObservation {
-        name: "frontend.public_interface",
+        name: "frontend.public_interface.project",
         duration: Duration::from_millis(8),
         context: None,
     });
     snapshot.timings.push(TimingObservation {
-        name: "frontend.public_interface",
+        name: "frontend.public_interface.finalise",
         duration: Duration::from_millis(4),
         context: None,
     });
@@ -321,17 +363,17 @@ fn public_interface_repeated_samples_sum_into_one_row() {
 fn generated_borrow_work_is_classified_once() {
     let mut snapshot = build_snapshot();
     snapshot.timings.push(TimingObservation {
-        name: "frontend.generated_functions",
+        name: "frontend.generated.materialise",
         duration: Duration::from_millis(6),
         context: None,
     });
     snapshot.timings.push(TimingObservation {
-        name: "frontend.borrow.generated",
+        name: "frontend.generated.borrow_recheck",
         duration: Duration::from_millis(2),
         context: None,
     });
     snapshot.timings.push(TimingObservation {
-        name: "frontend.borrow.exact_generated",
+        name: "frontend.borrow.converge",
         duration: Duration::from_millis(3),
         context: None,
     });
@@ -371,17 +413,17 @@ fn ast_children_show_tir_and_constant_finalization_labels() {
     let mut snapshot = build_snapshot();
     let module = TimingModuleKey::new(boundary_id(0), 0);
     snapshot.timings.push(TimingObservation {
-        name: "ast_build_environment_ms",
+        name: "frontend.ast.environment",
         duration: Duration::from_millis(30),
         context: Some(TimingContext::for_module(module)),
     });
     snapshot.timings.push(TimingObservation {
-        name: "ast_emit_nodes_ms",
+        name: "frontend.ast.emit",
         duration: Duration::from_millis(40),
         context: Some(TimingContext::for_module(module)),
     });
     snapshot.timings.push(TimingObservation {
-        name: "ast_finalize_ms",
+        name: "frontend.ast.finalise",
         duration: Duration::from_millis(20),
         context: Some(TimingContext::for_module(module)),
     });
@@ -408,7 +450,7 @@ fn ast_children_show_tir_and_constant_finalization_labels() {
         vec![
             "Environment, types and constants",
             "Bodies and TIR construction",
-            "Template and constant finalization",
+            "Template and constant finalisation",
         ]
     );
     assert_eq!(ast.children[1].total, Duration::from_millis(40));
@@ -419,7 +461,7 @@ fn ast_children_show_tir_and_constant_finalization_labels() {
 fn ast_children_hidden_below_significance_threshold() {
     let mut snapshot = build_snapshot();
     snapshot.timings.push(TimingObservation {
-        name: "ast_finalize_ms",
+        name: "frontend.ast.finalise",
         duration: Duration::from_secs_f64(0.0005),
         context: None,
     });
@@ -439,7 +481,7 @@ fn ast_children_hidden_below_significance_threshold() {
     assert!(
         ast.children
             .iter()
-            .all(|child| child.label != "Template and constant finalization"),
+            .all(|child| child.label != "Template and constant finalisation"),
         "sub-threshold AST children must stay hidden"
     );
 }
@@ -448,7 +490,7 @@ fn ast_children_hidden_below_significance_threshold() {
 fn js_lowering_aggregates_entry_and_linked_observations() {
     let mut snapshot = build_snapshot();
     snapshot.timings.push(TimingObservation {
-        name: "backend.js.lower_linked_hir",
+        name: "backend.js.lower_linked",
         duration: Duration::from_millis(3),
         context: None,
     });
@@ -481,7 +523,7 @@ fn wasm_and_tracked_asset_children_appear_when_significant() {
         context: None,
     });
     snapshot.timings.push(TimingObservation {
-        name: "backend.html.tracked_assets_emit",
+        name: "backend.assets.emit",
         duration: Duration::from_millis(1),
         context: None,
     });
@@ -498,7 +540,7 @@ fn wasm_and_tracked_asset_children_appear_when_significant() {
         .map(|row| row.label.as_ref())
         .collect::<Vec<_>>();
 
-    assert!(labels.contains(&"Wasm lowering"));
+    assert!(labels.contains(&"Wasm build"));
     assert!(labels.contains(&"Tracked assets"));
     assert!(
         !labels.contains(&"Site config") && !labels.contains(&"Document config"),
@@ -509,12 +551,13 @@ fn wasm_and_tracked_asset_children_appear_when_significant() {
 #[test]
 fn dev_report_uses_build_and_write_total_and_build_pipeline_rows() {
     let snapshot = snapshot_with(&[
-        ("command.dev.build_and_write", 100.0),
-        ("build_project.bootstrap", 10.0),
-        ("stage0.directory.module_inventory", 20.0),
-        ("stage0.directory.module_compile_batch", 30.0),
-        ("build_project.backend", 15.0),
-        ("output.write_total", 5.0),
+        ("command.dev.build_write", 100.0),
+        ("build.bootstrap.total", 10.0),
+        ("stage0.directory.inventory", 20.0),
+        ("stage0.directory.compile", 30.0),
+        ("build.frontend.total", 50.0),
+        ("build.backend.total", 15.0),
+        ("build.output.total", 5.0),
     ]);
     let report = build_timing_summary(&snapshot, TimingCommandKind::Dev, true);
 
@@ -532,21 +575,21 @@ fn dev_report_uses_build_and_write_total_and_build_pipeline_rows() {
         .map(|row| row.label.as_ref())
         .collect::<Vec<_>>();
     assert!(labels.contains(&"Bootstrap"));
-    assert!(labels.contains(&"Discover and prepare graph"));
-    assert!(labels.contains(&"Compile packages and project"));
+    assert!(labels.contains(&"Frontend"));
     assert!(labels.contains(&"Backend"));
-    assert!(labels.contains(&"Write output"));
+    assert!(labels.contains(&"Output"));
 }
 
 #[test]
 fn zero_rows_are_suppressed_before_rounding() {
     let snapshot = snapshot_with(&[
         ("command.build.total", 100.0),
-        ("build_project.bootstrap", 0.004),
-        ("stage0.directory.module_inventory", 20.0),
-        ("stage0.directory.module_compile_batch", 30.0),
-        ("build_project.backend", 15.0),
-        ("output.write_total", 5.0),
+        ("build.bootstrap.total", 0.004),
+        ("stage0.directory.inventory", 20.0),
+        ("stage0.directory.compile", 30.0),
+        ("build.frontend.total", 50.0),
+        ("build.backend.total", 15.0),
+        ("build.output.total", 5.0),
     ]);
     let report = build_timing_summary(&snapshot, TimingCommandKind::Build, true);
     let pipeline = section_items(&report)[0];
@@ -561,7 +604,7 @@ fn zero_rows_are_suppressed_before_rounding() {
 fn unknown_metrics_stay_hidden_from_basic_output() {
     let mut snapshot = build_snapshot();
     snapshot.timings.push(TimingObservation {
-        name: "backend.html.tracked_assets_emit",
+        name: "backend.wasm.lower",
         duration: Duration::from_millis(50),
         context: None,
     });
@@ -578,13 +621,13 @@ fn unknown_metrics_stay_hidden_from_basic_output() {
         .map(|row| row.label.as_ref())
         .collect();
 
-    assert!(!all_labels.contains(&"tracked_assets_emit"));
+    assert!(!all_labels.contains(&"Wasm build"));
     assert!(
         snapshot
             .timings
             .iter()
-            .any(|observation| observation.name == "backend.html.tracked_assets_emit"),
-        "raw snapshot must retain unknown metrics"
+            .any(|observation| observation.name == "backend.wasm.lower"),
+        "raw snapshot must retain detailed metrics hidden from basic output"
     );
 }
 
@@ -593,8 +636,8 @@ fn child_thresholds_apply_at_exact_boundaries() {
     // Child at exactly 1ms and 5% of a 20ms parent: shown.
     let shown = snapshot_with(&[
         ("command.build.total", 100.0),
-        ("build_project.backend", 20.0),
-        ("backend.js.lower_hir", 1.0),
+        ("build.backend.total", 20.0),
+        ("backend.js.lower_entry", 1.0),
     ]);
     let report = build_timing_summary(&shown, TimingCommandKind::Build, true);
     let sections = section_items(&report);
@@ -607,8 +650,8 @@ fn child_thresholds_apply_at_exact_boundaries() {
     // Child at 0.99ms: hidden.
     let hidden = snapshot_with(&[
         ("command.build.total", 100.0),
-        ("build_project.backend", 20.0),
-        ("backend.js.lower_hir", 0.99),
+        ("build.backend.total", 20.0),
+        ("backend.js.lower_entry", 0.99),
     ]);
     let report = build_timing_summary(&hidden, TimingCommandKind::Build, true);
     assert!(
@@ -671,7 +714,7 @@ fn failed_command_title_records_duration_without_changing_metrics() {
 fn repeated_rows_show_aggregate_duration_without_sample_noise() {
     let mut snapshot = build_snapshot();
     snapshot.timings.push(TimingObservation {
-        name: "frontend.file_prepare",
+        name: "frontend.prepare",
         duration: Duration::from_millis(1),
         context: None,
     });
@@ -794,22 +837,22 @@ fn boundary_rows_separate_packages_and_project_totals() {
     let snapshot = BenchmarkObservationSnapshot {
         timings: vec![
             attributed_observation(
-                "build.boundary.inventory",
+                "boundary.inventory",
                 2.0,
                 Some(TimingContext::for_boundary(html)),
             ),
             attributed_observation(
-                "build.boundary.compile",
+                "boundary.compile",
                 3.0,
                 Some(TimingContext::for_boundary(html)),
             ),
             attributed_observation(
-                "build.boundary.inventory",
+                "boundary.inventory",
                 40.0,
                 Some(TimingContext::for_boundary(project)),
             ),
             attributed_observation(
-                "build.boundary.compile",
+                "boundary.compile",
                 300.0,
                 Some(TimingContext::for_boundary(project)),
             ),
@@ -843,17 +886,17 @@ fn boundary_rows_follow_registration_order() {
     let snapshot = BenchmarkObservationSnapshot {
         timings: vec![
             attributed_observation(
-                "build.boundary.compile",
+                "boundary.compile",
                 1.0,
                 Some(TimingContext::for_boundary(project)),
             ),
             attributed_observation(
-                "build.boundary.compile",
+                "boundary.compile",
                 1.0,
                 Some(TimingContext::for_boundary(first)),
             ),
             attributed_observation(
-                "build.boundary.compile",
+                "boundary.compile",
                 1.0,
                 Some(TimingContext::for_boundary(second)),
             ),
@@ -933,17 +976,17 @@ fn shuffled_events_do_not_change_boundary_or_slowest_module() {
     let html_module = TimingModuleKey::new(html, 0);
     let mut entries = [
         (
-            "build.boundary.inventory",
+            "boundary.inventory",
             2.0,
             Some(TimingContext::for_boundary(html)),
         ),
         (
-            "build.boundary.compile",
+            "boundary.compile",
             3.0,
             Some(TimingContext::for_boundary(html)),
         ),
         (
-            "frontend.file_prepare",
+            "frontend.prepare",
             1.5,
             Some(TimingContext::for_module(html_module)),
         ),
@@ -989,7 +1032,7 @@ fn slowest_module_uses_preparation_plus_semantic_total() {
     let snapshot = BenchmarkObservationSnapshot {
         timings: vec![
             attributed_observation(
-                "frontend.file_prepare",
+                "frontend.prepare",
                 3.0,
                 Some(TimingContext::for_module(first)),
             ),
@@ -1061,7 +1104,7 @@ fn only_registered_boundaries_produce_rows() {
     let snapshot = BenchmarkObservationSnapshot {
         timings: vec![
             attributed_observation(
-                "build.boundary.compile",
+                "boundary.compile",
                 5.0,
                 Some(TimingContext::for_boundary(html)),
             ),
@@ -1096,17 +1139,32 @@ fn boundary_section_heading_marks_accumulated_work() {
 fn config_and_generated_ast_observations_never_enter_module_ast_children() {
     let mut snapshot = build_snapshot();
     snapshot.timings.push(TimingObservation {
-        name: "ast_build_environment_ms",
+        name: "config.ast.environment",
         duration: Duration::from_millis(90),
         context: None,
     });
     snapshot.timings.push(TimingObservation {
-        name: "ast_emit_nodes_ms",
+        name: "config.ast.emit",
         duration: Duration::from_millis(90),
         context: None,
     });
     snapshot.timings.push(TimingObservation {
-        name: "ast_finalize_ms",
+        name: "config.ast.finalise",
+        duration: Duration::from_millis(90),
+        context: None,
+    });
+    snapshot.timings.push(TimingObservation {
+        name: "frontend.generated.ast.environment",
+        duration: Duration::from_millis(90),
+        context: None,
+    });
+    snapshot.timings.push(TimingObservation {
+        name: "frontend.generated.ast.emit",
+        duration: Duration::from_millis(90),
+        context: None,
+    });
+    snapshot.timings.push(TimingObservation {
+        name: "frontend.generated.ast.finalise",
         duration: Duration::from_millis(90),
         context: None,
     });

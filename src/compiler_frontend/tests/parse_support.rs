@@ -136,6 +136,8 @@ pub(crate) fn parse_single_file_ast_build_result(
             capacity_estimate: Default::default(),
             #[cfg(feature = "timers")]
             timing_context: None,
+            #[cfg(feature = "timers")]
+            timing_metric_family: crate::compiler_frontend::ast::AstTimingMetricFamily::Frontend,
         },
     )
     .map_err(|messages| {

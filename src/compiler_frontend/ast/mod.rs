@@ -42,6 +42,10 @@ pub(crate) mod generic_bounds;
 pub(crate) mod generic_functions;
 mod module_ast;
 mod receiver_methods;
+
+#[cfg(feature = "timers")]
+pub(crate) use module_ast::build_context::AstTimingMetricFamily;
+
 pub(crate) mod type_interner;
 pub(crate) mod type_resolution;
 
@@ -319,6 +323,13 @@ impl Ast {
         let ast_header_counts = AstHeaderCounterSnapshot::from_headers(&headers);
         let (phase_context, string_table) = AstPhaseContext::from_build_context(context);
 
+        timed_ast_stage_guard!(
+            timing_guard_ast_total,
+            phase_context.timing_metric_family.total(),
+            phase_context.timing_context,
+            "AST construction completed in: "
+        );
+
         let mut environment = AstModuleEnvironmentBuilder::new(&phase_context).build(
             &headers,
             AstEnvironmentInput {
@@ -333,7 +344,7 @@ impl Ast {
         let emitted = {
             timed_ast_stage_guard!(
                 timing_guard,
-                "ast_emit_nodes_ms",
+                phase_context.timing_metric_family.emit(),
                 phase_context.timing_context,
                 "AST/emit nodes completed in: "
             );
@@ -345,7 +356,7 @@ impl Ast {
         let build_result = {
             timed_ast_stage_guard!(
                 timing_guard,
-                "ast_finalize_ms",
+                phase_context.timing_metric_family.finalise(),
                 phase_context.timing_context,
                 "AST/finalize completed in: "
             );

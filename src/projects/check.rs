@@ -42,10 +42,6 @@ pub(crate) fn run_check(path: &str, options: CheckOptions) -> CommandStatus {
     let warning_count = outcome.messages.warning_count();
     let benchmark_counts = benchmark_diagnostic_counts(&outcome.messages);
 
-    timing_scope!(
-        timing_guard_command_check_message_rendering,
-        "command.check.message_rendering"
-    );
     if options.terse {
         print_terse_compiler_messages(&outcome.messages);
         println!(
@@ -60,9 +56,7 @@ pub(crate) fn run_check(path: &str, options: CheckOptions) -> CommandStatus {
         print_compiler_messages(outcome.messages);
     }
     #[cfg(feature = "timers")]
-    timing_guard_command_check_message_rendering.finish();
-    #[cfg(feature = "timers")]
-    drop(timing_guard_command_check_total);
+    timing_guard_command_check_total.finish();
     command_timing_finish!(timing_session, error_count == 0);
     if let Some((error_count, warning_count)) = benchmark_counts {
         emit_benchmark_status(error_count, warning_count);
@@ -80,10 +74,6 @@ fn execute_check(path: &str) -> CheckOutcome {
     let normalized_path = normalize_entry_path(path);
 
     let mut path_string_table = StringTable::new();
-    timing_scope!(
-        timing_guard_command_check_path_validation,
-        "command.check.path_validation"
-    );
     let valid_path = match check_if_valid_path(normalized_path, &mut path_string_table) {
         Ok(path) => path,
         Err(error) => {
@@ -94,17 +84,7 @@ fn execute_check(path: &str) -> CheckOutcome {
         }
     };
 
-    timing_scope!(
-        timing_guard_command_check_builder_construction,
-        "command.check.builder_construction"
-    );
     let project_builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
-    #[cfg(feature = "timers")]
-    timing_guard_command_check_builder_construction.finish();
-    timing_scope!(
-        timing_guard_command_check_bootstrap,
-        "command.check.bootstrap"
-    );
     let BuildBootstrap {
         mut config,
         style_directives,
@@ -121,23 +101,18 @@ fn execute_check(path: &str) -> CheckOutcome {
         }
     };
 
-    timing_scope!(
-        timing_guard_command_check_compile_project_frontend,
-        "command.check.compile_project_frontend"
-    );
-    let messages = match compile_project_frontend(
+    let frontend = compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         validated_directory_output_settings.as_ref(),
         &style_directives,
         &mut frontend_surface,
         &mut string_table,
-    ) {
+    );
+    let messages = match frontend {
         Ok(frontend) => frontend.into_render_messages(&mut string_table),
         Err(messages) => messages,
     };
-    #[cfg(feature = "timers")]
-    timing_guard_command_check_compile_project_frontend.finish();
 
     CheckOutcome {
         messages,

@@ -50,16 +50,20 @@ pub(crate) use enabled::{
     AstStageTimingGuard, BenchmarkObservationMetric, BenchmarkObservationSnapshot,
     NO_TIMING_BOUNDARY, PipelineTimingGuard, PipelineTimingGuardAttributed,
     PipelineTimingGuardMulti, PipelineTimingStart, TimerOutputMode, TimingBoundaryId,
-    TimingBoundaryKind, TimingBoundaryRecord, TimingCollectionPurpose, TimingCommandKind,
-    TimingContext, TimingMetricSummary, TimingModuleKey, TimingModuleRecord, TimingObservation,
-    TimingSession, current_output_mode, detailed_prose_enabled, detailed_timer_output_enabled,
+    TimingBoundaryKind, TimingBoundaryRecord, TimingCommandKind, TimingContext,
+    TimingMetricSummary, TimingModuleKey, TimingModuleRecord, TimingObservation, TimingSession,
+    TimingSessionStartError, detailed_prose_enabled, detailed_timer_output_enabled,
     emit_bench_timing_line, output_enabled, record_pipeline_timing,
     record_pipeline_timing_attributed, record_pipeline_timing_multi,
-    record_started_pipeline_timing, record_started_pipeline_timing_attributed, record_timing,
+    record_started_pipeline_timing, record_started_pipeline_timing_attributed,
     register_timing_boundary, register_timing_module, render_command_timing_summary,
-    start_benchmark_collection, start_command_session, start_pipeline_timing,
-    start_raw_benchmark_collection, stop_and_collect_benchmark_observations,
+    start_benchmark_collection, start_command_session, start_detailed_timing,
+    start_pipeline_timing, start_raw_benchmark_collection, stop_and_collect_benchmark_observations,
+    timing_attribution_active,
 };
+
+#[cfg(all(feature = "timers", test))]
+pub(crate) use enabled::start_command_session_with_configuration;
 
 #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
 pub(crate) use enabled::record_counter;
@@ -74,12 +78,12 @@ pub(crate) use enabled::record_counter;
 
 /// Output mode controlling how high-volume benchmark counters reach the user.
 ///
-/// Parsed from the `MOTH_COUNTERS` environment variable. Counters are always
-/// collected into the central snapshot when `benchmark_counters` and `timers`
-/// are both active; this mode only controls what reaches stdout.
+/// Parsed from the `MOTH_COUNTERS` environment variable. In a timer build it
+/// selects the counter channel and its presentation policy; a counters-only
+/// build still uses it solely for direct stdout output.
 ///
-/// - `Off` (default): collect counters but print nothing. Lets in-process
-///   benchmark APIs read counters programmatically without flooding CLI output.
+/// - `Off` (default): do not collect command counters and print nothing.
+///   Explicit raw benchmark sessions may still collect counters programmatically.
 /// - `Summary`: emit stable `MOTH_BENCH counter` lines and print a concise
 ///   grouped counter summary after compilation.
 /// - `Full`: emit stable `MOTH_BENCH counter` lines and print the legacy
@@ -97,16 +101,22 @@ pub(crate) enum CounterOutputMode {
 
 #[cfg(feature = "benchmark_counters")]
 impl CounterOutputMode {
-    /// Parse the output mode from the `MOTH_COUNTERS` environment variable.
+    /// Parse one optional `MOTH_COUNTERS` value without reading process state.
     ///
     /// Unset or unrecognized values default to `Off` so regular benchmark
     /// builds do not flood stdout with counter prose.
-    pub(crate) fn from_env() -> Self {
-        match std::env::var("MOTH_COUNTERS").as_deref() {
-            Ok("summary") => Self::Summary,
-            Ok("full") => Self::Full,
+    pub(crate) fn parse(value: Option<&str>) -> Self {
+        match value {
+            Some("summary") => Self::Summary,
+            Some("full") => Self::Full,
             _ => Self::Off,
         }
+    }
+
+    /// Read the process setting while runtime configuration initialises.
+    pub(crate) fn from_environment() -> Self {
+        let value = std::env::var("MOTH_COUNTERS").ok();
+        Self::parse(value.as_deref())
     }
 
     /// Whether stable `MOTH_BENCH counter` lines should be printed.
@@ -127,27 +137,31 @@ impl CounterOutputMode {
     }
 }
 
-/// The current counter output mode parsed from `MOTH_COUNTERS`.
+/// The immutable counter output policy for counters-only process builds.
 ///
-/// Counters are collected regardless of this mode (when `timers` and
-/// `benchmark_counters` are both active); this only governs stdout.
-#[cfg(feature = "benchmark_counters")]
-static CACHED_COUNTER_MODE: std::sync::Mutex<Option<CounterOutputMode>> =
-    std::sync::Mutex::new(None);
+/// Timer builds keep this policy inside their shared runtime configuration;
+/// they use the active session channel directly instead of reading it while
+/// recording a counter.
+#[cfg(all(feature = "benchmark_counters", not(feature = "timers")))]
+static CACHED_COUNTER_MODE: std::sync::OnceLock<CounterOutputMode> = std::sync::OnceLock::new();
 
-#[cfg(feature = "benchmark_counters")]
+#[cfg(all(feature = "benchmark_counters", not(feature = "timers")))]
 pub(crate) fn current_counter_output_mode() -> CounterOutputMode {
-    let mut guard = CACHED_COUNTER_MODE
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    *guard.get_or_insert_with(CounterOutputMode::from_env)
+    *CACHED_COUNTER_MODE.get_or_init(CounterOutputMode::from_environment)
 }
 
-#[cfg(all(feature = "benchmark_counters", test))]
-pub(crate) fn set_counter_output_mode_for_test(mode: CounterOutputMode) {
-    *CACHED_COUNTER_MODE
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(mode);
+/// Whether legacy per-counter human prose is enabled for the active session.
+#[cfg(feature = "benchmark_counters")]
+pub(crate) fn counter_human_prose_enabled() -> bool {
+    #[cfg(feature = "timers")]
+    {
+        enabled::runtime::counter_human_prose_active()
+    }
+
+    #[cfg(not(feature = "timers"))]
+    {
+        current_counter_output_mode().emits_human_counter_prose()
+    }
 }
 
 /// Emit one stable `MOTH_BENCH counter` line to stdout if the counter output
@@ -165,9 +179,13 @@ pub(crate) fn emit_bench_counter_line(name: &'static str, value: f64, output_sup
         return;
     }
 
-    let mode = current_counter_output_mode();
+    #[cfg(feature = "timers")]
+    let emits_bench_line = enabled::runtime::counter_bench_output_active();
 
-    if !output_suppressed && mode.emits_bench_counter_lines() {
+    #[cfg(not(feature = "timers"))]
+    let emits_bench_line = current_counter_output_mode().emits_bench_counter_lines();
+
+    if !output_suppressed && emits_bench_line {
         saying::say!("MOTH_BENCH counter ", name, "=", #value);
     }
 }
@@ -205,7 +223,9 @@ macro_rules! timed_stage {
     ($metric:expr, $expression:expr) => {{
         let timing_start = $crate::timing::start_pipeline_timing();
         let timing_result = $expression;
-        $crate::timing::record_pipeline_timing($metric, timing_start.elapsed());
+        if let Some(elapsed) = timing_start.elapsed() {
+            $crate::timing::record_pipeline_timing($metric, elapsed);
+        }
         timing_result
     }};
 }
@@ -218,15 +238,22 @@ macro_rules! timed_stage {
 
 /// Time one expression and record a stable metric with attribution context.
 ///
-/// The context expression is only evaluated while `timers` is active.
+/// The context expression is only evaluated when the active session retains
+/// attribution metadata.
 #[macro_export]
 #[cfg(feature = "timers")]
 macro_rules! timed_stage_attributed {
     ($metric:expr, $context:expr, $expression:expr) => {{
         let timing_start = $crate::timing::start_pipeline_timing();
         let timing_result = $expression;
-        let elapsed = timing_start.elapsed();
-        $crate::timing::record_pipeline_timing_attributed($metric, elapsed, $context);
+        if let Some(elapsed) = timing_start.elapsed() {
+            let timing_context = if $crate::timing::timing_attribution_active() {
+                $context
+            } else {
+                None
+            };
+            $crate::timing::record_pipeline_timing_attributed($metric, elapsed, timing_context);
+        }
         timing_result
     }};
 }
@@ -279,8 +306,13 @@ macro_rules! timing_scope_multi {
 #[cfg(feature = "timers")]
 macro_rules! timing_scope_attributed {
     ($binding:ident, $metric:expr, $context:expr $(,)?) => {
+        let timing_context = if $crate::timing::timing_attribution_active() {
+            $context
+        } else {
+            None
+        };
         #[allow(unused_variables)]
-        let $binding = $crate::timing::PipelineTimingGuardAttributed::new($metric, $context);
+        let $binding = $crate::timing::PipelineTimingGuardAttributed::new($metric, timing_context);
     };
 }
 
@@ -312,7 +344,11 @@ macro_rules! record_timing_duration {
 #[cfg(feature = "timers")]
 macro_rules! record_attributed_duration {
     ($metric:expr, $duration:expr, $context:expr) => {
-        $crate::timing::record_pipeline_timing_attributed($metric, $duration, $context)
+        if $crate::timing::timing_attribution_active() {
+            $crate::timing::record_pipeline_timing_attributed($metric, $duration, $context)
+        } else {
+            $crate::timing::record_pipeline_timing_attributed($metric, $duration, None)
+        }
     };
 }
 
@@ -334,19 +370,25 @@ macro_rules! timed_frontend_stage {
     ($metric:expr, $prose_label:expr, $context:expr, $stage:expr $(,)?) => {{
         let timing_start = $crate::timing::start_pipeline_timing();
         let timing_result = $stage;
-        let elapsed = timing_start.elapsed();
-        #[allow(unused_variables)]
-        let output_suppressed = $crate::timing::record_pipeline_timing_attributed(
-            $metric,
-            elapsed,
-            $context,
-        );
+        if let Some(elapsed) = timing_start.elapsed() {
+            let timing_context = if $crate::timing::timing_attribution_active() {
+                $context
+            } else {
+                None
+            };
+            #[allow(unused_variables)]
+            let output_suppressed = $crate::timing::record_pipeline_timing_attributed(
+                $metric,
+                elapsed,
+                timing_context,
+            );
 
-        // Human prose stays gated by detailed_timers for verbose developer output.
-        #[cfg(feature = "detailed_timers")]
-        {
-            if $crate::timing::detailed_prose_enabled(output_suppressed) {
-                saying::say!($prose_label, Green #elapsed);
+            // Human prose stays gated by detailed_timers for verbose developer output.
+            #[cfg(feature = "detailed_timers")]
+            {
+                if $crate::timing::detailed_prose_enabled(output_suppressed) {
+                    saying::say!($prose_label, Green #elapsed);
+                }
             }
         }
         timing_result
@@ -370,18 +412,24 @@ macro_rules! timed_frontend_stage_with_child {
     ($metric:expr, $child_metric:expr, $prose_label:expr, $context:expr, $stage:expr $(,)?) => {{
         let timing_start = $crate::timing::start_pipeline_timing();
         let timing_result = $stage;
-        let elapsed = timing_start.elapsed();
-        #[allow(unused_variables)]
-        let output_suppressed = $crate::timing::record_pipeline_timing_multi(
-            &[($metric, $context), ($child_metric, $context)],
-            elapsed,
-        );
+        if let Some(elapsed) = timing_start.elapsed() {
+            let timing_context = if $crate::timing::timing_attribution_active() {
+                $context
+            } else {
+                None
+            };
+            #[allow(unused_variables)]
+            let output_suppressed = $crate::timing::record_pipeline_timing_multi(
+                &[($metric, timing_context), ($child_metric, timing_context)],
+                elapsed,
+            );
 
-        // Human prose stays gated by detailed_timers for verbose developer output.
-        #[cfg(feature = "detailed_timers")]
-        {
-            if $crate::timing::detailed_prose_enabled(output_suppressed) {
-                saying::say!($prose_label, Green #elapsed);
+            // Human prose stays gated by detailed_timers for verbose developer output.
+            #[cfg(feature = "detailed_timers")]
+            {
+                if $crate::timing::detailed_prose_enabled(output_suppressed) {
+                    saying::say!($prose_label, Green #elapsed);
+                }
             }
         }
         timing_result
@@ -435,8 +483,14 @@ macro_rules! timed_ast_stage {
 #[cfg(feature = "timers")]
 macro_rules! timed_ast_stage_guard {
     ($binding:ident, $metric:expr, $context:expr, $prose_label:expr) => {
+        let timing_context = if $crate::timing::timing_attribution_active() {
+            $context
+        } else {
+            None
+        };
         #[allow(unused_variables)]
-        let $binding = $crate::timing::AstStageTimingGuard::new($metric, $context, $prose_label);
+        let $binding =
+            $crate::timing::AstStageTimingGuard::new($metric, timing_context, $prose_label);
     };
 }
 
@@ -449,16 +503,19 @@ macro_rules! timed_ast_stage_guard {
 /// Time one detailed frontend substep through an erasing macro.
 ///
 /// The substep argument is a direct production expression, not a closure.
-/// With `detailed_timers` disabled the expansion is that expression itself;
-/// no closure or timing wrapper survives in the build.
+/// With `detailed_timers` disabled, or with no active detailed channel, the
+/// expansion executes that expression without a clock read.
 #[macro_export]
 #[cfg(feature = "detailed_timers")]
 macro_rules! timed_frontend_substep {
     ($metric:expr, $prose_label:expr, $substep:expr $(,)?) => {{
-        let timing_start = std::time::Instant::now();
-        let timing_result = $substep;
-        $crate::benchmark_timer_log!(timing_start, $metric, $prose_label);
-        timing_result
+        if let Some(timing_start) = $crate::timing::start_detailed_timing() {
+            let timing_result = $substep;
+            $crate::benchmark_timer_log!(timing_start, $metric, $prose_label);
+            timing_result
+        } else {
+            $substep
+        }
     }};
 }
 
@@ -514,7 +571,7 @@ macro_rules! command_timing_finish {
 // compiler-instrumentation scope. Every test that starts a collection session
 // or resets those stores must share a single lock, otherwise parallel test
 // execution interleaves unrelated sessions. The frontend counter-test lock
-// delegates here (matching the existing `current_counter_output_mode` call).
+// delegates here (matching the shared active-counter channel).
 
 /// Serialize every compiler-instrumentation test behind one process-global
 /// lock.

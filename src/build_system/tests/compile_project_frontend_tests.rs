@@ -144,7 +144,8 @@ fn directory_frontend_registers_package_and_project_boundaries() {
         PackageOrigin::Builder,
     );
 
-    let timing_session = crate::timing::start_benchmark_collection(true);
+    let timing_session =
+        crate::timing::start_benchmark_collection(true).expect("timing session should start");
     let frontend = compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
@@ -197,24 +198,24 @@ fn directory_frontend_registers_package_and_project_boundaries() {
         snapshot.modules
     );
     assert!(snapshot.timings.iter().any(|observation| {
-        observation.name == "build.boundary.inventory"
+        observation.name == "boundary.inventory"
             && observation.context
                 == Some(crate::timing::TimingContext::for_boundary(package_boundary))
     }));
     assert!(snapshot.timings.iter().any(|observation| {
-        observation.name == "build.boundary.inventory"
+        observation.name == "boundary.inventory"
             && observation
                 .context
                 .and_then(crate::timing::TimingContext::boundary)
                 == Some(project_boundary)
     }));
     assert!(snapshot.timings.iter().any(|observation| {
-        observation.name == "build.boundary.compile"
+        observation.name == "boundary.compile"
             && observation.context
                 == Some(crate::timing::TimingContext::for_boundary(package_boundary))
     }));
     assert!(snapshot.timings.iter().any(|observation| {
-        observation.name == "build.boundary.compile"
+        observation.name == "boundary.compile"
             && observation
                 .context
                 .and_then(crate::timing::TimingContext::boundary)
@@ -332,7 +333,8 @@ fn directory_frontend_records_incremental_file_prepare_with_module_attribution()
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
 
-    let timing_session = crate::timing::start_benchmark_collection(true);
+    let timing_session =
+        crate::timing::start_benchmark_collection(true).expect("timing session should start");
     let frontend = compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
@@ -355,7 +357,7 @@ fn directory_frontend_records_incremental_file_prepare_with_module_attribution()
         .timings
         .iter()
         .filter(|observation| {
-            observation.name == "frontend.file_prepare"
+            observation.name == "frontend.prepare"
                 && observation
                     .context
                     .and_then(crate::timing::TimingContext::boundary)
@@ -365,7 +367,7 @@ fn directory_frontend_records_incremental_file_prepare_with_module_attribution()
 
     assert!(
         !prepare_observations.is_empty(),
-        "incremental directory discovery must record frontend.file_prepare for the project boundary"
+        "incremental directory discovery must record frontend.prepare for the project boundary"
     );
     assert!(
         prepare_observations.iter().all(|observation| observation
@@ -392,7 +394,8 @@ fn single_file_frontend_records_file_prepare_with_module_attribution() {
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
 
-    let timing_session = crate::timing::start_benchmark_collection(true);
+    let timing_session =
+        crate::timing::start_benchmark_collection(true).expect("timing session should start");
     let frontend = compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
@@ -415,7 +418,7 @@ fn single_file_frontend_records_file_prepare_with_module_attribution() {
         .timings
         .iter()
         .filter(|observation| {
-            observation.name == "frontend.file_prepare"
+            observation.name == "frontend.prepare"
                 && observation
                     .context
                     .and_then(crate::timing::TimingContext::boundary)
@@ -424,7 +427,7 @@ fn single_file_frontend_records_file_prepare_with_module_attribution() {
         .collect::<Vec<_>>();
     assert!(
         !prepare_observations.is_empty(),
-        "single-file preparation must record frontend.file_prepare: boundaries={:#?} observations={:#?}",
+        "single-file preparation must record frontend.prepare: boundaries={:#?} observations={:#?}",
         snapshot
             .boundaries
             .iter()
@@ -433,7 +436,7 @@ fn single_file_frontend_records_file_prepare_with_module_attribution() {
         snapshot
             .timings
             .iter()
-            .filter(|observation| observation.name == "frontend.file_prepare")
+            .filter(|observation| observation.name == "frontend.prepare")
             .map(|observation| (
                 observation
                     .context
@@ -469,7 +472,8 @@ fn ast_aggregate_metrics_recorded_with_timers() {
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
 
-    let timing_session = crate::timing::start_benchmark_collection(true);
+    let timing_session =
+        crate::timing::start_benchmark_collection(true).expect("timing session should start");
     let frontend = compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
@@ -483,9 +487,9 @@ fn ast_aggregate_metrics_recorded_with_timers() {
     drop(frontend);
 
     for metric in [
-        "ast_build_environment_ms",
-        "ast_emit_nodes_ms",
-        "ast_finalize_ms",
+        "frontend.ast.environment",
+        "frontend.ast.emit",
+        "frontend.ast.finalise",
     ] {
         assert!(
             snapshot
@@ -495,6 +499,15 @@ fn ast_aggregate_metrics_recorded_with_timers() {
             "{metric} must be recorded whenever timers is enabled"
         );
     }
+    let ast_total_count = snapshot
+        .timings
+        .iter()
+        .filter(|observation| observation.name == "frontend.ast.total")
+        .count();
+    assert_eq!(
+        ast_total_count, 1,
+        "module AST construction must record one aggregate timing span"
+    );
 
     fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
@@ -513,7 +526,8 @@ fn ast_aggregate_metrics_are_not_double_recorded_with_detailed_timers() {
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
 
-    let timing_session = crate::timing::start_benchmark_collection(true);
+    let timing_session =
+        crate::timing::start_benchmark_collection(true).expect("timing session should start");
     let frontend = compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
@@ -527,9 +541,9 @@ fn ast_aggregate_metrics_are_not_double_recorded_with_detailed_timers() {
     drop(frontend);
 
     for metric in [
-        "ast_build_environment_ms",
-        "ast_emit_nodes_ms",
-        "ast_finalize_ms",
+        "frontend.ast.environment",
+        "frontend.ast.emit",
+        "frontend.ast.finalise",
     ] {
         let count = snapshot
             .timings
@@ -541,6 +555,15 @@ fn ast_aggregate_metrics_are_not_double_recorded_with_detailed_timers() {
             "{metric} must be recorded under detailed_timers"
         );
     }
+    let ast_total_count = snapshot
+        .timings
+        .iter()
+        .filter(|observation| observation.name == "frontend.ast.total")
+        .count();
+    assert_eq!(
+        ast_total_count, 1,
+        "detailed AST construction must still record one aggregate span"
+    );
 
     fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
@@ -1672,7 +1695,8 @@ fn linked_module_js_lowering_is_observed_separately() {
         PackageOrigin::Builder,
     );
 
-    let timing_session = crate::timing::start_benchmark_collection(true);
+    let timing_session =
+        crate::timing::start_benchmark_collection(true).expect("timing session should start");
     let modules = compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
@@ -1702,14 +1726,14 @@ fn linked_module_js_lowering_is_observed_separately() {
         snapshot
             .timings
             .iter()
-            .any(|observation| observation.name == "backend.js.lower_linked_hir"),
+            .any(|observation| observation.name == "backend.js.lower_linked"),
         "linked-module JS lowering must be observed separately from entry lowering"
     );
     assert!(
         snapshot
             .timings
             .iter()
-            .any(|observation| observation.name == "backend.js.lower_hir"),
+            .any(|observation| observation.name == "backend.js.lower_entry"),
         "entry-module JS lowering must remain observed"
     );
 

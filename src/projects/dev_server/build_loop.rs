@@ -367,7 +367,7 @@ fn build_once(
         #[cfg(feature = "timers")]
         timing_scope!(
             timing_guard_command_dev_build_and_write,
-            "command.dev.build_and_write"
+            "command.dev.build_write"
         );
         match executor.build_and_write(entry_file, flags) {
             Ok(build_result) => build_result,

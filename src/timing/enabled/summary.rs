@@ -115,9 +115,6 @@ struct MetricPolicy {
     emphasis: TimingEmphasis,
     /// Nested evidence rows shown only when they pass the child threshold.
     children: &'static [MetricChildPolicy],
-    /// Pipeline fallback shown only when the directory pipeline rows are
-    /// absent, for example the single-file `Compile frontend` row.
-    fallback: bool,
     /// `None` applies to every command.
     command: Option<TimingCommandKind>,
 }
@@ -141,126 +138,101 @@ enum SectionId {
 /// metrics have no entry and therefore never appear in basic output.
 const BASIC_METRIC_POLICY: &[MetricPolicy] = &[
     MetricPolicy {
-        metrics: &["build_project.bootstrap"],
+        metrics: &["build.bootstrap.total"],
         label: "Bootstrap",
         kind: TimingMeasurementKind::WallSpan,
         section: SectionId::Pipeline,
         emphasis: TimingEmphasis::Ordinary,
         children: &[],
-        fallback: false,
-        command: Some(TimingCommandKind::Build),
-    },
-    MetricPolicy {
-        metrics: &["command.check.bootstrap"],
-        label: "Bootstrap",
-        kind: TimingMeasurementKind::WallSpan,
-        section: SectionId::Pipeline,
-        emphasis: TimingEmphasis::Ordinary,
-        children: &[],
-        fallback: false,
-        command: Some(TimingCommandKind::Check),
-    },
-    MetricPolicy {
-        metrics: &["stage0.directory.module_inventory"],
-        label: "Discover and prepare graph",
-        kind: TimingMeasurementKind::WallSpan,
-        section: SectionId::Pipeline,
-        emphasis: TimingEmphasis::Ordinary,
-        children: &[],
-        fallback: false,
         command: None,
     },
     MetricPolicy {
-        metrics: &["stage0.directory.module_compile_batch"],
-        label: "Compile packages and project",
+        metrics: &["build.frontend.total"],
+        label: "Frontend",
         kind: TimingMeasurementKind::WallSpan,
         section: SectionId::Pipeline,
         emphasis: TimingEmphasis::Ordinary,
-        children: &[],
-        fallback: false,
+        children: &[
+            MetricChildPolicy {
+                metric: "stage0.directory.inventory",
+                label: "Directory inventory",
+            },
+            MetricChildPolicy {
+                metric: "stage0.directory.compile",
+                label: "Directory compile",
+            },
+            MetricChildPolicy {
+                metric: "stage0.single_file.total",
+                label: "Single-file frontend",
+            },
+        ],
         command: None,
     },
     MetricPolicy {
-        metrics: &["stage0.single_file.total"],
-        label: "Compile frontend",
-        kind: TimingMeasurementKind::WallSpan,
-        section: SectionId::Pipeline,
-        emphasis: TimingEmphasis::Ordinary,
-        children: &[],
-        fallback: true,
-        command: None,
-    },
-    MetricPolicy {
-        metrics: &["build_project.backend"],
+        metrics: &["build.backend.total"],
         label: "Backend",
         kind: TimingMeasurementKind::WallSpan,
         section: SectionId::Pipeline,
         emphasis: TimingEmphasis::Ordinary,
         children: &[],
-        fallback: false,
         command: Some(TimingCommandKind::Build),
     },
     MetricPolicy {
-        metrics: &["output.write_total"],
-        label: "Write output",
+        metrics: &["build.output.total"],
+        label: "Output",
         kind: TimingMeasurementKind::WallSpan,
         section: SectionId::Pipeline,
         emphasis: TimingEmphasis::Ordinary,
         children: &[],
-        fallback: false,
         command: Some(TimingCommandKind::Build),
     },
     MetricPolicy {
-        metrics: &["frontend.file_prepare"],
+        metrics: &["frontend.prepare"],
         label: "Prepare source files",
         kind: TimingMeasurementKind::Accumulated,
         section: SectionId::Frontend,
         emphasis: TimingEmphasis::Ordinary,
         children: &[],
-        fallback: false,
         command: None,
     },
     MetricPolicy {
-        metrics: &["frontend.header_bind"],
+        metrics: &["frontend.bind_headers"],
         label: "Bind headers",
         kind: TimingMeasurementKind::Accumulated,
         section: SectionId::Frontend,
         emphasis: TimingEmphasis::Ordinary,
         children: &[],
-        fallback: false,
         command: None,
     },
     MetricPolicy {
-        metrics: &["frontend.dependency_sort"],
+        metrics: &["frontend.order_declarations"],
         label: "Order declarations",
         kind: TimingMeasurementKind::Accumulated,
         section: SectionId::Frontend,
         emphasis: TimingEmphasis::Ordinary,
         children: &[],
-        fallback: false,
         command: None,
     },
     MetricPolicy {
-        metrics: &["frontend.ast"],
+        metrics: &["frontend.ast.total"],
         label: "Semantic frontend / AST",
         kind: TimingMeasurementKind::Accumulated,
         section: SectionId::Frontend,
         emphasis: TimingEmphasis::Ordinary,
         children: &[
             MetricChildPolicy {
-                metric: "ast_build_environment_ms",
+                metric: "frontend.ast.environment",
                 label: "Environment, types and constants",
             },
             MetricChildPolicy {
-                metric: "ast_emit_nodes_ms",
+                metric: "frontend.ast.emit",
                 label: "Bodies and TIR construction",
             },
             MetricChildPolicy {
-                metric: "ast_finalize_ms",
-                label: "Template and constant finalization",
+                metric: "frontend.ast.finalise",
+                label: "Template and constant finalisation",
             },
         ],
-        fallback: false,
         command: None,
     },
     MetricPolicy {
@@ -270,86 +242,75 @@ const BASIC_METRIC_POLICY: &[MetricPolicy] = &[
         section: SectionId::Frontend,
         emphasis: TimingEmphasis::Ordinary,
         children: &[],
-        fallback: false,
         command: None,
     },
     MetricPolicy {
-        metrics: &["frontend.public_interface"],
+        metrics: &[
+            "frontend.public_interface.project",
+            "frontend.public_interface.finalise",
+        ],
         label: "Public interface",
         kind: TimingMeasurementKind::Accumulated,
         section: SectionId::Frontend,
         emphasis: TimingEmphasis::Ordinary,
-        children: &[
-            MetricChildPolicy {
-                metric: "frontend.public_interface.projection",
-                label: "Projection",
-            },
-            MetricChildPolicy {
-                metric: "frontend.public_interface.finalization",
-                label: "Finalization",
-            },
-        ],
-        fallback: false,
+        children: &[],
         command: None,
     },
     MetricPolicy {
-        metrics: &["frontend.borrow", "frontend.borrow.exact_generated"],
+        metrics: &["frontend.borrow.initial", "frontend.borrow.converge"],
         label: "Borrow validation",
         kind: TimingMeasurementKind::Accumulated,
         section: SectionId::Frontend,
         emphasis: TimingEmphasis::Ordinary,
         children: &[],
-        fallback: false,
         command: None,
     },
     MetricPolicy {
-        metrics: &["frontend.generated_functions", "frontend.borrow.generated"],
+        metrics: &[
+            "frontend.generated.materialise",
+            "frontend.generated.borrow_recheck",
+        ],
         label: "Generated functions",
         kind: TimingMeasurementKind::Accumulated,
         section: SectionId::Frontend,
         emphasis: TimingEmphasis::Ordinary,
         children: &[],
-        fallback: false,
         command: None,
     },
     MetricPolicy {
-        metrics: &["backend.js.lower_hir", "backend.js.lower_linked_hir"],
+        metrics: &["backend.js.lower_entry", "backend.js.lower_linked"],
         label: "JS lowering",
         kind: TimingMeasurementKind::NestedEvidence,
         section: SectionId::Backend,
         emphasis: TimingEmphasis::Ordinary,
         children: &[],
-        fallback: false,
         command: Some(TimingCommandKind::Build),
     },
     MetricPolicy {
-        metrics: &["backend.js.render_html_document"],
+        metrics: &["backend.html.render"],
         label: "HTML rendering",
         kind: TimingMeasurementKind::NestedEvidence,
         section: SectionId::Backend,
         emphasis: TimingEmphasis::Ordinary,
         children: &[],
-        fallback: false,
         command: Some(TimingCommandKind::Build),
     },
     MetricPolicy {
         metrics: &["backend.wasm.total"],
-        label: "Wasm lowering",
+        label: "Wasm build",
         kind: TimingMeasurementKind::NestedEvidence,
         section: SectionId::Backend,
         emphasis: TimingEmphasis::Ordinary,
         children: &[],
-        fallback: false,
         command: Some(TimingCommandKind::Build),
     },
     MetricPolicy {
-        metrics: &["backend.html.tracked_assets_emit"],
+        metrics: &["backend.assets.plan", "backend.assets.emit"],
         label: "Tracked assets",
         kind: TimingMeasurementKind::NestedEvidence,
         section: SectionId::Backend,
         emphasis: TimingEmphasis::Ordinary,
         children: &[],
-        fallback: false,
         command: Some(TimingCommandKind::Build),
     },
 ];
@@ -374,7 +335,7 @@ pub(crate) fn build_timing_summary(
     if let Some(section) = build_frontend_section(&aggregates, snapshot) {
         items.push(TimingReportItem::Section(section));
     }
-    if let Some(section) = build_backend_section(&aggregates) {
+    if let Some(section) = build_backend_section(&aggregates, command) {
         items.push(TimingReportItem::Section(section));
     }
     if let Some(slowest_module) = build_slowest_module_summary(snapshot) {
@@ -420,7 +381,7 @@ fn command_total(
     let metric = match command {
         TimingCommandKind::Build => "command.build.total",
         TimingCommandKind::Check => "command.check.total",
-        TimingCommandKind::Dev => "command.dev.build_and_write",
+        TimingCommandKind::Dev => "command.dev.build_write",
     };
     aggregates
         .get(metric)
@@ -437,10 +398,8 @@ fn aggregate_boundary_totals(
 ) -> BTreeMap<TimingBoundaryId, Duration> {
     let mut totals = BTreeMap::new();
     for observation in &snapshot.timings {
-        if matches!(
-            observation.name,
-            "build.boundary.inventory" | "build.boundary.compile"
-        ) && let Some(TimingContext::Boundary(boundary)) = observation.context
+        if matches!(observation.name, "boundary.inventory" | "boundary.compile")
+            && let Some(TimingContext::Boundary(boundary)) = observation.context
         {
             *totals.entry(boundary).or_insert(Duration::ZERO) += observation.duration;
         }
@@ -490,7 +449,7 @@ fn build_slowest_module_summary(
             continue;
         };
         match observation.name {
-            "frontend.file_prepare" => {
+            "frontend.prepare" => {
                 *preparation.entry(module).or_insert(Duration::ZERO) += observation.duration;
             }
             "frontend.module.semantic_total" => {
@@ -529,12 +488,8 @@ fn build_pipeline_section(
     command_total: Duration,
 ) -> Option<TimingSummarySection> {
     let mut rows = Vec::new();
-    let directory_mode = aggregates.contains_key("stage0.directory.module_inventory")
-        || aggregates.contains_key("stage0.directory.module_compile_batch");
-
     for policy in BASIC_METRIC_POLICY.iter().filter(|policy| {
         policy.section == SectionId::Pipeline
-            && !policy.fallback
             && policy.command.is_none_or(|c| {
                 c == command || (command == TimingCommandKind::Dev && c == TimingCommandKind::Build)
             })
@@ -542,16 +497,7 @@ fn build_pipeline_section(
         push_policy_row(&mut rows, aggregates, &BTreeMap::new(), policy);
     }
 
-    if !directory_mode {
-        for policy in BASIC_METRIC_POLICY
-            .iter()
-            .filter(|policy| policy.section == SectionId::Pipeline && policy.fallback)
-        {
-            push_policy_row(&mut rows, aggregates, &BTreeMap::new(), policy);
-        }
-    }
-
-    push_other_row(&mut rows, aggregates, command_total, directory_mode);
+    push_other_row(&mut rows, aggregates, command, command_total);
 
     if rows.is_empty() {
         return None;
@@ -581,7 +527,7 @@ fn push_policy_row(
 
     let mut children = Vec::new();
     for child in policy.children {
-        let child_aggregates = if child.metric.starts_with("ast_") {
+        let child_aggregates = if child.metric.starts_with("frontend.ast.") {
             module_ast_children
         } else {
             aggregates
@@ -614,31 +560,21 @@ fn push_policy_row(
 fn push_other_row(
     rows: &mut Vec<TimingSummaryRow>,
     aggregates: &BTreeMap<&'static str, TimingMetricSummary>,
+    command: TimingCommandKind,
     command_total: Duration,
-    directory_mode: bool,
 ) {
     let mut accounted = Duration::ZERO;
-    for metric in [
-        "build_project.bootstrap",
-        "command.check.bootstrap",
-        "build_project.backend",
-        "output.write_total",
-    ] {
+    for metric in ["build.bootstrap.total", "build.frontend.total"] {
         if let Some(summary) = aggregates.get(metric) {
             accounted += summary.total;
         }
     }
-    if directory_mode {
-        for metric in [
-            "stage0.directory.module_inventory",
-            "stage0.directory.module_compile_batch",
-        ] {
+    if matches!(command, TimingCommandKind::Build | TimingCommandKind::Dev) {
+        for metric in ["build.backend.total", "build.output.total"] {
             if let Some(summary) = aggregates.get(metric) {
                 accounted += summary.total;
             }
         }
-    } else if let Some(summary) = aggregates.get("stage0.single_file.total") {
-        accounted += summary.total;
     }
 
     let other = command_total.saturating_sub(accounted);
@@ -660,9 +596,8 @@ fn push_other_row(
 
 /// Aggregate the AST child metrics from module-attributed observations only.
 ///
-/// Config parsing and generated materialisation also record the raw `ast_*`
-/// metrics; those observations stay available in raw and detailed output but
-/// must never appear as children of a module's `frontend.ast` row.
+/// Config parsing and generated materialisation use separate schema-v1 AST
+/// identities, so only frontend module child metrics may appear here.
 fn aggregate_module_ast_children(
     snapshot: &BenchmarkObservationSnapshot,
 ) -> BTreeMap<&'static str, TimingMetricSummary> {
@@ -670,7 +605,7 @@ fn aggregate_module_ast_children(
     for observation in &snapshot.timings {
         if matches!(
             observation.name,
-            "ast_build_environment_ms" | "ast_emit_nodes_ms" | "ast_finalize_ms"
+            "frontend.ast.environment" | "frontend.ast.emit" | "frontend.ast.finalise"
         ) && matches!(observation.context, Some(TimingContext::Module(_)))
         {
             aggregates
@@ -712,8 +647,12 @@ fn build_frontend_section(
 
 fn build_backend_section(
     aggregates: &BTreeMap<&'static str, TimingMetricSummary>,
+    command: TimingCommandKind,
 ) -> Option<TimingSummarySection> {
-    let parent = aggregates.get("build_project.backend")?;
+    if !matches!(command, TimingCommandKind::Build | TimingCommandKind::Dev) {
+        return None;
+    }
+    let parent = aggregates.get("build.backend.total")?;
     if rounds_to_zero(parent.total) {
         return None;
     }

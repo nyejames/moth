@@ -3,7 +3,6 @@
 //! Given an entry `.moth` file, walks its import declarations transitively to build the complete
 //! set of source files that belong to a module. Also assembles `PreparedSourceInput` payloads
 //! from those paths for downstream compilation stages.
-use crate::timing_scope;
 // Stage 0 deliberately returns full diagnostic/infrastructure payloads in `SourceDiscoveryError`
 // so import discovery does not erase source locations or downgrade filesystem failures.
 
@@ -229,11 +228,6 @@ pub(super) fn collect_reachable_input_files(
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     string_table: &mut StringTable,
 ) -> Result<CollectedReachableInputs, CompilerMessages> {
-    timing_scope!(
-        timing_guard_stage0_reachable_discovery_total,
-        "stage0.reachable_discovery.total"
-    );
-
     // 1. Traverse the import graph to find all paths and retained resolved edges.
     let discovery = match discover_reachable_source_files(
         entry_path,
@@ -335,18 +329,12 @@ fn load_and_join_input_slots(
     let input_file_count = input_slots.len();
     let mut input_slots = input_slots;
 
-    timing_scope!(
-        timing_guard_stage0_reachable_discovery_source_load,
-        "stage0.reachable_discovery.source_load"
-    );
     let loaded_missing_sources = match load_missing_sources(missing_sources, string_table) {
         Ok(loaded_missing_sources) => loaded_missing_sources,
         Err(messages) => {
             return Err(messages);
         }
     };
-    #[cfg(feature = "timers")]
-    timing_guard_stage0_reachable_discovery_source_load.finish();
     for loaded in loaded_missing_sources {
         add_frontend_counter(
             FrontendCounter::Stage0SourceBytesLoaded,
@@ -530,10 +518,6 @@ fn traverse_reachable_source_files(
             SourceFileKind::Moth => {}
         }
 
-        timing_scope!(
-            timing_guard_stage0_reachable_discovery_import_scan,
-            "stage0.reachable_discovery.import_scan"
-        );
         let scanned = match scan_and_cache_local_moth_source(
             &canonical_file,
             style_directives,
@@ -545,8 +529,6 @@ fn traverse_reachable_source_files(
                 return Err(error);
             }
         };
-        #[cfg(feature = "timers")]
-        timing_guard_stage0_reachable_discovery_import_scan.finish();
 
         if scanned.fresh_read {
             add_frontend_counter(
@@ -577,10 +559,6 @@ fn traverse_reachable_source_files(
             match action {
                 ImportPolicyAction::Skip => continue,
                 ImportPolicyAction::QueueLocal => {
-                    timing_scope!(
-                        timing_guard_stage0_reachable_discovery_import_resolve,
-                        "stage0.reachable_discovery.import_resolve"
-                    );
                     let mut reachable_queue = ReachableQueue {
                         reachable: &reachable,
                         queue: &mut queue,
@@ -737,10 +715,6 @@ fn handle_provider_capable_import(
         provider_backed_import_prefix(import_path, string_table)
     {
         if let Some(provider) = external_imports.providers.find_by_extension(&extension) {
-            timing_scope!(
-                timing_guard_stage0_reachable_discovery_provider_imports,
-                "stage0.reachable_discovery.provider_imports"
-            );
             let result = resolve_provider_backed_import(
                 ProviderBackedImportRequest {
                     importer_canonical_path: canonical_file,
@@ -756,8 +730,6 @@ fn handle_provider_capable_import(
                 string_table,
             );
             result?;
-            #[cfg(feature = "timers")]
-            timing_guard_stage0_reachable_discovery_provider_imports.finish();
             counter_observation!("stage0.reachable_discovery.provider_imports", 1.0);
             return Ok(ImportPolicyAction::Skip);
         }

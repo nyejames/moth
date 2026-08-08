@@ -133,10 +133,7 @@ pub(crate) fn compile_html_module_wasm(
         Arc::clone(&input.external_package_registry);
 
     let wasm_result = {
-        timing_scope!(
-            timing_guard_backend_wasm_lower_wasm,
-            "backend.wasm.lower_wasm"
-        );
+        timing_scope!(timing_guard_backend_wasm_lower_wasm, "backend.wasm.lower");
         lower_hir_to_wasm_module(
             input.hir_module,
             input.borrow_analysis.borrow_facts(),
@@ -157,7 +154,7 @@ pub(crate) fn compile_html_module_wasm(
     let artifacts = {
         timing_scope!(
             timing_guard_backend_wasm_artifact_assembly,
-            "backend.wasm.artifact_assembly"
+            "backend.wasm.artifacts"
         );
         emit_html_wasm_artifacts(
             &build_plan,
@@ -241,18 +238,12 @@ pub(crate) fn emit_html_wasm_artifacts(
         wasm_bytes,
     } = &mut input;
 
-    let bootstrap_js = {
-        timing_scope!(
-            timing_guard_backend_wasm_bootstrap_js,
-            "backend.wasm.bootstrap_js"
-        );
-        generate_wasm_bootstrap_js(
-            js_bundle,
-            &plan.js_entry_slot_ids,
-            &plan.js_start_invocation,
-        )
-        .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?
-    };
+    let bootstrap_js = generate_wasm_bootstrap_js(
+        js_bundle,
+        &plan.js_entry_slot_ids,
+        &plan.js_start_invocation,
+    )
+    .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
     let start_function = hir_module
         .require_start_function("HTML-Wasm document rendering")
         .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;

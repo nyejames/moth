@@ -92,6 +92,16 @@ pub fn run_frontend_benchmark(
 ) -> Result<FrontendBenchmarkReport, FrontendBenchmarkError> {
     let start = Instant::now();
 
+    // Acquire the raw session before even path validation. A benchmark must
+    // fail as tooling when another owner is active, never compile into that
+    // owner's snapshot and then report misleading stage timings.
+    #[cfg(feature = "timers")]
+    let timing_session = crate::compiler_frontend::compiler_messages::compiler_dev_logging::
+        start_raw_benchmark_collection(true)
+        .map_err(|error| FrontendBenchmarkError {
+            message: format!("Could not start frontend benchmark timing session: {error}"),
+        })?;
+
     let path = options
         .entry_path
         .to_str()
@@ -117,12 +127,6 @@ pub fn run_frontend_benchmark(
 
     let project_builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
 
-    #[cfg(feature = "timers")]
-    let timing_session =
-        crate::compiler_frontend::compiler_messages::compiler_dev_logging::start_raw_benchmark_collection(
-            true,
-        );
-
     let BuildBootstrap {
         mut config,
         style_directives,
@@ -132,9 +136,6 @@ pub fn run_frontend_benchmark(
     } = match bootstrap_project_build(&project_builder, valid_path) {
         Ok(bootstrap) => bootstrap,
         Err(messages) => {
-            #[cfg(feature = "timers")]
-            let _ = timing_session.finish();
-
             return Err(FrontendBenchmarkError {
                 message: format_compiler_messages(&messages),
             });

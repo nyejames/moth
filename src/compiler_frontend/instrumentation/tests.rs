@@ -24,7 +24,7 @@ fn ast_counters_record_stable_metrics_when_stdout_is_suppressed() {
     let _guard = super::lock_counter_test();
 
     reset_ast_counters();
-    let timing_session = start_benchmark_collection(true);
+    let timing_session = start_benchmark_collection(true).expect("timing session should start");
 
     add_ast_counter(AstCounter::ScopeContextsCreated, 3);
 
@@ -195,7 +195,7 @@ fn ast_counters_record_stable_metrics_when_stdout_is_suppressed() {
 fn ast_counters_are_isolated_per_thread() {
     let _guard = super::lock_counter_test();
 
-    let timing_session = start_benchmark_collection(true);
+    let timing_session = start_benchmark_collection(true).expect("timing session should start");
 
     // Synchronize the two worker threads so each resets and adds its own value
     // before either thread logs. With process-global counters this would always
@@ -243,7 +243,7 @@ fn frontend_counters_record_scheduling_metrics_when_stdout_is_suppressed() {
     let _counter_capture = capture_frontend_counters_for_test();
 
     reset_frontend_counters();
-    let timing_session = start_benchmark_collection(true);
+    let timing_session = start_benchmark_collection(true).expect("timing session should start");
 
     add_frontend_counter(FrontendCounter::ModuleCompilationSerialCount, 1);
     add_frontend_counter(FrontendCounter::ModuleCompilationParallelTaskCount, 2);
@@ -375,7 +375,7 @@ fn ast_body_root_and_scope_counters_record_stable_metrics() {
     let _counter_capture = capture_frontend_counters_for_test();
 
     reset_frontend_counters();
-    let timing_session = start_benchmark_collection(true);
+    let timing_session = start_benchmark_collection(true).expect("timing session should start");
 
     add_frontend_counter(FrontendCounter::AstFunctionBodyRootCount, 5);
     add_frontend_counter(FrontendCounter::AstStartBodyRootCount, 1);

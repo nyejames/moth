@@ -157,71 +157,51 @@ pub fn start_cli() -> process::ExitCode {
 }
 
 fn run_build_command(path: &str, flags: &[Flag]) -> CommandStatus {
+    run_build_command_with_output_plan(path, flags, create_build_output_plan)
+}
+
+/// Run a build command with one command-total lifecycle and one output-plan decision.
+///
+/// The injected plan builder keeps the command's terminal timing point shared
+/// between ordinary output planning and focused failure-path tests.
+fn run_build_command_with_output_plan(
+    path: &str,
+    flags: &[Flag],
+    output_plan_builder: impl FnOnce(&mut BuildResult) -> Result<OutputPlan, CompilerError>,
+) -> CommandStatus {
     command_timing_scope!(timing_session, crate::timing::TimingCommandKind::Build);
     let start = Instant::now();
     timing_scope!(timing_guard_command_build_total, "command.build.total");
     let project_builder = build::ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
     let (status, diagnostic_counts) = match build::build_project(&project_builder, path, flags) {
         Ok(mut build_result) => {
-            let output_plan = if let Some(plan) = build_result.directory_output_plan.as_ref() {
-                OutputPlan::Directory(plan.clone())
-            } else {
-                let output_root = match env::current_dir() {
-                    Ok(path) => path,
-                    Err(error) => {
-                        print_formatted_error(
-                            CompilerError::compiler_error(format!(
-                                "Could not resolve current directory for build outputs: {error}"
-                            )),
-                            &build_result.string_table,
-                        );
-                        command_timing_finish!(timing_session, false);
-                        return CommandStatus::Failure;
+            // Output planning and filesystem emission form one build-pipeline
+            // segment. The nested writer records its own `output.write.total`
+            // evidence without becoming a second additive command child.
+            timing_scope!(timing_guard_build_output_total, "build.output.total");
+            match output_plan_builder(&mut build_result) {
+                Ok(output_plan) => match write_project_outputs(
+                    &build_result.project,
+                    &WriteOptions {
+                        output_plan,
+                        write_mode: WriteMode::AlwaysWrite,
+                    },
+                    &build_result.string_table,
+                ) {
+                    Ok(()) => {
+                        let duration = start.elapsed();
+                        let warning_count = build_result.warnings.len();
+                        print_build_message(build_result, duration);
+                        (CommandStatus::Success, Some((0, warning_count)))
                     }
-                };
-                let project_root =
-                    match single_file_project_entry_dir(&build_result.config.entry_dir) {
-                        Ok(path) => path,
-                        Err(error) => {
-                            print_formatted_error(error, &build_result.string_table);
-                            command_timing_finish!(timing_session, false);
-                            return CommandStatus::Failure;
-                        }
-                    };
-
-                OutputPlan::SingleFile(SingleFileOutputPlan {
-                    output_root,
-                    project_root: Some(project_root),
-                    owner: build_result.output_owner,
-                    setting_location: SourceLocation::from_path(
-                        &build_result.config.entry_dir,
-                        &mut build_result.string_table,
-                    ),
-                })
-            };
-
-            timing_scope!(
-                timing_guard_command_build_output_write,
-                "command.build.output_write"
-            );
-            let write_result = write_project_outputs(
-                &build_result.project,
-                &WriteOptions {
-                    output_plan,
-                    write_mode: WriteMode::AlwaysWrite,
+                    Err(mut messages) => {
+                        messages.extend_diagnostics(build_result.warnings);
+                        print_compiler_messages(messages);
+                        (CommandStatus::Failure, None)
+                    }
                 },
-                &build_result.string_table,
-            );
-            match write_result {
-                Ok(()) => {
-                    let duration = start.elapsed();
-                    let warning_count = build_result.warnings.len();
-                    print_build_message(build_result, duration);
-                    (CommandStatus::Success, Some((0, warning_count)))
-                }
-                Err(mut messages) => {
-                    messages.extend_diagnostics(build_result.warnings);
-                    print_compiler_messages(messages);
+                Err(error) => {
+                    print_formatted_error(error, &build_result.string_table);
                     (CommandStatus::Failure, None)
                 }
             }
@@ -233,12 +213,39 @@ fn run_build_command(path: &str, flags: &[Flag]) -> CommandStatus {
         }
     };
     #[cfg(feature = "timers")]
-    drop(timing_guard_command_build_total);
+    timing_guard_command_build_total.finish();
     command_timing_finish!(timing_session, matches!(status, CommandStatus::Success));
     if let Some((error_count, warning_count)) = diagnostic_counts {
         emit_benchmark_status(error_count, warning_count);
     }
     status
+}
+
+/// Choose the output plan after a successful backend build.
+///
+/// Directory plans are validated during bootstrap. A single-file build needs
+/// its synthetic project directory only after backend output exists.
+fn create_build_output_plan(build_result: &mut BuildResult) -> Result<OutputPlan, CompilerError> {
+    if let Some(plan) = build_result.directory_output_plan.as_ref() {
+        return Ok(OutputPlan::Directory(plan.clone()));
+    }
+
+    let output_root = env::current_dir().map_err(|error| {
+        CompilerError::compiler_error(format!(
+            "Could not resolve current directory for build outputs: {error}"
+        ))
+    })?;
+    let project_root = single_file_project_entry_dir(&build_result.config.entry_dir)?;
+
+    Ok(OutputPlan::SingleFile(SingleFileOutputPlan {
+        output_root,
+        project_root: Some(project_root),
+        owner: build_result.output_owner,
+        setting_location: SourceLocation::from_path(
+            &build_result.config.entry_dir,
+            &mut build_result.string_table,
+        ),
+    }))
 }
 
 /// Resolve the containing directory used by single-file output cleanup safety checks.

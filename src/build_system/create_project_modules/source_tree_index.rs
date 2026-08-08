@@ -12,9 +12,6 @@
 //! into a central `SourceRecord` table addressed by dense `SourceId` values. Owned and unrooted collections
 //! store only `SourceId`s, so the index is the sole source inventory/ownership owner and later
 //! consumers resolve source data through it rather than through duplicated per-module records.
-#[cfg(feature = "timers")]
-use crate::timing_scope;
-
 use super::module_identity::{
     ModuleId, ModuleIdentityRecord, ModuleIdentityTable, module_root_role_for_file_name,
 };
@@ -545,12 +542,6 @@ impl SourceTreeIndex {
         external_import_providers: &ExternalImportProviderRegistry,
         string_table: &mut StringTable,
     ) -> Result<Self, CompilerMessages> {
-        #[cfg(feature = "timers")]
-        timing_scope!(
-            timing_guard_stage0_source_tree_index_discovery,
-            "stage0.source_tree_index.discovery"
-        );
-
         let SourceTreeBoundary {
             entry_root,
             package_identity: boundary_package,

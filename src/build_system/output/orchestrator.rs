@@ -39,7 +39,7 @@ pub(crate) fn write_project_outputs(
     options: &WriteOptions,
     string_table: &StringTable,
 ) -> Result<(), CompilerMessages> {
-    timing_scope!(timing_guard_output_write_total, "output.write_total");
+    timing_scope!(timing_guard_output_write_total, "output.write.total");
 
     // Keep the aggregate output timing visible even when filesystem validation or writes fail.
     write_project_outputs_inner(project, options, string_table)
@@ -56,12 +56,7 @@ fn write_project_outputs_inner(
     // WHAT: validate every non-NotBuilt output path, reject duplicate destinations, compute the
     // complete managed-path set, and prepare canonical destinations before any filesystem mutation.
     // WHY: a late invalid or duplicate path must not leave earlier files already written.
-    let prepared_write = {
-        #[cfg(feature = "timers")]
-        timing_scope!(timing_guard_output_preflight, "output.preflight");
-        let result = prepare_output_write(project, &options.output_plan, string_table);
-        result?
-    };
+    let prepared_write = prepare_output_write(project, &options.output_plan, string_table)?;
 
     // ---------------------------------------
     //  Prepare cleanup and create output root
@@ -73,54 +68,32 @@ fn write_project_outputs_inner(
     // WHAT: load and validate the previous manifest's ownership before creating the output root.
     // WHY: a foreign known owner must fail before emission; a matching recoverable owner may
     // proceed while preserving stale artifacts.
-    let cleanup_state = {
-        #[cfg(feature = "timers")]
-        timing_scope!(
-            timing_guard_output_prepare_cleanup,
-            "output.prepare_cleanup"
-        );
-        let result = prepare_output_cleanup(
-            output_root,
-            options.output_plan.project_root(),
-            options.output_plan.entry_root(),
-            output_owner,
-            options.output_plan.setting_location(),
-            &project.cleanup_policy,
-            string_table,
-        );
-        result?
-    };
+    let cleanup_state = prepare_output_cleanup(
+        output_root,
+        options.output_plan.project_root(),
+        options.output_plan.entry_root(),
+        output_owner,
+        options.output_plan.setting_location(),
+        &project.cleanup_policy,
+        string_table,
+    )?;
 
-    {
-        #[cfg(feature = "timers")]
-        timing_scope!(timing_guard_output_create_root, "output.create_root");
-        let result = fs::create_dir_all(output_root).map_err(|error| {
-            file_error_messages(
-                output_root,
-                format!(
-                    "Failed to create output root '{}': {error}",
-                    output_root.display()
-                ),
-                string_table,
-            )
-        });
-        result?;
-    }
+    fs::create_dir_all(output_root).map_err(|error| {
+        file_error_messages(
+            output_root,
+            format!(
+                "Failed to create output root '{}': {error}",
+                output_root.display()
+            ),
+            string_table,
+        )
+    })?;
 
     // ---------------------------------------
     //  Emit individual output files
     // ---------------------------------------
 
-    {
-        #[cfg(feature = "timers")]
-        timing_scope!(
-            timing_guard_output_emit_files_total,
-            "output.emit_files_total"
-        );
-        let result =
-            emit_prepared_output_files(project, &prepared_write, options.write_mode, string_table);
-        result?;
-    }
+    emit_prepared_output_files(project, &prepared_write, options.write_mode, string_table)?;
 
     // ---------------------------------------
     //  Finalize cleanup and write manifest
@@ -128,25 +101,17 @@ fn write_project_outputs_inner(
     // WHAT: clean stale artifacts for valid ownership and write the updated manifest.
     // WHY: artifacts from removed pages must not persist, while recoverable manifests must not
     // drive deletion under uncertain metadata.
-    {
-        #[cfg(feature = "timers")]
-        timing_scope!(
-            timing_guard_output_finalize_cleanup,
-            "output.finalize_cleanup"
-        );
-        let finalization = OutputCleanupFinalization {
-            output_root,
-            manifest_destination: &prepared_write.manifest_destination,
-            current_managed_artifact_paths: &prepared_write.managed_artifact_paths,
-            current_explicit_directory_paths: &prepared_write.explicit_directory_paths,
-            owner: output_owner,
-            cleanup_policy: &project.cleanup_policy,
-            write_mode: options.write_mode,
-            string_table,
-        };
-        let result = finalize_output_cleanup(&cleanup_state, &finalization);
-        result?;
-    }
+    let finalization = OutputCleanupFinalization {
+        output_root,
+        manifest_destination: &prepared_write.manifest_destination,
+        current_managed_artifact_paths: &prepared_write.managed_artifact_paths,
+        current_explicit_directory_paths: &prepared_write.explicit_directory_paths,
+        owner: output_owner,
+        cleanup_policy: &project.cleanup_policy,
+        write_mode: options.write_mode,
+        string_table,
+    };
+    finalize_output_cleanup(&cleanup_state, &finalization)?;
 
     Ok(())
 }

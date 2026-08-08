@@ -180,6 +180,8 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable) {
             capacity_estimate: Default::default(),
             #[cfg(feature = "timers")]
             timing_context: None,
+            #[cfg(feature = "timers")]
+            timing_metric_family: crate::compiler_frontend::ast::AstTimingMetricFamily::Frontend,
         },
     )
     .expect("Moth template content constant should build through AST")
@@ -391,6 +393,9 @@ impl MothTemplateScopeFixture {
                 capacity_estimate: Default::default(),
                 #[cfg(feature = "timers")]
                 timing_context: None,
+                #[cfg(feature = "timers")]
+                timing_metric_family:
+                    crate::compiler_frontend::ast::AstTimingMetricFamily::Frontend,
             },
         )
         .map_err(|messages| {
@@ -1760,6 +1765,8 @@ fn moth_template_folded_output_matches_authored_markdown_template() {
             capacity_estimate: Default::default(),
             #[cfg(feature = "timers")]
             timing_context: None,
+            #[cfg(feature = "timers")]
+            timing_metric_family: crate::compiler_frontend::ast::AstTimingMetricFamily::Frontend,
         },
     )
     .expect("authored md template constant should build through AST")

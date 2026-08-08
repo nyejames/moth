@@ -207,7 +207,7 @@ fn timer_facade_sources_never_use_cfg_timer_macro() {
     let facade_sources = [
         include_str!("../../timing.rs"),
         include_str!("../enabled.rs"),
-        include_str!("../enabled/mode.rs"),
+        include_str!("../enabled/runtime.rs"),
         include_str!("../enabled/collector.rs"),
     ];
 

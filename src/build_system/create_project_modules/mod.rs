@@ -67,6 +67,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::build_system::BuildProfile;
 use crate::builder_surface::BuilderSurface;
 use crate::projects::settings::{Config, LANGUAGE_SOURCE_EXTENSION};
+use crate::timed_stage;
 
 pub(crate) use compiled_boundary::ProjectFrontendCompilation;
 
@@ -100,37 +101,39 @@ pub fn compile_project_frontend(
     //  Dispatch: Single File vs. Directory
     // ---------------------------------------
 
-    let result = if config.entry_dir.is_dir() {
-        compilation::compile_directory_frontend(
-            config,
-            frontend_build_profile,
-            validated_output_settings,
-            style_directives,
-            builder_surface,
-            string_table,
-        )
-    } else if let Some(extension) = config.entry_dir.extension() {
-        compilation::compile_single_file_frontend(
-            config,
-            frontend_build_profile,
-            style_directives,
-            builder_surface,
-            extension,
-            string_table,
-        )
-    } else {
-        use crate::compiler_frontend::compiler_errors::CompilerError;
+    let result = timed_stage!("build.frontend.total", {
+        if config.entry_dir.is_dir() {
+            compilation::compile_directory_frontend(
+                config,
+                frontend_build_profile,
+                validated_output_settings,
+                style_directives,
+                builder_surface,
+                string_table,
+            )
+        } else if let Some(extension) = config.entry_dir.extension() {
+            compilation::compile_single_file_frontend(
+                config,
+                frontend_build_profile,
+                style_directives,
+                builder_surface,
+                extension,
+                string_table,
+            )
+        } else {
+            use crate::compiler_frontend::compiler_errors::CompilerError;
 
-        let err = CompilerError::file_error(
-            &config.entry_dir,
-            format!(
-                "Found a file without an extension set. Moth files use .{LANGUAGE_SOURCE_EXTENSION}"
-            ),
-            string_table,
-        );
+            let err = CompilerError::file_error(
+                &config.entry_dir,
+                format!(
+                    "Found a file without an extension set. Moth files use .{LANGUAGE_SOURCE_EXTENSION}"
+                ),
+                string_table,
+            );
 
-        Err(CompilerMessages::from_error_ref(err, string_table))
-    };
+            Err(CompilerMessages::from_error_ref(err, string_table))
+        }
+    });
 
     log_frontend_counters();
 
