@@ -96,8 +96,8 @@ fn prepare_via_pipeline(
     let input_path = PathBuf::from("src/intro.mtf");
     let input = FrontendFilePrepareInput {
         source: FrontendFilePrepareSource::MothTemplate {
-            source_code: source,
-            source_path: &input_path,
+            source_code: source.to_owned(),
+            source_path: input_path,
         },
         const_template_offset: 0,
         runtime_fragment_offset: 0,
@@ -134,8 +134,8 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable) {
     let input_path = PathBuf::from("src/intro.mtf");
     let input = FrontendFilePrepareInput {
         source: FrontendFilePrepareSource::MothTemplate {
-            source_code: source,
-            source_path: &input_path,
+            source_code: source.to_owned(),
+            source_path: input_path,
         },
         const_template_offset: 0,
         runtime_fragment_offset: 0,
@@ -506,11 +506,9 @@ impl MothTemplateScopeFixture {
                 .and_then(SourceFileKind::from_extension)
                 .unwrap_or(SourceFileKind::Moth);
 
-            // Tokenize Moth sources before building the prepare input so the borrowed
-            // `FileTokens` outlive the `FrontendFilePrepareSource` that references them.
-            let moth_tokens = if source_kind == SourceFileKind::Moth {
-                Some(
-                    CompilerFrontend::tokenize_source(
+            let source = match source_kind {
+                SourceFileKind::Moth => {
+                    let tokens = CompilerFrontend::tokenize_source(
                         &self.source_files,
                         &style_directives,
                         &source_code,
@@ -518,29 +516,19 @@ impl MothTemplateScopeFixture {
                         TokenizerEntryMode::SourceFile,
                         &mut string_table,
                     )
-                    .map_err(|diagnostic| (diagnostic, string_table.clone()))?,
-                )
-            } else {
-                None
-            };
-
-            let source = match source_kind {
-                SourceFileKind::Moth => {
-                    let tokens = moth_tokens
-                        .as_ref()
-                        .expect("Moth source should have retained tokens");
+                    .map_err(|diagnostic| (diagnostic, string_table.clone()))?;
                     FrontendFilePrepareSource::Moth {
-                        source_path: &source_path,
-                        tokens,
+                        source_path,
+                        tokens: Box::new(tokens),
                     }
                 }
                 SourceFileKind::MothTemplate => FrontendFilePrepareSource::MothTemplate {
-                    source_code: &source_code,
-                    source_path: &source_path,
+                    source_code,
+                    source_path,
                 },
                 SourceFileKind::PlainMarkdown => FrontendFilePrepareSource::PlainMarkdown {
-                    source_code: &source_code,
-                    source_path: &source_path,
+                    source_code,
+                    source_path,
                 },
             };
 

@@ -301,7 +301,7 @@ pub(crate) fn compile_single_file_frontend(
     #[cfg(feature = "timers")]
     let prepare_result = preparation_context.prepare_module(
         stable_origin,
-        &input_files,
+        input_files,
         &entry_path,
         local_table,
         source_byte_count,
@@ -310,7 +310,7 @@ pub(crate) fn compile_single_file_frontend(
     #[cfg(not(feature = "timers"))]
     let prepare_result = preparation_context.prepare_module(
         stable_origin,
-        &input_files,
+        input_files,
         &entry_path,
         local_table,
         source_byte_count,
@@ -473,21 +473,6 @@ enum DirectoryModuleTaskOutcome {
     Infrastructure(CompilerError),
 }
 
-struct DirectoryModuleCompileContext<'a> {
-    config: &'a Config,
-    build_profile: FrontendBuildProfile,
-    project_path_resolver: &'a ProjectPathResolver,
-    style_directives: &'a StyleDirectiveRegistry,
-    external_packages: &'a Arc<ExternalPackageRegistry>,
-    builder_surface: &'a BuilderSurface,
-    provider_store: &'a ModuleArtifactStore,
-    provider_bindings: &'a [ResolvedDependencyEdge],
-    provider_binding_index: &'a FxHashMap<(ModuleId, ImportShellId), usize>,
-    source_package_imports: &'a [ResolvedSourcePackageImport],
-    source_package_import_index: &'a FxHashMap<(ModuleId, ImportShellId), usize>,
-    completed_packages: &'a CompletedSourcePackageRegistry,
-}
-
 /// Immutable inputs shared by one project or source-package boundary compilation.
 ///
 /// WHAT: keeps the boundary-wide compiler services together while each module task adds only its
@@ -502,6 +487,47 @@ struct BoundaryCompilationContext<'a> {
     external_packages: &'a Arc<ExternalPackageRegistry>,
     builder_surface: &'a BuilderSurface,
     completed_packages: &'a CompletedSourcePackageRegistry,
+    implicit_template_package_ids: Vec<PackageBoundaryId>,
+}
+
+impl<'a> BoundaryCompilationContext<'a> {
+    fn new(
+        config: &'a Config,
+        build_profile: FrontendBuildProfile,
+        project_path_resolver: &'a ProjectPathResolver,
+        style_directives: &'a StyleDirectiveRegistry,
+        external_packages: &'a Arc<ExternalPackageRegistry>,
+        builder_surface: &'a BuilderSurface,
+        completed_packages: &'a CompletedSourcePackageRegistry,
+    ) -> Self {
+        let mut implicit_template_package_ids = builder_surface
+            .implicit_template_scope_source_packages
+            .iter()
+            .filter_map(|prefix| completed_packages.by_prefix(prefix))
+            .collect::<Vec<_>>();
+        implicit_template_package_ids.sort_unstable();
+        implicit_template_package_ids.dedup();
+
+        Self {
+            config,
+            build_profile,
+            project_path_resolver,
+            style_directives,
+            external_packages,
+            builder_surface,
+            completed_packages,
+            implicit_template_package_ids,
+        }
+    }
+}
+
+struct DirectoryModuleCompileContext<'boundary, 'services> {
+    boundary: &'boundary BoundaryCompilationContext<'services>,
+    provider_store: &'boundary ModuleArtifactStore,
+    provider_bindings: &'boundary [ResolvedDependencyEdge],
+    provider_binding_index: &'boundary FxHashMap<(ModuleId, ImportShellId), usize>,
+    source_package_imports: &'boundary [ResolvedSourcePackageImport],
+    source_package_import_index: &'boundary FxHashMap<(ModuleId, ImportShellId), usize>,
 }
 
 struct SourcePackageModuleInventory {
@@ -607,7 +633,7 @@ pub(crate) fn build_module_package_dependency_index(
     Ok(dependencies)
 }
 
-impl<'a> DirectoryModuleCompileContext<'a> {
+impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
     /// Build the per-module provider input set by direct retained-shell lookup.
     ///
     /// WHAT: resolves every retained import shell through the boundary indexes built once per
@@ -617,7 +643,7 @@ impl<'a> DirectoryModuleCompileContext<'a> {
         &self,
         consumer_module_id: ModuleId,
         prepared: &PreparedModule,
-    ) -> Result<SourceProviderImportSet<'a>, CompilerError> {
+    ) -> Result<SourceProviderImportSet<'boundary>, CompilerError> {
         let mut imports = Vec::new();
 
         for file_imports in prepared
@@ -660,6 +686,7 @@ impl<'a> DirectoryModuleCompileContext<'a> {
                 };
                 let package_import = &self.source_package_imports[*package_index];
                 let package_id = self
+                    .boundary
                     .completed_packages
                     .by_prefix(package_import.import_prefix.as_str())
                     .ok_or_else(|| {
@@ -669,7 +696,7 @@ impl<'a> DirectoryModuleCompileContext<'a> {
                             package_import.import_prefix
                         ))
                     })?;
-                let completed_package = self.completed_packages.package(package_id)?;
+                let completed_package = self.boundary.completed_packages.package(package_id)?;
 
                 imports.push(SourceProviderImport {
                     kind: ProviderImportKind::Authored {
@@ -684,15 +711,12 @@ impl<'a> DirectoryModuleCompileContext<'a> {
         // contain a `.mtf` semantic source. The package capability is supplied by the active
         // builder surface; generic orchestration must not infer it from a package-name list.
         if prepared.contains_moth_template {
-            let implicit_provider_imports: Vec<SourceProviderImport<'a>> = self
-                .completed_packages
+            let implicit_provider_imports: Vec<SourceProviderImport<'boundary>> = self
+                .boundary
+                .implicit_template_package_ids
                 .iter()
-                .filter(|package| {
-                    self.builder_surface
-                        .implicit_template_scope_source_packages
-                        .contains(package.import_prefix())
-                })
-                .map(|package| {
+                .map(|package_id| {
+                    let package = self.boundary.completed_packages.package(*package_id)?;
                     let interface = package.root_interface()?;
                     Ok(SourceProviderImport {
                         kind: ProviderImportKind::ImplicitTemplate {
@@ -744,20 +768,21 @@ impl<'a> DirectoryModuleCompileContext<'a> {
             }
         };
         let compile_context = FrontendModuleBuildContext {
-            config: self.config,
-            build_profile: self.build_profile,
-            project_path_resolver: Some(self.project_path_resolver.clone()),
-            style_directives: self.style_directives,
-            external_packages: Arc::clone(self.external_packages),
+            config: self.boundary.config,
+            build_profile: self.boundary.build_profile,
+            project_path_resolver: Some(self.boundary.project_path_resolver.clone()),
+            style_directives: self.boundary.style_directives,
+            external_packages: Arc::clone(self.boundary.external_packages),
             external_import_resolution_table: &self
+                .boundary
                 .builder_surface
                 .external_import_resolution_table,
             source_provider_imports: &source_provider_imports,
             source_provider_materialisations: &SourceProviderMaterialisationSet::new(
                 self.provider_store,
-                self.completed_packages,
+                self.boundary.completed_packages,
             ),
-            builder_runtime_packages: &self.builder_surface.builder_runtime_packages,
+            builder_runtime_packages: &self.boundary.builder_surface.builder_runtime_packages,
         };
 
         // The typed semantic boundary already classified user diagnostics from infrastructure
@@ -903,22 +928,17 @@ fn compile_module_waves(
         for job in ready {
             // The boundary worklist publishes each successful module transaction before the
             // next ModuleId so duplicate requests in one ready wave materialise exactly once.
-            // File preparation remains parallel inside each module. Module-wave parallelism can
-            // return once worklist sessions can commit deterministic deltas concurrently.
+            // File preparation remains parallel inside each module. Semantic module-wave
+            // parallelism remains a separate future phase because worklist sessions currently
+            // commit deterministic deltas through this serial publication owner.
             let outcome = {
                 let compile_context = DirectoryModuleCompileContext {
-                    config: context.config,
-                    build_profile: context.build_profile,
-                    project_path_resolver: context.project_path_resolver,
-                    style_directives: context.style_directives,
-                    external_packages: context.external_packages,
-                    builder_surface: context.builder_surface,
+                    boundary: &context,
                     provider_store: &provider_store,
                     provider_bindings,
                     provider_binding_index: &provider_binding_index,
                     source_package_imports,
                     source_package_import_index: &source_package_import_index,
-                    completed_packages: context.completed_packages,
                 };
                 compile_context.compile(job, generated_store.session())
             };
@@ -1312,15 +1332,15 @@ pub(crate) fn compile_directory_frontend(
             Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
         );
         let compiled = compile_module_waves(
-            BoundaryCompilationContext {
+            BoundaryCompilationContext::new(
                 config,
                 build_profile,
-                project_path_resolver: &path_resolver,
+                &path_resolver,
                 style_directives,
-                external_packages: &external_packages,
+                &external_packages,
                 builder_surface,
-                completed_packages: &completed_source_packages,
-            },
+                &completed_source_packages,
+            ),
             graph,
             module_waves,
             &provider_bindings,
@@ -1360,15 +1380,15 @@ pub(crate) fn compile_directory_frontend(
         )),
     );
     let compiled_project = compile_module_waves(
-        BoundaryCompilationContext {
+        BoundaryCompilationContext::new(
             config,
             build_profile,
-            project_path_resolver: &project_path_resolver,
+            &project_path_resolver,
             style_directives,
-            external_packages: &external_packages,
+            &external_packages,
             builder_surface,
-            completed_packages: &completed_source_packages,
-        },
+            &completed_source_packages,
+        ),
         project_setup.project_module_graph,
         project_module_waves,
         &project_provider_bindings,

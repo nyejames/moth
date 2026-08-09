@@ -109,6 +109,40 @@ fn test_style_directives() -> StyleDirectiveRegistry {
     StyleDirectiveRegistry::built_ins()
 }
 
+fn module_prepared_source_names(
+    module: &super::module_inventory::ModuleCompilationJob,
+) -> Vec<String> {
+    let prepared_logical_paths = &module
+        .prepared
+        .prepared_header_syntax
+        .module_symbols
+        .module_file_paths;
+
+    module
+        .prepared
+        .source_files
+        .iter()
+        .filter(|source| prepared_logical_paths.contains(&source.logical_path))
+        .map(|source| {
+            source
+                .canonical_os_path
+                .file_name()
+                .and_then(OsStr::to_str)
+                .unwrap_or_default()
+                .to_owned()
+        })
+        .collect()
+}
+
+fn module_source_paths(module: &super::module_inventory::ModuleCompilationJob) -> HashSet<PathBuf> {
+    module
+        .prepared
+        .source_files
+        .iter()
+        .map(|source| source.canonical_os_path.clone())
+        .collect()
+}
+
 fn parse_project_config_for_test(
     config: &mut Config,
     config_path: &std::path::Path,
@@ -1955,17 +1989,13 @@ fn discover_modules_uses_reachable_files_only() {
         .iter()
         .find(|module| module.entry_point.file_name() == Some(OsStr::new("@page.moth")))
         .expect("should include #page module");
-    let page_paths = page_module
-        .input_files
-        .iter()
-        .map(|file| {
-            file.source_path()
-                .file_name()
-                .unwrap()
-                .to_string_lossy()
-                .to_string()
-        })
-        .collect::<HashSet<_>>();
+    assert_eq!(
+        page_module.prepared.source_file_count, 2,
+        "frontend preparation should retain only the reachable entry and provider sources"
+    );
+    let page_paths: HashSet<_> = module_prepared_source_names(page_module)
+        .into_iter()
+        .collect();
 
     assert!(page_paths.contains("@page.moth"));
     assert!(page_paths.contains("html.moth"));
@@ -2013,17 +2043,9 @@ fn discover_modules_resolves_relative_child_imports() {
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
     assert_eq!(modules.len(), 1, "expected exactly one entry module");
 
-    let discovered = modules[0]
-        .input_files
-        .iter()
-        .map(|file| {
-            file.source_path()
-                .file_name()
-                .and_then(OsStr::to_str)
-                .unwrap_or_default()
-                .to_string()
-        })
-        .collect::<HashSet<_>>();
+    let discovered: HashSet<_> = module_prepared_source_names(modules[0])
+        .into_iter()
+        .collect();
 
     assert!(discovered.contains("@page.moth"));
     assert!(discovered.contains("widget.moth"));
@@ -2079,11 +2101,7 @@ fn module_root_relative_import_resolves_from_the_entry_root() {
     let source_theme = fs::canonicalize(src.join("helpers/theme.moth")).expect("canonical source");
     let package_theme =
         fs::canonicalize(lib.join("helpers/theme.moth")).expect("canonical package file");
-    let discovered_paths = modules[0]
-        .input_files
-        .iter()
-        .map(|file| file.source_path().to_path_buf())
-        .collect::<HashSet<_>>();
+    let discovered_paths = module_source_paths(modules[0]);
 
     assert!(
         discovered_paths.contains(&source_theme),
@@ -3494,23 +3512,12 @@ fn moth_template_files_are_reachable_without_import_scanning() {
         .expect(".mtf body text must not be scanned for imports");
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
 
-    let input_paths: HashSet<_> = modules[0]
-        .input_files
-        .iter()
-        .map(|input| input.source_path().file_name().unwrap().to_owned())
+    let input_paths: HashSet<_> = module_prepared_source_names(modules[0])
+        .into_iter()
         .collect();
-    assert!(input_paths.contains(OsStr::new("@page.moth")));
-    assert!(input_paths.contains(OsStr::new("intro.mtf")));
-
-    let moth_template_input = modules[0]
-        .input_files
-        .iter()
-        .find(|input| input.source_path().file_name() == Some(OsStr::new("intro.mtf")))
-        .expect("intro.mtf should be in discovered inputs");
-    assert!(matches!(
-        moth_template_input,
-        PreparedSourceInput::MothTemplate { .. }
-    ));
+    assert!(input_paths.contains("@page.moth"));
+    assert!(input_paths.contains("intro.mtf"));
+    assert!(modules[0].prepared.contains_moth_template);
 
     fs::remove_dir_all(&root).expect("should remove temp root");
 }
@@ -3565,14 +3572,12 @@ fn reachable_moth_template_queues_same_directory_root_file() {
                 .is_some_and(|name| name == "@page.moth")
         })
         .expect("entry module should be discovered");
-    let input_paths: HashSet<_> = entry_module
-        .input_files
-        .iter()
-        .map(|input| input.source_path().file_name().unwrap().to_owned())
+    let input_paths: HashSet<_> = module_prepared_source_names(entry_module)
+        .into_iter()
         .collect();
-    assert!(input_paths.contains(OsStr::new("@page.moth")));
-    assert!(!input_paths.contains(OsStr::new("intro.mtf")));
-    assert!(!input_paths.contains(OsStr::new("@docs.moth")));
+    assert!(input_paths.contains("@page.moth"));
+    assert!(!input_paths.contains("intro.mtf"));
+    assert!(!input_paths.contains("@docs.moth"));
 
     let docs_module = modules
         .iter()
@@ -3584,22 +3589,12 @@ fn reachable_moth_template_queues_same_directory_root_file() {
         })
         .expect("docs provider module should be discovered");
 
-    let moth_template_input = docs_module
-        .input_files
-        .iter()
-        .find(|input| input.source_path().file_name() == Some(OsStr::new("intro.mtf")))
-        .expect("intro.mtf should be in discovered inputs");
-    assert!(matches!(
-        moth_template_input,
-        PreparedSourceInput::MothTemplate { .. }
-    ));
-
-    let root_input = docs_module
-        .input_files
-        .iter()
-        .find(|input| input.source_path().file_name() == Some(OsStr::new("@docs.moth")))
-        .expect("@docs.moth should be in discovered inputs");
-    assert!(matches!(root_input, PreparedSourceInput::Moth { .. }));
+    let docs_input_names: HashSet<_> = module_prepared_source_names(docs_module)
+        .into_iter()
+        .collect();
+    assert!(docs_input_names.contains("intro.mtf"));
+    assert!(docs_input_names.contains("@docs.moth"));
+    assert!(docs_module.prepared.contains_moth_template);
 
     fs::remove_dir_all(&root).expect("should remove temp root");
 }
@@ -3636,15 +3631,8 @@ fn unimported_moth_template_file_under_entry_root_is_ignored() {
         .expect("unimported .mtf file should not affect discovery");
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
 
-    assert_eq!(modules[0].input_files.len(), 1);
-    assert_eq!(
-        modules[0].input_files[0].source_path().file_name().unwrap(),
-        OsStr::new("@page.moth")
-    );
-    assert!(matches!(
-        modules[0].input_files[0],
-        PreparedSourceInput::Moth { .. }
-    ));
+    assert_eq!(module_prepared_source_names(modules[0]), vec!["@page.moth"]);
+    assert!(!modules[0].prepared.contains_moth_template);
 
     fs::remove_dir_all(&root).expect("should remove temp root");
 }
@@ -3690,17 +3678,9 @@ fn extensionless_moth_import_and_virtual_package_import_still_work() {
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
     assert_eq!(modules.len(), 1);
 
-    let discovered = modules[0]
-        .input_files
-        .iter()
-        .map(|file| {
-            file.source_path()
-                .file_name()
-                .and_then(OsStr::to_str)
-                .unwrap_or_default()
-                .to_string()
-        })
-        .collect::<HashSet<_>>();
+    let discovered: HashSet<_> = module_prepared_source_names(modules[0])
+        .into_iter()
+        .collect();
 
     assert!(discovered.contains("@page.moth"));
     assert!(discovered.contains("helper.moth"));
@@ -3741,23 +3721,13 @@ fn indexed_module_inventory_includes_imported_markdown_without_scanning_its_body
         .expect(".md body text must not be scanned for imports");
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
 
-    let input_paths: HashSet<_> = modules[0]
-        .input_files
-        .iter()
-        .map(|input| input.source_path().file_name().unwrap().to_owned())
+    let input_paths: HashSet<_> = module_prepared_source_names(modules[0])
+        .into_iter()
         .collect();
-    assert!(input_paths.contains(OsStr::new("@page.moth")));
-    assert!(input_paths.contains(OsStr::new("intro.md")));
+    assert!(input_paths.contains("@page.moth"));
+    assert!(input_paths.contains("intro.md"));
 
-    let markdown_input = modules[0]
-        .input_files
-        .iter()
-        .find(|input| input.source_path().file_name() == Some(OsStr::new("intro.md")))
-        .expect("intro.md should be in discovered inputs");
-    assert!(matches!(
-        markdown_input,
-        PreparedSourceInput::PlainMarkdown { .. }
-    ));
+    assert!(!modules[0].prepared.contains_moth_template);
 
     fs::remove_dir_all(&root).expect("should remove temp root");
 }
@@ -3797,24 +3767,14 @@ fn indexed_module_inventory_excludes_unrelated_module_root_from_markdown_owner()
         .expect("reachable .md should not queue an unrelated module root");
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
 
-    let input_paths: HashSet<_> = modules[0]
-        .input_files
-        .iter()
-        .map(|input| input.source_path().file_name().unwrap().to_owned())
+    let input_paths: HashSet<_> = module_prepared_source_names(modules[0])
+        .into_iter()
         .collect();
-    assert!(input_paths.contains(OsStr::new("@page.moth")));
-    assert!(input_paths.contains(OsStr::new("intro.md")));
-    assert!(!input_paths.contains(OsStr::new("@other.moth")));
+    assert!(input_paths.contains("@page.moth"));
+    assert!(input_paths.contains("intro.md"));
+    assert!(!input_paths.contains("@other.moth"));
 
-    let markdown_input = modules[0]
-        .input_files
-        .iter()
-        .find(|input| input.source_path().file_name() == Some(OsStr::new("intro.md")))
-        .expect("intro.md should be in discovered inputs");
-    assert!(matches!(
-        markdown_input,
-        PreparedSourceInput::PlainMarkdown { .. }
-    ));
+    assert!(!modules[0].prepared.contains_moth_template);
 
     fs::remove_dir_all(&root).expect("should remove temp root");
 }
@@ -3852,15 +3812,8 @@ fn indexed_module_inventory_ignores_unimported_markdown_file() {
         .expect("unimported .md file should not affect discovery");
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
 
-    assert_eq!(modules[0].input_files.len(), 1);
-    assert_eq!(
-        modules[0].input_files[0].source_path().file_name().unwrap(),
-        OsStr::new("@page.moth")
-    );
-    assert!(matches!(
-        modules[0].input_files[0],
-        PreparedSourceInput::Moth { .. }
-    ));
+    assert_eq!(module_prepared_source_names(modules[0]), vec!["@page.moth"]);
+    assert!(!modules[0].prepared.contains_moth_template);
 
     fs::remove_dir_all(&root).expect("should remove temp root");
 }
@@ -4026,20 +3979,10 @@ fn stage0_reuses_scanned_moth_source_when_assembling_input_files() {
             "each selected Moth source should be read exactly once"
         );
     }
-    assert_eq!(modules[0].input_files.len(), 2);
-    let input_names = modules[0]
-        .input_files
-        .iter()
-        .map(|input| {
-            input
-                .source_path()
-                .file_name()
-                .and_then(OsStr::to_str)
-                .unwrap_or_default()
-                .to_owned()
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(input_names, vec!["@page.moth", "helper.moth"]);
+    assert_eq!(
+        module_prepared_source_names(modules[0]),
+        vec!["@page.moth", "helper.moth"]
+    );
 
     fs::remove_dir_all(&root).expect("should remove temp root");
 }
@@ -4157,40 +4100,11 @@ fn stage0_loads_asset_sources_and_preserves_deterministic_input_order() {
     let modules = discover_modules_for_test(&config, &resolver, &style_directives)
         .expect("asset source discovery should pass");
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
-    let input_files = &modules[0].input_files;
-    let input_names = input_files
-        .iter()
-        .map(|input| {
-            input
-                .source_path()
-                .file_name()
-                .and_then(OsStr::to_str)
-                .unwrap_or_default()
-                .to_owned()
-        })
-        .collect::<Vec<_>>();
-
-    assert_eq!(input_names, vec!["@page.moth", "intro.mtf", "notes.md"]);
-    assert!(matches!(
-        input_files[1],
-        PreparedSourceInput::MothTemplate { .. }
-    ));
-    match &input_files[1] {
-        PreparedSourceInput::MothTemplate { source_code, .. } => {
-            assert_eq!(source_code, "moth template body\n");
-        }
-        _ => unreachable!("input 1 should be a Moth template"),
-    }
-    assert!(matches!(
-        input_files[2],
-        PreparedSourceInput::PlainMarkdown { .. }
-    ));
-    match &input_files[2] {
-        PreparedSourceInput::PlainMarkdown { source_code, .. } => {
-            assert_eq!(source_code, "# Markdown body\n");
-        }
-        _ => unreachable!("input 2 should be PlainMarkdown"),
-    }
+    assert_eq!(
+        module_prepared_source_names(modules[0]),
+        vec!["@page.moth", "intro.mtf", "notes.md"]
+    );
+    assert!(modules[0].prepared.contains_moth_template);
 
     fs::remove_dir_all(&root).expect("should remove temp root");
 }
@@ -4313,11 +4227,7 @@ fn provider_backed_imports_are_resolved_without_becoming_source_inputs() {
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
 
     assert_eq!(calls.load(Ordering::Relaxed), 1);
-    assert_eq!(modules[0].input_files.len(), 1);
-    assert_eq!(
-        modules[0].input_files[0].source_path().file_name().unwrap(),
-        OsStr::new("@page.moth")
-    );
+    assert_eq!(module_prepared_source_names(modules[0]), vec!["@page.moth"]);
 
     fs::remove_dir_all(&root).expect("should remove temp root");
 }
@@ -4403,30 +4313,8 @@ fn canonical_multi_entry_discovery_is_deterministic_and_reads_each_source_once()
     assert_eq!(module_names, vec!["@pageA.moth", "@pageB.moth"]);
 
     // Per-module input order must be deterministic.
-    let module_a_inputs = modules[0]
-        .input_files
-        .iter()
-        .map(|input| {
-            input
-                .source_path()
-                .file_name()
-                .and_then(OsStr::to_str)
-                .unwrap_or_default()
-                .to_string()
-        })
-        .collect::<Vec<_>>();
-    let module_b_inputs = modules[1]
-        .input_files
-        .iter()
-        .map(|input| {
-            input
-                .source_path()
-                .file_name()
-                .and_then(OsStr::to_str)
-                .unwrap_or_default()
-                .to_string()
-        })
-        .collect::<Vec<_>>();
+    let module_a_inputs = module_prepared_source_names(modules[0]);
+    let module_b_inputs = module_prepared_source_names(modules[1]);
 
     // Canonical source order is deterministic by logical path (file name within this test).
     assert_eq!(
@@ -4492,12 +4380,11 @@ fn canonical_multi_entry_discovery_calls_provider_once() {
     );
     assert_eq!(modules.len(), 2);
 
-    // Module A has its own input; module B should only contain the Moth entry, not the .js.
-    assert_eq!(modules[0].input_files.len(), 1);
-    assert_eq!(modules[1].input_files.len(), 1);
+    // Module A has its own source; module B should only contain the Moth entry, not the .js.
+    assert_eq!(module_prepared_source_names(modules[0]).len(), 1);
     assert_eq!(
-        modules[1].input_files[0].source_path().file_name().unwrap(),
-        OsStr::new("@pageB.moth")
+        module_prepared_source_names(modules[1]),
+        vec!["@pageB.moth"]
     );
 
     fs::remove_dir_all(&root).expect("should remove temp root");
@@ -4584,25 +4471,11 @@ fn canonical_provider_discovery_reads_and_tokenizes_each_source_once() {
     );
     assert_eq!(modules.len(), 2);
 
-    // Every Moth input carries its retained Stage 0 token stream by type.
-    for module in &modules {
-        for input in &module.input_files {
-            match input {
-                PreparedSourceInput::Moth {
-                    source_path,
-                    tokens,
-                    ..
-                } => {
-                    assert!(
-                        !tokens.tokens.is_empty(),
-                        "prepared Moth file {:?} should carry retained tokens",
-                        source_path.file_name(),
-                    );
-                }
-                _ => panic!("this fixture should only produce Moth files"),
-            }
-        }
-    }
+    assert!(
+        modules
+            .iter()
+            .all(|module| !module.prepared.contains_moth_template)
+    );
 
     fs::remove_dir_all(&root).expect("should remove temp root");
 }
@@ -4927,30 +4800,8 @@ fn canonical_discovery_preserves_cross_module_root_queuing() {
                 .is_some_and(|name| name == "@api.moth")
         })
         .expect("module B should be discovered");
-    let module_a_inputs = module_a
-        .input_files
-        .iter()
-        .map(|input| {
-            input
-                .source_path()
-                .file_name()
-                .and_then(OsStr::to_str)
-                .unwrap_or_default()
-                .to_string()
-        })
-        .collect::<Vec<_>>();
-    let module_b_inputs = module_b
-        .input_files
-        .iter()
-        .map(|input| {
-            input
-                .source_path()
-                .file_name()
-                .and_then(OsStr::to_str)
-                .unwrap_or_default()
-                .to_string()
-        })
-        .collect::<Vec<_>>();
+    let module_a_inputs = module_prepared_source_names(module_a);
+    let module_b_inputs = module_prepared_source_names(module_b);
 
     assert!(
         !module_a_inputs.contains(&"@api.moth".to_string())
@@ -5185,7 +5036,7 @@ fn direct_child_private_path_bypass_is_rejected() {
 }
 
 #[test]
-fn stage0_retains_moth_tokens_and_leaves_non_tokenized_sources_without_tokens() {
+fn stage0_consumes_moth_tokens_into_retained_header_syntax() {
     let root = temp_dir("stage0_retained_tokens");
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
@@ -5219,61 +5070,37 @@ fn stage0_retains_moth_tokens_and_leaves_non_tokenized_sources_without_tokens() 
     let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
 
     let modules = discover_modules_for_test(&config, &resolver, &style_directives)
-        .expect("retained-token discovery should pass");
+        .expect("header discovery should pass");
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
-    let input_files = &modules[0].input_files;
-
-    // Every Moth input carries the retained Stage 0 token stream by type; Moth template and
-    // PlainMarkdown variants cannot carry tokens, so the invalid state is unrepresentable.
-    for input in input_files.iter() {
-        match input {
-            PreparedSourceInput::Moth {
-                source_path,
-                tokens,
-                ..
-            } => {
-                assert!(
-                    !tokens.tokens.is_empty(),
-                    "retained token stream for {:?} should not be empty",
-                    source_path.file_name(),
-                );
-            }
-            PreparedSourceInput::MothTemplate { source_path, .. }
-            | PreparedSourceInput::PlainMarkdown { source_path, .. } => {
-                // Non-Moth sources have no retained token stream by construction.
-                let _ = source_path;
-            }
-        }
-    }
-
-    // The retained Moth token for the entry file should contain the import path token,
-    // proving the Stage 0 lexical pass produced the tokens that header parsing will consume.
-    let entry_input = input_files
-        .iter()
-        .find(|input| match input {
-            PreparedSourceInput::Moth { source_path, .. } => source_path
-                .file_name()
-                .is_some_and(|name| name == "@page.moth"),
-            _ => false,
-        })
-        .expect("entry file should be in the input set");
-    let entry_tokens = match entry_input {
-        PreparedSourceInput::Moth { tokens, .. } => tokens,
-        _ => unreachable!("entry file should be a Moth prepared input"),
-    };
-    assert!(
-        entry_tokens.tokens.iter().any(|token| matches!(
-            token.kind,
-            crate::compiler_frontend::tokenizer::tokens::TokenKind::Import
-        )),
-        "retained entry tokens should contain the Import token from Stage 0 lexing"
+    assert_eq!(modules[0].prepared.source_file_count, 3);
+    assert_eq!(
+        module_prepared_source_names(modules[0]),
+        vec!["@page.moth", "helper.moth", "intro.mtf"]
+    );
+    assert!(modules[0].prepared.contains_moth_template);
+    let entry_path = fs::canonicalize(src.join("@page.moth")).expect("entry should canonicalize");
+    let entry_identity = modules[0]
+        .prepared
+        .source_files
+        .get_by_canonical_path(&entry_path)
+        .expect("entry should retain a source identity");
+    assert_eq!(
+        modules[0]
+            .prepared
+            .prepared_header_syntax
+            .module_symbols
+            .file_imports_by_source
+            .get(&entry_identity.logical_path)
+            .map(Vec::len),
+        Some(2),
+        "the consumed Moth token payload should produce retained entry import facts"
     );
 
     fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
-fn canonical_discovery_retains_moth_tokens_for_every_reachable_file() {
+fn canonical_discovery_consumes_moth_tokens_for_every_reachable_file() {
     let root = temp_dir("canonical_retained_tokens");
     let src = root.join("src");
     let module_a = src.join("module_a");
@@ -5311,25 +5138,23 @@ fn canonical_discovery_retains_moth_tokens_for_every_reachable_file() {
 
     assert_eq!(modules.len(), 2);
 
-    // Every Moth input in both modules must carry the tokens retained by canonical Stage 0.
-    for module in &modules {
-        for input in &module.input_files {
-            match input {
-                PreparedSourceInput::Moth {
-                    source_path,
-                    tokens,
-                    ..
-                } => {
-                    assert!(
-                        !tokens.tokens.is_empty(),
-                        "retained tokens for {:?} should not be empty",
-                        source_path.file_name(),
-                    );
-                }
-                _ => panic!("test should only produce Moth files"),
-            }
-        }
-    }
+    assert_eq!(
+        module_prepared_source_names(modules[0]),
+        vec!["@pageA.moth", "helperA.moth"]
+    );
+    assert_eq!(
+        module_prepared_source_names(modules[1]),
+        vec!["@pageB.moth", "helperB.moth"]
+    );
+    assert!(modules.iter().all(|module| {
+        module
+            .prepared
+            .prepared_header_syntax
+            .module_symbols
+            .file_imports_by_source
+            .values()
+            .any(|imports| !imports.is_empty())
+    }));
 
     fs::remove_dir_all(&root).expect("should remove temp root");
 }
@@ -5965,18 +5790,7 @@ fn canonical_module_job_excludes_cross_module_donor_sources() {
         .flatten()
         .find(|module| module.entry_point.file_name() == Some(OsStr::new("@page.moth")))
         .expect("consumer module should be discovered");
-    let input_names = consumer
-        .input_files
-        .iter()
-        .map(|input| {
-            input
-                .source_path()
-                .file_name()
-                .and_then(OsStr::to_str)
-                .unwrap_or_default()
-                .to_owned()
-        })
-        .collect::<Vec<_>>();
+    let input_names = module_prepared_source_names(consumer);
 
     assert_eq!(
         input_names,

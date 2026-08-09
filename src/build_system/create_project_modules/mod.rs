@@ -2,6 +2,8 @@
 //!
 //! Dispatches to single-file or directory-project flows, then delegates to focused submodules:
 //! - `frontend_orchestration`   — per-module pipeline (tokenization through borrow checking)
+//! - `generated_worklist`       — boundary-local generated request state and sidecar publication
+//! - `generated_summary_convergence` — transient HIR call topology and dirty-queue propagation
 //! - `project_roots`            — config root interpretation and path-resolver setup
 //! - `source_package_discovery` — source-package registration, boundary indexes and prefix checks
 //! - `source_tree_index`        — project and source-package boundary source-tree indexing with
@@ -26,6 +28,7 @@
 mod compilation;
 pub(crate) mod compiled_boundary;
 mod frontend_orchestration;
+mod generated_summary_convergence;
 pub(crate) mod generated_worklist;
 pub(crate) mod module_artifact_store;
 pub(crate) mod module_identity;

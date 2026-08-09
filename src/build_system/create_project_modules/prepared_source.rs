@@ -8,8 +8,9 @@
 //!      header preparation receives tokens directly and cannot panic on absent tokens, while
 //!      Moth template and PlainMarkdown cannot accidentally carry Moth tokens.
 //!
-//! This type is the build-system-owned handoff threaded through `ReachableSourceInventory`
-//! assembly, `ModuleCompilationJob`, single-file compilation and `FrontendModuleBuildContext`.
+//! This type is the build-system-owned transient handoff between Stage 0 source selection and
+//! frontend file/header preparation. It is consumed before `PreparedModule` reaches semantic
+//! compilation; directory module jobs retain only that completed module payload.
 
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 

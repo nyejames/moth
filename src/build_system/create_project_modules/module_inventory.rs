@@ -3,13 +3,13 @@
 //! WHAT: turns every canonical project module graph node into a `ModuleCompilationJob`
 //! records carrying their graph-assigned stable module origin and all transitively reachable
 //! input files.
-//! WHY: module inventory is the Stage 0 bridge between the structural graph and parallel frontend
+//! WHY: module inventory is the Stage 0 bridge between the structural graph and frontend
 //! compilation. The graph-owned `StableModuleOriginIdentity` travels with each module so semantic
 //! compilation receives a canonical identity instead of reconstructing one from an entry path.
 //! Entry root paths and deterministic compile-wave grouping come from the graph's compile waves so
-//! entry classification has one owner; the directory compiler consumes one wave at a time,
-//! permitting parallelism only within a ready wave. Root setup and source-backed package
-//! validation live in sibling modules.
+//! entry classification has one owner; semantic module jobs are scheduled serially while each
+//! job may parallelize its own file preparation. Root setup and source-backed package validation
+//! live in sibling modules.
 
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::InvalidConfigReason;
@@ -34,7 +34,7 @@ use super::source_discovery::{
     ExternalImportDiscoveryState, ResolvedDependencyEdge, ResolvedSourcePackageImport,
     StructuralProviderAction, prepare_owned_source_input, resolve_structural_provider_reference,
 };
-use super::source_tree_index::SourceClassification;
+use super::source_tree_index::{SourceClassification, SourceOwnership};
 
 /// One normal entry module seed carrying its graph-assigned `ModuleId` and canonical root file.
 ///
@@ -61,8 +61,6 @@ struct ModuleCompilationJobDraft {
     prepared: PreparedModule,
     #[cfg(feature = "timers")]
     timing_module_key: crate::timing::TimingModuleKey,
-    #[cfg(test)]
-    input_files: Vec<super::prepared_source::PreparedSourceInput>,
 }
 
 /// One graph-owned module job with its stable origin and prepared semantic inputs.
@@ -81,8 +79,6 @@ pub(crate) struct ModuleCompilationJob {
     pub(crate) prepared: PreparedModule,
     #[cfg(feature = "timers")]
     pub(crate) timing_module_key: crate::timing::TimingModuleKey,
-    #[cfg(test)]
-    pub(crate) input_files: Vec<super::prepared_source::PreparedSourceInput>,
 }
 
 struct ModuleCompilationJobBatch {
@@ -107,10 +103,10 @@ struct ModuleDiscoveryContext<'a> {
 ///       dependency wave, preserving the populated graph's dependency ordering and deterministic
 ///       `ModuleId` order. This schedule feeds the provider-store
 ///       scheduler; completed waves publish immutable interfaces before later consumers bind.
-/// WHY: preserving wave boundaries lets the directory compiler execute semantic compilation one
-///      dependency wave at a time, with Rayon parallelism only within a ready wave. The graph
-///      owns compile-wave order; this contract is the single owner of that order at the inventory
-///      boundary so the compiler does not recompute waves or flatten them back into one batch.
+/// WHY: preserving wave boundaries lets the directory compiler execute provider-dependent semantic
+///      jobs in dependency order while retaining one deterministic scheduling contract. File
+///      preparation may use Rayon inside each job, but semantic module jobs remain serial until a
+///      separate parallel-wave phase changes the publication protocol.
 pub(crate) struct ModuleCompilationSchedule {
     waves: Vec<Vec<ModuleCompilationJob>>,
     provider_bindings: Vec<ResolvedDependencyEdge>,
@@ -146,11 +142,10 @@ impl ModuleCompilationSchedule {
 /// Root files are seeded from every graph node in deterministic `ModuleId`
 /// order. Reachable-file discovery retains direct `ModuleId` edges for cross-module imports;
 /// after discovery completes the edges enter the graph as provider-before-consumer order, and the
-/// returned modules are ordered by the populated
-/// graph's compile waves. The
-/// directory compiler consumes these waves sequentially, permitting Rayon parallelism only within
-/// a ready wave. Only normal roots remain entry candidates, but support and facade roots now own
-/// API-only semantic jobs. A defensive
+/// returned modules are ordered by the populated graph's compile waves. The directory compiler
+/// consumes these waves sequentially; each job may use Rayon for file preparation, but semantic
+/// module publication remains serial. Only normal roots remain entry candidates, but support and
+/// facade roots now own API-only semantic jobs. A defensive
 /// graph cycle, a missing project-local root or a graph/inventory disagreement surfaces through
 /// the existing `CompilerMessages`/string-table boundary without panicking.
 #[allow(clippy::too_many_arguments)]
@@ -266,7 +261,7 @@ fn discover_all_modules_in_boundary(
     // consumers in the returned inventory waves. Discovery seeded entries in `ModuleId` order;
     // this groups the result into dependency-ordered compile waves without re-running discovery.
     // Every canonical module appears in exactly one wave, and the directory compiler consumes one
-    // wave at a time with parallelism only within a ready wave.
+    // wave at a time; per-module file preparation owns any internal parallelism.
     order_discovered_modules_by_compile_waves(
         project_module_graph,
         drafts,
@@ -426,8 +421,6 @@ fn order_discovered_modules_by_compile_waves(
                 prepared: draft.prepared,
                 #[cfg(feature = "timers")]
                 timing_module_key: draft.timing_module_key,
-                #[cfg(test)]
-                input_files: draft.input_files,
             });
         }
         if !wave_modules.is_empty() {
@@ -457,8 +450,8 @@ fn order_discovered_modules_by_compile_waves(
 ///
 /// Each owned source ID is read and tokenized directly into the module's input lane, then its
 /// retained header import shells drive indexed reachability and provider resolution. The loop
-/// stays serial because provider discovery mutates build-scoped registries; semantic compilation
-/// remains wave-parallel.
+/// stays serial because provider discovery mutates build-scoped registries; semantic module
+/// compilation remains serial while each module may parallelize file preparation.
 fn discover_modules_serial_provider_capable(
     seeds: &[ModuleEntrySeed],
     context: ModuleDiscoveryContext<'_>,
@@ -549,19 +542,8 @@ fn discover_modules_serial_provider_capable(
 
         let mut queued = BTreeSet::new();
         let mut queue = VecDeque::from([entry_source_id]);
-        #[cfg(test)]
-        let mut input_files = Vec::new();
         queued.insert(entry_source_id);
         while let Some(source_id) = queue.pop_front() {
-            let input = match prepare_owned_source_input(
-                source_id,
-                source_tree_index,
-                style_directives,
-                syntax.string_table_mut(),
-            ) {
-                Ok(input) => input,
-                Err(error) => return Err(error.into_messages(syntax.string_table_mut())),
-            };
             let order = source_order.get(&source_id).copied().ok_or_else(|| {
                 graph_inventory_mismatch_error(
                     format!(
@@ -572,11 +554,37 @@ fn discover_modules_serial_provider_capable(
                     syntax.string_table_mut(),
                 )
             })?;
-            let providers = syntax.prepare_source(order, &input)?;
+            if !matches!(
+                source_tree_index.source(source_id).ownership(),
+                SourceOwnership::Owned(owner) if owner == seed.module_id
+            ) {
+                return Err(graph_inventory_mismatch_error(
+                    format!(
+                        "ModuleId {} reached source ID {} without owning it in SourceTreeIndex",
+                        seed.module_id.index(),
+                        source_id.index()
+                    ),
+                    syntax.string_table_mut(),
+                ));
+            }
+            let source_path = source_tree_index
+                .source(source_id)
+                .canonical_path()
+                .to_path_buf();
+            let input = match prepare_owned_source_input(
+                source_id,
+                source_tree_index,
+                style_directives,
+                syntax.string_table_mut(),
+            ) {
+                Ok(input) => input,
+                Err(error) => return Err(error.into_messages(syntax.string_table_mut())),
+            };
+            let providers = syntax.prepare_source(order, input)?;
             for provider in providers {
                 let action = match resolve_structural_provider_reference(
                     &provider,
-                    input.source_path(),
+                    &source_path,
                     project_path_resolver,
                     external_imports,
                     directory_import_resolution,
@@ -592,7 +600,7 @@ fn discover_modules_serial_provider_capable(
                 let resolved = directory_import_resolution
                     .resolve_import(
                         provider.path_view(),
-                        input.source_path(),
+                        &source_path,
                         syntax.string_table_mut(),
                     )
                     .map_err(|diagnostic| {
@@ -639,8 +647,6 @@ fn discover_modules_serial_provider_capable(
                     ResolvedImport::BindingPackage => {}
                 }
             }
-            #[cfg(test)]
-            input_files.push(input);
         }
         let prepared = syntax.finish()?;
         #[cfg(feature = "timers")]
@@ -654,18 +660,6 @@ fn discover_modules_serial_provider_capable(
         for edge in &mut resolved_edges[module_edge_start..] {
             edge.graph_location.remap_string_ids(&graph_location_remap);
         }
-        #[cfg(test)]
-        input_files.sort_by_key(|input| {
-            source_order
-                .get(
-                    &source_tree_index
-                        .source_id_for_canonical_path(input.source_path())
-                        .expect("a prepared test input must retain its indexed canonical path"),
-                )
-                .copied()
-                .expect("a prepared test input must belong to the module source order")
-        });
-
         drafts.push(ModuleCompilationJobDraft {
             module_id: seed.module_id,
             entry_point: seed.entry_path.clone(),
@@ -673,8 +667,6 @@ fn discover_modules_serial_provider_capable(
             prepared,
             #[cfg(feature = "timers")]
             timing_module_key,
-            #[cfg(test)]
-            input_files,
         });
     }
 

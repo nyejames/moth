@@ -181,8 +181,8 @@ fn prepare_source_file(
     };
     let input = FrontendFilePrepareInput {
         source: FrontendFilePrepareSource::MothTemplate {
-            source_code: &source.source_text,
-            source_path: &source.source_path,
+            source_code: source.source_text.clone(),
+            source_path: source.source_path.clone(),
         },
         const_template_offset: 0,
         runtime_fragment_offset: 0,

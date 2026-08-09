@@ -177,7 +177,7 @@ pub(crate) fn parse_single_file_ast_diagnostic(source: &str) -> CompilerDiagnost
 pub(crate) fn tokenize_source_for_test(
     frontend: &mut CompilerFrontend,
     source_code: &str,
-    module_path: &std::path::PathBuf,
+    module_path: &std::path::Path,
     tokenizer_entry_mode: TokenizerEntryMode,
 ) -> Result<FileTokens, Box<CompilerDiagnostic>> {
     CompilerFrontend::tokenize_source(

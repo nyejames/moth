@@ -65,7 +65,7 @@ pub(crate) struct FrontendFilePrepareContext<'a> {
     pub(crate) options: &'a HeaderParseOptions,
 }
 
-/// State-safe per-file source payload for frontend preparation.
+/// Owned per-file source payload for frontend preparation.
 ///
 /// WHAT: one variant per source kind. Moth carries the retained `FileTokens` from the
 ///       single Stage 0 lexical pass; Moth template and PlainMarkdown carry only raw source text.
@@ -73,21 +73,20 @@ pub(crate) struct FrontendFilePrepareContext<'a> {
 ///      state. The Moth preparation arm receives `FileTokens` by type, so it cannot panic
 ///      on absent tokens, and Moth template/PlainMarkdown cannot carry Moth tokens.
 ///
-/// This is the frontend's borrowed view across the build-system/frontend stage boundary. The
-/// build system owns the `PreparedSourceInput` storage and constructs this view from it; the
-/// frontend does not depend on build-system types.
-pub(crate) enum FrontendFilePrepareSource<'a> {
+/// The build system moves its source-kind handoff into this value; the frontend does not depend on
+/// build-system types and owns each payload for the duration of header preparation.
+pub(crate) enum FrontendFilePrepareSource {
     Moth {
-        source_path: &'a PathBuf,
-        tokens: &'a FileTokens,
+        source_path: PathBuf,
+        tokens: Box<FileTokens>,
     },
     MothTemplate {
-        source_code: &'a str,
-        source_path: &'a PathBuf,
+        source_code: String,
+        source_path: PathBuf,
     },
     PlainMarkdown {
-        source_code: &'a str,
-        source_path: &'a PathBuf,
+        source_code: String,
+        source_path: PathBuf,
     },
 }
 
@@ -96,8 +95,8 @@ pub(crate) enum FrontendFilePrepareSource<'a> {
 /// WHAT: keeps the state-safe source variant and synthetic-fragment offsets together for one
 ///       worker item.
 /// WHY: grouping these inputs keeps the preparation API explicit without a broad argument list.
-pub(crate) struct FrontendFilePrepareInput<'a> {
-    pub(crate) source: FrontendFilePrepareSource<'a>,
+pub(crate) struct FrontendFilePrepareInput {
+    pub(crate) source: FrontendFilePrepareSource,
     pub(crate) const_template_offset: usize,
     pub(crate) runtime_fragment_offset: usize,
 }
@@ -121,10 +120,10 @@ struct FrontendSourceFileIdentity {
 ///      source identity so downstream stages treat them as ordinary module members.
 fn source_file_identity(
     source_files: &SourceFileTable,
-    source_path: &PathBuf,
+    source_path: &Path,
     string_table: &mut StringTable,
 ) -> Result<FrontendSourceFileIdentity, CompilerError> {
-    match source_files.get_by_canonical_path(source_path.as_path()) {
+    match source_files.get_by_canonical_path(source_path) {
         Some(identity) => Ok(FrontendSourceFileIdentity {
             logical_path: identity.logical_path.clone(),
             file_id: Some(identity.file_id),
@@ -199,7 +198,7 @@ impl CompilerFrontend {
         source_files: &SourceFileTable,
         style_directives: &StyleDirectiveRegistry,
         source_code: &str,
-        module_path: &PathBuf,
+        module_path: &Path,
         tokenizer_entry_mode: TokenizerEntryMode,
         string_table: &mut StringTable,
     ) -> Result<FileTokens, Box<CompilerDiagnostic>> {
@@ -227,7 +226,7 @@ impl CompilerFrontend {
     ///      owner for discovered Moth source.
     pub(crate) fn prepare_file_frontend_local(
         context: &FrontendFilePrepareContext<'_>,
-        input: FrontendFilePrepareInput<'_>,
+        input: FrontendFilePrepareInput,
         local_string_table: &mut StringTable,
     ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareError> {
         match input.source {
@@ -236,14 +235,14 @@ impl CompilerFrontend {
                 source_path,
             } => {
                 let identity =
-                    source_file_identity(context.source_files, source_path, local_string_table)
+                    source_file_identity(context.source_files, &source_path, local_string_table)
                         .map_err(|error| FileFrontendPrepareError {
                             warnings: Vec::new(),
                             diagnostic: Box::new(compiler_error_to_diagnostic(&error)),
                         })?;
                 Ok(prepare_plain_markdown_file(
                     PlainMarkdownPrepareInput {
-                        source_code,
+                        source_code: &source_code,
                         source_file: identity.logical_path,
                         file_id: identity.file_id,
                         canonical_os_path: identity.canonical_os_path,
@@ -253,27 +252,26 @@ impl CompilerFrontend {
             }
             FrontendFilePrepareSource::Moth {
                 source_path,
-                tokens,
+                mut tokens,
             } => {
                 // Moth files carry the exact token stream retained from the single Stage 0
                 // lexical pass. Rebind it to the module source identity and parse headers without
                 // re-tokenizing. `tokens` is present by type, so no absent-token panic is possible.
                 let identity =
-                    source_file_identity(context.source_files, source_path, local_string_table)
+                    source_file_identity(context.source_files, &source_path, local_string_table)
                         .map_err(|error| FileFrontendPrepareError {
                             warnings: Vec::new(),
                             diagnostic: Box::new(compiler_error_to_diagnostic(&error)),
                         })?;
 
-                let mut file_tokens = tokens.clone();
-                file_tokens.rebind_source_identity(
+                tokens.rebind_source_identity(
                     identity.logical_path,
                     identity.file_id,
                     identity.canonical_os_path,
                 );
 
                 parse_file_headers_with_table(
-                    &mut file_tokens,
+                    &mut tokens,
                     context.entry_file_path,
                     context.options,
                     local_string_table,
@@ -295,8 +293,8 @@ impl CompilerFrontend {
                 let tokenization = Self::tokenize_source(
                     context.source_files,
                     context.style_directives,
-                    source_code,
-                    source_path,
+                    &source_code,
+                    &source_path,
                     tokenizer_entry_mode,
                     local_string_table,
                 );

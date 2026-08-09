@@ -11,15 +11,9 @@
 
 use crate::build_system::build::GeneratedFunctionSidecar;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::reachability::HirModuleLinkFacts;
-use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
-use crate::compiler_frontend::public_call_summary::{
-    PublicCallSummary, PublicCallSummaryTransition, validate_public_call_summary_transition,
-};
-use crate::compiler_frontend::semantic_identity::{
-    GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, OriginFunctionId,
-};
+use crate::compiler_frontend::public_call_summary::PublicCallSummary;
+use crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity;
 use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
@@ -33,285 +27,6 @@ impl GeneratedRequestId {
         self.0
     }
 }
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(super) enum ConvergenceNode {
-    BaseModule,
-    Generated(Box<GeneratedFunctionIdentity>),
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(super) struct ConvergenceNodeId(usize);
-
-impl ConvergenceNodeId {
-    pub(super) fn index(self) -> usize {
-        self.0
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct ConvergenceNodeRecord {
-    node: ConvergenceNode,
-    generated_callees: Vec<GeneratedFunctionIdentity>,
-    active_public_callees: Vec<OriginFunctionId>,
-    module_private_callees: Vec<ModulePrivateExecutableIdentity>,
-}
-
-/// Construction-only reverse-call model for one module convergence observation.
-///
-/// WHAT: assigns dense deterministic nodes to the base module and newly materialised local
-///       sidecars, then stores sorted reverse callers for each node.
-/// WHY: convergence scheduling needs one inspectable dependency model derived from validated HIR
-///      link facts. It is never retained in an artefact and owns only this module's transient
-///      queue inputs.
-#[derive(Debug)]
-pub(super) struct ConvergenceModel {
-    nodes: Vec<ConvergenceNodeRecord>,
-    callers: Vec<Vec<ConvergenceNodeId>>,
-}
-
-impl ConvergenceModel {
-    #[cfg(test)]
-    pub(super) fn from_link_facts<'a>(
-        base: &HirModuleLinkFacts,
-        generated: impl IntoIterator<Item = (&'a GeneratedFunctionIdentity, &'a HirModuleLinkFacts)>,
-    ) -> Result<Self, CompilerError> {
-        Self::build(base, generated, &FxHashSet::default(), None)
-    }
-
-    pub(super) fn from_link_facts_for_base_callees<'a>(
-        base: &HirModuleLinkFacts,
-        generated: impl IntoIterator<Item = (&'a GeneratedFunctionIdentity, &'a HirModuleLinkFacts)>,
-        base_public_origins: &FxHashSet<OriginFunctionId>,
-        base_private_identities: &FxHashSet<ModulePrivateExecutableIdentity>,
-    ) -> Result<Self, CompilerError> {
-        Self::build(
-            base,
-            generated,
-            base_public_origins,
-            Some(base_private_identities),
-        )
-    }
-
-    fn build<'a>(
-        base: &HirModuleLinkFacts,
-        generated: impl IntoIterator<Item = (&'a GeneratedFunctionIdentity, &'a HirModuleLinkFacts)>,
-        base_public_origins: &FxHashSet<OriginFunctionId>,
-        base_private_identities: Option<&FxHashSet<ModulePrivateExecutableIdentity>>,
-    ) -> Result<Self, CompilerError> {
-        let mut generated = generated.into_iter().collect::<Vec<_>>();
-        generated.sort_by_key(|(left, _)| *left);
-        for pair in generated.windows(2) {
-            if pair[0].0 == pair[1].0 {
-                return Err(CompilerError::compiler_error(format!(
-                    "convergence model received duplicate generated identity {:?}",
-                    pair[0].0
-                )));
-            }
-        }
-
-        let mut nodes = vec![ConvergenceNodeRecord {
-            node: ConvergenceNode::BaseModule,
-            generated_callees: Vec::new(),
-            active_public_callees: Vec::new(),
-            module_private_callees: Vec::new(),
-        }];
-        for (identity, _) in &generated {
-            let node = ConvergenceNode::Generated(Box::new((*identity).clone()));
-            nodes.push(ConvergenceNodeRecord {
-                node,
-                generated_callees: Vec::new(),
-                active_public_callees: Vec::new(),
-                module_private_callees: Vec::new(),
-            });
-        }
-
-        let ids_by_generated = nodes
-            .iter()
-            .enumerate()
-            .skip(1)
-            .filter_map(|(index, record)| match &record.node {
-                ConvergenceNode::BaseModule => None,
-                ConvergenceNode::Generated(identity) => {
-                    Some((identity.as_ref().clone(), ConvergenceNodeId(index)))
-                }
-            })
-            .collect::<FxHashMap<_, _>>();
-        let mut callers = vec![Vec::new(); nodes.len()];
-
-        add_model_edges(
-            &mut callers,
-            &ids_by_generated,
-            &mut nodes[0],
-            ConvergenceNodeId(0),
-            base_public_origins,
-            base_private_identities,
-            base.direct_call_targets(),
-        );
-        for (identity, link_facts) in generated {
-            let caller = ids_by_generated[identity];
-            add_model_edges(
-                &mut callers,
-                &ids_by_generated,
-                &mut nodes[caller.index()],
-                caller,
-                base_public_origins,
-                base_private_identities,
-                link_facts.direct_call_targets(),
-            );
-        }
-
-        for record in &mut nodes {
-            record.generated_callees.sort_unstable();
-            record.generated_callees.dedup();
-            record.active_public_callees.sort_unstable();
-            record.active_public_callees.dedup();
-            record.module_private_callees.sort_unstable();
-            record.module_private_callees.dedup();
-        }
-        for caller_ids in &mut callers {
-            caller_ids.sort_unstable();
-            caller_ids.dedup();
-        }
-
-        Ok(Self { nodes, callers })
-    }
-
-    pub(super) fn node_count(&self) -> usize {
-        self.nodes.len()
-    }
-
-    pub(super) fn node(&self, id: ConvergenceNodeId) -> Option<&ConvergenceNode> {
-        self.nodes.get(id.index()).map(|record| &record.node)
-    }
-
-    #[cfg(test)]
-    pub(super) fn node_id(&self, node: &ConvergenceNode) -> Option<ConvergenceNodeId> {
-        self.nodes
-            .iter()
-            .position(|record| &record.node == node)
-            .map(ConvergenceNodeId)
-    }
-
-    pub(super) fn callers(&self, node: ConvergenceNodeId) -> Option<&[ConvergenceNodeId]> {
-        self.callers.get(node.index()).map(Vec::as_slice)
-    }
-
-    pub(super) fn all_node_ids(&self) -> Vec<ConvergenceNodeId> {
-        (0..self.nodes.len()).map(ConvergenceNodeId).collect()
-    }
-
-    pub(super) fn generated_callees(
-        &self,
-        node: ConvergenceNodeId,
-    ) -> Option<&[GeneratedFunctionIdentity]> {
-        self.nodes
-            .get(node.index())
-            .map(|record| record.generated_callees.as_slice())
-    }
-
-    pub(super) fn module_private_callees(
-        &self,
-        node: ConvergenceNodeId,
-    ) -> Option<&[ModulePrivateExecutableIdentity]> {
-        self.nodes
-            .get(node.index())
-            .map(|record| record.module_private_callees.as_slice())
-    }
-
-    pub(super) fn active_public_callees(
-        &self,
-        node: ConvergenceNodeId,
-    ) -> Option<&[OriginFunctionId]> {
-        self.nodes
-            .get(node.index())
-            .map(|record| record.active_public_callees.as_slice())
-    }
-
-    pub(super) fn generated_node_ids(&self) -> impl Iterator<Item = ConvergenceNodeId> + '_ {
-        (1..self.nodes.len()).map(ConvergenceNodeId)
-    }
-
-    /// Return the changed nodes and every reverse-reachable caller in dense ID order.
-    #[cfg(test)]
-    pub(super) fn dirty_nodes(
-        &self,
-        changed_nodes: impl IntoIterator<Item = ConvergenceNodeId>,
-    ) -> Vec<ConvergenceNodeId> {
-        let mut dirty = vec![false; self.nodes.len()];
-        let mut queue = std::collections::VecDeque::new();
-        for node in changed_nodes {
-            if node.index() < dirty.len() && !dirty[node.index()] {
-                dirty[node.index()] = true;
-                queue.push_back(node);
-            }
-        }
-
-        while let Some(changed) = queue.pop_front() {
-            for caller in &self.callers[changed.index()] {
-                if !dirty[caller.index()] {
-                    dirty[caller.index()] = true;
-                    queue.push_back(*caller);
-                }
-            }
-        }
-
-        dirty
-            .into_iter()
-            .enumerate()
-            .filter_map(|(index, is_dirty)| is_dirty.then_some(ConvergenceNodeId(index)))
-            .collect()
-    }
-}
-
-fn add_model_edges(
-    callers: &mut [Vec<ConvergenceNodeId>],
-    ids_by_generated: &FxHashMap<GeneratedFunctionIdentity, ConvergenceNodeId>,
-    record: &mut ConvergenceNodeRecord,
-    caller: ConvergenceNodeId,
-    base_public_origins: &FxHashSet<OriginFunctionId>,
-    base_private_identities: Option<&FxHashSet<ModulePrivateExecutableIdentity>>,
-    targets: Vec<(crate::compiler_frontend::hir::ids::FunctionId, CallTarget)>,
-) {
-    for (_, target) in targets {
-        let callee = match target {
-            CallTarget::Local(_) | CallTarget::External(_) => None,
-            CallTarget::CrossModule(origin) => {
-                if !base_public_origins.contains(&origin) {
-                    None
-                } else {
-                    record.active_public_callees.push(origin);
-                    match caller.index() {
-                        0 => None,
-                        _ => Some(ConvergenceNodeId(0)),
-                    }
-                }
-            }
-            CallTarget::ModulePrivate(identity) => {
-                let is_base_private =
-                    base_private_identities.is_none_or(|identities| identities.contains(&identity));
-                if !is_base_private {
-                    None
-                } else {
-                    record.module_private_callees.push(identity);
-                    match caller.index() {
-                        0 => None,
-                        _ => Some(ConvergenceNodeId(0)),
-                    }
-                }
-            }
-            CallTarget::Generated(identity) => {
-                record.generated_callees.push(identity.clone());
-                ids_by_generated.get(&identity).copied()
-            }
-        };
-        let Some(callee) = callee else {
-            continue;
-        };
-        callers[callee.index()].push(caller);
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum GeneratedRequestState {
     Pending,
@@ -531,23 +246,15 @@ impl<'a> GeneratedFunctionWorklist<'a> {
             .or_else(|| self.known.summary(identity))
     }
 
-    pub(super) fn convergence_model(
+    pub(super) fn completed_link_facts(
         &self,
-        base_link_facts: &HirModuleLinkFacts,
-        base_public_origins: &FxHashSet<OriginFunctionId>,
-        base_private_identities: &FxHashSet<ModulePrivateExecutableIdentity>,
-    ) -> Result<ConvergenceModel, CompilerError> {
-        ConvergenceModel::from_link_facts_for_base_callees(
-            base_link_facts,
-            self.completed_records.iter().map(|record| {
-                (
-                    &record.identity,
-                    &record.sidecar.module.link_facts.functions,
-                )
-            }),
-            base_public_origins,
-            base_private_identities,
-        )
+    ) -> impl Iterator<Item = (&GeneratedFunctionIdentity, &HirModuleLinkFacts)> + '_ {
+        self.completed_records.iter().map(|record| {
+            (
+                &record.identity,
+                &record.sidecar.module.link_facts.functions,
+            )
+        })
     }
 
     pub(super) fn sidecar_mut(
@@ -579,26 +286,23 @@ impl<'a> GeneratedFunctionWorklist<'a> {
         }
     }
 
-    pub(super) fn update_summary(
+    pub(super) fn summary_mut(
         &mut self,
         identity: &GeneratedFunctionIdentity,
-        summary: PublicCallSummary,
-    ) -> Result<bool, CompilerError> {
+    ) -> Result<&mut PublicCallSummary, CompilerError> {
         let record_id = self.completed_by_identity.get(identity).ok_or_else(|| {
             CompilerError::compiler_error(format!(
                 "Generated worklist cannot update unknown completed request {identity:?}"
             ))
         })?;
-        add_frontend_counter(FrontendCounter::ConvergenceSummaryComparisons, 1);
-        let current = &self.completed_records[record_id.index()].summary;
-        let transition = validate_public_call_summary_transition(current, &summary)?;
-        if transition == PublicCallSummaryTransition::Widened {
-            add_frontend_counter(FrontendCounter::ConvergenceSummaryChanges, 1);
-            self.completed_records[record_id.index()].summary = summary;
-            Ok(true)
-        } else {
-            Ok(false)
-        }
+        self.completed_records
+            .get_mut(record_id.index())
+            .map(|record| &mut record.summary)
+            .ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "Generated worklist summary index for {identity:?} is out of range"
+                ))
+            })
     }
 
     pub(super) fn finish(self) -> Result<GeneratedFunctionWorklistDelta, CompilerError> {

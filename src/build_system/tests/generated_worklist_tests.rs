@@ -10,22 +10,15 @@ use crate::compiler_frontend::canonical_type_identity::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::external_packages::{
-    CallTarget, ExternalFunctionId, ExternalPackageRegistry,
-};
-use crate::compiler_frontend::hir::blocks::HirBlock;
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::functions::HirFunction;
-use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, RegionId};
+use crate::compiler_frontend::hir::ids::{BlockId, FunctionId};
 use crate::compiler_frontend::hir::module::HirModule;
-use crate::compiler_frontend::hir::reachability::{
-    HirModuleLinkFacts, collect_module_function_link_facts,
-};
-use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
-use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::hir::reachability::HirModuleLinkFacts;
 use crate::compiler_frontend::public_call_summary::FunctionReturnAliasSummary;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, ModulePrivateExecutableCategory, ModulePrivateExecutableIdentity,
-    ModuleRootRole, OriginFunctionId, StableModuleOriginIdentity, StablePackageIdentity,
+    ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{CharPosition, SourceLocation};
@@ -108,48 +101,6 @@ fn test_sidecar(
         .public_call_summaries
         .insert(FunctionId(0), summary);
     GeneratedFunctionSidecar::new(identity, module)
-}
-
-fn link_facts_for_calls(targets: Vec<CallTarget>) -> HirModuleLinkFacts {
-    let mut module = HirModule::new();
-    module.functions.push(HirFunction {
-        id: FunctionId(0),
-        entry: BlockId(0),
-        params: Vec::new(),
-        return_type: TypeId(0),
-    });
-    module.blocks.push(HirBlock {
-        id: BlockId(0),
-        region: RegionId(0),
-        locals: Vec::new(),
-        statements: targets
-            .into_iter()
-            .enumerate()
-            .map(|(index, target)| HirStatement {
-                id: HirNodeId(index as u32),
-                kind: HirStatementKind::Call {
-                    target,
-                    args: Vec::new(),
-                    result: None,
-                },
-                location: SourceLocation::default(),
-            })
-            .collect(),
-        terminator: HirTerminator::RuntimeFailure {
-            message: "test convergence model".to_owned(),
-        },
-    });
-    collect_module_function_link_facts(&module).expect("test HIR should produce link facts")
-}
-
-fn private_identity(name: &str) -> ModulePrivateExecutableIdentity {
-    ModulePrivateExecutableIdentity::new(
-        module_origin(),
-        "@page.moth".to_owned(),
-        ModulePrivateExecutableCategory::FreeFunction,
-        name.to_owned(),
-        None,
-    )
 }
 
 fn store_with(
@@ -476,189 +427,4 @@ fn sidecar_record_identity_disagreement_leaves_store_unchanged() {
     assert!(store.records.is_empty());
     assert!(store.by_identity.is_empty());
     assert_eq!(store.sidecars().count(), 0);
-}
-
-#[test]
-fn convergence_model_sorts_nodes_and_classifies_validated_call_targets() {
-    let alpha = generated_identity("alpha");
-    let beta = generated_identity("beta");
-    let unknown = generated_identity("unknown");
-    let private = private_identity("private");
-    let cross_module = OriginFunctionId::new_free(module_origin(), "cross".to_owned());
-
-    let base_facts = link_facts_for_calls(vec![
-        CallTarget::Generated(alpha.clone()),
-        CallTarget::Generated(unknown),
-        CallTarget::ModulePrivate(private.clone()),
-        CallTarget::Local(FunctionId(0)),
-        CallTarget::CrossModule(cross_module),
-        CallTarget::External(ExternalFunctionId::Synthetic(1)),
-    ]);
-    let alpha_facts = link_facts_for_calls(vec![CallTarget::Generated(beta.clone())]);
-    let beta_facts = link_facts_for_calls(vec![
-        CallTarget::Generated(alpha.clone()),
-        CallTarget::ModulePrivate(private),
-    ]);
-
-    let model = ConvergenceModel::from_link_facts(
-        &base_facts,
-        vec![(&beta, &beta_facts), (&alpha, &alpha_facts)],
-    )
-    .unwrap();
-
-    assert_eq!(model.node_count(), 3);
-    assert_eq!(
-        model.node(ConvergenceNodeId(0)),
-        Some(&ConvergenceNode::BaseModule)
-    );
-    assert_eq!(
-        model.node(ConvergenceNodeId(1)),
-        Some(&ConvergenceNode::Generated(Box::new(alpha.clone())))
-    );
-    assert_eq!(
-        model.node(ConvergenceNodeId(2)),
-        Some(&ConvergenceNode::Generated(Box::new(beta.clone())))
-    );
-    assert_eq!(
-        model.callers(ConvergenceNodeId(1)),
-        Some(&[ConvergenceNodeId(0), ConvergenceNodeId(2)][..])
-    );
-    assert_eq!(
-        model.callers(ConvergenceNodeId(2)),
-        Some(&[ConvergenceNodeId(1)][..])
-    );
-    assert_eq!(
-        model.callers(ConvergenceNodeId(0)),
-        Some(&[ConvergenceNodeId(2)][..])
-    );
-    assert_eq!(
-        model.active_public_callees(ConvergenceNodeId(0)),
-        Some(&[][..]),
-        "a provider CrossModule target remains a fixed leaf"
-    );
-    assert_eq!(
-        model.active_public_callees(ConvergenceNodeId(1)),
-        Some(&[][..]),
-        "an unknown CrossModule target remains a fixed leaf"
-    );
-    assert_eq!(
-        model.dirty_nodes([ConvergenceNodeId(1)]),
-        vec![
-            ConvergenceNodeId(0),
-            ConvergenceNodeId(1),
-            ConvergenceNodeId(2)
-        ]
-    );
-    assert_eq!(
-        model.dirty_nodes([ConvergenceNodeId(0)]),
-        vec![
-            ConvergenceNodeId(0),
-            ConvergenceNodeId(1),
-            ConvergenceNodeId(2)
-        ]
-    );
-}
-
-#[test]
-fn convergence_model_keeps_provider_private_calls_as_fixed_leaves() {
-    let generated = generated_identity("generated");
-    let base_private = private_identity("base_private");
-    let provider_private = private_identity("provider_private");
-    let generated_facts = link_facts_for_calls(vec![
-        CallTarget::ModulePrivate(base_private.clone()),
-        CallTarget::ModulePrivate(provider_private.clone()),
-    ]);
-    let base_facts = link_facts_for_calls(Vec::new());
-    let mut base_private_identities = rustc_hash::FxHashSet::default();
-    base_private_identities.insert(base_private.clone());
-
-    let model = ConvergenceModel::from_link_facts_for_base_callees(
-        &base_facts,
-        vec![(&generated, &generated_facts)],
-        &rustc_hash::FxHashSet::default(),
-        &base_private_identities,
-    )
-    .unwrap();
-
-    assert_eq!(
-        model.callers(ConvergenceNodeId(0)),
-        Some(&[ConvergenceNodeId(1)][..])
-    );
-    assert_eq!(
-        model.module_private_callees(ConvergenceNodeId(1)),
-        Some(&[base_private][..])
-    );
-}
-
-#[test]
-fn convergence_model_classifies_active_base_public_cross_module_calls() {
-    let generated = generated_identity("generated");
-    let active_public = OriginFunctionId::new_free(module_origin(), "public_helper".to_owned());
-    let generated_facts =
-        link_facts_for_calls(vec![CallTarget::CrossModule(active_public.clone())]);
-    let base_facts = link_facts_for_calls(Vec::new());
-    let mut base_public_origins = rustc_hash::FxHashSet::default();
-    base_public_origins.insert(active_public.clone());
-
-    let model = ConvergenceModel::from_link_facts_for_base_callees(
-        &base_facts,
-        vec![(&generated, &generated_facts)],
-        &base_public_origins,
-        &rustc_hash::FxHashSet::default(),
-    )
-    .unwrap();
-
-    assert_eq!(
-        model.callers(ConvergenceNodeId(0)),
-        Some(&[ConvergenceNodeId(1)][..])
-    );
-    assert_eq!(
-        model.active_public_callees(ConvergenceNodeId(1)),
-        Some(&[active_public][..])
-    );
-}
-
-#[test]
-fn convergence_models_keep_equal_identities_local_to_each_boundary() {
-    let identity = generated_identity("shared");
-    let first_base = link_facts_for_calls(Vec::new());
-    let second_base = link_facts_for_calls(Vec::new());
-    let first_generated = link_facts_for_calls(Vec::new());
-    let second_generated = link_facts_for_calls(Vec::new());
-
-    let first = ConvergenceModel::from_link_facts(&first_base, vec![(&identity, &first_generated)])
-        .unwrap();
-    let second =
-        ConvergenceModel::from_link_facts(&second_base, vec![(&identity, &second_generated)])
-            .unwrap();
-
-    assert_eq!(
-        first.node_id(&ConvergenceNode::Generated(Box::new(identity.clone()))),
-        Some(ConvergenceNodeId(1))
-    );
-    assert_eq!(
-        second.node_id(&ConvergenceNode::Generated(Box::new(identity))),
-        Some(ConvergenceNodeId(1))
-    );
-    assert_eq!(first.callers(ConvergenceNodeId(1)), Some(&[][..]));
-    assert_eq!(second.callers(ConvergenceNodeId(1)), Some(&[][..]));
-}
-
-#[test]
-fn convergence_model_rejects_duplicate_local_generated_identities() {
-    let identity = generated_identity("duplicate");
-    let base_facts = link_facts_for_calls(Vec::new());
-    let first_generated = link_facts_for_calls(Vec::new());
-    let second_generated = link_facts_for_calls(Vec::new());
-
-    let error = ConvergenceModel::from_link_facts(
-        &base_facts,
-        vec![
-            (&identity, &first_generated),
-            (&identity, &second_generated),
-        ],
-    )
-    .unwrap_err();
-
-    assert!(error.msg.contains("duplicate generated identity"));
 }

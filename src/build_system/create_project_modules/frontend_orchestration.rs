@@ -50,7 +50,7 @@ use crate::compiler_frontend::module_metadata::HirLoweringResult;
 use crate::compiler_frontend::paths::const_paths::RetainedProviderReference;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::public_call_summary::{
-    PublicCallSummary, PublicCallSummaryTransition, validate_public_call_summary_transition,
+    PublicCallSummaryTransition, validate_public_call_summary_transition,
 };
 use crate::compiler_frontend::public_interface::{
     PublicInterfaceDraftBuilder, PublicInterfaceDraftBuilderInput, PublicSemanticInterface,
@@ -61,8 +61,8 @@ use crate::compiler_frontend::public_interface::{
     build_public_source_trait_origin_index,
 };
 use crate::compiler_frontend::semantic_identity::{
-    GeneratedDeclarationIdentity, GeneratedFunctionIdentity, ModulePrivateExecutableIdentity,
-    ModuleRootRole, OriginFunctionId, OriginTypeId, StableModuleOriginIdentity,
+    GeneratedDeclarationIdentity, GeneratedFunctionIdentity, ModuleRootRole, OriginTypeId,
+    StableModuleOriginIdentity,
 };
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -78,9 +78,11 @@ use crate::compiler_frontend::{
 };
 
 use super::compiled_boundary::CompletedSourcePackageRegistry;
+use super::generated_summary_convergence::{
+    exact_generated_sidecar_summary, run_generated_summary_convergence,
+};
 use super::generated_worklist::{
-    ConvergenceModel, ConvergenceNode, ConvergenceNodeId, GeneratedFunctionWorklist,
-    GeneratedRequestEntry, GeneratedRequestFacts, GeneratedRequestId,
+    GeneratedFunctionWorklist, GeneratedRequestEntry, GeneratedRequestFacts, GeneratedRequestId,
 };
 use super::module_artifact_store::ModuleArtifactStore;
 use super::prepared_module::PreparedModule;
@@ -90,8 +92,7 @@ use crate::borrow_log;
 use crate::projects::settings::Config;
 
 use rayon::prelude::*;
-use rustc_hash::{FxHashMap, FxHashSet};
-use std::collections::VecDeque;
+use rustc_hash::FxHashMap;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -411,13 +412,14 @@ impl ModulePreparationContext<'_> {
     pub(super) fn prepare_module(
         &self,
         stable_origin: StableModuleOriginIdentity,
-        module: &[PreparedSourceInput],
+        module: Vec<PreparedSourceInput>,
         entry_file_path: &Path,
         mut string_table: StringTable,
         source_byte_count: usize,
         #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
     ) -> Result<PreparedModule, CompilerMessages> {
         let mut warnings = Vec::new();
+        let module_file_count = module.len();
         let contains_moth_template = module.iter().any(PreparedSourceInput::is_moth_template);
 
         // Entry identity and root semantics are separate. The stable module origin owns whether
@@ -429,7 +431,7 @@ impl ModulePreparationContext<'_> {
         let source_files = Self::attach_source_files(
             &mut string_table,
             &self.project_path_resolver,
-            module,
+            &module,
             entry_file_path,
         )?;
 
@@ -487,7 +489,7 @@ impl ModulePreparationContext<'_> {
             source_files,
             contains_moth_template,
             warnings,
-            source_file_count: module.len(),
+            source_file_count: module_file_count,
             source_byte_count,
         })
     }
@@ -583,7 +585,7 @@ impl ModulePreparationContext<'_> {
         &self,
         string_table: &mut StringTable,
         source_files: &SourceFileTable,
-        module: &[PreparedSourceInput],
+        module: Vec<PreparedSourceInput>,
         entry_file_path: &Path,
         active_root_role: ModuleRootRole,
         source_byte_count: usize,
@@ -617,14 +619,18 @@ impl ModulePreparationContext<'_> {
             options: &options,
         };
 
-        add_frontend_counter(FrontendCounter::FilePreparationInputFileCount, module.len());
+        let module_file_count = module.len();
+        add_frontend_counter(
+            FrontendCounter::FilePreparationInputFileCount,
+            module_file_count,
+        );
         add_frontend_counter(
             FrontendCounter::FilePreparationInputByteCount,
             source_byte_count,
         );
 
         let (strategy, strategy_reason) =
-            FilePreparationStrategy::selection_for_module(module.len(), source_byte_count);
+            FilePreparationStrategy::selection_for_module(module_file_count, source_byte_count);
         record_file_preparation_strategy(strategy, strategy_reason);
 
         let preparation_chunks = Self::prepare_module_file_chunks(
@@ -639,7 +645,7 @@ impl ModulePreparationContext<'_> {
         Self::merge_file_preparation_chunks(
             string_table,
             preparation_chunks,
-            module.len(),
+            module_file_count,
             base_len,
         )
     }
@@ -760,39 +766,48 @@ impl ModulePreparationContext<'_> {
     }
 
     fn prepare_module_file_chunks(
-        module: &[PreparedSourceInput],
+        module: Vec<PreparedSourceInput>,
         fork_source: &StringTableForkSource,
         prepare_context: &FrontendFilePrepareContext<'_>,
         const_template_offset: usize,
         runtime_fragment_offset: usize,
         strategy: FilePreparationStrategy,
     ) -> Vec<FilePreparationChunk> {
-        match strategy {
-            FilePreparationStrategy::Serial => {
-                let plan = FilePreparationChunkPlan {
-                    chunk_index: 0,
-                    file_range: 0..module.len(),
-                };
-                vec![Self::prepare_module_file_chunk(
-                    plan,
-                    module,
-                    fork_source,
-                    prepare_context,
-                    const_template_offset,
-                    runtime_fragment_offset,
-                )]
+        let module_file_count = module.len();
+        let plans = match strategy {
+            FilePreparationStrategy::Serial => vec![FilePreparationChunkPlan {
+                chunk_index: 0,
+                file_range: 0..module_file_count,
+            }],
+            FilePreparationStrategy::ParallelPerFile => (0..module_file_count)
+                .map(|index| FilePreparationChunkPlan {
+                    chunk_index: index,
+                    file_range: index..index + 1,
+                })
+                .collect(),
+            FilePreparationStrategy::ParallelChunked => {
+                plan_file_preparation_chunks(module_file_count, rayon::current_num_threads())
             }
+        };
+        let mut module_files = module.into_iter().enumerate();
+        let planned_files = plans
+            .into_iter()
+            .map(|plan| {
+                let files = module_files
+                    .by_ref()
+                    .take(plan.file_range.len())
+                    .collect::<Vec<_>>();
+                (plan, files)
+            })
+            .collect::<Vec<_>>();
 
-            FilePreparationStrategy::ParallelPerFile => (0..module.len())
-                .into_par_iter()
-                .map(|index| {
-                    let plan = FilePreparationChunkPlan {
-                        chunk_index: index,
-                        file_range: index..index + 1,
-                    };
+        match strategy {
+            FilePreparationStrategy::Serial => planned_files
+                .into_iter()
+                .map(|(plan, files)| {
                     Self::prepare_module_file_chunk(
                         plan,
-                        module,
+                        files,
                         fork_source,
                         prepare_context,
                         const_template_offset,
@@ -800,16 +815,13 @@ impl ModulePreparationContext<'_> {
                     )
                 })
                 .collect(),
-
-            FilePreparationStrategy::ParallelChunked => {
-                let plans =
-                    plan_file_preparation_chunks(module.len(), rayon::current_num_threads());
-                plans
+            FilePreparationStrategy::ParallelPerFile | FilePreparationStrategy::ParallelChunked => {
+                planned_files
                     .into_par_iter()
-                    .map(|plan| {
+                    .map(|(plan, files)| {
                         Self::prepare_module_file_chunk(
                             plan,
-                            module,
+                            files,
                             fork_source,
                             prepare_context,
                             const_template_offset,
@@ -823,7 +835,7 @@ impl ModulePreparationContext<'_> {
 
     fn prepare_module_file_chunk(
         plan: FilePreparationChunkPlan,
-        module: &[PreparedSourceInput],
+        module: Vec<(usize, PreparedSourceInput)>,
         fork_source: &StringTableForkSource,
         prepare_context: &FrontendFilePrepareContext<'_>,
         const_template_offset: usize,
@@ -832,8 +844,7 @@ impl ModulePreparationContext<'_> {
         let (mut local_string_table, _) = fork_source.fork_for_module().into_parts();
         let mut results = Vec::with_capacity(plan.file_range.len());
 
-        for file_index in plan.file_range.clone() {
-            let file = &module[file_index];
+        for (file_index, file) in module {
             let source = match file {
                 PreparedSourceInput::Moth {
                     source_path,
@@ -841,7 +852,7 @@ impl ModulePreparationContext<'_> {
                     ..
                 } => FrontendFilePrepareSource::Moth {
                     source_path,
-                    tokens: tokens.as_ref(),
+                    tokens,
                 },
                 PreparedSourceInput::MothTemplate {
                     source_code,
@@ -890,8 +901,9 @@ impl ModuleSyntaxDiscovery<'_> {
     pub(super) fn prepare_source(
         &mut self,
         source_order: usize,
-        source: &PreparedSourceInput,
+        source: PreparedSourceInput,
     ) -> Result<Vec<RetainedProviderReference>, CompilerMessages> {
+        let source_byte_len = source.source_byte_len();
         self.contains_moth_template |= source.is_moth_template();
         let entry_file_id = self
             .source_files
@@ -915,7 +927,7 @@ impl ModuleSyntaxDiscovery<'_> {
                 ..
             } => FrontendFilePrepareSource::Moth {
                 source_path,
-                tokens: tokens.as_ref(),
+                tokens,
             },
             PreparedSourceInput::MothTemplate {
                 source_code,
@@ -958,7 +970,7 @@ impl ModuleSyntaxDiscovery<'_> {
             }
         };
 
-        self.source_byte_count += source.source_byte_len();
+        self.source_byte_count += source_byte_len;
         self.warnings.extend(output.warnings.iter().cloned());
         let providers = output
             .file_imports
@@ -1360,149 +1372,16 @@ impl FrontendModuleBuildContext<'_> {
                     timing_context,
                 )
             )?;
-            let base_public_origins = hir_module
-                .function_ids_by_origin
-                .keys()
-                .cloned()
-                .collect::<FxHashSet<_>>();
-            let base_private_identities = hir_module
-                .function_ids_by_private_origin
-                .keys()
-                .cloned()
-                .collect::<FxHashSet<_>>();
-            let convergence_model = generated_worklist
-                .convergence_model(
-                    &function_link_facts,
-                    &base_public_origins,
-                    &base_private_identities,
-                )
-                .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
-            let mut convergence_queue = VecDeque::new();
-            let mut queued_nodes = vec![false; convergence_model.node_count()];
-            for node_id in convergence_model.all_node_ids() {
-                convergence_queue.push_back(node_id);
-                queued_nodes[node_id.index()] = true;
-            }
-
-            let mut borrow_analysis = Some(bootstrap_borrow_analysis);
-            while let Some(node_id) = convergence_queue.pop_front() {
-                queued_nodes[node_id.index()] = false;
-                let node = convergence_model.node(node_id).cloned().ok_or_else(|| {
-                    CompilerMessages::from_error_ref(
-                        CompilerError::compiler_error(format!(
-                            "convergence queue received unknown node {node_id:?}"
-                        )),
-                        &compiler.string_table,
-                    )
-                })?;
-                let current_borrow_analysis = borrow_analysis.as_ref().ok_or_else(|| {
-                    CompilerMessages::from_error_ref(
-                        CompilerError::compiler_error(
-                            "Convergence queue lost the current base borrow analysis",
-                        ),
-                        &compiler.string_table,
-                    )
-                })?;
-                let direct_summaries = direct_convergence_summaries(
-                    &convergence_model,
-                    node_id,
-                    &generated_worklist,
-                    &hir_module,
-                    current_borrow_analysis,
-                )
-                .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
-
-                match node {
-                    ConvergenceNode::BaseModule => {
-                        install_convergence_summaries(
-                            &mut hir_module,
-                            &direct_summaries.generated,
-                            &direct_summaries.active_public,
-                            &direct_summaries.module_private,
-                        );
-                        increment_frontend_counter(FrontendCounter::ConvergenceBaseBorrowPasses);
-                        let report = timed_stage_attributed!(
-                            crate::timing::TimingMetric::FrontendBorrowConverge,
-                            timing_context,
-                            Self::check_borrows(&compiler, &hir_module, &warnings)
-                        )?;
-                        let summary_changes =
-                            base_summary_changes(&hir_module, current_borrow_analysis, &report)
-                                .map_err(|error| {
-                                    CompilerMessages::from_error_ref(error, &compiler.string_table)
-                                })?;
-                        borrow_analysis = Some(report);
-                        if !summary_changes.is_empty() {
-                            enqueue_base_dependents(
-                                &convergence_model,
-                                &summary_changes,
-                                &mut convergence_queue,
-                                &mut queued_nodes,
-                            )
-                            .map_err(|error| {
-                                CompilerMessages::from_error_ref(error, &compiler.string_table)
-                            })?;
-                        }
-                    }
-                    ConvergenceNode::Generated(identity) => {
-                        let identity = *identity;
-                        let summary = {
-                            let sidecar =
-                                generated_worklist.sidecar_mut(&identity).map_err(|error| {
-                                    CompilerMessages::from_error_ref(error, &compiler.string_table)
-                                })?;
-                            install_convergence_summaries(
-                                &mut sidecar.module.executable.hir,
-                                &direct_summaries.generated,
-                                &direct_summaries.active_public,
-                                &direct_summaries.module_private,
-                            );
-                            increment_frontend_counter(
-                                FrontendCounter::ConvergenceGeneratedSidecarBorrowPasses,
-                            );
-                            let report = timed_stage_attributed!(
-                                crate::timing::TimingMetric::FrontendGeneratedBorrowRecheck,
-                                timing_context,
-                                Self::check_borrows(
-                                    &compiler,
-                                    &sidecar.module.executable.hir,
-                                    &sidecar.module.metadata.warnings,
-                                )
-                            )?;
-                            sidecar.module.executable.borrow_analysis = report;
-                            exact_generated_sidecar_summary(&identity, &sidecar.module).map_err(
-                                |error| {
-                                    CompilerMessages::from_error_ref(error, &compiler.string_table)
-                                },
-                            )?
-                        };
-                        if generated_worklist
-                            .update_summary(&identity, summary)
-                            .map_err(|error| {
-                                CompilerMessages::from_error_ref(error, &compiler.string_table)
-                            })?
-                        {
-                            enqueue_convergence_callers(
-                                &convergence_model,
-                                node_id,
-                                &mut convergence_queue,
-                                &mut queued_nodes,
-                            )
-                            .map_err(|error| {
-                                CompilerMessages::from_error_ref(error, &compiler.string_table)
-                            })?;
-                        }
-                    }
-                }
-            }
-            let borrow_analysis = borrow_analysis.ok_or_else(|| {
-                CompilerMessages::from_error_ref(
-                    CompilerError::compiler_error(
-                        "Convergence queue did not analyze the base module",
-                    ),
-                    &compiler.string_table,
-                )
-            })?;
+            let borrow_analysis = run_generated_summary_convergence(
+                &compiler,
+                &mut hir_module,
+                &function_link_facts,
+                &mut generated_worklist,
+                bootstrap_borrow_analysis,
+                &warnings,
+                #[cfg(feature = "timers")]
+                timing_context,
+            )?;
             let _ = install_exact_concrete_call_summaries(
                 &mut materialisation_context_builder,
                 &hir_module,
@@ -1512,7 +1391,6 @@ impl FrontendModuleBuildContext<'_> {
             let generated_worklist_delta = generated_worklist
                 .finish()
                 .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
-            drop(convergence_model);
             record_borrow_counters(&borrow_analysis);
 
             // Concrete call-summary finalization runs exactly once after HIR and borrow
@@ -2043,275 +1921,6 @@ impl FrontendModuleBuildContext<'_> {
 //  Shared Helpers
 // -------------------------
 
-/// Stable base identities whose exact summaries widened during one borrow pass.
-#[derive(Debug)]
-struct BaseSummaryChanges {
-    public: Vec<OriginFunctionId>,
-    module_private: Vec<ModulePrivateExecutableIdentity>,
-}
-
-impl BaseSummaryChanges {
-    fn is_empty(&self) -> bool {
-        self.public.is_empty() && self.module_private.is_empty()
-    }
-}
-
-/// Exact direct-call summaries needed to analyze one convergence node.
-struct DirectConvergenceSummaries {
-    generated: Vec<(GeneratedFunctionIdentity, PublicCallSummary)>,
-    active_public: Vec<(OriginFunctionId, PublicCallSummary)>,
-    module_private: Vec<(ModulePrivateExecutableIdentity, PublicCallSummary)>,
-}
-
-fn direct_convergence_summaries(
-    model: &ConvergenceModel,
-    node_id: ConvergenceNodeId,
-    worklist: &GeneratedFunctionWorklist<'_>,
-    base_hir: &HirModule,
-    base_borrow_analysis: &BorrowCheckReport,
-) -> Result<DirectConvergenceSummaries, CompilerError> {
-    let generated_callees = model.generated_callees(node_id).ok_or_else(|| {
-        CompilerError::compiler_error(format!(
-            "convergence model is missing generated callees for node {node_id:?}"
-        ))
-    })?;
-    let generated_summaries = generated_callees
-        .iter()
-        .map(|identity| {
-            worklist
-                .summary(identity)
-                .cloned()
-                .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
-                        "convergence node {node_id:?} has no exact generated summary for {identity:?}"
-                    ))
-                })
-                .map(|summary| (identity.clone(), summary))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-
-    let active_public_callees = model.active_public_callees(node_id).ok_or_else(|| {
-        CompilerError::compiler_error(format!(
-            "convergence model is missing active public callees for node {node_id:?}"
-        ))
-    })?;
-    let active_public_summaries = active_public_callees
-        .iter()
-        .map(|origin| {
-            let function_id = base_hir
-                .function_ids_by_origin
-                .get(origin)
-                .copied()
-                .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
-                        "active base public origin {origin:?} has no HIR function identity"
-                    ))
-                })?;
-            let summary = base_borrow_analysis
-                .analysis
-                .public_call_summaries
-                .get(&function_id)
-                .cloned()
-                .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
-                        "active base public function {function_id:?} has no exact borrow summary"
-                    ))
-                })?;
-            Ok::<_, CompilerError>((origin.clone(), summary))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-
-    let private_callees = model.module_private_callees(node_id).ok_or_else(|| {
-        CompilerError::compiler_error(format!(
-            "convergence model is missing module-private callees for node {node_id:?}"
-        ))
-    })?;
-    let private_summaries = private_callees
-        .iter()
-        .map(|identity| {
-            let function_id = base_hir
-                .function_ids_by_private_origin
-                .get(identity)
-                .copied()
-                .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
-                        "active base private identity {identity:?} has no HIR function identity"
-                    ))
-                })?;
-            let summary = base_borrow_analysis
-                .analysis
-                .public_call_summaries
-                .get(&function_id)
-                .cloned()
-                .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
-                        "active base private function {function_id:?} has no exact borrow summary"
-                    ))
-                })?;
-            Ok::<_, CompilerError>((identity.clone(), summary))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-
-    Ok(DirectConvergenceSummaries {
-        generated: generated_summaries,
-        active_public: active_public_summaries,
-        module_private: private_summaries,
-    })
-}
-
-fn install_convergence_summaries(
-    hir: &mut HirModule,
-    generated_summaries: &[(GeneratedFunctionIdentity, PublicCallSummary)],
-    active_public_summaries: &[(OriginFunctionId, PublicCallSummary)],
-    private_summaries: &[(ModulePrivateExecutableIdentity, PublicCallSummary)],
-) {
-    hir.generated_call_summaries.clear();
-    for (identity, summary) in generated_summaries {
-        hir.generated_call_summaries
-            .insert(identity.clone(), summary.clone());
-    }
-
-    // Active-base public calls are represented as CrossModule targets in generated HIR. Update
-    // only those stable origins; provider and cross-boundary imports remain fixed bootstrap
-    // leaves in the same imported-summary map.
-    for (origin, summary) in active_public_summaries {
-        hir.imported_call_summaries
-            .insert(origin.clone(), summary.clone());
-    }
-
-    // Provider-private summaries remain fixed bootstrap leaves. Active-base private identities
-    // receive exact replacements, while no complete private map is rebuilt or retained.
-    for (identity, summary) in private_summaries {
-        hir.module_private_call_summaries
-            .insert(identity.clone(), summary.clone());
-    }
-}
-
-fn base_summary_changes(
-    hir: &HirModule,
-    previous: &BorrowCheckReport,
-    next: &BorrowCheckReport,
-) -> Result<BaseSummaryChanges, CompilerError> {
-    let mut widened_functions = FxHashSet::default();
-    for function in &hir.functions {
-        let previous_summary = previous
-            .analysis
-            .public_call_summaries
-            .get(&function.id)
-            .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "previous base borrow report is missing summary for {:?}",
-                    function.id
-                ))
-            })?;
-        let next_summary = next
-            .analysis
-            .public_call_summaries
-            .get(&function.id)
-            .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "next base borrow report is missing summary for {:?}",
-                    function.id
-                ))
-            })?;
-        if validate_public_call_summary_transition(previous_summary, next_summary)?
-            == PublicCallSummaryTransition::Widened
-        {
-            widened_functions.insert(function.id);
-        }
-    }
-
-    let mut changes = BaseSummaryChanges {
-        public: hir
-            .function_ids_by_origin
-            .iter()
-            .filter_map(|(origin, function_id)| {
-                widened_functions
-                    .contains(function_id)
-                    .then_some(origin.clone())
-            })
-            .collect(),
-        module_private: hir
-            .function_ids_by_private_origin
-            .iter()
-            .filter_map(|(identity, function_id)| {
-                widened_functions
-                    .contains(function_id)
-                    .then_some(identity.clone())
-            })
-            .collect(),
-    };
-    changes.public.sort_unstable();
-    changes.module_private.sort_unstable();
-    Ok(changes)
-}
-
-fn enqueue_convergence_node(
-    node_id: ConvergenceNodeId,
-    queue: &mut VecDeque<ConvergenceNodeId>,
-    queued_nodes: &mut [bool],
-) -> Result<(), CompilerError> {
-    let queued = queued_nodes.get_mut(node_id.index()).ok_or_else(|| {
-        CompilerError::compiler_error(format!(
-            "convergence node {node_id:?} is outside the queue bitset"
-        ))
-    })?;
-    if !*queued {
-        *queued = true;
-        queue.push_back(node_id);
-    }
-    Ok(())
-}
-
-fn enqueue_base_dependents(
-    model: &ConvergenceModel,
-    changes: &BaseSummaryChanges,
-    queue: &mut VecDeque<ConvergenceNodeId>,
-    queued_nodes: &mut [bool],
-) -> Result<(), CompilerError> {
-    for node_id in model.generated_node_ids() {
-        let active_public_callees = model.active_public_callees(node_id).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "convergence model is missing active public callees for node {node_id:?}"
-            ))
-        })?;
-        let private_callees = model.module_private_callees(node_id).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "convergence model is missing module-private callees for node {node_id:?}"
-            ))
-        })?;
-        let public_changed = changes
-            .public
-            .iter()
-            .any(|origin| active_public_callees.binary_search(origin).is_ok());
-        let private_changed = changes
-            .module_private
-            .iter()
-            .any(|identity| private_callees.binary_search(identity).is_ok());
-        if public_changed || private_changed {
-            enqueue_convergence_node(node_id, queue, queued_nodes)?;
-        }
-    }
-    Ok(())
-}
-
-fn enqueue_convergence_callers(
-    model: &ConvergenceModel,
-    changed_node: ConvergenceNodeId,
-    queue: &mut VecDeque<ConvergenceNodeId>,
-    queued_nodes: &mut [bool],
-) -> Result<(), CompilerError> {
-    let callers = model.callers(changed_node).ok_or_else(|| {
-        CompilerError::compiler_error(format!(
-            "convergence model is missing callers for node {changed_node:?}"
-        ))
-    })?;
-    for caller in callers {
-        enqueue_convergence_node(*caller, queue, queued_nodes)?;
-    }
-    Ok(())
-}
-
 fn install_exact_concrete_call_summaries(
     context: &mut crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationPreparationBuilder,
     hir: &HirModule,
@@ -2390,40 +1999,6 @@ fn collect_external_import_candidates_for_packages(
 
     candidates.sort_by_key(|candidate| candidate.package_id.0);
     candidates
-}
-
-fn exact_generated_sidecar_summary(
-    identity: &GeneratedFunctionIdentity,
-    module: &Module,
-) -> Result<PublicCallSummary, CompilerError> {
-    let function_id = module
-        .executable
-        .hir
-        .function_ids_by_generated
-        .get(identity)
-        .copied()
-        .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "Generated sidecar {identity:?} has no matching HIR executable identity"
-            ))
-        })?;
-    if module.executable.hir.function_ids_by_generated.len() != 1 {
-        return Err(CompilerError::compiler_error(format!(
-            "Generated sidecar {identity:?} contains more than one generated root identity"
-        )));
-    }
-    module
-        .executable
-        .borrow_analysis
-        .analysis
-        .public_call_summaries
-        .get(&function_id)
-        .cloned()
-        .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "Generated function {identity:?} has no exact borrow summary"
-            ))
-        })
 }
 
 struct GeneratedRequestNominalOrigins<'a> {
@@ -2924,7 +2499,7 @@ fn record_borrow_counters(report: &BorrowCheckReport) {
     );
 }
 
-fn merge_stage_messages(
+pub(super) fn merge_stage_messages(
     messages: CompilerMessages,
     warnings: &[CompilerDiagnostic],
     string_table: &StringTable,
