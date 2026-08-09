@@ -66,7 +66,7 @@ fn moth_prepared_input(
     tokens: FileTokens,
 ) -> PreparedSourceInput {
     PreparedSourceInput::Moth {
-        source_code: source_code.to_owned(),
+        source_byte_len: source_code.len(),
         source_path,
         tokens: Box::new(tokens),
     }
@@ -96,7 +96,7 @@ fn tokenized_moth_prepared_input(
 fn source_byte_count(input_files: &[PreparedSourceInput]) -> usize {
     input_files
         .iter()
-        .map(|input_file| input_file.source_code().len())
+        .map(PreparedSourceInput::source_byte_len)
         .sum()
 }
 

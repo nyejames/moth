@@ -1,8 +1,9 @@
-//! Synthetic single-file source traversal plus shared structural-provider resolution.
+//! Stage 0 source traversal, owned-input preparation and shared structural-provider resolution.
 //!
-//! Given an entry `.moth` file, walks its import declarations transitively to build the complete
-//! set of source files that belong to a module. Also assembles `PreparedSourceInput` payloads
-//! from those paths for downstream compilation stages.
+//! Given an entry `.moth` file, the synthetic path walks its import declarations transitively to
+//! build the complete set of source files for one single-file module. Directory projects prepare
+//! owned `SourceId`s through the direct-input helper in this module. Both paths assemble
+//! `PreparedSourceInput` values for downstream compilation stages.
 // Stage 0 deliberately returns full diagnostic/infrastructure payloads in `SourceDiscoveryError`
 // so import discovery does not erase source locations or downgrade filesystem failures.
 
@@ -25,8 +26,10 @@ use crate::compiler_frontend::paths::const_paths::{
 use crate::compiler_frontend::paths::path_normalization::join_and_normalize_path;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tokenizer::lexer::tokenize;
+use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
 use crate::counter_observation;
 
 use rayon::prelude::*;
@@ -42,6 +45,7 @@ use super::prepared_source::PreparedSourceInput;
 use super::source_discovery_error::SourceDiscoveryError;
 use super::source_loading::{extract_source_code, read_source_code, source_read_error};
 use super::source_scanning::{ScannedImportSource, scan_imports_with_source};
+use super::source_tree_index::{SourceClassification, SourceId, SourceTreeIndex};
 
 /// Minimum cache-miss count before Stage 0 uses Rayon for raw source loading.
 ///
@@ -104,10 +108,10 @@ pub(super) struct ReachableSourceFile {
 /// Stage 0 inventory for synthetic single-file compilation.
 ///
 /// WHAT: owns the deterministic source closure and the retained lexical scan for each reachable
-///       `.moth` file when no directory-project `SourceId` store exists.
-/// WHY: `assemble_input_files_from_inventory` can reuse each scanned source body while producing
-///      `PreparedSourceInput` values. Directory projects use `PreparedSourceStore` and canonical
-///      module jobs instead of this path.
+///       `.moth` file when no directory-project `SourceTreeIndex` ownership inventory is used.
+/// WHY: `assemble_input_files_from_inventory` moves each scanned source body into one
+///      `PreparedSourceInput` value. Directory projects prepare their owned `SourceId`s directly
+///      in the module-inventory queue instead of using this synthetic traversal cache.
 pub(super) struct ReachableSourceInventory {
     pub(super) files: Vec<ReachableSourceFile>,
     local_source_cache: FxHashMap<PathBuf, ScannedImportSource>,
@@ -248,10 +252,9 @@ pub(super) fn collect_reachable_input_files(
 
 /// Assemble `PreparedSourceInput` values from a deterministic Stage 0 inventory.
 ///
-/// WHAT: for directory projects, projects from the shared `PreparedSourceStore` (preparing
-///       `.mtf`/`.md` slots lazily). For single-file synthetic compilation, uses the retained
-///       local source cache and loads remaining Moth template/PlainMarkdown files through the
-///       serial/parallel cache-miss path.
+/// WHAT: for single-file synthetic compilation, moves the retained local source cache entries and
+///       loads remaining Moth template/PlainMarkdown files through the serial/parallel
+///       cache-miss path. Directory projects do not enter this assembly path.
 /// WHY: inventory assembly is the same whether discovery was provider-capable or provider-free,
 ///      so it is shared between both paths to keep ordering and loading policy in one place.
 pub(super) fn assemble_input_files_from_inventory(
@@ -263,6 +266,86 @@ pub(super) fn assemble_input_files_from_inventory(
         local_source_cache,
     } = inventory;
     assemble_reachable_files(files, local_source_cache, string_table)
+}
+
+/// Prepare one owned compiler-semantic `SourceId` directly into the module's input lane.
+///
+/// WHAT: reads and tokenizes the selected source exactly once, producing the owned input consumed
+///       by this module's header preparation queue. The caller's queued set is the ownership
+///       proof: a canonical source ID is handed to this function at most once for its owning
+///       module.
+/// WHY: `SourceTreeIndex` owns source identity and ownership; retaining a second project-wide
+///      payload store would duplicate complete source strings and token buffers without a second
+///      compiler consumer. The returned input is moved into the module job after its header
+///      references have been resolved.
+pub(super) fn prepare_owned_source_input(
+    source_id: SourceId,
+    source_tree_index: &SourceTreeIndex,
+    style_directives: &StyleDirectiveRegistry,
+    string_table: &mut StringTable,
+) -> Result<PreparedSourceInput, SourceDiscoveryError> {
+    let record = source_tree_index.source(source_id);
+    let SourceClassification::CompilerSemantic(source_kind) = record.classification() else {
+        return Err(SourceDiscoveryError::from(CompilerError::compiler_error(
+            format!(
+                "Project source ID {} is not compiler semantic",
+                source_id.index(),
+            ),
+        )));
+    };
+    let source_code = extract_source_code(record.canonical_path(), string_table)?;
+    let source_byte_len = source_code.len();
+    let tokens = if *source_kind == SourceFileKind::Moth {
+        let interned_path = InternedPath::try_from_filesystem_path(
+            record.canonical_path(),
+            string_table,
+        )
+        .map_err(|NonUtf8PathComponent { path }| {
+            SourceDiscoveryError::from(CompilerError::file_error(
+                &path,
+                format!(
+                    "Source file path {path:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
+                ),
+                string_table,
+            ))
+        })?;
+        Some(Box::new(
+            tokenize(
+                &source_code,
+                &interned_path,
+                TokenizerEntryMode::SourceFile,
+                style_directives,
+                string_table,
+                None,
+            )
+            .map_err(SourceDiscoveryError::Diagnostic)?,
+        ))
+    } else {
+        None
+    };
+
+    Ok(match *source_kind {
+        SourceFileKind::Moth => {
+            let Some(tokens) = tokens else {
+                return Err(SourceDiscoveryError::from(CompilerError::compiler_error(
+                    "Moth source preparation completed without a token stream",
+                )));
+            };
+            PreparedSourceInput::Moth {
+                source_byte_len,
+                source_path: record.canonical_path().to_path_buf(),
+                tokens,
+            }
+        }
+        SourceFileKind::MothTemplate => PreparedSourceInput::MothTemplate {
+            source_code,
+            source_path: record.canonical_path().to_path_buf(),
+        },
+        SourceFileKind::PlainMarkdown => PreparedSourceInput::PlainMarkdown {
+            source_code,
+            source_path: record.canonical_path().to_path_buf(),
+        },
+    })
 }
 
 /// Assemble `PreparedSourceInput` values without a semantic set (single-file synthetic path).
@@ -301,9 +384,10 @@ fn fill_input_slot(
 ) {
     if let Some(scanned_source) = source_cache.remove(canonical_path) {
         add_frontend_counter(FrontendCounter::Stage0SourceCacheHitCount, 1);
+        let source_byte_len = scanned_source.source_code.len();
 
         input_slots[input_index] = Some(PreparedSourceInput::Moth {
-            source_code: scanned_source.source_code,
+            source_byte_len,
             source_path: canonical_path.to_path_buf(),
             tokens: Box::new(scanned_source.tokens),
         });

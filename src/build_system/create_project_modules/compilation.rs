@@ -488,6 +488,22 @@ struct DirectoryModuleCompileContext<'a> {
     completed_packages: &'a CompletedSourcePackageRegistry,
 }
 
+/// Immutable inputs shared by one project or source-package boundary compilation.
+///
+/// WHAT: keeps the boundary-wide compiler services together while each module task adds only its
+///       retained provider indexes and publication stores.
+/// WHY: project and source-package callers should pass one typed boundary context to the wave
+///      coordinator instead of relying on a long positional argument list whose order can drift.
+struct BoundaryCompilationContext<'a> {
+    config: &'a Config,
+    build_profile: FrontendBuildProfile,
+    project_path_resolver: &'a ProjectPathResolver,
+    style_directives: &'a StyleDirectiveRegistry,
+    external_packages: &'a Arc<ExternalPackageRegistry>,
+    builder_surface: &'a BuilderSurface,
+    completed_packages: &'a CompletedSourcePackageRegistry,
+}
+
 struct SourcePackageModuleInventory {
     import_prefix: String,
     package_identity: StablePackageIdentity,
@@ -780,19 +796,12 @@ impl<'a> DirectoryModuleCompileContext<'a> {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn compile_module_waves(
-    config: &Config,
-    build_profile: FrontendBuildProfile,
-    project_path_resolver: &ProjectPathResolver,
-    style_directives: &StyleDirectiveRegistry,
-    external_packages: &Arc<ExternalPackageRegistry>,
-    builder_surface: &BuilderSurface,
+    context: BoundaryCompilationContext<'_>,
     graph: ProjectModuleGraph,
     module_waves: Vec<Vec<module_inventory::ModuleCompilationJob>>,
     provider_bindings: &[ResolvedDependencyEdge],
     source_package_imports: &[ResolvedSourcePackageImport],
-    completed_packages: &CompletedSourcePackageRegistry,
     string_table: &mut StringTable,
 ) -> Result<CompiledGraphBoundary, CompilerMessages> {
     let mut provider_store = ModuleArtifactStore::new(graph.nodes().len());
@@ -810,7 +819,7 @@ fn compile_module_waves(
     // walks only the packages that module actually imports and never filters the full import
     // vector for every job.
     let module_package_dependencies =
-        build_module_package_dependency_index(source_package_imports, completed_packages)
+        build_module_package_dependency_index(source_package_imports, context.completed_packages)
             .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
     let mut diagnosed = Vec::new();
@@ -849,7 +858,8 @@ fn compile_module_waves(
                 && let Some(package_ids) = module_package_dependencies.get(&job.module_id)
             {
                 for package_id in package_ids {
-                    let package = completed_packages
+                    let package = context
+                        .completed_packages
                         .package(*package_id)
                         .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
@@ -897,18 +907,18 @@ fn compile_module_waves(
             // return once worklist sessions can commit deterministic deltas concurrently.
             let outcome = {
                 let compile_context = DirectoryModuleCompileContext {
-                    config,
-                    build_profile,
-                    project_path_resolver,
-                    style_directives,
-                    external_packages,
-                    builder_surface,
+                    config: context.config,
+                    build_profile: context.build_profile,
+                    project_path_resolver: context.project_path_resolver,
+                    style_directives: context.style_directives,
+                    external_packages: context.external_packages,
+                    builder_surface: context.builder_surface,
                     provider_store: &provider_store,
                     provider_bindings,
                     provider_binding_index: &provider_binding_index,
                     source_package_imports,
                     source_package_import_index: &source_package_import_index,
-                    completed_packages,
+                    completed_packages: context.completed_packages,
                 };
                 compile_context.compile(job, generated_store.session())
             };
@@ -963,7 +973,8 @@ fn compile_module_waves(
     }
 
     let diagnosed_provider_exists = !diagnosed.is_empty()
-        || completed_packages
+        || context
+            .completed_packages
             .iter()
             .any(|package| !package.boundary.diagnosed.is_empty());
     if !blocked.is_empty() && !diagnosed_provider_exists {
@@ -1301,17 +1312,19 @@ pub(crate) fn compile_directory_frontend(
             Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
         );
         let compiled = compile_module_waves(
-            config,
-            build_profile,
-            &path_resolver,
-            style_directives,
-            &external_packages,
-            builder_surface,
+            BoundaryCompilationContext {
+                config,
+                build_profile,
+                project_path_resolver: &path_resolver,
+                style_directives,
+                external_packages: &external_packages,
+                builder_surface,
+                completed_packages: &completed_source_packages,
+            },
             graph,
             module_waves,
             &provider_bindings,
             &source_package_imports,
-            &completed_source_packages,
             string_table,
         );
         let boundary = compiled?;
@@ -1347,17 +1360,19 @@ pub(crate) fn compile_directory_frontend(
         )),
     );
     let compiled_project = compile_module_waves(
-        config,
-        build_profile,
-        &project_path_resolver,
-        style_directives,
-        &external_packages,
-        builder_surface,
+        BoundaryCompilationContext {
+            config,
+            build_profile,
+            project_path_resolver: &project_path_resolver,
+            style_directives,
+            external_packages: &external_packages,
+            builder_surface,
+            completed_packages: &completed_source_packages,
+        },
         project_setup.project_module_graph,
         project_module_waves,
         &project_provider_bindings,
         &project_source_package_imports,
-        &completed_source_packages,
         string_table,
     );
     let project_boundary = compiled_project?;

@@ -958,7 +958,7 @@ impl ModuleSyntaxDiscovery<'_> {
             }
         };
 
-        self.source_byte_count += source.source_code().len();
+        self.source_byte_count += source.source_byte_len();
         self.warnings.extend(output.warnings.iter().cloned());
         let providers = output
             .file_imports
@@ -2767,7 +2767,7 @@ pub(super) fn record_module_input_counters(module: &[PreparedSourceInput]) -> us
 
     let source_byte_count = module
         .iter()
-        .map(|input_file| input_file.source_code().len())
+        .map(PreparedSourceInput::source_byte_len)
         .sum();
     add_frontend_counter(FrontendCounter::SourceByteCount, source_byte_count);
     source_byte_count

@@ -28,12 +28,11 @@ use super::frontend_orchestration::ModulePreparationContext;
 use super::module_identity::ModuleId;
 use super::module_namespace::{DirectoryImportResolution, ResolvedImport};
 use super::prepared_module::PreparedModule;
-use super::prepared_source_store::PreparedSourceStore;
 use super::project_module_graph::ProjectModuleGraph;
 use super::project_structure_diagnostics::{config_diagnostic_messages, path_id};
 use super::source_discovery::{
     ExternalImportDiscoveryState, ResolvedDependencyEdge, ResolvedSourcePackageImport,
-    StructuralProviderAction, resolve_structural_provider_reference,
+    StructuralProviderAction, prepare_owned_source_input, resolve_structural_provider_reference,
 };
 use super::source_tree_index::SourceClassification;
 
@@ -232,14 +231,6 @@ fn discover_all_modules_in_boundary(
         ));
     }
 
-    // The shared project-boundary prepared-source store. Every selected `.moth` source is read,
-    // tokenized and prepared at most once across the canonical module inventory.
-    let mut prepared_source_store = PreparedSourceStore::new(
-        directory_import_resolution
-            .source_tree_index()
-            .source_count(),
-    );
-
     let ModuleCompilationJobBatch {
         drafts,
         resolved_edges,
@@ -254,7 +245,6 @@ fn discover_all_modules_in_boundary(
             source_origin_lookup: &source_origin_lookup,
         },
         external_imports,
-        &mut prepared_source_store,
         string_table,
         #[cfg(feature = "timers")]
         timing_boundary,
@@ -465,14 +455,14 @@ fn order_discovered_modules_by_compile_waves(
 
 /// Prepare every graph module through the canonical header-owned Stage 0 path.
 ///
-/// Each source is read and tokenized through the boundary store, then its retained header import
-/// shells drive indexed reachability and provider resolution. The loop stays serial because
-/// provider discovery mutates build-scoped registries; semantic compilation remains wave-parallel.
+/// Each owned source ID is read and tokenized directly into the module's input lane, then its
+/// retained header import shells drive indexed reachability and provider resolution. The loop
+/// stays serial because provider discovery mutates build-scoped registries; semantic compilation
+/// remains wave-parallel.
 fn discover_modules_serial_provider_capable(
     seeds: &[ModuleEntrySeed],
     context: ModuleDiscoveryContext<'_>,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
-    prepared_source_store: &mut PreparedSourceStore,
     string_table: &mut StringTable,
     #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
 ) -> Result<ModuleCompilationJobBatch, CompilerMessages> {
@@ -563,7 +553,7 @@ fn discover_modules_serial_provider_capable(
         let mut input_files = Vec::new();
         queued.insert(entry_source_id);
         while let Some(source_id) = queue.pop_front() {
-            let input = match prepared_source_store.prepare_or_get_project_input(
+            let input = match prepare_owned_source_input(
                 source_id,
                 source_tree_index,
                 style_directives,
@@ -583,8 +573,6 @@ fn discover_modules_serial_provider_capable(
                 )
             })?;
             let providers = syntax.prepare_source(order, &input)?;
-            #[cfg(test)]
-            input_files.push(input.clone());
             for provider in providers {
                 let action = match resolve_structural_provider_reference(
                     &provider,
@@ -651,6 +639,8 @@ fn discover_modules_serial_provider_capable(
                     ResolvedImport::BindingPackage => {}
                 }
             }
+            #[cfg(test)]
+            input_files.push(input);
         }
         let prepared = syntax.finish()?;
         #[cfg(feature = "timers")]

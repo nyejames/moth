@@ -988,16 +988,9 @@ impl SourceTreeIndex {
     /// file-creation order and checkout root.
     /// WHY: the index is the sole source inventory/ownership owner. Later Stage 0 consumers
     /// resolve source data through `SourceId` rather than through duplicated per-module records.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn sources(&self) -> &[SourceRecord] {
         &self.sources
-    }
-
-    /// The number of source records in this index.
-    ///
-    /// Each `SourceId` from `0` to `source_count() - 1` addresses a valid `SourceRecord`.
-    pub(crate) fn source_count(&self) -> usize {
-        self.sources.len()
     }
 
     /// One source record addressed by its dense `SourceId`.

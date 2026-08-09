@@ -5,7 +5,6 @@ use super::generated_worklist::BoundaryGeneratedFunctionStore;
 use super::module_artifact_store::ModuleArtifactStore;
 use super::module_identity::ModuleId;
 use super::prepared_source::PreparedSourceInput;
-use super::prepared_source_store::PreparedSourceStore;
 use super::project_module_graph::ProjectModuleGraph;
 use super::source_discovery::{ResolvedDependencyEdge, ResolvedSourcePackageImport};
 use super::*;
@@ -4028,25 +4027,26 @@ fn stage0_reuses_scanned_moth_source_when_assembling_input_files() {
         );
     }
     assert_eq!(modules[0].input_files.len(), 2);
-    assert!(
-        modules[0]
-            .input_files
-            .iter()
-            .any(|input| input.source_code().contains("#[:entry]"))
-    );
-    assert!(
-        modules[0]
-            .input_files
-            .iter()
-            .any(|input| input.source_code().contains("message #="))
-    );
+    let input_names = modules[0]
+        .input_files
+        .iter()
+        .map(|input| {
+            input
+                .source_path()
+                .file_name()
+                .and_then(OsStr::to_str)
+                .unwrap_or_default()
+                .to_owned()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(input_names, vec!["@page.moth", "helper.moth"]);
 
     fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
-fn project_prepared_source_store_transitions_one_dense_source_slot_once() {
-    let root = temp_dir("project_prepared_source_store_dense_slot");
+fn project_source_ids_are_prepared_into_owned_inputs_without_a_retained_store() {
+    let root = temp_dir("project_direct_source_input");
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
     fs::write(
@@ -4085,28 +4085,36 @@ fn project_prepared_source_store_transitions_one_dense_source_slot_once() {
     let source_id = source_tree_index
         .source_id_for_canonical_path(&entry_path)
         .expect("entry should have a dense source ID");
-    let mut store = PreparedSourceStore::new(source_tree_index.source_count());
 
-    let first = match store.prepare_or_get_project_input(
+    let _counter_guard = SOURCE_READ_COUNTER_TEST_LOCK
+        .lock()
+        .expect("source read counter test lock poisoned");
+    super::source_loading::reset_source_read_count_for_test(&project_root);
+
+    let first = match super::source_discovery::prepare_owned_source_input(
         source_id,
         &source_tree_index,
         &style_directives,
         &mut string_table,
     ) {
         Ok(input) => input,
-        Err(_) => panic!("first preparation should succeed"),
+        Err(_) => panic!("direct source preparation should succeed"),
     };
-    let second = match store.prepare_or_get_project_input(
+    let second = match super::source_discovery::prepare_owned_source_input(
         source_id,
         &source_tree_index,
         &style_directives,
         &mut string_table,
     ) {
         Ok(input) => input,
-        Err(_) => panic!("second preparation should reuse the same slot"),
+        Err(_) => panic!("a separately requested input should prepare directly"),
     };
 
-    assert_eq!(first.source_code(), second.source_code());
+    assert_eq!(
+        super::source_loading::source_read_count_for_path_for_test(&entry_path),
+        2,
+        "direct preparation has no project-wide payload cache"
+    );
     assert!(matches!(first, PreparedSourceInput::Moth { .. }));
     assert!(matches!(second, PreparedSourceInput::Moth { .. }));
 
@@ -4167,12 +4175,22 @@ fn stage0_loads_asset_sources_and_preserves_deterministic_input_order() {
         input_files[1],
         PreparedSourceInput::MothTemplate { .. }
     ));
-    assert_eq!(input_files[1].source_code(), "moth template body\n");
+    match &input_files[1] {
+        PreparedSourceInput::MothTemplate { source_code, .. } => {
+            assert_eq!(source_code, "moth template body\n");
+        }
+        _ => unreachable!("input 1 should be a Moth template"),
+    }
     assert!(matches!(
         input_files[2],
         PreparedSourceInput::PlainMarkdown { .. }
     ));
-    assert_eq!(input_files[2].source_code(), "# Markdown body\n");
+    match &input_files[2] {
+        PreparedSourceInput::PlainMarkdown { source_code, .. } => {
+            assert_eq!(source_code, "# Markdown body\n");
+        }
+        _ => unreachable!("input 2 should be PlainMarkdown"),
+    }
 
     fs::remove_dir_all(&root).expect("should remove temp root");
 }
@@ -4215,11 +4233,12 @@ fn stage0_parallel_missing_source_loading_preserves_input_order() {
 
     assert_eq!(loaded_names, expected_names);
     for (index, input_file) in input_files.iter().enumerate() {
-        assert_eq!(input_file.source_code(), format!("# Asset {index}\n"));
-        assert!(matches!(
-            input_file,
-            PreparedSourceInput::PlainMarkdown { .. }
-        ));
+        match input_file {
+            PreparedSourceInput::PlainMarkdown { source_code, .. } => {
+                assert_eq!(source_code, &format!("# Asset {index}\n"));
+            }
+            _ => panic!("missing-source loading should produce PlainMarkdown inputs"),
+        }
     }
 
     fs::remove_dir_all(&root).expect("should remove temp root");
@@ -4542,7 +4561,8 @@ fn canonical_provider_discovery_reads_and_tokenizes_each_source_once() {
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
 
     // Three unique Moth sources: @pageA.moth, page_a/helper.moth, and @pageB.moth.
-    // The canonical prepared-source store reads each once before header preparation.
+    // SourceTreeIndex ownership sends each directly to one module queue, which reads each once
+    // before header preparation.
     for source in [
         src.join("page_a/@pageA.moth"),
         src.join("page_a/helper.moth"),
@@ -5267,7 +5287,7 @@ fn canonical_discovery_retains_moth_tokens_for_every_reachable_file() {
     )
     .expect("should write config");
 
-    // Two entry points share the canonical prepared-source owner. Each module imports a helper.
+    // Two entry points retain independent canonical source ownership. Each module imports a helper.
     fs::write(module_a.join("@pageA.moth"), "import @helperA\n#[:pageA]\n")
         .expect("should write pageA");
     fs::write(module_a.join("helperA.moth"), "a #= 1\n").expect("should write helperA");

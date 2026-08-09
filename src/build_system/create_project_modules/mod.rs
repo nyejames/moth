@@ -10,12 +10,11 @@
 //! - `module_namespace`         — boundary-aware indexed module namespaces for source-import resolution
 //! - `project_module_graph`      — canonical structural project module graph and compile order
 //! - `module_inventory`         — project-level module assembly
-//! - `prepared_source`          — state-safe retained source and token inputs
-//! - `prepared_source_store`    — project-boundary prepare-once store indexed by `SourceId`
+//! - `prepared_source`          — state-safe source-kind input handoff
 //! - `prepared_module`          — retained module-preparation payload handed to semantic compilation
 //! - `module_artifact_store`    — completed immutable artefacts, dense slot mapping and outcomes
 //! - `compiled_boundary`        — retained project/source-package graph boundaries and frontend outcome
-//! - `source_discovery`         — single-file source traversal and structural provider resolution
+//! - `source_discovery`         — Stage 0 source traversal, owned-input preparation and structural provider resolution
 //! - `source_scanning`          — retained single-pass source tokenisation and import extraction
 //! - `project_structure_diagnostics` — typed Stage 0 project diagnostics
 //! - `source_discovery_error`   — Stage 0 boundary between diagnostics and file/tooling errors
@@ -34,7 +33,6 @@ mod module_inventory;
 mod module_namespace;
 mod prepared_module;
 mod prepared_source;
-mod prepared_source_store;
 pub(crate) mod project_module_graph;
 mod project_roots;
 mod project_structure_diagnostics;
