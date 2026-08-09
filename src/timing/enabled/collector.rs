@@ -6,17 +6,17 @@
 //! lifecycle and metadata registration remain serialized while global and
 //! attributed totals use schema-indexed atomic slots.
 
+#[cfg(feature = "benchmark_counters")]
+use super::BenchmarkObservationMetric;
 use super::attribution::{
     NO_TIMING_BOUNDARY, TimingBoundaryId, TimingBoundaryKind, TimingBoundaryRecord, TimingContext,
     TimingMetricAccumulator, TimingModuleKey, TimingModuleRecord, acquire_boundary_accumulator,
     acquire_module_accumulator,
 };
-use super::runtime::{self, TimingSessionConfiguration};
+use super::runtime::{self, TimingRecordAdmission, TimingSessionConfiguration};
 use super::schema::{TIMING_METRIC_COUNT, TIMING_SCHEMA_VERSION, TimingAttributionKind};
 use super::session::{TimingCommandKind, TimingSession, TimingSessionId, TimingSessionStartError};
-use super::{
-    BenchmarkObservationMetric, BenchmarkObservationSnapshot, TimingMetric, TimingMetricAggregate,
-};
+use super::{BenchmarkObservationSnapshot, TimingMetric, TimingMetricAggregate};
 use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -24,6 +24,7 @@ struct ActiveCollection {
     id: TimingSessionId,
     configuration: TimingSessionConfiguration,
     command: Option<TimingCommandKind>,
+    #[cfg(feature = "benchmark_counters")]
     counters: Vec<BenchmarkObservationMetric>,
     boundaries: Vec<TimingBoundaryRecord>,
     modules: Vec<TimingModuleRecord>,
@@ -42,57 +43,16 @@ static GLOBAL_METRICS: [TimingMetricAccumulator; TIMING_METRIC_COUNT] =
 pub(crate) struct TimingRecordOutcome {
     pub(crate) recorded: bool,
     pub(crate) output_suppressed: bool,
+    pub(crate) human_prose_enabled: bool,
 }
 
 impl TimingRecordOutcome {
-    const fn recorded(output_suppressed: bool) -> Self {
+    const fn recorded(output_suppressed: bool, human_prose_enabled: bool) -> Self {
         Self {
             recorded: true,
             output_suppressed,
+            human_prose_enabled,
         }
-    }
-}
-
-/// The result of recording several metrics under one admission window.
-///
-/// The facade uses the captured generation to reject stale contexts without
-/// allocating a per-entry outcome buffer. Stable benchmark lines are emitted
-/// from the completed session snapshot rather than this record path.
-// This result is consumed by the multi-metric facade path, whose call sites
-// come from macro expansion rather than this library target.
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct TimingMultiRecordOutcome {
-    session: Option<TimingSessionId>,
-    attribution_enabled: bool,
-    pub(crate) output_suppressed: bool,
-}
-
-#[allow(dead_code)]
-impl TimingMultiRecordOutcome {
-    const fn recorded(
-        session: TimingSessionId,
-        attribution_enabled: bool,
-        output_suppressed: bool,
-    ) -> Self {
-        Self {
-            session: Some(session),
-            attribution_enabled,
-            output_suppressed,
-        }
-    }
-
-    /// Whether this outcome retained the entry with its supplied context.
-    pub(crate) fn recorded_entry(
-        self,
-        metric: TimingMetric,
-        context: Option<TimingContext>,
-    ) -> bool {
-        let Some(session) = self.session else {
-            return false;
-        };
-
-        accepts_attribution(metric, context, session.raw(), self.attribution_enabled)
     }
 }
 
@@ -132,12 +92,13 @@ pub(crate) fn try_start_session(
         id,
         configuration,
         command,
+        #[cfg(feature = "benchmark_counters")]
         counters: Vec::new(),
         boundaries: Vec::new(),
         modules: Vec::new(),
     });
     reset_global_metrics();
-    runtime::activate_session(id.raw(), configuration);
+    runtime::activate_session(id.raw(), command, configuration);
 
     Ok(TimingSession::active(id, command, configuration))
 }
@@ -159,11 +120,14 @@ pub(crate) fn finish_session(id: TimingSessionId) -> BenchmarkObservationSnapsho
     runtime::deactivate_session();
     runtime::wait_for_records();
     let collection = guard.take().expect("active collection present");
+    let command = collection.command;
+    let configuration = collection.configuration;
 
     let mut snapshot = BenchmarkObservationSnapshot {
         schema_version: TIMING_SCHEMA_VERSION,
-        command: collection.command,
+        command,
         timings: snapshot_global_metrics(),
+        #[cfg(feature = "benchmark_counters")]
         counters: collection.counters,
         boundaries: collection.boundaries,
         modules: collection.modules,
@@ -179,6 +143,7 @@ pub(crate) fn finish_session(id: TimingSessionId) -> BenchmarkObservationSnapsho
         }
     }
     recompute_boundary_module_counts(&mut snapshot);
+    validate_snapshot_invariants(&snapshot, command, configuration);
     snapshot
 }
 
@@ -197,19 +162,40 @@ pub(crate) fn abandon_session(id: TimingSessionId) {
 
 /// Record one un-attributed timing aggregate without entering the lifecycle
 /// collector mutex.
+///
+/// This is the already-captured-duration macro endpoint; its current
+/// production consumers are macro expansions, which rustc does not count as
+/// reachability for this private helper.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn record_timing(metric: TimingMetric, duration: Duration) -> TimingRecordOutcome {
-    let Some(_session) = runtime::begin_record() else {
+    let Some(admission) = runtime::begin_metric_record(metric) else {
         return TimingRecordOutcome::default();
     };
-    if !runtime::metrics_active() {
-        runtime::end_record();
+    record_timing_with_admission(metric, duration, admission)
+}
+
+/// Record one timing observation using admission retained from before its
+/// clock started. The admission remains live until this function returns.
+pub(crate) fn record_timing_with_admission(
+    metric: TimingMetric,
+    duration: Duration,
+    admission: TimingRecordAdmission,
+) -> TimingRecordOutcome {
+    if !admission.metric_active(metric)
+        || !accepts_attribution(
+            metric,
+            None,
+            admission.session(),
+            admission.attribution_active(),
+        )
+    {
         return TimingRecordOutcome::default();
     }
 
     GLOBAL_METRICS[metric.index()].record(duration);
-    let output_suppressed = runtime::output_suppressed();
-    runtime::end_record();
-    TimingRecordOutcome::recorded(output_suppressed)
+    let output_suppressed = admission.output_suppressed();
+    let human_prose_enabled = admission.human_prose_enabled();
+    TimingRecordOutcome::recorded(output_suppressed, human_prose_enabled)
 }
 
 /// Record one timing observation with compact boundary/module context.
@@ -217,76 +203,49 @@ pub(crate) fn record_timing(metric: TimingMetric, duration: Duration) -> TimingR
 /// Attribution-off sessions keep the metric but deliberately discard its
 /// context. A stale or wrong-kind context rejects the entire observation,
 /// including its eventual final benchmark aggregate.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn record_attributed_timing(
     metric: TimingMetric,
     duration: Duration,
     context: Option<TimingContext>,
 ) -> TimingRecordOutcome {
-    let Some(session) = runtime::begin_record() else {
+    let Some(admission) = runtime::begin_metric_record(metric) else {
         return TimingRecordOutcome::default();
     };
-    if !runtime::metrics_active() {
-        runtime::end_record();
-        return TimingRecordOutcome::default();
-    }
+    record_attributed_timing_with_admission(metric, duration, context, admission)
+}
 
-    let attribution_enabled = runtime::attribution_active();
-    if !accepts_attribution(metric, context, session, attribution_enabled) {
-        runtime::end_record();
+/// Record an attributed timing observation using admission retained from
+/// before its clock started.
+pub(crate) fn record_attributed_timing_with_admission(
+    metric: TimingMetric,
+    duration: Duration,
+    context: Option<TimingContext>,
+    admission: TimingRecordAdmission,
+) -> TimingRecordOutcome {
+    if !admission.metric_active(metric)
+        || !accepts_attribution(
+            metric,
+            context,
+            admission.session(),
+            admission.attribution_active(),
+        )
+    {
         return TimingRecordOutcome::default();
     }
 
     GLOBAL_METRICS[metric.index()].record(duration);
-    if attribution_enabled && let Some(context) = context {
+    if admission.attribution_active()
+        && let Some(context) = context
+    {
         context
             .accumulator()
             .expect("accepted attributed context has storage")
             .record(metric, duration);
     }
-    let output_suppressed = runtime::output_suppressed();
-    runtime::end_record();
-    TimingRecordOutcome::recorded(output_suppressed)
-}
-
-/// Record several timing aggregates under one lock-free admission window.
-///
-/// Entries with stale contexts are skipped, matching single-record behaviour
-/// without adding a temporary allocation.
-#[allow(dead_code)]
-pub(crate) fn record_attributed_timing_multi(
-    entries: &[(TimingMetric, Option<TimingContext>)],
-    duration: Duration,
-) -> TimingMultiRecordOutcome {
-    let Some(session_raw) = runtime::begin_record() else {
-        return TimingMultiRecordOutcome::default();
-    };
-    if !runtime::metrics_active() {
-        runtime::end_record();
-        return TimingMultiRecordOutcome::default();
-    }
-
-    let attribution_enabled = runtime::attribution_active();
-    let outcome = TimingMultiRecordOutcome::recorded(
-        TimingSessionId::from_raw(session_raw),
-        attribution_enabled,
-        runtime::output_suppressed(),
-    );
-
-    for &(metric, context) in entries {
-        if !accepts_attribution(metric, context, session_raw, attribution_enabled) {
-            continue;
-        }
-        GLOBAL_METRICS[metric.index()].record(duration);
-        if attribution_enabled && let Some(context) = context {
-            context
-                .accumulator()
-                .expect("accepted attributed context has storage")
-                .record(metric, duration);
-        }
-    }
-
-    runtime::end_record();
-    outcome
+    let output_suppressed = admission.output_suppressed();
+    let human_prose_enabled = admission.human_prose_enabled();
+    TimingRecordOutcome::recorded(output_suppressed, human_prose_enabled)
 }
 
 /// Register one compilation boundary inside the active attributed session.
@@ -476,6 +435,7 @@ pub(crate) fn finalize_module_source_facts(
 }
 
 /// Record one counter observation when the counter channel is active.
+#[cfg(feature = "benchmark_counters")]
 pub(crate) fn record_counter(name: &'static str, value: f64) -> TimingRecordOutcome {
     let mut guard = lock_collector();
     let Some(collection) = guard.as_mut() else {
@@ -488,7 +448,7 @@ pub(crate) fn record_counter(name: &'static str, value: f64) -> TimingRecordOutc
     collection
         .counters
         .push(BenchmarkObservationMetric { name, value });
-    TimingRecordOutcome::recorded(collection.configuration.suppress_output())
+    TimingRecordOutcome::recorded(collection.configuration.suppress_output(), false)
 }
 
 /// Whether stdout output is currently allowed.
@@ -496,6 +456,7 @@ pub(crate) fn record_counter(name: &'static str, value: f64) -> TimingRecordOutc
 /// Returns false when an in-process collection session has suppressed output.
 /// It first checks the active-channel bit so ordinary inactive call sites do
 /// not take the collector mutex.
+#[cfg(feature = "detailed_timers")]
 pub(crate) fn output_enabled() -> bool {
     if !runtime::collection_active() {
         return true;
@@ -544,29 +505,97 @@ fn accepts_attribution(
         return true;
     }
 
-    // A caller may intentionally record a typed metric without requesting an
-    // attribution row. Keep that global evidence while reserving attributed
-    // slots for a registered context of the metric's declared kind.
-    if context.is_none() {
-        return true;
+    let session = TimingSessionId::from_raw(session_raw);
+    match (metric.descriptor().attribution, context) {
+        (TimingAttributionKind::None, None) => true,
+        (TimingAttributionKind::Boundary, Some(TimingContext::Boundary(boundary))) => {
+            boundary.session() == session && boundary.accumulator().is_some()
+        }
+        (TimingAttributionKind::Module, Some(TimingContext::Module(module))) => {
+            module.boundary().session() == session && module.accumulator().is_some()
+        }
+        _ => false,
+    }
+}
+
+/// Validate the facts that make a typed snapshot safe to consume.
+///
+/// Admission rejects command-inapplicable metrics before they mutate any
+/// aggregate. This final check remains a defensive invariant for unexpected
+/// collector misuse. Attributed sessions must also preserve the accounting
+/// identity: every global boundary/module aggregate is exactly the sum of its
+/// corresponding registered slots.
+fn validate_snapshot_invariants(
+    snapshot: &BenchmarkObservationSnapshot,
+    command: Option<TimingCommandKind>,
+    configuration: TimingSessionConfiguration,
+) {
+    if let Some(command) = command {
+        for aggregate in &snapshot.timings {
+            if aggregate.samples > 0 {
+                assert!(
+                    aggregate.metric.applies_to(command),
+                    "timing metric {} does not apply to command {:?}",
+                    aggregate.metric.descriptor().stable_name,
+                    command
+                );
+            }
+        }
     }
 
-    let session = TimingSessionId::from_raw(session_raw);
-    match metric.descriptor().attribution {
-        TimingAttributionKind::None => context.is_none(),
-        TimingAttributionKind::Boundary => matches!(
-            context,
-            Some(TimingContext::Boundary(boundary))
-                if boundary.session() == session
-                    && boundary.accumulator().is_some()
-        ),
-        TimingAttributionKind::Module => matches!(
-            context,
-            Some(TimingContext::Module(module))
-                if module.boundary().session() == session
-                    && module.accumulator().is_some()
-        ),
+    if !configuration.channels().attribution() {
+        return;
     }
+
+    for aggregate in snapshot.timings.iter().filter(|aggregate| {
+        aggregate.metric.descriptor().attribution != TimingAttributionKind::None
+    }) {
+        let (total, samples) = match aggregate.metric.descriptor().attribution {
+            TimingAttributionKind::None => unreachable!("filtered un-attributed metric"),
+            TimingAttributionKind::Boundary => sum_attributed_rows(
+                snapshot
+                    .boundaries
+                    .iter()
+                    .flat_map(|boundary| boundary.timings.iter()),
+                aggregate.metric,
+            ),
+            TimingAttributionKind::Module => sum_attributed_rows(
+                snapshot
+                    .modules
+                    .iter()
+                    .flat_map(|module| module.timings.iter()),
+                aggregate.metric,
+            ),
+        };
+
+        assert_eq!(
+            aggregate.total,
+            total,
+            "global timing total for {} differs from attributed slots",
+            aggregate.metric.descriptor().stable_name
+        );
+        assert_eq!(
+            aggregate.samples,
+            samples,
+            "global timing samples for {} differ from attributed slots",
+            aggregate.metric.descriptor().stable_name
+        );
+    }
+}
+
+fn sum_attributed_rows<'rows>(
+    rows: impl Iterator<Item = &'rows TimingMetricAggregate>,
+    metric: TimingMetric,
+) -> (Duration, u64) {
+    rows.filter(|aggregate| aggregate.metric == metric).fold(
+        (Duration::ZERO, 0),
+        |(total, samples), aggregate| {
+            (
+                total.saturating_add(aggregate.total),
+                samples.saturating_add(aggregate.samples),
+            )
+        },
+    )
 }
 
 fn same_accumulator(

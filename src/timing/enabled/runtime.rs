@@ -9,7 +9,10 @@
 #[cfg(feature = "benchmark_counters")]
 use crate::timing::CounterOutputMode;
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU64, Ordering};
+
+use super::schema::{TimingLevel, TimingMetric};
+use super::session::TimingCommandKind;
 
 /// Output mode controlling how timing information reaches the user.
 ///
@@ -106,7 +109,7 @@ impl TimingChannels {
         self.bits & Self::ATTRIBUTION != 0
     }
 
-    /// Whether detailed timer evidence is active.
+    /// Whether detailed schema metric evidence is active.
     #[cfg(test)]
     pub(crate) const fn detailed(self) -> bool {
         self.bits & Self::DETAILED != 0
@@ -123,7 +126,6 @@ impl TimingChannels {
     }
 
     /// Whether detailed timer prose is emitted during compilation.
-    #[cfg(test)]
     pub(crate) const fn human_prose(self) -> bool {
         self.bits & Self::HUMAN_PROSE != 0
     }
@@ -131,6 +133,72 @@ impl TimingChannels {
     /// Whether any event collection channel is active.
     pub(crate) const fn has_collection(self) -> bool {
         self.metrics() || self.counters()
+    }
+
+    /// Whether this captured channel policy collects the supplied schema metric.
+    const fn metric_active(self, metric: TimingMetric) -> bool {
+        if !self.metrics() {
+            return false;
+        }
+
+        match metric.descriptor().level {
+            TimingLevel::Basic => true,
+            TimingLevel::Detailed => self.detailed_enabled(),
+        }
+    }
+
+    const fn detailed_enabled(self) -> bool {
+        self.bits & Self::DETAILED != 0
+    }
+}
+
+/// Stable policy captured when one recorder enters the active session.
+///
+/// Finish deactivates the process-wide fast-path bits before waiting for
+/// admitted recorders. Carrying the session policy through the admission
+/// window prevents a recorder that already passed the generation check from
+/// observing the drained session's cleared command, attribution or output
+/// bits.
+#[derive(Debug)]
+pub(crate) struct TimingRecordAdmission {
+    session: u64,
+    channels: TimingChannels,
+    command: Option<TimingCommandKind>,
+    output_suppressed: bool,
+}
+
+impl TimingRecordAdmission {
+    pub(crate) const fn session(&self) -> u64 {
+        self.session
+    }
+
+    pub(crate) const fn metric_active(&self, metric: TimingMetric) -> bool {
+        if !self.channels.metric_active(metric) {
+            return false;
+        }
+
+        match self.command {
+            Some(command) => metric.applies_to(command),
+            None => true,
+        }
+    }
+
+    pub(crate) const fn attribution_active(&self) -> bool {
+        self.channels.attribution()
+    }
+
+    pub(crate) const fn output_suppressed(&self) -> bool {
+        self.output_suppressed
+    }
+
+    pub(crate) const fn human_prose_enabled(&self) -> bool {
+        self.channels.human_prose()
+    }
+}
+
+impl Drop for TimingRecordAdmission {
+    fn drop(&mut self) {
+        end_record();
     }
 }
 
@@ -159,6 +227,7 @@ impl TimingSessionConfiguration {
                 .with(TimingChannels::HUMAN_SUMMARY),
             TimerOutputMode::Bench => TimingChannels::empty()
                 .with(TimingChannels::METRICS)
+                .with(TimingChannels::DETAILED)
                 .with(TimingChannels::BENCH_OUTPUT),
             TimerOutputMode::Verbose => TimingChannels::empty()
                 .with(TimingChannels::METRICS)
@@ -197,7 +266,9 @@ impl TimingSessionConfiguration {
 
     /// Configure a caller-owned raw benchmark collection.
     pub(crate) fn raw_benchmark(suppress_output: bool, attribution: bool) -> Self {
-        let mut channels = TimingChannels::empty().with(TimingChannels::METRICS);
+        let mut channels = TimingChannels::empty()
+            .with(TimingChannels::METRICS)
+            .with(TimingChannels::DETAILED);
         if attribution {
             channels = channels.with(TimingChannels::ATTRIBUTION);
         }
@@ -321,45 +392,86 @@ pub(crate) fn command_session_configuration() -> TimingSessionConfiguration {
     TimingSessionConfiguration::for_command(current_runtime_configuration())
 }
 
+#[cfg(feature = "benchmark_counters")]
 const ACTIVE_COUNTER_BENCH_OUTPUT: u16 = 1 << 7;
+#[cfg(feature = "benchmark_counters")]
 const ACTIVE_COUNTER_HUMAN_PROSE: u16 = 1 << 8;
 
 static ACTIVE_CHANNEL_BITS: AtomicU16 = AtomicU16::new(0);
+static ACTIVE_COMMAND_KIND: AtomicU8 = AtomicU8::new(0);
 static ACTIVE_SESSION_ID: AtomicU64 = AtomicU64::new(0);
 static ACTIVE_RECORDERS: AtomicU64 = AtomicU64::new(0);
 static ACTIVE_OUTPUT_SUPPRESSED: AtomicBool = AtomicBool::new(false);
 
 /// Publish a newly owned session's active channels before compiler work begins.
-pub(crate) fn activate_session(id: u64, configuration: TimingSessionConfiguration) {
+pub(crate) fn activate_session(
+    id: u64,
+    command: Option<TimingCommandKind>,
+    configuration: TimingSessionConfiguration,
+) {
+    #[cfg(test)]
+    RECORD_SESSION_DEACTIVATED.store(false, Ordering::Release);
+    ACTIVE_COMMAND_KIND.store(command_code(command), Ordering::Release);
     ACTIVE_OUTPUT_SUPPRESSED.store(configuration.suppress_output(), Ordering::Relaxed);
-    ACTIVE_SESSION_ID.store(id, Ordering::Release);
     ACTIVE_CHANNEL_BITS.store(configuration.active_bits(), Ordering::Release);
+    ACTIVE_SESSION_ID.store(id, Ordering::Release);
 }
 
 /// Clear active channels after the matching session stops or drops.
 pub(crate) fn deactivate_session() {
-    ACTIVE_CHANNEL_BITS.store(0, Ordering::Release);
     ACTIVE_SESSION_ID.store(0, Ordering::Release);
+    ACTIVE_COMMAND_KIND.store(0, Ordering::Release);
+    ACTIVE_CHANNEL_BITS.store(0, Ordering::Release);
     ACTIVE_OUTPUT_SUPPRESSED.store(false, Ordering::Relaxed);
+    #[cfg(test)]
+    RECORD_SESSION_DEACTIVATED.store(true, Ordering::Release);
 }
 
 /// Begin one lock-free record admission window for the current session.
-pub(crate) fn begin_record() -> Option<u64> {
+pub(crate) fn begin_record() -> Option<TimingRecordAdmission> {
     loop {
         let session = ACTIVE_SESSION_ID.load(Ordering::Acquire);
         if session == 0 {
             return None;
         }
 
+        let channel_bits = ACTIVE_CHANNEL_BITS.load(Ordering::Acquire);
+        let command_code = ACTIVE_COMMAND_KIND.load(Ordering::Acquire);
+        let output_suppressed = ACTIVE_OUTPUT_SUPPRESSED.load(Ordering::Relaxed);
         ACTIVE_RECORDERS.fetch_add(1, Ordering::Acquire);
-        if ACTIVE_SESSION_ID.load(Ordering::Acquire) == session {
-            return Some(session);
+        if ACTIVE_SESSION_ID.load(Ordering::Acquire) == session
+            && ACTIVE_CHANNEL_BITS.load(Ordering::Acquire) == channel_bits
+            && ACTIVE_COMMAND_KIND.load(Ordering::Acquire) == command_code
+        {
+            let admission = TimingRecordAdmission {
+                session,
+                channels: TimingChannels { bits: channel_bits },
+                command: command_from_code(command_code),
+                output_suppressed,
+            };
+            #[cfg(test)]
+            pause_after_record_admission_for_test();
+            return Some(admission);
         }
 
         ACTIVE_RECORDERS.fetch_sub(1, Ordering::Release);
         if ACTIVE_SESSION_ID.load(Ordering::Acquire) == 0 {
             return None;
         }
+    }
+}
+
+/// Admit one metric before its timing clock starts.
+pub(crate) fn begin_metric_record(metric: TimingMetric) -> Option<TimingRecordAdmission> {
+    if !metric_active(metric) {
+        return None;
+    }
+
+    let admission = begin_record()?;
+    if admission.metric_active(metric) {
+        Some(admission)
+    } else {
+        None
     }
 }
 
@@ -375,21 +487,18 @@ pub(crate) fn wait_for_records() {
     }
 }
 
-/// Whether the active session suppresses caller-owned output.
-pub(crate) fn output_suppressed() -> bool {
-    ACTIVE_OUTPUT_SUPPRESSED.load(Ordering::Relaxed)
-}
-
 fn channel_active(bit: u16) -> bool {
     ACTIVE_CHANNEL_BITS.load(Ordering::Acquire) & bit != 0
 }
 
 /// Whether a timing metric needs a clock and collector record.
+#[cfg(feature = "detailed_timers")]
 pub(crate) fn metrics_active() -> bool {
     channel_active(TimingChannels::METRICS)
 }
 
 /// Whether a counter needs collector storage.
+#[cfg(feature = "benchmark_counters")]
 pub(crate) fn counters_active() -> bool {
     channel_active(TimingChannels::COUNTERS)
 }
@@ -399,12 +508,42 @@ pub(crate) fn attribution_active() -> bool {
     channel_active(TimingChannels::ATTRIBUTION)
 }
 
-/// Whether detailed metric collection is active.
-pub(crate) fn detailed_active() -> bool {
-    channel_active(TimingChannels::DETAILED)
+/// Whether the active session collects the supplied schema metric.
+pub(crate) fn metric_active(metric: TimingMetric) -> bool {
+    let channels = TimingChannels {
+        bits: ACTIVE_CHANNEL_BITS.load(Ordering::Acquire),
+    };
+    if !channels.metric_active(metric) {
+        return false;
+    }
+
+    match command_from_code(ACTIVE_COMMAND_KIND.load(Ordering::Acquire)) {
+        Some(command) => metric.applies_to(command),
+        None => true,
+    }
+}
+
+const fn command_code(command: Option<TimingCommandKind>) -> u8 {
+    match command {
+        None => 0,
+        Some(TimingCommandKind::Build) => 1,
+        Some(TimingCommandKind::Check) => 2,
+        Some(TimingCommandKind::Dev) => 3,
+    }
+}
+
+fn command_from_code(code: u8) -> Option<TimingCommandKind> {
+    match code {
+        0 => None,
+        1 => Some(TimingCommandKind::Build),
+        2 => Some(TimingCommandKind::Check),
+        3 => Some(TimingCommandKind::Dev),
+        _ => unreachable!("invalid active timing command code"),
+    }
 }
 
 /// Whether detailed timer prose is active for the current session.
+#[cfg(feature = "detailed_timers")]
 pub(crate) fn timer_human_prose_active() -> bool {
     channel_active(TimingChannels::HUMAN_PROSE)
 }
@@ -422,8 +561,16 @@ pub(crate) fn counter_human_prose_active() -> bool {
 }
 
 /// Whether any collection channel is currently active.
+#[cfg(feature = "detailed_timers")]
 pub(crate) fn collection_active() -> bool {
-    metrics_active() || counters_active()
+    #[cfg(feature = "benchmark_counters")]
+    {
+        metrics_active() || counters_active()
+    }
+    #[cfg(not(feature = "benchmark_counters"))]
+    {
+        metrics_active()
+    }
 }
 
 #[cfg(test)]
@@ -446,6 +593,60 @@ pub(crate) fn reset_timing_clock_reads_for_test() {
 #[cfg(test)]
 pub(crate) fn timing_clock_reads_for_test() -> usize {
     TIMING_CLOCK_READS.load(Ordering::Relaxed)
+}
+
+#[cfg(test)]
+static RECORD_ADMISSION_PAUSED: AtomicBool = AtomicBool::new(false);
+
+#[cfg(test)]
+static RECORD_ADMISSION_REACHED: AtomicBool = AtomicBool::new(false);
+
+#[cfg(test)]
+static RECORD_SESSION_DEACTIVATED: AtomicBool = AtomicBool::new(false);
+
+#[cfg(test)]
+pub(crate) struct RecordAdmissionPauseGuard;
+
+#[cfg(test)]
+impl RecordAdmissionPauseGuard {
+    pub(crate) fn release(&self) {
+        RECORD_ADMISSION_PAUSED.store(false, Ordering::Release);
+    }
+}
+
+#[cfg(test)]
+impl Drop for RecordAdmissionPauseGuard {
+    fn drop(&mut self) {
+        self.release();
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn pause_record_admission_for_test() -> RecordAdmissionPauseGuard {
+    RECORD_ADMISSION_REACHED.store(false, Ordering::Release);
+    RECORD_SESSION_DEACTIVATED.store(false, Ordering::Release);
+    RECORD_ADMISSION_PAUSED.store(true, Ordering::Release);
+    RecordAdmissionPauseGuard
+}
+
+#[cfg(test)]
+pub(crate) fn record_admission_reached_for_test() -> bool {
+    RECORD_ADMISSION_REACHED.load(Ordering::Acquire)
+}
+
+#[cfg(test)]
+pub(crate) fn record_session_deactivated_for_test() -> bool {
+    RECORD_SESSION_DEACTIVATED.load(Ordering::Acquire)
+}
+
+#[cfg(test)]
+fn pause_after_record_admission_for_test() {
+    if RECORD_ADMISSION_PAUSED.load(Ordering::Acquire) {
+        RECORD_ADMISSION_REACHED.store(true, Ordering::Release);
+        while RECORD_ADMISSION_PAUSED.load(Ordering::Acquire) {
+            std::thread::yield_now();
+        }
+    }
 }
 
 #[cfg(test)]
@@ -506,6 +707,7 @@ mod tests {
 
         let bench = TimingSessionConfiguration::for_test(TimerOutputMode::Bench);
         assert!(bench.channels().metrics());
+        assert!(bench.channels().detailed());
         assert!(bench.channels().bench_output());
         assert!(!bench.channels().attribution());
         assert!(!bench.channels().human_summary());
@@ -520,6 +722,7 @@ mod tests {
     fn raw_benchmark_configuration_owns_metrics_without_attribution() {
         let raw = TimingSessionConfiguration::raw_benchmark(true, false);
         assert!(raw.channels().metrics());
+        assert!(raw.channels().detailed());
         assert!(!raw.channels().attribution());
         assert!(raw.suppress_output());
         assert!(!raw.channels().bench_output());

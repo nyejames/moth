@@ -19,7 +19,7 @@ use crate::projects::dev_server::sse;
 use crate::projects::dev_server::state::DevServerState;
 use crate::projects::dev_server::watch;
 use crate::projects::routing::{HtmlSiteConfig, parse_html_site_config};
-#[cfg(feature = "timers")]
+#[cfg(feature = "detailed_timers")]
 use crate::timing_scope;
 use saying::say;
 use std::io;
@@ -104,32 +104,35 @@ impl DevBuildExecutor for ProjectBuildExecutor {
         })?;
 
         let mut build_result = build::build_project(&self.builder, entry_path, flags)?;
-        let output_plan = if let Some(plan) = build_result.directory_output_plan.as_ref() {
-            OutputPlan::Directory(plan.clone())
-        } else {
-            let project_root = entry_file
-                .parent()
-                .filter(|parent| parent.is_dir())
-                .map(Path::to_path_buf)
-                .unwrap_or_else(|| entry_file.to_path_buf());
-            OutputPlan::SingleFile(SingleFileOutputPlan {
-                output_root: project_root.join("dev"),
-                project_root: Some(project_root),
-                owner: build_result.output_owner,
-                setting_location: SourceLocation::from_path(
-                    entry_file,
-                    &mut build_result.string_table,
-                ),
-            })
-        };
-        if let Err(mut messages) = write_project_outputs(
-            &build_result.project,
-            &WriteOptions {
-                output_plan,
-                write_mode: WriteMode::SkipUnchanged,
-            },
-            &build_result.string_table,
-        ) {
+        let output_result = crate::timed_stage!(crate::timing::TimingMetric::BuildOutputTotal, {
+            let output_plan = if let Some(plan) = build_result.directory_output_plan.as_ref() {
+                OutputPlan::Directory(plan.clone())
+            } else {
+                let project_root = entry_file
+                    .parent()
+                    .filter(|parent| parent.is_dir())
+                    .map(Path::to_path_buf)
+                    .unwrap_or_else(|| entry_file.to_path_buf());
+                OutputPlan::SingleFile(SingleFileOutputPlan {
+                    output_root: project_root.join("dev"),
+                    project_root: Some(project_root),
+                    owner: build_result.output_owner,
+                    setting_location: SourceLocation::from_path(
+                        entry_file,
+                        &mut build_result.string_table,
+                    ),
+                })
+            };
+            write_project_outputs(
+                &build_result.project,
+                &WriteOptions {
+                    output_plan,
+                    write_mode: WriteMode::SkipUnchanged,
+                },
+                &build_result.string_table,
+            )
+        });
+        if let Err(mut messages) = output_result {
             messages.extend_diagnostics(build_result.warnings);
             return Err(messages);
         }
@@ -364,28 +367,24 @@ fn build_once(
     entry_file: &Path,
     flags: &[Flag],
 ) -> BuildOutcome {
-    let mut build_result = {
-        // The dev total is owned by the orchestration around the executor trait
-        // call, so every DevBuildExecutor implementation receives the same metric.
-        #[cfg(feature = "timers")]
-        timing_scope!(
-            timing_guard_command_dev_build_and_write,
-            crate::timing::TimingMetric::CommandDevBuildWrite
-        );
-        match executor.build_and_write(entry_file, flags) {
-            Ok(build_result) => build_result,
-            Err(messages) => {
-                return BuildOutcome {
-                    build_succeeded: false,
-                    entry_page_rel: None,
-                    html_site_config: None,
-                    diagnostics_summary: format_compiler_messages(&messages),
-                    success_messages: None,
-                    failed_build: Some(BuildFailure::CompilerMessages(messages)),
-                    watch_scope: None,
-                    output_dir: None,
-                };
-            }
+    // The dev total is owned by the orchestration around the executor trait
+    // call, so every DevBuildExecutor implementation receives the same metric.
+    let mut build_result = match crate::timed_stage!(
+        crate::timing::TimingMetric::CommandDevBuildWrite,
+        executor.build_and_write(entry_file, flags)
+    ) {
+        Ok(build_result) => build_result,
+        Err(messages) => {
+            return BuildOutcome {
+                build_succeeded: false,
+                entry_page_rel: None,
+                html_site_config: None,
+                diagnostics_summary: format_compiler_messages(&messages),
+                success_messages: None,
+                failed_build: Some(BuildFailure::CompilerMessages(messages)),
+                watch_scope: None,
+                output_dir: None,
+            };
         }
     };
     let output_dir = build_result

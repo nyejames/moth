@@ -7,6 +7,7 @@
 
 use crate::timing::{
     TimingCommandKind, TimingMetric, TimingMetricAggregate, start_benchmark_collection,
+    start_raw_benchmark_collection,
 };
 use std::cell::Cell;
 
@@ -27,6 +28,16 @@ fn timings_named(
         .iter()
         .filter(|aggregate| aggregate.metric == metric && aggregate.samples > 0)
         .collect()
+}
+
+fn wait_for_timing_flag(mut observed: impl FnMut() -> bool) -> bool {
+    for _ in 0..1_000_000 {
+        if observed() {
+            return true;
+        }
+        std::thread::yield_now();
+    }
+    false
 }
 
 #[test]
@@ -68,7 +79,7 @@ fn final_benchmark_snapshot_uses_schema_order_and_omits_empty_rows() {
 #[test]
 fn timed_stage_records_one_observation_and_runs_expression_once() {
     let _test_guard = collector_test_guard();
-    let timing_session = start_benchmark_collection(true).expect("timing session should start");
+    let timing_session = start_raw_benchmark_collection(true).expect("timing session should start");
 
     let runs = Cell::new(0);
     let value = timed_stage!(TimingMetric::FrontendPrepare, {
@@ -109,7 +120,7 @@ fn timed_stage_attributed_records_observation_and_passes_value_through() {
 #[test]
 fn timing_guard_records_observation_when_scope_ends() {
     let _test_guard = collector_test_guard();
-    let timing_session = start_benchmark_collection(true).expect("timing session should start");
+    let timing_session = start_raw_benchmark_collection(true).expect("timing session should start");
 
     {
         timing_scope!(timing_guard, TimingMetric::FrontendOrderDeclarations);
@@ -124,7 +135,7 @@ fn timing_guard_records_observation_when_scope_ends() {
 #[test]
 fn timing_scope_records_started_stage() {
     let _test_guard = collector_test_guard();
-    let timing_session = start_benchmark_collection(true).expect("timing session should start");
+    let timing_session = start_raw_benchmark_collection(true).expect("timing session should start");
 
     {
         timing_scope!(timing_guard, TimingMetric::FrontendAstTotal);
@@ -139,7 +150,7 @@ fn timing_scope_records_started_stage() {
 #[test]
 fn finish_timing_scope_records_a_guard_exactly_once() {
     let _test_guard = collector_test_guard();
-    let timing_session = start_benchmark_collection(true).expect("timing session should start");
+    let timing_session = start_raw_benchmark_collection(true).expect("timing session should start");
 
     {
         timing_scope!(timing_guard, TimingMetric::FrontendAstTotal);
@@ -154,31 +165,9 @@ fn finish_timing_scope_records_a_guard_exactly_once() {
 }
 
 #[test]
-fn timing_scope_multi_preserves_one_duration_for_each_metric() {
-    let _test_guard = collector_test_guard();
-    let timing_session = start_benchmark_collection(true).expect("timing session should start");
-    let entries = [
-        (TimingMetric::BoundaryInventory, None),
-        (TimingMetric::BoundaryCompile, None),
-    ];
-
-    {
-        timing_scope_multi!(timing_guard, &entries);
-        finish_timing_scope!(timing_guard);
-    }
-
-    let snapshot = timing_session.finish();
-    let inventory = timings_named(&snapshot, TimingMetric::BoundaryInventory);
-    let compile = timings_named(&snapshot, TimingMetric::BoundaryCompile);
-    assert_eq!(inventory.len(), 1);
-    assert_eq!(compile.len(), 1);
-    assert_eq!(inventory[0].total, compile[0].total);
-}
-
-#[test]
 fn finished_snapshot_uses_dense_schema_order_with_zero_slots() {
     let _test_guard = collector_test_guard();
-    let timing_session = start_benchmark_collection(true).expect("timing session should start");
+    let timing_session = start_raw_benchmark_collection(true).expect("timing session should start");
     record_timing_via_facade(TimingMetric::FrontendPrepare);
 
     let snapshot = timing_session.finish();
@@ -210,7 +199,7 @@ fn finished_snapshot_uses_dense_schema_order_with_zero_slots() {
 #[test]
 fn parallel_timing_records_sum_into_one_atomic_slot() {
     let _test_guard = collector_test_guard();
-    let timing_session = start_benchmark_collection(true).expect("timing session should start");
+    let timing_session = start_raw_benchmark_collection(true).expect("timing session should start");
     const WORKERS: usize = 8;
     const RECORDS_PER_WORKER: usize = 100;
     let duration = std::time::Duration::from_nanos(1_000);
@@ -234,6 +223,268 @@ fn parallel_timing_records_sum_into_one_atomic_slot() {
     assert_eq!(
         aggregate.total,
         duration * (WORKERS * RECORDS_PER_WORKER) as u32
+    );
+}
+
+#[test]
+fn admitted_attribution_policy_survives_session_drain() {
+    let _test_guard = collector_test_guard();
+    let timing_session = start_benchmark_collection(true).expect("timing session should start");
+    let boundary = crate::timing::register_timing_boundary(
+        crate::timing::TimingBoundaryKind::MainProject,
+        || "test-project".to_owned(),
+    );
+    let context = Some(crate::timing::TimingContext::for_boundary(boundary));
+    let pause = crate::timing::enabled::runtime::pause_record_admission_for_test();
+
+    let recorder = std::thread::spawn(move || {
+        crate::timing::record_pipeline_timing_attributed(
+            TimingMetric::BoundaryInventory,
+            std::time::Duration::from_millis(7),
+            context,
+        );
+    });
+    if !wait_for_timing_flag(|| {
+        crate::timing::enabled::runtime::record_admission_reached_for_test()
+    }) {
+        pause.release();
+        let _ = recorder.join();
+        panic!("the recorder should pause after admission");
+    }
+
+    let finisher = std::thread::spawn(move || timing_session.finish());
+    if !wait_for_timing_flag(|| {
+        crate::timing::enabled::runtime::record_session_deactivated_for_test()
+    }) {
+        pause.release();
+        let _ = recorder.join();
+        let _ = finisher.join();
+        panic!("session finish should deactivate the fast-path bits before waiting");
+    }
+
+    pause.release();
+    recorder
+        .join()
+        .expect("the admitted recorder should finish cleanly");
+    let snapshot = finisher
+        .join()
+        .expect("session drain must not panic while an admitted recorder finishes");
+
+    let global = timings_named(&snapshot, TimingMetric::BoundaryInventory)
+        .into_iter()
+        .next()
+        .expect("the admitted global observation should be retained");
+    let boundary_record = snapshot
+        .boundaries
+        .iter()
+        .find(|record| record.id == boundary)
+        .expect("the registered boundary should be retained");
+    let attributed = boundary_record
+        .timings
+        .iter()
+        .find(|aggregate| aggregate.metric == TimingMetric::BoundaryInventory)
+        .expect("the attributed boundary row should be retained");
+
+    assert_eq!(global.total, attributed.total);
+    assert_eq!(global.samples, attributed.samples);
+}
+
+#[test]
+fn attributed_duration_context_uses_admitted_session_policy() {
+    let _test_guard = collector_test_guard();
+    let timing_session = start_benchmark_collection(true).expect("timing session should start");
+    let boundary = crate::timing::register_timing_boundary(
+        crate::timing::TimingBoundaryKind::MainProject,
+        || "test-project".to_owned(),
+    );
+    let pause = crate::timing::enabled::runtime::pause_record_admission_for_test();
+    let (context_sender, context_receiver) = std::sync::mpsc::channel();
+
+    let recorder = std::thread::spawn(move || {
+        record_attributed_duration!(
+            TimingMetric::BoundaryInventory,
+            std::time::Duration::from_millis(7),
+            {
+                context_sender
+                    .send(())
+                    .expect("the context observer should remain available");
+                Some(crate::timing::TimingContext::for_boundary(boundary))
+            }
+        )
+    });
+    if !wait_for_timing_flag(|| {
+        crate::timing::enabled::runtime::record_admission_reached_for_test()
+    }) {
+        pause.release();
+        let _ = recorder.join();
+        let _ = timing_session.finish();
+        panic!("the direct-duration recorder should pause after admission");
+    }
+    let context_ran_before_admission = context_receiver.try_recv().is_ok();
+
+    let (finish_sender, finish_receiver) = std::sync::mpsc::channel();
+    let finisher = std::thread::spawn(move || {
+        finish_sender
+            .send(timing_session.finish())
+            .expect("the finish receiver should remain available");
+    });
+    if !wait_for_timing_flag(|| {
+        crate::timing::enabled::runtime::record_session_deactivated_for_test()
+    }) {
+        pause.release();
+        let _ = recorder.join();
+        let _ = finisher.join();
+        panic!("session finish should deactivate the fast-path bits before waiting");
+    }
+    assert!(
+        matches!(
+            finish_receiver.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        ),
+        "finish must wait for the admitted direct-duration record"
+    );
+
+    pause.release();
+    assert!(
+        recorder
+            .join()
+            .expect("the admitted direct-duration recorder should finish cleanly"),
+        "the direct-duration facade should return the captured output policy"
+    );
+    assert!(
+        context_receiver.recv().is_ok(),
+        "the context should evaluate after admission releases it"
+    );
+    finisher
+        .join()
+        .expect("session drain must not panic while direct duration finishes");
+    let snapshot = finish_receiver
+        .recv()
+        .expect("the drained session should publish its snapshot");
+
+    assert!(
+        !context_ran_before_admission,
+        "direct attributed duration must not evaluate context before admission"
+    );
+    let global = timings_named(&snapshot, TimingMetric::BoundaryInventory)
+        .into_iter()
+        .next()
+        .expect("the admitted direct-duration observation should be retained");
+    let boundary_record = snapshot
+        .boundaries
+        .iter()
+        .find(|record| record.id == boundary)
+        .expect("the registered boundary should be retained");
+    let attributed = boundary_record
+        .timings
+        .iter()
+        .find(|aggregate| aggregate.metric == TimingMetric::BoundaryInventory)
+        .expect("the admitted direct-duration attribution should be retained");
+    assert_eq!(global.samples, 1);
+    assert_eq!(global.samples, attributed.samples);
+}
+
+#[test]
+fn admitted_human_prose_policy_survives_session_drain() {
+    let _test_guard = collector_test_guard();
+    crate::timing::enabled::reset_detailed_prose_emissions_for_test();
+    let timing_session = start_test_command_session(
+        TimingCommandKind::Build,
+        crate::timing::TimerOutputMode::Verbose,
+    );
+    let boundary = crate::timing::register_timing_boundary(
+        crate::timing::TimingBoundaryKind::MainProject,
+        || "test-project".to_owned(),
+    );
+    let module = crate::timing::register_timing_module(boundary, 0, "entry", 1, 128);
+    let pause = crate::timing::enabled::runtime::pause_record_admission_for_test();
+
+    let recorder = std::thread::spawn(move || {
+        let mut start = crate::timing::start_pipeline_timing(TimingMetric::FrontendPrepare);
+        crate::timing::record_started_pipeline_timing_attributed(
+            TimingMetric::FrontendPrepare,
+            &mut start,
+            Some(crate::timing::TimingContext::for_module(module)),
+        )
+    });
+    if !wait_for_timing_flag(|| {
+        crate::timing::enabled::runtime::record_admission_reached_for_test()
+    }) {
+        pause.release();
+        let _ = recorder.join();
+        let _ = timing_session.finish();
+        panic!("the recorder should pause after admission");
+    }
+
+    let (finish_sender, finish_receiver) = std::sync::mpsc::channel();
+    let finisher = std::thread::spawn(move || {
+        finish_sender
+            .send(timing_session.finish())
+            .expect("the finish receiver should remain available");
+    });
+    if !wait_for_timing_flag(|| {
+        crate::timing::enabled::runtime::record_session_deactivated_for_test()
+    }) {
+        pause.release();
+        let _ = recorder.join();
+        let _ = finisher.join();
+        panic!("session finish should deactivate the fast-path bits before waiting");
+    }
+    assert!(
+        matches!(
+            finish_receiver.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        ),
+        "finish must wait for the pre-clock admitted span"
+    );
+
+    pause.release();
+    recorder
+        .join()
+        .expect("the admitted recorder should finish cleanly");
+    finisher
+        .join()
+        .expect("session drain must not panic while an admitted recorder finishes");
+    let snapshot = finish_receiver
+        .recv()
+        .expect("the drained session should publish its snapshot");
+
+    assert_eq!(
+        crate::timing::enabled::detailed_prose_emissions_for_test(),
+        1,
+        "the admitted verbose record must emit exactly one prose line"
+    );
+    assert_eq!(
+        timings_named(&snapshot, TimingMetric::FrontendPrepare).len(),
+        1
+    );
+    assert_eq!(
+        snapshot
+            .modules
+            .iter()
+            .flat_map(|module| module.timings.iter())
+            .find(|aggregate| aggregate.metric == TimingMetric::FrontendPrepare)
+            .expect("the pre-clock admitted module row should be retained")
+            .samples,
+        1
+    );
+
+    let next_session = start_test_command_session(TimingCommandKind::Build, timer_mode_summary());
+    let next_boundary = crate::timing::register_timing_boundary(
+        crate::timing::TimingBoundaryKind::MainProject,
+        || "next-project".to_owned(),
+    );
+    let next_module = crate::timing::register_timing_module(next_boundary, 0, "entry", 1, 128);
+    crate::timing::record_pipeline_timing_attributed(
+        TimingMetric::FrontendPrepare,
+        std::time::Duration::from_millis(3),
+        Some(crate::timing::TimingContext::for_module(next_module)),
+    );
+    let _ = next_session.finish();
+    assert_eq!(
+        crate::timing::enabled::detailed_prose_emissions_for_test(),
+        1,
+        "a later summary generation must not emit prose or alter the admitted decision"
     );
 }
 
@@ -262,6 +513,11 @@ fn attributed_slots_accept_only_registered_metric_kinds() {
         std::time::Duration::from_millis(4),
         Some(crate::timing::TimingContext::for_module(module)),
     );
+    crate::timing::record_pipeline_timing_attributed(
+        TimingMetric::FrontendPrepare,
+        std::time::Duration::from_millis(5),
+        Some(crate::timing::TimingContext::for_boundary(boundary)),
+    );
 
     let snapshot = timing_session.finish();
     let boundary_record = snapshot
@@ -287,6 +543,10 @@ fn attributed_slots_accept_only_registered_metric_kinds() {
     assert!(boundary_record.timings.iter().all(|aggregate| {
         aggregate.metric != TimingMetric::BoundaryCompile || aggregate.samples == 0
     }));
+    assert!(
+        timings_named(&snapshot, TimingMetric::BoundaryCompile).is_empty(),
+        "a wrong attribution context must not enter global storage"
+    );
     assert_eq!(
         module_record
             .timings
@@ -334,6 +594,66 @@ fn timing_scope_attributed_stores_context() {
     assert!(module_record.timings.iter().any(|aggregate| {
         aggregate.metric == TimingMetric::FrontendPrepare && aggregate.samples == 1
     }));
+    let global = timings_named(&snapshot, TimingMetric::FrontendPrepare)
+        .into_iter()
+        .next()
+        .expect("global module metric should be recorded");
+    let attributed = module_record
+        .timings
+        .iter()
+        .find(|aggregate| aggregate.metric == TimingMetric::FrontendPrepare)
+        .expect("module metric should have an attributed row");
+    assert_eq!(global.total, attributed.total);
+    assert_eq!(global.samples, attributed.samples);
+}
+
+#[test]
+fn attributed_metric_without_context_is_rejected_when_attribution_is_active() {
+    let _test_guard = collector_test_guard();
+    let timing_session = start_benchmark_collection(true).expect("timing session should start");
+
+    crate::timing::record_pipeline_timing_attributed(
+        TimingMetric::FrontendPrepare,
+        std::time::Duration::from_millis(3),
+        None,
+    );
+
+    let snapshot = timing_session.finish();
+    assert!(
+        timings_named(&snapshot, TimingMetric::FrontendPrepare).is_empty(),
+        "an attributed metric without context must not enter global storage"
+    );
+}
+
+#[test]
+fn direct_facade_rejects_attributed_metrics_without_context() {
+    let _test_guard = collector_test_guard();
+    let timing_session = start_benchmark_collection(true).expect("timing session should start");
+
+    let value = timed_stage!(TimingMetric::FrontendPrepare, 7);
+
+    let snapshot = timing_session.finish();
+    assert_eq!(value, 7);
+    assert!(
+        timings_named(&snapshot, TimingMetric::FrontendPrepare).is_empty(),
+        "the direct facade must reject attributed metrics without context"
+    );
+}
+
+#[test]
+fn metric_only_raw_sessions_accept_global_attributed_metrics() {
+    let _test_guard = collector_test_guard();
+    let timing_session = start_raw_benchmark_collection(true).expect("timing session should start");
+
+    let value = timed_stage!(TimingMetric::FrontendPrepare, 11);
+
+    let snapshot = timing_session.finish();
+    assert_eq!(value, 11);
+    assert_eq!(
+        timings_named(&snapshot, TimingMetric::FrontendPrepare).len(),
+        1,
+        "metric-only raw sessions must retain global attributed metrics"
+    );
 }
 
 #[test]
@@ -449,7 +769,7 @@ fn timed_stage_records_observation_and_runs_expression_once() {
 #[test]
 fn timed_ast_stage_records_exactly_once_without_double_recording() {
     let _test_guard = collector_test_guard();
-    let timing_session = start_benchmark_collection(true).expect("timing session should start");
+    let timing_session = start_raw_benchmark_collection(true).expect("timing session should start");
 
     let start = std::time::Instant::now();
     let duration = start.elapsed();
@@ -541,7 +861,7 @@ fn boundary_and_module_registration_is_dense_and_deterministic() {
 #[test]
 fn timed_stage_is_recorded_without_detailed_timers() {
     let _test_guard = collector_test_guard();
-    let timing_session = start_benchmark_collection(true).expect("timing session should start");
+    let timing_session = start_raw_benchmark_collection(true).expect("timing session should start");
 
     let value: u32 = timed_stage!(TimingMetric::FrontendHir, 42);
 
@@ -555,10 +875,7 @@ fn timed_stage_is_recorded_without_detailed_timers() {
 #[test]
 fn timed_stage_records_observation_when_detailed_timers_active() {
     let _test_guard = collector_test_guard();
-    let timing_session = start_test_command_session(
-        TimingCommandKind::Build,
-        crate::timing::TimerOutputMode::Verbose,
-    );
+    let timing_session = start_raw_benchmark_collection(true).expect("timing session should start");
 
     let value: u32 = timed_stage!(TimingMetric::FrontendHir, 42);
 
@@ -578,12 +895,12 @@ fn timed_stage_records_observation_when_detailed_timers_active() {
 #[test]
 fn nested_raw_start_returns_an_error_and_preserves_outer_session() {
     let _test_guard = collector_test_guard();
-    let outer = start_benchmark_collection(true).expect("timing session should start");
+    let outer = start_raw_benchmark_collection(true).expect("timing session should start");
     record_timing_via_facade(TimingMetric::BuildFrontendTotal);
 
     assert!(
         matches!(
-            start_benchmark_collection(true),
+            start_raw_benchmark_collection(true),
             Err(crate::timing::TimingSessionStartError::CollectorBusy)
         ),
         "a nested raw start must fail instead of recording into the outer session"
@@ -604,7 +921,7 @@ fn nested_raw_start_returns_an_error_and_preserves_outer_session() {
 #[test]
 fn stale_finish_cannot_drain_another_session() {
     let _test_guard = collector_test_guard();
-    let first = start_benchmark_collection(true).expect("timing session should start");
+    let first = start_raw_benchmark_collection(true).expect("timing session should start");
     record_timing_via_facade(TimingMetric::BuildFrontendTotal);
 
     let stale_snapshot = crate::timing::enabled::collector::finish_session(
@@ -627,11 +944,11 @@ fn stale_finish_cannot_drain_another_session() {
 fn dropped_unfinished_session_cleans_up_only_its_scope() {
     let _test_guard = collector_test_guard();
     {
-        let abandoned = start_benchmark_collection(true).expect("timing session should start");
+        let abandoned = start_raw_benchmark_collection(true).expect("timing session should start");
         assert!(abandoned.is_active());
     }
 
-    let next = start_benchmark_collection(true).expect("timing session should start");
+    let next = start_raw_benchmark_collection(true).expect("timing session should start");
     assert!(
         next.is_active(),
         "dropping an unfinished session must release the collector scope"
@@ -800,11 +1117,17 @@ fn bench_mode_command_session_collects_metrics_without_attribution() {
     );
     assert_eq!(boundary, crate::timing::NO_TIMING_BOUNDARY);
     record_timing_via_facade(TimingMetric::BuildFrontendTotal);
+    record_timing_via_facade(TimingMetric::ConfigAstTotal);
 
     let snapshot = session.finish();
     assert_eq!(
         timings_named(&snapshot, TimingMetric::BuildFrontendTotal).len(),
         1
+    );
+    assert_eq!(
+        timings_named(&snapshot, TimingMetric::ConfigAstTotal).len(),
+        1,
+        "bench mode must collect the schema's detailed evidence"
     );
     assert!(snapshot.boundaries.is_empty());
     assert!(snapshot.modules.is_empty());
@@ -878,6 +1201,74 @@ fn summary_mode_command_session_collects_snapshot() {
             .count(),
         1
     );
+}
+
+#[test]
+fn summary_mode_does_not_clock_or_record_detailed_metrics() {
+    let _test_guard = collector_test_guard();
+    let session = start_test_command_session(TimingCommandKind::Check, timer_mode_summary());
+    crate::timing::enabled::runtime::reset_timing_clock_reads_for_test();
+    crate::timing::enabled::collector::reset_lock_acquisitions_for_test();
+
+    let value = timed_stage!(TimingMetric::ConfigAstTotal, 42);
+
+    assert_eq!(value, 42);
+    assert_eq!(
+        crate::timing::enabled::runtime::timing_clock_reads_for_test(),
+        0,
+        "summary mode must not clock detailed schema metrics"
+    );
+    assert_eq!(
+        crate::timing::enabled::collector::lock_acquisitions_for_test(),
+        0,
+        "summary mode must not record detailed schema metrics"
+    );
+
+    let snapshot = session.finish();
+    assert_eq!(
+        snapshot
+            .timings
+            .iter()
+            .find(|aggregate| aggregate.metric == TimingMetric::ConfigAstTotal)
+            .expect("summary snapshots retain dense schema rows")
+            .samples,
+        0
+    );
+}
+
+#[test]
+fn command_admission_rejects_metrics_outside_command_scope() {
+    let _test_guard = collector_test_guard();
+    let rejected_records = [
+        (TimingCommandKind::Build, TimingMetric::CommandCheckTotal),
+        (TimingCommandKind::Check, TimingMetric::CommandBuildTotal),
+        (TimingCommandKind::Build, TimingMetric::CommandDevBuildWrite),
+        (TimingCommandKind::Check, TimingMetric::BuildBackendTotal),
+    ];
+
+    for (command, metric) in rejected_records {
+        let session = start_test_command_session(command, timer_mode_summary());
+        let outcome = crate::timing::enabled::collector::record_timing(
+            metric,
+            std::time::Duration::from_millis(1),
+        );
+
+        assert!(
+            !outcome.recorded,
+            "{metric:?} must be rejected for {command:?}"
+        );
+        let snapshot = session.finish();
+        assert_eq!(
+            snapshot
+                .timings
+                .iter()
+                .find(|aggregate| aggregate.metric == metric)
+                .expect("dense snapshots retain a row for every schema metric")
+                .samples,
+            0,
+            "rejected {metric:?} must not mutate the global aggregate"
+        );
+    }
 }
 
 #[test]
@@ -1019,7 +1410,7 @@ fn inactive_metrics_skip_pipeline_clock_and_collector_lock() {
 #[test]
 fn counter_metric_names_are_static_strings() {
     let _test_guard = collector_test_guard();
-    let session = start_benchmark_collection(true).expect("timing session should start");
+    let session = start_raw_benchmark_collection(true).expect("timing session should start");
     crate::timing::record_counter("test.counter", 3.0);
 
     let snapshot = session.finish();
@@ -1095,7 +1486,7 @@ fn silent_counter_summary_session_collects_counters_without_metric_clocks() {
 #[test]
 fn ast_stage_guard_records_on_drop_including_error_paths() {
     let _test_guard = collector_test_guard();
-    let session = start_benchmark_collection(true).expect("timing session should start");
+    let session = start_raw_benchmark_collection(true).expect("timing session should start");
 
     {
         timing_scope!(timing_guard, TimingMetric::FrontendAstFinalise);
@@ -1111,89 +1502,4 @@ fn ast_stage_guard_records_on_drop_including_error_paths() {
         1,
         "the AST stage guard must record when the scope ends, including error paths"
     );
-}
-
-#[test]
-fn multi_record_outcome_rejects_stale_contexts_before_snapshot_aggregation() {
-    let _test_guard = collector_test_guard();
-    let first = start_benchmark_collection(true).expect("first timing session should start");
-    let stale_boundary = crate::timing::register_timing_boundary(
-        crate::timing::TimingBoundaryKind::MainProject,
-        || "first-project".to_owned(),
-    );
-    let _ = first.finish();
-
-    let second = start_benchmark_collection(true).expect("second timing session should start");
-    let current_boundary = crate::timing::register_timing_boundary(
-        crate::timing::TimingBoundaryKind::MainProject,
-        || "second-project".to_owned(),
-    );
-    let entries = [
-        (
-            TimingMetric::BoundaryInventory,
-            Some(crate::timing::TimingContext::for_boundary(current_boundary)),
-        ),
-        (
-            TimingMetric::BoundaryCompile,
-            Some(crate::timing::TimingContext::for_boundary(stale_boundary)),
-        ),
-    ];
-
-    let outcome = crate::timing::enabled::collector::record_attributed_timing_multi(
-        &entries,
-        std::time::Duration::from_millis(7),
-    );
-
-    // The facade consults this predicate after releasing the collector lock.
-    // Completed-session snapshots own all stable benchmark output.
-    assert!(outcome.recorded_entry(entries[0].0, entries[0].1));
-    assert!(
-        !outcome.recorded_entry(entries[1].0, entries[1].1),
-        "a stale multi-record entry must be rejected before snapshot aggregation"
-    );
-
-    let snapshot = second.finish();
-    assert_eq!(
-        timings_named(&snapshot, TimingMetric::BoundaryInventory).len(),
-        1
-    );
-    assert!(
-        timings_named(&snapshot, TimingMetric::BoundaryCompile).is_empty(),
-        "a stale multi-record entry must not enter the active snapshot"
-    );
-}
-
-#[test]
-fn multi_record_uses_one_captured_duration() {
-    let _test_guard = collector_test_guard();
-    let session = start_benchmark_collection(true).expect("timing session should start");
-    crate::timing::enabled::collector::reset_lock_acquisitions_for_test();
-
-    crate::timing::record_pipeline_timing_multi(
-        &[
-            (TimingMetric::BoundaryInventory, None),
-            (TimingMetric::BoundaryCompile, None),
-        ],
-        std::time::Duration::from_millis(7),
-    );
-
-    assert_eq!(
-        crate::timing::enabled::collector::lock_acquisitions_for_test(),
-        0,
-        "a shared duration must update dense slots without a collector lock"
-    );
-
-    let snapshot = session.finish();
-    let first = snapshot
-        .timings
-        .iter()
-        .find(|observation| observation.metric == TimingMetric::BoundaryInventory)
-        .expect("first shared metric should be recorded");
-    let second = snapshot
-        .timings
-        .iter()
-        .find(|observation| observation.metric == TimingMetric::BoundaryCompile)
-        .expect("second shared metric should be recorded");
-    assert_eq!(first.total, std::time::Duration::from_millis(7));
-    assert_eq!(second.total, std::time::Duration::from_millis(7));
 }

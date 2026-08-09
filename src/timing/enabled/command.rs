@@ -22,7 +22,7 @@ pub(crate) fn start_command_session(command: TimingCommandKind) -> TimingSession
 ///
 /// A silent command with no counter channel intentionally owns no collector.
 /// A nested command stays an inactive token rather than replacing an outer
-/// outer collector; instrumentation tests use that outer session to inspect
+/// collector; instrumentation tests use that outer session to inspect
 /// command spans without rendering a competing report.
 fn start_command_session_with_config(
     command: TimingCommandKind,

@@ -31,14 +31,19 @@ pub(crate) use attribution::{
 pub(crate) use command::start_command_session_with_configuration;
 pub(crate) use command::{render_command_timing_summary, start_command_session};
 pub(crate) use guard::{
-    PipelineTimingGuard, PipelineTimingGuardAttributed, PipelineTimingGuardMulti,
-    PipelineTimingStart, record_started_pipeline_timing, record_started_pipeline_timing_attributed,
+    PipelineTimingGuard, PipelineTimingGuardAttributed, PipelineTimingStart,
+    record_started_pipeline_timing, record_started_pipeline_timing_attributed,
     start_pipeline_timing,
 };
 pub(crate) use runtime::TimerOutputMode;
 pub(crate) use schema::TimingMetric;
 pub(crate) use session::{TimingCommandKind, TimingSession, TimingSessionStartError};
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
+
+#[cfg(test)]
+static DETAILED_PROSE_EMISSIONS: AtomicUsize = AtomicUsize::new(0);
 
 // ---------------------------------------------------------------------------
 //  Snapshot types
@@ -61,6 +66,7 @@ pub(crate) struct TimingMetricAggregate {
 /// One named counter metric value captured during a benchmark collection scope.
 ///
 /// Counters remain `f64` values; only timing observations carry `Duration`.
+#[cfg(feature = "benchmark_counters")]
 #[derive(Debug, Clone)]
 pub(crate) struct BenchmarkObservationMetric {
     pub(crate) name: &'static str,
@@ -84,6 +90,7 @@ pub(crate) struct BenchmarkObservationSnapshot {
     #[allow(dead_code)]
     pub(crate) command: Option<TimingCommandKind>,
     pub(crate) timings: Vec<TimingMetricAggregate>,
+    #[cfg(feature = "benchmark_counters")]
     pub(crate) counters: Vec<BenchmarkObservationMetric>,
     /// Registered compilation boundaries in deterministic registration order.
     pub(crate) boundaries: Vec<TimingBoundaryRecord>,
@@ -143,16 +150,17 @@ pub(crate) fn record_counter(name: &'static str, value: f64) -> bool {
 
 /// Whether verbose human prose should print for one recorded event.
 ///
-/// Takes the suppression flag captured while recording so callers never
-/// take a second collector lock just to decide whether to print.
-pub(crate) fn detailed_prose_enabled(output_suppressed: bool) -> bool {
-    !output_suppressed && runtime::timer_human_prose_active()
+/// Takes the output and prose policy captured while recording so callers
+/// never reread mutable session state after the collector has drained.
+pub(crate) fn detailed_prose_enabled(output_suppressed: bool, human_prose_enabled: bool) -> bool {
+    !output_suppressed && human_prose_enabled
 }
 
 /// Whether verbose human prose is enabled for prose-only call sites.
 ///
 /// Used by developer logging macros that print without recording; the record
-/// paths use `detailed_prose_enabled` with the captured suppression flag.
+/// paths use `detailed_prose_enabled` with both captured policy flags.
+#[cfg(feature = "detailed_timers")]
 pub(crate) fn detailed_timer_output_enabled() -> bool {
     runtime::timer_human_prose_active() && collector::output_enabled()
 }
@@ -165,20 +173,33 @@ pub(crate) fn emit_detailed_metric_prose(
     metric: TimingMetric,
     duration: Duration,
     output_suppressed: bool,
+    human_prose_enabled: bool,
 ) {
     let Some(label) = metric.detailed_prose_label() else {
         return;
     };
 
-    if detailed_prose_enabled(output_suppressed) {
+    if detailed_prose_enabled(output_suppressed, human_prose_enabled) {
+        #[cfg(test)]
+        DETAILED_PROSE_EMISSIONS.fetch_add(1, Ordering::Relaxed);
         saying::say!(label, Green #duration);
     }
 }
 
+#[cfg(test)]
+pub(crate) fn reset_detailed_prose_emissions_for_test() {
+    DETAILED_PROSE_EMISSIONS.store(0, Ordering::Relaxed);
+}
+
+#[cfg(test)]
+pub(crate) fn detailed_prose_emissions_for_test() -> usize {
+    DETAILED_PROSE_EMISSIONS.load(Ordering::Relaxed)
+}
+
 /// Format the stable final aggregate records for one completed snapshot.
 ///
-/// WHAT: emits the schema header once, then one line for each non-empty
-///       aggregate in `TimingMetric::ALL` order.
+/// WHAT: emits the schema header once, then one line for each non-empty row in
+///       the dense snapshot's schema order.
 /// WHY: benchmark output must describe the completed collection rather than
 ///       perturbing measured stage bodies with per-event formatting.
 pub(crate) fn format_bench_timing_snapshot(snapshot: &BenchmarkObservationSnapshot) -> Vec<String> {
@@ -188,14 +209,7 @@ pub(crate) fn format_bench_timing_snapshot(snapshot: &BenchmarkObservationSnapsh
         snapshot.schema_version
     ));
 
-    for &metric in TimingMetric::ALL {
-        let Some(aggregate) = snapshot
-            .timings
-            .iter()
-            .find(|aggregate| aggregate.metric == metric)
-        else {
-            continue;
-        };
+    for aggregate in &snapshot.timings {
         if aggregate.samples == 0 {
             continue;
         }
@@ -203,7 +217,7 @@ pub(crate) fn format_bench_timing_snapshot(snapshot: &BenchmarkObservationSnapsh
         let millis = aggregate.total.as_secs_f64() * 1000.0;
         lines.push(format!(
             "MOTH_BENCH timing {}={}ms",
-            metric.descriptor().stable_name,
+            aggregate.metric.descriptor().stable_name,
             millis
         ));
     }
@@ -220,17 +234,37 @@ pub(crate) fn emit_bench_timing_snapshot(snapshot: &BenchmarkObservationSnapshot
 
 /// Record a pipeline-stage timing.
 ///
-/// Used by the `timed_stage!` macro. Stable benchmark output is emitted only
-/// after the owning session finishes; detailed prose still uses the captured
-/// duration at the semantic recording endpoint.
+/// Used by the already-captured-duration facade. Stable benchmark output is
+/// emitted only after the owning session finishes; detailed prose still uses
+/// the supplied duration at the semantic recording endpoint.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn record_pipeline_timing(metric: TimingMetric, duration: Duration) -> bool {
-    if !runtime::metrics_active() {
-        return false;
-    }
-
     let outcome = collector::record_timing(metric, duration);
+    finish_recorded_timing(metric, duration, outcome)
+}
+
+/// Record a span using admission retained from before its clock started.
+pub(crate) fn record_pipeline_timing_with_admission(
+    metric: TimingMetric,
+    duration: Duration,
+    admission: runtime::TimingRecordAdmission,
+) -> bool {
+    let outcome = collector::record_timing_with_admission(metric, duration, admission);
+    finish_recorded_timing(metric, duration, outcome)
+}
+
+fn finish_recorded_timing(
+    metric: TimingMetric,
+    duration: Duration,
+    outcome: collector::TimingRecordOutcome,
+) -> bool {
     if outcome.recorded {
-        emit_detailed_metric_prose(metric, duration, outcome.output_suppressed);
+        emit_detailed_metric_prose(
+            metric,
+            duration,
+            outcome.output_suppressed,
+            outcome.human_prose_enabled,
+        );
     }
     outcome.output_suppressed
 }
@@ -310,52 +344,51 @@ pub(crate) fn finalize_timing_module_source_facts(
 ///      boundary/module accumulator named by the compact context.
 /// WHY:  the basic summary reads deterministic metadata records after the
 ///       session drains; identities never appear in stable benchmark lines.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn record_pipeline_timing_attributed(
     metric: TimingMetric,
     duration: Duration,
     context: Option<TimingContext>,
 ) -> bool {
-    if !runtime::metrics_active() {
-        return false;
-    }
-
     let outcome = collector::record_attributed_timing(metric, duration, context);
-    if outcome.recorded {
-        emit_detailed_metric_prose(metric, duration, outcome.output_suppressed);
-    }
-    outcome.output_suppressed
+    finish_recorded_timing(metric, duration, outcome)
 }
 
-/// Record several metrics from one captured duration.
-///
-/// Used when two stable metrics intentionally share one measurement boundary,
-/// so the second metric never includes the first record's overhead.
-// This facade path remains available to the multi-metric macro. Library
-// targets do not expand that macro themselves, so Clippy cannot see its
-// production call sites.
-#[allow(dead_code)]
-pub(crate) fn record_pipeline_timing_multi(
-    entries: &[(TimingMetric, Option<TimingContext>)],
+/// Record an attributed span using admission retained from before its clock
+/// started.
+pub(crate) fn record_pipeline_timing_attributed_with_admission(
+    metric: TimingMetric,
     duration: Duration,
+    context: Option<TimingContext>,
+    admission: runtime::TimingRecordAdmission,
 ) -> bool {
-    if !runtime::metrics_active() {
-        return false;
-    }
-
-    let outcome = collector::record_attributed_timing_multi(entries, duration);
-    for &(metric, context) in entries {
-        if outcome.recorded_entry(metric, context) {
-            emit_detailed_metric_prose(metric, duration, outcome.output_suppressed);
-        }
-    }
-    outcome.output_suppressed
+    let outcome =
+        collector::record_attributed_timing_with_admission(metric, duration, context, admission);
+    finish_recorded_timing(metric, duration, outcome)
 }
 
-/// Whether the active session retains timing attribution metadata.
+/// Record an already-captured duration with lazily constructed attribution.
 ///
-/// The facade uses this before evaluating context expressions so benchmark
-/// callers that requested metric-only collection avoid building unused module
-/// or boundary context.
-pub(crate) fn timing_attribution_active() -> bool {
-    runtime::attribution_active()
+/// WHAT: acquires the generation-stable admission before evaluating the
+///      context expression, then records through that exact admission.
+/// WHY: direct-duration macros cannot let a mutable session bit decide
+///      attribution before admission because a drain may begin between those
+///      operations.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn record_pipeline_timing_attributed_lazy(
+    metric: TimingMetric,
+    duration: Duration,
+    context: impl FnOnce() -> Option<TimingContext>,
+) -> bool {
+    let Some(admission) = runtime::begin_metric_record(metric) else {
+        return false;
+    };
+    let context = if admission.attribution_active() {
+        context()
+    } else {
+        None
+    };
+    let outcome =
+        collector::record_attributed_timing_with_admission(metric, duration, context, admission);
+    finish_recorded_timing(metric, duration, outcome)
 }

@@ -53,7 +53,7 @@ impl DetailedTimerStart {
 
 #[cfg(feature = "detailed_timers")]
 pub(crate) fn start_detailed_timer() -> DetailedTimerStart {
-    if !enabled::runtime::detailed_active() {
+    if !enabled::runtime::timer_human_prose_active() {
         return DetailedTimerStart(None);
     }
 
@@ -71,18 +71,23 @@ mod enabled;
 /// lib-only builds where the collector paths are exercised only by tests.
 #[allow(unused_imports)]
 pub(crate) use enabled::{
-    BenchmarkObservationMetric, BenchmarkObservationSnapshot, NO_TIMING_BOUNDARY,
-    PipelineTimingGuard, PipelineTimingGuardAttributed, PipelineTimingGuardMulti,
-    PipelineTimingStart, TimerOutputMode, TimingBoundaryId, TimingBoundaryKind,
-    TimingBoundaryRecord, TimingCommandKind, TimingContext, TimingMetric, TimingMetricAggregate,
-    TimingModuleKey, TimingModuleRecord, TimingSession, TimingSessionStartError,
-    detailed_prose_enabled, detailed_timer_output_enabled, emit_detailed_metric_prose,
+    BenchmarkObservationSnapshot, NO_TIMING_BOUNDARY, PipelineTimingGuard,
+    PipelineTimingGuardAttributed, PipelineTimingStart, TimerOutputMode, TimingBoundaryId,
+    TimingBoundaryKind, TimingBoundaryRecord, TimingCommandKind, TimingContext, TimingMetric,
+    TimingMetricAggregate, TimingModuleKey, TimingModuleRecord, TimingSession,
+    TimingSessionStartError, detailed_prose_enabled, emit_detailed_metric_prose,
     finalize_timing_module_source_facts, record_pipeline_timing, record_pipeline_timing_attributed,
-    record_pipeline_timing_multi, record_started_pipeline_timing,
+    record_pipeline_timing_attributed_lazy, record_started_pipeline_timing,
     record_started_pipeline_timing_attributed, register_timing_boundary, register_timing_module,
     register_timing_module_for_preparation, render_command_timing_summary, start_command_session,
-    start_pipeline_timing, start_raw_benchmark_collection, timing_attribution_active,
+    start_pipeline_timing, start_raw_benchmark_collection,
 };
+
+#[cfg(all(feature = "timers", feature = "detailed_timers"))]
+pub(crate) use enabled::detailed_timer_output_enabled;
+
+#[cfg(all(feature = "timers", feature = "benchmark_counters", test))]
+pub(crate) use enabled::BenchmarkObservationMetric;
 
 #[cfg(all(feature = "timers", test))]
 pub(crate) use enabled::start_benchmark_collection;
@@ -292,11 +297,10 @@ macro_rules! counter_observation {
 #[cfg(feature = "timers")]
 macro_rules! timed_stage {
     ($metric:expr, $expression:expr $(,)?) => {{
-        let timing_start = $crate::timing::start_pipeline_timing();
+        let timing_metric = $metric;
+        let mut timing_start = $crate::timing::start_pipeline_timing(timing_metric);
         let timing_result = $expression;
-        if let Some(elapsed) = timing_start.elapsed() {
-            $crate::timing::record_pipeline_timing($metric, elapsed);
-        }
+        $crate::timing::record_started_pipeline_timing(timing_metric, &mut timing_start);
         timing_result
     }};
 }
@@ -315,16 +319,19 @@ macro_rules! timed_stage {
 #[cfg(feature = "timers")]
 macro_rules! timed_stage_attributed {
     ($metric:expr, $context:expr, $expression:expr $(,)?) => {{
-        let timing_start = $crate::timing::start_pipeline_timing();
+        let timing_metric = $metric;
+        let mut timing_start = $crate::timing::start_pipeline_timing(timing_metric);
         let timing_result = $expression;
-        if let Some(elapsed) = timing_start.elapsed() {
-            let timing_context = if $crate::timing::timing_attribution_active() {
-                $context
-            } else {
-                None
-            };
-            $crate::timing::record_pipeline_timing_attributed($metric, elapsed, timing_context);
-        }
+        let timing_context = if timing_start.attribution_active() {
+            $context
+        } else {
+            None
+        };
+        $crate::timing::record_started_pipeline_timing_attributed(
+            timing_metric,
+            &mut timing_start,
+            timing_context,
+        );
         timing_result
     }};
 }
@@ -353,24 +360,6 @@ macro_rules! timing_scope {
     ($binding:ident, $metric:expr $(,)?) => {};
 }
 
-/// Start a named scope guard that records several metrics from one duration.
-///
-/// The entries slice is only evaluated while `timers` is active.
-#[macro_export]
-#[cfg(feature = "timers")]
-macro_rules! timing_scope_multi {
-    ($binding:ident, $entries:expr $(,)?) => {
-        #[allow(unused_variables)]
-        let $binding = $crate::timing::PipelineTimingGuardMulti::new($entries);
-    };
-}
-
-#[macro_export]
-#[cfg(not(feature = "timers"))]
-macro_rules! timing_scope_multi {
-    ($binding:ident, $entries:expr $(,)?) => {};
-}
-
 /// Start a named scope guard that records an attributed metric when the scope
 /// ends.
 #[macro_export]
@@ -378,14 +367,7 @@ macro_rules! timing_scope_multi {
 macro_rules! timing_scope_attributed {
     ($binding:ident, $metric:expr, $context:expr $(,)?) => {
         #[allow(unused_variables)]
-        let $binding = $crate::timing::PipelineTimingGuardAttributed::new(
-            $metric,
-            if $crate::timing::timing_attribution_active() {
-                $context
-            } else {
-                None
-            },
-        );
+        let $binding = $crate::timing::PipelineTimingGuardAttributed::new($metric, || $context);
     };
 }
 
@@ -417,11 +399,7 @@ macro_rules! record_timing_duration {
 #[cfg(feature = "timers")]
 macro_rules! record_attributed_duration {
     ($metric:expr, $duration:expr, $context:expr) => {
-        if $crate::timing::timing_attribution_active() {
-            $crate::timing::record_pipeline_timing_attributed($metric, $duration, $context)
-        } else {
-            $crate::timing::record_pipeline_timing_attributed($metric, $duration, None)
-        }
+        $crate::timing::record_pipeline_timing_attributed_lazy($metric, $duration, || $context)
     };
 }
 

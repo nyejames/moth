@@ -229,7 +229,8 @@ timing_metrics! {
 // `build.backend.total`: complete selected backend build.
     BuildBackendTotal, "build.backend.total", Basic, WallSpan, None, BuildOrDev, BuildSystem,
         None, TimingAccountingRole::Pipeline(TimingPipelineStage::Backend);
-// `build.output.total`: complete output orchestration.
+// `build.output.total`: output planning and filesystem writing, excluding
+// terminal rendering owned by the command.
     BuildOutputTotal, "build.output.total", Basic, WallSpan, None, BuildOrDev, BuildSystem,
         None, TimingAccountingRole::Pipeline(TimingPipelineStage::Output);
 // `stage0.directory.inventory`: directory graph, source and module

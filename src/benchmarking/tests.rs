@@ -178,12 +178,16 @@ fn frontend_benchmark_rejects_a_busy_raw_session_before_compilation() {
     );
 
     let outer_snapshot = outer.finish();
+    #[cfg(feature = "benchmark_counters")]
+    let counters_empty = outer_snapshot.counters.is_empty();
+    #[cfg(not(feature = "benchmark_counters"))]
+    let counters_empty = true;
     assert!(
         outer_snapshot
             .timings
             .iter()
             .all(|aggregate| aggregate.samples == 0)
-            && outer_snapshot.counters.is_empty(),
+            && counters_empty,
         "the rejected benchmark must not record path or compiler work into the outer session"
     );
 }

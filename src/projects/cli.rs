@@ -32,6 +32,11 @@ use std::{env, process};
 /// Build-profile flags accepted by both `build` and `dev`.
 const BUILD_FLAGS: &[&str] = &["--release", "--html-wasm"];
 
+enum BuildOutputStageError {
+    OutputPlan(CompilerError),
+    Write(CompilerMessages),
+}
+
 #[derive(Debug, PartialEq, Eq)]
 enum Command {
     NewHTMLProject(NewHtmlProjectOptions), // Creates a new HTML project template
@@ -179,34 +184,37 @@ fn run_build_command_with_output_plan(
     let (status, diagnostic_counts) = match build::build_project(&project_builder, path, flags) {
         Ok(mut build_result) => {
             // Output planning and filesystem emission form one build-pipeline
-            // segment. The nested writer records its own `output.write.total`
-            // evidence without becoming a second additive command child.
-            timing_scope!(
-                timing_guard_build_output_total,
-                crate::timing::TimingMetric::BuildOutputTotal
+            // segment. Terminal diagnostics and success rendering remain part
+            // of the command total, not this output orchestration span.
+            let output_result = crate::timed_stage!(
+                crate::timing::TimingMetric::BuildOutputTotal,
+                (|| {
+                    let output_plan = output_plan_builder(&mut build_result)
+                        .map_err(BuildOutputStageError::OutputPlan)?;
+                    write_project_outputs(
+                        &build_result.project,
+                        &WriteOptions {
+                            output_plan,
+                            write_mode: WriteMode::AlwaysWrite,
+                        },
+                        &build_result.string_table,
+                    )
+                    .map_err(BuildOutputStageError::Write)
+                })()
             );
-            match output_plan_builder(&mut build_result) {
-                Ok(output_plan) => match write_project_outputs(
-                    &build_result.project,
-                    &WriteOptions {
-                        output_plan,
-                        write_mode: WriteMode::AlwaysWrite,
-                    },
-                    &build_result.string_table,
-                ) {
-                    Ok(()) => {
-                        let duration = start.elapsed();
-                        let warning_count = build_result.warnings.len();
-                        print_build_message(build_result, duration);
-                        (CommandStatus::Success, Some((0, warning_count)))
-                    }
-                    Err(mut messages) => {
-                        messages.extend_diagnostics(build_result.warnings);
-                        print_compiler_messages(messages);
-                        (CommandStatus::Failure, None)
-                    }
-                },
-                Err(error) => {
+            match output_result {
+                Ok(()) => {
+                    let duration = start.elapsed();
+                    let warning_count = build_result.warnings.len();
+                    print_build_message(build_result, duration);
+                    (CommandStatus::Success, Some((0, warning_count)))
+                }
+                Err(BuildOutputStageError::Write(mut messages)) => {
+                    messages.extend_diagnostics(build_result.warnings);
+                    print_compiler_messages(messages);
+                    (CommandStatus::Failure, None)
+                }
+                Err(BuildOutputStageError::OutputPlan(error)) => {
                     print_formatted_error(error, &build_result.string_table);
                     (CommandStatus::Failure, None)
                 }

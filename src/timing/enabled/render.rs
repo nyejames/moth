@@ -122,7 +122,7 @@ fn render_slowest_module(slowest_module: &TimingSlowestModuleSummary) {
 
     let identity = truncate_logical_identity(slowest_module.identity.as_ref());
     let file_word = module_file_word(slowest_module.source_file_count);
-    let size = format!("{:.1}KB", slowest_module.source_byte_count as f64 / 1024.0);
+    let size = format!("{:.1}KiB", slowest_module.source_byte_count as f64 / 1024.0);
     let value = format_duration(slowest_module.total);
     saying::say!(
         identity,
@@ -201,7 +201,7 @@ fn boundary_module_word(module_count: u64) -> String {
 pub(crate) fn slowest_module_text(slowest_module: &TimingSlowestModuleSummary) -> String {
     let file_word = module_file_word(slowest_module.source_file_count);
     format!(
-        "{}  {} · {} · {:.1}KB",
+        "{}  {} · {} · {:.1}KiB",
         truncate_logical_identity(slowest_module.identity.as_ref()),
         format_duration(slowest_module.total),
         file_word,

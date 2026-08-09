@@ -621,12 +621,30 @@ fn project_build_executor_preserves_warnings_when_output_write_fails() {
     let entry_file = root.join("main.moth");
     fs::write(&entry_file, "value = 1\n").expect("should write source file");
 
+    #[cfg(feature = "timers")]
+    let timing_session =
+        crate::timing::start_raw_benchmark_collection(true).expect("timing session should start");
     let mut executor =
         ProjectBuildExecutor::new(ProjectBuilder::new(Box::new(InvalidOutputWarningBuilder)));
     let messages = match executor.build_and_write(&entry_file, &[]) {
         Ok(_) => panic!("invalid output path should fail writing"),
         Err(messages) => messages,
     };
+
+    #[cfg(feature = "timers")]
+    let timing_snapshot = timing_session.finish();
+
+    #[cfg(feature = "timers")]
+    assert_eq!(
+        timing_snapshot
+            .timings
+            .iter()
+            .find(|observation| observation.metric.descriptor().stable_name == "build.output.total")
+            .expect("failed dev output writes retain a dense output-total row")
+            .samples,
+        1,
+        "the failed output-plan/write span must finish before warning extension"
+    );
 
     assert_eq!(messages.error_count(), 1);
     let warnings: Vec<_> = messages.warnings().collect();
@@ -668,9 +686,27 @@ fn project_build_executor_writes_the_validated_directory_plan() {
 
     let mut executor =
         ProjectBuildExecutor::new(ProjectBuilder::new(Box::new(HtmlProjectBuilder::new())));
+    #[cfg(feature = "timers")]
+    let timing_session =
+        crate::timing::start_raw_benchmark_collection(true).expect("timing session should start");
     let build_result = executor
         .build_and_write(&root, &[])
         .expect("directory dev build should succeed");
+
+    #[cfg(feature = "timers")]
+    let timing_snapshot = timing_session.finish();
+
+    #[cfg(feature = "timers")]
+    assert_eq!(
+        timing_snapshot
+            .timings
+            .iter()
+            .find(|observation| observation.metric.descriptor().stable_name == "build.output.total")
+            .expect("successful dev output writes retain a dense output-total row")
+            .samples,
+        1,
+        "the output-plan/filesystem-write span must finish before the executor returns"
+    );
 
     assert_eq!(
         build_result
@@ -716,11 +752,25 @@ fn dev_cycle_records_build_and_write_and_drains_one_collection_per_build() {
             snapshot
                 .timings
                 .iter()
-                .filter(|observation| observation.metric.descriptor().stable_name
-                    == "command.dev.build_write")
-                .count(),
+                .find(|observation| {
+                    observation.metric.descriptor().stable_name == "command.dev.build_write"
+                })
+                .expect("each dev cycle must retain a dense build/write row")
+                .samples,
             1,
             "each dev cycle records exactly one build-and-write observation"
+        );
+        assert_eq!(
+            snapshot
+                .timings
+                .iter()
+                .find(|observation| {
+                    observation.metric.descriptor().stable_name == "build.output.total"
+                })
+                .expect("each dev cycle must retain a dense output-total row")
+                .samples,
+            1,
+            "each dev cycle records one output-plan/filesystem-write observation"
         );
     }
     #[cfg(feature = "detailed_timers")]
@@ -729,9 +779,11 @@ fn dev_cycle_records_build_and_write_and_drains_one_collection_per_build() {
             first_snapshot
                 .timings
                 .iter()
-                .filter(|observation| observation.metric.descriptor().stable_name
-                    == "command.dev.cycle")
-                .count(),
+                .find(|observation| {
+                    observation.metric.descriptor().stable_name == "command.dev.cycle"
+                })
+                .expect("the first dev cycle must retain a dense cycle row")
+                .samples,
             1,
             "each dev cycle records exactly one full-cycle observation"
         );
@@ -739,9 +791,11 @@ fn dev_cycle_records_build_and_write_and_drains_one_collection_per_build() {
             second_snapshot
                 .timings
                 .iter()
-                .filter(|observation| observation.metric.descriptor().stable_name
-                    == "command.dev.cycle")
-                .count(),
+                .find(|observation| {
+                    observation.metric.descriptor().stable_name == "command.dev.cycle"
+                })
+                .expect("the second dev cycle must retain a dense cycle row")
+                .samples,
             1,
             "cycle observations must not leak across builds"
         );
@@ -769,6 +823,21 @@ fn failed_dev_build_still_drains_timing_snapshot() {
     assert!(
         report.timing_snapshot.is_some(),
         "a failed dev build must still drain its timing collection"
+    );
+    assert_eq!(
+        report
+            .timing_snapshot
+            .as_ref()
+            .expect("failed dev builds retain their timing snapshot")
+            .timings
+            .iter()
+            .find(|observation| {
+                observation.metric.descriptor().stable_name == "command.dev.build_write"
+            })
+            .expect("the dev build/write total must retain a dense row")
+            .samples,
+        1,
+        "the failed executor call must finish the dev build/write span before formatting errors"
     );
 
     fs::remove_dir_all(&root).expect("should remove temp dir");

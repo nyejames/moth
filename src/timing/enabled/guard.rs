@@ -7,55 +7,88 @@
 
 use super::schema::TimingMetric;
 use super::{
-    TimingContext, record_pipeline_timing, record_pipeline_timing_attributed,
-    record_pipeline_timing_multi,
+    TimingContext, record_pipeline_timing_attributed_with_admission,
+    record_pipeline_timing_with_admission,
 };
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 /// Opaque start token for manually timed pipeline stages.
 ///
-/// The token carries an `Instant` only while the metrics channel is active.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct PipelineTimingStart(Option<Instant>);
+/// The token carries a clock and its metric-aware admission while the metrics
+/// channel is active. Holding the admission through the expression keeps the
+/// session drain from clearing or replacing the policy before completion.
+#[derive(Debug)]
+pub(crate) struct PipelineTimingStart {
+    started_at: Option<Instant>,
+    admission: Option<super::runtime::TimingRecordAdmission>,
+}
 
 impl PipelineTimingStart {
-    /// Return the captured duration when this session enabled metric timing.
-    pub(crate) fn elapsed(&self) -> Option<Duration> {
-        self.0.map(|start| start.elapsed())
+    fn inactive() -> Self {
+        Self {
+            started_at: None,
+            admission: None,
+        }
+    }
+
+    /// Whether this start retained attribution metadata for its session.
+    pub(crate) fn attribution_active(&self) -> bool {
+        self.admission
+            .as_ref()
+            .is_some_and(|admission| admission.attribution_active())
+    }
+
+    fn take(&mut self) -> Option<(Instant, super::runtime::TimingRecordAdmission)> {
+        match (self.started_at.take(), self.admission.take()) {
+            (Some(started_at), Some(admission)) => Some((started_at, admission)),
+            _ => None,
+        }
     }
 }
 
-/// Start a manually recorded pipeline stage only when metrics are active.
-pub(crate) fn start_pipeline_timing() -> PipelineTimingStart {
-    if !super::runtime::metrics_active() {
-        return PipelineTimingStart(None);
-    }
+/// Start a manually recorded pipeline stage only when this metric is active.
+pub(crate) fn start_pipeline_timing(metric: TimingMetric) -> PipelineTimingStart {
+    let Some(admission) = super::runtime::begin_metric_record(metric) else {
+        return PipelineTimingStart::inactive();
+    };
 
     #[cfg(test)]
     super::runtime::record_timing_clock_read_for_test();
 
-    PipelineTimingStart(Some(Instant::now()))
+    PipelineTimingStart {
+        started_at: Some(Instant::now()),
+        admission: Some(admission),
+    }
 }
 
 /// Record a manually timed pipeline stage from a previously captured start.
 pub(crate) fn record_started_pipeline_timing(
     metric: TimingMetric,
-    start: PipelineTimingStart,
+    start: &mut PipelineTimingStart,
 ) -> bool {
-    start
-        .elapsed()
-        .is_some_and(|duration| record_pipeline_timing(metric, duration))
+    let Some((started_at, admission)) = start.take() else {
+        return false;
+    };
+
+    record_pipeline_timing_with_admission(metric, started_at.elapsed(), admission)
 }
 
 /// Record a manually timed pipeline stage with attribution context.
 pub(crate) fn record_started_pipeline_timing_attributed(
     metric: TimingMetric,
-    start: PipelineTimingStart,
+    start: &mut PipelineTimingStart,
     context: Option<TimingContext>,
 ) -> bool {
-    start
-        .elapsed()
-        .is_some_and(|duration| record_pipeline_timing_attributed(metric, duration, context))
+    let Some((started_at, admission)) = start.take() else {
+        return false;
+    };
+
+    record_pipeline_timing_attributed_with_admission(
+        metric,
+        started_at.elapsed(),
+        context,
+        admission,
+    )
 }
 
 /// RAII guard that records one metric when dropped.
@@ -70,14 +103,14 @@ impl PipelineTimingGuard {
     pub(crate) fn new(metric: TimingMetric) -> Self {
         Self {
             metric,
-            start: start_pipeline_timing(),
+            start: start_pipeline_timing(metric),
             finished: false,
         }
     }
 
     /// Record the stage now and suppress the drop record.
     pub(crate) fn finish(mut self) {
-        record_started_pipeline_timing(self.metric, self.start);
+        record_started_pipeline_timing(self.metric, &mut self.start);
         self.finished = true;
     }
 }
@@ -85,7 +118,7 @@ impl PipelineTimingGuard {
 impl Drop for PipelineTimingGuard {
     fn drop(&mut self) {
         if !self.finished {
-            record_started_pipeline_timing(self.metric, self.start);
+            record_started_pipeline_timing(self.metric, &mut self.start);
         }
     }
 }
@@ -100,10 +133,20 @@ pub(crate) struct PipelineTimingGuardAttributed {
 
 impl PipelineTimingGuardAttributed {
     /// Start an attributed stage that records when the guard drops.
-    pub(crate) fn new(metric: TimingMetric, context: Option<TimingContext>) -> Self {
+    pub(crate) fn new(
+        metric: TimingMetric,
+        context: impl FnOnce() -> Option<TimingContext>,
+    ) -> Self {
+        let start = start_pipeline_timing(metric);
+        let context = if start.attribution_active() {
+            context()
+        } else {
+            None
+        };
+
         Self {
             metric,
-            start: start_pipeline_timing(),
+            start,
             context,
             finished: false,
         }
@@ -111,7 +154,7 @@ impl PipelineTimingGuardAttributed {
 
     /// Record the stage now and suppress the drop record.
     pub(crate) fn finish(mut self) {
-        record_started_pipeline_timing_attributed(self.metric, self.start, self.context);
+        record_started_pipeline_timing_attributed(self.metric, &mut self.start, self.context);
         self.finished = true;
     }
 }
@@ -119,49 +162,7 @@ impl PipelineTimingGuardAttributed {
 impl Drop for PipelineTimingGuardAttributed {
     fn drop(&mut self) {
         if !self.finished {
-            record_started_pipeline_timing_attributed(self.metric, self.start, self.context);
-        }
-    }
-}
-
-/// RAII guard that records several metrics from one captured duration.
-//
-// This guard is instantiated through the exported `timing_scope_multi!` macro.
-// The library target does not expand that macro itself, so the implementation
-// appears unused to Clippy even though it remains part of the facade contract.
-#[allow(dead_code)]
-pub(crate) struct PipelineTimingGuardMulti<'entries> {
-    entries: &'entries [(TimingMetric, Option<TimingContext>)],
-    start: PipelineTimingStart,
-    finished: bool,
-}
-
-#[allow(dead_code)]
-impl<'entries> PipelineTimingGuardMulti<'entries> {
-    /// Start a shared measurement boundary for several typed metrics.
-    pub(crate) fn new(entries: &'entries [(TimingMetric, Option<TimingContext>)]) -> Self {
-        Self {
-            entries,
-            start: start_pipeline_timing(),
-            finished: false,
-        }
-    }
-
-    /// Record the shared duration now and suppress the drop record.
-    pub(crate) fn finish(mut self) {
-        if let Some(duration) = self.start.elapsed() {
-            record_pipeline_timing_multi(self.entries, duration);
-        }
-        self.finished = true;
-    }
-}
-
-impl Drop for PipelineTimingGuardMulti<'_> {
-    fn drop(&mut self) {
-        if !self.finished
-            && let Some(duration) = self.start.elapsed()
-        {
-            record_pipeline_timing_multi(self.entries, duration);
+            record_started_pipeline_timing_attributed(self.metric, &mut self.start, self.context);
         }
     }
 }

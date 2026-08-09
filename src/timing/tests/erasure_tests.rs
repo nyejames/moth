@@ -221,17 +221,6 @@ fn timer_facade_sources_never_use_cfg_timer_macro() {
 }
 
 #[test]
-fn timing_scope_multi_does_not_evaluate_entries() {
-    let entries_evaluated = evaluation_counter();
-    timing_scope_multi!(timing_guard, {
-        entries_evaluated.set(entries_evaluated.get() + 1);
-        &[]
-    });
-
-    assert_eq!(entries_evaluated.get(), 0);
-}
-
-#[test]
 fn command_timing_scope_does_not_evaluate_command_expression() {
     let command_evaluated = evaluation_counter();
     command_timing_scope!(timing_session, {

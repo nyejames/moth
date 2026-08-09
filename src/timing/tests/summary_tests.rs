@@ -34,6 +34,7 @@ fn snapshot_with(entries: &[(TimingMetric, f64)]) -> BenchmarkObservationSnapsho
             .collect(),
         schema_version: 1,
         command: None,
+        #[cfg(feature = "benchmark_counters")]
         counters: Vec::new(),
         boundaries: Vec::new(),
         modules: Vec::new(),
@@ -896,7 +897,7 @@ fn model_supports_dynamic_boundary_and_slowest_module_labels() {
     let slowest_module = slowest_module_item(&report).expect("slowest module should exist");
     assert_eq!(
         slowest_module_text(slowest_module),
-        "@docs/progress  16.00ms · 1 file · 43.9KB"
+        "@docs/progress  16.00ms · 1 file · 43.9KiB"
     );
 }
 
@@ -1008,6 +1009,7 @@ fn boundary_rows_separate_packages_and_project_totals() {
         schema_version: 1,
         command: Some(TimingCommandKind::Build),
         timings: vec![aggregate(TimingMetric::CommandBuildTotal, 500.0)],
+        #[cfg(feature = "benchmark_counters")]
         counters: Vec::new(),
         boundaries: vec![
             boundary_record_with_timings(
@@ -1050,6 +1052,7 @@ fn boundary_rows_follow_registration_order() {
         schema_version: 1,
         command: Some(TimingCommandKind::Build),
         timings: vec![aggregate(TimingMetric::CommandBuildTotal, 100.0)],
+        #[cfg(feature = "benchmark_counters")]
         counters: Vec::new(),
         boundaries: vec![
             boundary_record_with_timings(0, "@zeta", 1, &[(TimingMetric::BoundaryCompile, 1.0)]),
@@ -1092,6 +1095,7 @@ fn same_module_index_in_two_boundaries_does_not_collide() {
         schema_version: 1,
         command: Some(TimingCommandKind::Build),
         timings: vec![aggregate(TimingMetric::CommandBuildTotal, 100.0)],
+        #[cfg(feature = "benchmark_counters")]
         counters: Vec::new(),
         boundaries: vec![
             boundary_record(0, "@html", 1),
@@ -1132,6 +1136,7 @@ fn shuffled_events_do_not_change_boundary_or_slowest_module() {
         schema_version: 1,
         command: Some(TimingCommandKind::Build),
         timings: vec![aggregate(TimingMetric::CommandBuildTotal, 100.0)],
+        #[cfg(feature = "benchmark_counters")]
         counters: Vec::new(),
         boundaries: vec![boundary_record_with_timings(
             0,
@@ -1158,6 +1163,7 @@ fn shuffled_events_do_not_change_boundary_or_slowest_module() {
         schema_version: 1,
         command: Some(TimingCommandKind::Build),
         timings: vec![aggregate(TimingMetric::CommandBuildTotal, 100.0)],
+        #[cfg(feature = "benchmark_counters")]
         counters: Vec::new(),
         boundaries: vec![boundary_record_with_timings(
             0,
@@ -1194,6 +1200,7 @@ fn slowest_module_uses_preparation_plus_semantic_total() {
         schema_version: 1,
         command: Some(TimingCommandKind::Build),
         timings: vec![aggregate(TimingMetric::CommandBuildTotal, 100.0)],
+        #[cfg(feature = "benchmark_counters")]
         counters: Vec::new(),
         boundaries: vec![boundary_record(0, "moth_docs", 2)],
         modules: vec![
@@ -1247,6 +1254,7 @@ fn slowest_module_ignores_unfinished_source_facts() {
         schema_version: 1,
         command: Some(TimingCommandKind::Build),
         timings: vec![aggregate(TimingMetric::CommandBuildTotal, 100.0)],
+        #[cfg(feature = "benchmark_counters")]
         counters: Vec::new(),
         boundaries: vec![boundary_record(0, "moth_docs", 2)],
         modules: vec![
@@ -1278,6 +1286,7 @@ fn slowest_module_identity_uses_logical_path_not_absolute_path() {
         schema_version: 1,
         command: Some(TimingCommandKind::Build),
         timings: vec![aggregate(TimingMetric::CommandBuildTotal, 100.0)],
+        #[cfg(feature = "benchmark_counters")]
         counters: Vec::new(),
         boundaries: vec![boundary_record(0, "moth_docs", 1)],
         modules: vec![module_record_with_timings(
@@ -1308,6 +1317,7 @@ fn slowest_module_identity_is_bounded_to_its_unique_tail() {
         schema_version: 1,
         command: Some(TimingCommandKind::Build),
         timings: vec![aggregate(TimingMetric::CommandBuildTotal, 100.0)],
+        #[cfg(feature = "benchmark_counters")]
         counters: Vec::new(),
         boundaries: vec![boundary_record(0, "moth_docs", 1)],
         modules: vec![module_record_with_timings(
@@ -1335,6 +1345,7 @@ fn only_registered_boundaries_produce_rows() {
         schema_version: 1,
         command: Some(TimingCommandKind::Build),
         timings: vec![aggregate(TimingMetric::CommandBuildTotal, 100.0)],
+        #[cfg(feature = "benchmark_counters")]
         counters: Vec::new(),
         boundaries: vec![boundary_record_with_timings(
             0,

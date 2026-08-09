@@ -1132,25 +1132,23 @@ pub fn build_project(
     // BUILD PROJECT USING THE APPROPRIATE BUILDER
     // --------------------------------------------
 
-    timing_scope!(
-        timing_guard_build_backend_total,
-        crate::timing::TimingMetric::BuildBackendTotal
+    let project_result = crate::timed_stage!(
+        crate::timing::TimingMetric::BuildBackendTotal,
+        project_builder.backend.build_backend(
+            project_compilation,
+            &config,
+            build_profile,
+            flags,
+            &mut string_table,
+        )
     );
-    let project = match project_builder.backend.build_backend(
-        project_compilation,
-        &config,
-        build_profile,
-        flags,
-        &mut string_table,
-    ) {
+    let project = match project_result {
         Ok(project) => project,
         Err(mut compiler_messages) => {
             compiler_messages.string_table = string_table;
             return Err(compiler_messages);
         }
     };
-    #[cfg(feature = "timers")]
-    timing_guard_build_backend_total.finish();
 
     warnings.extend(project.warnings.iter().cloned());
 
