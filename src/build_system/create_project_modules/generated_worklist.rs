@@ -1,19 +1,25 @@
 //! Build-owned generated-function request scheduling and sidecar storage.
 //!
 //! WHAT: owns one deterministic request worklist per project or package compilation boundary,
-//! dense request IDs, requester/dependency records, exact completed summaries and the separate
-//! generated-sidecar lane.
+//! dense request IDs, exact completed summaries and the separate generated-sidecar lane.
 //! WHY: generic call inference belongs to AST, but aggregation, deduplication, fixed-point
 //! scheduling and sidecar placement belong to the owning build boundary. A session reuses only
 //! its own boundary's completed store and transactional delta; equal generated identities may
-//! coexist in unrelated boundaries and are never suppressed or resolved across them.
+//! coexist in unrelated boundaries and are never suppressed or resolved across them. Materialising
+//! request history is intentionally not retained as a second dependency topology; convergence
+//! derives its observation model from validated HIR call facts.
 
 use crate::build_system::build::GeneratedFunctionSidecar;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::public_call_summary::PublicCallSummary;
-use crate::compiler_frontend::semantic_identity::{
-    GeneratedFunctionIdentity, StableModuleOriginIdentity,
+use crate::compiler_frontend::external_packages::CallTarget;
+use crate::compiler_frontend::hir::reachability::HirModuleLinkFacts;
+use crate::compiler_frontend::instrumentation::{
+    FrontendCounter, add_frontend_counter, increment_frontend_counter,
 };
+use crate::compiler_frontend::public_call_summary::{
+    PublicCallSummary, PublicCallSummaryTransition, validate_public_call_summary_transition,
+};
+use crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity;
 use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
@@ -28,13 +34,173 @@ impl GeneratedRequestId {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum GeneratedRequester {
-    Module(StableModuleOriginIdentity),
-    Generated(GeneratedRequestId),
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(super) enum ConvergenceNode {
+    BaseModule,
+    Generated(Box<GeneratedFunctionIdentity>),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(super) struct ConvergenceNodeId(usize);
+
+impl ConvergenceNodeId {
+    pub(super) fn index(self) -> usize {
+        self.0
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct ConvergenceNodeRecord {
+    node: ConvergenceNode,
+}
+
+/// Construction-only reverse-call model for one module convergence observation.
+///
+/// WHAT: assigns dense deterministic nodes to the base module and newly materialised local
+///       sidecars, then stores sorted reverse callers for each node.
+/// WHY: R5C6A needs an inspectable dependency model before scheduling changes. It is derived from
+///      validated HIR link facts, is never retained in an artefact, and never replaces the broad
+///      recheck loop in this slice.
+#[derive(Debug)]
+pub(super) struct ConvergenceModel {
+    nodes: Vec<ConvergenceNodeRecord>,
+    callers: Vec<Vec<ConvergenceNodeId>>,
+}
+
+impl ConvergenceModel {
+    pub(super) fn from_link_facts<'a>(
+        base: &HirModuleLinkFacts,
+        generated: impl IntoIterator<Item = (&'a GeneratedFunctionIdentity, &'a HirModuleLinkFacts)>,
+    ) -> Result<Self, CompilerError> {
+        let mut generated = generated.into_iter().collect::<Vec<_>>();
+        generated.sort_by_key(|(left, _)| *left);
+
+        let mut nodes = vec![ConvergenceNodeRecord {
+            node: ConvergenceNode::BaseModule,
+        }];
+        for (identity, _) in &generated {
+            let node = ConvergenceNode::Generated(Box::new((*identity).clone()));
+            if nodes.iter().any(|record| record.node == node) {
+                return Err(CompilerError::compiler_error(format!(
+                    "convergence model received duplicate generated identity {identity:?}"
+                )));
+            }
+            nodes.push(ConvergenceNodeRecord { node });
+        }
+
+        let ids_by_node = nodes
+            .iter()
+            .enumerate()
+            .map(|(index, record)| (record.node.clone(), ConvergenceNodeId(index)))
+            .collect::<FxHashMap<_, _>>();
+        let mut callers = vec![Vec::new(); nodes.len()];
+
+        add_model_edges(
+            &mut callers,
+            &ids_by_node,
+            ConvergenceNodeId(0),
+            base.direct_call_targets(),
+        );
+        for (identity, link_facts) in generated {
+            let caller = ids_by_node[&ConvergenceNode::Generated(Box::new(identity.clone()))];
+            add_model_edges(
+                &mut callers,
+                &ids_by_node,
+                caller,
+                link_facts.direct_call_targets(),
+            );
+        }
+
+        for caller_ids in &mut callers {
+            caller_ids.sort_unstable();
+            caller_ids.dedup();
+        }
+
+        Ok(Self { nodes, callers })
+    }
+
+    #[cfg(test)]
+    pub(super) fn node_count(&self) -> usize {
+        self.nodes.len()
+    }
+
+    #[cfg(test)]
+    pub(super) fn node(&self, id: ConvergenceNodeId) -> Option<&ConvergenceNode> {
+        self.nodes.get(id.index()).map(|record| &record.node)
+    }
+
+    pub(super) fn node_id(&self, node: &ConvergenceNode) -> Option<ConvergenceNodeId> {
+        self.nodes
+            .iter()
+            .position(|record| &record.node == node)
+            .map(ConvergenceNodeId)
+    }
+
+    #[cfg(test)]
+    pub(super) fn callers(&self, node: ConvergenceNodeId) -> Option<&[ConvergenceNodeId]> {
+        self.callers.get(node.index()).map(Vec::as_slice)
+    }
+
+    pub(super) fn all_node_ids(&self) -> Vec<ConvergenceNodeId> {
+        (0..self.nodes.len()).map(ConvergenceNodeId).collect()
+    }
+
+    /// Return the changed nodes and every reverse-reachable caller in dense ID order.
+    pub(super) fn dirty_nodes(
+        &self,
+        changed_nodes: impl IntoIterator<Item = ConvergenceNodeId>,
+    ) -> Vec<ConvergenceNodeId> {
+        let mut dirty = vec![false; self.nodes.len()];
+        let mut queue = std::collections::VecDeque::new();
+        for node in changed_nodes {
+            if node.index() < dirty.len() && !dirty[node.index()] {
+                dirty[node.index()] = true;
+                queue.push_back(node);
+            }
+        }
+
+        while let Some(changed) = queue.pop_front() {
+            for caller in &self.callers[changed.index()] {
+                if !dirty[caller.index()] {
+                    dirty[caller.index()] = true;
+                    queue.push_back(*caller);
+                }
+            }
+        }
+
+        dirty
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, is_dirty)| is_dirty.then_some(ConvergenceNodeId(index)))
+            .collect()
+    }
+}
+
+fn add_model_edges(
+    callers: &mut [Vec<ConvergenceNodeId>],
+    ids_by_node: &FxHashMap<ConvergenceNode, ConvergenceNodeId>,
+    caller: ConvergenceNodeId,
+    targets: Vec<(crate::compiler_frontend::hir::ids::FunctionId, CallTarget)>,
+) {
+    for (_, target) in targets {
+        let callee = match target {
+            CallTarget::Local(_) | CallTarget::CrossModule(_) | CallTarget::External(_) => None,
+            CallTarget::ModulePrivate(_) => match caller.index() {
+                0 => None,
+                _ => Some(ConvergenceNodeId(0)),
+            },
+            CallTarget::Generated(identity) => ids_by_node
+                .get(&ConvergenceNode::Generated(Box::new(identity)))
+                .copied(),
+        };
+        let Some(callee) = callee else {
+            continue;
+        };
+        callers[callee.index()].push(caller);
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum GeneratedRequestState {
     Pending,
     Materialising,
@@ -45,8 +211,6 @@ struct GeneratedRequestRecord {
     identity: GeneratedFunctionIdentity,
     display_name: String,
     diagnostic_location: SourceLocation,
-    requesters: Vec<GeneratedRequester>,
-    dependencies: Vec<GeneratedRequestId>,
     state: GeneratedRequestState,
 }
 
@@ -111,34 +275,8 @@ impl<'a> GeneratedFunctionWorklist<'a> {
         }
     }
 
-    pub(super) fn register_module_requests(
+    pub(super) fn register_requests(
         &mut self,
-        requester: &StableModuleOriginIdentity,
-        requests: impl IntoIterator<Item = GeneratedRequestFacts>,
-    ) -> Vec<GeneratedRequestId> {
-        self.register_requests(GeneratedRequester::Module(requester.clone()), requests)
-    }
-
-    pub(super) fn register_generated_requests(
-        &mut self,
-        requester: GeneratedRequestId,
-        requests: impl IntoIterator<Item = GeneratedRequestFacts>,
-    ) -> Vec<GeneratedRequestId> {
-        let dependency_ids =
-            self.register_requests(GeneratedRequester::Generated(requester), requests);
-        let record = &mut self.records[requester.index()];
-        for dependency_id in &dependency_ids {
-            if !record.dependencies.contains(dependency_id) {
-                record.dependencies.push(*dependency_id);
-            }
-        }
-        record.dependencies.sort_unstable();
-        dependency_ids
-    }
-
-    fn register_requests(
-        &mut self,
-        requester: GeneratedRequester,
         requests: impl IntoIterator<Item = GeneratedRequestFacts>,
     ) -> Vec<GeneratedRequestId> {
         let mut requests = requests.into_iter().collect::<Vec<_>>();
@@ -163,16 +301,10 @@ impl<'a> GeneratedFunctionWorklist<'a> {
                     identity: request.identity,
                     display_name: request.display_name,
                     diagnostic_location: request.diagnostic_location,
-                    requesters: Vec::new(),
-                    dependencies: Vec::new(),
                     state: GeneratedRequestState::Pending,
                 });
                 request_id
             };
-            let record = &mut self.records[request_id.index()];
-            if !record.requesters.contains(&requester) {
-                record.requesters.push(requester.clone());
-            }
             request_ids.push(request_id);
         }
         request_ids
@@ -290,6 +422,7 @@ impl<'a> GeneratedFunctionWorklist<'a> {
     pub(super) fn completed_summaries(
         &self,
     ) -> FxHashMap<GeneratedFunctionIdentity, PublicCallSummary> {
+        increment_frontend_counter(FrontendCounter::ConvergenceCompleteGeneratedSummaryMapBuilds);
         let mut summaries = FxHashMap::default();
         for record in &self.completed_records {
             summaries.insert(record.identity.clone(), record.summary.clone());
@@ -298,6 +431,35 @@ impl<'a> GeneratedFunctionWorklist<'a> {
             summaries.insert(record.identity.clone(), record.summary.clone());
         }
         summaries
+    }
+
+    pub(super) fn convergence_model(
+        &self,
+        base_link_facts: &HirModuleLinkFacts,
+    ) -> Result<ConvergenceModel, CompilerError> {
+        ConvergenceModel::from_link_facts(
+            base_link_facts,
+            self.completed_records.iter().map(|record| {
+                (
+                    &record.identity,
+                    &record.sidecar.module.link_facts.functions,
+                )
+            }),
+        )
+    }
+
+    pub(super) fn sidecar_node_id(
+        &self,
+        model: &ConvergenceModel,
+        identity: &GeneratedFunctionIdentity,
+    ) -> Result<ConvergenceNodeId, CompilerError> {
+        model
+            .node_id(&ConvergenceNode::Generated(Box::new(identity.clone())))
+            .ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "convergence model is missing generated sidecar {identity:?}"
+                ))
+            })
     }
 
     pub(super) fn sidecars_mut(
@@ -328,10 +490,16 @@ impl<'a> GeneratedFunctionWorklist<'a> {
                 "Generated worklist cannot update unknown completed request {identity:?}"
             ))
         })?;
-        let current = &mut self.completed_records[record_id.index()].summary;
-        let changed = *current != summary;
-        *current = summary;
-        Ok(changed)
+        add_frontend_counter(FrontendCounter::ConvergenceSummaryComparisons, 1);
+        let current = &self.completed_records[record_id.index()].summary;
+        let transition = validate_public_call_summary_transition(current, &summary)?;
+        if transition == PublicCallSummaryTransition::Widened {
+            add_frontend_counter(FrontendCounter::ConvergenceSummaryChanges, 1);
+            self.completed_records[record_id.index()].summary = summary;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
     pub(super) fn summaries_for(

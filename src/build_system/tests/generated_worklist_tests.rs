@@ -10,15 +10,22 @@ use crate::compiler_frontend::canonical_type_identity::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::external_packages::{
+    CallTarget, ExternalFunctionId, ExternalPackageRegistry,
+};
+use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::functions::HirFunction;
-use crate::compiler_frontend::hir::ids::{BlockId, FunctionId};
+use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, RegionId};
 use crate::compiler_frontend::hir::module::HirModule;
-use crate::compiler_frontend::hir::reachability::HirModuleLinkFacts;
+use crate::compiler_frontend::hir::reachability::{
+    HirModuleLinkFacts, collect_module_function_link_facts,
+};
+use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
+use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::public_call_summary::FunctionReturnAliasSummary;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, ModulePrivateExecutableCategory, ModulePrivateExecutableIdentity,
-    ModuleRootRole, StablePackageIdentity,
+    ModuleRootRole, OriginFunctionId, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{CharPosition, SourceLocation};
@@ -103,6 +110,48 @@ fn test_sidecar(
     GeneratedFunctionSidecar::new(identity, module)
 }
 
+fn link_facts_for_calls(targets: Vec<CallTarget>) -> HirModuleLinkFacts {
+    let mut module = HirModule::new();
+    module.functions.push(HirFunction {
+        id: FunctionId(0),
+        entry: BlockId(0),
+        params: Vec::new(),
+        return_type: TypeId(0),
+    });
+    module.blocks.push(HirBlock {
+        id: BlockId(0),
+        region: RegionId(0),
+        locals: Vec::new(),
+        statements: targets
+            .into_iter()
+            .enumerate()
+            .map(|(index, target)| HirStatement {
+                id: HirNodeId(index as u32),
+                kind: HirStatementKind::Call {
+                    target,
+                    args: Vec::new(),
+                    result: None,
+                },
+                location: SourceLocation::default(),
+            })
+            .collect(),
+        terminator: HirTerminator::RuntimeFailure {
+            message: "test convergence model".to_owned(),
+        },
+    });
+    collect_module_function_link_facts(&module).expect("test HIR should produce link facts")
+}
+
+fn private_identity(name: &str) -> ModulePrivateExecutableIdentity {
+    ModulePrivateExecutableIdentity::new(
+        module_origin(),
+        "@page.moth".to_owned(),
+        ModulePrivateExecutableCategory::FreeFunction,
+        name.to_owned(),
+        None,
+    )
+}
+
 fn store_with(
     identity: GeneratedFunctionIdentity,
     summary: PublicCallSummary,
@@ -138,25 +187,22 @@ fn registration_sorts_and_deduplicates_stable_identities_before_assigning_dense_
     let known = BoundaryGeneratedFunctionStore::default();
     let mut worklist = GeneratedFunctionWorklist::new(&known);
 
-    let ids = worklist.register_module_requests(
-        &module_origin(),
-        [
-            facts("beta"),
-            facts("alpha"),
-            GeneratedRequestFacts {
-                identity: beta,
-                display_name: "beta".to_owned(),
-                diagnostic_location: SourceLocation::new(
-                    crate::compiler_frontend::symbols::interned_path::InternedPath::from_single_str(
-                        "src/@page.moth",
-                        &mut StringTable::new(),
-                    ),
-                    CharPosition::default(),
-                    CharPosition::default(),
+    let ids = worklist.register_requests([
+        facts("beta"),
+        facts("alpha"),
+        GeneratedRequestFacts {
+            identity: beta,
+            display_name: "beta".to_owned(),
+            diagnostic_location: SourceLocation::new(
+                crate::compiler_frontend::symbols::interned_path::InternedPath::from_single_str(
+                    "src/@page.moth",
+                    &mut StringTable::new(),
                 ),
-            },
-        ],
-    );
+                CharPosition::default(),
+                CharPosition::default(),
+            ),
+        },
+    ]);
 
     assert_eq!(ids, vec![GeneratedRequestId(0), GeneratedRequestId(1)]);
     assert_eq!(worklist.identity(ids[0]).unwrap(), &alpha);
@@ -164,19 +210,18 @@ fn registration_sorts_and_deduplicates_stable_identities_before_assigning_dense_
 }
 
 #[test]
-fn duplicate_requesters_and_dependency_edges_are_recorded_once() {
+fn repeated_request_registration_keeps_one_identity_state_record() {
     let known = BoundaryGeneratedFunctionStore::default();
     let mut worklist = GeneratedFunctionWorklist::new(&known);
-    let parent_id =
-        worklist.register_module_requests(&module_origin(), [facts("parent"), facts("parent")])[0];
+    let parent_id = worklist.register_requests([facts("parent"), facts("parent")])[0];
 
-    let child_ids = worklist
-        .register_generated_requests(parent_id, [facts("child"), facts("child"), facts("child")]);
-    worklist.register_generated_requests(parent_id, [facts("child")]);
+    let child_ids = worklist.register_requests([facts("child"), facts("child"), facts("child")]);
+    worklist.register_requests([facts("child")]);
 
     assert_eq!(child_ids.len(), 1);
-    assert_eq!(worklist.records[parent_id.index()].dependencies, child_ids);
-    assert_eq!(worklist.records[child_ids[0].index()].requesters.len(), 1);
+    assert_eq!(parent_id, GeneratedRequestId(0));
+    assert_eq!(child_ids[0], GeneratedRequestId(1));
+    assert_eq!(worklist.records.len(), 2);
 }
 
 #[test]
@@ -186,7 +231,7 @@ fn completed_boundary_summary_suppresses_rematerialisation() {
     let known = store_with(identity.clone(), expected.clone());
     let mut worklist = GeneratedFunctionWorklist::new(&known);
 
-    let ids = worklist.register_module_requests(&module_origin(), [facts("known")]);
+    let ids = worklist.register_requests([facts("known")]);
 
     assert!(ids.is_empty());
     assert_eq!(worklist.summary(&identity), Some(&expected));
@@ -199,7 +244,7 @@ fn session_allocates_only_new_records() {
     let known = store_with(known_identity, summary());
     let mut worklist = GeneratedFunctionWorklist::new(&known);
 
-    let known_ids = worklist.register_module_requests(&module_origin(), [facts("known")]);
+    let known_ids = worklist.register_requests([facts("known")]);
     assert!(known_ids.is_empty());
     assert_eq!(
         worklist.records.len(),
@@ -207,7 +252,7 @@ fn session_allocates_only_new_records() {
         "known summaries seed the session"
     );
 
-    let new_ids = worklist.register_module_requests(&module_origin(), [facts("new")]);
+    let new_ids = worklist.register_requests([facts("new")]);
     assert_eq!(new_ids.len(), 1);
     assert_eq!(
         worklist.records.len(),
@@ -234,14 +279,11 @@ fn request_records_own_diagnostic_facts() {
             char_column: 9,
         },
     );
-    let ids = worklist.register_module_requests(
-        &module_origin(),
-        [GeneratedRequestFacts {
-            identity: generated_identity("make"),
-            display_name: "make".to_owned(),
-            diagnostic_location: first_location.clone(),
-        }],
-    );
+    let ids = worklist.register_requests([GeneratedRequestFacts {
+        identity: generated_identity("make"),
+        display_name: "make".to_owned(),
+        diagnostic_location: first_location.clone(),
+    }]);
 
     let (display_name, diagnostic_location) = worklist.request_facts(ids[0]).unwrap();
     assert_eq!(display_name, "make");
@@ -298,7 +340,7 @@ fn session_does_not_suppress_requests_known_only_in_another_boundary() {
     let local_boundary = BoundaryGeneratedFunctionStore::default();
     let mut local_worklist = GeneratedFunctionWorklist::new(&local_boundary);
 
-    let ids = local_worklist.register_module_requests(&module_origin(), [facts("shared")]);
+    let ids = local_worklist.register_requests([facts("shared")]);
 
     assert_eq!(
         ids.len(),
@@ -434,4 +476,120 @@ fn sidecar_record_identity_disagreement_leaves_store_unchanged() {
     assert!(store.records.is_empty());
     assert!(store.by_identity.is_empty());
     assert_eq!(store.sidecars().count(), 0);
+}
+
+#[test]
+fn convergence_model_sorts_nodes_and_classifies_validated_call_targets() {
+    let alpha = generated_identity("alpha");
+    let beta = generated_identity("beta");
+    let unknown = generated_identity("unknown");
+    let private = private_identity("private");
+    let cross_module = OriginFunctionId::new_free(module_origin(), "cross".to_owned());
+
+    let base_facts = link_facts_for_calls(vec![
+        CallTarget::Generated(alpha.clone()),
+        CallTarget::Generated(unknown),
+        CallTarget::ModulePrivate(private.clone()),
+        CallTarget::Local(FunctionId(0)),
+        CallTarget::CrossModule(cross_module),
+        CallTarget::External(ExternalFunctionId::Synthetic(1)),
+    ]);
+    let alpha_facts = link_facts_for_calls(vec![CallTarget::Generated(beta.clone())]);
+    let beta_facts = link_facts_for_calls(vec![
+        CallTarget::Generated(alpha.clone()),
+        CallTarget::ModulePrivate(private),
+    ]);
+
+    let model = ConvergenceModel::from_link_facts(
+        &base_facts,
+        vec![(&beta, &beta_facts), (&alpha, &alpha_facts)],
+    )
+    .unwrap();
+
+    assert_eq!(model.node_count(), 3);
+    assert_eq!(
+        model.node(ConvergenceNodeId(0)),
+        Some(&ConvergenceNode::BaseModule)
+    );
+    assert_eq!(
+        model.node(ConvergenceNodeId(1)),
+        Some(&ConvergenceNode::Generated(Box::new(alpha.clone())))
+    );
+    assert_eq!(
+        model.node(ConvergenceNodeId(2)),
+        Some(&ConvergenceNode::Generated(Box::new(beta.clone())))
+    );
+    assert_eq!(
+        model.callers(ConvergenceNodeId(1)),
+        Some(&[ConvergenceNodeId(0), ConvergenceNodeId(2)][..])
+    );
+    assert_eq!(
+        model.callers(ConvergenceNodeId(2)),
+        Some(&[ConvergenceNodeId(1)][..])
+    );
+    assert_eq!(
+        model.callers(ConvergenceNodeId(0)),
+        Some(&[ConvergenceNodeId(2)][..])
+    );
+    assert_eq!(
+        model.dirty_nodes([ConvergenceNodeId(1)]),
+        vec![
+            ConvergenceNodeId(0),
+            ConvergenceNodeId(1),
+            ConvergenceNodeId(2)
+        ]
+    );
+    assert_eq!(
+        model.dirty_nodes([ConvergenceNodeId(0)]),
+        vec![
+            ConvergenceNodeId(0),
+            ConvergenceNodeId(1),
+            ConvergenceNodeId(2)
+        ]
+    );
+}
+
+#[test]
+fn convergence_models_keep_equal_identities_local_to_each_boundary() {
+    let identity = generated_identity("shared");
+    let first_base = link_facts_for_calls(Vec::new());
+    let second_base = link_facts_for_calls(Vec::new());
+    let first_generated = link_facts_for_calls(Vec::new());
+    let second_generated = link_facts_for_calls(Vec::new());
+
+    let first = ConvergenceModel::from_link_facts(&first_base, vec![(&identity, &first_generated)])
+        .unwrap();
+    let second =
+        ConvergenceModel::from_link_facts(&second_base, vec![(&identity, &second_generated)])
+            .unwrap();
+
+    assert_eq!(
+        first.node_id(&ConvergenceNode::Generated(Box::new(identity.clone()))),
+        Some(ConvergenceNodeId(1))
+    );
+    assert_eq!(
+        second.node_id(&ConvergenceNode::Generated(Box::new(identity))),
+        Some(ConvergenceNodeId(1))
+    );
+    assert_eq!(first.callers(ConvergenceNodeId(1)), Some(&[][..]));
+    assert_eq!(second.callers(ConvergenceNodeId(1)), Some(&[][..]));
+}
+
+#[test]
+fn convergence_model_rejects_duplicate_local_generated_identities() {
+    let identity = generated_identity("duplicate");
+    let base_facts = link_facts_for_calls(Vec::new());
+    let first_generated = link_facts_for_calls(Vec::new());
+    let second_generated = link_facts_for_calls(Vec::new());
+
+    let error = ConvergenceModel::from_link_facts(
+        &base_facts,
+        vec![
+            (&identity, &first_generated),
+            (&identity, &second_generated),
+        ],
+    )
+    .unwrap_err();
+
+    assert!(error.msg.contains("duplicate generated identity"));
 }

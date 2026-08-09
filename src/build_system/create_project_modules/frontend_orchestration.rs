@@ -42,12 +42,16 @@ use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::reachability::{
     collect_module_function_link_facts, collect_reachability_from_function_link_facts,
 };
-use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
+use crate::compiler_frontend::instrumentation::{
+    FrontendCounter, add_frontend_counter, increment_frontend_counter, record_frontend_counter_max,
+};
 use crate::compiler_frontend::module_dependencies::SortedHeaders;
 use crate::compiler_frontend::module_metadata::HirLoweringResult;
 use crate::compiler_frontend::paths::const_paths::RetainedProviderReference;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
-use crate::compiler_frontend::public_call_summary::PublicCallSummary;
+use crate::compiler_frontend::public_call_summary::{
+    PublicCallSummary, PublicCallSummaryTransition, validate_public_call_summary_transition,
+};
 use crate::compiler_frontend::public_interface::{
     PublicInterfaceDraftBuilder, PublicInterfaceDraftBuilderInput, PublicSemanticInterface,
     SourceProviderImportSet,
@@ -75,7 +79,8 @@ use crate::compiler_frontend::{
 
 use super::compiled_boundary::CompletedSourcePackageRegistry;
 use super::generated_worklist::{
-    GeneratedFunctionWorklist, GeneratedRequestEntry, GeneratedRequestFacts, GeneratedRequestId,
+    ConvergenceModel, ConvergenceNode, ConvergenceNodeId, GeneratedFunctionWorklist,
+    GeneratedRequestEntry, GeneratedRequestFacts, GeneratedRequestId,
 };
 use super::module_artifact_store::ModuleArtifactStore;
 use super::prepared_module::PreparedModule;
@@ -1012,6 +1017,10 @@ impl ModuleSyntaxDiscovery<'_> {
     }
 }
 
+struct GeneratedBorrowRecheck {
+    changed_identities: Vec<GeneratedFunctionIdentity>,
+}
+
 impl FrontendModuleBuildContext<'_> {
     /// Compile one retained module through the provider-dependent semantic pipeline.
     ///
@@ -1258,19 +1267,17 @@ impl FrontendModuleBuildContext<'_> {
                 &mut module_ast,
             )
             .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
-            let generated_request_ids = generated_worklist.register_module_requests(
-                &active_module_origin,
-                generated_requests
-                    .iter()
-                    .map(|request| GeneratedRequestFacts {
+            let generated_request_ids =
+                generated_worklist.register_requests(generated_requests.iter().map(|request| {
+                    GeneratedRequestFacts {
                         identity: request.identity.clone(),
                         display_name: request
                             .function_name
                             .map(|name| compiler.string_table.resolve(name).to_owned())
                             .unwrap_or_else(|| "<generated>".to_owned()),
                         diagnostic_location: request.call_location.clone(),
-                    }),
-            );
+                    }
+                }));
             // 4b. Extract validated generic-template body artefacts before HIR consumes AST
             //     state. The transient public callable seed table is the exact path-to-origin
             //     authority for every directly exported generic free function or receiver method;
@@ -1324,7 +1331,14 @@ impl FrontendModuleBuildContext<'_> {
                 ));
             }
 
+            // Link facts are the validated-HIR owner for direct call targets. The convergence
+            // observation model consumes these facts after HIR validation rather than scanning
+            // source or introducing a second HIR call graph.
+            let function_link_facts = collect_module_function_link_facts(&hir_module)
+                .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+
             // 8. Run static analysis (Borrow Checker).
+            increment_frontend_counter(FrontendCounter::ConvergenceInitialBaseBorrowPasses);
             let bootstrap_borrow_analysis = timed_stage_attributed!(
                 crate::timing::TimingMetric::FrontendBorrowInitial,
                 timing_context,
@@ -1357,6 +1371,24 @@ impl FrontendModuleBuildContext<'_> {
                 )
                 .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
 
+            let convergence_model = generated_worklist
+                .convergence_model(&function_link_facts)
+                .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+            let base_node_id = convergence_model
+                .node_id(&ConvergenceNode::BaseModule)
+                .ok_or_else(|| {
+                    CompilerMessages::from_error_ref(
+                        CompilerError::compiler_error(
+                            "convergence model is missing its base-module node",
+                        ),
+                        &compiler.string_table,
+                    )
+                })?;
+            // The first observation pass must include every newly materialised sidecar. Later
+            // passes use the model only to compare predicted dirtiness with the existing broad
+            // recheck; this slice does not skip any borrow work.
+            let mut changed_nodes = convergence_model.all_node_ids();
+
             let convergence_limit = hir_module
                 .functions
                 .len()
@@ -1364,7 +1396,13 @@ impl FrontendModuleBuildContext<'_> {
                 .saturating_mul(4)
                 .max(1);
             let mut stable_borrow_analysis = None;
-            for _ in 0..convergence_limit {
+            for convergence_iteration in 1..=convergence_limit {
+                increment_frontend_counter(FrontendCounter::ConvergenceBaseBorrowPasses);
+                record_frontend_counter_max(
+                    FrontendCounter::ConvergenceMaxIterations,
+                    convergence_iteration,
+                );
+                let dirty_nodes = convergence_model.dirty_nodes(changed_nodes.iter().copied());
                 let borrow_analysis = timed_stage_attributed!(
                     crate::timing::TimingMetric::FrontendBorrowConverge,
                     timing_context,
@@ -1376,15 +1414,18 @@ impl FrontendModuleBuildContext<'_> {
                     &borrow_analysis,
                 )
                 .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
-                let generated_summaries_changed = timed_stage_attributed!(
+                let generated_recheck = timed_stage_attributed!(
                     crate::timing::TimingMetric::FrontendGeneratedBorrowRecheck,
                     timing_context,
                     self.recheck_generated_borrows(
                         &mut generated_worklist,
                         materialisation_context_builder.context(),
                         &compiler,
+                        &convergence_model,
+                        &dirty_nodes,
                     )
                 )?;
+                let generated_summaries_changed = !generated_recheck.changed_identities.is_empty();
                 hir_module.generated_call_summaries = generated_worklist
                     .summaries_for(
                         generated_requests
@@ -1398,6 +1439,19 @@ impl FrontendModuleBuildContext<'_> {
                     stable_borrow_analysis = Some(borrow_analysis);
                     break;
                 }
+
+                changed_nodes.clear();
+                if concrete_summaries_changed {
+                    changed_nodes.push(base_node_id);
+                }
+                for identity in generated_recheck.changed_identities {
+                    let node_id = generated_worklist
+                        .sidecar_node_id(&convergence_model, &identity)
+                        .map_err(|error| {
+                            CompilerMessages::from_error_ref(error, &compiler.string_table)
+                        })?;
+                    changed_nodes.push(node_id);
+                }
             }
             let borrow_analysis = stable_borrow_analysis.ok_or_else(|| {
                 CompilerMessages::from_error_ref(
@@ -1410,6 +1464,7 @@ impl FrontendModuleBuildContext<'_> {
             let generated_worklist_delta = generated_worklist
                 .finish()
                 .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+            drop(convergence_model);
             record_borrow_counters(&borrow_analysis);
 
             // Concrete call-summary finalization runs exactly once after HIR and borrow
@@ -1441,11 +1496,6 @@ impl FrontendModuleBuildContext<'_> {
             )?;
             let materialisation_context = materialisation_context_builder
                 .freeze(&public_interface)
-                .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
-
-            // Record every base function before entry selection. Build-owned assembly later
-            // traverses these direct facts from the selected root and derives runtime unions.
-            let function_link_facts = collect_module_function_link_facts(&hir_module)
                 .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
 
             // -------------------------
@@ -1770,17 +1820,17 @@ impl FrontendModuleBuildContext<'_> {
             &mut generated_ast,
         )
         .map_err(|error| CompilerMessages::from_error_ref(error, &generated_string_table))?;
-        let nested_request_ids = worklist.register_generated_requests(
-            request_id,
-            nested_requests.iter().map(|request| GeneratedRequestFacts {
-                identity: request.identity.clone(),
-                display_name: request
-                    .function_name
-                    .map(|name| generated_string_table.resolve(name).to_owned())
-                    .unwrap_or_else(|| "<generated>".to_owned()),
-                diagnostic_location: request.call_location.clone(),
-            }),
-        );
+        let nested_request_ids =
+            worklist.register_requests(nested_requests.iter().map(|request| {
+                GeneratedRequestFacts {
+                    identity: request.identity.clone(),
+                    display_name: request
+                        .function_name
+                        .map(|name| generated_string_table.resolve(name).to_owned())
+                        .unwrap_or_else(|| "<generated>".to_owned()),
+                    diagnostic_location: request.call_location.clone(),
+                }
+            }));
 
         let first_nested_sidecar = worklist.sidecar_count();
         let mut generated_compiler = CompilerFrontend::new(
@@ -1932,13 +1982,30 @@ impl FrontendModuleBuildContext<'_> {
         worklist: &mut GeneratedFunctionWorklist<'_>,
         materialisation_context: &crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationPreparation,
         compiler: &CompilerFrontend,
-    ) -> Result<bool, CompilerMessages> {
+        convergence_model: &ConvergenceModel,
+        dirty_nodes: &[ConvergenceNodeId],
+    ) -> Result<GeneratedBorrowRecheck, CompilerMessages> {
         let generated_summaries = worklist.completed_summaries();
         let private_summaries = exact_private_call_summaries(materialisation_context);
-        let mut updated_summaries = Vec::new();
+        let mut updated_summaries = Vec::with_capacity(worklist.sidecar_count());
 
         for sidecar in worklist.sidecars_mut() {
+            let node = ConvergenceNode::Generated(Box::new(sidecar.identity.clone()));
+            let node_id = convergence_model.node_id(&node).ok_or_else(|| {
+                CompilerMessages::from_error_ref(
+                    CompilerError::compiler_error(format!(
+                        "convergence model is missing generated sidecar {:?}",
+                        sidecar.identity
+                    )),
+                    &compiler.string_table,
+                )
+            })?;
+            let is_predicted_dirty = dirty_nodes.binary_search(&node_id).is_ok();
+            if !is_predicted_dirty {
+                increment_frontend_counter(FrontendCounter::ConvergenceStableSidecarsRechecked);
+            }
             sidecar.module.executable.hir.generated_call_summaries = generated_summaries.clone();
+            increment_frontend_counter(FrontendCounter::ConvergenceGeneratedSummaryMapClones);
             for (identity, summary) in &private_summaries {
                 if let Some(existing) = sidecar
                     .module
@@ -1951,6 +2018,7 @@ impl FrontendModuleBuildContext<'_> {
                 }
             }
             let warnings = sidecar.module.metadata.warnings.clone();
+            increment_frontend_counter(FrontendCounter::ConvergenceGeneratedSidecarBorrowPasses);
             let borrow_analysis =
                 Self::check_borrows(compiler, &sidecar.module.executable.hir, &warnings)?;
             sidecar.module.executable.borrow_analysis = borrow_analysis;
@@ -1959,13 +2027,16 @@ impl FrontendModuleBuildContext<'_> {
             updated_summaries.push((sidecar.identity.clone(), summary));
         }
 
-        let mut changed = false;
+        let mut changed_identities = Vec::new();
         for (identity, summary) in updated_summaries {
-            changed |= worklist
+            if worklist
                 .update_summary(&identity, summary)
-                .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+                .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?
+            {
+                changed_identities.push(identity);
+            }
         }
-        Ok(changed)
+        Ok(GeneratedBorrowRecheck { changed_identities })
     }
 
     fn lower_hir(
@@ -2029,8 +2100,14 @@ fn install_exact_concrete_call_summaries(
                     "Module materialisation context is missing the exact call summary for {function_id:?}"
                 ))
             })?;
-        changed |= contract.summary != exact_summary;
-        contract.summary = exact_summary;
+        add_frontend_counter(FrontendCounter::ConvergenceSummaryComparisons, 1);
+        let transition =
+            validate_public_call_summary_transition(&contract.summary, &exact_summary)?;
+        if transition == PublicCallSummaryTransition::Widened {
+            add_frontend_counter(FrontendCounter::ConvergenceSummaryChanges, 1);
+            contract.summary = exact_summary;
+            changed = true;
+        }
     }
     Ok(changed)
 }
@@ -2074,6 +2151,7 @@ fn exact_private_call_summaries(
     crate::compiler_frontend::semantic_identity::ModulePrivateExecutableIdentity,
     PublicCallSummary,
 > {
+    increment_frontend_counter(FrontendCounter::ConvergencePrivateSummaryMapRebuilds);
     materialisation_context
         .imported_functions_by_local_path
         .values()

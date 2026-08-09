@@ -90,6 +90,16 @@ pub(crate) enum FrontendCounter {
     BorrowStatementFactCount,
     BorrowTerminatorFactCount,
     BorrowValueFactCount,
+    ConvergenceInitialBaseBorrowPasses,
+    ConvergenceBaseBorrowPasses,
+    ConvergenceGeneratedSidecarBorrowPasses,
+    ConvergenceCompleteGeneratedSummaryMapBuilds,
+    ConvergenceGeneratedSummaryMapClones,
+    ConvergencePrivateSummaryMapRebuilds,
+    ConvergenceSummaryComparisons,
+    ConvergenceSummaryChanges,
+    ConvergenceStableSidecarsRechecked,
+    ConvergenceMaxIterations,
 
     // Implementation-pressure counters from shared frontend data structures.
     TypeEnvironmentFieldsForQueries,
@@ -246,6 +256,16 @@ mod detailed {
     static BORROW_STATEMENT_FACT_COUNT: AtomicUsize = AtomicUsize::new(0);
     static BORROW_TERMINATOR_FACT_COUNT: AtomicUsize = AtomicUsize::new(0);
     static BORROW_VALUE_FACT_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static CONVERGENCE_INITIAL_BASE_BORROW_PASSES: AtomicUsize = AtomicUsize::new(0);
+    static CONVERGENCE_BASE_BORROW_PASSES: AtomicUsize = AtomicUsize::new(0);
+    static CONVERGENCE_GENERATED_SIDECAR_BORROW_PASSES: AtomicUsize = AtomicUsize::new(0);
+    static CONVERGENCE_COMPLETE_GENERATED_SUMMARY_MAP_BUILDS: AtomicUsize = AtomicUsize::new(0);
+    static CONVERGENCE_GENERATED_SUMMARY_MAP_CLONES: AtomicUsize = AtomicUsize::new(0);
+    static CONVERGENCE_PRIVATE_SUMMARY_MAP_REBUILDS: AtomicUsize = AtomicUsize::new(0);
+    static CONVERGENCE_SUMMARY_COMPARISONS: AtomicUsize = AtomicUsize::new(0);
+    static CONVERGENCE_SUMMARY_CHANGES: AtomicUsize = AtomicUsize::new(0);
+    static CONVERGENCE_STABLE_SIDECARS_RECHECKED: AtomicUsize = AtomicUsize::new(0);
+    static CONVERGENCE_MAX_ITERATIONS: AtomicUsize = AtomicUsize::new(0);
     static STRING_TABLE_DELTA_MERGE_CALLS: AtomicUsize = AtomicUsize::new(0);
     static STRING_TABLE_DELTA_ENTRIES_SCANNED: AtomicUsize = AtomicUsize::new(0);
     static STRING_TABLE_DELTA_IDENTITY_REMAPS: AtomicUsize = AtomicUsize::new(0);
@@ -292,7 +312,7 @@ mod detailed {
     }
 
     pub(crate) fn reset_frontend_counters() {
-        for counter in all_counters() {
+        for &counter in all_counters() {
             atomic_counter(counter).store(0, Ordering::Relaxed);
         }
     }
@@ -310,6 +330,23 @@ mod detailed {
         atomic_counter(counter).fetch_add(amount, Ordering::Relaxed);
     }
 
+    pub(crate) fn record_frontend_counter_max(counter: FrontendCounter, value: usize) {
+        #[cfg(test)]
+        if !test_counter_capture_active() {
+            return;
+        }
+
+        let atomic = atomic_counter(counter);
+        let mut current = atomic.load(Ordering::Relaxed);
+        while current < value {
+            match atomic.compare_exchange_weak(current, value, Ordering::Relaxed, Ordering::Relaxed)
+            {
+                Ok(_) => break,
+                Err(observed) => current = observed,
+            }
+        }
+    }
+
     pub(crate) fn log_frontend_counters() {
         // The legacy per-counter human dump only prints in `MOTH_COUNTERS=full`.
         // Stable `MOTH_BENCH counter` lines (summary/full) are emitted inside
@@ -322,7 +359,7 @@ mod detailed {
             saying::say!("Frontend/performance counters:");
         }
 
-        for counter in all_counters() {
+        for &counter in all_counters() {
             let value = counter_value(counter);
             log_benchmark_counter(counter_metric_name(counter), value as f64);
 
@@ -332,8 +369,8 @@ mod detailed {
         }
     }
 
-    fn all_counters() -> [FrontendCounter; 99] {
-        [
+    fn all_counters() -> &'static [FrontendCounter] {
+        &[
             FrontendCounter::ModuleCount,
             FrontendCounter::SourceFileCount,
             FrontendCounter::SourceByteCount,
@@ -398,6 +435,16 @@ mod detailed {
             FrontendCounter::BorrowStatementFactCount,
             FrontendCounter::BorrowTerminatorFactCount,
             FrontendCounter::BorrowValueFactCount,
+            FrontendCounter::ConvergenceInitialBaseBorrowPasses,
+            FrontendCounter::ConvergenceBaseBorrowPasses,
+            FrontendCounter::ConvergenceGeneratedSidecarBorrowPasses,
+            FrontendCounter::ConvergenceCompleteGeneratedSummaryMapBuilds,
+            FrontendCounter::ConvergenceGeneratedSummaryMapClones,
+            FrontendCounter::ConvergencePrivateSummaryMapRebuilds,
+            FrontendCounter::ConvergenceSummaryComparisons,
+            FrontendCounter::ConvergenceSummaryChanges,
+            FrontendCounter::ConvergenceStableSidecarsRechecked,
+            FrontendCounter::ConvergenceMaxIterations,
             FrontendCounter::TypeEnvironmentFieldsForQueries,
             FrontendCounter::TypeEnvironmentFieldsReturned,
             FrontendCounter::TypeEnvironmentVariantsForQueries,
@@ -592,6 +639,38 @@ mod detailed {
             FrontendCounter::BorrowTerminatorFactCount => &BORROW_TERMINATOR_FACT_COUNT,
 
             FrontendCounter::BorrowValueFactCount => &BORROW_VALUE_FACT_COUNT,
+
+            FrontendCounter::ConvergenceInitialBaseBorrowPasses => {
+                &CONVERGENCE_INITIAL_BASE_BORROW_PASSES
+            }
+
+            FrontendCounter::ConvergenceBaseBorrowPasses => &CONVERGENCE_BASE_BORROW_PASSES,
+
+            FrontendCounter::ConvergenceGeneratedSidecarBorrowPasses => {
+                &CONVERGENCE_GENERATED_SIDECAR_BORROW_PASSES
+            }
+
+            FrontendCounter::ConvergenceCompleteGeneratedSummaryMapBuilds => {
+                &CONVERGENCE_COMPLETE_GENERATED_SUMMARY_MAP_BUILDS
+            }
+
+            FrontendCounter::ConvergenceGeneratedSummaryMapClones => {
+                &CONVERGENCE_GENERATED_SUMMARY_MAP_CLONES
+            }
+
+            FrontendCounter::ConvergencePrivateSummaryMapRebuilds => {
+                &CONVERGENCE_PRIVATE_SUMMARY_MAP_REBUILDS
+            }
+
+            FrontendCounter::ConvergenceSummaryComparisons => &CONVERGENCE_SUMMARY_COMPARISONS,
+
+            FrontendCounter::ConvergenceSummaryChanges => &CONVERGENCE_SUMMARY_CHANGES,
+
+            FrontendCounter::ConvergenceStableSidecarsRechecked => {
+                &CONVERGENCE_STABLE_SIDECARS_RECHECKED
+            }
+
+            FrontendCounter::ConvergenceMaxIterations => &CONVERGENCE_MAX_ITERATIONS,
 
             FrontendCounter::TypeEnvironmentFieldsForQueries => {
                 &TYPE_ENVIRONMENT_FIELDS_FOR_QUERIES
@@ -846,6 +925,38 @@ mod detailed {
             FrontendCounter::BorrowTerminatorFactCount => "borrow/terminator fact count",
 
             FrontendCounter::BorrowValueFactCount => "borrow/value fact count",
+
+            FrontendCounter::ConvergenceInitialBaseBorrowPasses => {
+                "convergence/initial base borrow passes"
+            }
+
+            FrontendCounter::ConvergenceBaseBorrowPasses => "convergence/base borrow passes",
+
+            FrontendCounter::ConvergenceGeneratedSidecarBorrowPasses => {
+                "convergence/generated sidecar borrow passes"
+            }
+
+            FrontendCounter::ConvergenceCompleteGeneratedSummaryMapBuilds => {
+                "convergence/complete generated summary map builds"
+            }
+
+            FrontendCounter::ConvergenceGeneratedSummaryMapClones => {
+                "convergence/generated summary map clones"
+            }
+
+            FrontendCounter::ConvergencePrivateSummaryMapRebuilds => {
+                "convergence/private summary map rebuilds"
+            }
+
+            FrontendCounter::ConvergenceSummaryComparisons => "convergence/summary comparisons",
+
+            FrontendCounter::ConvergenceSummaryChanges => "convergence/summary changes",
+
+            FrontendCounter::ConvergenceStableSidecarsRechecked => {
+                "convergence/stable sidecars rechecked"
+            }
+
+            FrontendCounter::ConvergenceMaxIterations => "convergence/max iterations",
 
             FrontendCounter::TypeEnvironmentFieldsForQueries => {
                 "TypeEnvironment/fields_for queries"
@@ -1105,6 +1216,38 @@ mod detailed {
 
             FrontendCounter::BorrowValueFactCount => "borrow_value_fact_count",
 
+            FrontendCounter::ConvergenceInitialBaseBorrowPasses => {
+                "convergence_initial_base_borrow_passes"
+            }
+
+            FrontendCounter::ConvergenceBaseBorrowPasses => "convergence_base_borrow_passes",
+
+            FrontendCounter::ConvergenceGeneratedSidecarBorrowPasses => {
+                "convergence_generated_sidecar_borrow_passes"
+            }
+
+            FrontendCounter::ConvergenceCompleteGeneratedSummaryMapBuilds => {
+                "convergence_complete_generated_summary_map_builds"
+            }
+
+            FrontendCounter::ConvergenceGeneratedSummaryMapClones => {
+                "convergence_generated_summary_map_clones"
+            }
+
+            FrontendCounter::ConvergencePrivateSummaryMapRebuilds => {
+                "convergence_private_summary_map_rebuilds"
+            }
+
+            FrontendCounter::ConvergenceSummaryComparisons => "convergence_summary_comparisons",
+
+            FrontendCounter::ConvergenceSummaryChanges => "convergence_summary_changes",
+
+            FrontendCounter::ConvergenceStableSidecarsRechecked => {
+                "convergence_stable_sidecars_rechecked"
+            }
+
+            FrontendCounter::ConvergenceMaxIterations => "convergence_max_iterations",
+
             FrontendCounter::TypeEnvironmentFieldsForQueries => {
                 "type_environment_fields_for_queries"
             }
@@ -1243,7 +1386,7 @@ mod detailed {
 #[cfg(feature = "benchmark_counters")]
 pub(crate) use detailed::{
     add_frontend_counter, increment_frontend_counter, log_frontend_counters,
-    reset_frontend_counters,
+    record_frontend_counter_max, reset_frontend_counters,
 };
 
 #[cfg(all(test, feature = "benchmark_counters"))]
@@ -1257,6 +1400,9 @@ pub(crate) fn increment_frontend_counter(_counter: FrontendCounter) {}
 
 #[cfg(not(feature = "benchmark_counters"))]
 pub(crate) fn add_frontend_counter(_counter: FrontendCounter, _amount: usize) {}
+
+#[cfg(not(feature = "benchmark_counters"))]
+pub(crate) fn record_frontend_counter_max(_counter: FrontendCounter, _value: usize) {}
 
 #[cfg(not(feature = "benchmark_counters"))]
 pub(crate) fn log_frontend_counters() {}

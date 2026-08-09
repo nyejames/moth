@@ -95,6 +95,13 @@ pub(crate) struct PublicCallSummary {
     pub return_alias: FunctionReturnAliasSummary,
 }
 
+/// The result of validating one retained call-summary transition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PublicCallSummaryTransition {
+    Unchanged,
+    Widened,
+}
+
 /// Validates one concrete call summary against its declaration-owned parameter access contract.
 ///
 /// WHAT: checks the AST signature and borrow-summary join plus the canonical shape of mutation,
@@ -124,6 +131,132 @@ pub(crate) fn validate_public_call_summary(
     }
 
     validate_return_alias_summary(declared_parameter_access.len(), &summary.return_alias)
+}
+
+/// Validate that a newly computed call summary preserves the finite widening order.
+///
+/// WHAT: checks invariant fields and the mutation, reactive-effect and return-alias partial orders
+///       before a summary replaces an already retained summary.
+/// WHY: convergence must make progress through one explicit finite order. Silently accepting a
+///      narrowing or incomparable transition would make scheduling order observable and hide an
+///      error in the summary producer.
+pub(crate) fn validate_public_call_summary_transition(
+    previous: &PublicCallSummary,
+    next: &PublicCallSummary,
+) -> Result<PublicCallSummaryTransition, CompilerError> {
+    let declared_parameter_access = previous
+        .parameters
+        .iter()
+        .map(|parameter| parameter.access)
+        .collect::<Vec<_>>();
+    validate_public_call_summary(&declared_parameter_access, previous)?;
+    validate_public_call_summary(&declared_parameter_access, next)?;
+
+    if previous.parameters.len() != next.parameters.len() {
+        return Err(CompilerError::compiler_error(
+            "public call summary transition changed parameter count",
+        ));
+    }
+
+    let mut widened = false;
+    for (parameter_index, (previous, next)) in
+        previous.parameters.iter().zip(&next.parameters).enumerate()
+    {
+        if previous.access != next.access {
+            return Err(CompilerError::compiler_error(format!(
+                "public call summary transition changed parameter {parameter_index} access"
+            )));
+        }
+        if previous.transfer_eligibility != next.transfer_eligibility {
+            return Err(CompilerError::compiler_error(format!(
+                "public call summary transition changed parameter {parameter_index} transfer eligibility"
+            )));
+        }
+        if previous.transfer_effect != next.transfer_effect {
+            return Err(CompilerError::compiler_error(format!(
+                "public call summary transition changed parameter {parameter_index} transfer effect"
+            )));
+        }
+
+        match (previous.mutation, next.mutation) {
+            (PublicCallMutationEffect::NoWrite, PublicCallMutationEffect::NoWrite)
+            | (PublicCallMutationEffect::Writes, PublicCallMutationEffect::Writes) => {}
+            (PublicCallMutationEffect::NoWrite, PublicCallMutationEffect::Writes) => {
+                widened = true;
+            }
+            (PublicCallMutationEffect::Writes, PublicCallMutationEffect::NoWrite) => {
+                return Err(CompilerError::compiler_error(format!(
+                    "public call summary transition narrowed parameter {parameter_index} mutation"
+                )));
+            }
+        }
+
+        if !reactive_effect_is_widening(previous.reactive_effect, next.reactive_effect) {
+            return Err(CompilerError::compiler_error(format!(
+                "public call summary transition narrowed parameter {parameter_index} reactive effect"
+            )));
+        }
+        if previous.reactive_effect != next.reactive_effect {
+            widened = true;
+        }
+    }
+
+    if !return_alias_is_widening(&previous.return_alias, &next.return_alias) {
+        return Err(CompilerError::compiler_error(
+            "public call summary transition narrowed or changed return alias incompatibly",
+        ));
+    }
+    if previous.return_alias != next.return_alias {
+        widened = true;
+    }
+
+    Ok(if widened {
+        PublicCallSummaryTransition::Widened
+    } else {
+        PublicCallSummaryTransition::Unchanged
+    })
+}
+
+fn reactive_effect_is_widening(
+    previous: PublicCallReactiveEffect,
+    next: PublicCallReactiveEffect,
+) -> bool {
+    let (previous_subscription, previous_invalidation) = reactive_effect_bits(previous);
+    let (next_subscription, next_invalidation) = reactive_effect_bits(next);
+    (!previous_subscription || next_subscription) && (!previous_invalidation || next_invalidation)
+}
+
+fn reactive_effect_bits(effect: PublicCallReactiveEffect) -> (bool, bool) {
+    match effect {
+        PublicCallReactiveEffect::None => (false, false),
+        PublicCallReactiveEffect::Subscribes => (true, false),
+        PublicCallReactiveEffect::Invalidates => (false, true),
+        PublicCallReactiveEffect::SubscribesAndInvalidates => (true, true),
+    }
+}
+
+fn return_alias_is_widening(
+    previous: &FunctionReturnAliasSummary,
+    next: &FunctionReturnAliasSummary,
+) -> bool {
+    match (previous, next) {
+        (FunctionReturnAliasSummary::Fresh, FunctionReturnAliasSummary::Fresh)
+        | (FunctionReturnAliasSummary::Unknown, FunctionReturnAliasSummary::Unknown) => true,
+        (FunctionReturnAliasSummary::Fresh, FunctionReturnAliasSummary::AliasParams(_))
+        | (FunctionReturnAliasSummary::Fresh, FunctionReturnAliasSummary::Unknown)
+        | (FunctionReturnAliasSummary::AliasParams(_), FunctionReturnAliasSummary::Unknown) => true,
+        (
+            FunctionReturnAliasSummary::AliasParams(previous),
+            FunctionReturnAliasSummary::AliasParams(next),
+        ) => previous
+            .iter()
+            .all(|index| next.binary_search(index).is_ok()),
+        (FunctionReturnAliasSummary::AliasParams(_), FunctionReturnAliasSummary::Fresh)
+        | (FunctionReturnAliasSummary::Unknown, FunctionReturnAliasSummary::Fresh)
+        | (FunctionReturnAliasSummary::Unknown, FunctionReturnAliasSummary::AliasParams(_)) => {
+            false
+        }
+    }
 }
 
 fn validate_parameter_summary(

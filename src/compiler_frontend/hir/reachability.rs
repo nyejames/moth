@@ -119,6 +119,52 @@ impl HirModuleLinkFacts {
             .map(|index| &self.blocks[index])
     }
 
+    /// Return the validated HIR call targets with their owning function identities.
+    ///
+    /// WHAT: exposes the existing per-function link-fact call extraction to transient build
+    ///       observations that need topology without rescanning HIR or source.
+    /// WHY: convergence derives its read-only dependency model from the same validated call
+    ///      targets that already own backend reachability facts. The returned vector is a
+    ///      construction input, not a second retained call graph.
+    pub(crate) fn direct_call_targets(&self) -> Vec<(FunctionId, CallTarget)> {
+        let mut targets = Vec::new();
+        for block in &self.blocks {
+            targets.extend(
+                block
+                    .direct_facts
+                    .direct_user_calls
+                    .iter()
+                    .copied()
+                    .map(|function_id| (block.function_id, CallTarget::Local(function_id))),
+            );
+            targets.extend(
+                block
+                    .direct_facts
+                    .direct_cross_module_calls
+                    .iter()
+                    .cloned()
+                    .map(|origin| (block.function_id, CallTarget::CrossModule(origin))),
+            );
+            targets.extend(
+                block
+                    .direct_facts
+                    .direct_module_private_calls
+                    .iter()
+                    .cloned()
+                    .map(|identity| (block.function_id, CallTarget::ModulePrivate(identity))),
+            );
+            targets.extend(
+                block
+                    .direct_facts
+                    .direct_generated_calls
+                    .iter()
+                    .cloned()
+                    .map(|identity| (block.function_id, CallTarget::Generated(identity))),
+            );
+        }
+        targets
+    }
+
     /// Remap source locations retained for later target diagnostics.
     pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         for block in &mut self.blocks {

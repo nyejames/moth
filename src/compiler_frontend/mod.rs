@@ -87,6 +87,7 @@ pub(crate) mod tests {
     mod keyword_tests;
     pub(crate) mod parse_support;
     mod plain_markdown_tests;
+    mod public_call_summary_tests;
     mod semantic_identity_tests;
     mod synthetic_interface_provenance_tests;
     pub(crate) mod type_id_fixture_support;
