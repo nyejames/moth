@@ -11,11 +11,10 @@
 </em></p>
 
 <p>⚠️ This project is in early Alpha ⚠️</p>
-<p>⚠️ Still missing diagnostics, backend stability and compile time optimisations ⚠️</p> 
+<p>⚠️ Better diagnostics, backend stability and more optimisation will come in time ⚠️</p> 
 
-<p><a href="https://nyejames.github.io/moth/">The documentation site</a> was created using <a href="https://github.com/nyejames/moth/blob/main/docs/src">Moth</a>. </p>
+<p><a href="https://nyejames.github.io/moth/">The documentation site</a> was created using this language and toolchain. </p>
 
-<p>Development is moving quickly. <a href="https://github.com/nyejames/moth/blob/main/CONTRIBUTING.md">CONTRIBUTING</a> has more info if you want to get involved.</p>
 </div>
 <br>
 <br>
@@ -61,7 +60,12 @@ This makes content-heavy pages quick to build and easy to format.
 
 No more TypeScript framework lasagne, build-tool linguini or 17 package dependency spaghetti for padding a string.
 
+<br>
+<div align="center">
+
 ## Getting Started
+
+</div>
 
 `moth` is the project tool for creating, checking, building and running Moth projects.
 It's the CLI bundled with the compiler and build system.
@@ -124,6 +128,8 @@ See [the design principles doc](./docs/src/docs/design-scope/design-principles.m
 
 <div align="center">
 
+<br>
+
 ## LLM-aware design
 
 </div>
@@ -137,6 +143,8 @@ This isn't a language for LLMs only, its a language for human creativity with th
 See [HUMANS.md](./HUMANS.md) for more info and way too much elaboration about this.
 
 <div align="center">
+
+<br>
   
 ## Documentation
 
