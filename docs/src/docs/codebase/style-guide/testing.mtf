@@ -10,6 +10,99 @@ The primary goal is end-to-end language and artifact correctness. Prefer real
 usage patterns and complete Moth snippets over narrow implementation-shaped
 tests.
 
+### Task-reading guide
+
+Heading paths use `>` to name nested sections. Read the selected heading through
+the next heading of the same or higher level, including nested subsections
+unless the route narrows further. Read this document in full for test
+infrastructure, suite policy, broad fixture cleanup or audits.
+
+[table:
+    [th:
+        [: **Task**]
+        [: **Read**]
+    ]
+
+    [td:
+        [: Choosing the test owner, level or location]
+        [:
+            - `Default testing preference`
+            - `Supporting rules`
+            - `Test ownership`
+            - `Test location and module layout`
+        ]
+    ]
+
+    [td:
+        [: Unit or subsystem-invariant coverage]
+        [:
+            - `Unit tests`
+            - `HIR and internal-IR assertions` when IR or side-table facts are involved
+            - `Fixtures and temporary files`
+        ]
+    ]
+
+    [td:
+        [: User-visible language or project behaviour]
+        [:
+            - `Integration cases`
+            - `Successful backend intent`
+            - `Focused integration selection and inventory`
+        ]
+    ]
+
+    [td:
+        [: Runtime output or reactivity behaviour]
+        [:
+            - `Runtime output assertions`
+            - `Backend matrices and artifact assertions` when structure also matters
+        ]
+    ]
+
+    [td:
+        [: Diagnostics or warnings]
+        [:
+            - `Diagnostics assertions`
+            - `Integration cases`
+        ]
+    ]
+
+    [td:
+        [: Backend structure, target parity, Wasm validation or goldens]
+        [:
+            - `Successful backend intent`
+            - `Backend matrices and artifact assertions`
+            - `HIR and internal-IR assertions` only for hidden compiler invariants
+        ]
+    ]
+
+    [td:
+        [: Manifest policy, suite inventory, filtering or audit behaviour]
+        [:
+            - `Successful backend intent`
+            - `Focused integration selection and inventory`
+        ]
+    ]
+
+    [td:
+        [: Fixtures, temporary paths or test support]
+        [: `Fixtures and temporary files`]
+    ]
+
+    [td:
+        [: Removing duplicate or obsolete coverage]
+        [:
+            - `Pruning and duplicate coverage`
+            - `Benchmarks are not correctness tests`
+        ]
+    ]
+
+    [td:
+        [: Final coverage review]
+        [: `Testing checklist`]
+    ]
+]
+
 ### Default testing preference
 
 Integration tests written in Moth are the default for user-visible language behaviour. They exercise the real compiler path and usually provide the strongest regression coverage.

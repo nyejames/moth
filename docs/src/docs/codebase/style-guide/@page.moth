@@ -14,7 +14,10 @@ page_head #= theme_head
 
     # Codebase development standards
 
-    Good compiler work should be easy to read, easy to test and hard to misinterpret. These references cover implementation style, test design and the validation gates that show a change is ready.
+    Good compiler work should be easy to read, easy to test and hard to misinterpret. 
+    These references cover implementation style, test design and the validation gates.
+
+    All of these must be followed by all contributors to meet the criteria for an acceptable PR.
 ]
 
 #[section, style_content]

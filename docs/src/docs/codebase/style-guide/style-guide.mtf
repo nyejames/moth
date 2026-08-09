@@ -2,11 +2,9 @@
 
 This document owns implementation style for new and refactored compiler code.
 
-For test strategy and test construction, read
-`docs/src/docs/codebase/style-guide/testing.mtf`.
+@./testing.mtf (Test strategy and test construction guide).
 
-For final technical gates and completion checks, read
-`docs/src/docs/codebase/style-guide/validation.mtf`.
+@./validation.mtf (Final technical gates and completion checks guide).
 
 Priorities:
 
@@ -23,9 +21,9 @@ Priorities:
 
 - Use `CompilerDiagnostic` for normal user-facing source, config, import, syntax, type, rule, borrow and deferred-feature diagnostics.
 - Use `CompilerError` only for internal compiler, filesystem, backend, dev-server and tooling infrastructure failures.
-- Diagnostic payloads and reason enums should carry structured facts, not pre-rendered prose.
-- Preserve `SourceLocation` and source labels wherever the compiler can point to useful source context.
-- Type diagnostics should carry semantic `TypeId`s and render them through `DiagnosticRenderContext`, not cloned `DataType` values or formatted type names.
+- Diagnostic payloads and reason enums should carry typed `DiagnosticPayload` facts and stable diagnostic codes, not pre-rendered prose.
+- Include a `SourceLocation` in every user-facing diagnostic and preserve source labels wherever they add useful context.
+- Type diagnostics should carry semantic `TypeId`s and context enums and render through `DiagnosticRenderContext`, not cloned `DataType` values or formatted type names.
 - Use `DiagnosticBag` for stage-local accumulation and `CompilerMessages` only at build/render boundaries.
 
 For test assertion policy, see `testing.mtf`.
@@ -33,42 +31,23 @@ For test assertion policy, see `testing.mtf`.
 ### Naming
 
 - Use descriptive full names. Avoid abbreviations except simple iterators such as `i` and `j`.
-- Functions should be self-describing through clear names.
-- Compiler passes should use explicit names such as `build_ast`, `generate_hir` and `emit_wasm`.
-
-Avoid vague names when they cross more than a few lines or function boundaries:
-
-- prefer `function_signature` over `sig`.
-- prefer `expression` over `expr` outside tiny scopes.
-- prefer `data_type` or the concrete type name over `ty`.
-- prefer `scope_context` or `module_environment` over `ctx` or `env` when several contexts/environments exist.
+- Functions should be self-describing. Compiler passes should use explicit names such as `build_ast`, `generate_hir` and `emit_wasm`.
+- Outside tiny scopes, prefer `function_signature` over `sig`, `expression` over `expr`, `data_type` over `ty` and a specific context name over `ctx` or `env`.
 
 ### `format!` and printing
 
-- Use the saying library macro `say!()` for stdout when creating user-facing messages that may need colour styling in the future.
-
-Use variables directly in `format!` strings whenever possible.
+Use the saying library macro `say!()` for user-facing stdout that may need colour styling. Use variables directly in `format!` strings whenever possible.
 
 ### Imports
 
-Avoid inline imports. They are only acceptable when they are one level deep and help local reasoning.
+Use inline imports only when they are one level deep and improve local reasoning. Import long paths at the top, including types used once in signatures.
 
 [codeblock, $code("rust"):
-    // ACCEPTABLE: builtin_type_ids is imported, but kept inline because it's terse and clear.
+    // ACCEPTABLE: terse and locally clear.
     let type_id = builtin_type_ids::BOOL
 
-    // BAD: large inline import, even if this is only used once, it's too noisy inline.
+    // BAD: import this long path at the top.
     let type_id = crate::compiler_frontend::datatypes::ids::builtin_type_ids::BOOL
-
-    // BAD: inline imports with long paths should be imported at the top, even if only used once.
-    fn lookup_constant(
-        &self,
-    ) -> Option<(
-        crate::compiler_frontend::external_packages::ExternalConstantId,
-        &crate::compiler_frontend::external_packages::ExternalConstantDef,
-    )> {
-        ...
-    }
 ]
 
 Avoid aliasing unless it clearly improves readability.
@@ -76,43 +55,25 @@ Avoid aliasing unless it clearly improves readability.
 ### Code style and organisation
 
 - Maintain clear separation between compilation stages.
-- Each module should have one clear responsibility. Don't mix concerns.
+- Each module should have one clear responsibility. Do not mix concerns.
 - Split files by task category. Aim for files under ~2000 lines where practical.
-- `mod.rs` should be the module entry point and structural map. It exposes the public surface, shows the flow of the module and points to the files that contain the real implementation.
+- `mod.rs` should be the module entry point and structural map. It exposes the public surface, shows the module flow and points to the files that contain the implementation.
 - Keep `mod.rs` focused on orchestration, re-exports and documentation rather than core implementation.
-- A reader should be able to open `mod.rs` first and quickly understand what the module does, which stages or responsibilities it contains and where to find the important functions and types.
-- Use comments and doc comments in `mod.rs` to explain the module's structure, data flow and why the pieces are arranged that way.
-- Prefer context structs for shared state instead of passing many state values between functions.
-- Separate unrelated statements and all functions with an extra newline.
+- A reader should understand the module's responsibilities and important files by opening `mod.rs` first. Its documentation should explain structure and data flow and state what the module owns, important exclusions and why the pieces are arranged that way.
+- Prefer context structs for shared state instead of noisy or repetitive parameter lists.
 - Keep new abstractions small, stage-local and easy to justify.
-- Avoid `.unwrap()` unless it's blatantly safe and tied to an internal invariant.
-- Prefer `.to_owned()` over `.clone()` when copying owned string-like data.
-- Use `.clone()` when a general copy is genuinely required and clearer.
+- Avoid `.unwrap()` unless it is blatantly safe and tied to an internal invariant.
+- Prefer `.to_owned()` over `.clone()` when copying owned string-like data. Use `.clone()` when a general copy is genuinely required and clearer.
 
 For test-file placement, see `testing.mtf`.
 
 ### Readable Rust style
 
-Compiler code should optimise for fast human review.
-Dense code is harder to scan and easier to extend badly.
+Compiler code should optimise for fast human review. Dense code is harder to scan and easier to extend badly.
 
-Prefer code that reads as a sequence of named steps over dense expression chains, clever iterator nesting or large inline matches.
-The best code in this compiler should make the data flow obvious before the reader understands every detail.
+Prefer code that reads as a sequence of named steps and makes data flow obvious before every detail is understood. The main function for a module or pass should also read as a sequence of named steps.
 
-Good compiler code has:
-
-- clear stage ownership
-- named intermediate values
-- short functions with one job
-- explicit control flow for multi-step logic
-- narrow helper functions
-- context/input structs instead of long parameter lists
-- enums for meaningful states instead of loose booleans
-- comments that act as reading landmarks
-- vertical spacing between logical blocks
-
-Avoid code that compresses too much logic into one expression.
-Brevity is less important than clarity.
+Use named intermediate values, short single-purpose functions, explicit multi-step control flow, narrow helpers, context/input structs, enums for meaningful states, comments as landmarks and visible spacing. Avoid dense expression chains, clever iterator nesting, large inline matches and logic compressed into one expression. Brevity is less important than clarity.
 
 ### Vertical spacing
 
@@ -120,11 +81,11 @@ Use vertical spacing to show structure.
 
 Required:
 
-- one blank line between functions.
-- one blank line between unrelated statement groups.
-- one blank line between major control-flow blocks inside long functions.
-- one blank line between match arms unless the arms are tiny and visually identical.
-- one blank line before a comment that introduces a new logical step.
+- one blank line between functions
+- one blank line between unrelated statement groups
+- one blank line between major control-flow blocks inside long functions
+- one blank line between match arms unless the arms are tiny and visually identical
+- one blank line before a comment that introduces a new logical step
 
 Prefer this:
 
@@ -138,57 +99,17 @@ Prefer this:
     self.resolve_constant_headers(&headers, visibility, string_table)?;
 ]
 
-Avoid this:
-
-[codeblock, $code("rust"):
-    let source_file = header.source_file.clone();
-    let visibility = import_environment.visibility_for(&source_file)?;
-    self.resolve_type_aliases(&headers, visibility, string_table)?;
-    self.resolve_constant_headers(&headers, visibility, string_table)?;
-]
-
 ### Comments as reading landmarks
 
-Comments are encouraged when they make code faster to understand.
-They should be terse and focus on wider context rather than re-describing the code.
-Write comments aimed at programmers reading the codebase for the first time, 
-trying to navigate around and understand how everything flows and is connected together in the wider picture.
+**Comments must explain non-local intent, not restate the code.** Write for programmers reading the codebase for the first time so they can understand local code without first reading distant owners.
 
-Always:
-- Add doc comments at the top of new files.
-- Add concise WHAT/WHY comments in these top of file doc comments and for complex functions & methods (not small methods or helpers or self-describing code) and important structs.
+- Add a concise WHAT/WHY doc comment at the top of every new file. State what the file owns, important exclusions and how it fits the wider module or compiler.
+- Add intent comments to important structs and complex functions, methods or blocks, not small helpers or self-describing code.
+- Explain wider ownership, downstream consumers, non-obvious ordering or control flow, invariants, failure conditions, fallbacks, phase joins, subtle fixes and project-specific or widely shared behaviour.
+- Use terse comments to mark stage boundaries, control-flow joins, intentional no-op branches, why a diagnostic belongs at this stage and the reason a helper exists.
+- Keep comments aligned with the current design when code moves or behaviour changes. Remove stale comments.
 
-WHAT comments should mostly provide context about what something does from the perspective of its role in the wider module / compiler.
-They should only help condense complexity or provide wider codebase/non-local context concisely.
-
-Comments should help a reader understand code locally without reading large parts of the codebase first.
-They should not restate syntax, especially for functions with already descriptive names and signatures. 
-
-Be comment-positive, but not noisy.
-
-They should explain:
-- what role this code plays in the larger subsystem
-- which later stage, caller or output consumes the result
-- why the control flow is shaped this way
-- invariants
-- failure conditions
-- subtle bug fixes
-- non-obvious data flow
-- important joins between phases
-- unusual or project-specific code
-- code used widely across the repository
-
-Use terse comments to mark:
-- stage boundaries
-- non-obvious ordering requirements
-- invariants
-- why a fallback exists
-- why a branch intentionally does nothing
-- why an error is reported at this stage instead of a later stage
-- control-flow joins in large functions
-- the reason a helper exists
-
-Good comments are grammatical, readable and explain intent:
+Be comment-positive, but not noisy. Comments should be grammatical and readable. Do not narrate syntax, repeat a descriptive name or paraphrase a clear signature.
 
 [codeblock, $code("rust"):
     // Register same-file declarations before imports so aliases cannot shadow local names.
@@ -204,17 +125,15 @@ Good comments are grammatical, readable and explain intent:
 
 ### Refactor moves
 
-When moving code across compiler stages, don't copy the old module shape unchanged.
-Use the move to correct ownership, names, APIs, comments and data flow.
+When moving code across compiler stages, do not copy the old module shape unchanged. Use the move to correct ownership, names, APIs, comments and data flow.
 
 Moved code must:
-- remove obsolete wrappers and compatibility paths
-- replace long parameter lists with context/input structs
+- replace long parameter lists with context/input structs where useful
 - split mixed-responsibility modules
-- update file-level docs to match the new owner
+- update file-level documentation to match the new owner
 - delete the old owner once the new path is wired
 
-Don't preserve a bad API shape just because it already exists.
+Do not preserve a bad API shape because it already exists.
 
 ### API breakage
 
@@ -227,34 +146,14 @@ Don't preserve a bad API shape just because it already exists.
 
 Order types in a file from higher-level abstractions to lower-level supporting types.
 
-[codeblock, $code("rust"):
-    pub struct HirModule { ... }
-    pub struct HirBlock { ... }
-    pub struct HirNode { ... }
-    pub struct HirExpression { ... }
-]
-
 ### Iterators versus loops
 
 - Use iterators for simple transformations.
 - Use explicit loops for complex multi-stage logic where control flow is clearer.
 
-[codeblock, $code("rust"):
-    let mut processed_nodes = Vec::new();
-
-    for node in ast_nodes {
-        if let Some(ir_node) = convert_to_ir(&node)? {
-            if ir_node.is_optimizable() {
-                processed_nodes.push(optimize_node(ir_node));
-            }
-        }
-    }
-]
-
 ### Function size
 
-Functions should usually stay under ~200 lines.
-Longer functions are fine when they still represent one coherent operation, such as a compiler transformation, state machine or tightly coupled sequential process.
+Functions should usually stay under ~200 lines. Longer functions are fine when they still represent one coherent operation, such as a compiler transformation, state machine or tightly coupled sequential process.
 
 Split functions when they mix unrelated responsibilities, are hard to test or no longer match their name.
 
@@ -323,20 +222,17 @@ A few more lines are fine when the result is easier to inspect and harder to mis
 
 ### Macros
 
-- Keep macro usage minimal
-- Use small declarative macros only where they clearly reduce repetition
-- Avoid creating procedural macros
+Keep macro usage minimal. Use small declarative macros only where they clearly reduce repetition and avoid creating procedural macros.
 
 ### Warnings and lints
 
-- Use `clippy`.
-- Use the default Rust formatter.
+- Use `clippy` and the default Rust formatter.
 - Keep unused variables and dead code to a minimum.
-- Use `allow(dead_code)` attributes only with clear justification. Dead code must have a comment stating that it's a todo or used only in tests.
+- Any lint suppression must be justified and documented. Use `allow(dead_code)` only for clearly identified planned work or test-only code.
 
 ### Section banners
 
-Use section banners only in long functions, large files or complex orchestration code where phase boundaries help a reader jump into the process.
+Use section banners only for real phase boundaries in long functions, large files or complex orchestration such as parsing, lowering, template folding, import resolution, diagnostic rendering or build flow.
 
 Use exactly this format:
 
@@ -346,48 +242,21 @@ Use exactly this format:
     // ------------------------
 ]
 
-Rules:
-- Three lines
-- Top and bottom lines use `// ` followed by dashes
-- The title line starts with `//  ` and uses one extra leading space after the comment marker
-- Dash lines should exceed the title text by the same amount on each side
-- Use title case or clear imperative phase names consistently within the file
-- Don't use banners around small helpers
-- Don't use banners to hide a file that should be split
-
-Good uses:
-- parser phases
-- compiler lowering phases
-- template folding stages
-- import resolution stages
-- diagnostic rendering stages
-- long build orchestration functions
+The banner has three lines. The title starts with `//  ` and uses title case or a clear imperative name. The top and bottom start with `// ` and their dashes extend equally beyond the title on both sides. Do not use banners around small helpers or to hide a file that should be split.
 
 ### Returning errors
 
-The diagnostic system has two paths:
+The diagnostic lane rules above apply to every local error boundary.
 
-- **`CompilerDiagnostic`** is the current user-facing diagnostic type. Use typed payloads (`DiagnosticPayload`) and stable diagnostic codes. This is the correct path for all source-language diagnostics: syntax, type, rule, import, borrow and config.
-- **`CompilerError`** is for internal/tooling failures only: compiler bugs, HIR lowering failures, filesystem errors and backend failures. Don't route user-facing diagnostics through `CompilerError`.
-
-#### Rules for new code
-
-- **New user-facing diagnostics must use `CompilerDiagnostic`** with typed constructors in `compiler_diagnostic.rs`. Don't add new `CompilerError` for syntax, type, rule, import or borrow diagnostics.
-- Use `return_compiler_error!` **only** for internal compiler bugs or broken invariants.
-- Use `DiagnosticBag` for stage-local accumulation of multiple diagnostics.
-- Convert to `CompilerMessages` only at clear build/render boundaries.
-- When a local `Result` error boundary carries `CompilerDiagnostic` or `CompilerError` and Clippy reports `result_large_err`, box the payload inside the local boundary enum or use a stage-local boxed diagnostic result alias.
+- New user-facing diagnostics must use typed `CompilerDiagnostic` constructors in `compiler_diagnostic.rs`. Do not add `CompilerError` variants for syntax, type, rule, import, borrow or config failures.
+- Use `return_compiler_error!` only for internal compiler bugs or broken invariants.
+- When a local `Result` boundary carrying `CompilerDiagnostic` or `CompilerError` triggers `result_large_err`, box the payload inside that boundary enum or use a stage-local boxed diagnostic result alias.
 - Keep `DiagnosticBag` and `CompilerMessages` owning plain `CompilerDiagnostic` values at accumulation and render/build boundaries.
-- Prefer `Option<CompilerDiagnostic>` over `Result<(), CompilerDiagnostic>` for predicate-only validation helpers that only need to report one diagnostic or continue.
-- Prefer explicit loops over iterator closures when the closure would infer `Result<_, CompilerDiagnostic>`.
-- Include a `SourceLocation` for every user-facing diagnostic.
-- Keep paths interned until render time. Don't duplicate them as owned `PathBuf`s.
-- New type diagnostics must carry semantic `TypeId`s and context enums, not rendered type strings or cloned `DataType` payloads.
-- Render type names through the diagnostic render context.
-- Be specific. Include exact tokens, types or names.
-- Be helpful. Suggest corrections when practical.
-
-#### Examples
+- Prefer `Option<CompilerDiagnostic>` over `Result<(), CompilerDiagnostic>` for predicate-only validators that report one diagnostic or continue.
+- Prefer explicit loops when iterator closures would infer `Result<_, CompilerDiagnostic>`.
+- Keep paths interned until render time. Do not duplicate them as owned `PathBuf`s.
+- Centralise repeated diagnostic construction in the owning typed constructor or narrow helper instead of duplicating it across branches.
+- Include exact tokens, types or names and suggest practical corrections where possible.
 
 [codeblock, $code("rust"):
     // Typed diagnostic constructor.
@@ -409,49 +278,18 @@ The diagnostic system has two paths:
 
 ### Codebase documentation
 
-Codebase pages and Moth template references have different jobs.
+This section covers codebase doc comments and small requested documentation edits. For substantial documentation work, follow the task's dedicated writing guidance and the surrounding source.
 
-- `@page.moth` owns the website page, title, introduction, navigation and layout
-- `overview.mtf` provides a compact routing and contract reference and must not
-  be imported by `@page.moth`
-- Topic-named `.mtf` files own detailed design content
-- Website pages may import topic-named `.mtf` files
-- Topic-named `.mtf` files should remain useful when read directly
-- Website pages should make the subject easy to explore
-- Compact references should reach the contract quickly
+- `@page.moth` owns website title, introduction, navigation, composition and layout.
+- `overview.mtf` owns compact routing and contract reference and must not be imported by `@page.moth`.
+- Topic-named `.mtf` files own detailed design content, remain useful when read directly and may be imported by website pages. Pages should make subjects easy to explore while compact references reach the contract quickly.
 
-Writing rules:
-- Use British English.
-- Avoid hollow intensifiers (incredibly, extremely, highly, pivotal, crucial, profound).
-- Don't use semicolons, oxford commas and em dashes.
-- Avoid filler (just, really, basically, actually, simply).
-- Avoid excessive preambles or commentary about the structure or description of the document itself unless it is specifically required. Get to the point. 
-- DO NOT summarise the preceding text at the end of a section. If the point has been made, move on without concluding it.
-- NEVER use generic transitions and transitional terms (however, therefore and consequently,furthermore, moreover, thus, herein, aforementioned, notably).
-- Use direct, active language. Eliminate all passive constructions and copula verbs (is, has, serves as). Ensure the subject of every sentence directly performs the action. Don't mask verbs as nouns.
-- Avoid hedging and vague qualifiers (various, numerous, several, to some extent, broadly speaking).
-- Avoids restating or over-describing, cliché metaphors, culturally dated or pop culture language.
-- Use contractions. Only keep hard `must` and `must not` language for deliberate stern emphasis.
-- Use normal `'` apostrophes, never `U+2019`.
-- Mix up your sentence structure. Combine shorter, punchy sentences with longer, conversational ones in the same paragraph to create a more natural rhythm. Never write three consecutive sentences of similar length.
-- Keep quotes or code syntax exact even when it contains punctuation or rule violations from this style guide.
-- Example names must use "Priya" as a first choice for examples.
+For small edits:
 
-### Style checklist
-
-Before considering an implementation slice structurally complete, check:
-
-- The module has one clear owner responsibility.
-- The file-level documentation says what the module owns and must not own.
-- The main function reads as a sequence of named steps.
-- Complex blocks have concise intent comments.
-- Imports remain readable and are not needlessly fully inline.
-- Match arms are grouped by meaning.
-- Unrelated blocks have visual spacing.
-- Function arguments are not noisy or repetitive.
-- Named states are used instead of boolean-heavy APIs.
-- Error construction isn't duplicated across branches.
-- The code avoids cleverness that slows review.
-- No stale comments describe an older design.
-- No compatibility wrappers preserve obsolete paths.
-- Lint suppression is justified and documented.
+- Follow the surrounding style and use British English.
+- Prefer direct, active constructions and concrete verbs. Keep only information-carrying prose.
+- Remove filler, hollow intensifiers, hedging, vague qualifiers, generic transitions, redundant preambles or recaps, restatement, over-description, clichés and dated cultural references.
+- Do not add redundant end-of-section summaries.
+- Avoid semicolons, Oxford commas and em dashes. Use straight `'` apostrophes and contractions. Reserve hard `must` and `must not` wording for deliberate emphasis.
+- Vary sentence rhythm naturally. Preserve exact quotes and code syntax even when they break prose rules.
+- Use "Priya" as the first choice for example names.

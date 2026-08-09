@@ -20,6 +20,31 @@ Companion authorities:
 
 User-facing pages under `docs/src/docs/**` teach the language. They do not replace this architecture reference.
 
+## Task-reading guide
+
+For every compiler task, read the opening authority text above and
+`Architectural invariants`. Heading paths use `>` to name nested sections. Read
+the selected heading through the next heading of the same or higher level,
+including nested subsections unless the route narrows further. Read the full
+document for architecture plans, cross-stage ownership changes, broad refactors
+or thorough reviews.
+
+| Task | Read in this document | Also read when affected |
+|---|---|---|
+| Module compilation inputs, outcomes, root roles or artefact lanes | `Compiler input and result boundary` | `docs/build-system-design.md` > `Deterministic scheduling and graph outcomes` |
+| Diagnostic lanes, render context or deterministic diagnostic identity | `Diagnostics and deterministic identity` | `docs/src/docs/codebase/style-guide/style-guide.mtf` > `Diagnostics` and `Returning errors` |
+| Cross-module declaration, type, builtin or binding identity | `Stable semantic identities` | `Public semantic interfaces` |
+| Public surfaces, exported effects, aliases, conformances or project provenance | `Public semantic interfaces` | `Stable semantic identities` and the relevant language reference |
+| Fingerprints, invalidation inputs or compiler-owned reuse facts | `Fingerprints and reuse facts` | `docs/build-system-design.md` > `Incremental and persistent artefacts` |
+| Concrete generic materialisation or generated sidecars | `Generated concrete functions`; `Frontend stages > Stage 4: AST semantics > Generics` | `docs/build-system-design.md` > `Generated-function worklist` |
+| Tokenization, header syntax, interface binding, source-kind preparation or local declaration ordering | The relevant section under `Frontend stages > Stage 1: tokenization`, `Stage 2: header syntax and interface binding` or `Stage 3: local declaration ordering` | `docs/build-system-design.md` > `Prepared-source orchestration` when Stage 0 consumes or schedules the result |
+| AST typing, constants, traits, casts, templates, reactivity or another language feature | `Frontend stages > Stage 4: AST semantics` and the exact relevant subsection | The feature's canonical unsuffixed language references and routed memory material when value flow is affected |
+| HIR shape, lowering, validation, numeric ownership or call targets | `Frontend stages > Stage 5: HIR and validation` and the exact relevant subsection | The affected Stage 4 producer, Stage 6 consumer or backend handoff |
+| Borrow validation, transfer facts or exported access summaries | `Frontend stages > Stage 6: borrow validation` | The task route in `docs/src/docs/codebase/memory-management/overview.mtf` |
+| Lifetime regions, escapes, retention or exported lifetime summaries | `Lifetime-region and escape validation` | The memory task route and `docs/build-system-design.md` > `HTML project builder > Link planning and lifetime topology` when project lifecycles are involved |
+| Reachability, link facts, target checks or backend inputs | `Per-function link facts`; `Target-contract validation`; `Backend-facing compiler handoff` | `docs/build-system-design.md` > `Entry and package link planning` and the relevant builder section |
+| Current source locations | `Compiler implementation map` | Open the owning module entry point and adjacent producer or consumer before changing code |
+
 ## Architectural invariants
 
 - One directory-scoped `@*.moth` or `+*.moth` module is the canonical semantic compilation unit.

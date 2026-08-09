@@ -3,17 +3,13 @@
 Moth is an early-stage compiler and language project with ambitious long-term, difficult goals. 
 
 If you are interested in compilers/programming languages or the goals of this project 
-and want to contribute or make suggestions, please open a discussion on GitHub.
+and want to contribute or make suggestions, please open a discussion on GitHub. Make sure to read the [design scope doc](docs/src/docs/design-scope/) and [progress matrix](docs/src/docs/progress/@page.moth) before suggesting or discussing a feature.
 
 This is still an undisclosed project (its open sourced but no one really knows about it), so getting in touch prior to contributing is preferred at this stage over yeeting a random PR at the repo.
 
 No PRs making modifications to documentation or other supporting documents in this codebase will be accepted. 
 
-## AI Policy
-
-AI tools are used to help with building this language, but all LLM generated output is meticulously planned and scaffolded ahead of time, carefully reviewed, and has been put through a rigourously tested pipeline with tons of documentation and testing to support that process.
-
-Contributions that are AI generated can be accepted on their own merit, but might have to adhere to a higher standard of scruitiny before they can be accepted. Everything must pass the full validation workflow and follow the compiler documentation strictly. Submissions that show design drift, duplicated implementation paths, weak diagnostics, superficial tests, or unreviewed generated churn will not be accepted.
+See the [AI policy](./HUMANS.md) for more info about what is / isn't acceptable for LLM generated code and how to get them to write acceptable PRs.
 
 ---
 

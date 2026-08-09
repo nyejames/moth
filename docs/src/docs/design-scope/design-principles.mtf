@@ -92,6 +92,27 @@ source-language obligations.
 - Is it accepted but unimplemented, undecided or intentionally excluded?
 - Does it make code harder to inspect locally?
 
+### LLM-aware design
+
+Coding agents are increasingly becoming a part of coding workflows. 
+
+Moth is designed to be strict and provide clear and fast feedback to coding agents.
+
+Developers can focus more on high level design, architecture or important implementation detailed, while agents handle the busy work.
+
+Good languages for the future should be easy to review and strict about what the code should look like and how it's structured.
+This means developers can worry less about whether their code is reliable / memory safe / structured correctly / using the correct patterns or idioms.
+
+A small syntax, strict rules, opinionated design, fast tooling and good diagnostics give agents less space to make mistakes or drift from ideomatic code.
+
+Compiler diagnostics should carry stable codes, structured facts and source metadata for editors, development servers and coding agents.
+
+Moth has very little training data, but this may be useful later: 
+examples can grow around the language that exists and agents will have to follow your codebase style more strictly. 
+No legacy patterns to pollute generated output.
+
+See @https://github.com/nyejames/moth/blob/main/HUMANS.md (HUMANS.md) for more general stances and opinions on getting good output out of LLMs.
+
 ### Read next
 
 - @#deferred-and-outside-scope (Deferred, open and outside scope)

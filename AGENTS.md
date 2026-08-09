@@ -1,186 +1,128 @@
 # Moth agent rules
 
-Resolve every relative path in this file from the current worktree root. Do not read project references from another worktree unless the user explicitly asks you to.
+Resolve relative paths from the current worktree root. Do not read project references from another worktree unless the user explicitly asks.
 
-## Reading list
+## Reading routes
 
-Before any Moth task, read:
-- this file
-- `docs/compiler-design-overview.md`
-- `docs/src/docs/codebase/style-guide/style-guide.mtf`
-- `docs/src/docs/codebase/memory-management/overview.mtf`
+Always read this file. Before loading other project documentation, classify the task by affected domain and load only the routed canonical material. Re-route when scope expands. When ownership is unclear, a change crosses several stages or a review is architectural, read the relevant authority in full.
 
-Before making or reviewing a non-trivial change, read:
-- `docs/src/docs/codebase/style-guide/validation.mtf`
+### Named sections
 
-Read `docs/src/docs/codebase/style-guide/testing.mtf` when the task changes or reviews behavior, diagnostics, compiler stages, backend artifacts, tests, fixtures, or test infrastructure.
+A route may name an exact Markdown heading path such as:
 
-Read `docs/build-system-design.md` for build-system or project orchestration: Stage 0, config, imports, modules, packages, builders, tooling, link planning, backend project assembly, outputs, incremental builds and the dev server.
+```text
+Frontend stages > Stage 4: AST semantics > Templates and TIR
+```
 
-For memory, ownership, borrow checking, allocation, GC, drops, or runtime-handle work:
-1. Read `docs/src/docs/codebase/memory-management/overview.mtf`
-2. Use its task-reading guide
-3. Read the selected memory leaf documents
+Read the selected heading through the next heading of the same or higher level. Include nested subsections unless the route narrows further. Use heading names rather than line numbers. Use a document's task-reading guide when present. If a heading is missing or no longer owns the task, report the drift and read the broader authority.
 
-For language syntax, semantics and user-visible behavior, read:
-1. `docs/src/docs/codebase/language/overview.mtf`
-2. Every relevant canonical unsuffixed Moth template file selected by that overview
-3. `docs/src/docs/codebase/memory-management/overview.mtf` and its routed leaves when source behaviour touches access, copies, borrows, lifetimes, groups or ownership
-4. Paired `-basic.mtf` files and `@page.moth` only when teaching, presentation or website structure is in scope
+### Task routing
 
-Before writing Moth code or changing tokenization, parsing, type checking,
-semantics, diagnostics or lowering for a language feature, always read that
-feature's relevant unsuffixed language reference. Do not infer the language
-contract from examples, tests, compiler behaviour or a Basic teaching page.
+- **Code-bearing implementation or review:** read `docs/src/docs/codebase/style-guide/style-guide.mtf` in full and ensure all touched code follows the rules in this document.
+- **Compiler stages, semantic data or handoffs:** read the opening authority text and `Architectural invariants` in `docs/compiler-design-overview.md`, then its routed task sections and affected producer or consumer handoffs.
+- **Build system and project orchestration:** read the opening authority text and `Architectural invariants` in both `docs/compiler-design-overview.md` and `docs/build-system-design.md`, then routed build sections and relevant compiler handoffs. This includes Stage 0, config, imports, modules, packages, builders, tooling, linking, backend project assembly, outputs, incremental builds and the dev server.
+- **Memory and value flow:** read `docs/src/docs/codebase/memory-management/overview.mtf`, use its task-reading guide and read the selected leaves. This includes access, copies, ownership, borrowing, lifetimes, allocation, GC, drops, reactivity retention, runtime handles and ABI work.
+- **Language syntax or user-visible semantics:** read `docs/src/docs/codebase/language/overview.mtf` and every relevant canonical unsuffixed reference it selects. Also read routed memory material when behaviour touches access, copies, borrows, lifetimes, groups or ownership. Read paired `-basic.mtf` files and `@page.moth` only for teaching, presentation or site structure.
+- **Tests:** read relevant sections of `docs/src/docs/codebase/style-guide/testing.mtf` before choosing, adding, changing or reviewing coverage. Read it in full for test infrastructure, suite policy, broad fixture cleanup or audits.
+- **Final validation:** read `docs/src/docs/codebase/style-guide/validation.mtf` before selecting, running or reporting a final gate. It need not remain loaded during implementation.
+- **Architecture plans, cross-stage ownership changes, broad refactors and thorough reviews:** read every relevant authority in full, including adjacent handoff authorities, current status and active sequencing.
+
+Before writing Moth code or changing tokenization, parsing, type checking, semantics, diagnostics or lowering for a language feature, read that feature's canonical unsuffixed reference. Do not infer the language contract from examples, tests, compiler behaviour or a Basic page.
 
 Use:
 - `docs/src/docs/progress/@page.moth` for current implementation status and coverage
-- `docs/roadmap/roadmap.md` for sequencing, active plans, and genuinely deferred design
+- `docs/roadmap/roadmap.md` for sequencing, active plans and genuinely deferred design
 - `index.md` only as a file and module locator
 
-The public unsuffixed Design Scope files under `docs/src/docs/design-scope/` own
-accepted deferred implementation, open design questions and excluded language
-boundaries. The progress matrix tracks implementation of accepted design only
-and must not add open or outside-scope features as standalone rows.
+The public unsuffixed files under `docs/src/docs/design-scope/` own accepted deferred implementation, open questions and excluded language boundaries. The progress matrix tracks implementation of accepted design only.
 
-## Instruction priority
+## Authority and architecture
 
-1. The explicit user request for the current task
+Instruction priority:
+1. The explicit user request
 2. The most specific relevant design or standards document
 3. This file
-4. Existing implementation behavior
+4. Existing implementation behaviour
 
-A narrow canonical design or standards document may refine a broader authority within its declared ownership area. Educational compiler-design pages explain concepts and implementation examples but cannot override the compiler overview, build-system design, language authorities, memory authorities or progress matrix.
+`docs/compiler-design-overview.md` owns compiler semantics and stage contracts. `docs/build-system-design.md` owns project and build orchestration. Canonical unsuffixed language references own syntax and observable language semantics. Roadmap plans cannot override these authorities. Code may lag accepted design, so report conflicts instead of treating implementation as authoritative. The progress matrix says what works today, not what the accepted design means.
 
-`docs/compiler-design-overview.md` is the authority for compiler semantics and stage contracts. `docs/build-system-design.md` is the authority for project and build orchestration. The unsuffixed language references selected by `docs/src/docs/codebase/language/overview.mtf` own source syntax and observable language semantics. A plan that crosses compiler and build ownership must read both architecture documents. Roadmap plans cannot override these authorities.
+Core contracts:
+- Each semantic fact has one owner. Later stages consume owned facts rather than rescanning source, reparsing syntax or reconstructing meaning from an earlier IR.
+- Tokenization and declaration-shell parsing happen once. Do not add lightweight scanners or parallel parsing paths for owned syntax.
+- Keep build-system, frontend, AST, HIR, analysis, project-builder and backend responsibilities separate. Builders and backends consume explicit validated artefacts rather than rediscovering source structure or semantics.
+- Donor-local `TypeId`, HIR, region and other local indexes do not cross module boundaries. Use stable semantic identities and summaries.
+- TIR is AST-local. HIR is the first backend-facing semantic IR. Borrow and lifetime analyses read validated HIR and write side tables without rewriting it.
+- User-authored failures use structured `CompilerDiagnostic` values with useful source context. `CompilerError` is for internal invariants, filesystem, tooling and backend infrastructure failures. User input must not panic.
+- Borrow validation and lifetime-topology validation are mandatory and backend-independent. GC may represent an already legal topology but cannot legalise invalid or unproven topology.
+- Missing optional ownership or transfer proof falls back conservatively without rejecting legal source. Missing mandatory topology proof is a source diagnostic, not a GC fallback.
+- Backends do not reparse source, reconstruct imports, infer source semantics or reconsider borrow and lifetime legality.
 
-Code may lag accepted design. When implementation conflicts with the relevant design document, call out the conflict rather than silently treating the code as authoritative.
+## Coding and workflow
 
-The progress matrix answers what works today. It does not override accepted architecture or language semantics.
+- Prefer readable, modular, explicit code with descriptive names, narrow helpers, context structs and concise WHAT/WHY comments. Prefer data-oriented design over object-oriented patterns.
+- Moth is pre-release. Do not preserve old APIs through compatibility wrappers, forwarding shims, parallel structs, legacy entry points or fallback paths.
+- Keep one current implementation path. Thread API changes through every owner and delete the old path.
+- Fix root causes. Remove transitional duplication, stale helpers, dead code, obsolete comments, superseded fixtures and cleanup debt in the owning change.
+- Before adding a helper, pass, type, registry, validator, module or test abstraction, search the current owner, adjacent stages, backend paths and tests. Share only identical behaviour with a clear owner.
+- Do not move shared logic into a broad utility module unless it is genuinely shared and ownership remains clear.
+- Do not claim validation commands were run when they were not.
+- Use `/tmp` for temporary snippets and artefacts that should be untracked by git.
 
-## Core working rules
+Required workflow:
+1. Route and read canonical documentation.
+2. Inspect the implementation and identify its owner.
+3. Search for overlapping, duplicated, legacy and test paths.
+4. Decide whether to extend, consolidate, replace or remove the existing path.
+5. Implement the smallest coherent slice without transitional duplication.
+6. Add or update tests when behaviour or a real internal invariant changed.
+7. Review progress and index update rules, run the correct final gate and perform the Final audit.
 
-- Prefer readability, modularity, correctness, and structured diagnostics over cleverness. Avoid complexity.
-- Maintain strict boundaries between build-system, frontend, AST, HIR, analysis, project-builder, and backend responsibilities.
-- Avoid user-input panics. User failures use structured diagnostics; panic paths are only for proven internal compiler invariants.
-- Moth is pre-release. Do not preserve old APIs through compatibility wrappers, forwarding shims, parallel structs, or legacy entry points. No compatibility fallbacks.
-- Prefer one current implementation path. Extend, consolidate, replace, or delete existing paths instead of adding parallel systems. 
-- When an API shape changes, thread the new shape through the compiler and remove the old one. 
-- Be strict about making root-cause fixes over patches. Never leave code that will need refactoring or cleaning up later.
-- Write beautiful code that uses descriptive names, explicit control flow, narrow helpers, context structs, and concise WHAT/WHY comments.
-- Remove dead code, obsolete helpers, stale comments, duplicate paths, and superseded fixtures as part of the owning change.
-- Be strict about design drift, duplicated implementation paths, weak diagnostics, oversized modules, stale helpers, and stage-boundary leaks.
-- Do not move shared logic into a broad utility module unless the behavior is genuinely shared and the owner remains clear.
-- Do not claim work was validated by commands that were not run.
-- Prefer data-oriented design over OOP patterns, especially when optimising code.
-
-When creating temporary files for testing snippets of code or creating temporary artifacts that will be cleaned up before a commit, use the `/tmp` folder.
-
-## Required workflow
-
-Every non-trivial implementation plan must end with the Final audit below.
-
-For multi-phase work, briefly re-check ownership, duplication, stale paths and
-test gaps after each completed phase.
-
-1. Identify and read the relevant documentation.
-2. Inspect the current implementation and its existing owner.
-3. Search for overlapping helpers, validators, lowering paths, diagnostics, tests, and legacy implementations.
-4. Decide whether the task extends, consolidates, replaces, or removes an existing path.
-5. Implement the smallest coherent slice without leaving transitional duplication.
-6. Add or update tests according to `style-guide/testing.mtf` when behavior or internal invariants changed.
-7. Review the progress matrix when support, rejection, backend coverage, or test coverage changed.
-8. Apply the correct final gate from `style-guide/validation.mtf`.
-9. Perform the final audit below.
-
-If a user request changes accepted behavior, treat the request as authoritative for that task and update the relevant design/status documentation when documentation changes are in scope. Call out any implementation conflict explicitly.
-
-## Duplication and abstraction policy
-
-Be strict about avoiding duplicated logic. Prefer extending, consolidating, or replacing the existing owner of the behavior over adding a new module, system, or parallel path. Only add a new subsystem when the existing ownership is clearly wrong or the new behavior is genuinely separate.
-
-Before adding a helper, pass, type, registry, validator, or module:
-- check for an existing owner
-- check adjacent stages and backend paths for near-duplicate logic
-- prefer extending or restructuring the current owner
-- extract shared code only when the behavior is genuinely identical and the abstraction has a clear home
-
-When similar logic remains separate, state why the similarity is superficial or why sharing would blur ownership.
-
-Actively look for duplicated:
-- validation
-- diagnostic construction
-- type and coercion logic
-- template handling
-- control-flow lowering
-- backend lowering
-- test fixtures and assertions
+For multi-phase work, re-check ownership, duplication, stale paths and test gaps after each phase. Every non-trivial implementation plan must end with the Final audit. If the user changes accepted behaviour, treat that request as authoritative for the task and call out implementation conflicts.
 
 ## Testing
 
 Follow `docs/src/docs/codebase/style-guide/testing.mtf`.
 
-Key routing:
-- prefer integration cases under `tests/cases/` for user-visible language behavior
-- use focused unit tests only for subsystem-local invariants or side-table facts
-  that integration output can't expose
-- use backend-specific artifact assertions or contractual goldens for backend structure
-- use one input with backend-specific expectations for cross-backend parity
-- don't use benchmark fixtures as correctness coverage
+- User-visible language and project behaviour belongs under `tests/cases/`.
+- Focused subsystem-local invariant tests belong under that module's test directory, not in production implementation files.
+- End-to-end or multi-module Rust harness tests belong under `src/compiler_tests/`.
+- Prefer one primary test owner per behaviour. Remove redundant, obsolete or implementation-shaped coverage.
+- Use the narrowest runtime, artefact or contractual golden assertion that owns backend behaviour. Use one input with backend-specific expectations for parity.
+- Do not use benchmark fixtures as correctness coverage.
 
-## Validation
+## Documentation and status
 
-Always follow `docs/src/docs/codebase/style-guide/validation.mtf`.
+Do not modify documentation unless the user explicitly requests it or approves identified changes.
 
-If using the Moth compiler `check` command, prefer `--terse` for compact Moth error messages.
+Exceptions:
+- Update the progress matrix when implementation status, rejection behaviour, backend coverage or test coverage changes. Do not edit it for a pure refactor or prose-only correction.
+- Update `index.md` when modules, files or folders move, are renamed or fundamentally change behaviour.
 
-## Documentation policy
+Report documentation made inaccurate by implementation as a separate follow-up. Do not edit generated files under `docs/release/**` directly. Rebuild them through the compiler.
 
-Do not modify documentation unless the user explicitly requests documentation
-changes or explicitly approves them after they are identified. 
+## Validation and benchmarking
 
-The progress matrix and `index.md` are exceptions. Update the matrix when implementation
-status, rejection behavior, backend coverage, or test coverage changes. Do not
-edit it for a pure refactor or prose-only correction. 
+Code-bearing work ends with `just validate`. Documentation-only work uses the documentation release-build gate. Read the validation guide before selecting or reporting the final gate. Prefer `--terse` for Moth `check` diagnostics.
 
-Update `index.md` whenever modules, files or folders are moved, renamed or have fundamentally changed behaviour.
-
-If implementation work makes documentation inaccurate, report the affected files and required corrections as a separate follow-up. Do not edit generated files under `docs/release/**` directly, rebuild it through the compiler.
-
-- Codebase design documents may describe accepted end-state architecture that has not fully landed.
-- The progress matrix records current support, partial support, clean rejection, experimental paths, and coverage.
-- The roadmap records sequencing, active plans, and genuinely deferred design.
-- Update the progress matrix when current status changed. Do not make a meaningless matrix edit for a pure refactor or prose-only correction.
-- Compiler semantic architecture belongs in `docs/compiler-design-overview.md`
-- Build orchestration belongs in `docs/build-system-design.md`
-- Keep memory, language-scope, testing and validation rules in their existing canonical references.
-
-## Benchmarking
-
-- Use `just bench-check` for non-recording performance evidence
-- Use `just bench` only when intentionally recording benchmark history
-- Keep raw profiling and benchmark data local
-- Treat profiling as attribution evidence, not proof of correctness or improvement
+- Use `just bench-check` for non-recording performance evidence.
+- Use the `timers` or `detailed_timers` feature flags for quick rough stage timings.
+- Keep raw profiling and benchmark data local.
+- Treat profiling as attribution evidence, not proof of correctness or improvement.
 
 ## Compaction rules
 
-When compacting: Completely forget project documentation from the reading list so it can be efficiently reloaded without duplication.
-
-After context is compacted, reset or may be incomplete: Fully re-read this file and follow the `Reading list` at the top of this document.
-
-Don't continue implementation from compressed memory alone.
+After compaction, reread `AGENTS.md`, reclassify the active task and reload the routed canonical sections and documents. Do not continue from compressed recollection of project contracts.
 
 ## Final audit
 
-Before reporting a non-trivial slice complete or reviewing changes, verify:
-- the relevant style, compiler, memory, and language contracts are respected.
-- stage and subsystem ownership remain clear.
-- no duplicated, legacy or obsolete implementation path remains.
-- there is no unnecessary indirection, weak diagnostics, poor comments, or missing test coverage.
-- there are no abstractions that are too broad, too early, or placed in the wrong layer
-- diagnostics use the correct lane and preserve useful source context.
-- tests protect behavior or real internal invariants rather than implementation accidents.
-- the progress matrix accurately reflects changed support.
-- documentation and comments name the current owner and behavior.
-- the correct validation path was run.
-- the final report states exactly what was and was not validated.
+Before reporting a non-trivial slice complete or reviewing changes, audit in this order:
+
+1. Re-check the relevant architecture, language, memory, style and build contracts.
+2. Read each changed module from its entry point. Confirm one clear owner. File documentation should state ownership and important exclusions, and the main flow should read as named steps.
+3. Search changed and adjacent paths again for duplicated, legacy or obsolete logic, including compatibility wrappers and fallback paths.
+4. Review API and abstraction shape. Reject broad, premature or wrong-layer abstractions, noisy parameter lists, boolean-heavy state and clever control flow that slows review.
+5. Review local readability. Keep imports readable, group matches by meaning, space unrelated blocks and give complex code concise non-local WHAT/WHY comments. Remove stale comments and justify every lint suppression.
+6. Review diagnostics. Use the correct lane, preserve source context, avoid user-input panics and centralise repeated diagnostic construction.
+7. Review tests. Protect observable behaviour or real invariants, keep each test under the correct owner and remove redundant or implementation-shaped coverage.
+8. Review progress, index and documentation effects under their update rules.
+9. Confirm the correct validation path ran and report exactly what was and was not validated.

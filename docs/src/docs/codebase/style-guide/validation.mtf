@@ -6,6 +6,75 @@ slice must pass.
 The required final gate depends on whether the slice changes implementation or
 is strictly documentation-only.
 
+### Task-reading guide
+
+Start every completion decision with `Choose the final gate by scope`. Heading
+paths use `>` to name nested sections. Read the selected heading through the
+next heading of the same or higher level, including nested subsections unless
+the route narrows further. Read this document in full when changing validation
+infrastructure or auditing the complete gate policy.
+
+[table:
+    [th:
+        [: **Task**]
+        [: **Read**]
+    ]
+
+    [td:
+        [: Select the required final gate]
+        [: `Choose the final gate by scope`]
+    ]
+
+    [td:
+        [: Choose direct compiler or Cargo invocation]
+        [: `Compiler invocation`]
+    ]
+
+    [td:
+        [: Complete or review code-bearing work]
+        [:
+            - `Code-bearing final gate`
+            - `Formatting`
+            - `Manual architecture audits` when its trigger applies
+            - `Progress-matrix review`
+            - `Benchmark safety`
+            - `Failure handling`
+            - `Code-bearing completion checklist`
+        ]
+    ]
+
+    [td:
+        [: Complete or review documentation-only work]
+        [:
+            - `Documentation-only release-build gate`
+            - `Generated documentation`
+            - `Failure handling`
+            - `Documentation-only completion checklist`
+        ]
+    ]
+
+    [td:
+        [: Pick a targeted iteration command]
+        [: `Fast iteration commands`]
+    ]
+
+    [td:
+        [: Performance or benchmark validation]
+        [:
+            - `Benchmark safety`
+            - `Code-bearing final gate` when the slice is being completed
+        ]
+    ]
+
+    [td:
+        [: Review a failed gate or a validation claim]
+        [:
+            - `Failure handling`
+            - the checklist for the selected final gate
+        ]
+    ]
+]
+
 ### Compiler invocation
 
 Use an up-to-date release build of the compiler when one is available. The

@@ -118,22 +118,23 @@ This compiles the project using the command-selected builder and writes output t
 
 - **As few dependencies as possible**. A language project shouldn't need a PhD dissertation for a lockfile.
 
+<br>
+
+See [the design principles doc](./docs/src/docs/design-scope/design-principles.mtf) for what the language is deliberately *not* doing.
+
 <div align="center">
 
 ## LLM-aware design
 
 </div>
 
-Coding agents are increasingly becoming core to software workflows. Developers should own the final design and architecture. Agents can handle the churn.
+Coding agents are increasingly becoming a part of coding workflows. 
 
-Compilers should give detailed, fast feedback for producing reliable code. Good languages for the future should be easy to review and strict about what the code should look like and how it's structured.
+Moth is designed for developers focused on the final design and implementation requirements while agents handle the busy work.
 
-A small syntax, strict rules, opinionated design, fast tooling and good diagnostics make generated changes easier to inspect and validate.
+This isn't a language for LLMs only, its a language for human creativity with the churn automated away as much as possible.
 
-Compiler diagnostics should carry stable codes, structured facts and source metadata for editors, development servers and coding agents.
-
-Moth has very little training data, but this may be useful later: 
-examples can grow around the language that exists and agents will have to follow your codebase style more strictly. No legacy patterns to pollute generated output.
+See [HUMANS.md](./HUMANS.md) for more info and way too much elaboration about this.
 
 <div align="center">
   

@@ -16,6 +16,31 @@ Companion authorities:
 - `docs/src/docs/progress/@page.moth` for current support and backend coverage
 - `docs/roadmap/roadmap.md` and `docs/roadmap/plans/` for implementation order and genuinely deferred design
 
+## Task-reading guide
+
+For every build-system task, read the opening authority text and
+`Architectural invariants` in both this document and
+`docs/compiler-design-overview.md`. Heading paths use `>` to name nested
+sections. Read the selected heading through the next heading of the same or
+higher level, including nested subsections unless the route narrows further.
+Read both documents in full for cross-boundary architecture plans, broad
+refactors or thorough reviews.
+
+| Task | Read in this document | Also read when affected |
+|---|---|---|
+| Command selection, builder capabilities or tooling overlays | `Selected command and capability surface`; `Command and tooling policies` | The compiler sections for any new semantic capability or validation root |
+| `config.moth`, project fields, `#Import`, `@project`, builder sections, entry config or bootstrap order | `Project bootstrap` and the exact relevant subsection | `docs/compiler-design-overview.md` > `Frontend stages > Stage 4: AST semantics > Constants, build inputs and const records` when compiler folding or handoff changes |
+| Source discovery, ownership, semantic source sets, check-only units or source preparation | `Source indexing and source sets`; `Prepared-source orchestration` | `docs/compiler-design-overview.md` > `Compiler input and result boundary` and the relevant Stage 1 to Stage 3 section |
+| Module roots, import topology, support packages, project facades, namespaces or package classification | `Project and package topology` and the exact relevant subsection | The canonical unsuffixed project-structure and package language references |
+| Dependency, Core or Builder source package graphs | `Project and package topology > Dependency package graphs` or `Core and Builder source package graphs` | Compiler public-interface, provenance, fingerprint and generated-function sections |
+| Compile waves, diagnosed or blocked modules, deterministic merging or `ProjectCompilation` | `Deterministic scheduling and graph outcomes` | `docs/compiler-design-overview.md` > `Compiler input and result boundary` and `Diagnostics and deterministic identity` |
+| Generated request aggregation, scheduling or sidecar reuse | `Generated-function worklist` | `docs/compiler-design-overview.md` > `Generated concrete functions` |
+| Entry selection, package assembly, reachability or validation roots | `Entry and package link planning` | Compiler `Per-function link facts`, `Target-contract validation` and routed lifetime material |
+| HTML fragment assembly, target partitioning, physical variants, runtime memory, lowering, external JavaScript or assets | `HTML project builder` and the exact relevant subsection | Compiler `Backend-facing compiler handoff` plus routed memory material for lifecycle, ABI or runtime representation changes |
+| Output roots, manifests, stale cleanup or output pipelines | `Output ownership` | The selected builder section that produces the output records |
+| Development reuse, invalidation or persistent compatibility | `Incremental and persistent artefacts`; `Command and tooling policies > dev` | `docs/compiler-design-overview.md` > `Fingerprints and reuse facts` |
+| Current source locations | `Build-system implementation map` | Open the owning module entry point and the compiler handoff when the task crosses that boundary |
+
 ## Architectural invariants
 
 - One command selects one artefact builder and any active tooling overlays before config schema validation begins.
