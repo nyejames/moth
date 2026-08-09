@@ -25,10 +25,10 @@ ACTIVE_PLAN: docs/roadmap/plans/canonical-module-compilation-and-scoped-packages
 WORK_ID: R5-closeout
 WORK_SOURCE: continued Phase 5 closeout after Gate B acceptance and the revised plan
 BASE_REVISION: 276bc4cb2 (clean revised-plan baseline before R5C6A)
-IMPLEMENTED_CHECKPOINT: a4e3d50ab
-RECONCILED_HEAD: a4e3d50ab
-STATUS: active - R5C6B complete; Gate C2 audit cycle is warranted and awaiting user findings
-CURRENT_SLICE: Gate C2 - user-provided audit and review findings
+IMPLEMENTED_CHECKPOINT: a9460bf94
+RECONCILED_HEAD: a9460bf94
+STATUS: active - R5C6C complete; waiting for Gate C2 re-review
+CURRENT_SLICE: Gate C2 re-review - R5C6C exact active-base summary dependencies
 ACCEPTED_CHECKPOINTS:
 - R5C3C provider agreement and recursive interface closure
 - R5C4A exhaustive canonical token traversal
@@ -43,10 +43,13 @@ VALIDATION_STATE:
 - 766bb827c1 passed full just validate: 4210 workspace unit tests, 1818/1818 integration executions, cross-target Clippy, docs, benchmark sanity and timer erasure
 - a4e3d50ab passed full just validate: 4211 workspace unit tests, 1818/1818 integration executions, cross-target Clippy, docs, 60 benchmark preflights plus quick benchmark sanity and timer erasure
 - Gate C1 automation remained intentionally deferred under the explicit user instruction; R5C6B now replaces broad convergence with the accepted monotone dirty queue
-BLOCKERS: none; awaiting user-provided audit and review findings before corrections
-NEXT_WORKER_ORDER: Gate C2 -> audit corrections (separate commit) -> R5C7A -> R5C7B -> R5C8 -> R5C9 -> Gate D -> mandatory handoff
-STOP_REASON: R5C6B is a stable checkpoint and the next audit cycle is warranted; no automated auditor was invoked
-NEXT_RESUME_ACTION: apply accepted audit/review corrections in a separate commit, then continue with R5C7A
+- User-provided Gate C2 review identified active-base public-call classification, coarse base invalidation, repeated materialisation-context scans and missing production queue coverage
+- a9460bf94 passed full just validate: 4218 workspace tests, 1818/1818 integration executions, cross-target Clippy, docs, 60 benchmark preflights plus quick benchmark sanity and timer erasure
+- R5C6C focused coverage passed: 12 convergence tests and the timer/counter active-base public pipeline regression
+BLOCKERS: none; R5C7A must wait for Gate C2 re-review
+NEXT_WORKER_ORDER: Gate C2 re-review -> R5C7A -> R5C7B -> R5C8 -> R5C9 -> Gate D -> mandatory handoff
+STOP_REASON: R5C6C is committed; waiting for user-provided Gate C2 re-review; no automated auditor was invoked
+NEXT_RESUME_ACTION: after Gate C2 re-review, continue R5C7A
 FOLLOW_UP_CHAIN:
 1. dependency-clauses-and-path-syntax-plan.md
 2. tir-corrections-and-simplification-plan.md
@@ -171,7 +174,9 @@ pub enum ConvergenceNode {
 - A local call within one node creates no cross-node edge.
 - `ModulePrivate` from a sidecar targets `BaseModule`.
 - `Generated` targets the owning boundary's generated node.
-- Cross-module source and binding-backed summaries are fixed leaves, not nodes.
+- Provider/cross-boundary source and binding-backed summaries are fixed leaves, not nodes. A
+  generated sidecar's `CrossModule` target may name a public executable in the active compilation
+  boundary and then depends on `BaseModule`.
 - Another package's generated sidecar is neither a node nor a leaf in the current boundary.
 
 Per-function HIR and link facts may derive these edges. They do not create a second function-granular borrow scheduler.
@@ -352,7 +357,8 @@ Requirements:
 - caller lists are sorted and deduplicated
 - edges come only from validated HIR call targets
 - local calls inside one analysis unit are ignored
-- provider and cross-module summaries are validated fixed leaves
+- provider and cross-boundary summaries are validated fixed leaves; active-base public
+  `CrossModule` targets are base dependencies
 - the model is dropped after one module compilation
 - no hash-map iteration order affects IDs, counters or diagnostics
 
@@ -440,6 +446,23 @@ Each node retains or reconstructs only the direct summary entries its HIR calls 
 If this requires partial `BorrowChecker` execution, function-report merging or mutation of validated HIR, stop and create a dedicated incremental-borrow plan. Do not expand R5C6B.
 
 **Gate:** run the standard code gate and stop for Gate C2.
+
+### R5C6C - exact active-base summary dependencies
+
+**Goal:** finish the boundary between the coarse `BaseModule` borrow-analysis unit and the exact stable summaries it publishes before changing source-payload ownership.
+
+**Completed:**
+
+- classify `CrossModule(origin)` against the active base HIR: active public origins depend on `BaseModule`; provider and cross-boundary origins remain immutable fixed leaves
+- retain active-base public and private callees in the construction-only convergence model
+- resolve direct base summaries from the current base HIR identity maps and current `BorrowCheckReport`, with materialisation preparation used only for bootstrap and final contract installation
+- publish base changes as exact widened public/private identities and requeue only generated callers whose direct inputs intersect those identities
+- preserve the dense queue, queued bitset, stable generated identity order, adjacent duplicate rejection and provider-private fixed-leaf boundary
+- add model, orchestration, narrowing-transition and production pipeline coverage, including counter assertions for generated rechecks and zero legacy complete-map/recheck paths
+
+The correction does not introduce function-granular borrow scheduling, SCC machinery, another durable dependency graph or source-payload changes. `BaseModule` remains one complete-HIR borrow-analysis unit and each generated sidecar remains one convergence node.
+
+**Gate:** `just validate` passed; stop for Gate C2 re-review. R5C7A has not started.
 
 ### R5C7A - prove source-payload ownership
 
