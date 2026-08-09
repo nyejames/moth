@@ -20,6 +20,7 @@ use crate::compiler_frontend::external_packages::{
     ExternalTypeId, ExternalTypeSpec,
 };
 use crate::compiler_frontend::hir::statements::HirStatementKind;
+use crate::compiler_frontend::public_call_summary::PublicCallMutationEffect;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -826,6 +827,180 @@ io.line(result)
     );
 
     fs::remove_dir_all(&dir).expect("should remove temp dir");
+}
+
+#[test]
+fn generated_sidecar_refreshes_active_base_public_summary() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let dir = temp_dir("generated_active_base_public_summary");
+    fs::create_dir_all(&dir).expect("should create project root");
+    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(
+        dir.join("@page.moth"),
+        r#"export:
+    public_helper |value ~Int| -> Int:
+        return seed_helper(~value, "seed")
+    ;
+;
+
+seed_helper type T |value ~Int, marker T| -> Int:
+    value = value + 1
+    return value
+;
+
+mutating_helper type T |value ~Int, marker T| -> Int:
+    return public_helper(~value)
+;
+
+caller type T |value ~Int, marker T| -> Int:
+    return mutating_helper(~value, marker)
+;
+
+independent type T |value T| -> T:
+    return value
+;
+
+counter ~Int = 1
+result Int = caller(~counter, "seed")
+independent_result Int = independent(42)
+"#,
+    )
+    .expect("should write active-base public fixture");
+
+    let mut config = Config::new(dir.clone());
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut string_table = StringTable::new();
+    #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
+    let _counter_capture =
+        crate::compiler_frontend::instrumentation::capture_frontend_counters_for_test();
+    #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
+    let _counter_guard = {
+        crate::compiler_frontend::instrumentation::reset_frontend_counters();
+        Some(crate::timing::start_benchmark_collection(true).expect("timing session should start"))
+    };
+    let frontend = compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut BuilderSurface::with_mandatory_core(),
+        &mut string_table,
+    )
+    .expect("active-base public generic call should compile");
+    #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
+    let convergence_observations = {
+        crate::compiler_frontend::instrumentation::log_frontend_counters();
+        _counter_guard
+            .expect("counter timing session should exist")
+            .finish()
+    };
+    #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
+    {
+        let counter_value = |name: &str| {
+            convergence_observations
+                .counters
+                .iter()
+                .find(|counter| counter.name == name)
+                .map(|counter| counter.value)
+                .unwrap_or(-1.0)
+        };
+        assert_eq!(counter_value("convergence_initial_base_borrow_passes"), 1.0);
+        assert_eq!(counter_value("convergence_base_borrow_passes"), 2.0);
+        assert_eq!(
+            counter_value("convergence_generated_sidecar_borrow_passes"),
+            9.0
+        );
+        assert_eq!(
+            counter_value("convergence_complete_generated_summary_map_builds"),
+            0.0
+        );
+        assert_eq!(
+            counter_value("convergence_generated_summary_map_clones"),
+            0.0
+        );
+        assert_eq!(
+            counter_value("convergence_private_summary_map_rebuilds"),
+            0.0
+        );
+        assert_eq!(counter_value("convergence_stable_sidecars_rechecked"), 0.0);
+        assert_eq!(counter_value("convergence_max_iterations"), 0.0);
+    }
+
+    let base_module = frontend
+        .project
+        .successful_artefacts_in_module_id_order()
+        .map(|artifact| &artifact.module)
+        .next()
+        .expect("project should retain a base module");
+    let (active_origin, active_function_id) = base_module
+        .executable
+        .hir
+        .function_ids_by_origin
+        .iter()
+        .find(|(origin, _)| origin.defining_name() == "public_helper")
+        .map(|(origin, function_id)| (origin.clone(), *function_id))
+        .expect("public helper should retain its stable origin");
+    assert_eq!(
+        frontend.project.generated.sidecars().count(),
+        4,
+        "the base-to-generated chain and independent request should materialise once each"
+    );
+    let sidecar = frontend
+        .project
+        .generated
+        .sidecars()
+        .find(|sidecar| {
+            sidecar.module.executable.hir.blocks.iter().any(|block| {
+                block.statements.iter().any(|statement| {
+                    matches!(
+                        &statement.kind,
+                        HirStatementKind::Call {
+                            target: CallTarget::CrossModule(origin),
+                            ..
+                        } if origin == &active_origin
+                    )
+                })
+            })
+        })
+        .expect("the generated caller should retain the active-base CrossModule call");
+    let exact_summary = base_module
+        .executable
+        .borrow_analysis
+        .analysis
+        .public_call_summaries
+        .get(&active_function_id)
+        .expect("base report should retain the public helper summary");
+    assert_eq!(
+        exact_summary.parameters[0].mutation,
+        PublicCallMutationEffect::Writes,
+        "the helper summary should be widened through its generated callee"
+    );
+    assert!(
+        sidecar.module.executable.hir.blocks.iter().any(|block| {
+            block.statements.iter().any(|statement| {
+                matches!(
+                    &statement.kind,
+                    HirStatementKind::Call {
+                        target: CallTarget::CrossModule(origin),
+                        ..
+                    } if origin == &active_origin
+                )
+            })
+        }),
+        "the generated sidecar should retain the active-base CrossModule call"
+    );
+    assert_eq!(
+        sidecar
+            .module
+            .executable
+            .hir
+            .imported_call_summaries
+            .get(&active_origin),
+        Some(exact_summary),
+        "the sidecar should receive the exact active-base public summary"
+    );
+
+    fs::remove_dir_all(&dir).expect("should remove active-base public fixture");
 }
 
 #[test]

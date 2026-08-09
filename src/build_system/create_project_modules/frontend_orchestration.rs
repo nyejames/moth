@@ -62,7 +62,7 @@ use crate::compiler_frontend::public_interface::{
 };
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, GeneratedFunctionIdentity, ModulePrivateExecutableIdentity,
-    ModuleRootRole, OriginTypeId, StableModuleOriginIdentity,
+    ModuleRootRole, OriginFunctionId, OriginTypeId, StableModuleOriginIdentity,
 };
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -1360,19 +1360,22 @@ impl FrontendModuleBuildContext<'_> {
                     timing_context,
                 )
             )?;
-            let base_private_identities = materialisation_context_builder
-                .context()
-                .imported_functions_by_local_path
-                .values()
-                .filter_map(|contract| match &contract.target {
-                    SourceFunctionTarget::ModulePrivate { identity, .. } => Some(identity.clone()),
-                    SourceFunctionTarget::Local(_)
-                    | SourceFunctionTarget::Imported { .. }
-                    | SourceFunctionTarget::Generated { .. } => None,
-                })
+            let base_public_origins = hir_module
+                .function_ids_by_origin
+                .keys()
+                .cloned()
+                .collect::<FxHashSet<_>>();
+            let base_private_identities = hir_module
+                .function_ids_by_private_origin
+                .keys()
+                .cloned()
                 .collect::<FxHashSet<_>>();
             let convergence_model = generated_worklist
-                .convergence_model(&function_link_facts, &base_private_identities)
+                .convergence_model(
+                    &function_link_facts,
+                    &base_public_origins,
+                    &base_private_identities,
+                )
                 .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
             let mut convergence_queue = VecDeque::new();
             let mut queued_nodes = vec![false; convergence_model.node_count()];
@@ -1381,7 +1384,7 @@ impl FrontendModuleBuildContext<'_> {
                 queued_nodes[node_id.index()] = true;
             }
 
-            let mut borrow_analysis = None;
+            let mut borrow_analysis = Some(bootstrap_borrow_analysis);
             while let Some(node_id) = convergence_queue.pop_front() {
                 queued_nodes[node_id.index()] = false;
                 let node = convergence_model.node(node_id).cloned().ok_or_else(|| {
@@ -1392,31 +1395,30 @@ impl FrontendModuleBuildContext<'_> {
                         &compiler.string_table,
                     )
                 })?;
+                let current_borrow_analysis = borrow_analysis.as_ref().ok_or_else(|| {
+                    CompilerMessages::from_error_ref(
+                        CompilerError::compiler_error(
+                            "Convergence queue lost the current base borrow analysis",
+                        ),
+                        &compiler.string_table,
+                    )
+                })?;
                 let direct_summaries = direct_convergence_summaries(
                     &convergence_model,
                     node_id,
                     &generated_worklist,
-                    materialisation_context_builder.context(),
+                    &hir_module,
+                    current_borrow_analysis,
                 )
                 .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
-                let private_callees = convergence_model
-                    .module_private_callees(node_id)
-                    .ok_or_else(|| {
-                        CompilerMessages::from_error_ref(
-                            CompilerError::compiler_error(format!(
-                                "convergence model is missing module-private callees for node {node_id:?}"
-                            )),
-                            &compiler.string_table,
-                        )
-                    })?;
 
                 match node {
                     ConvergenceNode::BaseModule => {
                         install_convergence_summaries(
                             &mut hir_module,
                             &direct_summaries.generated,
+                            &direct_summaries.active_public,
                             &direct_summaries.module_private,
-                            private_callees,
                         );
                         increment_frontend_counter(FrontendCounter::ConvergenceBaseBorrowPasses);
                         let report = timed_stage_attributed!(
@@ -1424,19 +1426,16 @@ impl FrontendModuleBuildContext<'_> {
                             timing_context,
                             Self::check_borrows(&compiler, &hir_module, &warnings)
                         )?;
-                        let concrete_summaries_changed = install_exact_concrete_call_summaries(
-                            &mut materialisation_context_builder,
-                            &hir_module,
-                            &report,
-                        )
-                        .map_err(|error| {
-                            CompilerMessages::from_error_ref(error, &compiler.string_table)
-                        })?;
+                        let summary_changes =
+                            base_summary_changes(&hir_module, current_borrow_analysis, &report)
+                                .map_err(|error| {
+                                    CompilerMessages::from_error_ref(error, &compiler.string_table)
+                                })?;
                         borrow_analysis = Some(report);
-                        if concrete_summaries_changed {
-                            enqueue_convergence_callers(
+                        if !summary_changes.is_empty() {
+                            enqueue_base_dependents(
                                 &convergence_model,
-                                node_id,
+                                &summary_changes,
                                 &mut convergence_queue,
                                 &mut queued_nodes,
                             )
@@ -1455,8 +1454,8 @@ impl FrontendModuleBuildContext<'_> {
                             install_convergence_summaries(
                                 &mut sidecar.module.executable.hir,
                                 &direct_summaries.generated,
+                                &direct_summaries.active_public,
                                 &direct_summaries.module_private,
-                                private_callees,
                             );
                             increment_frontend_counter(
                                 FrontendCounter::ConvergenceGeneratedSidecarBorrowPasses,
@@ -1504,6 +1503,12 @@ impl FrontendModuleBuildContext<'_> {
                     &compiler.string_table,
                 )
             })?;
+            let _ = install_exact_concrete_call_summaries(
+                &mut materialisation_context_builder,
+                &hir_module,
+                &borrow_analysis,
+            )
+            .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
             let generated_worklist_delta = generated_worklist
                 .finish()
                 .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
@@ -2038,9 +2043,23 @@ impl FrontendModuleBuildContext<'_> {
 //  Shared Helpers
 // -------------------------
 
+/// Stable base identities whose exact summaries widened during one borrow pass.
+#[derive(Debug)]
+struct BaseSummaryChanges {
+    public: Vec<OriginFunctionId>,
+    module_private: Vec<ModulePrivateExecutableIdentity>,
+}
+
+impl BaseSummaryChanges {
+    fn is_empty(&self) -> bool {
+        self.public.is_empty() && self.module_private.is_empty()
+    }
+}
+
 /// Exact direct-call summaries needed to analyze one convergence node.
 struct DirectConvergenceSummaries {
     generated: Vec<(GeneratedFunctionIdentity, PublicCallSummary)>,
+    active_public: Vec<(OriginFunctionId, PublicCallSummary)>,
     module_private: Vec<(ModulePrivateExecutableIdentity, PublicCallSummary)>,
 }
 
@@ -2048,7 +2067,8 @@ fn direct_convergence_summaries(
     model: &ConvergenceModel,
     node_id: ConvergenceNodeId,
     worklist: &GeneratedFunctionWorklist<'_>,
-    materialisation_context: &crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationPreparation,
+    base_hir: &HirModule,
+    base_borrow_analysis: &BorrowCheckReport,
 ) -> Result<DirectConvergenceSummaries, CompilerError> {
     let generated_callees = model.generated_callees(node_id).ok_or_else(|| {
         CompilerError::compiler_error(format!(
@@ -2070,6 +2090,37 @@ fn direct_convergence_summaries(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
+    let active_public_callees = model.active_public_callees(node_id).ok_or_else(|| {
+        CompilerError::compiler_error(format!(
+            "convergence model is missing active public callees for node {node_id:?}"
+        ))
+    })?;
+    let active_public_summaries = active_public_callees
+        .iter()
+        .map(|origin| {
+            let function_id = base_hir
+                .function_ids_by_origin
+                .get(origin)
+                .copied()
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(format!(
+                        "active base public origin {origin:?} has no HIR function identity"
+                    ))
+                })?;
+            let summary = base_borrow_analysis
+                .analysis
+                .public_call_summaries
+                .get(&function_id)
+                .cloned()
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(format!(
+                        "active base public function {function_id:?} has no exact borrow summary"
+                    ))
+                })?;
+            Ok::<_, CompilerError>((origin.clone(), summary))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
     let private_callees = model.module_private_callees(node_id).ok_or_else(|| {
         CompilerError::compiler_error(format!(
             "convergence model is missing module-private callees for node {node_id:?}"
@@ -2077,17 +2128,33 @@ fn direct_convergence_summaries(
     })?;
     let private_summaries = private_callees
         .iter()
-        .filter_map(|identity| {
-            match exact_private_call_summary(materialisation_context, identity) {
-                Ok(Some(summary)) => Some(Ok((identity.clone(), summary))),
-                Ok(None) => None,
-                Err(error) => Some(Err(error)),
-            }
+        .map(|identity| {
+            let function_id = base_hir
+                .function_ids_by_private_origin
+                .get(identity)
+                .copied()
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(format!(
+                        "active base private identity {identity:?} has no HIR function identity"
+                    ))
+                })?;
+            let summary = base_borrow_analysis
+                .analysis
+                .public_call_summaries
+                .get(&function_id)
+                .cloned()
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(format!(
+                        "active base private function {function_id:?} has no exact borrow summary"
+                    ))
+                })?;
+            Ok::<_, CompilerError>((identity.clone(), summary))
         })
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(DirectConvergenceSummaries {
         generated: generated_summaries,
+        active_public: active_public_summaries,
         module_private: private_summaries,
     })
 }
@@ -2095,8 +2162,8 @@ fn direct_convergence_summaries(
 fn install_convergence_summaries(
     hir: &mut HirModule,
     generated_summaries: &[(GeneratedFunctionIdentity, PublicCallSummary)],
+    active_public_summaries: &[(OriginFunctionId, PublicCallSummary)],
     private_summaries: &[(ModulePrivateExecutableIdentity, PublicCallSummary)],
-    private_callees: &[ModulePrivateExecutableIdentity],
 ) {
     hir.generated_call_summaries.clear();
     for (identity, summary) in generated_summaries {
@@ -2104,14 +2171,128 @@ fn install_convergence_summaries(
             .insert(identity.clone(), summary.clone());
     }
 
-    // Keep fixed provider summaries that are already present in the bootstrap HIR. Only
-    // materialisation-owned identities receive exact replacements during convergence.
-    hir.module_private_call_summaries
-        .retain(|identity, _| private_callees.binary_search(identity).is_ok());
+    // Active-base public calls are represented as CrossModule targets in generated HIR. Update
+    // only those stable origins; provider and cross-boundary imports remain fixed bootstrap
+    // leaves in the same imported-summary map.
+    for (origin, summary) in active_public_summaries {
+        hir.imported_call_summaries
+            .insert(origin.clone(), summary.clone());
+    }
+
+    // Provider-private summaries remain fixed bootstrap leaves. Active-base private identities
+    // receive exact replacements, while no complete private map is rebuilt or retained.
     for (identity, summary) in private_summaries {
         hir.module_private_call_summaries
             .insert(identity.clone(), summary.clone());
     }
+}
+
+fn base_summary_changes(
+    hir: &HirModule,
+    previous: &BorrowCheckReport,
+    next: &BorrowCheckReport,
+) -> Result<BaseSummaryChanges, CompilerError> {
+    let mut widened_functions = FxHashSet::default();
+    for function in &hir.functions {
+        let previous_summary = previous
+            .analysis
+            .public_call_summaries
+            .get(&function.id)
+            .ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "previous base borrow report is missing summary for {:?}",
+                    function.id
+                ))
+            })?;
+        let next_summary = next
+            .analysis
+            .public_call_summaries
+            .get(&function.id)
+            .ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "next base borrow report is missing summary for {:?}",
+                    function.id
+                ))
+            })?;
+        if validate_public_call_summary_transition(previous_summary, next_summary)?
+            == PublicCallSummaryTransition::Widened
+        {
+            widened_functions.insert(function.id);
+        }
+    }
+
+    let mut changes = BaseSummaryChanges {
+        public: hir
+            .function_ids_by_origin
+            .iter()
+            .filter_map(|(origin, function_id)| {
+                widened_functions
+                    .contains(function_id)
+                    .then_some(origin.clone())
+            })
+            .collect(),
+        module_private: hir
+            .function_ids_by_private_origin
+            .iter()
+            .filter_map(|(identity, function_id)| {
+                widened_functions
+                    .contains(function_id)
+                    .then_some(identity.clone())
+            })
+            .collect(),
+    };
+    changes.public.sort_unstable();
+    changes.module_private.sort_unstable();
+    Ok(changes)
+}
+
+fn enqueue_convergence_node(
+    node_id: ConvergenceNodeId,
+    queue: &mut VecDeque<ConvergenceNodeId>,
+    queued_nodes: &mut [bool],
+) -> Result<(), CompilerError> {
+    let queued = queued_nodes.get_mut(node_id.index()).ok_or_else(|| {
+        CompilerError::compiler_error(format!(
+            "convergence node {node_id:?} is outside the queue bitset"
+        ))
+    })?;
+    if !*queued {
+        *queued = true;
+        queue.push_back(node_id);
+    }
+    Ok(())
+}
+
+fn enqueue_base_dependents(
+    model: &ConvergenceModel,
+    changes: &BaseSummaryChanges,
+    queue: &mut VecDeque<ConvergenceNodeId>,
+    queued_nodes: &mut [bool],
+) -> Result<(), CompilerError> {
+    for node_id in model.generated_node_ids() {
+        let active_public_callees = model.active_public_callees(node_id).ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "convergence model is missing active public callees for node {node_id:?}"
+            ))
+        })?;
+        let private_callees = model.module_private_callees(node_id).ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "convergence model is missing module-private callees for node {node_id:?}"
+            ))
+        })?;
+        let public_changed = changes
+            .public
+            .iter()
+            .any(|origin| active_public_callees.binary_search(origin).is_ok());
+        let private_changed = changes
+            .module_private
+            .iter()
+            .any(|identity| private_callees.binary_search(identity).is_ok());
+        if public_changed || private_changed {
+            enqueue_convergence_node(node_id, queue, queued_nodes)?;
+        }
+    }
+    Ok(())
 }
 
 fn enqueue_convergence_callers(
@@ -2126,16 +2307,7 @@ fn enqueue_convergence_callers(
         ))
     })?;
     for caller in callers {
-        let caller_index = caller.index();
-        let queued = queued_nodes.get_mut(caller_index).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "convergence model caller {caller:?} is outside the queue bitset"
-            ))
-        })?;
-        if !*queued {
-            *queued = true;
-            queue.push_back(*caller);
-        }
+        enqueue_convergence_node(*caller, queue, queued_nodes)?;
     }
     Ok(())
 }
@@ -2218,35 +2390,6 @@ fn collect_external_import_candidates_for_packages(
 
     candidates.sort_by_key(|candidate| candidate.package_id.0);
     candidates
-}
-
-fn exact_private_call_summary(
-    materialisation_context: &crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationPreparation,
-    identity: &ModulePrivateExecutableIdentity,
-) -> Result<Option<PublicCallSummary>, CompilerError> {
-    let mut summary = None;
-    for contract in materialisation_context
-        .imported_functions_by_local_path
-        .values()
-    {
-        let SourceFunctionTarget::ModulePrivate {
-            identity: contract_identity,
-            ..
-        } = &contract.target
-        else {
-            continue;
-        };
-        if contract_identity != identity {
-            continue;
-        }
-        if summary.is_some() {
-            return Err(CompilerError::compiler_error(format!(
-                "module-private executable {identity:?} has duplicate materialisation contracts"
-            )));
-        }
-        summary = Some(contract.summary.clone());
-    }
-    Ok(summary)
 }
 
 fn exact_generated_sidecar_summary(

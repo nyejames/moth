@@ -532,6 +532,16 @@ fn convergence_model_sorts_nodes_and_classifies_validated_call_targets() {
         Some(&[ConvergenceNodeId(2)][..])
     );
     assert_eq!(
+        model.active_public_callees(ConvergenceNodeId(0)),
+        Some(&[][..]),
+        "a provider CrossModule target remains a fixed leaf"
+    );
+    assert_eq!(
+        model.active_public_callees(ConvergenceNodeId(1)),
+        Some(&[][..]),
+        "an unknown CrossModule target remains a fixed leaf"
+    );
+    assert_eq!(
         model.dirty_nodes([ConvergenceNodeId(1)]),
         vec![
             ConvergenceNodeId(0),
@@ -562,9 +572,10 @@ fn convergence_model_keeps_provider_private_calls_as_fixed_leaves() {
     let mut base_private_identities = rustc_hash::FxHashSet::default();
     base_private_identities.insert(base_private.clone());
 
-    let model = ConvergenceModel::from_link_facts_for_private_callees(
+    let model = ConvergenceModel::from_link_facts_for_base_callees(
         &base_facts,
         vec![(&generated, &generated_facts)],
+        &rustc_hash::FxHashSet::default(),
         &base_private_identities,
     )
     .unwrap();
@@ -575,7 +586,35 @@ fn convergence_model_keeps_provider_private_calls_as_fixed_leaves() {
     );
     assert_eq!(
         model.module_private_callees(ConvergenceNodeId(1)),
-        Some(&[base_private, provider_private][..])
+        Some(&[base_private][..])
+    );
+}
+
+#[test]
+fn convergence_model_classifies_active_base_public_cross_module_calls() {
+    let generated = generated_identity("generated");
+    let active_public = OriginFunctionId::new_free(module_origin(), "public_helper".to_owned());
+    let generated_facts =
+        link_facts_for_calls(vec![CallTarget::CrossModule(active_public.clone())]);
+    let base_facts = link_facts_for_calls(Vec::new());
+    let mut base_public_origins = rustc_hash::FxHashSet::default();
+    base_public_origins.insert(active_public.clone());
+
+    let model = ConvergenceModel::from_link_facts_for_base_callees(
+        &base_facts,
+        vec![(&generated, &generated_facts)],
+        &base_public_origins,
+        &rustc_hash::FxHashSet::default(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        model.callers(ConvergenceNodeId(0)),
+        Some(&[ConvergenceNodeId(1)][..])
+    );
+    assert_eq!(
+        model.active_public_callees(ConvergenceNodeId(1)),
+        Some(&[active_public][..])
     );
 }
 
