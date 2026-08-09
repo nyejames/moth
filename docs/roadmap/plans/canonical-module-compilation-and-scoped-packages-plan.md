@@ -25,10 +25,10 @@ ACTIVE_PLAN: docs/roadmap/plans/canonical-module-compilation-and-scoped-packages
 WORK_ID: R5-closeout
 WORK_SOURCE: continued Phase 5 closeout after Gate B acceptance and the revised plan
 BASE_REVISION: 276bc4cb2 (clean revised-plan baseline before R5C6A)
-IMPLEMENTED_CHECKPOINT: 7cb61bcb3
-RECONCILED_HEAD: 7cb61bcb3
-STATUS: active - R5C7A/R5C7B complete; R5C8 initial cleanup complete; awaiting next review phase
-CURRENT_SLICE: next review phase - source-payload ownership and boundary context consolidation
+IMPLEMENTED_CHECKPOINT: 156942cc3
+RECONCILED_HEAD: 156942cc3
+STATUS: active - R5C8 complete; paused for user review before R5C9
+CURRENT_SLICE: R5C8 - source-payload consumption and convergence ownership consolidation
 ACCEPTED_CHECKPOINTS:
 - R5C3C provider agreement and recursive interface closure
 - R5C4A exhaustive canonical token traversal
@@ -50,10 +50,13 @@ VALIDATION_STATE:
 - R5C7A evidence found one owning module queue per selected compiler-semantic `SourceId`; existing Stage 0 coverage covers duplicate same-module paths, cross-module edges, support roots, package boundaries, unrooted sources and reversed discovery order
 - R5C7B deleted the project-wide prepared-source store, moved direct owned inputs through the module queue, removed `PreparedSourceInput::Clone`, and narrowed Moth inputs to tokens plus byte length; the synthetic single-file cache remains isolated
 - R5C8 initial cleanup grouped the immutable boundary inputs to `compile_module_waves` in one typed context without changing graph, provider or package ownership
-BLOCKERS: none; enough implementation changes are committed for the next user review phase
-NEXT_WORKER_ORDER: next review phase -> continue R5C8 -> R5C9 -> Gate D -> mandatory handoff
-STOP_REASON: R5C7A/R5C7B and the first R5C8 cleanup are committed; no automated auditor will be invoked
-NEXT_RESUME_ACTION: after review, continue R5C8 deletion-first consolidation around generated materialisation and summary convergence ownership
+- User audit accepted R5C6A/R5C6B/R5C6C and identified the remaining R5C7C blocker; the source-payload correction and R5C8 consolidation are now complete
+- Interim implementation-coordinator auditor `20260809T190234Z-f3a404aa` identified four bounded corrections; all were resolved and revalidated
+- `156942cc3` passed full `just validate`: 4218 workspace tests, 1818/1818 integration executions, cross-target Clippy, docs, 60 benchmark preflights plus quick benchmark sanity and timer erasure
+BLOCKERS: none
+NEXT_WORKER_ORDER: R5C9 -> Gate D -> mandatory handoff
+STOP_REASON: user requested a pause before the final review; final auditor intentionally deferred until the next review cycle
+NEXT_RESUME_ACTION: after user review, begin the R5C9 deletion audit and Phase 5 validation
 FOLLOW_UP_CHAIN:
 1. dependency-clauses-and-path-syntax-plan.md
 2. tir-corrections-and-simplification-plan.md
@@ -525,9 +528,12 @@ Run the standard code gate before R5C8.
 
 **Goal:** make the completed pipeline readable after R5C6 and R5C7 without changing semantic data flow.
 
-**Current progress:** the first cleanup slice deleted the stale project-wide prepared-source owner and
-grouped immutable boundary inputs to `compile_module_waves` in one typed context. The generated
-materialisation and summary-convergence ownership remains for the next R5C8 slice.
+**Current progress:** R5C7C now moves each retained Moth token stream by value through header
+preparation, validates source ownership before I/O and removes test-only module payload retention.
+R5C8 keeps request registration and generated materialisation in `frontend_orchestration.rs`, while
+the transient HIR topology, dirty queue and exact summary publication live in
+`generated_summary_convergence.rs`; the boundary context also precomputes implicit template package
+IDs. No semantic graph, provider or package ownership changed.
 
 First delete stale helpers, fields, comments and test adapters revealed by the previous slices. Split files only around surviving owners.
 
