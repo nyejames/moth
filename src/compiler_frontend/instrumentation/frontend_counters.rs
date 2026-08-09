@@ -93,12 +93,17 @@ pub(crate) enum FrontendCounter {
     ConvergenceInitialBaseBorrowPasses,
     ConvergenceBaseBorrowPasses,
     ConvergenceGeneratedSidecarBorrowPasses,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
     ConvergenceCompleteGeneratedSummaryMapBuilds,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
     ConvergenceGeneratedSummaryMapClones,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
     ConvergencePrivateSummaryMapRebuilds,
     ConvergenceSummaryComparisons,
     ConvergenceSummaryChanges,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
     ConvergenceStableSidecarsRechecked,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
     ConvergenceMaxIterations,
 
     // Implementation-pressure counters from shared frontend data structures.
@@ -328,23 +333,6 @@ mod detailed {
         }
 
         atomic_counter(counter).fetch_add(amount, Ordering::Relaxed);
-    }
-
-    pub(crate) fn record_frontend_counter_max(counter: FrontendCounter, value: usize) {
-        #[cfg(test)]
-        if !test_counter_capture_active() {
-            return;
-        }
-
-        let atomic = atomic_counter(counter);
-        let mut current = atomic.load(Ordering::Relaxed);
-        while current < value {
-            match atomic.compare_exchange_weak(current, value, Ordering::Relaxed, Ordering::Relaxed)
-            {
-                Ok(_) => break,
-                Err(observed) => current = observed,
-            }
-        }
     }
 
     pub(crate) fn log_frontend_counters() {
@@ -1386,7 +1374,7 @@ mod detailed {
 #[cfg(feature = "benchmark_counters")]
 pub(crate) use detailed::{
     add_frontend_counter, increment_frontend_counter, log_frontend_counters,
-    record_frontend_counter_max, reset_frontend_counters,
+    reset_frontend_counters,
 };
 
 #[cfg(all(test, feature = "benchmark_counters"))]
@@ -1400,9 +1388,6 @@ pub(crate) fn increment_frontend_counter(_counter: FrontendCounter) {}
 
 #[cfg(not(feature = "benchmark_counters"))]
 pub(crate) fn add_frontend_counter(_counter: FrontendCounter, _amount: usize) {}
-
-#[cfg(not(feature = "benchmark_counters"))]
-pub(crate) fn record_frontend_counter_max(_counter: FrontendCounter, _value: usize) {}
 
 #[cfg(not(feature = "benchmark_counters"))]
 pub(crate) fn log_frontend_counters() {}

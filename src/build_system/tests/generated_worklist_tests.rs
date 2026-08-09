@@ -550,6 +550,36 @@ fn convergence_model_sorts_nodes_and_classifies_validated_call_targets() {
 }
 
 #[test]
+fn convergence_model_keeps_provider_private_calls_as_fixed_leaves() {
+    let generated = generated_identity("generated");
+    let base_private = private_identity("base_private");
+    let provider_private = private_identity("provider_private");
+    let generated_facts = link_facts_for_calls(vec![
+        CallTarget::ModulePrivate(base_private.clone()),
+        CallTarget::ModulePrivate(provider_private.clone()),
+    ]);
+    let base_facts = link_facts_for_calls(Vec::new());
+    let mut base_private_identities = rustc_hash::FxHashSet::default();
+    base_private_identities.insert(base_private.clone());
+
+    let model = ConvergenceModel::from_link_facts_for_private_callees(
+        &base_facts,
+        vec![(&generated, &generated_facts)],
+        &base_private_identities,
+    )
+    .unwrap();
+
+    assert_eq!(
+        model.callers(ConvergenceNodeId(0)),
+        Some(&[ConvergenceNodeId(1)][..])
+    );
+    assert_eq!(
+        model.module_private_callees(ConvergenceNodeId(1)),
+        Some(&[base_private, provider_private][..])
+    );
+}
+
+#[test]
 fn convergence_models_keep_equal_identities_local_to_each_boundary() {
     let identity = generated_identity("shared");
     let first_base = link_facts_for_calls(Vec::new());
