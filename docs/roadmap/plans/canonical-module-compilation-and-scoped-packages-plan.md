@@ -23,11 +23,12 @@ Phase 5 does not implement the new dependency grammar, builtin `Path`, resource 
 ```text
 ACTIVE_PLAN: docs/roadmap/plans/canonical-module-compilation-and-scoped-packages-plan.md
 WORK_ID: R5-closeout
-WORK_SOURCE: parent reviews through checkpoint 909d41660b198db5f39e7d822282a107e69be118
-IMPLEMENTED_CHECKPOINT: R5C1C checkpoint (complete, awaiting Gate B re-review)
-REPOSITORY_STATE: clean at the R5C1C checkpoint commit
-STATUS: paused - Gate B re-review required
-CURRENT_SLICE: R5C1C - finalize boundaries and validate dense identity mapping (complete)
+WORK_SOURCE: continued Phase 5 closeout from the accepted R5C1C checkpoint
+BASE_REVISION: e53b6a01d (clean repository baseline for this continuation)
+IMPLEMENTED_CHECKPOINT: R5C1C checkpoint (complete, Gate B user review pending)
+REPOSITORY_STATE: clean at e53b6a01d; later history contains unrelated timer and documentation commits
+STATUS: paused - user Gate B review requested
+CURRENT_SLICE: Gate B review of the accepted R5C1B through R5C1C boundary work
 ACCEPTED_FROM_CHECKPOINT:
 - R5C3C provider agreement and recursive interface closure
 - R5C4A exhaustive canonical token traversal for correctness
@@ -43,13 +44,13 @@ COMPLETED_R5C1C:
 - ProjectCompilation::from_successful_boundaries uses one require_all_successful conversion
 - project/package materialisation collision check uses direct indexes without per-row owner strings
 PENDING_GATE_B:
-- R5C1B completion through R5C1C
+- user-provided audit and review findings for R5C1B through R5C1C
 REQUIRED_RELOADS: AGENTS.md, this plan, compiler-design-overview.md, build-system-design.md, compiled_boundary.rs, module_artifact_store.rs, generated_worklist.rs, compilation.rs, build.rs and boundary tests
 VALIDATION_STATE: full just validate green at R5C1C (workspace tests 4083, integration 1818/1818, cross-target Clippy, docs, bench-ci)
-BLOCKERS: none
-NEXT_WORKER_ORDER: Gate B re-review -> R5C6A -> Gate C review -> R5C6B -> R5C7 -> R5C8 -> R5C9 -> Phase 5 exit review -> mandatory handoff
-STOP_REASON: plan requires stopping for Gate B re-review after R5C1C
-NEXT_RESUME_ACTION: submit the R5C1C checkpoint for Gate B re-review; after acceptance implement R5C6A
+BLOCKERS: awaiting user findings
+NEXT_WORKER_ORDER: user Gate B findings -> correction commit -> R5C6A -> Gate C review -> R5C6B -> R5C7 -> R5C8 -> R5C9 -> Phase 5 exit review -> mandatory handoff
+STOP_REASON: user requested replacing the Gate B auditor with a committed pause for manual audit and review
+NEXT_RESUME_ACTION: receive user findings, correct them in a separate commit, then continue with R5C6A
 FOLLOW_UP_CHAIN:
 1. dependency-clauses-and-path-syntax-plan.md
 2. tir-corrections-and-simplification-plan.md
