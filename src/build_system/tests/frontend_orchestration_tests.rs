@@ -1,21 +1,16 @@
 //! Per-module frontend orchestration regression tests.
 //!
-//! WHAT: validates Stage 0/frontend boundary helpers such as message merging and parallel local-table
-//!       file preparation.
+//! WHAT: validates Stage 0/frontend boundary helpers such as deterministic local-table file
+//!       preparation.
 //! WHY: these tests exercise infrastructure invariants that integration cases cannot inspect
 //!      directly, while keeping test code out of the production orchestration module.
 
 use super::super::prepared_source::PreparedSourceInput;
-use super::merge_stage_messages;
 use crate::builder_surface::SourceFileKindRegistry;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::CompilerFrontend;
-use crate::compiler_frontend::compiler_errors::{CompilerMessages, SourceLocation};
-use crate::compiler_frontend::compiler_messages::display_messages::format_terse_compiler_messages;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticPayload, TypeMismatchContext,
-};
-use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::compiler_errors::SourceLocation;
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticPayload};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileFrontendPrepareError, HeaderKind, HeaderParseOptions, PreparedHeaderSyntax,
@@ -186,36 +181,6 @@ fn fixture_source_refs(file_sources: &[(String, String)]) -> Vec<(&str, &str)> {
         .iter()
         .map(|(file_name, source)| (file_name.as_str(), source.as_str()))
         .collect()
-}
-
-#[test]
-fn merge_stage_messages_preserves_render_type_context_with_warnings() {
-    let string_table = StringTable::new();
-    let type_environment = TypeEnvironment::new();
-    let diagnostic = CompilerDiagnostic::type_mismatch(
-        type_environment.builtins().int,
-        type_environment.builtins().string,
-        TypeMismatchContext::Assignment,
-        SourceLocation::default(),
-    );
-    let warning = CompilerDiagnostic::unreachable_match_arm(SourceLocation::default());
-    let messages = CompilerMessages::from_diagnostics(vec![diagnostic], string_table.clone())
-        .with_type_context_for_all_diagnostics(type_environment);
-
-    let merged = merge_stage_messages(messages, &[warning], &string_table);
-    let rendered_lines = format_terse_compiler_messages(&merged);
-
-    assert_eq!(merged.render_type_contexts().len(), 1);
-    assert_eq!(rendered_lines.len(), 2);
-    assert!(
-        rendered_lines[0].contains("expected Int, found String"),
-        "errors should render before warnings; first line should be the type mismatch, got: {}",
-        rendered_lines[0]
-    );
-    assert!(
-        !rendered_lines[0].contains("TypeId("),
-        "type names should be rendered, not raw type ids"
-    );
 }
 
 #[test]

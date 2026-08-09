@@ -1,7 +1,8 @@
 //! Frontend compilation coordinator for Moth projects.
 //!
 //! Dispatches to single-file or directory-project flows, then delegates to focused submodules:
-//! - `frontend_orchestration`   — per-module pipeline (tokenization through borrow checking)
+//! - `frontend_orchestration`   — provider-independent file/header preparation and per-module
+//!   semantic orchestration
 //! - `generated_worklist`       — boundary-local generated request state and sidecar publication
 //! - `generated_summary_convergence` — transient HIR call topology and dirty-queue propagation
 //! - `project_roots`            — config root interpretation and path-resolver setup

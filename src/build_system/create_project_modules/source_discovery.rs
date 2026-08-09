@@ -461,8 +461,9 @@ enum ImportPolicyAction {
 /// WHAT: the provider-capable path owns external imports while the shared BFS owns queue
 ///       handling, canonicalization, source preparation and local queuing.
 ///
-/// Source preparation is owned by the [`TraversalSourceStorage`] parameter, not the policy. The
-/// policy only decides import actions; the storage decides where scanned source data is retained.
+/// The policy only decides import actions for the synthetic single-file traversal. Directory
+/// projects use indexed discovery and prepare each owned `SourceId` directly in the module queue;
+/// the synthetic traversal alone retains its isolated local scan cache until input assembly.
 enum ImportPolicy<'a, 'b> {
     /// Full provider-capable path. Mutates provider cache and resolution tables.
     Capable {
@@ -708,10 +709,6 @@ pub(super) fn discover_reachable_source_files(
     })
 }
 
-/// Build the `TraversalSourceStorage` for one traversal from the optional store and resolution.
-///
-/// Directory projects pass `Some(store)` and `Some(resolution)` so the store owns source
-/// preparation. Single-file synthetic compilation passes `None` for both, using the local cache.
 /// Resolve a compiler-semantic Moth import and enqueue its indexed or synthetic-file target.
 ///
 /// WHAT: handles cross-module root queuing, implementation-file discovery and direct dependency

@@ -26,7 +26,9 @@ use crate::compiler_frontend::canonical_type_identity::{
     ExportedGenericParameterIdentity, GenericParameterOriginResolver, NominalOriginResolver,
     project_type_id_to_canonical_identity,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::{
+    CompilerError, CompilerMessages, merge_stage_messages,
+};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::ModuleDiagnostics;
 use crate::compiler_frontend::external_packages::{ExternalPackageId, ExternalPackageRegistry};
@@ -774,40 +776,28 @@ impl ModulePreparationContext<'_> {
         strategy: FilePreparationStrategy,
     ) -> Vec<FilePreparationChunk> {
         let module_file_count = module.len();
-        let plans = match strategy {
-            FilePreparationStrategy::Serial => vec![FilePreparationChunkPlan {
-                chunk_index: 0,
-                file_range: 0..module_file_count,
-            }],
-            FilePreparationStrategy::ParallelPerFile => (0..module_file_count)
-                .map(|index| FilePreparationChunkPlan {
-                    chunk_index: index,
-                    file_range: index..index + 1,
-                })
-                .collect(),
-            FilePreparationStrategy::ParallelChunked => {
-                plan_file_preparation_chunks(module_file_count, rayon::current_num_threads())
-            }
-        };
-        let mut module_files = module.into_iter().enumerate();
-        let planned_files = plans
-            .into_iter()
-            .map(|plan| {
-                let files = module_files
-                    .by_ref()
-                    .take(plan.file_range.len())
-                    .collect::<Vec<_>>();
-                (plan, files)
-            })
-            .collect::<Vec<_>>();
-
         match strategy {
-            FilePreparationStrategy::Serial => planned_files
-                .into_iter()
-                .map(|(plan, files)| {
+            FilePreparationStrategy::Serial => vec![Self::prepare_module_file_chunk(
+                FilePreparationChunkPlan {
+                    chunk_index: 0,
+                    file_range: 0..module_file_count,
+                },
+                module.into_iter().enumerate(),
+                fork_source,
+                prepare_context,
+                const_template_offset,
+                runtime_fragment_offset,
+            )],
+            FilePreparationStrategy::ParallelPerFile => module
+                .into_par_iter()
+                .enumerate()
+                .map(|(file_index, file)| {
                     Self::prepare_module_file_chunk(
-                        plan,
-                        files,
+                        FilePreparationChunkPlan {
+                            chunk_index: file_index,
+                            file_range: file_index..file_index + 1,
+                        },
+                        std::iter::once((file_index, file)),
                         fork_source,
                         prepare_context,
                         const_template_offset,
@@ -815,7 +805,21 @@ impl ModulePreparationContext<'_> {
                     )
                 })
                 .collect(),
-            FilePreparationStrategy::ParallelPerFile | FilePreparationStrategy::ParallelChunked => {
+            FilePreparationStrategy::ParallelChunked => {
+                let plans =
+                    plan_file_preparation_chunks(module_file_count, rayon::current_num_threads());
+                let mut module_files = module.into_iter().enumerate();
+                let planned_files = plans
+                    .into_iter()
+                    .map(|plan| {
+                        let files = module_files
+                            .by_ref()
+                            .take(plan.file_range.len())
+                            .collect::<Vec<_>>();
+                        (plan, files)
+                    })
+                    .collect::<Vec<_>>();
+
                 planned_files
                     .into_par_iter()
                     .map(|(plan, files)| {
@@ -835,7 +839,7 @@ impl ModulePreparationContext<'_> {
 
     fn prepare_module_file_chunk(
         plan: FilePreparationChunkPlan,
-        module: Vec<(usize, PreparedSourceInput)>,
+        module: impl IntoIterator<Item = (usize, PreparedSourceInput)>,
         fork_source: &StringTableForkSource,
         prepare_context: &FrontendFilePrepareContext<'_>,
         const_template_offset: usize,
@@ -2497,17 +2501,6 @@ fn record_borrow_counters(report: &BorrowCheckReport) {
         FrontendCounter::BorrowValueFactCount,
         report.analysis.value_facts.len(),
     );
-}
-
-pub(super) fn merge_stage_messages(
-    messages: CompilerMessages,
-    warnings: &[CompilerDiagnostic],
-    string_table: &StringTable,
-) -> CompilerMessages {
-    let mut messages = messages;
-    messages.prepend_diagnostics_preserving_context(warnings.iter().cloned());
-    messages.string_table = string_table.clone();
-    messages
 }
 
 /// Render the module's source logical paths from the retained source identity table.

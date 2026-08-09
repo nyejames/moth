@@ -506,6 +506,23 @@ pub struct CompilerError {
     render_context: Option<StringTable>,
 }
 
+/// Merge warnings produced by an earlier frontend stage into a later message set.
+///
+/// WHAT: preserves diagnostic order and render type-context ranges while attaching the caller's
+///       current string table to the returned boundary container.
+/// WHY: stage orchestration and HIR-derived convergence share this diagnostic boundary, so the
+///      neutral compiler-message owner keeps warning composition out of either coordinator.
+pub(crate) fn merge_stage_messages(
+    messages: CompilerMessages,
+    warnings: &[CompilerDiagnostic],
+    string_table: &StringTable,
+) -> CompilerMessages {
+    let mut messages = messages;
+    messages.prepend_diagnostics_preserving_context(warnings.iter().cloned());
+    messages.string_table = string_table.clone();
+    messages
+}
+
 impl CompilerError {
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         // An attached render context is only authoritative for the location's original ID space.

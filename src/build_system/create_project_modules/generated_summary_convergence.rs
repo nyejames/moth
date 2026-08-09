@@ -8,7 +8,9 @@
 
 use crate::compiler_frontend::CompilerFrontend;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::{
+    CompilerError, CompilerMessages, merge_stage_messages,
+};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::module::HirModule;
@@ -448,13 +450,9 @@ fn check_borrows_with_warnings(
     hir_module: &HirModule,
     warnings: &[CompilerDiagnostic],
 ) -> Result<BorrowCheckReport, CompilerMessages> {
-    compiler.check_borrows(hir_module).map_err(|messages| {
-        super::frontend_orchestration::merge_stage_messages(
-            messages,
-            warnings,
-            &compiler.string_table,
-        )
-    })
+    compiler
+        .check_borrows(hir_module)
+        .map_err(|messages| merge_stage_messages(messages, warnings, &compiler.string_table))
 }
 
 /// Stable base identities whose exact summaries widened during one borrow pass.

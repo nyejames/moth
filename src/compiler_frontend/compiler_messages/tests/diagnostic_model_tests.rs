@@ -19,7 +19,9 @@ use super::{
     TypeDiagnosticKind, TypeMismatchContext, UnsupportedBackendFeatureReason,
     UnsupportedOperatorCategory, is_well_formed_reason_key,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::{
+    CompilerError, CompilerMessages, merge_stage_messages,
+};
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, dev_server, invalid_config_message, terminal, terse,
 };
@@ -615,6 +617,39 @@ fn compiler_messages_preserve_type_context_ranges_when_prepending_and_appending(
         rendered[1].contains("expected Status, found String"),
         "second rendered line should be the Status error, got: {}",
         rendered[1]
+    );
+}
+
+#[test]
+fn merge_stage_messages_preserves_render_type_context_with_warnings() {
+    let string_table = StringTable::new();
+    let type_environment = TypeEnvironment::new();
+    let diagnostic = CompilerDiagnostic::type_mismatch(
+        type_environment.builtins().int,
+        type_environment.builtins().string,
+        TypeMismatchContext::Assignment,
+        SourceLocation::default(),
+    );
+    let warning = CompilerDiagnostic::unreachable_match_arm(SourceLocation::default());
+    let messages = CompilerMessages::from_diagnostics(vec![diagnostic], string_table.clone())
+        .with_type_context_for_all_diagnostics(type_environment);
+
+    let merged = merge_stage_messages(messages, &[warning], &string_table);
+    let rendered_lines =
+        crate::compiler_frontend::compiler_messages::display_messages::format_terse_compiler_messages(
+            &merged,
+        );
+
+    assert_eq!(merged.render_type_contexts().len(), 1);
+    assert_eq!(rendered_lines.len(), 2);
+    assert!(
+        rendered_lines[0].contains("expected Int, found String"),
+        "errors should render before warnings; first line should be the type mismatch, got: {}",
+        rendered_lines[0]
+    );
+    assert!(
+        !rendered_lines[0].contains("TypeId("),
+        "type names should be rendered, not raw type ids"
     );
 }
 

@@ -27,8 +27,8 @@ WORK_SOURCE: continued Phase 5 closeout after Gate B acceptance and the revised 
 BASE_REVISION: 276bc4cb2 (clean revised-plan baseline before R5C6A)
 IMPLEMENTED_CHECKPOINT: 156942cc3
 RECONCILED_HEAD: 156942cc3
-STATUS: active - R5C8 complete; paused for user review before R5C9
-CURRENT_SLICE: R5C8 - source-payload consumption and convergence ownership consolidation
+STATUS: active - R5C9 deletion audit and validation complete; paused before final review
+CURRENT_SLICE: R5C9 - deletion audit and Phase 5 validation complete
 ACCEPTED_CHECKPOINTS:
 - R5C3C provider agreement and recursive interface closure
 - R5C4A exhaustive canonical token traversal
@@ -53,10 +53,18 @@ VALIDATION_STATE:
 - User audit accepted R5C6A/R5C6B/R5C6C and identified the remaining R5C7C blocker; the source-payload correction and R5C8 consolidation are now complete
 - Interim implementation-coordinator auditor `20260809T190234Z-f3a404aa` identified four bounded corrections; all were resolved and revalidated
 - `156942cc3` passed full `just validate`: 4218 workspace tests, 1818/1818 integration executions, cross-target Clippy, docs, 60 benchmark preflights plus quick benchmark sanity and timer erasure
+- User review accepted `156942cc3` and identified only three non-blocking R5C9 cleanup checks: diagnostic-owner coupling, singleton per-file preparation allocation and a stale module-map description
+- R5C9 audit inventory passed `cargo run --quiet -- tests --audit`: 1668 integration cases and 1818 backend executions
+- R5C9 focused tests passed: frontend orchestration 22, convergence 12 and frontend pipeline 40
+- R5C9 working tree passed full `just validate`: 4218 workspace tests, 1818/1818 integration executions, cross-target Clippy, docs, all 60 benchmark preflights plus quick benchmark sanity and timer erasure
+- Interim auditor `20260809T204134Z-4d73f013` found one stale `TraversalSourceStorage` ownership comment; the required correction is complete
+- Post-correction `just validate` and `cargo run --quiet -- tests --audit` passed with the same full counts and clean timer-erasure/source audit
+- Verification auditor `20260809T205404Z-6575bf06` found one test-owner correction; the warning/context regression now lives under compiler-messages tests and the obsolete frontend-orchestration ownership text is removed
+- Final post-correction `just validate` passed: 4218 workspace tests, 1818/1818 integration executions, cross-target Clippy, docs, all 60 benchmark preflights plus quick benchmark sanity and timer erasure
 BLOCKERS: none
-NEXT_WORKER_ORDER: R5C9 -> Gate D -> mandatory handoff
-STOP_REASON: user requested a pause before the final review; final auditor intentionally deferred until the next review cycle
-NEXT_RESUME_ACTION: after user review, begin the R5C9 deletion audit and Phase 5 validation
+NEXT_WORKER_ORDER: final review -> Gate D -> mandatory handoff
+STOP_REASON: R5C9 is accepted and committed next; user requested a pause before final review, so final auditor and Gate D are deferred
+NEXT_RESUME_ACTION: after user review, run the final auditor and Gate D without reopening accepted R5C9 cleanup
 FOLLOW_UP_CHAIN:
 1. dependency-clauses-and-path-syntax-plan.md
 2. tir-corrections-and-simplification-plan.md
