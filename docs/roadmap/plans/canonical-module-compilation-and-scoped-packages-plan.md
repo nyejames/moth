@@ -25,17 +25,17 @@ ACTIVE_PLAN: docs/roadmap/plans/canonical-module-compilation-and-scoped-packages
 WORK_ID: R5-closeout
 WORK_SOURCE: continued Phase 5 closeout after Gate B acceptance and the revised plan
 BASE_REVISION: 276bc4cb2 (clean revised-plan baseline before R5C6A)
-IMPLEMENTED_CHECKPOINT: a9460bf94
-RECONCILED_HEAD: a9460bf94
-STATUS: active - R5C6C complete; waiting for Gate C2 re-review
-CURRENT_SLICE: Gate C2 re-review - R5C6C exact active-base summary dependencies
+IMPLEMENTED_CHECKPOINT: 7cb61bcb3
+RECONCILED_HEAD: 7cb61bcb3
+STATUS: active - R5C7A/R5C7B complete; R5C8 initial cleanup complete; awaiting next review phase
+CURRENT_SLICE: next review phase - source-payload ownership and boundary context consolidation
 ACCEPTED_CHECKPOINTS:
 - R5C3C provider agreement and recursive interface closure
 - R5C4A exhaustive canonical token traversal
 - R5C5B boundary-scoped generated ownership and caller-scoped lookup
 - R5C4B exact in-place remapping, exact template-row identity and transactional publication
 - R5C1B/R5C1C total retained-boundary completion and identity validation
-REQUIRED_RELOADS: AGENTS.md, this plan, compiler-design-overview.md, build-system-design.md, frontend_orchestration.rs, generated_worklist.rs, public_call_summary.rs, borrow_checker/metadata.rs, prepared_source_store.rs, prepared_source.rs, module_inventory.rs and the focused generated/source tests
+REQUIRED_RELOADS: AGENTS.md, this plan, compiler-design-overview.md, build-system-design.md, frontend_orchestration.rs, generated_worklist.rs, public_call_summary.rs, borrow_checker/metadata.rs, prepared_source.rs, module_inventory.rs, source_tree_index.rs and the focused generated/source tests
 VALIDATION_STATE:
 - fd16cf7b7 passed full just validate: 4083 workspace tests, 1818/1818 integration executions, cross-target Clippy, docs and bench-ci
 - later timing-system code at 5d2918faf passed its own full just validate and timer erasure gates
@@ -46,10 +46,14 @@ VALIDATION_STATE:
 - User-provided Gate C2 review identified active-base public-call classification, coarse base invalidation, repeated materialisation-context scans and missing production queue coverage
 - a9460bf94 passed full just validate: 4218 workspace tests, 1818/1818 integration executions, cross-target Clippy, docs, 60 benchmark preflights plus quick benchmark sanity and timer erasure
 - R5C6C focused coverage passed: 12 convergence tests and the timer/counter active-base public pipeline regression
-BLOCKERS: none; R5C7A must wait for Gate C2 re-review
-NEXT_WORKER_ORDER: Gate C2 re-review -> R5C7A -> R5C7B -> R5C8 -> R5C9 -> Gate D -> mandatory handoff
-STOP_REASON: R5C6C is committed; waiting for user-provided Gate C2 re-review; no automated auditor was invoked
-NEXT_RESUME_ACTION: after Gate C2 re-review, continue R5C7A
+- 7cb61bcb3 passed full just validate: 4218 workspace tests, 1818/1818 integration executions, cross-target Clippy, docs, 60 benchmark preflights plus quick benchmark sanity and timer erasure
+- R5C7A evidence found one owning module queue per selected compiler-semantic `SourceId`; existing Stage 0 coverage covers duplicate same-module paths, cross-module edges, support roots, package boundaries, unrooted sources and reversed discovery order
+- R5C7B deleted the project-wide prepared-source store, moved direct owned inputs through the module queue, removed `PreparedSourceInput::Clone`, and narrowed Moth inputs to tokens plus byte length; the synthetic single-file cache remains isolated
+- R5C8 initial cleanup grouped the immutable boundary inputs to `compile_module_waves` in one typed context without changing graph, provider or package ownership
+BLOCKERS: none; enough implementation changes are committed for the next user review phase
+NEXT_WORKER_ORDER: next review phase -> continue R5C8 -> R5C9 -> Gate D -> mandatory handoff
+STOP_REASON: R5C7A/R5C7B and the first R5C8 cleanup are committed; no automated auditor will be invoked
+NEXT_RESUME_ACTION: after review, continue R5C8 deletion-first consolidation around generated materialisation and summary convergence ownership
 FOLLOW_UP_CHAIN:
 1. dependency-clauses-and-path-syntax-plan.md
 2. tir-corrections-and-simplification-plan.md
@@ -468,7 +472,7 @@ The correction does not introduce function-granular borrow scheduling, SCC machi
 
 **Goal:** establish whether the prepared-source cache has any real multi-consumer requirement before changing storage.
 
-**Owners:** `module_inventory.rs`, `prepared_source_store.rs`, `source_tree_index.rs` and focused Stage 0 tests.
+**Owners:** `module_inventory.rs`, `prepared_source.rs`, `source_tree_index.rs` and focused Stage 0 tests.
 
 Prove for directory-project and source-package compilation:
 
@@ -520,6 +524,10 @@ Run the standard code gate before R5C8.
 ### R5C8 - deletion-first ownership consolidation
 
 **Goal:** make the completed pipeline readable after R5C6 and R5C7 without changing semantic data flow.
+
+**Current progress:** the first cleanup slice deleted the stale project-wide prepared-source owner and
+grouped immutable boundary inputs to `compile_module_waves` in one typed context. The generated
+materialisation and summary-convergence ownership remains for the next R5C8 slice.
 
 First delete stale helpers, fields, comments and test adapters revealed by the previous slices. Split files only around surviving owners.
 
