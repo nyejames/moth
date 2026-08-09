@@ -23,11 +23,12 @@ Phase 5 does not implement the new dependency grammar, builtin `Path`, resource 
 ```text
 ACTIVE_PLAN: docs/roadmap/plans/canonical-module-compilation-and-scoped-packages-plan.md
 WORK_ID: R5-closeout
-WORK_SOURCE: parent pre-resume review after the accepted retained-boundary correction
-IMPLEMENTED_CHECKPOINT: fd16cf7b7e70ceb82973981a4cb1281cd35c994f
-RECONCILED_HEAD: 63ea2d6cd2cd3fd35728dc1ee489742e2d6a56be
-STATUS: active - Gate B accepted; R5C6A is next
-CURRENT_SLICE: R5C6A - convergence instrumentation, monotonicity proof and read-only dependency model
+WORK_SOURCE: continued Phase 5 closeout after Gate B acceptance and the revised plan
+BASE_REVISION: 276bc4cb2 (clean revised-plan baseline before R5C6A)
+IMPLEMENTED_CHECKPOINT: 766bb827c15c46fa3e2427202b8abeb41dc0ea20
+RECONCILED_HEAD: 766bb827c15c46fa3e2427202b8abeb41dc0ea20
+STATUS: active - R5C6A complete; R5C6B is next; Gate C1 audit deferred by user instruction
+CURRENT_SLICE: R5C6B - monotone dirty-queue convergence
 ACCEPTED_CHECKPOINTS:
 - R5C3C provider agreement and recursive interface closure
 - R5C4A exhaustive canonical token traversal
@@ -39,10 +40,12 @@ VALIDATION_STATE:
 - fd16cf7b7 passed full just validate: 4083 workspace tests, 1818/1818 integration executions, cross-target Clippy, docs and bench-ci
 - later timing-system code at 5d2918faf passed its own full just validate and timer erasure gates
 - 63ea2d6 is a plan-only pause checkpoint validated with the docs release build and diff checks
-BLOCKERS: none
-NEXT_WORKER_ORDER: R5C6A -> Gate C1 -> R5C6B -> Gate C2 -> R5C7A -> R5C7B -> R5C8 -> R5C9 -> Gate D -> mandatory handoff
-STOP_REASON: Gate B is accepted; implementation may resume only with the bounded R5C6A observation slice
-NEXT_RESUME_ACTION: implement R5C6A without changing borrow results, run full validation and stop for Gate C1
+- 766bb827c1 passed full just validate: 4210 workspace unit tests, 1818/1818 integration executions, cross-target Clippy, docs, benchmark sanity and timer erasure
+- Gate C1 audit is intentionally deferred under the explicit user instruction; R5C6A remains observation-only and borrow scheduling is unchanged
+BLOCKERS: none; continue through R5C6B before the next audit cycle
+NEXT_WORKER_ORDER: R5C6B -> Gate C2 -> R5C7A -> R5C7B -> R5C8 -> R5C9 -> Gate D -> mandatory handoff
+STOP_REASON: none; Gate C1 audit is deferred and the dirty-queue slice is the active bounded work
+NEXT_RESUME_ACTION: replace broad convergence with the accepted monotone dirty queue while preserving exact final reports
 FOLLOW_UP_CHAIN:
 1. dependency-clauses-and-path-syntax-plan.md
 2. tir-corrections-and-simplification-plan.md
