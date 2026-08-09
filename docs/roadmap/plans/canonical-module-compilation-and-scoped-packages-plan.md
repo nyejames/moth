@@ -2,12 +2,12 @@
 
 ## Purpose
 
-Finish the canonical module and scoped-package cutover, then hand a syntax-independent dependency substrate to the dedicated dependency-clause and path-syntax plan.
+Finish the canonical module and scoped-package cutover, then hand one syntax-independent dependency substrate to the dedicated dependency-clause and path-syntax plan.
 
 Phase 5 targets:
 
 - one semantic compilation per physical module inside one project or package boundary
-- one deterministic source inventory and preparation pass per selected source
+- one deterministic source inventory and one preparation pass per consumed source
 - immutable completed provider interfaces rather than donor headers, AST or HIR
 - stable cross-module identities and generated sidecars owned by the consuming boundary
 - complete retained graph outcomes and success-only linkable project payloads
@@ -16,41 +16,33 @@ Phase 5 targets:
 - no compatibility path, duplicate semantic owner or speculative duplicate work
 - no graph or provider consumer coupled to the current `import` keyword
 
-Phase 5 does not implement the new dependency grammar, builtin `Path`, resource identity or asset publication.
+Phase 5 does not implement the new dependency grammar, builtin `Path`, resource identity, resource linking or asset publication.
 
 ## Current state
 
 ```text
 ACTIVE_PLAN: docs/roadmap/plans/canonical-module-compilation-and-scoped-packages-plan.md
 WORK_ID: R5-closeout
-WORK_SOURCE: continued Phase 5 closeout from the accepted R5C1C checkpoint
-BASE_REVISION: e53b6a01d (clean repository baseline for this continuation)
-IMPLEMENTED_CHECKPOINT: R5C1C checkpoint (complete, Gate B user review pending)
-REPOSITORY_STATE: clean at e53b6a01d; later history contains unrelated timer and documentation commits
-STATUS: paused - user Gate B review requested
-CURRENT_SLICE: Gate B review of the accepted R5C1B through R5C1C boundary work
-ACCEPTED_FROM_CHECKPOINT:
+WORK_SOURCE: parent pre-resume review after the accepted retained-boundary correction
+IMPLEMENTED_CHECKPOINT: fd16cf7b7e70ceb82973981a4cb1281cd35c994f
+RECONCILED_HEAD: 63ea2d6cd2cd3fd35728dc1ee489742e2d6a56be
+STATUS: active - Gate B accepted; R5C6A is next
+CURRENT_SLICE: R5C6A - convergence instrumentation, monotonicity proof and read-only dependency model
+ACCEPTED_CHECKPOINTS:
 - R5C3C provider agreement and recursive interface closure
-- R5C4A exhaustive canonical token traversal for correctness
+- R5C4A exhaustive canonical token traversal
 - R5C5B boundary-scoped generated ownership and caller-scoped lookup
-- R5C4B exact remapping, exact template-row identity and transactional publication
-COMPLETED_R5C1C:
-- CompiledGraphBoundary::finish sorts and proves every boundary before publication
-- compile_module_waves and single-file compilation return only finished boundaries
-- CompletedSourcePackageRegistry::publish validates the finished package boundary before mutation
-- dense outcome lanes replace hash sets; successful slots prove interface origin equals graph node origin and reference exactly one artefact row with no orphaned rows
-- CompiledSourcePackage::validate proves root range, package identity, normal root role, final outcome and interface agreement
-- generated publication proves one in-range generated root and exact summary agreement
-- ProjectCompilation::from_successful_boundaries uses one require_all_successful conversion
-- project/package materialisation collision check uses direct indexes without per-row owner strings
-PENDING_GATE_B:
-- user-provided audit and review findings for R5C1B through R5C1C
-REQUIRED_RELOADS: AGENTS.md, this plan, compiler-design-overview.md, build-system-design.md, compiled_boundary.rs, module_artifact_store.rs, generated_worklist.rs, compilation.rs, build.rs and boundary tests
-VALIDATION_STATE: full just validate green at R5C1C (workspace tests 4083, integration 1818/1818, cross-target Clippy, docs, bench-ci)
-BLOCKERS: awaiting user findings
-NEXT_WORKER_ORDER: user Gate B findings -> correction commit -> R5C6A -> Gate C review -> R5C6B -> R5C7 -> R5C8 -> R5C9 -> Phase 5 exit review -> mandatory handoff
-STOP_REASON: user requested replacing the Gate B auditor with a committed pause for manual audit and review
-NEXT_RESUME_ACTION: receive user findings, correct them in a separate commit, then continue with R5C6A
+- R5C4B exact in-place remapping, exact template-row identity and transactional publication
+- R5C1B/R5C1C total retained-boundary completion and identity validation
+REQUIRED_RELOADS: AGENTS.md, this plan, compiler-design-overview.md, build-system-design.md, frontend_orchestration.rs, generated_worklist.rs, public_call_summary.rs, borrow_checker/metadata.rs, prepared_source_store.rs, prepared_source.rs, module_inventory.rs and the focused generated/source tests
+VALIDATION_STATE:
+- fd16cf7b7 passed full just validate: 4083 workspace tests, 1818/1818 integration executions, cross-target Clippy, docs and bench-ci
+- later timing-system code at 5d2918faf passed its own full just validate and timer erasure gates
+- 63ea2d6 is a plan-only pause checkpoint validated with the docs release build and diff checks
+BLOCKERS: none
+NEXT_WORKER_ORDER: R5C6A -> Gate C1 -> R5C6B -> Gate C2 -> R5C7A -> R5C7B -> R5C8 -> R5C9 -> Gate D -> mandatory handoff
+STOP_REASON: Gate B is accepted; implementation may resume only with the bounded R5C6A observation slice
+NEXT_RESUME_ACTION: implement R5C6A without changing borrow results, run full validation and stop for Gate C1
 FOLLOW_UP_CHAIN:
 1. dependency-clauses-and-path-syntax-plan.md
 2. tir-corrections-and-simplification-plan.md
@@ -70,32 +62,45 @@ Read before implementation and each review gate:
 - memory-management, style-guide, testing and validation authorities under `docs/src/docs/codebase/`
 - `docs/src/docs/progress/@page.moth`
 
-The architecture overviews own semantic boundaries. The language overview owns current syntax. This plan owns the remaining Phase 5 sequence and handoff.
+The compiler and build-system overviews own semantic and orchestration boundaries. The language overview owns current syntax. This plan owns only the remaining Phase 5 sequence and its handoff.
 
-## Accepted baseline
+## Accepted Phase 5 baseline
 
 Keep this work. Do not rebuild it under new names.
 
 - Project and source-package `CompiledGraphBoundary` values retain graph identity, artefacts, generated lanes and diagnosed or blocked outcomes.
+- `CompiledGraphBoundary::finish` proves the dense slot, outcome, graph-node and artefact-row relationships before a boundary becomes a provider.
 - Boundary-local dense IDs remain separate from stable semantic identities.
-- `CompletedSourcePackageRegistry` owns package records, prefix lookup and direct dependency adjacency.
+- `CompletedSourcePackageRegistry` owns package rows, prefix lookup, dependency adjacency and direct materialisation lookup.
 - Retained provider references carry non-optional file-local shell identity.
-- Authored and implicit provider inputs are explicit states.
-- One operation-local `ProviderInterfaceId` selects one immutable interface and binding view.
+- Authored and implicit provider inputs are explicit valid states.
+- One operation-local `ProviderInterfaceId` selects one immutable interface and one binding view.
 - Provider declarations, evidence and summaries use agreement insertion.
 - Recursive interface closure uses exact `RecordRef` values and one declaration/evidence queue.
 - Final interfaces remain deterministic vectors with construction-only indexes.
-- Frozen generic bodies reuse the canonical `TokenKind` vocabulary and exhaustive string-ID traversal.
+- Frozen generic bodies reuse the canonical `TokenKind` vocabulary and exhaustive in-place string-ID traversal.
 - Generated declaration lookup resolves an exact artefact and template row.
 - Generated summaries and sidecars live in one `CompletedGeneratedFunction` row.
 - Generated sessions reuse only their own boundary store and local transaction.
 - Equal generated identities may coexist in unrelated project or package boundaries.
 - Entry assembly resolves generated functions relative to the calling boundary.
-- Generated symbol names remain globally collision-free without making identity globally owned.
+- Generated symbol names remain globally collision-free without making generated identity globally owned.
+- Timing and benchmark instrumentation now use one typed schema and erasing facade. Remaining Phase 5 instrumentation must extend those owners rather than create another timing path.
 
-Gate A accepted the R5C5B checkpoint. Do not reopen boundary-local generated ownership unless a concrete invariant failure is found.
+Gates A and B are accepted. Reopen them only for a concrete invariant failure.
 
 ## Locked implementation decisions
+
+### One owner per semantic or scheduling fact
+
+- `SourceTreeIndex` owns physical source inventory, `SourceId`, source ownership and portable source identity.
+- `ProjectModuleGraph` owns module topology and provider-before-consumer scheduling.
+- Completed provider interfaces own cross-module semantic facts.
+- Validated HIR call targets own executable call dependency facts.
+- `BoundaryGeneratedFunctionStore` owns completed generated summaries and sidecars for one boundary.
+- Entry and package assembly own reachability and root activation.
+
+A later stage must not reconstruct one of these facts from paths, rendered names, source text, another IR or a parallel graph.
 
 ### Generated functions are boundary owned
 
@@ -112,27 +117,18 @@ Concrete generic functions live in sidecars owned by the consuming project or pa
 
 Do not introduce a hybrid global store whose row is owned by whichever package compiles first.
 
-### Graph outcomes are total
+### Retained graph outcomes are total
 
-`CompiledGraphBoundary::validate_invariants` is the single completion proof for one frontend graph result.
+Every boundary finishes before publication:
 
 ```text
-Successful  -> no diagnosed or blocked record
+Successful  -> one matching graph node and one artefact row
 Diagnosed   -> exactly one diagnosed record
 Blocked     -> exactly one blocked record
 Unavailable -> CompilerError
 ```
 
-Also reject:
-
-- duplicate diagnosed records
-- duplicate blocked records
-- diagnosed and blocked overlap
-- out-of-range module IDs
-- invalid successful artefact references
-- graph and slot-count disagreement
-
-`ProjectFrontendCompilation::new` validates the project and every source-package boundary. Success-only assembly adds only the stricter all-successful requirement.
+Successful artefact interface origin must equal the graph-node origin. No artefact row may be missing, shared or orphaned. Success-only project assembly adds only the stricter all-successful condition.
 
 ### Publication is transactional
 
@@ -147,34 +143,68 @@ Any multi-row publication preflights before mutation:
 
 This applies to generated deltas, module materialisation contexts and package publication.
 
-### Exact rows verify identity
-
-An indexed materialisation row must verify:
-
-```rust
-artefact.declaration_identity == *input.identity.declaration()
-```
-
-A stale but in-range row is `CompilerError`.
-
-### Token remapping is exhaustive, in place and fallible
-
-Keep one canonical exhaustive walker equivalent to:
-
-```rust
-pub fn try_remap_string_ids<E>(
-    &mut self,
-    map: &mut impl FnMut(StringId) -> Result<StringId, E>,
-) -> Result<(), E>
-```
-
-Ordinary remapping mutates existing payloads. Frozen capture and materialisation clone each token once, then remap the clone. Token locations and path fields use the same fallible contract. Invalid frozen indexes return `CompilerError`.
-
 ### Provider facts are imported once
 
 Each consumer/provider pair projects one closed provider interface. Stable declarations, evidence and summaries are stored once. Aliases and namespace members retain stable references.
 
 Agreement insertion borrows the candidate and clones only when the key is vacant. Equal duplicate records are normal for recursively closed facades.
+
+### Convergence uses validated HIR as its topology authority
+
+The convergence scheduler consumes actual lowered call targets. It does not use source requests, path names or a second persistent graph.
+
+The analysis unit is deliberately coarse:
+
+```rust
+pub enum ConvergenceNode {
+    BaseModule,
+    Generated(GeneratedFunctionIdentity),
+}
+```
+
+- All local and module-private functions stay inside `BaseModule` because the current borrow checker analyses a complete `HirModule`.
+- Each generated sidecar is one node.
+- A local call within one node creates no cross-node edge.
+- `ModulePrivate` from a sidecar targets `BaseModule`.
+- `Generated` targets the owning boundary's generated node.
+- Cross-module source and binding-backed summaries are fixed leaves, not nodes.
+- Another package's generated sidecar is neither a node nor a leaf in the current boundary.
+
+Per-function HIR and link facts may derive these edges. They do not create a second function-granular borrow scheduler.
+
+### Call-summary convergence must be monotone
+
+R5C6 must formalise and validate the existing finite summary order before changing scheduling.
+
+Invariant fields must remain equal:
+
+- parameter count and declared access
+- transfer eligibility
+- transfer effect
+
+Widening fields are:
+
+- mutation: `NoWrite <= Writes`
+- reactive effects: retained subscription and invalidation bits may only be added
+- return alias:
+  - `Fresh` is the least conservative value
+  - `AliasParams(A) <= AliasParams(B)` only when `A` is a subset of `B`
+  - any `Fresh` or alias value may widen to `Unknown`
+  - `Unknown` is the top value
+
+`AliasParams` remains sorted and unique. A recomputation that narrows, changes invariant fields or moves between incomparable alias sets is `CompilerError` and stops this plan. Do not hide non-monotonic behaviour by silently joining it to a less precise result.
+
+### Source payloads are not a cache by default
+
+Canonical source ownership already assigns one source to one module. Same-module traversal deduplicates by `SourceId`, while cross-module dependencies create graph edges rather than adding provider source to a consumer source set.
+
+R5C7 must prove the number of real preparation consumers per canonical `SourceId`. When the production count is one, delete the payload cache and move the source payload once. Shared ownership is allowed only when a real second consumer exists.
+
+Do not retain a clone-heavy cache for hypothetical future reuse.
+
+### Token remapping remains exhaustive, in place and fallible
+
+Ordinary remapping mutates existing payloads. Frozen capture and materialisation clone each token once, then remap the clone. Token locations and path fields use the same fallible contract. Invalid frozen indexes return `CompilerError`.
 
 ### Dependency syntax remains replaceable
 
@@ -189,7 +219,7 @@ Phase 5 preserves:
 - direct graph edges and package dependency IDs
 - no source or path rediscovery after identities exist
 
-Current grouped imports may still retain more than one shell identity because the parser expands selected items. The immediate follow-up plan owns the coherent path-table migration and consolidates one authored clause under one `DependencyShellId`.
+Current grouped imports may still retain more than one shell identity because the parser expands selected items. The immediate follow-up plan owns the coherent path-table migration and one `DependencyShellId` per authored clause.
 
 Graph, package, provider, closure and binding consumers must not depend on:
 
@@ -198,33 +228,23 @@ Graph, package, provider, closure and binding consumers must not depend on:
 - raw source spelling
 - a second token scan
 
-Do not partially rename `ImportShellId`, `FileImport` or import-oriented modules during this closeout.
+Do not partially rename `ImportShellId`, `FileImport` or import-oriented modules during Phase 5.
 
-### Work limits
+### Instrumentation uses existing owners
 
-Inside one project or package boundary:
+- Use current typed `TimingMetric` spans for elapsed-time evidence.
+- Add structural work counts through `FrontendCounter` under `benchmark_counters`.
+- Use private test statistics for graph and queue invariants.
+- Do not add raw timing names, direct clock reads or a second collector.
+- Do not change timing schema version unless an existing metric's semantic boundary changes.
 
-- read, tokenize and prepare each selected source once
-- resolve each retained shell once
-- compile each physical module once
-- close and project each provider interface once per consumer/provider pair
-- materialise each generated identity once per boundary
-- emit one diagnostic set per diagnosed module or request
+### No compatibility scaffolding
 
-Directory projects must not use the synthetic single-file scanner. Synthetic mode may retain its isolated shared-parser traversal.
-
-Moth is pre-release. Replace APIs directly and delete old owners. Do not add compatibility wrappers, feature flags or production adapters kept only for tests.
+Moth is pre-release. Replace APIs directly and delete old owners. Do not add compatibility wrappers, forwarding shims, feature flags, fallback branches or production adapters kept only for tests.
 
 ## Slice and review discipline
 
-Each slice names:
-
-- owner
-- inputs and outputs
-- deleted code
-- focused tests
-- non-goals
-- full validation gate
+Every slice names its owner, inputs, outputs, deletions, tests, non-goals and final gate.
 
 Standard code gate:
 
@@ -233,220 +253,299 @@ cargo fmt --all
 just validate
 ```
 
-Stop when:
+Focused tests and timings are iteration evidence, not acceptance gates.
 
-- a second durable representation appears necessary
-- identity would depend on display data
-- a full-table clone remains in a hot loop
-- more than two unlisted stage boundaries change
+Stop and request parent review when:
+
+- a second durable representation of one fact appears necessary
+- identity would depend on display data or donor-local IDs
+- HIR call topology and a retained request topology disagree
+- a summary transition is non-monotone
+- a canonical source has more than one real preparation consumer
+- a full-table clone remains inside a hot loop after the owning slice
+- more than two unlisted stage boundaries must change
 - a slice exceeds roughly 12 production files or 600 net production lines, excluding mechanical moves
 - a user-facing failure would need `CompilerError`
-- the same invariant needs a second correction pass
+- the same invariant needs another correction pass
 
 Review gates:
 
 - **Gate A:** accepted at R5C5B
-- **Gate B:** after R5C1B and R5C4B
-- **Gate C:** after R5C6A
+- **Gate B:** accepted at R5C1C
+- **Gate C1:** after R5C6A, before convergence behaviour changes
+- **Gate C2:** after R5C6B, before source-payload ownership changes
 - **Gate D:** after R5C9
 
-Reviews are read-only. Resolve every required finding before continuing.
+Reviews are read-only. Corrections land as separate bounded slices.
 
 ## Remaining Phase 5 work
 
-### R5C1B - make graph-outcome validation total
+### R5C6A - instrument and prove the convergence model
 
-**Goal:** establish one complete frontend graph outcome gate.
+**Goal:** measure the existing fixed point, formalise monotonicity and build one read-only dependency model without changing borrow results.
 
-**Owners:** `compiled_boundary.rs`, `module_artifact_store.rs`, `compilation.rs`, `build.rs` and boundary tests.
+**Owners:** `frontend_orchestration.rs`, `generated_worklist.rs`, `public_call_summary.rs`, borrow-checker metadata, frontend counters and focused generated tests.
 
-**Changes:**
+#### R5C6A1 - baseline work evidence
 
-- validate the complete slot/lane bijection
-- reject duplicate and overlapping diagnosed or blocked entries
-- reject every final `Unavailable` slot
-- validate successful artefact references while walking slots
-- validate every source-package boundary in `ProjectFrontendCompilation::new`
-- remove redundant downstream completion checks
-- change unfinished-slot regressions to expect frontend-boundary rejection
-- move `ProjectCompilation::from_test_modules(Vec<Module>)` and synthetic builders into test support
-- remove the old flat-module test-construction shape from production `build.rs`
+Add benchmark-only counters for:
 
-**Tests:**
+- initial base-module borrow passes
+- convergence base-module borrow passes
+- generated sidecar borrow passes
+- complete generated-summary map builds
+- generated-summary map clones into sidecars
+- private-summary map rebuilds
+- summary comparisons and changes
+- stable sidecars rechecked without an input change
+- maximum current convergence iterations
 
-- both mismatch directions for diagnosed and blocked states
-- duplicate and overlap cases
-- unavailable project and package slots
-- missing successful artefact rows
-- valid mixed outcomes retained for `check`
+Use the existing timing metrics for initial borrow, convergence borrow and generated rechecks. Do not add a timing metric for every counter.
 
-**Non-goals:** scheduler, diagnostic cascade and `CompiledModuleRef` redesign.
+Record a focused baseline from fixtures containing:
 
-### R5C4B - exact remapping, lookup and publication
+- no generated functions
+- independent generated functions
+- a generated-to-generated chain
+- a generated-to-module-private call
+- a base-to-generated-to-base cycle
+- equal generated identities in two separate package boundaries
 
-**Goal:** retain checkpoint correctness while removing avoidable allocation and partial mutation.
+Counters are attribution evidence only. Existing diagnostics, summaries and output must remain byte-for-byte or structurally identical under their current owners.
 
-**Owners:** `tokenizer/tokens.rs`, frozen generic syntax and materialisation, `generated_worklist.rs`, `module_artifact_store.rs` and `compiled_boundary.rs`.
+#### R5C6A2 - monotonicity contract
 
-**Changes:**
+Add one narrow summary-transition validator under the shared call-summary owner.
 
-- replace reconstructive token mapping with one exhaustive in-place fallible walker
-- route frozen token, source-location and path remapping through it
-- verify declaration identity at the exact template row
-- preflight complete generated deltas before append
-- validate `record.identity == record.sidecar.identity` at boundary publication
-- preflight module and package materialisation rows before mutation
-- resolve package dependencies before publishing the package row
-- retain deterministic materialisation rows in contiguous order plus one lookup map
-- replace symmetric project/package duplicate scans with one deterministic registration pass
-- make agreement insertion borrow and clone only on vacant entries
-- assign generated names inside a boundary from stable generated identity order
-- reuse one shared empty generated-name map rather than allocating per lookup
+It must:
 
-**Tests:**
+- validate invariant fields
+- validate the mutation and reactive partial orders
+- validate sorted unique alias parameter sets
+- validate the return-alias partial order
+- distinguish `Unchanged` from `Widened`
+- reject narrowing or incomparable transitions through `CompilerError`
 
-- all token payloads remap in place and path vectors keep their allocation
-- invalid frozen token or location indexes return `CompilerError`
-- stale in-range template rows fail identity validation
-- late generated or package duplicates leave owners unchanged
-- sidecar/record identity disagreement leaves the store unchanged
-- deterministic materialisation iteration survives reversed insertion order
-- occupied agreement insertion avoids cloning where instrumentation can prove it
-- generated names remain stable under sidecar publication reordering
+Do not introduce a generic lattice framework.
 
-**Delete:**
+Add focused unit tests for every allowed and rejected transition.
 
-- reconstructive ordinary remapping
-- panic-prone frozen remap indexing
-- incremental multi-row publication
-- nondeterministic iteration described as deterministic
-- repeated empty generated-name allocations
+#### R5C6A3 - transient dependency model
 
-Run the standard gate after R5C1B and R5C4B, then stop for Gate B.
+After all local sidecars have materialised, build one construction-only dense model:
 
-### R5C6A - instrument and build the read-only convergence graph
-
-**Goal:** measure current work and prove node ownership before scheduling changes.
-
-**Precondition:** Gate B accepted.
-
-Instrument:
-
-- base-module and sidecar borrow passes
-- complete summary-map clones
-- summary changes
-- dirty nodes and SCCs
-- SCC sizes and maximum iterations
-- stable nodes revisited after convergence
-
-Build one read-only deterministic graph over boundary-local source, private and generated functions. Stable cross-module source summaries and provider summaries are fixed leaves. Another package's generated sidecar is never a node or leaf in the current boundary.
+```rust
+pub struct ConvergenceModel {
+    nodes: Vec<ConvergenceNodeRecord>,
+    callers: Vec<Vec<ConvergenceNodeId>>,
+}
+```
 
 Requirements:
 
-- derive edges from stable HIR targets and retained link facts
-- preserve current borrow execution and results
-- make boundary ownership explicit in node identity
-- expose focused test inspection without retaining a second graph authority
-- compare predicted dirty sets with current rechecks
+- node zero is `BaseModule`
+- generated nodes are assigned in stable `GeneratedFunctionIdentity` order
+- caller lists are sorted and deduplicated
+- edges come only from validated HIR call targets
+- local calls inside one analysis unit are ignored
+- provider and cross-module summaries are validated fixed leaves
+- the model is dropped after one module compilation
+- no hash-map iteration order affects IDs, counters or diagnostics
 
-Tests cover:
+Compare the model's predicted dirty callers with the nodes currently rechecked by the broad loop. Do not use the model to skip work in R5C6A.
 
-- equal generated identities in two boundaries
-- provider leaves
-- independent SCCs
-- reversed discovery order
-- unchanged diagnostics and summaries
+`GeneratedRequestRecord.requesters` and `dependencies` currently describe materialisation history rather than final HIR calls. Search all production consumers. When they have no independent diagnostic or scheduling owner, delete them in this slice instead of retaining a second topology. Recursive materialisation detection remains state-based.
 
-Run the standard gate and stop for Gate C.
+**Tests:**
 
-### R5C6B - dependency-driven call-summary convergence
+- base/generated edge classification for every HIR call target class
+- deterministic node IDs and caller order under reversed materialisation order
+- equal identities in separate boundaries remain isolated
+- worklist construction topology is absent or demonstrably non-authoritative
+- predicted dirty sets match hand-constructed fixtures
+- all existing borrow summaries and diagnostics remain unchanged
 
-**Goal:** remove unconditional whole-boundary borrow rechecking.
+**Non-goals:** skipping borrow passes, partial borrow reports, function-granular scheduling or source-payload changes.
 
-Requirements:
+**Gate:** run the standard code gate and stop for Gate C1.
 
-- schedule only nodes whose local input or callee summary changed
-- process SCCs in deterministic boundary-scoped order
-- keep provider and cross-module source summaries as fixed leaves
-- prove monotone summary updates or diagnose oscillation
-- avoid cloning complete summary maps into every sidecar
-- do not recheck independent stable SCCs
-- run final base borrow validation with exact required summaries
-- preserve deterministic diagnostics
+### R5C6B - replace broad convergence with a monotone dirty queue
 
-If function-granular scheduling requires a broad borrow-checker rewrite, stop and create a dedicated plan. A module-level fallback is acceptable only when counters prove unrelated stable sidecars are not rechecked.
+**Goal:** remove unconditional base/sidecar rechecking and complete-summary cloning while preserving exact final reports.
 
-Tests cover reverse-reachable dirtying, recursive convergence, independent boundaries, oscillation failure and parity with the baseline.
+**Precondition:** Gate C1 accepts the monotonicity contract and read-only model.
 
-### R5C7 - remove prepared-source payload cloning
+**Owners:** a focused generated-summary convergence owner, `frontend_orchestration.rs`, `generated_worklist.rs` and borrow-check integration.
 
-**Goal:** preserve one read and tokenization without complete payload copies.
+#### Initial state
 
-- keep `PreparedSourceStore` indexed by `SourceId`
-- move canonical payloads into their single preparation owner
-- share one immutable source allocation only for a real second consumer
-- do not clone `FileTokens` before header preparation
-- rebind source identity without copying tokens
-- prevent diagnosed preparation from being consumed twice
-- retain typed path syntax facts so the dependency/path plan can replace grammar without rescanning
-- do not narrow storage around import-only facts
-- do not implement `Path`, resource identity or asset publication here
+- Keep the existing initial base borrow analysis.
+- Materialise every requested sidecar exactly once.
+- Build the accepted convergence model.
+- Seed every node once in deterministic node order. This preserves a conservative parity baseline without repeated global passes.
 
-Synthetic single-file traversal may retain its isolated cache.
+#### Dirty scheduling
 
-### R5C8 - simplify ownership and preserve the dependency boundary
+Use one dense `VecDeque<ConvergenceNodeId>` plus a queued bitset.
 
-**Goal:** make the finished pipeline inspectable without changing semantic dataflow.
+For one node:
 
-Suggested ownership:
+1. install only the direct callee summaries required by that node
+2. run the existing complete-HIR borrow analysis for that node
+3. compare its produced summary facts with the retained facts
+4. reject non-monotone transitions
+5. publish widened facts
+6. enqueue only direct callers when at least one published fact changed
+
+`BaseModule` may produce several local or module-private summary changes but remains one analysis unit. A generated node produces one completed generated summary.
+
+The queue terminates when empty. Do not retain an arbitrary iteration multiplier after every transition has a finite validated widening order.
+
+#### Data-flow cleanup
+
+Delete or replace these broad paths:
+
+- `GeneratedFunctionWorklist::completed_summaries` full-map construction
+- cloning the complete generated summary map into every sidecar
+- rebuilding the complete private summary map every pass
+- `recheck_generated_borrows` as an all-sidecar loop
+- the `(functions + requests) * 4` convergence limit
+- warning-vector clones where a borrowed warning slice is sufficient
+
+Each node retains or reconstructs only the direct summary entries its HIR calls require. Do not place references into persistent HIR or artefacts.
+
+#### Correctness
+
+- imported source and binding summaries remain fixed
+- another package's generated summary never enters the boundary model
+- final base and sidecar `BorrowCheckReport` values are retained on their existing module owners
+- user diagnostics remain deterministic
+- no source program becomes accepted or rejected because of scheduling order
+
+**Tests and counters:**
+
+- independent sidecars stop after their own initial stable pass
+- a changed generated summary rechecks only reverse-reachable callers
+- generated-to-base and base-to-generated cycles converge
+- recursive alias summaries widen to the same final results as the baseline
+- a forced narrowing or oscillating test transfer fails through `CompilerError`
+- reversing generated publication order preserves final summaries, diagnostics and output
+- complete summary-map clone counters fall to zero
+- unchanged nodes are not reanalysed
+
+If this requires partial `BorrowChecker` execution, function-report merging or mutation of validated HIR, stop and create a dedicated incremental-borrow plan. Do not expand R5C6B.
+
+**Gate:** run the standard code gate and stop for Gate C2.
+
+### R5C7A - prove source-payload ownership
+
+**Goal:** establish whether the prepared-source cache has any real multi-consumer requirement before changing storage.
+
+**Owners:** `module_inventory.rs`, `prepared_source_store.rs`, `source_tree_index.rs` and focused Stage 0 tests.
+
+Prove for directory-project and source-package compilation:
+
+- every compiler-semantic `SourceId` has one `SourceOwnership::Owned(ModuleId)` or is explicitly unrooted
+- one module queue consumes each selected owned `SourceId` at most once
+- same-module duplicate dependencies collapse through the queued set
+- cross-module dependencies add graph edges and never enqueue provider source
+- check-only and tooling paths do not currently consume the same canonical payload twice
+
+Use a construction-only dense consumption table or benchmark counters when runtime evidence is useful. Do not retain source payloads merely to collect the proof.
+
+**Stop condition:** when a real second consumer exists, stop and document its owner, lifetime and exact payload need before choosing shared storage.
+
+**Tests:** repeated same-module paths, cross-module imports, support roots, package boundaries, unrooted sources and reversed source discovery order.
+
+### R5C7B - delete or narrow prepared-source storage
+
+**Goal:** move each canonical payload once and remove clone-heavy migration storage.
+
+**Default path when R5C7A proves one consumer:**
+
+- delete `PreparedSourceStore`, `PreparedSourceSlot` and `PreparedSourceEntry`
+- load and tokenize one `SourceId` directly into an owned `PreparedSourceInput`
+- consume or drop that input after retained header syntax is produced
+- remove `Clone` from `PreparedSourceInput`
+- remove test-only `input_files` clones from module jobs
+- keep `SourceTreeIndex` as the identity, path and ownership owner
+
+Narrow `PreparedSourceInput` where current consumers allow:
+
+```rust
+Moth {
+    source_path: PathBuf,
+    source_byte_len: usize,
+    tokens: Box<FileTokens>,
+}
+```
+
+Do not retain the complete Moth source string after tokenization when no diagnostic or semantic consumer needs it. Template and Markdown variants retain their source text because their preparation path consumes it.
+
+**Fallback only for a proven second consumer:** use one source-level immutable shared payload. Do not clone complete strings or token buffers and do not add per-token reference counting. This fallback requires parent review before implementation.
+
+Retain the typed structural path facts produced by header preparation so the dependency-clause plan can replace grammar without another source scan.
+
+**Tests and counters:** one read, one tokenization, one header preparation and no complete token/source clone per consumed source. Synthetic single-file traversal remains isolated and follows the same one-read contract.
+
+Run the standard code gate before R5C8.
+
+### R5C8 - deletion-first ownership consolidation
+
+**Goal:** make the completed pipeline readable after R5C6 and R5C7 without changing semantic data flow.
+
+First delete stale helpers, fields, comments and test adapters revealed by the previous slices. Split files only around surviving owners.
+
+Likely owners, when still justified:
 
 ```text
 create_project_modules/
 ├── compiled_boundary.rs
 ├── module_artifact_store.rs
 ├── package_registry.rs
-├── provider_inputs.rs
 ├── graph_compile.rs
 └── frontend/
-    ├── mod.rs
     ├── preparation.rs
     ├── semantic_compile.rs
     ├── generated_materialisation.rs
-    └── generated_summary_fixpoint.rs
+    └── generated_summary_convergence.rs
 ```
+
+This tree is illustrative, not a requirement to create every file.
 
 Requirements:
 
-- one obvious module coordinator
-- package indexing and ordering in one owner
-- provider input construction in one owner
-- graph and provider consumers accept typed retained references only
+- one obvious directory-project compilation coordinator
+- package indexing, package ordering and package publication in one owner
+- generated materialisation separate from generated summary convergence
+- one narrow immutable context instead of the long `compile_module_waves` argument list
+- provider and graph consumers accept typed retained references only
 - no directory owner imports tokenizer-specific dependency grammar or branches on `TokenKind::Import`
-- generated materialisation and convergence stay outside base semantic orchestration
-- replace long compile-wave argument lists with one narrow immutable context
-- split generic materialisation only at real ownership boundaries
-- consolidate generated symbol-name maps into one owner when their lifecycle matches
-- return borrowed views instead of rebuilding vectors when simple
-- keep import-oriented filenames temporary for the follow-up migration
-- remove stale comments, forwarding modules, compatibility derefs and production test adapters
-- keep tests with their owner
-- do not add stage traits or dynamic dispatch
+- no stage traits or dynamic dispatch
+- no forwarding module or wrapper left after a move
+- tests move with the owner and are not duplicated
+- import-oriented filenames remain until the immediate follow-up migration
+- comments describe the current serial module-wave policy rather than claiming semantic wave parallelism
 
-Do not split files mechanically before ownership is clear.
+Prefer direct functions and dense data over registries or generic orchestration abstractions. Do not mechanically split files to match the diagram.
+
+Run the standard code gate.
 
 ### R5C9 - deletion audit and Phase 5 validation
 
-Audit:
+Perform the `AGENTS.md` Final audit in order, then run this plan-specific audit.
 
-**Source and graph**
+#### Source and graph
 
 - no directory fallback scanner or `ProjectPathResolver` source fallback
 - synthetic traversal stays isolated with one read and tokenization
-- no source/token reparse after retained dependency facts exist
-- no graph/provider consumer depends on `TokenKind::Import`
+- no source or token reparse after retained dependency facts exist
+- no graph or provider consumer depends on `TokenKind::Import`
 - no suffix or path matching for provider joins
+- no clone-backed `PreparedSourceStore` or equivalent speculative payload cache
+- no test-only full source/token clone retained in module jobs
 
-**Provider and interface**
+#### Provider and interface
 
 - no donor header, AST or HIR copying
 - no first-provider-wins record
@@ -455,7 +554,7 @@ Audit:
 - no complete payload clone per alias or namespace member
 - no occupied agreement-path clone
 
-**Generated and boundaries**
+#### Generated and boundaries
 
 - no cross-boundary request suppression or global identity-only owner map
 - equal generated identities may coexist across boundaries
@@ -464,25 +563,29 @@ Audit:
 - no partial generated or materialisation publication
 - no `Unavailable` retained slot
 - every project and package boundary passes the full outcome bijection
+- no retained materialisation-history graph competing with HIR convergence topology
+- no complete generated-summary map clone
+- no complete private-summary map rebuild per iteration
+- no broad all-sidecar recheck
+- no arbitrary convergence multiplier
 
-**Token and ownership**
+#### Token and ownership
 
 - no mirrored token vocabulary
 - no ordinary remap that rebuilds path vectors
 - no infallible frozen remap indexing
 - no full declaration-table clone in hot loops
-- no complete prepared-source clone per handoff
 - no flat `Vec<Module>` production test constructor
 - no compatibility API
 
-**Handoff**
+#### Handoff
 
 - dependency grammar can be replaced without graph, package, provider or interface changes
 - current import-specific names are not public or persistent identity
 - retained path/dependency facts can move to one file-owned path table without another source pass
 - no resource behaviour is implemented or reconstructed from rendered strings in this plan
 
-Final gate:
+#### Final gate
 
 ```bash
 cargo fmt --all
@@ -498,9 +601,10 @@ Counters must prove:
 - one interface publication
 - one provider projection per consumer/provider pair
 - one generated materialisation per identity per boundary
-- no unrelated SCC recheck
+- zero complete summary-map clones in convergence
+- no borrow reanalysis without a changed direct input after the initial seed pass
 
-Run Gate D.
+Run Gate D. Resolve every required finding before accepting Phase 5.
 
 ## Phase 5 exit gate
 
@@ -516,12 +620,13 @@ Phase 5 is complete only when:
 - graph identity and successful artefacts survive into `ProjectCompilation`
 - provider binding performs no path rediscovery or repeated full-interface projection
 - package readiness uses one indexed dependency model
-- prepared source, generated lookup and convergence avoid repeated payload clones
+- source payloads move once or have one proven shared owner
+- convergence performs no unrelated rechecks or complete summary-map clones
 - generated and materialisation publication are transactional
 - token remapping is exhaustive, in place and fallible
 - one directory-project compiler path remains
 - dependency consumers are independent of the current `import` keyword
-- full validation and Gates B through D are clean
+- full validation and Gates C1 through D are clean
 
 After acceptance, compress the detailed R5C section to one accepted-baseline paragraph before archiving this plan.
 
@@ -568,7 +673,13 @@ The later resource plan owns:
 
 ## Validation policy
 
-Focused tests are iteration evidence, not the acceptance gate. Run the architecture audit whenever a slice changes discovery, dependency shells, provider binding, interface closure, identity, borrow summaries, graph scheduling or generated sidecars.
+Focused tests are iteration evidence, not the acceptance gate. Run the manual architecture audit from `validation.mtf` whenever a slice changes discovery, dependency shells, provider binding, interface closure, identity, borrow summaries, graph scheduling or generated sidecars.
+
+Documentation-only plan changes use:
+
+```bash
+moth build docs --release
+```
 
 ## Deferred beyond Phase 5
 
