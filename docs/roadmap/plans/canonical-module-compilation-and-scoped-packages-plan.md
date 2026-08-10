@@ -25,8 +25,8 @@ ACTIVE_PLAN: docs/roadmap/plans/canonical-module-compilation-and-scoped-packages
 WORK_ID: R5-closeout
 WORK_SOURCE: continued Phase 5 closeout after Gate B acceptance and the revised plan
 BASE_REVISION: 276bc4cb2 (clean revised-plan baseline before R5C6A)
-IMPLEMENTED_CHECKPOINT: 257c4be5c
-RECONCILED_HEAD: 1081eeaa2
+IMPLEMENTED_CHECKPOINT: 4cbf93829
+RECONCILED_HEAD: 4cbf93829
 STATUS: active - R5C10C complete; second independent review pending
 CURRENT_SLICE: R5C10C - canonical package discovery, requester template indexing and generated evidence visibility (complete)
 ACCEPTED_CHECKPOINTS:
