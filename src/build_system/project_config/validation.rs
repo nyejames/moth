@@ -464,7 +464,8 @@ fn reject_duplicate_folder_entries(
 
 /// Validate one `package_folders` entry and normalize it to the stored path form.
 ///
-/// WHY: project-local source-backed package folder discovery should stay project-relative and explicit.
+/// WHY: this transitional parser/storage field remains project-relative until the queued Project Config
+/// migration removes it; canonical Stage 0 discovers only structural support roots and registered packages.
 fn validate_package_folder_path(
     package_folder: PathBuf,
     location: &SourceLocation,

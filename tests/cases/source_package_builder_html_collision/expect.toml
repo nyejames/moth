@@ -4,3 +4,7 @@ entry = "."
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-CONFIG-0001"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-CONFIG-0001"
+reason = "invalid_config.entry_root_package_prefix_collision"

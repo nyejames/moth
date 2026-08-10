@@ -8864,13 +8864,6 @@ contract = "language.config.package_folder_duplicate_rejected"
 role = "primary"
 
 [[case]]
-id = "config_package_folder_builder_collision_rejected"
-path = "config_package_folder_builder_collision_rejected"
-tags = ["integration", "config", "packages", "builder-packages", "diagnostics"]
-contract = "language.config.package_folder_builder_collision_rejected"
-role = "primary"
-
-[[case]]
 id = "config_package_folder_missing_default_ignored"
 path = "config_package_folder_missing_default_ignored"
 tags = ["integration", "config", "packages"]
@@ -8885,10 +8878,10 @@ contract = "language.config.package_folder_nested_path_rejected"
 role = "primary"
 
 [[case]]
-id = "custom_package_import_resolves_through_mod"
-path = "custom_package_import_resolves_through_mod"
-tags = ["integration", "config", "packages", "imports", "facades"]
-contract = "language.imports.custom_package_resolves_through_mod_acceptance"
+id = "source_module_import_resolves_through_mod"
+path = "source_module_import_resolves_through_mod"
+tags = ["integration", "modules", "imports", "facades"]
+contract = "language.imports.source_module_resolves_through_mod_acceptance"
 role = "primary"
 
 [[case]]
@@ -9119,7 +9112,7 @@ role = "primary"
 id = "source_package_builder_html_collision"
 path = "source_package_builder_html_collision"
 tags = ["integration", "source-packages", "builder-packages", "diagnostics"]
-contract = "language.imports.source_package_builder_collision_rejected"
+contract = "language.imports.source_package_registered_builder_collision_rejected"
 role = "primary"
 
 [[case]]
