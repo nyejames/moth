@@ -1,0 +1,9 @@
+export:
+    Box type T = |
+        value T,
+    |
+;
+
+label type T |this Box of T| -> String:
+    return "generic module receiver"
+;

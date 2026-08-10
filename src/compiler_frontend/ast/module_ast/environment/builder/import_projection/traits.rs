@@ -8,7 +8,6 @@
 
 use super::*;
 use crate::compiler_frontend::canonical_type_identity::CanonicalTraitIdentity;
-use crate::compiler_frontend::headers::import_environment::SourceFunctionTarget;
 use crate::compiler_frontend::public_interface::{
     PublicTraitReceiverAccess, TraitSurfaceTypeIdentity,
 };
@@ -307,7 +306,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         )
                     })?;
                 let method_path = self
-                    .imported_method_path(&mapping.method_origin, string_table)
+                    .imported_method_path(&mapping.method_origin)
                     .ok_or_else(|| {
                         CompilerError::compiler_error(
                             "Imported reusable evidence has no visible projected receiver method target.",
@@ -339,26 +338,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         Ok(())
     }
 
-    fn imported_method_path(
-        &self,
-        method_origin: &OriginFunctionId,
-        string_table: &StringTable,
-    ) -> Option<InternedPath> {
-        let mut paths = self
-            .projected_imported_functions_by_local_path
-            .iter()
-            .filter_map(|(path, contract)| match &contract.target {
-                SourceFunctionTarget::Imported { origin, .. } if origin == method_origin => {
-                    Some(path.clone())
-                }
-                SourceFunctionTarget::Local(_)
-                | SourceFunctionTarget::Imported { .. }
-                | SourceFunctionTarget::Generated { .. }
-                | SourceFunctionTarget::ModulePrivate { .. } => None,
-            })
-            .collect::<Vec<_>>();
-        paths.sort_by_key(|path| path.to_string(string_table));
-        paths.into_iter().next()
+    fn imported_method_path(&self, method_origin: &OriginFunctionId) -> Option<InternedPath> {
+        self.imported_receiver_method_paths_by_origin
+            .get(method_origin)
+            .cloned()
     }
 }
 

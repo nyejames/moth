@@ -1,0 +1,10 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0057"]
+message_contains = [
+    "Generic type 'Box' requires 'T' to satisfy trait 'DISPLAY_TEXT'",
+    "Plain has no visible trait evidence",
+]

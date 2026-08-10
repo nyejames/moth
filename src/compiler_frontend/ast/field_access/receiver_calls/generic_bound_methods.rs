@@ -14,6 +14,7 @@ use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression_kind::ExpressionKind;
+use crate::compiler_frontend::ast::generic_bounds::evidence_for_type;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidReceiverCallReason};
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -119,22 +120,20 @@ fn generic_bound_requirement_candidates<'a>(
     candidates
 }
 
-fn evidence_for_bound_method(
+fn evidence_for_bound_method<'a>(
     trait_id: TraitId,
     receiver_type_id: TypeId,
-    scope_context: &ScopeContext,
-) -> Result<Option<&TraitEvidenceDefinition>, ExpressionParseError> {
+    scope_context: &'a ScopeContext,
+    type_environment: &TypeEnvironment,
+) -> Result<Option<&'a TraitEvidenceDefinition>, ExpressionParseError> {
     let evidence_environment = scope_context.trait_evidence_environment();
-
-    if let Some(evidence_id) = evidence_environment.builtin_for(receiver_type_id, trait_id) {
-        return Ok(evidence_environment.get(evidence_id));
-    }
-
-    if let Some(evidence_id) = evidence_environment.canonical_for(receiver_type_id, trait_id) {
-        return Ok(evidence_environment.get(evidence_id));
-    }
-
-    Ok(None)
+    Ok(evidence_for_type(
+        receiver_type_id,
+        trait_id,
+        type_environment,
+        evidence_environment,
+    )
+    .and_then(|evidence_id| evidence_environment.get(evidence_id)))
 }
 
 pub(super) fn lookup_generic_bound_receiver_method(
@@ -200,6 +199,7 @@ pub(super) fn lookup_generic_bound_receiver_method(
                     candidate.trait_definition.id,
                     receiver_type_id,
                     scope_context,
+                    type_environment,
                 )?
                 else {
                     return Ok(None);

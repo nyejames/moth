@@ -327,11 +327,21 @@ pub(crate) struct GeneratedFunctionWorklistDelta {
     records: Vec<CompletedGeneratedFunction>,
 }
 
+#[derive(Debug)]
+pub(crate) struct GeneratedFunctionPublication {
+    record_count: usize,
+}
+
 impl GeneratedFunctionWorklistDelta {
     pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         for record in &mut self.records {
             record.sidecar.remap_string_ids(remap);
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_records_for_test(records: Vec<CompletedGeneratedFunction>) -> Self {
+        Self { records }
     }
 }
 
@@ -354,10 +364,10 @@ impl BoundaryGeneratedFunctionStore {
         GeneratedFunctionWorklist::new(self)
     }
 
-    pub(super) fn publish(
-        &mut self,
-        delta: GeneratedFunctionWorklistDelta,
-    ) -> Result<(), CompilerError> {
+    pub(crate) fn preflight(
+        &self,
+        delta: &GeneratedFunctionWorklistDelta,
+    ) -> Result<GeneratedFunctionPublication, CompilerError> {
         // Preflight the complete delta before mutation: identity/sidecar agreement, executable
         // record shape, duplicate identities inside the delta and duplicates against retained
         // state must all pass before any row is appended.
@@ -384,11 +394,37 @@ impl BoundaryGeneratedFunctionStore {
             }
         }
 
+        Ok(GeneratedFunctionPublication {
+            record_count: delta.records.len(),
+        })
+    }
+
+    pub(crate) fn commit(
+        &mut self,
+        publication: GeneratedFunctionPublication,
+        delta: GeneratedFunctionWorklistDelta,
+    ) {
+        debug_assert_eq!(publication.record_count, delta.records.len());
         for record in delta.records {
             let record_id = GeneratedFunctionId(self.records.len());
             self.by_identity.insert(record.identity.clone(), record_id);
             self.records.push(record);
         }
+    }
+
+    pub(crate) fn reserve_commit(&mut self, publication: &GeneratedFunctionPublication) {
+        self.records.reserve(publication.record_count);
+        self.by_identity.reserve(publication.record_count);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn publish(
+        &mut self,
+        delta: GeneratedFunctionWorklistDelta,
+    ) -> Result<(), CompilerError> {
+        let publication = self.preflight(&delta)?;
+        self.reserve_commit(&publication);
+        self.commit(publication, delta);
         Ok(())
     }
 

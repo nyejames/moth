@@ -2,6 +2,10 @@
 
 use super::*;
 
+use crate::compiler_frontend::ast::module_ast::environment::builder::import_projection::nominal::imported_nominal_path;
+use crate::compiler_frontend::canonical_type_identity::GenericDeclarationOrigin;
+use crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity;
+
 impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     pub(in crate::compiler_frontend::ast::module_ast::environment::builder) fn project_imported_function_declarations(
         &mut self,
@@ -82,6 +86,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         string_table,
                     )
                 })?;
+                let generic_parameter_owner =
+                    GenericDeclarationOrigin::free_function(origin.clone())
+                        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
                 self.generic_function_templates_by_path.insert(
                     local_path.clone(),
@@ -91,6 +98,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         declaration_identity: Some(
                             crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity::Public(origin),
                         ),
+                        generic_parameter_owner: Some(generic_parameter_owner),
                         generic_parameter_list_id,
                         signature,
                         body_tokens: None,
@@ -149,6 +157,35 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             .import_environment
             .imported_declarations_by_local_path
             .clone();
+        let mut imported = imported.into_iter().collect::<Vec<_>>();
+        let mut bound_type_origins = imported
+            .iter()
+            .filter_map(|(_, origin)| match origin {
+                OriginDeclarationId::Type(origin) => Some(origin.clone()),
+                _ => None,
+            })
+            .collect::<FxHashSet<_>>();
+        for (origin, record) in &self.import_environment.imported_declarations_by_origin {
+            let OriginDeclarationId::Type(type_origin) = origin else {
+                continue;
+            };
+            if !self.imported_type_ids_by_origin.contains_key(type_origin)
+                || !matches!(
+                    record.semantics,
+                    PublicDeclarationSemantics::Struct(_) | PublicDeclarationSemantics::Choice(_)
+                )
+                || !bound_type_origins.insert(type_origin.clone())
+            {
+                continue;
+            }
+            // Evidence-only nominal targets have no authored local alias in the generated
+            // visibility table. Project their receiver catalog under the deterministic imported
+            // nominal path so stable evidence method origins still resolve to a callable path.
+            imported.push((
+                imported_nominal_path(type_origin, string_table),
+                origin.clone(),
+            ));
+        }
 
         for (imported_type_path, origin) in imported {
             let OriginDeclarationId::Type(receiver_origin) = &origin else {
@@ -162,9 +199,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             else {
                 continue;
             };
-            let methods = match &record.semantics {
-                PublicDeclarationSemantics::Struct(structure) => &structure.receiver_methods,
-                PublicDeclarationSemantics::Choice(choice) => &choice.receiver_methods,
+            let (methods, generic_parameter_surfaces) = match &record.semantics {
+                PublicDeclarationSemantics::Struct(structure) => {
+                    (&structure.receiver_methods, &structure.generic_parameters)
+                }
+                PublicDeclarationSemantics::Choice(choice) => {
+                    (&choice.receiver_methods, &choice.generic_parameters)
+                }
                 _ => continue,
             };
             let Some(receiver_type_id) = self
@@ -212,10 +253,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 }
             };
 
+            let receiver_generic_parameter_list_id = self
+                .register_imported_generic_parameters(generic_parameter_surfaces, string_table)
+                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+
             for method in methods {
-                if !matches!(method.category, PublicReceiverMethodCategory::ConcreteLocal) {
-                    continue;
-                }
                 let method_name = string_table.intern(method.method_origin.defining_name());
                 let method_path = imported_type_path.append(method_name);
                 let (signature, _, fallible_carrier_type_id) = self
@@ -231,23 +273,91 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     method_path.clone(),
                     ResolvedFunctionSignature {
                         receiver: Some(receiver.clone()),
-                        signature,
+                        signature: signature.clone(),
                     },
                 );
+
+                if matches!(
+                    method.category,
+                    PublicReceiverMethodCategory::GenericTemplate
+                ) {
+                    if self
+                        .projected_imported_receiver_methods_by_local_path
+                        .insert(method_path.clone(), method.method_origin.clone())
+                        .is_some()
+                    {
+                        return Err(CompilerMessages::from_error_ref(
+                            CompilerError::compiler_error(
+                                "Imported receiver method path was projected more than once",
+                            ),
+                            string_table,
+                        ));
+                    }
+                    self.index_imported_receiver_method_path(
+                        method.method_origin.clone(),
+                        method_path.clone(),
+                        string_table,
+                    );
+                    let generic_parameter_list_id =
+                        receiver_generic_parameter_list_id.ok_or_else(|| {
+                            CompilerMessages::from_error_ref(
+                                CompilerError::compiler_error(
+                                    "Imported generic receiver method has no receiver generic parameter list",
+                                ),
+                                string_table,
+                            )
+                        })?;
+                    let generic_parameter_owner = GenericDeclarationOrigin::nominal_type(
+                        receiver_origin.clone(),
+                    )
+                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+                    self.generic_function_templates_by_path.insert(
+                        method_path,
+                        GenericFunctionTemplate {
+                            function_path: imported_type_path.append(method_name),
+                            source_file: InternedPath::new(),
+                            declaration_identity: Some(GeneratedDeclarationIdentity::Public(
+                                method.method_origin.clone(),
+                            )),
+                            generic_parameter_owner: Some(generic_parameter_owner),
+                            generic_parameter_list_id,
+                            signature,
+                            body_tokens: None,
+                            declaration_location: Default::default(),
+                        },
+                    );
+                    continue;
+                }
 
                 let header_contract = self
                     .import_environment
                     .imported_functions_by_local_path
                     .get(&method_path)
-                    .ok_or_else(|| {
-                        CompilerMessages::from_error_ref(
-                            CompilerError::compiler_error(format!(
-                                "Imported concrete receiver method '{}' has no header-stage call contract",
-                                method.method_origin.defining_name()
-                            )),
-                            string_table,
-                        )
-                    })?;
+                    .cloned();
+                let Some(header_contract) = header_contract else {
+                    // A transparent alias or an evidence-only nominal target may carry the
+                    // receiver declaration without re-exporting a concrete executable method.
+                    // Such a method is not callable through this local path and must not turn a
+                    // missing optional projection into an internal publication failure.
+                    continue;
+                };
+                if self
+                    .projected_imported_receiver_methods_by_local_path
+                    .insert(method_path.clone(), method.method_origin.clone())
+                    .is_some()
+                {
+                    return Err(CompilerMessages::from_error_ref(
+                        CompilerError::compiler_error(
+                            "Imported receiver method path was projected more than once",
+                        ),
+                        string_table,
+                    ));
+                }
+                self.index_imported_receiver_method_path(
+                    method.method_origin.clone(),
+                    method_path.clone(),
+                    string_table,
+                );
                 self.projected_imported_functions_by_local_path.insert(
                     method_path,
                     AstImportedFunctionContract {
@@ -255,7 +365,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         summary: self
                             .import_environment
                             .imported_call_summaries_by_origin
-                            .get(&summary_origin(header_contract).map_err(|error| {
+                            .get(&summary_origin(&header_contract).map_err(|error| {
                                 CompilerMessages::from_error_ref(error, string_table)
                             })?)
                             .cloned()
@@ -274,6 +384,24 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         }
 
         Ok(())
+    }
+
+    fn index_imported_receiver_method_path(
+        &mut self,
+        method_origin: crate::compiler_frontend::semantic_identity::OriginFunctionId,
+        method_path: InternedPath,
+        string_table: &StringTable,
+    ) {
+        let replace = self
+            .imported_receiver_method_paths_by_origin
+            .get(&method_origin)
+            .is_none_or(|existing| {
+                method_path.to_string(string_table) < existing.to_string(string_table)
+            });
+        if replace {
+            self.imported_receiver_method_paths_by_origin
+                .insert(method_origin, method_path);
+        }
     }
 
     fn project_imported_callable_signature(

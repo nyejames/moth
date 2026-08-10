@@ -509,9 +509,9 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: Receiver methods]
             [: Supported]
-            [: Broad same-file struct/choice receiver, aligned generic receiver, imported receiver type, namespace receiver type, module-boundary exposure, nonlocal/builtin/external receiver rejection, duplicate, collision, and mutability coverage.]
+            [: Broad same-file struct/choice receiver, aligned generic receiver, imported generic receiver, namespace receiver type, module-boundary exposure, nonlocal/builtin/external receiver rejection, duplicate, collision, and mutability coverage.]
             [: JS / HTML]
-            [: Source-authored receiver methods travel with receiver type visibility. They are never grouped-imported, aliased, or exposed as namespace-record fields.]
+            [: Source-authored receiver methods travel with receiver type visibility, including retained generic receiver templates across module and package boundaries. They are never grouped-imported, aliased, or exposed as namespace-record fields.]
         ]
 
         [data:

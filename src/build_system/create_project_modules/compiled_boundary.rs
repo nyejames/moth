@@ -450,6 +450,14 @@ pub(crate) struct CompletedSourcePackageRegistry {
     materialisation_rows: Vec<(GeneratedDeclarationIdentity, PackageMaterialisationLocation)>,
 }
 
+#[derive(Debug)]
+pub(crate) struct SourcePackagePublication {
+    package_id: PackageBoundaryId,
+    prefix: String,
+    resolved_providers: Vec<PackageBoundaryId>,
+    materialisation_rows: Vec<(GeneratedDeclarationIdentity, PackageMaterialisationLocation)>,
+}
+
 impl CompletedSourcePackageRegistry {
     pub(crate) fn new() -> Self {
         Self {
@@ -472,11 +480,11 @@ impl CompletedSourcePackageRegistry {
     ///      registry entry; a missing entry is a proven scheduling invariant failure. The
     ///      boundary must also be provably complete before later consumers resolve its facade,
     ///      slots or materialisation indexes.
-    pub(crate) fn publish(
-        &mut self,
-        package: CompiledSourcePackage,
+    pub(crate) fn preflight(
+        &self,
+        package: &CompiledSourcePackage,
         dependency_prefixes: &[String],
-    ) -> Result<PackageBoundaryId, CompilerError> {
+    ) -> Result<SourcePackagePublication, CompilerError> {
         let prefix = package.import_prefix().to_owned();
         if self.by_prefix.contains_key(prefix.as_str()) {
             return Err(CompilerError::compiler_error(format!(
@@ -504,14 +512,25 @@ impl CompletedSourcePackageRegistry {
                         prefix, dependency_prefix
                     ))
                 })?;
-            if seen_providers.insert(provider_id) {
-                resolved_providers.push(provider_id);
+            if !seen_providers.insert(provider_id) {
+                return Err(CompilerError::compiler_error(format!(
+                    "source package @{} lists provider package @{} more than once",
+                    prefix, dependency_prefix
+                )));
             }
+            resolved_providers.push(provider_id);
         }
 
         // Preflight materialisation rows against retained state before appending the package.
         let mut materialisation_rows = Vec::new();
+        let mut seen_declarations = FxHashSet::default();
         for (identity, location) in package.boundary.modules.materialisation_locations() {
+            if !seen_declarations.insert(identity.clone()) {
+                return Err(CompilerError::compiler_error(format!(
+                    "Generated declaration identity {:?} is duplicated inside source package @{}",
+                    identity, prefix
+                )));
+            }
             if let Some(existing) = self.declarations_by_identity.get(identity) {
                 return Err(CompilerError::compiler_error(format!(
                     "Generated declaration identity {:?} was published by source packages @{} and @{}",
@@ -530,21 +549,68 @@ impl CompletedSourcePackageRegistry {
         }
 
         let package_id = PackageBoundaryId(self.packages.len());
+        Ok(SourcePackagePublication {
+            package_id,
+            prefix,
+            resolved_providers,
+            materialisation_rows,
+        })
+    }
+
+    pub(crate) fn commit(
+        &mut self,
+        publication: SourcePackagePublication,
+        package: CompiledSourcePackage,
+    ) {
+        let SourcePackagePublication {
+            package_id,
+            prefix,
+            resolved_providers,
+            materialisation_rows,
+        } = publication;
+
         self.packages.push(package);
-        self.provider_packages.push(Vec::new());
+        // The provider vector was allocated while preflighting. Move it into the retained lane
+        // so commit performs no capacity-bearing allocation after the first mutation.
+        self.provider_packages.push(resolved_providers);
         self.consumer_packages.push(Vec::new());
-        self.by_prefix.insert(prefix.clone(), package_id);
+        self.by_prefix.insert(prefix, package_id);
         for (identity, location) in &materialisation_rows {
             self.declarations_by_identity
                 .insert(identity.clone(), *location);
             self.materialisation_rows
                 .push((identity.clone(), *location));
         }
-        for provider_id in resolved_providers {
-            self.provider_packages[package_id.0].push(provider_id);
-            self.consumer_packages[provider_id.0].push(package_id);
+        for provider_index in 0..self.provider_packages[package_id.index()].len() {
+            let provider_id = self.provider_packages[package_id.index()][provider_index];
+            self.consumer_packages[provider_id.index()].push(package_id);
         }
+    }
 
+    pub(crate) fn reserve_commit(&mut self, publication: &SourcePackagePublication) {
+        self.packages.reserve(1);
+        self.by_prefix.reserve(1);
+        self.provider_packages.reserve(1);
+        self.consumer_packages.reserve(1);
+        self.declarations_by_identity
+            .reserve(publication.materialisation_rows.len());
+        self.materialisation_rows
+            .reserve(publication.materialisation_rows.len());
+        for provider_id in &publication.resolved_providers {
+            self.consumer_packages[provider_id.index()].reserve(1);
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn publish(
+        &mut self,
+        package: CompiledSourcePackage,
+        dependency_prefixes: &[String],
+    ) -> Result<PackageBoundaryId, CompilerError> {
+        let publication = self.preflight(&package, dependency_prefixes)?;
+        let package_id = publication.package_id;
+        self.reserve_commit(&publication);
+        self.commit(publication, package);
         Ok(package_id)
     }
 

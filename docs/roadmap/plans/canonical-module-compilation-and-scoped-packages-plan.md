@@ -25,10 +25,10 @@ ACTIVE_PLAN: docs/roadmap/plans/canonical-module-compilation-and-scoped-packages
 WORK_ID: R5-closeout
 WORK_SOURCE: continued Phase 5 closeout after Gate B acceptance and the revised plan
 BASE_REVISION: 276bc4cb2 (clean revised-plan baseline before R5C6A)
-IMPLEMENTED_CHECKPOINT: 156942cc3
-RECONCILED_HEAD: 156942cc3
-STATUS: active - R5C9 deletion audit and validation complete; paused before final review
-CURRENT_SLICE: R5C9 - deletion audit and Phase 5 validation complete
+IMPLEMENTED_CHECKPOINT: 6cddcc38c
+RECONCILED_HEAD: 6cddcc38c
+STATUS: active - R5C10 corrections implemented and validated; paused before final review
+CURRENT_SLICE: R5C10 - exported generic receiver retention/import, transactional publication, shared materialisation data and ownership closeout complete
 ACCEPTED_CHECKPOINTS:
 - R5C3C provider agreement and recursive interface closure
 - R5C4A exhaustive canonical token traversal
@@ -61,10 +61,15 @@ VALIDATION_STATE:
 - Post-correction `just validate` and `cargo run --quiet -- tests --audit` passed with the same full counts and clean timer-erasure/source audit
 - Verification auditor `20260809T205404Z-6575bf06` found one test-owner correction; the warning/context regression now lives under compiler-messages tests and the obsolete frontend-orchestration ownership text is removed
 - Final post-correction `just validate` passed: 4218 workspace tests, 1818/1818 integration executions, cross-target Clippy, docs, all 60 benchmark preflights plus quick benchmark sanity and timer erasure
-BLOCKERS: none
-NEXT_WORKER_ORDER: final review -> Gate D -> mandatory handoff
-STOP_REASON: R5C9 is accepted and committed next; user requested a pause before final review, so final auditor and Gate D are deferred
-NEXT_RESUME_ACTION: after user review, run the final auditor and Gate D without reopening accepted R5C9 cleanup
+- User Gate D review rejected `6cddcc38c`: exported generic receiver methods are not retained/imported end to end; publication preflight/commit APIs remain fallible after mutation; generic materialisation closure/evidence is duplicated per template; and closeout ownership/test placement remains incomplete
+- R5C10 interim audit `20260810T004421Z-0a8e7c39` found one package-lane allocation after mutation, missing ownership docs on the two moved test owners and one imported generic-bound negative test gap; all required corrections were resolved
+- R5C10 focused validation passed: workspace check, combined publication and package-registry tests, and eight generic receiver/evidence integration cases
+- R5C10 `cargo run --quiet -- tests --audit` passed: 1675 integration cases and 1825 backend executions
+- R5C10 `just validate` passed: 4224 workspace tests, 1825/1825 integration executions, cross-target Clippy, docs, all 60 benchmark preflights plus quick benchmark sanity and timer erasure
+BLOCKERS: Gate D remains deferred by user instruction; final auditor and Gate D have not been run
+NEXT_WORKER_ORDER: R5C10 checkpoint -> user review -> final auditor/Gate D only after explicit resume
+STOP_REASON: R5C10 is implemented, audited and fully validated; paused at the user-requested pre-final-review boundary
+NEXT_RESUME_ACTION: review the R5C10 checkpoint; do not invoke the final auditor or Gate D in this pause
 FOLLOW_UP_CHAIN:
 1. dependency-clauses-and-path-syntax-plan.md
 2. tir-corrections-and-simplification-plan.md

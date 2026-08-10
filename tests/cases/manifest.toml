@@ -1682,6 +1682,55 @@ contract = "language.generics.receiver_method"
 role = "primary"
 
 [[case]]
+id = "generic_receiver_module_boundary_success"
+path = "generic_receiver_module_boundary_success"
+tags = ["integration","generics","imports","receiver-methods"]
+contract = "language.generics.receiver_method"
+role = "boundary"
+
+[[case]]
+id = "generic_receiver_namespace_module_boundary_success"
+path = "generic_receiver_namespace_module_boundary_success"
+tags = ["integration","generics","imports","receiver-methods"]
+contract = "language.generics.receiver_method"
+role = "boundary"
+
+[[case]]
+id = "generic_choice_receiver_module_boundary_success"
+path = "generic_choice_receiver_module_boundary_success"
+tags = ["integration","generics","imports","receiver-methods"]
+contract = "language.generics.receiver_method"
+role = "boundary"
+
+[[case]]
+id = "generic_receiver_source_package_facade_success"
+path = "generic_receiver_source_package_facade_success"
+tags = ["integration","generics","imports","receiver-methods","packages"]
+contract = "language.generics.receiver_method"
+role = "boundary"
+
+[[case]]
+id = "generic_receiver_nested_method_boundary_success"
+path = "generic_receiver_nested_method_boundary_success"
+tags = ["integration","generics","imports","receiver-methods"]
+contract = "language.generics.receiver_method"
+role = "boundary"
+
+[[case]]
+id = "generic_receiver_generic_evidence_boundary_success"
+path = "generic_receiver_generic_evidence_boundary_success"
+tags = ["integration","generics","imports","receiver-methods","traits"]
+contract = "language.generics.receiver_method"
+role = "boundary"
+
+[[case]]
+id = "generic_receiver_generic_evidence_nested_argument_rejected"
+path = "generic_receiver_generic_evidence_nested_argument_rejected"
+tags = ["integration","generics","imports","receiver-methods","traits","diagnostics"]
+contract = "language.generics.trait_bound_missing_evidence_rejected"
+role = "boundary"
+
+[[case]]
 id = "generic_receiver_method_parameter_mismatch_rejected"
 path = "generic_receiver_method_parameter_mismatch_rejected"
 tags = ["integration","generics","receiver-methods","diagnostics"]

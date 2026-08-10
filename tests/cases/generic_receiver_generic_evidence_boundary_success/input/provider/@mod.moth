@@ -1,0 +1,15 @@
+export:
+    DISPLAY_TEXT must:
+        display |This| -> String
+    ;
+
+    Box type T is DISPLAY_TEXT = |
+        value T,
+    |
+;
+
+display type T is DISPLAY_TEXT |this Box of T| -> String:
+    return "generic receiver evidence"
+;
+
+Box must DISPLAY_TEXT

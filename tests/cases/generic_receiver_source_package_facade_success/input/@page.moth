@@ -1,0 +1,5 @@
+import @utils { Wrapper, make_wrapper }
+
+value = make_wrapper(42)
+
+[: [value.label()]]

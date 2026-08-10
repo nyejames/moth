@@ -12,7 +12,9 @@ use super::module_identity::ModuleId;
 use crate::build_system::build::CompiledModuleArtifact;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
-use crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity;
+use crate::compiler_frontend::semantic_identity::{
+    GeneratedDeclarationIdentity, StableModuleOriginIdentity,
+};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -23,6 +25,10 @@ impl CompiledModuleArtifactId {
         self.0
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/module_artifact_store_tests.rs"]
+mod tests;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ProviderSlot {
@@ -57,6 +63,13 @@ pub(crate) struct ModuleArtifactStore {
     materialisation_rows: Vec<(GeneratedDeclarationIdentity, MaterialisationContextLocation)>,
 }
 
+#[derive(Debug)]
+pub(crate) struct ModuleSuccessPublication {
+    module_index: usize,
+    artifact_id: CompiledModuleArtifactId,
+    materialisation_rows: Vec<(GeneratedDeclarationIdentity, MaterialisationContextLocation)>,
+}
+
 impl ModuleArtifactStore {
     pub(crate) fn new(module_count: usize) -> Self {
         Self {
@@ -67,15 +80,24 @@ impl ModuleArtifactStore {
         }
     }
 
-    pub(crate) fn publish_success(
-        &mut self,
+    pub(crate) fn preflight_success(
+        &self,
         module_id: ModuleId,
-        artifact: CompiledModuleArtifact,
-    ) -> Result<(), CompilerError> {
+        artifact: &CompiledModuleArtifact,
+        expected_origin: &StableModuleOriginIdentity,
+    ) -> Result<ModuleSuccessPublication, CompilerError> {
         if self.slot(module_id)? != ProviderSlot::Unavailable {
             return Err(CompilerError::compiler_error(format!(
                 "Provider slot for ModuleId {} was published more than once",
                 module_id.index()
+            )));
+        }
+        if artifact.interface.module_origin != *expected_origin {
+            return Err(CompilerError::compiler_error(format!(
+                "ModuleId {} artefact interface origin {:?} disagrees with graph node origin {:?}",
+                module_id.index(),
+                artifact.interface.module_origin,
+                expected_origin
             )));
         }
 
@@ -113,14 +135,33 @@ impl ModuleArtifactStore {
             }
         }
 
+        Ok(ModuleSuccessPublication {
+            module_index: module_id.index(),
+            artifact_id,
+            materialisation_rows: rows,
+        })
+    }
+
+    pub(crate) fn reserve_success_commit(&mut self, publication: &ModuleSuccessPublication) {
+        self.artifacts.reserve(1);
+        self.contexts_by_declaration
+            .reserve(publication.materialisation_rows.len());
+        self.materialisation_rows
+            .reserve(publication.materialisation_rows.len());
+    }
+
+    pub(crate) fn commit_success(
+        &mut self,
+        publication: ModuleSuccessPublication,
+        artifact: CompiledModuleArtifact,
+    ) {
         self.artifacts.push(artifact);
-        for (identity, location) in rows {
+        for (identity, location) in publication.materialisation_rows {
             self.contexts_by_declaration
                 .insert(identity.clone(), location);
             self.materialisation_rows.push((identity, location));
         }
-        *self.slot_mut(module_id)? = ProviderSlot::Successful(artifact_id);
-        Ok(())
+        self.slots[publication.module_index] = ProviderSlot::Successful(publication.artifact_id);
     }
 
     pub(crate) fn mark_diagnosed(&mut self, module_id: ModuleId) -> Result<(), CompilerError> {
@@ -277,6 +318,19 @@ impl ModuleArtifactStore {
         Ok(())
     }
 
+    #[cfg(test)]
+    pub(crate) fn publish_success(
+        &mut self,
+        module_id: ModuleId,
+        artifact: CompiledModuleArtifact,
+    ) -> Result<(), CompilerError> {
+        let expected_origin = artifact.interface.module_origin.clone();
+        let publication = self.preflight_success(module_id, &artifact, &expected_origin)?;
+        self.reserve_success_commit(&publication);
+        self.commit_success(publication, artifact);
+        Ok(())
+    }
+
     fn slot_mut(&mut self, module_id: ModuleId) -> Result<&mut ProviderSlot, CompilerError> {
         let slot_count = self.slots.len();
         self.slots.get_mut(module_id.index()).ok_or_else(|| {
@@ -286,51 +340,5 @@ impl ModuleArtifactStore {
                 slot_count
             ))
         })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::build_system::create_project_modules::compiled_boundary::CompiledGraphBoundary;
-    use crate::build_system::create_project_modules::generated_worklist::BoundaryGeneratedFunctionStore;
-    use crate::build_system::create_project_modules::project_module_graph::ProjectModuleGraph;
-    use crate::compiler_frontend::semantic_identity::{
-        ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
-    };
-    use std::path::PathBuf;
-
-    #[test]
-    fn boundary_validation_rejects_missing_successful_artefact_row() {
-        let graph = ProjectModuleGraph::from_normal_roots(vec![(
-            StableModuleOriginIdentity::from_portable_path(
-                StablePackageIdentity::project_local("test"),
-                "missing".to_owned(),
-                ModuleRootRole::Normal,
-            ),
-            PathBuf::from("@missing.moth"),
-            PathBuf::from("@missing.moth"),
-        )]);
-        let store = ModuleArtifactStore {
-            slots: vec![ProviderSlot::Successful(CompiledModuleArtifactId(0))],
-            artifacts: Vec::new(),
-            contexts_by_declaration: FxHashMap::default(),
-            materialisation_rows: Vec::new(),
-        };
-        let boundary = CompiledGraphBoundary {
-            structure: graph,
-            modules: store,
-            generated: BoundaryGeneratedFunctionStore::default(),
-            diagnosed: Vec::new(),
-            blocked: Vec::new(),
-        };
-
-        let error = boundary
-            .validate_invariants()
-            .expect_err("a successful slot must reference an existing artefact row");
-        assert!(
-            error.msg.contains("references missing artifact 0"),
-            "unexpected missing-artefact error: {error:?}"
-        );
     }
 }

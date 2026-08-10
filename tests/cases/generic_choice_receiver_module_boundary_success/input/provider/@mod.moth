@@ -1,0 +1,13 @@
+export:
+    Maybe type T ::
+        Value | value T |,
+    ;
+
+    make_result type T |value T| -> Maybe of T:
+        return Maybe::Value(value)
+    ;
+;
+
+label type T |this Maybe of T| -> String:
+    return "generic choice receiver"
+;

@@ -537,6 +537,7 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
         function_path: method_fn_path.clone(),
         source_file: InternedPath::new(),
         declaration_identity: None,
+        generic_parameter_owner: None,
         generic_parameter_list_id: list_id,
         signature: method_signature,
         body_tokens: Some(FileTokens::new(method_fn_path.clone(), vec![])),

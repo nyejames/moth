@@ -195,6 +195,13 @@ pub(crate) struct AstModuleEnvironmentBuilder<'context, 'services> {
     imported_generic_parameter_registrations: Vec<ImportedGenericParameterRegistration>,
     pub(super) projected_imported_functions_by_local_path:
         FxHashMap<InternedPath, AstImportedFunctionContract>,
+    /// Every imported receiver-method path, including generic methods without a concrete
+    /// summary. The category-neutral table feeds the receiver catalog; the origin index below
+    /// gives imported evidence one deterministic path without scanning concrete contracts.
+    pub(super) projected_imported_receiver_methods_by_local_path:
+        FxHashMap<InternedPath, crate::compiler_frontend::semantic_identity::OriginFunctionId>,
+    pub(super) imported_receiver_method_paths_by_origin:
+        FxHashMap<crate::compiler_frontend::semantic_identity::OriginFunctionId, InternedPath>,
     imported_struct_definitions: Vec<AstImportedStructDefinition>,
     imported_choice_definitions: Vec<AstChoiceDefinition>,
 }
@@ -224,6 +231,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             imported_generic_parameter_type_ids: FxHashMap::default(),
             imported_generic_parameter_registrations: Vec::new(),
             projected_imported_functions_by_local_path: FxHashMap::default(),
+            projected_imported_receiver_methods_by_local_path: FxHashMap::default(),
+            imported_receiver_method_paths_by_origin: FxHashMap::default(),
             imported_struct_definitions: Vec::new(),
             imported_choice_definitions: Vec::new(),
         }

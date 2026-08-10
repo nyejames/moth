@@ -21,7 +21,7 @@ use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::traits::definitions::TraitVisibility;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
-use crate::compiler_frontend::traits::ids::TraitId;
+use crate::compiler_frontend::traits::ids::{TraitEvidenceId, TraitId};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 type GenericBoundValidationResult<T> = Result<T, Box<CompilerDiagnostic>>;
@@ -76,6 +76,37 @@ pub(crate) fn validate_nominal_generic_bound_evidence(
 ) -> GenericBoundValidationResult<()> {
     let mut visited = FxHashSet::default();
     validate_type_recursive(type_id, &location, context, &mut visited)
+}
+
+/// Resolve reusable evidence for one concrete type, including evidence declared on a generic
+/// nominal constructor.
+///
+/// WHAT: checks exact builtin and canonical evidence first, then falls back from a concrete
+/// generic instance to the evidence registered for its nominal constructor.
+/// WHY: `Box must TRAIT` is one reusable conformance for every valid `Box of T` instance; the
+/// public interface therefore carries the constructor identity while consumers validate a
+/// concrete instance identity. Declaration-site bounds on the instance arguments are validated
+/// separately by [`validate_type_recursive`].
+pub(crate) fn evidence_for_type(
+    type_id: TypeId,
+    trait_id: TraitId,
+    type_environment: &TypeEnvironment,
+    evidence_environment: &TraitEvidenceEnvironment,
+) -> Option<TraitEvidenceId> {
+    let exact = evidence_environment
+        .builtin_for(type_id, trait_id)
+        .or_else(|| evidence_environment.canonical_for(type_id, trait_id));
+    if exact.is_some() {
+        return exact;
+    }
+
+    let Some(TypeDefinition::GenericInstance(instance)) = type_environment.get(type_id) else {
+        return None;
+    };
+    let base_type_id = type_environment.type_id_for_nominal_id(instance.base)?;
+    evidence_environment
+        .builtin_for(base_type_id, trait_id)
+        .or_else(|| evidence_environment.canonical_for(base_type_id, trait_id))
 }
 
 fn validate_type_recursive(
@@ -195,12 +226,13 @@ fn validate_single_bound(
 
     let has_reusable_evidence = trait_is_visible
         && context.evidence_target_is_visible(concrete_type_id)
-        && (evidence_environment
-            .builtin_for(concrete_type_id, trait_id)
-            .is_some()
-            || evidence_environment
-                .canonical_for(concrete_type_id, trait_id)
-                .is_some());
+        && evidence_for_type(
+            concrete_type_id,
+            trait_id,
+            context.type_environment,
+            evidence_environment,
+        )
+        .is_some();
 
     if has_reusable_evidence {
         return Ok(());
@@ -283,13 +315,25 @@ fn source_target_resolves_to_type(
     if let SourceDeclarationTarget::Imported { origin, .. } = target
         && let crate::compiler_frontend::semantic_identity::OriginDeclarationId::Type(origin) =
             origin
-        && matches!(
-            type_environment.canonical_identity_for_type_id(type_id),
-            Some(crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity::SourceNominal(type_origin))
-                if type_origin == origin
-        )
     {
-        return true;
+        let source_nominal_matches = |candidate_type_id: TypeId| {
+            matches!(
+                type_environment.canonical_identity_for_type_id(candidate_type_id),
+                Some(crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity::SourceNominal(type_origin))
+                    if type_origin == origin
+            )
+        };
+        if source_nominal_matches(type_id)
+            || matches!(
+                type_environment.get(type_id),
+                Some(TypeDefinition::GenericInstance(instance))
+                    if type_environment
+                        .type_id_for_nominal_id(instance.base)
+                        .is_some_and(source_nominal_matches)
+            )
+        {
+            return true;
+        }
     }
 
     if type_environment

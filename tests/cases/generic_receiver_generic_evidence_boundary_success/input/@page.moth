@@ -1,0 +1,17 @@
+import @provider { DISPLAY_TEXT, Box }
+
+Label = |
+    text String,
+|
+
+display |this Label| -> String:
+    return this.text
+;
+
+Label must DISPLAY_TEXT
+
+render type T is DISPLAY_TEXT |value T| -> String:
+    return value.display()
+;
+
+[: [render(Box(Label("local")))]]

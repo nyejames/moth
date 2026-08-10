@@ -16,7 +16,9 @@ use crate::compiler_frontend::ast::expressions::call_validation::{
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::function_calls::parse_generic_call_arguments_typed;
-use crate::compiler_frontend::ast::generic_bounds::evidence_target_is_visible;
+use crate::compiler_frontend::ast::generic_bounds::{
+    evidence_for_type, evidence_target_is_visible,
+};
 use crate::compiler_frontend::ast::generic_functions::diagnostics::{
     cannot_infer_generic_function_arguments, conflicting_generic_function_argument,
     missing_generic_function_trait_evidence, recursive_generic_function_instantiation,
@@ -532,11 +534,12 @@ pub(crate) fn validate_generic_function_bound_evidence(
                 );
             let evidence_id = evidence_is_visible
                 .then(|| {
-                    evidence_environment
-                        .builtin_for(*concrete_type_id, *trait_id)
-                        .or_else(|| {
-                            evidence_environment.canonical_for(*concrete_type_id, *trait_id)
-                        })
+                    evidence_for_type(
+                        *concrete_type_id,
+                        *trait_id,
+                        type_environment,
+                        evidence_environment,
+                    )
                 })
                 .flatten();
 

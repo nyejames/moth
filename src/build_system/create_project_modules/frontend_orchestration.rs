@@ -344,8 +344,8 @@ impl<'a> SourceProviderMaterialisationSet<'a> {
 ///      the central lossless normalization in `ModuleDiagnostics::from_messages`.
 ///
 /// The success payload keeps the internal `ModuleSemanticDraft` carrying the unmerged module
-/// plus local string-table state. It is not the final `CompiledModuleArtifact`, which remains
-/// deferred.
+/// plus local string-table state. The compilation coordinator merges that draft and immediately
+/// publishes the resulting `CompiledModuleArtifact` through the boundary stores.
 pub(crate) enum ModuleCompilationOutcome {
     // `ModuleSemanticDraft` carries the full unmerged module (HIR, type environment and borrow
     // facts) and is far larger than `ModuleDiagnostics`, so the success payload is boxed to keep
@@ -2040,16 +2040,64 @@ impl NominalOriginResolver for GeneratedRequestNominalOrigins<'_> {
     }
 }
 
-struct NoGeneratedRequestGenericParameters;
+struct GeneratedRequestGenericParameters<'a> {
+    type_environment: &'a crate::compiler_frontend::datatypes::environment::TypeEnvironment,
+    templates: &'a FxHashMap<
+        crate::compiler_frontend::symbols::interned_path::InternedPath,
+        GenericFunctionTemplate,
+    >,
+    string_table: &'a StringTable,
+}
 
-impl GenericParameterOriginResolver for NoGeneratedRequestGenericParameters {
+impl GenericParameterOriginResolver for GeneratedRequestGenericParameters<'_> {
     fn resolve_generic_parameter_origin(
         &self,
-        _parameter_id: crate::compiler_frontend::datatypes::ids::GenericParameterId,
+        parameter_id: crate::compiler_frontend::datatypes::ids::GenericParameterId,
     ) -> Result<ExportedGenericParameterIdentity, CompilerError> {
-        Err(CompilerError::compiler_error(
-            "Concrete generated request retained an unresolved generic parameter",
-        ))
+        let type_id = self
+            .type_environment
+            .type_id_for_generic_parameter(parameter_id)
+            .ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "Generated request references a generic parameter without a local type handle",
+                )
+            })?;
+        if let Some(CanonicalTypeIdentity::GenericParameter(identity)) = self
+            .type_environment
+            .canonical_identity_for_type_id(type_id)
+        {
+            return Ok(identity.clone());
+        }
+        for template in self.templates.values() {
+            let Some(parameter_list) = self
+                .type_environment
+                .generic_parameters(template.generic_parameter_list_id)
+            else {
+                continue;
+            };
+            let Some((position, parameter)) = parameter_list
+                .parameters
+                .iter()
+                .enumerate()
+                .find(|(_, parameter)| parameter.id == parameter_id)
+            else {
+                continue;
+            };
+            let owner = template.generic_parameter_owner.clone().ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "Generated request references a private generic parameter across a generated boundary",
+                )
+            })?;
+            return Ok(ExportedGenericParameterIdentity::new(
+                owner,
+                position as u32,
+                self.string_table.resolve(parameter.name).to_owned(),
+            ));
+        }
+        Err(CompilerError::compiler_error(format!(
+            "Generated request references generic parameter {parameter_id:?} as TypeId({}) without a stable exported identity",
+            type_id.0
+        )))
     }
 }
 
@@ -2103,7 +2151,11 @@ fn install_generated_request_contracts(
             let nominal_origins = GeneratedRequestNominalOrigins {
                 type_environment: &materialisation_context.type_environment,
             };
-            let generic_parameter_origins = NoGeneratedRequestGenericParameters;
+            let generic_parameter_origins = GeneratedRequestGenericParameters {
+                type_environment: &materialisation_context.type_environment,
+                templates,
+                string_table: &materialisation_context.string_table,
+            };
             let projection_context = CanonicalTypeProjectionContext::new(
                 &nominal_origins,
                 &generic_parameter_origins,
@@ -2195,7 +2247,11 @@ fn canonicalize_generated_request_evidence(
     let nominal_origins = GeneratedRequestNominalOrigins {
         type_environment: &materialisation_context.type_environment,
     };
-    let generic_parameter_origins = NoGeneratedRequestGenericParameters;
+    let generic_parameter_origins = GeneratedRequestGenericParameters {
+        type_environment: &materialisation_context.type_environment,
+        templates: materialisation_context.generic_function_templates(),
+        string_table: &materialisation_context.string_table,
+    };
     let projection_context = CanonicalTypeProjectionContext::new(
         &nominal_origins,
         &generic_parameter_origins,

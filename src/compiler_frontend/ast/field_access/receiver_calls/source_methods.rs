@@ -38,6 +38,7 @@ use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidRec
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
+use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
 
@@ -70,6 +71,85 @@ impl SourceReceiverMethodTarget<'_> {
             SourceReceiverMethodTarget::TraitSurface(method) => &method.signature,
         }
     }
+}
+
+struct GenericReceiverMethodInferenceInput<'a, 'interner> {
+    template: &'a crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate,
+    receiver_node: &'a AstNode,
+    receiver_mutable: bool,
+    raw_args: &'a [CallArgument],
+    member_location: &'a SourceLocation,
+    scope_context: &'a ScopeContext,
+    type_interner: &'a mut AstTypeInterner<'interner>,
+    string_table: &'a mut StringTable,
+}
+
+fn infer_generic_receiver_method_target<'a, 'interner>(
+    input: GenericReceiverMethodInferenceInput<'a, 'interner>,
+) -> Result<
+    (
+        InternedPath,
+        FunctionSignature,
+        GenericFunctionInstantiationRequest,
+    ),
+    ExpressionParseError,
+> {
+    let GenericReceiverMethodInferenceInput {
+        template,
+        receiver_node,
+        receiver_mutable,
+        raw_args,
+        member_location,
+        scope_context,
+        type_interner,
+        string_table,
+    } = input;
+    let receiver_expr = expression_from_postfix_node(receiver_node)?;
+    let receiver_access = if receiver_mutable {
+        CallAccessMode::Mutable
+    } else {
+        CallAccessMode::Shared
+    };
+    let receiver_arg =
+        CallArgument::positional(receiver_expr, receiver_access, member_location.clone());
+
+    let mut inference_args = Vec::with_capacity(raw_args.len() + 1);
+    inference_args.push(receiver_arg);
+    inference_args.extend(raw_args.iter().cloned());
+
+    let inference = infer_generic_function_call(GenericFunctionInferenceInput {
+        template,
+        raw_arguments: &inference_args,
+        expected_context: GenericCallExpectedContext::None,
+        call_location: member_location.clone(),
+        type_environment: type_interner.environment_mut_for_derived_types(),
+        string_table,
+    })?;
+    let selected_evidence = validate_generic_function_bound_evidence(
+        template,
+        inference.key.type_arguments.as_ref(),
+        scope_context,
+        type_interner.environment(),
+        member_location.clone(),
+    )?;
+
+    if scope_context.is_generic_function_instantiation_active(&inference.key) {
+        return Err(recursive_generic_function_instantiation(
+            template.function_path.name(),
+            member_location.clone(),
+        )
+        .into());
+    }
+
+    let request = GenericFunctionInstantiationRequest {
+        declaration_identity: template.declaration_identity.clone(),
+        evidence: selected_evidence,
+        key: inference.key,
+        instance_path: inference.instance_path.clone(),
+        call_location: member_location.clone(),
+    };
+
+    Ok((inference.instance_path, inference.signature, request))
 }
 
 pub(super) struct SourceReceiverMethodCallInput<'a, 'interner> {
@@ -159,55 +239,19 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
             if let Some(template) =
                 scope_context.lookup_generic_function_template(&method_entry.function_path)
             {
-                let receiver_expr = expression_from_postfix_node(receiver_node)?;
-                let receiver_access = if method_entry.receiver_mutable {
-                    CallAccessMode::Mutable
-                } else {
-                    CallAccessMode::Shared
-                };
-                let receiver_arg = CallArgument::positional(
-                    receiver_expr,
-                    receiver_access,
-                    member_location.clone(),
-                );
+                let (instance_path, signature, request) =
+                    infer_generic_receiver_method_target(GenericReceiverMethodInferenceInput {
+                        template,
+                        receiver_node,
+                        receiver_mutable: method_entry.receiver_mutable,
+                        raw_args: &raw_args,
+                        member_location: &member_location,
+                        scope_context,
+                        type_interner,
+                        string_table,
+                    })?;
 
-                let mut inference_args = Vec::with_capacity(raw_args.len() + 1);
-                inference_args.push(receiver_arg);
-                inference_args.extend(raw_args.iter().cloned());
-
-                let inference = infer_generic_function_call(GenericFunctionInferenceInput {
-                    template,
-                    raw_arguments: &inference_args,
-                    expected_context: GenericCallExpectedContext::None,
-                    call_location: member_location.clone(),
-                    type_environment: type_interner.environment_mut_for_derived_types(),
-                    string_table,
-                })?;
-                let selected_evidence = validate_generic_function_bound_evidence(
-                    template,
-                    inference.key.type_arguments.as_ref(),
-                    scope_context,
-                    type_interner.environment(),
-                    member_location.clone(),
-                )?;
-
-                if scope_context.is_generic_function_instantiation_active(&inference.key) {
-                    return Err(recursive_generic_function_instantiation(
-                        template.function_path.name(),
-                        member_location.clone(),
-                    )
-                    .into());
-                }
-
-                let request = GenericFunctionInstantiationRequest {
-                    declaration_identity: template.declaration_identity.clone(),
-                    evidence: selected_evidence,
-                    key: inference.key,
-                    instance_path: inference.instance_path.clone(),
-                    call_location: member_location.clone(),
-                };
-
-                (inference.instance_path, inference.signature, Some(request))
+                (instance_path, signature, Some(request))
             } else {
                 (
                     method_entry.function_path.to_owned(),
@@ -218,7 +262,24 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
         }
 
         SourceReceiverMethodTarget::TraitSurface(method) => {
-            (method.method_path.clone(), method.signature.clone(), None)
+            if let Some(template) =
+                scope_context.lookup_generic_function_template(&method.method_path)
+            {
+                let (instance_path, signature, request) =
+                    infer_generic_receiver_method_target(GenericReceiverMethodInferenceInput {
+                        template,
+                        receiver_node,
+                        receiver_mutable: method.receiver_mutable,
+                        raw_args: &raw_args,
+                        member_location: &member_location,
+                        scope_context,
+                        type_interner,
+                        string_table,
+                    })?;
+                (instance_path, signature, Some(request))
+            } else {
+                (method.method_path.clone(), method.signature.clone(), None)
+            }
         }
     };
 
@@ -242,7 +303,9 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
         type_interner,
     )?;
 
-    if let Some(request) = generic_request {
+    if !scope_context.generic_template_validation
+        && let Some(request) = generic_request
+    {
         scope_context.record_generic_function_instantiation_request(request);
     }
 

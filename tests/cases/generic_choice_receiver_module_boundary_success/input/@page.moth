@@ -1,0 +1,5 @@
+import @provider { Maybe, make_result }
+
+value = make_result(42)
+
+[: [value.label()]]

@@ -390,6 +390,18 @@ impl GenericDeclarationOrigin {
             )),
         }
     }
+
+    /// Return the nominal declaration that owns this generic parameter list, when present.
+    ///
+    /// Generic receiver methods reuse the enclosing nominal's local parameter handles during
+    /// generated materialisation. Free-function templates keep their own declaration-local
+    /// parameter list instead.
+    pub(crate) fn nominal_type_origin(&self) -> Option<&OriginTypeId> {
+        match &self.inner {
+            GenericDeclarationOriginInner::FreeFunction(_) => None,
+            GenericDeclarationOriginInner::NominalType(origin) => Some(origin),
+        }
+    }
 }
 
 /// Owned, hashable, cross-build canonical identity for one exported generic parameter.

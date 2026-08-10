@@ -336,7 +336,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             }
         })?;
 
-        for function_path in self.projected_imported_functions_by_local_path.keys() {
+        for function_path in self
+            .projected_imported_receiver_methods_by_local_path
+            .keys()
+        {
             let Some(resolved) = self.resolved_function_signatures_by_path.get(function_path)
             else {
                 return Err(self.error_messages(
@@ -481,6 +484,7 @@ fn build_generic_function_template(
         function_path: header.tokens.src_path.to_owned(),
         source_file: header.source_file.to_owned(),
         declaration_identity: None,
+        generic_parameter_owner: None,
         generic_parameter_list_id,
         signature: signature.to_owned(),
         body_tokens: Some(header.tokens.to_owned()),

@@ -1,0 +1,13 @@
+export:
+    Box type T = |
+        value T,
+    |
+
+    make_box type T |value T| -> Box of T:
+        return Box(value)
+    ;
+;
+
+label type T |this Box of T| -> String:
+    return "generic namespace receiver"
+;

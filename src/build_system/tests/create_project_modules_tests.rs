@@ -6177,6 +6177,31 @@ fn completed_package_registry_records_direct_dependency_edges_once() {
 }
 
 #[test]
+fn completed_package_registry_rejects_duplicate_dependency_input_without_mutation() {
+    let mut registry = CompletedSourcePackageRegistry::new();
+    let provider = registry
+        .publish(compiled_package("provider"), &[])
+        .expect("provider package publishes");
+
+    let error = registry
+        .publish(
+            compiled_package("consumer"),
+            &["provider".to_owned(), "provider".to_owned()],
+        )
+        .expect_err("duplicate provider input must be rejected before publication");
+
+    assert!(error.msg.contains("more than once"));
+    assert_eq!(registry.len(), 1);
+    assert_eq!(registry.by_prefix("consumer"), None);
+    assert!(
+        registry
+            .consumer_packages(provider)
+            .expect("provider has a consumer lane")
+            .is_empty()
+    );
+}
+
+#[test]
 fn completed_package_registry_rejects_self_dependency_before_publication() {
     let mut registry = CompletedSourcePackageRegistry::new();
     let error = registry

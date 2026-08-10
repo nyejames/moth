@@ -46,7 +46,7 @@ use super::frontend_orchestration::{
     SourceProviderMaterialisationSet, record_module_input_counters,
 };
 
-use super::generated_worklist::BoundaryGeneratedFunctionStore;
+use super::generated_worklist::{BoundaryGeneratedFunctionStore, GeneratedFunctionWorklistDelta};
 use super::module_artifact_store::{ModuleArtifactStore, ProviderSlot};
 use super::module_identity::ModuleId;
 use super::module_inventory;
@@ -59,6 +59,33 @@ use super::source_discovery;
 use super::source_discovery::{ResolvedDependencyEdge, ResolvedSourcePackageImport};
 use super::source_package_discovery::build_source_package_boundary_indexes;
 use super::source_tree_index::SourceTreeIndex;
+
+#[cfg(test)]
+#[path = "../tests/compilation_tests.rs"]
+mod tests;
+
+/// Publish one successful module and its generated sidecars as one boundary transaction.
+///
+/// WHAT: validates both retained lanes before either lane is mutated, then commits the module
+///       artefact and generated delta through their infallible commit operations.
+/// WHY: a successful semantic result has one ownership boundary; publishing its lanes separately
+///      would make atomicity depend on a later invariant remaining impossible.
+pub(super) fn publish_module_and_generated(
+    modules: &mut ModuleArtifactStore,
+    generated: &mut BoundaryGeneratedFunctionStore,
+    module_id: ModuleId,
+    expected_origin: &StableModuleOriginIdentity,
+    artifact: CompiledModuleArtifact,
+    generated_delta: GeneratedFunctionWorklistDelta,
+) -> Result<(), CompilerError> {
+    let generated_publication = generated.preflight(&generated_delta)?;
+    let module_publication = modules.preflight_success(module_id, &artifact, expected_origin)?;
+    modules.reserve_success_commit(&module_publication);
+    generated.reserve_commit(&generated_publication);
+    modules.commit_success(module_publication, artifact);
+    generated.commit(generated_publication, generated_delta);
+    Ok(())
+}
 
 // -------------------------
 //  Single-File Compilation
@@ -419,27 +446,30 @@ pub(crate) fn compile_single_file_frontend(
         module.remap_string_ids(&remap);
         generated_worklist_delta.remap_string_ids(&remap);
     }
-    generated_store
-        .publish(generated_worklist_delta)
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-
-    let graph =
-        ProjectModuleGraph::from_normal_roots(vec![(graph_stable_origin, source_root, entry_path)]);
+    let graph = ProjectModuleGraph::from_normal_roots(vec![(
+        graph_stable_origin.clone(),
+        source_root,
+        entry_path,
+    )]);
     let module_id = graph
         .entry_modules()
         .first()
         .copied()
         .expect("a single-module graph has one normal entry");
     let mut modules = ModuleArtifactStore::new(1);
-    modules
-        .publish_success(
-            module_id,
-            CompiledModuleArtifact {
-                module,
-                interface: public_interface,
-            },
-        )
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    let artifact = CompiledModuleArtifact {
+        module,
+        interface: public_interface,
+    };
+    publish_module_and_generated(
+        &mut modules,
+        &mut generated_store,
+        module_id,
+        &graph_stable_origin,
+        artifact,
+        generated_worklist_delta,
+    )
+    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
     let boundary = CompiledGraphBoundary {
         structure: graph,
@@ -961,12 +991,15 @@ fn compile_module_waves(
                         module,
                         interface: public_interface,
                     };
-                    provider_store
-                        .publish_success(outcome.module_id, artifact)
-                        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-                    generated_store
-                        .publish(generated_worklist_delta)
-                        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+                    publish_module_and_generated(
+                        &mut provider_store,
+                        &mut generated_store,
+                        outcome.module_id,
+                        graph.node(outcome.module_id).stable_origin(),
+                        artifact,
+                        generated_worklist_delta,
+                    )
+                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
                 }
                 DirectoryModuleTaskOutcome::Diagnosed(diagnostics) => {
                     provider_store
@@ -1350,20 +1383,25 @@ pub(crate) fn compile_directory_frontend(
         let boundary = compiled?;
         #[cfg(feature = "timers")]
         timing_guard_build_boundary_compile.finish();
-        let dependency_prefixes = source_package_imports
-            .iter()
-            .map(|dependency| dependency.import_prefix.clone())
-            .collect::<Vec<_>>();
-        completed_source_packages
-            .publish(
-                CompiledSourcePackage {
-                    package_identity,
-                    root_module_id,
-                    boundary,
-                },
-                &dependency_prefixes,
-            )
+        let mut dependency_prefixes = Vec::new();
+        let mut seen_dependency_prefixes = FxHashSet::default();
+        for dependency in &source_package_imports {
+            // Several modules may import the same provider. Publication records one direct
+            // package edge, while the module-level import rows retain every consumer binding.
+            if seen_dependency_prefixes.insert(dependency.import_prefix.clone()) {
+                dependency_prefixes.push(dependency.import_prefix.clone());
+            }
+        }
+        let package = CompiledSourcePackage {
+            package_identity,
+            root_module_id,
+            boundary,
+        };
+        let publication = completed_source_packages
+            .preflight(&package, &dependency_prefixes)
             .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        completed_source_packages.reserve_commit(&publication);
+        completed_source_packages.commit(publication, package);
     }
 
     completed_source_packages

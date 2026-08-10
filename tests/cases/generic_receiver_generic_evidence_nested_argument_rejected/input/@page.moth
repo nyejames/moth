@@ -1,0 +1,9 @@
+import @provider { Box }
+
+Plain = |
+    text String,
+|
+
+bad = Box(Plain("no evidence"))
+
+[: [bad.value.text]]

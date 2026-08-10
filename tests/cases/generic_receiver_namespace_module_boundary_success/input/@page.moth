@@ -1,0 +1,5 @@
+import @provider as provider
+
+value = provider.make_box(42)
+
+[: [value.label()]]

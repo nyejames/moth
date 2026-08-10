@@ -17,7 +17,9 @@ use crate::compiler_frontend::ast::module_ast::environment::{
     DeclarationSemanticTable, ResolvedPublicTraitRoot, TopLevelDeclarationTable,
 };
 use crate::compiler_frontend::ast::module_ast::finalization::AstFinalizer;
-use crate::compiler_frontend::ast::module_ast::scope_context::ReceiverMethodCatalog;
+use crate::compiler_frontend::ast::module_ast::scope_context::{
+    ReceiverMethodCatalog, ReceiverMethodEntry,
+};
 use crate::compiler_frontend::ast::statements::functions::{
     FunctionSignature, ReturnChannel, ReturnSlot,
 };
@@ -41,8 +43,8 @@ use crate::compiler_frontend::datatypes::generic_parameters::{
     GenericParameter, GenericParameterList, TypeParameterId,
 };
 use crate::compiler_frontend::datatypes::ids::{
-    BuiltinTypeConstructor, BuiltinTypeKey, FunctionTypeKey, GenericParameterId, NominalTypeId,
-    TypeConstructor, TypeId,
+    BuiltinTypeConstructor, BuiltinTypeKey, FunctionTypeKey, GenericParameterId,
+    GenericParameterListId, NominalTypeId, TypeConstructor, TypeId,
 };
 use crate::compiler_frontend::datatypes::{DataType, ReceiverKey, diagnostic_type_spelling};
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariant;
@@ -330,17 +332,21 @@ enum MaterialisationTypeBlueprint {
 
 /// Published generated-function metadata for one successful declaring module.
 ///
-/// The context is deliberately a compact list rather than a donor-module snapshot. Every entry
-/// owns one retained body and the stable semantic closure needed to materialise that body in a
-/// fresh environment. Modules without retained bodies publish no context.
+/// The context is deliberately a compact list rather than a donor-module snapshot. It owns one
+/// module-wide stable semantic closure and one retained body per template. Modules without
+/// retained bodies publish no context.
 #[derive(Clone)]
 pub(crate) struct ModuleMaterialisationContext {
+    declaration_closure: Box<[PublicDeclarationRecord]>,
+    evidence: Box<[PublicEvidenceRecord]>,
     artefacts: Box<[GenericTemplateArtefact]>,
 }
 
 #[derive(Clone)]
 struct GenericTemplateArtefact {
     declaration_identity: GeneratedDeclarationIdentity,
+    generic_parameter_owner: Option<GenericDeclarationOrigin>,
+    receiver: Option<StableReceiverKey>,
     function_path: Box<[String]>,
     source_file: Box<[String]>,
     declaration_location: StableSourceLocation,
@@ -349,8 +355,6 @@ struct GenericTemplateArtefact {
     generic_parameters: Box<[StableGenericParameter]>,
     visibility: StableFileVisibility,
     declarations: Box<[StableDeclarationBinding]>,
-    declaration_closure: Box<[PublicDeclarationRecord]>,
-    evidence: Box<[PublicEvidenceRecord]>,
     callables: Box<[StableCallableBinding]>,
     nominals: Box<[StableNominalBinding]>,
     nominal_blueprints: FxHashMap<CanonicalTypeIdentity, NominalMaterialisationBlueprint>,
@@ -410,6 +414,33 @@ enum StableFunctionTarget {
     ModulePrivate(ModulePrivateExecutableIdentity),
 }
 
+#[derive(Clone)]
+enum StableReceiverKey {
+    Struct(Box<[String]>),
+    Choice(Box<[String]>),
+}
+
+impl StableReceiverKey {
+    fn capture(receiver: &ReceiverKey, string_table: &StringTable) -> Result<Self, CompilerError> {
+        match receiver {
+            ReceiverKey::Struct(path) => Ok(Self::Struct(stable_path(path, string_table))),
+            ReceiverKey::Choice(path) => Ok(Self::Choice(stable_path(path, string_table))),
+            ReceiverKey::External(_) | ReceiverKey::BuiltinScalar(_) => {
+                Err(CompilerError::compiler_error(
+                    "Retained receiver method has a non-source receiver key",
+                ))
+            }
+        }
+    }
+
+    fn materialise(&self, string_table: &mut StringTable) -> ReceiverKey {
+        match self {
+            Self::Struct(path) => ReceiverKey::Struct(materialise_path(path, string_table)),
+            Self::Choice(path) => ReceiverKey::Choice(materialise_path(path, string_table)),
+        }
+    }
+}
+
 #[derive(Clone, Default)]
 struct StableFileVisibility {
     source_names: Box<[StableVisibleDeclaration]>,
@@ -437,6 +468,10 @@ struct StableReceiverMethod {
     visible_name: String,
     local_path: Box<[String]>,
     target: StableFunctionTarget,
+    receiver: StableReceiverKey,
+    signature: StableFunctionSignature,
+    summary: Option<PublicCallSummary>,
+    generic_parameters: Box<[StableGenericParameter]>,
     location: StableSourceLocation,
 }
 
@@ -571,6 +606,8 @@ impl ModuleMaterialisationContext {
             .into_iter()
             .map(|declaration_identity| GenericTemplateArtefact {
                 declaration_identity,
+                generic_parameter_owner: None,
+                receiver: None,
                 function_path: Box::new([]),
                 source_file: Box::new([]),
                 declaration_location: StableSourceLocation {
@@ -590,14 +627,16 @@ impl ModuleMaterialisationContext {
                 generic_parameters: Box::new([]),
                 visibility: StableFileVisibility::default(),
                 declarations: Box::new([]),
-                declaration_closure: Box::new([]),
-                evidence: Box::new([]),
                 callables: Box::new([]),
                 nominals: Box::new([]),
                 nominal_blueprints: FxHashMap::default(),
             })
             .collect::<Box<[_]>>();
-        Self { artefacts }
+        Self {
+            declaration_closure: Box::new([]),
+            evidence: Box::new([]),
+            artefacts,
+        }
     }
 
     #[cfg(test)]
@@ -721,6 +760,7 @@ impl GenericTemplateArtefact {
         );
         let import_environment = self
             .materialise_import_environment(
+                context,
                 &source_file,
                 external_package_registry,
                 string_table_ref,
@@ -832,6 +872,7 @@ impl GenericTemplateArtefact {
 
     fn materialise_import_environment(
         &self,
+        context: &ModuleMaterialisationContext,
         source_file: &InternedPath,
         external_package_registry: &ExternalPackageRegistry,
         string_table: &mut StringTable,
@@ -848,12 +889,12 @@ impl GenericTemplateArtefact {
                 .imported_declarations_by_local_path
                 .insert(local_path, binding.record.origin.clone());
         }
-        for record in &self.declaration_closure {
+        for record in &context.declaration_closure {
             environment
                 .imported_declarations_by_origin
                 .insert(record.origin.clone(), record.clone());
         }
-        for record in &self.evidence {
+        for record in &context.evidence {
             environment
                 .imported_evidence_by_identity
                 .insert(record.identity.clone(), record.clone());
@@ -956,6 +997,92 @@ impl GenericTemplateArtefact {
             );
         }
 
+        for method in &self.visibility.receiver_methods {
+            let method_path = materialise_path(&method.local_path, string_table);
+            if context
+                .artefacts
+                .iter()
+                .any(|nested| materialise_path(&nested.function_path, string_table) == method_path)
+            {
+                continue;
+            }
+            if !method.generic_parameters.is_empty() {
+                // Imported generic receiver methods are reprojected from their imported nominal
+                // declaration. A locally-owned generic receiver method must have a retained
+                // artefact, so leaving this path unresolved would hide a broken closure.
+                if matches!(method.target, StableFunctionTarget::Imported(_)) {
+                    continue;
+                }
+                return Err(CompilerError::compiler_error(
+                    "Generic receiver method has no retained materialisation artefact",
+                ));
+            }
+            let (signature, function_type_id, fallible_carrier_type_id) =
+                method.signature.materialise(
+                    &method_path,
+                    &[],
+                    self,
+                    &mut environment.type_environment,
+                    external_package_registry,
+                    string_table,
+                )?;
+            let receiver = materialised_receiver_key(&signature, &environment.type_environment)
+                .or_else(|_| {
+                    Ok::<ReceiverKey, CompilerError>(method.receiver.materialise(string_table))
+                })?;
+            let declaration = Declaration {
+                id: method_path.clone(),
+                value: Expression::new(
+                    ExpressionKind::NoValue,
+                    Default::default(),
+                    function_type_id,
+                    DataType::Function(Box::new(Some(receiver.clone())), signature.clone()),
+                    ValueMode::ImmutableReference,
+                ),
+            };
+            let lookups = Rc::make_mut(&mut environment.lookups);
+            if lookups
+                .declaration_table
+                .get_by_path(&method_path)
+                .is_none()
+            {
+                let mut declarations = lookups
+                    .declaration_table
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<_>>();
+                declarations.push(declaration);
+                lookups.declaration_table = Rc::new(TopLevelDeclarationTable::new(declarations));
+            }
+            Rc::make_mut(&mut lookups.resolved_function_signatures_by_path).insert(
+                method_path.clone(),
+                ResolvedFunctionSignature {
+                    receiver: Some(receiver.clone()),
+                    signature: signature.clone(),
+                },
+            );
+            register_materialised_receiver_method(
+                lookups,
+                method_path.clone(),
+                receiver,
+                signature,
+            )?;
+            Rc::make_mut(&mut lookups.declaration_semantics)
+                .register_materialised_function(method_path.clone());
+            lookups.imported_functions_by_local_path.insert(
+                method_path.clone(),
+                AstImportedFunctionContract {
+                    target: method.target.materialise(method_path),
+                    summary: method.summary.clone().ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "Concrete receiver method has no retained call summary",
+                        )
+                    })?,
+                    fallible_carrier_type_id,
+                },
+            );
+        }
+
         let selected_paths = self.visibility.materialised_selected_paths(string_table);
         for nested in &context.artefacts {
             let nested_path = materialise_path(&nested.function_path, string_table);
@@ -964,93 +1091,179 @@ impl GenericTemplateArtefact {
             {
                 continue;
             }
-            let parsed_parameters = GenericParameterList {
-                parameters: nested
-                    .generic_parameters
-                    .iter()
-                    .enumerate()
-                    .map(|(slot, parameter)| GenericParameter {
-                        id: TypeParameterId(slot as u32),
-                        name: string_table.intern(&parameter.name),
-                        location: Default::default(),
-                        trait_bounds: Vec::new(),
-                    })
-                    .collect(),
-            };
-            let registration = environment
-                .type_environment
-                .register_generic_parameter_list(&parsed_parameters, &FxHashMap::default());
-            let generic_parameter_type_ids = (0..nested.generic_parameters.len())
-                .map(|slot| {
-                    let parameter_id = registration
-                        .canonical_by_local
-                        .get(&TypeParameterId(slot as u32))
-                        .copied()
-                        .ok_or_else(|| {
-                            CompilerError::compiler_error(
-                                "Materialised generic template omitted a parameter slot",
-                            )
-                        })?;
-                    environment
-                        .type_environment
-                        .type_id_for_generic_parameter(parameter_id)
-                        .ok_or_else(|| {
-                            CompilerError::compiler_error(
-                                "Materialised generic template parameter has no type handle",
-                            )
-                        })
-                })
-                .collect::<Result<Vec<_>, CompilerError>>()?;
-            let mut resolved_bounds_by_local = FxHashMap::default();
-            for (slot, parameter) in nested.generic_parameters.iter().enumerate() {
-                let local_id = TypeParameterId(slot as u32);
-                let parameter_id = registration
-                    .canonical_by_local
-                    .get(&local_id)
-                    .copied()
+            if nested.receiver.is_some() && nested.generic_parameter_owner.is_none() {
+                return Err(CompilerError::compiler_error(format!(
+                    "Materialised generic receiver template {:?} has no generic-parameter owner",
+                    nested_path
+                )));
+            }
+            let (generic_parameter_list_id, generic_parameter_type_ids) = if let Some(
+                nominal_origin,
+            ) = nested
+                .generic_parameter_owner
+                .as_ref()
+                .and_then(GenericDeclarationOrigin::nominal_type_origin)
+            {
+                // A generic receiver method shares the enclosing nominal's local generic
+                // handles. Registering a second list for the method would assign one stable
+                // exported parameter identity to two TypeIds and make its generated sidecar
+                // internally inconsistent.
+                let nominal_identity = CanonicalTypeIdentity::SourceNominal(nominal_origin.clone());
+                let nominal_type_id = intern_generated_canonical_type(
+                    &nominal_identity,
+                    &mut environment.type_environment,
+                    external_package_registry,
+                    self,
+                    string_table,
+                )?;
+                let generic_parameter_list_id =
+                    match environment.type_environment.get(nominal_type_id) {
+                        Some(TypeDefinition::Struct(definition)) => definition.generic_parameters,
+                        Some(TypeDefinition::Choice(definition)) => definition.generic_parameters,
+                        _ => {
+                            return Err(CompilerError::compiler_error(
+                                "Generic receiver template owner is not a nominal type",
+                            ));
+                        }
+                    }
                     .ok_or_else(|| {
                         CompilerError::compiler_error(
-                            "Materialised generic template omitted a stable parameter slot",
+                            "Generic receiver template owner has no generic parameter list",
                         )
                     })?;
-                let parameter_type_id = environment
+                let generic_parameter_type_ids = environment
                     .type_environment
-                    .type_id_for_generic_parameter(parameter_id)
+                    .generic_parameters(generic_parameter_list_id)
                     .ok_or_else(|| {
                         CompilerError::compiler_error(
-                            "Materialised generic template parameter has no type identity",
+                            "Generic receiver template owner has a missing parameter list",
                         )
-                    })?;
-                if let Some(exported_identity) = &parameter.exported_identity {
-                    environment.type_environment.register_canonical_identity(
-                        CanonicalTypeIdentity::GenericParameter(exported_identity.clone()),
-                        parameter_type_id,
-                    )?;
-                }
-                let bounds = parameter
-                    .bounds
+                    })?
+                    .parameters
                     .iter()
-                    .map(|identity| {
+                    .map(|parameter| {
                         environment
-                            .lookups
-                            .trait_environment
-                            .id_for_canonical_identity(identity)
+                            .type_environment
+                            .type_id_for_generic_parameter(parameter.id)
                             .ok_or_else(|| {
                                 CompilerError::compiler_error(
-                                    "Materialised generic bound is absent from its trait closure",
+                                    "Generic receiver template owner parameter has no type handle",
                                 )
                             })
                     })
                     .collect::<Result<Vec<_>, CompilerError>>()?;
-                resolved_bounds_by_local.insert(local_id, bounds);
-            }
-            environment
-                .type_environment
-                .update_generic_parameter_bounds(
-                    registration.list_id,
-                    &resolved_bounds_by_local,
-                    &registration.canonical_by_local,
-                );
+                if generic_parameter_type_ids.len() != nested.generic_parameters.len() {
+                    return Err(CompilerError::compiler_error(
+                        "Generic receiver template parameter count disagrees with its nominal owner",
+                    ));
+                }
+                for (parameter, type_id) in nested
+                    .generic_parameters
+                    .iter()
+                    .zip(&generic_parameter_type_ids)
+                {
+                    let exported_identity = parameter.exported_identity.as_ref().ok_or_else(|| {
+                            CompilerError::compiler_error(
+                                "Generic receiver template parameter has no stable nominal identity",
+                            )
+                        })?;
+                    let expected_identity =
+                        CanonicalTypeIdentity::GenericParameter(exported_identity.clone());
+                    environment
+                        .type_environment
+                        .register_canonical_identity(expected_identity, *type_id)?;
+                }
+                (generic_parameter_list_id, generic_parameter_type_ids)
+            } else {
+                let parsed_parameters = GenericParameterList {
+                    parameters: nested
+                        .generic_parameters
+                        .iter()
+                        .enumerate()
+                        .map(|(slot, parameter)| GenericParameter {
+                            id: TypeParameterId(slot as u32),
+                            name: string_table.intern(&parameter.name),
+                            location: Default::default(),
+                            trait_bounds: Vec::new(),
+                        })
+                        .collect(),
+                };
+                let registration = environment
+                    .type_environment
+                    .register_generic_parameter_list(&parsed_parameters, &FxHashMap::default());
+                let generic_parameter_type_ids = (0..nested.generic_parameters.len())
+                    .map(|slot| {
+                        let parameter_id = registration
+                            .canonical_by_local
+                            .get(&TypeParameterId(slot as u32))
+                            .copied()
+                            .ok_or_else(|| {
+                                CompilerError::compiler_error(
+                                    "Materialised generic template omitted a parameter slot",
+                                )
+                            })?;
+                        environment
+                            .type_environment
+                            .type_id_for_generic_parameter(parameter_id)
+                            .ok_or_else(|| {
+                                CompilerError::compiler_error(
+                                    "Materialised generic template parameter has no type handle",
+                                )
+                            })
+                    })
+                    .collect::<Result<Vec<_>, CompilerError>>()?;
+                let mut resolved_bounds_by_local = FxHashMap::default();
+                for (slot, parameter) in nested.generic_parameters.iter().enumerate() {
+                    let local_id = TypeParameterId(slot as u32);
+                    let parameter_id = registration
+                        .canonical_by_local
+                        .get(&local_id)
+                        .copied()
+                        .ok_or_else(|| {
+                            CompilerError::compiler_error(
+                                "Materialised generic template omitted a stable parameter slot",
+                            )
+                        })?;
+                    let parameter_type_id = environment
+                        .type_environment
+                        .type_id_for_generic_parameter(parameter_id)
+                        .ok_or_else(|| {
+                            CompilerError::compiler_error(
+                                "Materialised generic template parameter has no type identity",
+                            )
+                        })?;
+                    if let Some(exported_identity) = &parameter.exported_identity {
+                        environment.type_environment.register_canonical_identity(
+                            CanonicalTypeIdentity::GenericParameter(exported_identity.clone()),
+                            parameter_type_id,
+                        )?;
+                    }
+                    let bounds = parameter
+                            .bounds
+                            .iter()
+                            .map(|identity| {
+                                environment
+                                    .lookups
+                                    .trait_environment
+                                    .id_for_canonical_identity(identity)
+                                    .ok_or_else(|| {
+                                        CompilerError::compiler_error(
+                                            "Materialised generic bound is absent from its trait closure",
+                                        )
+                                    })
+                            })
+                            .collect::<Result<Vec<_>, CompilerError>>()?;
+                    resolved_bounds_by_local.insert(local_id, bounds);
+                }
+                environment
+                    .type_environment
+                    .update_generic_parameter_bounds(
+                        registration.list_id,
+                        &resolved_bounds_by_local,
+                        &registration.canonical_by_local,
+                    );
+                (registration.list_id, generic_parameter_type_ids)
+            };
             let (signature, function_type_id, _) = nested.signature.materialise(
                 &nested_path,
                 &generic_parameter_type_ids,
@@ -1059,11 +1272,20 @@ impl GenericTemplateArtefact {
                 external_package_registry,
                 string_table,
             )?;
+            let receiver = if nested.receiver.is_some() {
+                Some(materialised_receiver_key(
+                    &signature,
+                    &environment.type_environment,
+                )?)
+            } else {
+                None
+            };
             let template = GenericFunctionTemplate {
                 function_path: nested_path.clone(),
                 source_file: materialise_path(&nested.source_file, string_table),
                 declaration_identity: Some(nested.declaration_identity.clone()),
-                generic_parameter_list_id: registration.list_id,
+                generic_parameter_owner: nested.generic_parameter_owner.clone(),
+                generic_parameter_list_id,
                 signature: signature.clone(),
                 body_tokens: Some(nested.body.materialise(string_table)?),
                 declaration_location: nested.declaration_location.materialise(string_table),
@@ -1075,10 +1297,18 @@ impl GenericTemplateArtefact {
             Rc::make_mut(&mut lookups.resolved_function_signatures_by_path).insert(
                 nested_path.clone(),
                 ResolvedFunctionSignature {
-                    receiver: None,
+                    receiver: receiver.clone(),
                     signature: signature.clone(),
                 },
             );
+            if let Some(receiver) = receiver.clone() {
+                register_materialised_receiver_method(
+                    lookups,
+                    nested_path.clone(),
+                    receiver,
+                    signature.clone(),
+                )?;
+            }
             if lookups
                 .declaration_table
                 .get_by_path(&nested_path)
@@ -1095,7 +1325,7 @@ impl GenericTemplateArtefact {
                         ExpressionKind::NoValue,
                         Default::default(),
                         function_type_id,
-                        DataType::Function(Box::new(None), signature),
+                        DataType::Function(Box::new(receiver), signature),
                         ValueMode::ImmutableReference,
                     ),
                 });
@@ -1106,6 +1336,70 @@ impl GenericTemplateArtefact {
         }
         Ok(())
     }
+}
+
+fn materialised_receiver_key(
+    signature: &FunctionSignature,
+    type_environment: &TypeEnvironment,
+) -> Result<ReceiverKey, CompilerError> {
+    let receiver_type_id = signature
+        .parameters
+        .first()
+        .map(|parameter| parameter.value.type_id)
+        .ok_or_else(|| {
+            CompilerError::compiler_error("Receiver method has no receiver parameter")
+        })?;
+    type_environment
+        .receiver_key_for_type_id(receiver_type_id)
+        .ok_or_else(|| {
+            CompilerError::compiler_error(
+                "Receiver method parameter does not resolve to a nominal receiver",
+            )
+        })
+}
+
+fn register_materialised_receiver_method(
+    lookups: &mut AstModuleLookups,
+    function_path: InternedPath,
+    receiver: ReceiverKey,
+    signature: FunctionSignature,
+) -> Result<(), CompilerError> {
+    let method_name = function_path.name().ok_or_else(|| {
+        CompilerError::compiler_error(
+            "Materialised receiver method path has no final method-name component",
+        )
+    })?;
+    let entry = ReceiverMethodEntry {
+        function_path: function_path.clone(),
+        receiver: receiver.clone(),
+        source_file: function_path.parent().unwrap_or_default(),
+        receiver_mutable: signature
+            .parameters
+            .first()
+            .is_some_and(|parameter| parameter.value.value_mode.is_mutable()),
+        signature,
+    };
+    let receiver_methods = Rc::make_mut(&mut lookups.receiver_methods);
+    receiver_methods
+        .by_receiver_and_name
+        .entry((receiver, method_name))
+        .or_default()
+        .push(entry.clone());
+    receiver_methods
+        .by_method_name
+        .entry(method_name)
+        .or_default()
+        .push(entry.clone());
+    if receiver_methods
+        .by_function_path
+        .insert(function_path, entry)
+        .is_some()
+    {
+        return Err(CompilerError::compiler_error(
+            "Materialised receiver method path was registered more than once",
+        ));
+    }
+    Ok(())
 }
 
 impl StableFileVisibility {
@@ -1180,12 +1474,19 @@ impl StableFileVisibility {
         &self,
         string_table: &mut StringTable,
     ) -> FxHashSet<InternedPath> {
-        self.source_names
+        let mut selected = self
+            .source_names
             .iter()
             .chain(self.type_alias_names.iter())
             .chain(self.trait_names.iter())
             .map(|binding| materialise_path(&binding.local_path, string_table))
-            .collect()
+            .collect::<FxHashSet<_>>();
+        selected.extend(
+            self.receiver_methods
+                .iter()
+                .map(|method| materialise_path(&method.local_path, string_table)),
+        );
+        selected
     }
 }
 
@@ -1431,16 +1732,40 @@ impl ModuleMaterialisationPreparation {
             .values()
             .filter(|template| template.body_tokens.is_some())
             .collect::<Vec<_>>();
-        templates.sort_by_key(|template| format!("{:?}", template.declaration_identity));
+        templates.sort_by(|left, right| left.declaration_identity.cmp(&right.declaration_identity));
         if templates.is_empty() {
             return Ok(None);
         }
+
+        let mut declaration_closure = self
+            .import_environment
+            .imported_declarations_by_origin
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        declaration_closure.extend(public_interface.declarations.iter().cloned());
+        declaration_closure.sort_by(|left, right| left.origin.cmp(&right.origin));
+        declaration_closure.dedup_by(|left, right| left.origin == right.origin);
+
+        let mut evidence = self
+            .import_environment
+            .imported_evidence_by_identity
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        evidence.extend(public_interface.reusable_evidence.iter().cloned());
+        evidence.sort_by(|left, right| left.identity.cmp(&right.identity));
+        evidence.dedup_by(|left, right| left.identity == right.identity);
 
         let artefacts = templates
             .into_iter()
             .map(|template| self.freeze_template(template, public_interface))
             .collect::<Result<Box<[_]>, CompilerError>>()?;
-        Ok(Some(ModuleMaterialisationContext { artefacts }))
+        Ok(Some(ModuleMaterialisationContext {
+            declaration_closure: declaration_closure.into_boxed_slice(),
+            evidence: evidence.into_boxed_slice(),
+            artefacts,
+        }))
     }
 
     fn freeze_template(
@@ -1457,6 +1782,13 @@ impl ModuleMaterialisationPreparation {
             CompilerError::compiler_error("Retained generic template has no body syntax")
         })?;
         let generic_parameters = self.stable_generic_parameters(template)?;
+        let generic_parameter_owner = template.generic_parameter_owner.clone();
+        let receiver = self
+            .resolved_function_signatures_by_path
+            .get(&template.function_path)
+            .and_then(|resolved| resolved.receiver.as_ref())
+            .map(|receiver| StableReceiverKey::capture(receiver, &self.string_table))
+            .transpose()?;
         let parameter_slots = self.generic_parameter_slots(template)?;
         let signature = self.stable_function_signature(&template.signature, &parameter_slots)?;
         let mut referenced_names = stable_body_symbol_names(body_tokens, &self.string_table);
@@ -1473,28 +1805,10 @@ impl ModuleMaterialisationPreparation {
         let nominals = self.stable_nominal_bindings(&selected_paths);
         let nominal_blueprints = self.stable_nominal_blueprints(&selected_paths, &signature)?;
 
-        let mut declaration_closure = self
-            .import_environment
-            .imported_declarations_by_origin
-            .values()
-            .cloned()
-            .collect::<Vec<_>>();
-        declaration_closure.extend(public_interface.declarations.iter().cloned());
-        declaration_closure.sort_by_key(|record| format!("{:?}", record.origin));
-        declaration_closure.dedup_by(|left, right| left.origin == right.origin);
-
-        let mut evidence = self
-            .import_environment
-            .imported_evidence_by_identity
-            .values()
-            .cloned()
-            .collect::<Vec<_>>();
-        evidence.extend(public_interface.reusable_evidence.iter().cloned());
-        evidence.sort_by(|left, right| left.identity.cmp(&right.identity));
-        evidence.dedup_by(|left, right| left.identity == right.identity);
-
         Ok(GenericTemplateArtefact {
             declaration_identity,
+            generic_parameter_owner,
+            receiver,
             function_path: stable_path(&template.function_path, &self.string_table),
             source_file: stable_path(&template.source_file, &self.string_table),
             declaration_location: StableSourceLocation::capture(
@@ -1506,8 +1820,6 @@ impl ModuleMaterialisationPreparation {
             generic_parameters,
             visibility,
             declarations,
-            declaration_closure: declaration_closure.into_boxed_slice(),
-            evidence: evidence.into_boxed_slice(),
             callables,
             nominals,
             nominal_blueprints,
@@ -1533,13 +1845,20 @@ impl ModuleMaterialisationPreparation {
             .map(|(slot, parameter)| {
                 let name = self.string_table.resolve(parameter.name).to_owned();
                 let exported_identity = match template.declaration_identity.as_ref() {
-                    Some(GeneratedDeclarationIdentity::Public(origin)) => {
-                        Some(ExportedGenericParameterIdentity::new(
-                            GenericDeclarationOrigin::free_function(origin.clone())?,
+                    Some(GeneratedDeclarationIdentity::Public(_)) => Some(
+                        ExportedGenericParameterIdentity::new(
+                            template
+                                .generic_parameter_owner
+                                .clone()
+                                .ok_or_else(|| {
+                                    CompilerError::compiler_error(
+                                        "Public retained generic template has no explicit generic-parameter owner",
+                                    )
+                                })?,
                             slot as u32,
                             name.clone(),
-                        ))
-                    }
+                        ),
+                    ),
                     Some(GeneratedDeclarationIdentity::ModulePrivate(_)) => None,
                     None => {
                         return Err(CompilerError::compiler_error(
@@ -1735,33 +2054,66 @@ impl ModuleMaterialisationPreparation {
                 identity,
             });
         }
-        let receiver_methods = visibility
-            .visible_receiver_methods
-            .iter()
-            .filter(|(name, _)| referenced_names.contains(self.string_table.resolve(**name)))
-            .flat_map(|(name, methods)| {
-                methods.iter().filter_map(|method| {
-                    StableFunctionTarget::capture(&method.target).map(|target| {
-                        StableReceiverMethod {
-                            visible_name: self.string_table.resolve(*name).to_owned(),
-                            local_path: stable_path(method.target.local_path(), &self.string_table),
-                            target,
-                            location: StableSourceLocation::capture(
-                                &method.location,
-                                &self.string_table,
-                            ),
-                        }
+        let mut receiver_methods = Vec::new();
+        for (name, methods) in &visibility.visible_receiver_methods {
+            if !referenced_names.contains(self.string_table.resolve(*name)) {
+                continue;
+            }
+            for method in methods {
+                let local_path = method.target.local_path();
+                let Some(target) = self.stable_target_for_path(&method.target) else {
+                    continue;
+                };
+                let resolved = self
+                    .resolved_function_signatures_by_path
+                    .get(local_path)
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "Visible receiver method has no resolved function signature",
+                        )
+                    })?;
+                let receiver = resolved
+                    .receiver
+                    .as_ref()
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "Visible receiver method has no receiver signature",
+                        )
                     })
-                })
-            })
-            .collect::<Vec<_>>()
-            .into_boxed_slice();
+                    .and_then(|receiver| {
+                        StableReceiverKey::capture(receiver, &self.string_table)
+                    })?;
+                let generic_template = self.generic_function_templates_by_path.get(local_path);
+                let parameter_slots = generic_template
+                    .map(|template| self.generic_parameter_slots(template))
+                    .transpose()?
+                    .unwrap_or_default();
+                let generic_parameters = generic_template
+                    .map(|template| self.stable_generic_parameters(template))
+                    .transpose()?
+                    .unwrap_or_default();
+                receiver_methods.push(StableReceiverMethod {
+                    visible_name: self.string_table.resolve(*name).to_owned(),
+                    local_path: stable_path(local_path, &self.string_table),
+                    target,
+                    receiver,
+                    signature: self
+                        .stable_function_signature(&resolved.signature, &parameter_slots)?,
+                    summary: self
+                        .imported_functions_by_local_path
+                        .get(local_path)
+                        .map(|contract| contract.summary.clone()),
+                    generic_parameters,
+                    location: StableSourceLocation::capture(&method.location, &self.string_table),
+                });
+            }
+        }
         Ok(StableFileVisibility {
             source_names: capture_declarations(&visibility.visible_source_names),
             type_alias_names: capture_declarations(&visibility.visible_type_alias_names),
             trait_names: capture_declarations(&visibility.visible_trait_names),
             external_symbols: external_symbols.into_boxed_slice(),
-            receiver_methods,
+            receiver_methods: receiver_methods.into_boxed_slice(),
         })
     }
 
@@ -1771,14 +2123,50 @@ impl ModuleMaterialisationPreparation {
         referenced_names: &FxHashSet<String>,
     ) -> Result<FxHashSet<InternedPath>, CompilerError> {
         let visibility = self.import_environment.visibility_for(source_file)?;
-        Ok(visibility
+        let mut selected = visibility
             .visible_source_names
             .iter()
             .chain(visibility.visible_type_alias_names.iter())
             .chain(visibility.visible_trait_names.iter())
             .filter(|(name, _)| referenced_names.contains(self.string_table.resolve(**name)))
             .map(|(_, target)| target.local_path().clone())
-            .collect())
+            .collect::<FxHashSet<_>>();
+        for (name, methods) in &visibility.visible_receiver_methods {
+            if referenced_names.contains(self.string_table.resolve(*name)) {
+                selected.extend(
+                    methods
+                        .iter()
+                        .map(|method| method.target.local_path().clone()),
+                );
+            }
+        }
+        Ok(selected)
+    }
+
+    fn stable_target_for_path(
+        &self,
+        target: &SourceFunctionTarget,
+    ) -> Option<StableFunctionTarget> {
+        if let Some(stable) = StableFunctionTarget::capture(target) {
+            return Some(stable);
+        }
+        if let Some(contract) = self
+            .imported_functions_by_local_path
+            .get(target.local_path())
+            && let Some(stable) = StableFunctionTarget::capture(&contract.target)
+        {
+            return Some(stable);
+        }
+        self.generic_function_templates_by_path
+            .get(target.local_path())
+            .and_then(|template| match template.declaration_identity.as_ref()? {
+                GeneratedDeclarationIdentity::Public(origin) => {
+                    Some(StableFunctionTarget::Imported(origin.clone()))
+                }
+                GeneratedDeclarationIdentity::ModulePrivate(identity) => {
+                    Some(StableFunctionTarget::ModulePrivate(identity.clone()))
+                }
+            })
     }
 
     fn stable_declaration_bindings(
@@ -1970,6 +2358,42 @@ impl ModuleMaterialisationPreparation {
                 )?)
             };
 
+            let resolved = self
+                .resolved_function_signatures_by_path
+                .get(&path)
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "Generic template has no resolved function signature",
+                    )
+                })?;
+            let existing_owner = self
+                .generic_function_templates_by_path
+                .get(&path)
+                .and_then(|template| template.generic_parameter_owner.clone());
+            let generic_parameter_owner = match resolved.receiver.as_ref() {
+                Some(ReceiverKey::Struct(receiver_path) | ReceiverKey::Choice(receiver_path)) => {
+                    public_nominal_origins_by_path
+                        .get(receiver_path)
+                        .cloned()
+                        .map(GenericDeclarationOrigin::nominal_type)
+                        .transpose()?
+                        .or(existing_owner)
+                }
+                Some(ReceiverKey::External(_) | ReceiverKey::BuiltinScalar(_)) => {
+                    if public_origins_by_path.contains_key(&path) {
+                        return Err(CompilerError::compiler_error(
+                            "Public generic receiver template has a non-source receiver owner",
+                        ));
+                    }
+                    existing_owner
+                }
+                None => public_origins_by_path
+                    .get(&path)
+                    .map(|origin| GenericDeclarationOrigin::free_function(origin.clone()))
+                    .transpose()?
+                    .or(existing_owner),
+            };
+
             let template = self
                 .generic_function_templates_by_path
                 .get_mut(&path)
@@ -1985,7 +2409,38 @@ impl ModuleMaterialisationPreparation {
                     "Generic template declaration identity disagrees with its callable origin",
                 ));
             }
+            if matches!(&expected_identity, GeneratedDeclarationIdentity::Public(_))
+                && generic_parameter_owner.is_none()
+            {
+                return Err(CompilerError::compiler_error(
+                    "Public generic template has no explicit generic-parameter owner",
+                ));
+            }
+            if let (Some(existing), Some(expected)) = (
+                template.generic_parameter_owner.as_ref(),
+                generic_parameter_owner.as_ref(),
+            ) && existing != expected
+            {
+                return Err(CompilerError::compiler_error(
+                    "Generic template generic-parameter owner disagrees with its callable origin",
+                ));
+            }
             template.declaration_identity = Some(expected_identity);
+            template.generic_parameter_owner = generic_parameter_owner;
+            let owner_for_identity = template.generic_parameter_owner.clone();
+            let generic_parameter_list_id = template.generic_parameter_list_id;
+            let receiver = resolved.receiver.clone();
+            let is_public = matches!(
+                template.declaration_identity,
+                Some(GeneratedDeclarationIdentity::Public(_))
+            );
+            if is_public && let Some(owner) = owner_for_identity {
+                self.register_exported_generic_parameter_identities(
+                    generic_parameter_list_id,
+                    &owner,
+                    receiver.as_ref(),
+                )?;
+            }
         }
 
         let signatures = self
@@ -2035,6 +2490,90 @@ impl ModuleMaterialisationPreparation {
         }
 
         Ok(private_executables)
+    }
+
+    fn register_exported_generic_parameter_identities(
+        &mut self,
+        template_parameter_list_id: GenericParameterListId,
+        owner: &GenericDeclarationOrigin,
+        receiver: Option<&ReceiverKey>,
+    ) -> Result<(), CompilerError> {
+        let generic_parameter_list_id = if owner.nominal_type_origin().is_some() {
+            let receiver_path = match receiver {
+                Some(ReceiverKey::Struct(path) | ReceiverKey::Choice(path)) => path,
+                Some(ReceiverKey::External(_) | ReceiverKey::BuiltinScalar(_)) | None => {
+                    return Err(CompilerError::compiler_error(
+                        "Nominal generic-parameter owner has no source receiver path",
+                    ));
+                }
+            };
+            let receiver_type_id = self
+                .nominal_type_ids_by_path
+                .get(receiver_path)
+                .copied()
+                .or_else(|| {
+                    self.type_environment
+                        .nominal_id_for_path(receiver_path)
+                        .and_then(|nominal_id| {
+                            self.type_environment.type_id_for_nominal_id(nominal_id)
+                        })
+                })
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "Public generic receiver owner has no local nominal type handle",
+                    )
+                })?;
+            match self.type_environment.get(receiver_type_id) {
+                Some(TypeDefinition::Struct(definition)) => definition.generic_parameters,
+                Some(TypeDefinition::Choice(definition)) => definition.generic_parameters,
+                _ => None,
+            }
+            .ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "Public generic receiver owner has no generic parameter list",
+                )
+            })?
+        } else {
+            template_parameter_list_id
+        };
+        let parameters = self
+            .type_environment
+            .generic_parameters(generic_parameter_list_id)
+            .ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "Public generic template references a missing parameter list",
+                )
+            })?
+            .parameters
+            .iter()
+            .enumerate()
+            .map(|(position, parameter)| {
+                (
+                    position as u32,
+                    parameter.id,
+                    self.string_table.resolve(parameter.name).to_owned(),
+                )
+            })
+            .collect::<Vec<_>>();
+        for (position, parameter_id, authored_name) in parameters {
+            let type_id = self
+                .type_environment
+                .type_id_for_generic_parameter(parameter_id)
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "Public generic template parameter has no local type handle",
+                    )
+                })?;
+            self.type_environment.register_canonical_identity(
+                CanonicalTypeIdentity::GenericParameter(ExportedGenericParameterIdentity::new(
+                    owner.clone(),
+                    position,
+                    authored_name,
+                )),
+                type_id,
+            )?;
+        }
+        Ok(())
     }
 
     fn install_private_semantic_identities(
@@ -3552,15 +4091,47 @@ fn install_generated_request_evidence(
                 method_path: method_path.clone(),
             });
 
-            let source_contract = requester_context
+            let (source_target, source_summary) = if let Some(source_contract) = requester_context
                 .imported_functions_by_local_path
                 .get(&requester_mapping.method_path)
-                .ok_or_else(|| {
-                    CompilerError::compiler_error(
-                        "Generated evidence method has no frozen executable target",
-                    )
-                })?;
-            let target = match source_contract.target.clone() {
+            {
+                (
+                    source_contract.target.clone(),
+                    source_contract.summary.clone(),
+                )
+            } else if let Some(template) = requester_context
+                .generic_function_templates_by_path
+                .get(&requester_mapping.method_path)
+            {
+                let target = match template.declaration_identity.as_ref() {
+                    Some(GeneratedDeclarationIdentity::Public(origin)) => {
+                        SourceFunctionTarget::Imported {
+                            origin: origin.clone(),
+                            local_path: requester_mapping.method_path.clone(),
+                        }
+                    }
+                    Some(GeneratedDeclarationIdentity::ModulePrivate(identity)) => {
+                        SourceFunctionTarget::ModulePrivate {
+                            identity: identity.clone(),
+                            local_path: requester_mapping.method_path.clone(),
+                        }
+                    }
+                    None => {
+                        return Err(CompilerError::compiler_error(
+                            "Generated evidence generic method has no frozen executable identity",
+                        ));
+                    }
+                };
+                (
+                    target,
+                    bootstrap_call_summary_from_signature(&template.signature),
+                )
+            } else {
+                return Err(CompilerError::compiler_error(
+                    "Generated evidence method has no frozen executable target",
+                ));
+            };
+            let target = match source_target {
                 SourceFunctionTarget::Imported { origin, .. } => SourceFunctionTarget::Imported {
                     origin,
                     local_path: method_path.clone(),
@@ -3581,7 +4152,7 @@ fn install_generated_request_evidence(
                 method_path.clone(),
                 AstImportedFunctionContract {
                     target,
-                    summary: source_contract.summary.clone(),
+                    summary: source_summary,
                     fallible_carrier_type_id: None,
                 },
             ));

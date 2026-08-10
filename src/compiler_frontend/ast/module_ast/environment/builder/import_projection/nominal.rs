@@ -343,6 +343,20 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     /// Computes the nominal declaration closure required by directly imported declarations.
     fn reachable_imported_type_origins(&self) -> FxHashSet<OriginTypeId> {
         let mut reachable = FxHashSet::default();
+        for evidence in self
+            .import_environment
+            .imported_evidence_by_identity
+            .values()
+        {
+            // Reusable evidence carries a canonical target that may be a generic nominal
+            // instance even when the generated body never names that type directly. Its target
+            // declaration is therefore part of the imported nominal closure before evidence is
+            // projected into consumer-local TypeIds.
+            collect_canonical_type_origins(
+                evidence.identity.target_type_identity(),
+                &mut reachable,
+            );
+        }
         for origin in self
             .import_environment
             .imported_declarations_by_local_path
@@ -396,7 +410,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         if let Some(existing) = self
             .imported_generic_parameter_registrations
             .iter()
-            .find(|registration| registration.surfaces == parameters)
+            .find(|registration| registration.surfaces.as_slice() == parameters)
         {
             return Ok(Some(existing.list_id));
         }
@@ -416,7 +430,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         let registered = self
             .type_environment
             .register_generic_parameter_list(&parsed, &FxHashMap::default());
-
         for (index, parameter) in parameters.iter().enumerate() {
             let local_id = registered
                 .canonical_by_local
