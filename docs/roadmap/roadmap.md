@@ -11,11 +11,10 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 
 ## Active implementation work
 
-- [Canonical module compilation and scoped packages — Phase 5 closeout](./plans/canonical-module-compilation-and-scoped-packages-plan.md)
+- [Dependency clauses and path syntax](./plans/dependency-clauses-and-path-syntax-plan.md)
 
 ## Queued implementation chain
 
-- [Dependency clauses and path syntax](./plans/dependency-clauses-and-path-syntax-plan.md)
 - [TIR corrections and simplification](./plans/tir-corrections-and-simplification-plan.md)
 - [Path values and resource linking](./plans/path-values-and-resource-linking-plan.md)
 - [Growable collections infallability](./plans/collection-push-fallibility-split-plan.md)
