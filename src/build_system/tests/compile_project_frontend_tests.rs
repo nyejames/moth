@@ -705,11 +705,7 @@ fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_
     let src = dir.join("src");
     fs::create_dir_all(&package).expect("should create package root");
     fs::create_dir_all(&src).expect("should create entry root");
-    fs::write(
-        dir.join("config.moth"),
-        "entry_root #= \"src\"\npackage_folders #= { \"packages\" }\n",
-    )
-    .expect("should write config");
+    fs::write(dir.join("config.moth"), "entry_root #= \"src\"\n").expect("should write config");
     fs::write(
         src.join("@page.moth"),
         "import @broken { run }\nvalue = run()\n",
@@ -2982,11 +2978,7 @@ fn source_package_warning_retained_by_frontend_outcome() {
     let src = dir.join("src");
     fs::create_dir_all(&package).expect("should create package root");
     fs::create_dir_all(&src).expect("should create entry root");
-    fs::write(
-        dir.join("config.moth"),
-        "entry_root #= \"src\"\npackage_folders #= { \"packages\" }\n",
-    )
-    .expect("should write config");
+    fs::write(dir.join("config.moth"), "entry_root #= \"src\"\n").expect("should write config");
     fs::write(src.join("@page.moth"), "value = 1\n").expect("should write project root");
     fs::write(
         package.join("@mod.moth"),

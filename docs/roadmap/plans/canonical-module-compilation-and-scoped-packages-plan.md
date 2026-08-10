@@ -25,10 +25,10 @@ ACTIVE_PLAN: docs/roadmap/plans/canonical-module-compilation-and-scoped-packages
 WORK_ID: R5-closeout
 WORK_SOURCE: continued Phase 5 closeout after Gate B acceptance and the revised plan
 BASE_REVISION: 276bc4cb2 (clean revised-plan baseline before R5C6A)
-IMPLEMENTED_CHECKPOINT: 0d17808b5
-RECONCILED_HEAD: 0d17808b5
-STATUS: final-review - R5C10F correction slice complete; fresh final auditor pending
-CURRENT_SLICE: R5C10F - isolate remaining discovery-era fixture contracts and parser ownership text (complete)
+IMPLEMENTED_CHECKPOINT: b0782b111
+RECONCILED_HEAD: b0782b111
+STATUS: final-review - R5C10G correction slice complete; fresh final auditor pending
+CURRENT_SLICE: R5C10G - remove ignored legacy package-folder settings from registered-package frontend tests (complete)
 ACCEPTED_CHECKPOINTS:
 - R5C3C provider agreement and recursive interface closure
 - R5C4A exhaustive canonical token traversal
@@ -91,11 +91,15 @@ VALIDATION_STATE:
 - R5C10F `cargo run --quiet -- tests --audit` passed: 1676 integration cases and 1826 backend executions
 - R5C10F `cargo run --quiet -- tests --terse` passed: 1826/1826 integration executions
 - R5C10F exact gate passed: `just validate` with 4223 workspace tests, 17 auxiliary tests, 641 xtask tests, 1826/1826 integration executions, cross-target Clippy, docs, benchmark sanity and timer-erasure; standalone `just bench-ci` passed all 60 benchmark preflights and quick CLI/frontend cases
-AUDITS: interim auditor `20260810T093610Z-d64f9dcf` found one stale DeclarationId comment; corrected; pass-two auditor `20260810T094147Z-9376c565` found no required correction; interim auditor `20260810T105710Z-703236c2` found no required correction; regular auditor `20260810T112902Z-2655eca7` found no required correction; second independent review corrections are implemented; regular auditor attempt `20260810T174728Z-1dcfafdc` was blocked by a provider tool-contract failure with no workspace changes; final auditor `20260810T202756Z-e5ede7f9` found two bounded Gate D corrections; final auditor `20260810T205925Z-0cec93ec` found one fixture-contract and parser-comment correction, resolved in R5C10F
+- R5C10G focused checks passed: both named registered-package frontend tests, `cargo fmt --all -- --check`, `cargo run --quiet -- tests --audit`, `cargo run --quiet -- tests --terse` and the complete `package_folders` ownership search
+- R5C10G `cargo run --quiet -- tests --audit` passed: 1676 integration cases and 1826 backend executions
+- R5C10G `cargo run --quiet -- tests --terse` passed: 1826/1826 integration executions
+- R5C10G exact gate passed: `just validate` with 4223 workspace tests, 17 auxiliary tests, 641 xtask tests, 1826/1826 integration executions, cross-target Clippy, docs, benchmark sanity and timer-erasure; standalone `just bench-ci` passed all 60 benchmark preflights and quick CLI/frontend cases
+AUDITS: interim auditor `20260810T093610Z-d64f9dcf` found one stale DeclarationId comment; corrected; pass-two auditor `20260810T094147Z-9376c565` found no required correction; interim auditor `20260810T105710Z-703236c2` found no required correction; regular auditor `20260810T112902Z-2655eca7` found no required correction; second independent review corrections are implemented; regular auditor attempt `20260810T174728Z-1dcfafdc` was blocked by a provider tool-contract failure with no workspace changes; final auditor `20260810T202756Z-e5ede7f9` found two bounded Gate D corrections; final auditor `20260810T205925Z-0cec93ec` found one fixture-contract and parser-comment correction, resolved in R5C10F; final auditor `20260810T211701Z-8b6fc0ea` found two residual fixture settings, resolved in R5C10G
 BLOCKERS: fresh final auditor and Gate D remain pending; strict entry_root remains deferred to the queued Project Config plan
 NEXT_WORKER_ORDER: fresh final_auditor -> Gate D -> compress/archive canonical Phase 5 -> dependency-clauses-and-path-syntax-plan.md
-STOP_REASON: R5C10F is implemented and the exact validation gate is green; pause before the fresh final auditor and Gate D
-NEXT_RESUME_ACTION: invoke a fresh final_auditor against the R5C10F correction checkpoint before Gate D
+STOP_REASON: R5C10G is implemented and the exact validation gate is green; pause before the fresh final auditor and Gate D
+NEXT_RESUME_ACTION: invoke a fresh final_auditor against the R5C10G correction checkpoint before Gate D
 FOLLOW_UP_CHAIN:
 1. dependency-clauses-and-path-syntax-plan.md
 2. tir-corrections-and-simplification-plan.md
@@ -329,7 +333,7 @@ Review gates:
 - **Gate B:** accepted at R5C1C
 - **Gate C1:** after R5C6A, before convergence behaviour changes
 - **Gate C2:** after R5C6B, before source-payload ownership changes
-- **Gate D:** after R5C9 deletion audit, R5C10/R5C10C/R5C10D/R5C10E/R5C10F corrections and the final auditor
+- **Gate D:** after R5C9 deletion audit, R5C10/R5C10C/R5C10D/R5C10E/R5C10F/R5C10G corrections and the final auditor
 
 Reviews are read-only. Corrections land as separate bounded slices.
 
@@ -685,7 +689,7 @@ Counters must prove:
 - no borrow reanalysis without a changed direct input after the initial seed pass
 
 Use this checkpoint for the Gate D review. Resolve any required findings through the bounded
-R5C10/R5C10C/R5C10D/R5C10E/R5C10F correction lane before the final auditor and Gate D acceptance.
+R5C10/R5C10C/R5C10D/R5C10E/R5C10F/R5C10G correction lane before the final auditor and Gate D acceptance.
 
 ### R5C10 / Gate D corrections
 
@@ -816,6 +820,23 @@ The correction sequence is:
 ```text
 fresh final auditor findings
 -> R5C10F fixture and parser-ownership correction
+-> exact validation gate
+-> fresh final auditor
+-> Gate D acceptance
+```
+
+### R5C10G / registered-package fixture cleanup
+
+The fresh final auditor found two remaining ignored `package_folders` settings in Rust frontend tests
+that register Builder package roots directly. R5C10G removes those settings while preserving each test's
+independent package registration and outcome assertions. Parser/storage validation and dedicated
+ignored-legacy coverage remain the only fixture-level uses of the transitional field.
+
+The correction sequence is:
+
+```text
+fresh final auditor findings
+-> R5C10G registered-package fixture cleanup
 -> exact validation gate
 -> fresh final auditor
 -> Gate D acceptance
