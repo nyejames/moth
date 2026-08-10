@@ -691,7 +691,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: Generic functions]
             [: Partial]
-            [: Broad declaration, body validation, inference, instantiation, module-boundary import, nested private receiver materialisation with forwarded receiver bounds and evidence, diagnostics, fallible return, and non-value-use coverage.]
+            [: Broad declaration, body validation, inference, instantiation, module-boundary import, frozen provider semantic-closure defaults and namespaces, nested private receiver materialisation with forwarded receiver bounds and evidence, diagnostics, fallible return, and non-value-use coverage.]
             [: Generic free functions and aligned receiver templates infer from immediate call arguments and immediate expected result context only, then emit concrete instances before HIR. Explicit call-site type application is not part of the current inference-only rule.]
         ]
 

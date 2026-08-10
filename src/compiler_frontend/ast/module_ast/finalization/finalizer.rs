@@ -274,7 +274,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
 
         let AstModuleEnvironment {
             lookups,
-            generated_evidence_target_type_ids: _,
+            generated_evidence_pairs: _,
             type_environment,
             resolved_public_type_roots,
             resolved_public_trait_roots,

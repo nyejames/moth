@@ -926,6 +926,13 @@ contract = "language.generics.function_argument_inference"
 role = "boundary"
 
 [[case]]
+id = "generic_frozen_semantic_closure_success"
+path = "generic_frozen_semantic_closure_success"
+tags = ["integration","generics","functions","imports"]
+contract = "language.generics.function_argument_inference"
+role = "boundary"
+
+[[case]]
 id = "generic_fn_cross_file_namespace_expected_result_success"
 path = "generic_fn_cross_file_namespace_expected_result_success"
 tags = ["integration","generics","functions","imports"]

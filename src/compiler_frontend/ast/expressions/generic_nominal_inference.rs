@@ -156,9 +156,7 @@ pub(crate) fn infer_generic_nominal_constructor(
             type_environment: type_interner.environment(),
             trait_environment: Some(context.trait_environment()),
             trait_evidence_environment: Some(context.trait_evidence_environment()),
-            generated_evidence_target_type_ids: Some(
-                context.shared.generated_evidence_target_type_ids.as_ref(),
-            ),
+            generated_evidence_pairs: Some(context.shared.generated_evidence_pairs.as_ref()),
             visible_trait_names: context
                 .file_visibility
                 .as_ref()

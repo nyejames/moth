@@ -46,56 +46,138 @@ impl AstFinalizer<'_, '_> {
         let store = self.context.template_ir_store.borrow();
 
         for declaration in &self.environment.lookups.module_constants {
-            let ExpressionKind::Template(template) = &declaration.value.kind else {
-                continue;
-            };
-            let reference = template.tir_reference;
-            let view = TirView::with_minimum_phase(
+            let Some(projected) = self.project_template_expression(
+                declaration,
                 &store,
-                reference.root,
-                reference.phase,
-                TemplateTirPhase::Composed,
-                reference.context,
-            )?;
-            let prepared = prepare_tir_view(&view, TemplatePreparationMode::ConstRequired)?;
-            let publish = matches!(prepared, PreparedTemplate::Foldable(_))
-                || matches!(
-                    prepared,
-                    PreparedTemplate::Helper(
-                        crate::compiler_frontend::ast::templates::tir::TemplateHelperKind::SlotInsert
-                    )
-                );
-            if !publish {
-                continue;
-            }
-
-            let source_file_scope = self
-                .environment
-                .lookups
-                .module_symbols
-                .canonical_source_by_symbol_path
-                .get(&declaration.id)
-                .unwrap_or(&declaration.value.location.scope);
-            let mut fold_context = make_fold_context(
-                source_file_scope,
-                &self.context.path_format_config,
                 project_path_resolver,
                 string_table,
-                self.context.template_const_loop_iteration_limit,
-            );
-            let mut visiting = FxHashSet::default();
-            let projected =
-                project_const_template_view(view, prepared, &mut fold_context, &mut visiting)?;
+            )?
+            else {
+                continue;
+            };
+
             let defining_name = declaration.id.name_str(string_table).ok_or_else(|| {
                 CompilerError::compiler_error(
                     "Public const-template declaration path has no defining name.",
                 )
             })?;
             by_name.insert(defining_name.to_owned(), projected.clone());
-            by_path.insert(declaration.id.clone(), projected);
+            Self::insert_projected_template(&mut by_path, declaration, projected)?;
+        }
+
+        // Parameter and nominal-field defaults are declaration-owned compile-time values too.
+        // Keep their path index alongside module constants so frozen generic metadata can
+        // reconstruct a normalized const template without reopening the donor TIR store.
+        for signature in self
+            .environment
+            .lookups
+            .resolved_function_signatures_by_path
+            .values()
+        {
+            for parameter in &signature.signature.parameters {
+                let Some(projected) = self.project_template_expression(
+                    parameter,
+                    &store,
+                    project_path_resolver,
+                    string_table,
+                )?
+                else {
+                    continue;
+                };
+                Self::insert_projected_template(&mut by_path, parameter, projected)?;
+            }
+        }
+        for fields in self
+            .environment
+            .lookups
+            .resolved_struct_fields_by_path
+            .values()
+        {
+            for field in fields {
+                let Some(projected) = self.project_template_expression(
+                    field,
+                    &store,
+                    project_path_resolver,
+                    string_table,
+                )?
+                else {
+                    continue;
+                };
+                Self::insert_projected_template(&mut by_path, field, projected)?;
+            }
         }
 
         Ok(ProjectedConstTemplates { by_name, by_path })
+    }
+
+    fn project_template_expression(
+        &self,
+        declaration: &crate::compiler_frontend::ast::ast_nodes::Declaration,
+        store: &crate::compiler_frontend::ast::templates::tir::TemplateIrStore,
+        project_path_resolver: &ProjectPathResolver,
+        string_table: &mut StringTable,
+    ) -> Result<Option<PublicConstTemplate>, TemplateNormalizationError> {
+        let ExpressionKind::Template(template) = &declaration.value.kind else {
+            return Ok(None);
+        };
+        let reference = template.tir_reference;
+        let view = TirView::with_minimum_phase(
+            store,
+            reference.root,
+            reference.phase,
+            TemplateTirPhase::Composed,
+            reference.context,
+        )?;
+        let prepared = prepare_tir_view(&view, TemplatePreparationMode::ConstRequired)?;
+        let publish = matches!(prepared, PreparedTemplate::Foldable(_))
+            || matches!(
+                prepared,
+                PreparedTemplate::Helper(
+                    crate::compiler_frontend::ast::templates::tir::TemplateHelperKind::SlotInsert
+                )
+            );
+        if !publish {
+            return Ok(None);
+        }
+
+        let source_file_scope = self
+            .environment
+            .lookups
+            .module_symbols
+            .canonical_source_by_symbol_path
+            .get(&declaration.id)
+            .unwrap_or(&declaration.value.location.scope);
+        let mut fold_context = make_fold_context(
+            source_file_scope,
+            &self.context.path_format_config,
+            project_path_resolver,
+            string_table,
+            self.context.template_const_loop_iteration_limit,
+        );
+        let mut visiting = FxHashSet::default();
+        Ok(Some(project_const_template_view(
+            view,
+            prepared,
+            &mut fold_context,
+            &mut visiting,
+        )?))
+    }
+
+    fn insert_projected_template(
+        by_path: &mut FxHashMap<InternedPath, PublicConstTemplate>,
+        declaration: &crate::compiler_frontend::ast::ast_nodes::Declaration,
+        projected: PublicConstTemplate,
+    ) -> Result<(), TemplateNormalizationError> {
+        if let Some(existing) = by_path.get(&declaration.id)
+            && existing != &projected
+        {
+            return Err(CompilerError::compiler_error(
+                "Public const-template projection produced conflicting values for one declaration path.",
+            )
+            .into());
+        }
+        by_path.insert(declaration.id.clone(), projected);
+        Ok(())
     }
 }
 

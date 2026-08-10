@@ -1,0 +1,21 @@
+import @./support as support
+
+default_size #= 10
+Size as Int
+
+Config type T = |
+    value T,
+    size Int = default_size,
+|
+
+private_helper |value Size = default_size| -> Size:
+    return value
+;
+
+identity type T |value T| -> T:
+    fallback Size = default_size
+    config = Config(value)
+    configured_size = config.size
+    ignored = private_helper()
+    return support.identity(value)
+;

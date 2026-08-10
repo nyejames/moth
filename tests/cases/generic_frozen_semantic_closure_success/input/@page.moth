@@ -1,0 +1,4 @@
+import @./helpers {identity}
+
+value = identity("frozen semantic closure")
+[: [value] ]

@@ -16,8 +16,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             .imported_declarations_by_local_path
             .clone();
 
-        let mut projected_declarations = self.declaration_table.iter().cloned().collect::<Vec<_>>();
-
         for (local_path, origin) in imported {
             let Some(record) = self
                 .import_environment
@@ -60,7 +58,16 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     ValueMode::ImmutableReference,
                 ),
             };
-            projected_declarations.push(declaration);
+            Rc::make_mut(&mut self.declaration_table)
+                .append_for_construction(declaration)
+                .ok_or_else(|| {
+                    CompilerMessages::from_error_ref(
+                        CompilerError::compiler_error(
+                            "Imported function declaration path was registered more than once",
+                        ),
+                        string_table,
+                    )
+                })?;
             self.resolved_function_signatures_by_path.insert(
                 local_path.clone(),
                 ResolvedFunctionSignature {
@@ -143,8 +150,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 },
             );
         }
-
-        self.declaration_table = Rc::new(TopLevelDeclarationTable::new(projected_declarations));
 
         Ok(())
     }

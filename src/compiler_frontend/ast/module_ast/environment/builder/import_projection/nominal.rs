@@ -237,7 +237,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             }
         }
 
-        let mut declarations = self.declaration_table.iter().cloned().collect::<Vec<_>>();
         for (local_path, origin) in self
             .import_environment
             .imported_declarations_by_local_path
@@ -324,18 +323,23 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         .insert(local_path.clone(), fields);
                 }
             }
-            declarations.push(Declaration {
-                id: local_path,
-                value: Expression::new(
-                    ExpressionKind::NoValue,
-                    Default::default(),
-                    type_id,
-                    diagnostic_type,
-                    ValueMode::ImmutableReference,
-                ),
-            });
+            Rc::make_mut(&mut self.declaration_table)
+                .append_for_construction(Declaration {
+                    id: local_path,
+                    value: Expression::new(
+                        ExpressionKind::NoValue,
+                        Default::default(),
+                        type_id,
+                        diagnostic_type,
+                        ValueMode::ImmutableReference,
+                    ),
+                })
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "Imported nominal declaration path was registered more than once",
+                    )
+                })?;
         }
-        self.declaration_table = Rc::new(TopLevelDeclarationTable::new(declarations));
 
         Ok(())
     }
@@ -385,10 +389,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             else {
                 continue;
             };
-            collect_semantic_type_origins(&record.semantics, &mut reachable);
-            for discovered in &reachable {
-                if !pending.contains(discovered) {
-                    pending.push(discovered.clone());
+            let mut discovered_origins = FxHashSet::default();
+            collect_semantic_type_origins(&record.semantics, &mut discovered_origins);
+            for discovered in discovered_origins {
+                if reachable.insert(discovered.clone()) {
+                    pending.push(discovered);
                 }
             }
         }

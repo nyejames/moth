@@ -17,7 +17,8 @@ use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::function_calls::parse_generic_call_arguments_typed;
 use crate::compiler_frontend::ast::generic_bounds::{
-    evidence_for_type, evidence_target_is_visible, generic_parameter_declares_bound,
+    evidence_for_type, evidence_target_is_visible, generated_evidence_pair_is_selected,
+    generic_parameter_declares_bound,
 };
 use crate::compiler_frontend::ast::generic_functions::diagnostics::{
     cannot_infer_generic_function_arguments, conflicting_generic_function_argument,
@@ -521,30 +522,31 @@ pub(crate) fn validate_generic_function_bound_evidence(
                 continue;
             }
             let evidence_is_visible = trait_is_visible
-                && (context
-                    .shared
-                    .generated_evidence_target_type_ids
-                    .contains(concrete_type_id)
-                    || evidence_target_is_visible(
-                        *concrete_type_id,
-                        type_environment,
-                        context
-                            .shared
-                            .file_visibility
-                            .as_deref()
-                            .map(|visibility| &visibility.visible_source_names),
-                        context
-                            .shared
-                            .file_visibility
-                            .as_deref()
-                            .map(|visibility| &visibility.visible_type_alias_names),
-                        context
-                            .shared
-                            .file_visibility
-                            .as_deref()
-                            .map(|visibility| &visibility.visible_namespace_records),
-                        context.shared.resolved_type_aliases.as_deref(),
-                    ));
+                && (generated_evidence_pair_is_selected(
+                    *concrete_type_id,
+                    *trait_id,
+                    type_environment,
+                    context.shared.generated_evidence_pairs.as_ref(),
+                ) || evidence_target_is_visible(
+                    *concrete_type_id,
+                    type_environment,
+                    context
+                        .shared
+                        .file_visibility
+                        .as_deref()
+                        .map(|visibility| &visibility.visible_source_names),
+                    context
+                        .shared
+                        .file_visibility
+                        .as_deref()
+                        .map(|visibility| &visibility.visible_type_alias_names),
+                    context
+                        .shared
+                        .file_visibility
+                        .as_deref()
+                        .map(|visibility| &visibility.visible_namespace_records),
+                    context.shared.resolved_type_aliases.as_deref(),
+                ));
             let evidence_id = evidence_is_visible
                 .then(|| {
                     evidence_for_type(

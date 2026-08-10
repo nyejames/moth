@@ -33,6 +33,7 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
+use crate::compiler_frontend::traits::ids::TraitId;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -127,7 +128,7 @@ pub(crate) struct AstModuleEnvironment {
     /// Exact nominal targets whose requester-selected evidence is being reconstructed for one
     /// generated body. This transient set is consumed by bound validation and is deliberately
     /// separate from authored file visibility.
-    pub(crate) generated_evidence_target_type_ids: Rc<FxHashSet<TypeId>>,
+    pub(crate) generated_evidence_pairs: Rc<FxHashSet<(TypeId, TraitId)>>,
 
     // Frontend semantic type identity owned by this module.
     // WHY: AST nodes carry compact TypeIds; the environment carries the canonical table.

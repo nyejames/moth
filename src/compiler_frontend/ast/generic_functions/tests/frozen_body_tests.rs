@@ -10,11 +10,13 @@ use super::{
     FrozenStringPool, GenericFunctionTemplate, ModuleMaterialisationPreparation, StableBodySyntax,
     check_materialisation_row_identity,
 };
+use crate::compiler_frontend::ast::generic_bounds::generated_evidence_pair_is_selected;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::datatypes::ids::GenericParameterListId;
+use crate::compiler_frontend::datatypes::{builtin_type_ids, environment::TypeEnvironment};
 use crate::compiler_frontend::numeric_text::token::{
     NumericExponentSign, NumericLiteralKind, NumericLiteralSign, NumericLiteralToken,
 };
@@ -28,7 +30,8 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable}
 use crate::compiler_frontend::tokenizer::tokens::{
     CharPosition, FileTokens, PathTokenItem, SourceLocation, Token, TokenKind,
 };
-use rustc_hash::FxHashMap;
+use crate::compiler_frontend::traits::ids::TraitId;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 fn location(scope: &str, string_table: &mut StringTable) -> SourceLocation {
     SourceLocation::new(
@@ -371,4 +374,23 @@ fn stale_in_range_template_row_fails_declaration_identity_validation() {
         error.msg.contains("declaration identity"),
         "unexpected row identity error: {error:?}"
     );
+}
+
+#[test]
+fn generated_evidence_authorization_requires_the_selected_trait_pair() {
+    let type_environment = TypeEnvironment::new();
+    let selected = FxHashSet::from_iter([(builtin_type_ids::INT, TraitId(7))]);
+
+    assert!(generated_evidence_pair_is_selected(
+        builtin_type_ids::INT,
+        TraitId(7),
+        &type_environment,
+        &selected,
+    ));
+    assert!(!generated_evidence_pair_is_selected(
+        builtin_type_ids::INT,
+        TraitId(8),
+        &type_environment,
+        &selected,
+    ));
 }

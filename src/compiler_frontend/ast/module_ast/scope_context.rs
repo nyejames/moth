@@ -71,6 +71,7 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable}
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
+use crate::compiler_frontend::traits::ids::TraitId;
 use crate::projects::settings::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::return_compiler_error;
 
@@ -108,7 +109,7 @@ pub struct ScopeShared {
     pub(crate) lookups: Rc<AstModuleLookups>,
     pub(crate) top_level_declarations: Rc<TopLevelDeclarationTable>,
     pub(crate) nominal_type_ids_by_path: Rc<FxHashMap<InternedPath, TypeId>>,
-    pub(crate) generated_evidence_target_type_ids: Rc<FxHashSet<TypeId>>,
+    pub(crate) generated_evidence_pairs: Rc<FxHashSet<(TypeId, TraitId)>>,
 
     // External package and frontend services.
     pub(crate) external_package_registry: Arc<ExternalPackageRegistry>,
@@ -432,7 +433,7 @@ impl ScopeContext {
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             receiver_methods: Rc::clone(&lookups.receiver_methods),
             nominal_type_ids_by_path: Rc::clone(&lookups.nominal_type_ids_by_path),
-            generated_evidence_target_type_ids: Rc::new(FxHashSet::default()),
+            generated_evidence_pairs: Rc::new(FxHashSet::default()),
             trait_environment_override: None,
         });
 

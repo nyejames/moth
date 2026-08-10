@@ -30,7 +30,7 @@ pub(crate) struct GenericBoundEvidenceContext<'a> {
     pub(crate) type_environment: &'a TypeEnvironment,
     pub(crate) trait_environment: Option<&'a TraitEnvironment>,
     pub(crate) trait_evidence_environment: Option<&'a TraitEvidenceEnvironment>,
-    pub(crate) generated_evidence_target_type_ids: Option<&'a FxHashSet<TypeId>>,
+    pub(crate) generated_evidence_pairs: Option<&'a FxHashSet<(TypeId, TraitId)>>,
     pub(crate) visible_trait_names: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
     pub(crate) visible_source_names: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
     pub(crate) visible_type_alias_names: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
@@ -50,7 +50,7 @@ impl<'a> GenericBoundEvidenceContext<'a> {
             type_environment,
             trait_environment: Some(trait_environment),
             trait_evidence_environment: Some(trait_evidence_environment),
-            generated_evidence_target_type_ids: None,
+            generated_evidence_pairs: None,
             visible_trait_names: Some(&visibility.visible_trait_names),
             visible_source_names: Some(&visibility.visible_source_names),
             visible_type_alias_names: Some(&visibility.visible_type_alias_names),
@@ -59,11 +59,14 @@ impl<'a> GenericBoundEvidenceContext<'a> {
         }
     }
 
-    pub(crate) fn evidence_target_is_visible(&self, type_id: TypeId) -> bool {
-        if self
-            .generated_evidence_target_type_ids
-            .is_some_and(|type_ids| type_ids.contains(&type_id))
-        {
+    pub(crate) fn evidence_target_is_visible_for_trait(
+        &self,
+        type_id: TypeId,
+        trait_id: TraitId,
+    ) -> bool {
+        if self.generated_evidence_pairs.is_some_and(|pairs| {
+            generated_evidence_pair_is_selected(type_id, trait_id, self.type_environment, pairs)
+        }) {
             return true;
         }
         evidence_target_is_visible(
@@ -75,6 +78,30 @@ impl<'a> GenericBoundEvidenceContext<'a> {
             self.resolved_type_aliases,
         )
     }
+}
+
+/// Check the exact generated evidence pair selected by one requester.
+///
+/// A generic instance may use evidence registered on its nominal constructor, so the
+/// constructor pair is accepted alongside an exact instance pair. The trait remains part of
+/// the key: selecting evidence for one trait must never make a different trait visible merely
+/// because it shares the same target type.
+pub(crate) fn generated_evidence_pair_is_selected(
+    type_id: TypeId,
+    trait_id: TraitId,
+    type_environment: &TypeEnvironment,
+    pairs: &FxHashSet<(TypeId, TraitId)>,
+) -> bool {
+    if pairs.contains(&(type_id, trait_id)) {
+        return true;
+    }
+    let Some(TypeDefinition::GenericInstance(instance)) = type_environment.get(type_id) else {
+        return false;
+    };
+    let Some(base_type_id) = type_environment.type_id_for_nominal_id(instance.base) else {
+        return false;
+    };
+    pairs.contains(&(base_type_id, trait_id))
 }
 
 pub(crate) fn validate_nominal_generic_bound_evidence(
@@ -233,7 +260,7 @@ fn validate_single_bound(
     }
 
     let has_reusable_evidence = trait_is_visible
-        && context.evidence_target_is_visible(concrete_type_id)
+        && context.evidence_target_is_visible_for_trait(concrete_type_id, trait_id)
         && evidence_for_type(
             concrete_type_id,
             trait_id,

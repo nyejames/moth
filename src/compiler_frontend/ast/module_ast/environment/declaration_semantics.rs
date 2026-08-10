@@ -86,6 +86,16 @@ impl DeclarationSemanticTable {
     pub(crate) fn register_materialised_function(&mut self, path: InternedPath) {
         self.by_path.insert(path, DeclarationSemanticKind::Function);
     }
+
+    /// Register a constant reconstructed from the stable generated-materialisation closure.
+    pub(crate) fn register_materialised_constant(&mut self, path: InternedPath) {
+        self.by_path.insert(path, DeclarationSemanticKind::Constant);
+    }
+
+    /// Register a transparent alias declaration reconstructed from the stable closure.
+    pub(crate) fn register_materialised_value(&mut self, path: InternedPath) {
+        self.by_path.insert(path, DeclarationSemanticKind::Value);
+    }
 }
 
 fn classify_declaration(
