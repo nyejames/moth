@@ -1,0 +1,14 @@
+PrivateBox type T = |
+    value T,
+|
+
+private_label type T |this PrivateBox of T| -> String:
+    return "private generic receiver"
+;
+
+export:
+    make type T |value T| -> String:
+        box = PrivateBox(value)
+        return box.private_label()
+    ;
+;

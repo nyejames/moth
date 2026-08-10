@@ -1,7 +1,7 @@
-//! AST-owned generic free-function model.
+//! AST-owned generic function and receiver-template model.
 //!
-//! WHAT: keeps parsed generic function bodies as immutable templates and defines the
-//! concrete-call inference and instance-emission records for visible generic free functions.
+//! WHAT: keeps parsed generic function and receiver-method bodies as immutable templates and
+//! defines the concrete-call inference and instance-emission records for visible generic calls.
 //! WHY: generic functions must be solved and instantiated before HIR lowering. The AST
 //! stage owns that boundary so backends never receive unresolved generic parameters.
 

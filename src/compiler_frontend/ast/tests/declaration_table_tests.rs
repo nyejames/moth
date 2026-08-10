@@ -42,6 +42,47 @@ fn updates_existing_declaration_slot_without_reordering() {
     assert_eq!(by_name.value.diagnostic_type, DataType::StringSlice);
 }
 
+#[test]
+fn appending_declaration_updates_path_and_name_indexes() {
+    let mut string_table = StringTable::new();
+    let first_path = InternedPath::from_single_str("first", &mut string_table);
+    let appended_path = InternedPath::from_single_str("appended", &mut string_table);
+
+    let mut table = TopLevelDeclarationTable::new(vec![declaration(&first_path, DataType::Bool)]);
+    let appended = declaration(&appended_path, DataType::StringSlice);
+
+    table
+        .append_for_construction(appended)
+        .expect("new declaration path should append during construction");
+
+    assert_eq!(table.iter().count(), 2);
+    assert_eq!(
+        table
+            .get_by_path(&appended_path)
+            .expect("path index should include appended declaration")
+            .value
+            .diagnostic_type,
+        DataType::StringSlice
+    );
+    assert_eq!(
+        table
+            .get_visible_resolved_by_name(
+                appended_path
+                    .name()
+                    .expect("appended test path should have a name"),
+                None,
+            )
+            .expect("name index should include appended declaration")
+            .id,
+        appended_path
+    );
+    assert!(
+        table
+            .append_for_construction(declaration(&appended_path, DataType::Bool))
+            .is_none()
+    );
+}
+
 fn declaration(path: &InternedPath, data_type: DataType) -> Declaration {
     Declaration {
         id: path.to_owned(),

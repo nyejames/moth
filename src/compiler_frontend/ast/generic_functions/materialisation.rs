@@ -57,7 +57,7 @@ use crate::compiler_frontend::headers::import_environment::{
     SourceFunctionTarget,
 };
 use crate::compiler_frontend::headers::module_symbols::{
-    GenericDeclarationMetadata, ModuleSymbols,
+    GenericDeclarationKind, GenericDeclarationMetadata, ModuleSymbols,
 };
 use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
@@ -347,6 +347,7 @@ struct GenericTemplateArtefact {
     declaration_identity: GeneratedDeclarationIdentity,
     generic_parameter_owner: Option<GenericDeclarationOrigin>,
     receiver: Option<StableReceiverKey>,
+    receiver_nominal_identity: Option<CanonicalTypeIdentity>,
     function_path: Box<[String]>,
     source_file: Box<[String]>,
     declaration_location: StableSourceLocation,
@@ -608,6 +609,7 @@ impl ModuleMaterialisationContext {
                 declaration_identity,
                 generic_parameter_owner: None,
                 receiver: None,
+                receiver_nominal_identity: None,
                 function_path: Box::new([]),
                 source_file: Box::new([]),
                 declaration_location: StableSourceLocation {
@@ -937,9 +939,48 @@ impl GenericTemplateArtefact {
             environment
                 .type_environment
                 .register_nominal_path_alias(local_path.clone(), type_id)?;
+            let generated_nominal_path = environment
+                .type_environment
+                .nominal_path(type_id)
+                .cloned()
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "Materialised nominal binding has no generated environment path",
+                    )
+                })?;
+            let generic_metadata =
+                materialised_generic_nominal_metadata(type_id, &environment.type_environment)?;
             let lookups = Rc::make_mut(&mut environment.lookups);
             Rc::make_mut(&mut lookups.nominal_type_ids_by_path).insert(local_path.clone(), type_id);
-            Rc::make_mut(&mut lookups.source_nominal_paths).insert(local_path);
+            Rc::make_mut(&mut lookups.source_nominal_paths).insert(local_path.clone());
+            if let Some(metadata) = generic_metadata {
+                let declarations = Rc::make_mut(&mut lookups.generic_declarations_by_path);
+                declarations
+                    .entry(local_path.clone())
+                    .or_insert_with(|| metadata.clone());
+                declarations
+                    .entry(generated_nominal_path.clone())
+                    .or_insert(metadata);
+            }
+            if !lookups
+                .resolved_struct_fields_by_path
+                .contains_key(&generated_nominal_path)
+                && let Some(fields) =
+                    materialised_struct_fields(type_id, &environment.type_environment)
+            {
+                Rc::make_mut(&mut lookups.resolved_struct_fields_by_path)
+                    .insert(generated_nominal_path, fields);
+            }
+            if lookups.declaration_table.get_by_path(&local_path).is_none() {
+                append_materialised_declaration(
+                    lookups,
+                    materialised_nominal_declaration(
+                        local_path.clone(),
+                        type_id,
+                        &environment.type_environment,
+                    )?,
+                )?;
+            }
         }
 
         for callable in &self.callables {
@@ -971,13 +1012,7 @@ impl GenericTemplateArtefact {
                 ),
             };
             let lookups = Rc::make_mut(&mut environment.lookups);
-            let mut declarations = lookups
-                .declaration_table
-                .iter()
-                .cloned()
-                .collect::<Vec<_>>();
-            declarations.push(declaration);
-            lookups.declaration_table = Rc::new(TopLevelDeclarationTable::new(declarations));
+            append_materialised_declaration(lookups, declaration)?;
             Rc::make_mut(&mut lookups.resolved_function_signatures_by_path).insert(
                 local_path.clone(),
                 ResolvedFunctionSignature {
@@ -1046,13 +1081,7 @@ impl GenericTemplateArtefact {
                 .get_by_path(&method_path)
                 .is_none()
             {
-                let mut declarations = lookups
-                    .declaration_table
-                    .iter()
-                    .cloned()
-                    .collect::<Vec<_>>();
-                declarations.push(declaration);
-                lookups.declaration_table = Rc::new(TopLevelDeclarationTable::new(declarations));
+                append_materialised_declaration(lookups, declaration)?;
             }
             Rc::make_mut(&mut lookups.resolved_function_signatures_by_path).insert(
                 method_path.clone(),
@@ -1090,12 +1119,6 @@ impl GenericTemplateArtefact {
                 && !selected_paths.contains(&nested_path)
             {
                 continue;
-            }
-            if nested.receiver.is_some() && nested.generic_parameter_owner.is_none() {
-                return Err(CompilerError::compiler_error(format!(
-                    "Materialised generic receiver template {:?} has no generic-parameter owner",
-                    nested_path
-                )));
             }
             let (generic_parameter_list_id, generic_parameter_type_ids) = if let Some(
                 nominal_origin,
@@ -1162,16 +1185,69 @@ impl GenericTemplateArtefact {
                     .iter()
                     .zip(&generic_parameter_type_ids)
                 {
-                    let exported_identity = parameter.exported_identity.as_ref().ok_or_else(|| {
-                            CompilerError::compiler_error(
-                                "Generic receiver template parameter has no stable nominal identity",
-                            )
-                        })?;
-                    let expected_identity =
-                        CanonicalTypeIdentity::GenericParameter(exported_identity.clone());
-                    environment
-                        .type_environment
-                        .register_canonical_identity(expected_identity, *type_id)?;
+                    if let Some(exported_identity) = parameter.exported_identity.as_ref() {
+                        let expected_identity =
+                            CanonicalTypeIdentity::GenericParameter(exported_identity.clone());
+                        environment
+                            .type_environment
+                            .register_canonical_identity(expected_identity, *type_id)?;
+                    }
+                }
+                (generic_parameter_list_id, generic_parameter_type_ids)
+            } else if nested.receiver.is_some() {
+                let receiver_identity = nested.receiver_nominal_identity.as_ref().ok_or_else(|| {
+                    CompilerError::compiler_error(format!(
+                        "Materialised generic receiver template {:?} has no retained nominal identity",
+                        nested_path
+                    ))
+                })?;
+                let receiver_type_id = intern_generated_canonical_type(
+                    receiver_identity,
+                    &mut environment.type_environment,
+                    external_package_registry,
+                    self,
+                    string_table,
+                )?;
+                let generic_parameter_list_id =
+                    match environment.type_environment.get(receiver_type_id) {
+                        Some(TypeDefinition::Struct(definition)) => definition.generic_parameters,
+                        Some(TypeDefinition::Choice(definition)) => definition.generic_parameters,
+                        _ => {
+                            return Err(CompilerError::compiler_error(
+                                "Private generic receiver owner is not a nominal type",
+                            ));
+                        }
+                    }
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "Private generic receiver owner has no generic parameter list",
+                        )
+                    })?;
+                let generic_parameter_type_ids = environment
+                    .type_environment
+                    .generic_parameters(generic_parameter_list_id)
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "Private generic receiver owner has a missing parameter list",
+                        )
+                    })?
+                    .parameters
+                    .iter()
+                    .map(|parameter| {
+                        environment
+                            .type_environment
+                            .type_id_for_generic_parameter(parameter.id)
+                            .ok_or_else(|| {
+                                CompilerError::compiler_error(
+                                    "Private generic receiver owner parameter has no type handle",
+                                )
+                            })
+                    })
+                    .collect::<Result<Vec<_>, CompilerError>>()?;
+                if generic_parameter_type_ids.len() != nested.generic_parameters.len() {
+                    return Err(CompilerError::compiler_error(
+                        "Private generic receiver template parameter count disagrees with its nominal owner",
+                    ));
                 }
                 (generic_parameter_list_id, generic_parameter_type_ids)
             } else {
@@ -1314,22 +1390,19 @@ impl GenericTemplateArtefact {
                 .get_by_path(&nested_path)
                 .is_none()
             {
-                let mut declarations = lookups
-                    .declaration_table
-                    .iter()
-                    .cloned()
-                    .collect::<Vec<_>>();
-                declarations.push(Declaration {
-                    id: nested_path.clone(),
-                    value: Expression::new(
-                        ExpressionKind::NoValue,
-                        Default::default(),
-                        function_type_id,
-                        DataType::Function(Box::new(receiver), signature),
-                        ValueMode::ImmutableReference,
-                    ),
-                });
-                lookups.declaration_table = Rc::new(TopLevelDeclarationTable::new(declarations));
+                append_materialised_declaration(
+                    lookups,
+                    Declaration {
+                        id: nested_path.clone(),
+                        value: Expression::new(
+                            ExpressionKind::NoValue,
+                            Default::default(),
+                            function_type_id,
+                            DataType::Function(Box::new(receiver), signature),
+                            ValueMode::ImmutableReference,
+                        ),
+                    },
+                )?;
             }
             Rc::make_mut(&mut lookups.declaration_semantics)
                 .register_materialised_function(nested_path);
@@ -1400,6 +1473,132 @@ fn register_materialised_receiver_method(
         ));
     }
     Ok(())
+}
+
+fn append_materialised_declaration(
+    lookups: &mut AstModuleLookups,
+    declaration: Declaration,
+) -> Result<(), CompilerError> {
+    let path = declaration.id.clone();
+    Rc::make_mut(&mut lookups.declaration_table)
+        .append_for_construction(declaration)
+        .ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "Materialised declaration path {path:?} was registered more than once",
+            ))
+        })?;
+    Ok(())
+}
+
+fn materialised_nominal_declaration(
+    local_path: InternedPath,
+    type_id: TypeId,
+    type_environment: &TypeEnvironment,
+) -> Result<Declaration, CompilerError> {
+    let diagnostic_type = match type_environment.get(type_id) {
+        Some(TypeDefinition::Struct(definition)) => DataType::Struct {
+            nominal_path: local_path.clone(),
+            type_id,
+            const_record: definition.const_record,
+            generic_instance_key: None,
+        },
+        Some(TypeDefinition::Choice(_)) => DataType::Choices {
+            nominal_path: local_path.clone(),
+            type_id,
+            generic_instance_key: None,
+        },
+        _ => {
+            return Err(CompilerError::compiler_error(
+                "Materialised nominal binding has no struct or choice definition",
+            ));
+        }
+    };
+    Ok(Declaration {
+        id: local_path,
+        value: Expression::new(
+            ExpressionKind::NoValue,
+            Default::default(),
+            type_id,
+            diagnostic_type,
+            ValueMode::ImmutableReference,
+        ),
+    })
+}
+
+fn materialised_generic_nominal_metadata(
+    type_id: TypeId,
+    type_environment: &TypeEnvironment,
+) -> Result<Option<GenericDeclarationMetadata>, CompilerError> {
+    let Some(generic_parameter_list_id) =
+        type_environment.generic_parameter_list_id_for_type(type_id)
+    else {
+        return Ok(None);
+    };
+    let environment_parameters = type_environment
+        .generic_parameters(generic_parameter_list_id)
+        .ok_or_else(|| {
+            CompilerError::compiler_error(
+                "Materialised generic nominal has no registered parameter list",
+            )
+        })?
+        .parameters
+        .iter()
+        .enumerate()
+        .map(|(index, parameter)| GenericParameter {
+            id: TypeParameterId(index as u32),
+            name: parameter.name,
+            location: Default::default(),
+            trait_bounds: Vec::new(),
+        })
+        .collect::<Vec<_>>();
+    let kind = match type_environment.get(type_id) {
+        Some(TypeDefinition::Struct(_)) => GenericDeclarationKind::Struct,
+        Some(TypeDefinition::Choice(_)) => GenericDeclarationKind::Choice,
+        Some(TypeDefinition::GenericInstance(_)) => {
+            return Err(CompilerError::compiler_error(
+                "Materialised generic nominal metadata target is an instance",
+            ));
+        }
+        _ => {
+            return Err(CompilerError::compiler_error(
+                "Materialised generic nominal metadata target is not a struct or choice",
+            ));
+        }
+    };
+    Ok(
+        (!environment_parameters.is_empty()).then_some(GenericDeclarationMetadata {
+            kind,
+            parameters: GenericParameterList {
+                parameters: environment_parameters,
+            },
+            declaration_location: Default::default(),
+        }),
+    )
+}
+
+fn materialised_struct_fields(
+    type_id: TypeId,
+    type_environment: &TypeEnvironment,
+) -> Option<Vec<Declaration>> {
+    let TypeDefinition::Struct(_) = type_environment.get(type_id)? else {
+        return None;
+    };
+    Some(
+        type_environment
+            .fields_for(type_id)?
+            .iter()
+            .map(|field| Declaration {
+                id: field.name.clone(),
+                value: Expression::new(
+                    ExpressionKind::NoValue,
+                    field.location.clone(),
+                    field.type_id,
+                    diagnostic_type_spelling(field.type_id, type_environment),
+                    ValueMode::ImmutableReference,
+                ),
+            })
+            .collect(),
+    )
 }
 
 impl StableFileVisibility {
@@ -1789,6 +1988,7 @@ impl ModuleMaterialisationPreparation {
             .and_then(|resolved| resolved.receiver.as_ref())
             .map(|receiver| StableReceiverKey::capture(receiver, &self.string_table))
             .transpose()?;
+        let receiver_nominal_identity = self.receiver_nominal_identity(&template.function_path)?;
         let parameter_slots = self.generic_parameter_slots(template)?;
         let signature = self.stable_function_signature(&template.signature, &parameter_slots)?;
         let mut referenced_names = stable_body_symbol_names(body_tokens, &self.string_table);
@@ -1809,6 +2009,7 @@ impl ModuleMaterialisationPreparation {
             declaration_identity,
             generic_parameter_owner,
             receiver,
+            receiver_nominal_identity,
             function_path: stable_path(&template.function_path, &self.string_table),
             source_file: stable_path(&template.source_file, &self.string_table),
             declaration_location: StableSourceLocation::capture(
@@ -2310,6 +2511,45 @@ impl ModuleMaterialisationPreparation {
             .collect::<Vec<_>>();
         bindings.sort_by(|left, right| left.local_path.cmp(&right.local_path));
         bindings.into_boxed_slice()
+    }
+
+    fn receiver_nominal_identity(
+        &self,
+        function_path: &InternedPath,
+    ) -> Result<Option<CanonicalTypeIdentity>, CompilerError> {
+        let Some(receiver) = self
+            .resolved_function_signatures_by_path
+            .get(function_path)
+            .and_then(|resolved| resolved.receiver.as_ref())
+        else {
+            return Ok(None);
+        };
+        let receiver_path = match receiver {
+            ReceiverKey::Struct(path) | ReceiverKey::Choice(path) => path,
+            ReceiverKey::External(_) | ReceiverKey::BuiltinScalar(_) => {
+                return Err(CompilerError::compiler_error(
+                    "Retained receiver method has no source nominal identity",
+                ));
+            }
+        };
+        let type_id = self
+            .nominal_type_ids_by_path
+            .get(receiver_path)
+            .copied()
+            .ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "Retained receiver method has no enclosing nominal type handle",
+                )
+            })?;
+        self.type_environment
+            .canonical_identity_for_type_id(type_id)
+            .cloned()
+            .map(Some)
+            .ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "Retained receiver method has no enclosing nominal identity",
+                )
+            })
     }
 
     /// Freeze stable targets for every concrete executable visible to generated bodies.

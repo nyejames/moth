@@ -7,7 +7,8 @@
 //!
 //! Owned by the AST environment builder and consumed by AST emission, `ScopeContext`, and
 //! finalization. The table is immutable after construction except for in-place replacements
-//! during environment building.
+//! during environment building and construction-time appends while generated environments are
+//! assembled.
 
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
@@ -16,8 +17,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Opaque index into `TopLevelDeclarationTable::declarations`.
 ///
-/// IDs are created only by `TopLevelDeclarationTable::new` and are valid only within the
-/// table that produced them.
+/// IDs are created by `TopLevelDeclarationTable::new` or its construction-only append operation
+/// and are valid only within the table that produced them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(in crate::compiler_frontend::ast) struct DeclarationId(u32);
 
@@ -88,6 +89,34 @@ impl TopLevelDeclarationTable {
     ) -> Option<DeclarationId> {
         let declaration_id = *self.by_path.get(&declaration.id)?;
         self.declarations[declaration_id.index()] = declaration;
+        Some(declaration_id)
+    }
+
+    /// Append one declaration while a generated environment is being assembled.
+    ///
+    /// WHAT: extends the declaration vector and both construction indexes in one operation.
+    /// WHY: generated materialisation adds a small number of declarations to an existing
+    ///     environment; rebuilding the complete table for each addition makes that hot path
+    ///     quadratic and needlessly clones unrelated declarations.
+    ///
+    /// This is intentionally construction-only. Callers must not use it to mutate a completed
+    /// AST environment, and duplicate paths are rejected rather than replacing an existing row.
+    pub(in crate::compiler_frontend::ast) fn append_for_construction(
+        &mut self,
+        declaration: Declaration,
+    ) -> Option<DeclarationId> {
+        if self.by_path.contains_key(&declaration.id) {
+            return None;
+        }
+
+        let declaration_id = DeclarationId(self.declarations.len() as u32);
+        let path = declaration.id.to_owned();
+        let name = declaration.id.name();
+        self.declarations.push(declaration);
+        self.by_path.insert(path, declaration_id);
+        if let Some(name) = name {
+            self.by_name.entry(name).or_default().push(declaration_id);
+        }
         Some(declaration_id)
     }
 

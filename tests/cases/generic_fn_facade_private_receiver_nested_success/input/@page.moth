@@ -1,0 +1,5 @@
+import @utils {make}
+
+value = make(42)
+
+[: [value]]

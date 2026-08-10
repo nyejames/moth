@@ -1,6 +1,6 @@
 //! Generic function instance identity.
 //!
-//! WHAT: defines the canonical key and record shape for concrete generic free-function
+//! WHAT: defines the canonical key and record shape for concrete generic function and receiver
 //! instances.
 //! WHY: call inference and emission deduplicate instances by source function path and canonical
 //! `TypeId` arguments, not by rendered names or local import aliases.

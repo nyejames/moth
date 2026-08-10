@@ -1,7 +1,7 @@
 //! Generic function diagnostics owned by AST call/template handling.
 //!
-//! WHAT: provides focused constructors and helpers for generic free-function inference,
-//! concrete instantiation context, and unsupported generic function value use.
+//! WHAT: provides focused constructors and helpers for generic function inference, concrete
+//! instantiation context, and unsupported generic function value use.
 //! WHY: call parsing and instance emission should report structured generic facts without
 //! knowing diagnostic rendering details.
 
