@@ -1,4 +1,4 @@
-**Accepted deferred design.** This page defines the final grouped project-config contract. The current compiler still uses a transitional flat config shape and legacy `package_folders` discovery. See @../progress (Progress) for current support.
+**Accepted deferred design.** This page defines the final grouped project-config contract. The current compiler still parses and stores the transitional flat `package_folders` field for migration compatibility, but canonical Stage 0 ignores it. See @../progress (Progress) for current support.
 
 `config.moth` is the single project config file. It lives at the project root, is loaded before source-tree discovery and is one self-contained compile-time source file with no source imports or package resolution.
 

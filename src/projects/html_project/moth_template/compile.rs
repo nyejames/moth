@@ -65,19 +65,23 @@ fn compile_one_source(
     string_table: &mut StringTable,
     warnings: &mut Vec<CompilerDiagnostic>,
 ) -> Result<CompiledMothTemplateDocument, CompilerMessages> {
-    let mut compiler =
-        new_direct_moth_template_frontend(&source.source_path, string_table.clone())?;
+    let MothTemplateSourceUnit {
+        source_path,
+        relative_path,
+        source_text,
+    } = source;
+    let mut compiler = new_direct_moth_template_frontend(&source_path, string_table.clone())?;
 
     let source_files = SourceFileTable::build(
-        [source.source_path.as_path()],
-        source.source_path.as_path(),
+        [source_path.as_path()],
+        source_path.as_path(),
         compiler.project_path_resolver.as_ref(),
         &mut compiler.string_table,
     )
     .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
     compiler.set_source_files(source_files);
 
-    let prepared = prepare_source_file(&mut compiler, &source)?;
+    let prepared = prepare_source_file(&mut compiler, &source_path, source_text)?;
     let prepared_syntax = prepare_header_syntax(vec![prepared], &mut compiler.string_table)
         .map_err(|bag| {
             CompilerMessages::from_diagnostics(
@@ -104,7 +108,7 @@ fn compile_one_source(
     let ast = compiler
         .headers_to_ast(
             sorted,
-            &source.source_path,
+            &source_path,
             crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
             FrontendBuildProfile::Dev,
             Default::default(),
@@ -118,8 +122,8 @@ fn compile_one_source(
     *string_table = compiler.string_table;
 
     Ok(CompiledMothTemplateDocument {
-        source_path: source.source_path,
-        relative_path: source.relative_path,
+        source_path,
+        relative_path,
         content,
     })
 }
@@ -160,7 +164,8 @@ fn new_direct_moth_template_frontend(
 
 fn prepare_source_file(
     compiler: &mut CompilerFrontend,
-    source: &MothTemplateSourceUnit,
+    source_path: &Path,
+    source_text: String,
 ) -> Result<
     crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareOutput,
     CompilerMessages,
@@ -168,7 +173,7 @@ fn prepare_source_file(
     let options = HeaderParseOptions {
         entry_file_id: compiler
             .source_files
-            .get_by_canonical_path(&source.source_path)
+            .get_by_canonical_path(source_path)
             .map(|identity| identity.file_id),
         project_path_resolver: compiler.project_path_resolver.clone(),
         active_root_role: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
@@ -176,13 +181,13 @@ fn prepare_source_file(
     let context = FrontendFilePrepareContext {
         source_files: &compiler.source_files,
         style_directives: &compiler.style_directives,
-        entry_file_path: source.source_path.as_path(),
+        entry_file_path: source_path,
         options: &options,
     };
     let input = FrontendFilePrepareInput {
         source: FrontendFilePrepareSource::MothTemplate {
-            source_code: source.source_text.clone(),
-            source_path: source.source_path.clone(),
+            source_code: source_text,
+            source_path: source_path.to_path_buf(),
         },
         const_template_offset: 0,
         runtime_fragment_offset: 0,

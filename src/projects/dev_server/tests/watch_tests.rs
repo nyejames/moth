@@ -69,7 +69,7 @@ fn detects_modified_file_fingerprints() {
 }
 
 #[test]
-fn directory_scope_watches_config_entry_root_and_package_folders() {
+fn directory_scope_ignores_legacy_package_folders() {
     let root = temp_dir("directory_scope");
     let output_dir = root.join("dev");
     fs::create_dir_all(root.join("src")).expect("should create src dir");
@@ -92,8 +92,8 @@ fn directory_scope_watches_config_entry_root_and_package_folders() {
     assert!(scope.watches_path(&canonical_root.join(CONFIG_FILE_NAME)));
     assert!(scope.watches_path(&canonical_root.join("src/main.moth")));
     assert!(scope.watches_path(&canonical_root.join("src/helper.js")));
-    assert!(scope.watches_path(&canonical_root.join("assets/logo.png")));
-    assert!(scope.watches_path(&canonical_root.join("assets/vendor/lib.js")));
+    assert!(!scope.watches_path(&canonical_root.join("assets/logo.png")));
+    assert!(!scope.watches_path(&canonical_root.join("assets/vendor/lib.js")));
     assert!(!scope.watches_path(&canonical_root.join("target/debug/app")));
     assert!(!scope.watches_path(&canonical_root.join("dev/bundle.js")));
 

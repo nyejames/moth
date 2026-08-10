@@ -67,7 +67,7 @@ pub const MINIMUM_LIKELY_DECLARATIONS: usize = 10; // (Maybe) How many symbols t
 /// - `entry_root`: The root directory for source files (default: "")
 /// - `dev_folder`: Output directory for development builds (default: "dev")
 /// - `output_folder`: Output directory for release builds (default: "release")
-/// - `package_folders`: Top-level folders scanned for project-local source-backed packages (default: ["lib"])
+/// - `package_folders`: Transitional parsed/stored configuration (default: ["lib"]); canonical Stage 0 ignores it
 /// - `project_name` or `name`: The project name
 /// - `version`: The project version (default: "0.1.0")
 /// - `author`: The project author
@@ -83,9 +83,10 @@ pub struct Config {
     pub entry_root: PathBuf,
     pub dev_folder: PathBuf,
     pub release_folder: PathBuf,
-    /// Top-level project folders scanned for project-local source-backed packages.
+    /// Transitional parsed/stored package-folder configuration. Canonical Stage 0 ignores this field;
+    /// the queued Project Config migration removes it.
     pub package_folders: Vec<PathBuf>,
-    /// Whether `package_folders` was explicitly configured in `config.moth`.
+    /// Whether the transitional `package_folders` field was explicitly configured in `config.moth`.
     pub has_explicit_package_folders: bool,
     /// Per-loop expansion limit for compile-time template loops.
     pub template_const_loop_iteration_limit: usize,
@@ -107,7 +108,8 @@ impl Config {
             dev_folder: PathBuf::from("dev"),
             release_folder: PathBuf::from("release"),
 
-            package_folders: vec![PathBuf::from("lib")], // Default convention for project-local source-backed packages
+            // Retained for transitional config storage; canonical Stage 0 ignores this default.
+            package_folders: vec![PathBuf::from("lib")],
             has_explicit_package_folders: false,
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             project_name: String::new(),

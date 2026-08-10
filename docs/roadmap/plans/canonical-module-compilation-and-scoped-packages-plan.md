@@ -25,10 +25,10 @@ ACTIVE_PLAN: docs/roadmap/plans/canonical-module-compilation-and-scoped-packages
 WORK_ID: R5-closeout
 WORK_SOURCE: continued Phase 5 closeout after Gate B acceptance and the revised plan
 BASE_REVISION: 276bc4cb2 (clean revised-plan baseline before R5C6A)
-IMPLEMENTED_CHECKPOINT: 3c839b85b
-RECONCILED_HEAD: 3c839b85b
-STATUS: final-review - R5C10D correction slice complete; final auditor pending
-CURRENT_SLICE: R5C10D - frozen semantic closure and exact generated-evidence authorization (complete)
+IMPLEMENTED_CHECKPOINT: 8d91bb815
+RECONCILED_HEAD: 8d91bb815
+STATUS: final-review - R5C10E correction slice complete; fresh final auditor pending
+CURRENT_SLICE: R5C10E - remove legacy package-folder consumers/contracts and direct Moth-template source clone (complete)
 ACCEPTED_CHECKPOINTS:
 - R5C3C provider agreement and recursive interface closure
 - R5C4A exhaustive canonical token traversal
@@ -83,11 +83,15 @@ VALIDATION_STATE:
 - R5C10D focused checks passed: `cargo fmt --all`, `cargo check --quiet`, generic-function unit tests (17 passed), declaration-table tests, `cargo run --quiet -- check docs --terse`, and `git diff --check`
 - R5C10D exact gate passed: `just validate` with 4223 workspace tests, 17 auxiliary tests, 641 xtask tests, 1827/1827 integration executions, cross-target Clippy, docs, benchmark sanity and timer erasure; standalone `just bench-ci` passed all 60 benchmark preflights and quick CLI/frontend cases
 - R5C10D `cargo run --quiet -- tests --audit` passed: 1677 integration cases and 1827 backend executions
-AUDITS: interim auditor `20260810T093610Z-d64f9dcf` found one stale DeclarationId comment; corrected; pass-two auditor `20260810T094147Z-9376c565` found no required correction; interim auditor `20260810T105710Z-703236c2` found no required correction; regular auditor `20260810T112902Z-2655eca7` found no required correction; second independent review corrections are implemented; regular auditor attempt `20260810T174728Z-1dcfafdc` was blocked by a provider tool-contract failure with no workspace changes; final auditor remains pending
-BLOCKERS: final auditor and Gate D remain pending; strict entry_root remains deferred to the queued Project Config plan
-NEXT_WORKER_ORDER: final auditor -> Gate D -> compress/archive canonical Phase 5 -> dependency-clauses-and-path-syntax-plan.md
-STOP_REASON: R5C10D is implemented and the exact validation gate is green; pause before the final auditor and Gate D
-NEXT_RESUME_ACTION: invoke the configured final_auditor against R5C10D and resolve any required findings before Gate D
+- R5C10E focused checks passed: `cargo fmt --all`, `cargo check --quiet`, the legacy package-folder watch and Stage 0 tests, the Moth-template suite, `cargo run --quiet -- check docs --terse`, docs release build and `git diff --check`
+- R5C10E exact gate passed: `just validate` with 4223 workspace tests, 17 auxiliary tests, 641 xtask tests, 1827/1827 integration executions, cross-target Clippy, docs, benchmark sanity and timer erasure
+- R5C10E `cargo run --quiet -- tests --audit` passed: 1677 integration cases and 1827 backend executions
+- R5C10E `just bench-ci` passed: all 60 benchmark preflights and the selected CLI/frontend benchmark cases
+AUDITS: interim auditor `20260810T093610Z-d64f9dcf` found one stale DeclarationId comment; corrected; pass-two auditor `20260810T094147Z-9376c565` found no required correction; interim auditor `20260810T105710Z-703236c2` found no required correction; regular auditor `20260810T112902Z-2655eca7` found no required correction; second independent review corrections are implemented; regular auditor attempt `20260810T174728Z-1dcfafdc` was blocked by a provider tool-contract failure with no workspace changes; final auditor `20260810T202756Z-e5ede7f9` found two bounded Gate D corrections
+BLOCKERS: fresh final auditor and Gate D remain pending; strict entry_root remains deferred to the queued Project Config plan
+NEXT_WORKER_ORDER: fresh final_auditor -> Gate D -> compress/archive canonical Phase 5 -> dependency-clauses-and-path-syntax-plan.md
+STOP_REASON: R5C10E is implemented and the exact validation gate is green; pause before the fresh final auditor and Gate D
+NEXT_RESUME_ACTION: invoke a fresh final_auditor against the R5C10E correction checkpoint before Gate D
 FOLLOW_UP_CHAIN:
 1. dependency-clauses-and-path-syntax-plan.md
 2. tir-corrections-and-simplification-plan.md
@@ -321,7 +325,7 @@ Review gates:
 - **Gate B:** accepted at R5C1C
 - **Gate C1:** after R5C6A, before convergence behaviour changes
 - **Gate C2:** after R5C6B, before source-payload ownership changes
-- **Gate D:** after R5C9 deletion audit, R5C10/R5C10C/R5C10D corrections and the final auditor
+- **Gate D:** after R5C9 deletion audit, R5C10/R5C10C/R5C10D/R5C10E corrections and the final auditor
 
 Reviews are read-only. Corrections land as separate bounded slices.
 
@@ -677,7 +681,7 @@ Counters must prove:
 - no borrow reanalysis without a changed direct input after the initial seed pass
 
 Use this checkpoint for the Gate D review. Resolve any required findings through the bounded
-R5C10/R5C10C/R5C10D correction lane before the final auditor and Gate D acceptance.
+R5C10/R5C10C/R5C10D/R5C10E correction lane before the final auditor and Gate D acceptance.
 
 ### R5C10 / Gate D corrections
 
@@ -758,6 +762,31 @@ second independent review
 -> R5C10D frozen-closure and evidence corrections
 -> exact validation gate
 -> final auditor
+-> Gate D acceptance
+```
+
+### R5C10E / final-audit ownership corrections
+
+The final auditor identified two bounded Gate D corrections after R5C10D:
+
+- canonical Stage 0 must have no remaining legacy `package_folders` consumer, discovery-shaped
+  diagnostic contract or discovery-shaped integration fixture; the transitional config parser and
+  storage field remain deferred to the queued Project Config plan
+- direct Moth-template compilation must move source text into frontend preparation rather than
+  cloning the complete source string at that boundary
+
+R5C10E also updates the affected watch-scope test, source documentation and fixture contracts while
+preserving structural `+*.moth` support packages, independently registered Builder/Core packages and
+the accepted strict-`entry_root` deferral. The final auditor and Gate D must inspect this correction
+checkpoint before any follow-up plan starts.
+
+The correction sequence is:
+
+```text
+final auditor findings
+-> R5C10E legacy package-folder and Moth-template corrections
+-> exact validation gate
+-> fresh final auditor
 -> Gate D acceptance
 ```
 

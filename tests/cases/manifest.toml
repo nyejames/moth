@@ -8815,31 +8815,31 @@ contract = "language.imports.source_package_project_local_acceptance"
 role = "primary"
 
 [[case]]
-id = "config_package_folder_default_lib_success"
-path = "config_package_folder_default_lib_success"
-tags = ["integration", "config", "packages", "imports"]
-contract = "language.config.package_folder_default_lib_acceptance"
+id = "source_package_structural_support_success"
+path = "source_package_structural_support_success"
+tags = ["integration", "source-packages", "imports"]
+contract = "language.imports.source_package_structural_support_acceptance"
 role = "primary"
 
 [[case]]
-id = "config_custom_package_folder_success"
-path = "config_custom_package_folder_success"
-tags = ["integration", "config", "packages", "imports"]
-contract = "language.config.custom_package_folder_acceptance"
+id = "source_module_legacy_config_ignored_success"
+path = "source_module_legacy_config_ignored_success"
+tags = ["integration", "config", "modules", "imports"]
+contract = "language.imports.source_module_legacy_config_ignored_acceptance"
 role = "primary"
 
 [[case]]
-id = "config_multiple_package_folders_success"
-path = "config_multiple_package_folders_success"
-tags = ["integration", "config", "packages", "imports"]
-contract = "language.config.multiple_package_folders_acceptance"
+id = "source_modules_legacy_config_ignored_success"
+path = "source_modules_legacy_config_ignored_success"
+tags = ["integration", "config", "modules", "imports"]
+contract = "language.imports.source_modules_legacy_config_ignored_acceptance"
 role = "primary"
 
 [[case]]
 id = "config_package_folder_missing_ignored"
-path = "config_package_folder_missing_rejected"
-tags = ["integration", "config", "packages", "diagnostics"]
-contract = "language.config.package_folder_missing_ignored"
+path = "config_package_folder_missing_ignored"
+tags = ["integration", "config", "packages"]
+contract = "language.config.legacy_package_folder_missing_ignored"
 role = "primary"
 
 [[case]]

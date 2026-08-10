@@ -1030,7 +1030,7 @@ internal_value <span class='moth-code-operator'>#=</span> <span class='moth-code
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
-    <p>Project-local source-backed packages are scoped <code>+*.moth</code> support packages discovered structurally from the project source tree. The current compiler also retains legacy config-driven <code>package_folders</code> discovery, defaulting to <code>lib/</code>. The queued Project Config migration removes that compatibility path.</p><h3>Directory structure</h3><pre style=""><code class='codeblock'>project-root/
+    <p>Project-local source-backed packages are scoped <code>+*.moth</code> support packages discovered structurally from the project source tree. The transitional <code>package_folders</code> config field may still be parsed and stored for migration compatibility, but canonical Stage 0 ignores it and it does not create package roots. The queued Project Config migration removes the field.</p><h3>Directory structure</h3><pre style=""><code class='codeblock'>project-root/
 ├── config.moth
 ├── src/
 │   ├── @site.moth

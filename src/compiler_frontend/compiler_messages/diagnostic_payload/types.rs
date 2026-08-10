@@ -181,21 +181,6 @@ pub enum InvalidConfigReason {
     ConfiguredEntryRootMissing {
         entry_root: StringId,
     },
-    ConfiguredPackageFolderMissing {
-        folder: StringId,
-    },
-    ConfiguredPackageFolderNotDirectory {
-        folder: StringId,
-    },
-    SourcePackagePrefixCollision {
-        prefix: StringId,
-        first_root: StringId,
-        second_root: StringId,
-    },
-    SourcePackageBuilderPrefixCollision {
-        prefixes: StringId,
-        package_folders: StringId,
-    },
     EntryRootPackagePrefixCollision {
         prefix: StringId,
         entry_folder: StringId,
@@ -319,29 +304,6 @@ impl InvalidConfigReason {
                 for candidate in candidates {
                     *candidate = remap.get(*candidate);
                 }
-            }
-
-            Self::ConfiguredPackageFolderMissing { folder }
-            | Self::ConfiguredPackageFolderNotDirectory { folder } => {
-                *folder = remap.get(*folder);
-            }
-
-            Self::SourcePackagePrefixCollision {
-                prefix,
-                first_root,
-                second_root,
-            } => {
-                *prefix = remap.get(*prefix);
-                *first_root = remap.get(*first_root);
-                *second_root = remap.get(*second_root);
-            }
-
-            Self::SourcePackageBuilderPrefixCollision {
-                prefixes,
-                package_folders,
-            } => {
-                *prefixes = remap.get(*prefixes);
-                *package_folders = remap.get(*package_folders);
             }
 
             Self::EntryRootPackagePrefixCollision {

@@ -45,7 +45,7 @@ The `moth new html` scaffold generates `src/@page.moth` as a conventional defaul
 
 ### Implementation note
 
-The current scaffold still creates an empty `lib/` folder and the compiler retains legacy `package_folders` support. These are implementation drift and are not part of the accepted project/package model. See @../progress/ (the progress matrix) for current status.
+The current scaffold still creates an empty `lib/` folder and the transitional `package_folders` field is still parsed and stored, but canonical Stage 0 ignores it. These are implementation drift and are not part of the accepted project/package model. See @../progress/ (the progress matrix) for current status.
 
 ### Source versus output
 

@@ -130,32 +130,6 @@ pub(crate) fn invalid_config_message(
             "Configured entry root '{}' does not exist.",
             string_table.resolve(*entry_root),
         ),
-        InvalidConfigReason::ConfiguredPackageFolderMissing { folder } => format!(
-            "Configured package folder '{}' does not exist.",
-            string_table.resolve(*folder),
-        ),
-        InvalidConfigReason::ConfiguredPackageFolderNotDirectory { folder } => format!(
-            "Configured package folder '{}' is not a directory.",
-            string_table.resolve(*folder),
-        ),
-        InvalidConfigReason::SourcePackagePrefixCollision {
-            prefix,
-            first_root,
-            second_root,
-        } => format!(
-            "Configured package folder collision: source-backed package prefix '@{}' is defined by both '{}' and '{}'.",
-            string_table.resolve(*prefix),
-            string_table.resolve(*first_root),
-            string_table.resolve(*second_root),
-        ),
-        InvalidConfigReason::SourcePackageBuilderPrefixCollision {
-            prefixes,
-            package_folders,
-        } => format!(
-            "Project-local package prefixes collide with Builder package prefixes: {}. Rename or remove the conflicting project-local package prefix, or update 'package_folders' (currently: {}).",
-            string_table.resolve(*prefixes),
-            string_table.resolve(*package_folders),
-        ),
         InvalidConfigReason::EntryRootPackagePrefixCollision {
             prefix,
             entry_folder,
