@@ -898,9 +898,9 @@ td {
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Receiver methods</td>
  <td style="padding: 0.1em 0.5em; "> Supported</td>
- <td style="padding: 0.1em 0.5em; "> Broad same-file struct/choice receiver, aligned generic receiver, imported receiver type, namespace receiver type, module-boundary exposure, nonlocal/builtin/external receiver rejection, duplicate, collision, and mutability coverage.</td>
+ <td style="padding: 0.1em 0.5em; "> Broad same-file struct/choice receiver, aligned generic receiver, imported generic receiver, namespace receiver type, module-boundary exposure, nonlocal/builtin/external receiver rejection, duplicate, collision, and mutability coverage.</td>
  <td style="padding: 0.1em 0.5em; "> JS / HTML</td>
- <td style="padding: 0.1em 0.5em; "> Source-authored receiver methods travel with receiver type visibility. They are never grouped-imported, aliased, or exposed as namespace-record fields.</td>
+ <td style="padding: 0.1em 0.5em; "> Source-authored receiver methods travel with receiver type visibility, including retained generic receiver templates across module and package boundaries. They are never grouped-imported, aliased, or exposed as namespace-record fields.</td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">
@@ -1100,8 +1100,8 @@ td {
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Generic functions</td>
  <td style="padding: 0.1em 0.5em; "> Partial</td>
- <td style="padding: 0.1em 0.5em; "> Broad declaration, body validation, inference, instantiation, module-boundary import, diagnostics, fallible return, and non-value-use coverage.</td>
- <td style="padding: 0.1em 0.5em; "> Generic free functions infer from immediate call arguments and immediate expected result context only, then emit concrete instances before HIR. Explicit call-site type application is not part of the current inference-only rule.</td>
+ <td style="padding: 0.1em 0.5em; "> Broad declaration, body validation, inference, instantiation, module-boundary import, nested private receiver materialisation with forwarded receiver bounds and evidence, diagnostics, fallible return, and non-value-use coverage.</td>
+ <td style="padding: 0.1em 0.5em; "> Generic free functions and aligned receiver templates infer from immediate call arguments and immediate expected result context only, then emit concrete instances before HIR. Explicit call-site type application is not part of the current inference-only rule.</td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">
