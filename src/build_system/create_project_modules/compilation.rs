@@ -1335,7 +1335,7 @@ pub(crate) fn compile_directory_frontend(
     timing_guard_stage0_directory_inventory.finish();
 
     // Share the effective external package registry immutably across all boundary compilations;
-    // directory modules may compile in parallel and can safely read the same Arc.
+    // the serial module scheduler can safely read the same Arc for every directory module.
     let external_packages = Arc::new(builder_surface.binding_packages.clone());
 
     // 3. Compile source packages in package-dependency order, then compile the project against

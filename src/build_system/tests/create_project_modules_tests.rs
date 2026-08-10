@@ -5086,7 +5086,7 @@ fn same_module_import_creates_no_project_graph_edge() {
 #[test]
 fn independent_no_edge_entries_are_grouped_in_one_ready_wave() {
     // Two entry modules with no cross-module dependency edges must be grouped in the same
-    // compile wave so the directory compiler can compile them in parallel within that wave.
+    // dependency-ready wave; the serial scheduler can then publish them in deterministic order.
     let root = temp_dir("phase5c_no_edge_same_wave");
     let src = root.join("src");
     let module_a = src.join("module_a");

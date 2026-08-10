@@ -39,9 +39,9 @@ use super::source_tree_index::{SourceClassification, SourceOwnership};
 /// One normal entry module seed carrying its graph-assigned `ModuleId` and canonical root file.
 ///
 /// WHAT: discovery seeds entry modules in deterministic `ModuleId` order. The `ModuleId` travels
-///       through serial and parallel discovery so the deterministic compile-wave reorder can
-///       match by identity rather than re-deriving identity from a root path, and so the
-///       graph-owned `StableModuleOriginIdentity` is preserved for each discovered module.
+///       through serial discovery so the deterministic compile-wave reorder can match by identity
+///       rather than re-deriving identity from a root path, and so the graph-owned
+///       `StableModuleOriginIdentity` is preserved for each discovered module.
 /// WHY: the graph owns the canonical origin identity; discovery must not reconstruct it. Carrying
 ///      the dense `ModuleId` keeps the graph as the single identity owner through reorder.
 struct ModuleEntrySeed {
@@ -49,8 +49,8 @@ struct ModuleEntrySeed {
     entry_path: PathBuf,
 }
 
-/// Discovery-internal inventory carrying the graph-assigned `ModuleId` through serial and parallel
-/// discovery so the compile-wave reorder can match by identity.
+/// Discovery-internal inventory carrying the graph-assigned `ModuleId` through serial discovery so
+/// the compile-wave reorder can match by identity.
 ///
 /// The graph-owned `StableModuleOriginIdentity` is attached once, after reorder, when each draft
 /// is lifted to the consumer-facing [`ModuleCompilationJob`].

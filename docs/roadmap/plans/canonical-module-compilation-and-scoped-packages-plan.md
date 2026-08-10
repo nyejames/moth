@@ -25,10 +25,10 @@ ACTIVE_PLAN: docs/roadmap/plans/canonical-module-compilation-and-scoped-packages
 WORK_ID: R5-closeout
 WORK_SOURCE: continued Phase 5 closeout after Gate B acceptance and the revised plan
 BASE_REVISION: 276bc4cb2 (clean revised-plan baseline before R5C6A)
-IMPLEMENTED_CHECKPOINT: b0782b111
-RECONCILED_HEAD: b0782b111
-STATUS: final-review - R5C10G correction slice complete; fresh final auditor pending
-CURRENT_SLICE: R5C10G - remove ignored legacy package-folder settings from registered-package frontend tests (complete)
+IMPLEMENTED_CHECKPOINT: f3a49d7f0
+RECONCILED_HEAD: f3a49d7f0
+STATUS: final-review - R5C10H correction complete; fresh final auditor pending
+CURRENT_SLICE: R5C10H - align module-wave comments with the serial semantic scheduler (complete)
 ACCEPTED_CHECKPOINTS:
 - R5C3C provider agreement and recursive interface closure
 - R5C4A exhaustive canonical token traversal
@@ -95,11 +95,15 @@ VALIDATION_STATE:
 - R5C10G `cargo run --quiet -- tests --audit` passed: 1676 integration cases and 1826 backend executions
 - R5C10G `cargo run --quiet -- tests --terse` passed: 1826/1826 integration executions
 - R5C10G exact gate passed: `just validate` with 4223 workspace tests, 17 auxiliary tests, 641 xtask tests, 1826/1826 integration executions, cross-target Clippy, docs, benchmark sanity and timer-erasure; standalone `just bench-ci` passed all 60 benchmark preflights and quick CLI/frontend cases
-AUDITS: interim auditor `20260810T093610Z-d64f9dcf` found one stale DeclarationId comment; corrected; pass-two auditor `20260810T094147Z-9376c565` found no required correction; interim auditor `20260810T105710Z-703236c2` found no required correction; regular auditor `20260810T112902Z-2655eca7` found no required correction; second independent review corrections are implemented; regular auditor attempt `20260810T174728Z-1dcfafdc` was blocked by a provider tool-contract failure with no workspace changes; final auditor `20260810T202756Z-e5ede7f9` found two bounded Gate D corrections; final auditor `20260810T205925Z-0cec93ec` found one fixture-contract and parser-comment correction, resolved in R5C10F; final auditor `20260810T211701Z-8b6fc0ea` found two residual fixture settings, resolved in R5C10G
+- R5C10H focused checks passed: `cargo fmt --all -- --check`, the dependency-ready wave inventory test `independent_no_edge_entries_are_grouped_in_one_ready_wave` and `git diff --check`
+- R5C10H exact gate passed in the default non-PTY shell: `just validate` with 4223 workspace tests, 17 auxiliary tests, 641 xtask tests, 1826/1826 integration executions, cross-target Clippy, docs, benchmark sanity and timer-erasure
+- R5C10H `cargo run --quiet -- tests --audit` passed: 1676 integration cases and 1826 backend executions
+- R5C10H `just bench-ci` passed: all 60 benchmark preflights and the selected CLI/frontend benchmark cases
+AUDITS: interim auditor `20260810T093610Z-d64f9dcf` found one stale DeclarationId comment; corrected; pass-two auditor `20260810T094147Z-9376c565` found no required correction; interim auditor `20260810T105710Z-703236c2` found no required correction; regular auditor `20260810T112902Z-2655eca7` found no required correction; second independent review corrections are implemented; regular auditor attempt `20260810T174728Z-1dcfafdc` was blocked by a provider tool-contract failure with no workspace changes; final auditor `20260810T202756Z-e5ede7f9` found two bounded Gate D corrections; final auditor `20260810T205925Z-0cec93ec` found one fixture-contract and parser-comment correction, resolved in R5C10F; final auditor `20260810T211701Z-8b6fc0ea` found two residual fixture settings, resolved in R5C10G; final auditor `20260810T212736Z-2747a674` found stale scheduling comments, resolved in R5C10H; fresh final auditor pending
 BLOCKERS: fresh final auditor and Gate D remain pending; strict entry_root remains deferred to the queued Project Config plan
 NEXT_WORKER_ORDER: fresh final_auditor -> Gate D -> compress/archive canonical Phase 5 -> dependency-clauses-and-path-syntax-plan.md
-STOP_REASON: R5C10G is implemented and the exact validation gate is green; pause before the fresh final auditor and Gate D
-NEXT_RESUME_ACTION: invoke a fresh final_auditor against the R5C10G correction checkpoint before Gate D
+STOP_REASON: R5C10H is implemented and the exact validation gate is green; pause before the fresh final auditor and Gate D
+NEXT_RESUME_ACTION: invoke a fresh final_auditor against the R5C10H correction checkpoint before Gate D
 FOLLOW_UP_CHAIN:
 1. dependency-clauses-and-path-syntax-plan.md
 2. tir-corrections-and-simplification-plan.md
@@ -333,7 +337,7 @@ Review gates:
 - **Gate B:** accepted at R5C1C
 - **Gate C1:** after R5C6A, before convergence behaviour changes
 - **Gate C2:** after R5C6B, before source-payload ownership changes
-- **Gate D:** after R5C9 deletion audit, R5C10/R5C10C/R5C10D/R5C10E/R5C10F/R5C10G corrections and the final auditor
+- **Gate D:** after R5C9 deletion audit, R5C10/R5C10C/R5C10D/R5C10E/R5C10F/R5C10G/R5C10H corrections and the final auditor
 
 Reviews are read-only. Corrections land as separate bounded slices.
 
@@ -689,7 +693,7 @@ Counters must prove:
 - no borrow reanalysis without a changed direct input after the initial seed pass
 
 Use this checkpoint for the Gate D review. Resolve any required findings through the bounded
-R5C10/R5C10C/R5C10D/R5C10E/R5C10F/R5C10G correction lane before the final auditor and Gate D acceptance.
+R5C10/R5C10C/R5C10D/R5C10E/R5C10F/R5C10G/R5C10H correction lane before the final auditor and Gate D acceptance.
 
 ### R5C10 / Gate D corrections
 
@@ -837,6 +841,33 @@ The correction sequence is:
 ```text
 fresh final auditor findings
 -> R5C10G registered-package fixture cleanup
+-> exact validation gate
+-> fresh final auditor
+-> Gate D acceptance
+```
+
+### R5C10H / final-audit scheduling-comment correction
+
+The fresh final auditor found one stale documentation-only mismatch in the module scheduling
+comments. R5C10H corrects the comments so they describe the current ownership and execution model:
+
+- module inventory seeds and drafts are discovered serially, then reordered by graph identity for
+  deterministic compile waves
+- source-file preparation may use its existing per-module parallel work, while semantic module
+  publication remains serial in dependency-ready order
+- the independent-entry ready-wave test describes deterministic serial publication rather than
+  claiming parallel module compilation
+
+No scheduling behaviour changes in R5C10H. The focused ready-wave test still protects the actual
+dependency grouping invariant. The default `just validate` gate, integration audit and standalone
+`just bench-ci` are green at this checkpoint. The strict `entry_root` compatibility remains owned
+by the queued Project Config plan.
+
+The correction sequence is:
+
+```text
+fresh final auditor findings
+-> R5C10H scheduling-comment correction
 -> exact validation gate
 -> fresh final auditor
 -> Gate D acceptance
