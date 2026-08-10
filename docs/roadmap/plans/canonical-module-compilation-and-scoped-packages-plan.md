@@ -310,7 +310,7 @@ Review gates:
 - **Gate B:** accepted at R5C1C
 - **Gate C1:** after R5C6A, before convergence behaviour changes
 - **Gate C2:** after R5C6B, before source-payload ownership changes
-- **Gate D:** after R5C9
+- **Gate D:** after R5C9 deletion audit, R5C10 corrections and the final auditor
 
 Reviews are read-only. Corrections land as separate bounded slices.
 
@@ -665,7 +665,35 @@ Counters must prove:
 - zero complete summary-map clones in convergence
 - no borrow reanalysis without a changed direct input after the initial seed pass
 
-Run Gate D. Resolve every required finding before accepting Phase 5.
+Use this checkpoint for the Gate D review. Resolve any required findings through the bounded
+R5C10 correction lane before the final auditor and Gate D acceptance.
+
+### R5C10 / Gate D corrections
+
+R5C10 is the bounded correction lane for Gate D review findings after the R5C9 deletion audit.
+It must preserve the accepted source-index, immutable-interface, transactional-publication and
+boundary-owned generated-sidecar architecture.
+
+Its acceptance list is:
+
+- exported generic receivers survive immutable interface projection and import
+- private generic receivers needed by generated bodies use module-private nominal identity
+- generic receiver bounds and evidence survive generated-local reconstruction
+- declaration and evidence materialisation closure remains shared at module scope
+- no complete declaration record is duplicated per template binding
+- module, generated and package publication remain transactional
+- generated declaration lookup uses construction-only indexed append
+- normal `just validate` is green
+
+The sequence is:
+
+```text
+R5C9 deletion audit
+-> Gate D review findings
+-> R5C10 corrections
+-> final review/auditor
+-> Gate D acceptance
+```
 
 ## Phase 5 exit gate
 

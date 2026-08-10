@@ -1,21 +1,19 @@
-use std::io::Write;
-use std::path::PathBuf;
-use std::sync::Mutex;
-
 use crate::benchmarking::frontend::{
     FrontendBenchmarkBuildProfile, FrontendBenchmarkOptions, run_frontend_benchmark,
 };
+use std::io::Write;
+use std::path::PathBuf;
 
-// The in-memory benchmark collector uses a global static. Parallel tests that
-// each start/stop a collection scope would race. Serialize benchmarking tests
-// to keep the harness simple without adding a test-dependency crate.
-static BENCHMARK_TEST_MUTEX: Mutex<()> = Mutex::new(());
+// Frontend benchmarks use the process-global timing and counter stores. Share
+// the facade-owned test lock with timing, instrumentation and build tests so
+// parallel workspace execution cannot interleave collection sessions.
+fn benchmark_test_guard() -> std::sync::MutexGuard<'static, ()> {
+    crate::timing::lock_instrumentation_tests()
+}
 
 #[test]
 fn frontend_benchmark_runs_for_simple_file() {
-    let _guard = BENCHMARK_TEST_MUTEX.lock().expect("test mutex should lock");
-    #[cfg(feature = "timers")]
-    let _counter_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let _guard = benchmark_test_guard();
     #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
     let _counter_capture =
         crate::compiler_frontend::instrumentation::capture_frontend_counters_for_test();
@@ -56,9 +54,7 @@ fn frontend_benchmark_runs_for_simple_file() {
 
 #[test]
 fn frontend_benchmark_retains_warning_count_and_codes() {
-    let _guard = BENCHMARK_TEST_MUTEX.lock().expect("test mutex should lock");
-    #[cfg(feature = "timers")]
-    let _counter_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let _guard = benchmark_test_guard();
     let temp_dir = tempfile::tempdir().expect("should create temp dir");
     let file_path = temp_dir.path().join("warning.moth");
     let warning_source = "\
@@ -96,9 +92,7 @@ if value is:
 
 #[test]
 fn frontend_benchmark_retains_source_package_warning() {
-    let _guard = BENCHMARK_TEST_MUTEX.lock().expect("test mutex should lock");
-    #[cfg(feature = "timers")]
-    let _counter_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let _guard = benchmark_test_guard();
     let temp_dir = tempfile::tempdir().expect("should create temp dir");
     let root = temp_dir.path();
     let package = root.join("packages/warnpkg");
@@ -140,9 +134,7 @@ fn frontend_benchmark_retains_source_package_warning() {
 
 #[test]
 fn frontend_benchmark_fails_for_missing_file() {
-    let _guard = BENCHMARK_TEST_MUTEX.lock().expect("test mutex should lock");
-    #[cfg(feature = "timers")]
-    let _counter_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let _guard = benchmark_test_guard();
 
     let options = FrontendBenchmarkOptions {
         entry_path: PathBuf::from("/definitely/does/not/exist.moth"),
@@ -159,8 +151,7 @@ fn frontend_benchmark_fails_for_missing_file() {
 #[cfg(feature = "timers")]
 #[test]
 fn frontend_benchmark_rejects_a_busy_raw_session_before_compilation() {
-    let _guard = BENCHMARK_TEST_MUTEX.lock().expect("test mutex should lock");
-    let _counter_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let _guard = benchmark_test_guard();
     let outer =
         crate::timing::start_benchmark_collection(true).expect("outer timing session should start");
 
@@ -194,9 +185,7 @@ fn frontend_benchmark_rejects_a_busy_raw_session_before_compilation() {
 
 #[test]
 fn frontend_benchmark_fails_for_invalid_syntax() {
-    let _guard = BENCHMARK_TEST_MUTEX.lock().expect("test mutex should lock");
-    #[cfg(feature = "timers")]
-    let _counter_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let _guard = benchmark_test_guard();
 
     let temp_dir = tempfile::tempdir().expect("should create temp dir");
     let file_path = temp_dir.path().join("bad.moth");

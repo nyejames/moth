@@ -1,5 +1,15 @@
-import @utils {make}
+import @utils {DISPLAY_TEXT, make}
 
-value = make(42)
+Label = |
+    text String,
+|
+
+display |this Label| -> String:
+    return this.text
+;
+
+Label must DISPLAY_TEXT
+
+value = make(Label("private generic receiver evidence"))
 
 [: [value]]

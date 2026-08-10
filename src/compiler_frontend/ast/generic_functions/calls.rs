@@ -17,7 +17,7 @@ use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::function_calls::parse_generic_call_arguments_typed;
 use crate::compiler_frontend::ast::generic_bounds::{
-    evidence_for_type, evidence_target_is_visible,
+    evidence_for_type, evidence_target_is_visible, generic_parameter_declares_bound,
 };
 use crate::compiler_frontend::ast::generic_functions::diagnostics::{
     cannot_infer_generic_function_arguments, conflicting_generic_function_argument,
@@ -511,6 +511,15 @@ pub(crate) fn validate_generic_function_bound_evidence(
     for (parameter, concrete_type_id) in parameter_list.parameters.iter().zip(type_arguments) {
         for trait_id in &parameter.trait_bounds {
             let trait_is_visible = context.trait_id_is_visible(*trait_id);
+            if context.generic_template_validation
+                && trait_is_visible
+                && generic_parameter_declares_bound(*concrete_type_id, *trait_id, type_environment)
+            {
+                // A template can forward its own bound into a nested generic request. The
+                // concrete instance is reparsed later, where the requester selects the actual
+                // evidence identity, so template validation must not manufacture a local row.
+                continue;
+            }
             let evidence_is_visible = trait_is_visible
                 && evidence_target_is_visible(
                     *concrete_type_id,

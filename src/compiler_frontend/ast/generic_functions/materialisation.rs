@@ -391,7 +391,7 @@ struct StableFunctionReturn {
 #[derive(Clone)]
 struct StableDeclarationBinding {
     local_path: Box<[String]>,
-    record: PublicDeclarationRecord,
+    origin: OriginDeclarationId,
 }
 
 #[derive(Clone)]
@@ -819,6 +819,7 @@ impl GenericTemplateArtefact {
             identity,
             requester_context,
             &requester_string_remap,
+            &source_file,
             &mut environment,
             string_table_ref,
         )
@@ -889,7 +890,7 @@ impl GenericTemplateArtefact {
             let local_path = materialise_path(&binding.local_path, string_table);
             environment
                 .imported_declarations_by_local_path
-                .insert(local_path, binding.record.origin.clone());
+                .insert(local_path, binding.origin.clone());
         }
         for record in &context.declaration_closure {
             environment
@@ -1249,6 +1250,14 @@ impl GenericTemplateArtefact {
                         "Private generic receiver template parameter count disagrees with its nominal owner",
                     ));
                 }
+                self.restore_private_receiver_generic_parameter_bounds(
+                    nested,
+                    receiver_identity,
+                    generic_parameter_list_id,
+                    &mut environment.type_environment,
+                    &environment.lookups.trait_environment,
+                    string_table,
+                )?;
                 (generic_parameter_list_id, generic_parameter_type_ids)
             } else {
                 let parsed_parameters = GenericParameterList {
@@ -1488,6 +1497,93 @@ fn append_materialised_declaration(
             ))
         })?;
     Ok(())
+}
+
+impl GenericTemplateArtefact {
+    /// Restore the declaration-site bounds shared by a private receiver and its nominal owner.
+    ///
+    /// WHAT: validates ordered names and canonical bound identities, then patches the generated
+    ///       nominal parameter handles with consumer-local `TraitId` values.
+    /// WHY: nominal reconstruction creates reusable local handles before the generated trait
+    ///       table is available. A private receiver template must not inherit an empty bound
+    ///       list, because bound dispatch selects both its method and generated evidence identity.
+    fn restore_private_receiver_generic_parameter_bounds(
+        &self,
+        nested: &GenericTemplateArtefact,
+        receiver_identity: &CanonicalTypeIdentity,
+        generic_parameter_list_id: GenericParameterListId,
+        type_environment: &mut TypeEnvironment,
+        trait_environment: &TraitEnvironment,
+        string_table: &StringTable,
+    ) -> Result<(), CompilerError> {
+        let nominal_blueprint =
+            self.nominal_blueprints
+                .get(receiver_identity)
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "Private generic receiver owner has no retained nominal blueprint",
+                    )
+                })?;
+        let nominal_parameters = &nominal_blueprint.generic_parameters;
+        let local_parameters = type_environment
+            .generic_parameters(generic_parameter_list_id)
+            .ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "Private generic receiver owner has no reconstructed parameter list",
+                )
+            })?
+            .parameters
+            .clone();
+        if nominal_parameters.len() != nested.generic_parameters.len()
+            || nominal_parameters.len() != local_parameters.len()
+        {
+            return Err(CompilerError::compiler_error(
+                "Private generic receiver owner and method parameter lists disagree in arity",
+            ));
+        }
+
+        let mut bounds_by_local = FxHashMap::default();
+        let mut canonical_by_local = FxHashMap::default();
+        for (slot, ((nominal_parameter, receiver_parameter), local_parameter)) in nominal_parameters
+            .iter()
+            .zip(&nested.generic_parameters)
+            .zip(&local_parameters)
+            .enumerate()
+        {
+            if nominal_parameter.name != receiver_parameter.name
+                || string_table.resolve(local_parameter.name) != nominal_parameter.name
+                || nominal_parameter.bounds.as_ref() != receiver_parameter.bounds.as_ref()
+            {
+                return Err(CompilerError::compiler_error(
+                    "Private generic receiver owner and method parameter bounds disagree",
+                ));
+            }
+
+            let bounds = receiver_parameter
+                .bounds
+                .iter()
+                .map(|identity| {
+                    trait_environment
+                        .id_for_canonical_identity(identity)
+                        .ok_or_else(|| {
+                            CompilerError::compiler_error(
+                                "Private generic receiver bound is absent from the generated trait table",
+                            )
+                        })
+                })
+                .collect::<Result<Vec<_>, CompilerError>>()?;
+            let local_id = TypeParameterId(slot as u32);
+            canonical_by_local.insert(local_id, local_parameter.id);
+            bounds_by_local.insert(local_id, bounds);
+        }
+
+        type_environment.update_generic_parameter_bounds(
+            generic_parameter_list_id,
+            &bounds_by_local,
+            &canonical_by_local,
+        );
+        Ok(())
+    }
 }
 
 fn materialised_nominal_declaration(
@@ -2381,24 +2477,24 @@ impl ModuleMaterialisationPreparation {
                 .import_environment
                 .imported_declarations_by_local_path
                 .get(path)
-                && let Some(record) = self
+                && self
                     .import_environment
                     .imported_declarations_by_origin
-                    .get(origin)
+                    .contains_key(origin)
             {
                 bindings.push(StableDeclarationBinding {
                     local_path: stable_path(path, &self.string_table),
-                    record: record.clone(),
+                    origin: origin.clone(),
                 });
                 continue;
             }
             let origin = self.public_origin_for_path(path);
             if let Some(origin) = origin
-                && let Some(record) = public_interface.declaration(&origin)
+                && public_interface.declaration(&origin).is_some()
             {
                 bindings.push(StableDeclarationBinding {
                     local_path: stable_path(path, &self.string_table),
-                    record: record.clone(),
+                    origin,
                 });
             }
         }
@@ -3571,10 +3667,12 @@ impl ModuleMaterialisationPreparation {
             .map_err(|error| CompilerMessages::from_error_ref(error, &self.string_table))?;
             type_arguments.push(type_id);
         }
+        let source_file = template.source_file.clone();
         install_generated_request_evidence(
             identity,
             requester_context,
             &requester_string_remap,
+            &source_file,
             &mut environment,
             string_table_ref,
         )
@@ -4068,13 +4166,7 @@ fn intern_materialisation_nominal(
             .collect(),
     };
     // Bounds remain exact stable facts on the immutable blueprint. Reconstructing a concrete
-    // nominal for field/variant substitution does not re-run declaration-site evidence solving,
-    // and requester-only traits need not exist in the declaring generic function's trait table.
-    let _retained_bounds = blueprint
-        .generic_parameters
-        .iter()
-        .map(|parameter| parameter.bounds.as_ref())
-        .collect::<Vec<_>>();
+    // nominal for field/variant substitution does not re-run declaration-site evidence solving.
     let generic_parameter_registration = (!parsed_parameters.parameters.is_empty()).then(|| {
         type_environment.register_generic_parameter_list(&parsed_parameters, &FxHashMap::default())
     });
@@ -4227,8 +4319,9 @@ fn install_generated_request_evidence(
     identity: &GeneratedFunctionIdentity,
     requester_context: &ModuleMaterialisationPreparation,
     requester_string_remap: &StringIdRemap,
+    source_file: &InternedPath,
     environment: &mut AstModuleEnvironment,
-    string_table: &StringTable,
+    string_table: &mut StringTable,
 ) -> Result<(), CompilerError> {
     for evidence_identity in identity.evidence() {
         let generated_target_type_id = environment
@@ -4239,6 +4332,12 @@ fn install_generated_request_evidence(
                     "Generated evidence target type was not interned in the generated environment",
                 )
             })?;
+        expose_generated_evidence_target(
+            environment,
+            source_file,
+            generated_target_type_id,
+            string_table,
+        )?;
         let generated_trait_id = if let Some(trait_id) = environment
             .lookups
             .trait_environment
@@ -4425,6 +4524,50 @@ fn install_generated_request_evidence(
         }
     }
 
+    Ok(())
+}
+
+/// Make an explicitly selected generated-evidence target visible to generated bound validation.
+///
+/// WHAT: adds the reconstructed nominal's local path to the generated file's transient source
+/// visibility without changing the retained provider interface or the requester environment.
+/// WHY: generated requests carry the exact requester-selected evidence identity. The generated
+/// body must be allowed to validate that evidence even when the target nominal is private to the
+/// declaring artefact and therefore cannot be represented by an imported public origin.
+fn expose_generated_evidence_target(
+    environment: &mut AstModuleEnvironment,
+    source_file: &InternedPath,
+    target_type_id: TypeId,
+    string_table: &mut StringTable,
+) -> Result<(), CompilerError> {
+    let Some(target_path) = environment
+        .type_environment
+        .nominal_path(target_type_id)
+        .cloned()
+    else {
+        return Ok(());
+    };
+
+    let lookups = Rc::make_mut(&mut environment.lookups);
+    let visibility = lookups
+        .import_environment
+        .file_visibility_by_source
+        .get_mut(source_file)
+        .ok_or_else(|| {
+            CompilerError::compiler_error(
+                "Generated evidence target has no declaring-file visibility record",
+            )
+        })?;
+
+    let mut binding_name = string_table.intern("__generated_evidence_target");
+    let mut suffix = 0usize;
+    while visibility.visible_source_names.contains_key(&binding_name) {
+        suffix += 1;
+        binding_name = string_table.intern(&format!("__generated_evidence_target_{suffix}"));
+    }
+    visibility
+        .visible_source_names
+        .insert(binding_name, SourceDeclarationTarget::Local(target_path));
     Ok(())
 }
 

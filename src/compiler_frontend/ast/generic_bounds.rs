@@ -349,7 +349,7 @@ fn source_target_resolves_to_type(
         == Some(type_id)
 }
 
-fn generic_parameter_declares_bound(
+pub(crate) fn generic_parameter_declares_bound(
     concrete_type_id: TypeId,
     trait_id: TraitId,
     type_environment: &TypeEnvironment,

@@ -1,13 +1,17 @@
-PrivateBox type T = |
+PrivateBox type T is DISPLAY_TEXT = |
     value T,
 |
 
-private_label type T |this PrivateBox of T| -> String:
-    return "private generic receiver"
+private_label type T is DISPLAY_TEXT |this PrivateBox of T| -> String:
+    return this.value.display()
 ;
 
 export:
-    make type T |value T| -> String:
+    DISPLAY_TEXT must:
+        display |This| -> String
+    ;
+
+    make type T is DISPLAY_TEXT |value T| -> String:
         box = PrivateBox(value)
         return box.private_label()
     ;
