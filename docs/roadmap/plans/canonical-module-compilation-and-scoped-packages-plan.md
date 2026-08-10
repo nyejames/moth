@@ -25,10 +25,10 @@ ACTIVE_PLAN: docs/roadmap/plans/canonical-module-compilation-and-scoped-packages
 WORK_ID: R5-closeout
 WORK_SOURCE: continued Phase 5 closeout after Gate B acceptance and the revised plan
 BASE_REVISION: 276bc4cb2 (clean revised-plan baseline before R5C6A)
-IMPLEMENTED_CHECKPOINT: 58aa30fd5
-RECONCILED_HEAD: 58aa30fd5
-STATUS: active - R5C10 correction checkpoint complete; paused before final review
-CURRENT_SLICE: R5C10 - private generic receiver retention and construction-only declaration-table indexing (complete)
+IMPLEMENTED_CHECKPOINT: 257c4be5c
+RECONCILED_HEAD: 257c4be5c
+STATUS: active - R5C10B closeout correction checkpoint complete; paused before final review
+CURRENT_SLICE: R5C10B - private generic receiver bounds/evidence and closeout validation (complete)
 ACCEPTED_CHECKPOINTS:
 - R5C3C provider agreement and recursive interface closure
 - R5C4A exhaustive canonical token traversal
@@ -71,11 +71,13 @@ VALIDATION_STATE:
 - R5C10 correction serialized full gate passed with `RUST_TEST_THREADS=1 just validate`: 4225 workspace tests, 1826/1826 integration executions, cross-target Clippy, docs, all 60 benchmark preflights plus quick benchmark sanity and timer erasure
 - R5C10 correction `cargo run --quiet -- tests --audit` passed: 1676 integration cases and 1826 backend executions
 - R5C10 correction `just bench-ci` passed: all 60 benchmark preflights and the selected CLI/frontend benchmark cases
-- The default parallel `just validate` unit phase hit an existing global benchmark-timing test race and a retry stalled; the serialized full gate passed without changing that unrelated harness
-AUDITS: interim auditor `20260810T093610Z-d64f9dcf` found one stale DeclarationId comment; corrected; pass-two auditor `20260810T094147Z-9376c565` found no required correction
+- R5C10B passed the normal default `just validate`: 4225 workspace tests, 1826/1826 integration executions, cross-target Clippy, docs, all 60 benchmark preflights plus quick benchmark sanity and timer erasure; the shared instrumentation lock resolved the prior parallel benchmark-timing race
+- R5C10B `cargo run --quiet -- tests --audit` passed: 1676 integration cases and 1826 backend executions
+- R5C10B focused private receiver evidence case passed HTML compilation and rendering
+AUDITS: interim auditor `20260810T093610Z-d64f9dcf` found one stale DeclarationId comment; corrected; pass-two auditor `20260810T094147Z-9376c565` found no required correction; interim auditor `20260810T105710Z-703236c2` found no required correction
 BLOCKERS: no implementation blocker in this correction slice; final auditor and Gate D remain intentionally deferred
 NEXT_WORKER_ORDER: user review -> explicit resume -> final auditor -> Gate D
-STOP_REASON: R5C10 correction checkpoint committed; paused before the final auditor and Gate D per user instruction
+STOP_REASON: R5C10B correction checkpoint committed; paused before the final auditor and Gate D per user instruction
 NEXT_RESUME_ACTION: after user review, explicitly resume for the final auditor and Gate D; do not invoke either during this pause
 FOLLOW_UP_CHAIN:
 1. dependency-clauses-and-path-syntax-plan.md
