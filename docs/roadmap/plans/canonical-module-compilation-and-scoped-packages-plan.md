@@ -25,9 +25,9 @@ ACTIVE_PLAN: docs/roadmap/plans/canonical-module-compilation-and-scoped-packages
 WORK_ID: R5-closeout
 WORK_SOURCE: continued Phase 5 closeout after Gate B acceptance and the revised plan
 BASE_REVISION: 276bc4cb2 (clean revised-plan baseline before R5C6A)
-IMPLEMENTED_CHECKPOINT: 6cddcc38c
-RECONCILED_HEAD: 6cddcc38c
-STATUS: active - R5C10 corrections implemented and validated; paused before final review
+IMPLEMENTED_CHECKPOINT: 4c9a1236d
+RECONCILED_HEAD: 4c9a1236d
+STATUS: active - R5C10 checkpoint complete; paused before final review
 CURRENT_SLICE: R5C10 - exported generic receiver retention/import, transactional publication, shared materialisation data and ownership closeout complete
 ACCEPTED_CHECKPOINTS:
 - R5C3C provider agreement and recursive interface closure
