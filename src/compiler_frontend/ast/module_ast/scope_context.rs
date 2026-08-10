@@ -108,6 +108,7 @@ pub struct ScopeShared {
     pub(crate) lookups: Rc<AstModuleLookups>,
     pub(crate) top_level_declarations: Rc<TopLevelDeclarationTable>,
     pub(crate) nominal_type_ids_by_path: Rc<FxHashMap<InternedPath, TypeId>>,
+    pub(crate) generated_evidence_target_type_ids: Rc<FxHashSet<TypeId>>,
 
     // External package and frontend services.
     pub(crate) external_package_registry: Arc<ExternalPackageRegistry>,
@@ -431,6 +432,7 @@ impl ScopeContext {
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             receiver_methods: Rc::clone(&lookups.receiver_methods),
             nominal_type_ids_by_path: Rc::clone(&lookups.nominal_type_ids_by_path),
+            generated_evidence_target_type_ids: Rc::new(FxHashSet::default()),
             trait_environment_override: None,
         });
 

@@ -604,6 +604,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 project_path_resolver: self.context.project_path_resolver.clone(),
                 path_format_config: self.context.path_format_config.clone(),
             }),
+            generated_evidence_target_type_ids: Rc::new(FxHashSet::default()),
             resolved_public_type_roots: resolved_public_surface_outputs.type_roots,
             resolved_public_trait_roots: resolved_public_surface_outputs.trait_roots,
 

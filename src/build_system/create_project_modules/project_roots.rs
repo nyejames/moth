@@ -1,9 +1,9 @@
 //! Project root and path-resolver setup for Stage 0.
 //!
-//! WHAT: interprets config paths, canonicalizes the project/entry roots, wires source-backed package
-//! discovery, constructs the shared `ProjectPathResolver`, and builds the canonical
-//! `ProjectModuleGraph` that owns entry classification and compile-wave scheduling for the rest
-//! of Stage 0.
+//! WHAT: interprets config paths, canonicalizes the project/entry roots, indexes independently
+//! registered source-backed package boundaries, constructs the shared `ProjectPathResolver`, and
+//! builds the canonical `ProjectModuleGraph` that owns entry classification and compile-wave
+//! scheduling for the rest of Stage 0.
 //! WHY: config path interpretation is build-system input preparation, while the frontend path
 //! resolver should focus on resolving already-established project roots. The graph is built once
 //! from the single source-tree traversal so entry classification and dependency ordering have one
@@ -25,10 +25,7 @@ use std::path::PathBuf;
 use super::module_namespace::ModuleNamespaceSet;
 use super::project_module_graph::ProjectModuleGraph;
 use super::project_structure_diagnostics::{config_diagnostic_messages, path_id};
-use super::source_package_discovery::{
-    build_source_package_boundary_indexes, discover_project_local_source_packages,
-    merge_source_packages,
-};
+use super::source_package_discovery::build_source_package_boundary_indexes;
 use super::source_tree_index::{SourceTreeIndex, SourceTreeProjectContext};
 
 /// Canonical roots used to construct project-aware path resolution.
@@ -90,18 +87,8 @@ pub(super) fn build_project_path_resolver_with_index(
 ) -> Result<ProjectPathResolverSetup, CompilerMessages> {
     let roots = resolve_project_roots(config, string_table)?;
 
-    let project_local_packages =
-        discover_project_local_source_packages(config, &roots.project_root, string_table)?;
-
-    let merged_packages = merge_source_packages(
-        config,
-        builder_source_packages,
-        &project_local_packages,
-        string_table,
-    )?;
-
     let source_package_boundary_indexes = build_source_package_boundary_indexes(
-        &merged_packages,
+        builder_source_packages,
         source_file_kinds,
         external_import_providers,
         string_table,
@@ -117,7 +104,7 @@ pub(super) fn build_project_path_resolver_with_index(
             validated_output_settings,
         },
         config,
-        &merged_packages,
+        builder_source_packages,
         source_file_kinds,
         external_import_providers,
         string_table,
@@ -128,7 +115,9 @@ pub(super) fn build_project_path_resolver_with_index(
         entry_root.clone(),
         prepared_source_package_roots,
         source_file_kinds,
-        source_tree_index.module_roots().clone(),
+        source_tree_index
+            .module_identities()
+            .derive_compilation_root_table(),
     )
     .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 

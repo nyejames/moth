@@ -1,2 +1,2 @@
 project #= "html"
-entry_root #= "."
+entry_root #= "src"

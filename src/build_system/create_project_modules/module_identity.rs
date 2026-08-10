@@ -2,17 +2,17 @@
 //!
 //! WHAT: owns the dense `ModuleId`, `ModuleIdentityRecord`, deterministic assignment table,
 //! structural ancestry and the filename-to-root-role classifier produced by the one Stage 0
-//! source-tree traversal, and derives the narrow frontend module-root lookup table from the
-//! normal roots. The cross-stage portable value types — `StablePackageIdentity`,
+//! source-tree traversal, and derives frontend module-root lookup tables from those identities.
+//! The cross-stage portable value types — `StablePackageIdentity`,
 //! `StableModuleOriginIdentity` and `ModuleRootRole` — are compiler-semantic identity owned by
 //! [`crate::compiler_frontend::semantic_identity`]; this module imports them so Stage 0 stays
 //! the assignment and table owner while identity values remain build-independent.
-//! WHY: durable identity and topology are build-system-owned data. The frontend resolver
-//! consumes only the derived normal-root lookup table, so import resolution never sees support
-//! or facade records in this slice. Later graph-construction phases consume the identity and
-//! ancestry directly from this table. The dense `ModuleId` is the build-local handle for one
-//! build boundary; the owned `StableModuleOriginIdentity` is the cross-build semantic identity
-//! that later exported declaration identities embed.
+//! WHY: durable identity and topology are build-system-owned data. The directory frontend
+//! resolver consumes a derived normal-and-support root lookup table, while synthetic single-file
+//! compilation can request the narrower normal-root view. Later graph-construction phases consume
+//! the identity and ancestry directly from this table. The dense `ModuleId` is the build-local
+//! handle for one build boundary; the owned `StableModuleOriginIdentity` is the cross-build
+//! semantic identity that later exported declaration identities embed.
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::paths::module_roots::{ModuleRootRecord, ModuleRootTable};
@@ -231,12 +231,15 @@ impl ModuleIdentityTable {
     /// Derive the complete root table for semantic compilation inside one package boundary.
     ///
     /// Package scheduling compiles normal and support modules directly. Its resolver therefore
-    /// needs every indexed root for membership and same-directory content preparation, while the
-    /// narrower project import resolver continues to expose only normal child-module roots.
+    /// needs every indexed non-facade root for membership and same-directory content preparation.
+    /// The project-root facade remains a retained Stage 0 identity, but it is not a filesystem
+    /// module root for resolver membership and must not replace a normal root when both share the
+    /// project directory in the compatibility layout.
     pub(crate) fn derive_compilation_root_table(&self) -> ModuleRootTable {
         let records = self
             .records
             .iter()
+            .filter(|record| record.role != ModuleRootRole::ProjectPackageFacade)
             .map(|record| {
                 ModuleRootRecord::new(record.root_directory.clone(), record.root_file.clone())
             })

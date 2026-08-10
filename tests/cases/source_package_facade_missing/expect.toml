@@ -1,6 +1,6 @@
 entry = "."
 
 [backends.html]
-mode = "failure"
+mode = "success"
 warnings = "forbid"
-diagnostic_codes = ["MOTH-CONFIG-0001"]
+rendered_output_contains = ["ordinary folder ignored"]

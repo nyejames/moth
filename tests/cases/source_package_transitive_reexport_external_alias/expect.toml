@@ -1,6 +1,6 @@
 entry = "."
 
 [backends.html]
-mode = "success"
+mode = "failure"
 warnings = "forbid"
-rendered_output_contains = ["transitive_binding sine=0", "ratio=3.14159", "seconds=2.5"]
+diagnostic_codes = ["MOTH-IMPORT-0005"]

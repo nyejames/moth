@@ -471,15 +471,15 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Partial]
             [: Targeted flat-config parsing, known-key validation, self-contained import rejection, and builder-section coverage.]
             [: Frontend / HTML]
-            [: The current compiler supports the transitional flat config shape with parsing and validation implemented. Grouped [$html:<code>project</code>] and builder records are accepted deferred design. [$html:<code>#Import</code>], [$html:<code>@project</code>] and entry-local [$html:<code>config:</code>] remain separately queued. Legacy [$html:<code>package_folders</code>] remains current implementation drift. The queued Project Config and recursive schemas plan owns replacement.]
+            [: The current compiler supports the transitional flat config shape with parsing and validation implemented. Grouped [$html:<code>project</code>] and builder records are accepted deferred design. [$html:<code>#Import</code>], [$html:<code>@project</code>] and entry-local [$html:<code>config:</code>] remain separately queued. The transitional [$html:<code>package_folders</code>] field still parses for the queued Project Config migration, but canonical Stage 0 no longer consumes it for package discovery.]
         ]
 
         [data:
             [: Project-local packages]
             [: Partial]
-            [: Targeted structural support-package roots, legacy config-defined package folders, import resolution, generic normal module-root, and public-surface coverage.]
+            [: Targeted structural support-package roots, ignored legacy package-folder configuration, independently registered builder packages, import resolution, generic normal module-root, and public-surface coverage.]
             [: Frontend / HTML]
-            [: Structural [$html:<code>+*.moth</code>] support packages and the optional project-root facade define the accepted package model. The current compiler also retains legacy config-driven [$html:<code>package_folders</code>] discovery, defaulting to [$html:<code>lib/</code>]. The queued Project Config migration removes that compatibility path. Each support package's containing directory supplies its name. Stage 0 requires exactly one direct [$html:<code>@*.moth</code>] or [$html:<code>+*.moth</code>] root with a non-empty cosmetic name. The filename after [$html:<code>@</code>] or [$html:<code>+</code>] has no semantic role and the root's strict [$html:<code>export:</code>] block defines its public surface.]
+            [: Structural [$html:<code>+*.moth</code>] support packages and the optional project-root facade define the accepted project-local package model. Canonical Stage 0 ignores legacy config-driven [$html:<code>package_folders</code>] paths, including the historical default [$html:<code>lib/</code>]; the transitional config field remains only until the queued Project Config migration removes it. Independently registered Builder/Core source packages retain their own package boundaries. Each support package's containing directory supplies its name. Stage 0 requires exactly one direct [$html:<code>@*.moth</code>] or [$html:<code>+*.moth</code>] root with a non-empty cosmetic name. The filename after [$html:<code>@</code>] or [$html:<code>+</code>] has no semantic role and the root's strict [$html:<code>export:</code>] block defines its public surface.]
         ]
 
         [data:

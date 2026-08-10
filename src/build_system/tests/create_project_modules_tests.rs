@@ -29,7 +29,6 @@ use crate::builder_surface::external_import_providers::provider::{
 use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::compiler_errors::{CompilerMessages, ErrorType};
-use crate::compiler_frontend::compiler_messages::render::{DiagnosticRenderContext, terse};
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticCategory, DiagnosticPayload,
@@ -100,7 +99,9 @@ fn configured_resolver_with_source_file_kinds(
         entry_root,
         PreparedSourcePackageRoots::empty(),
         source_file_kinds,
-        source_tree_index.module_roots().clone(),
+        source_tree_index
+            .module_identities()
+            .derive_compilation_root_table(),
     )
     .expect("project path resolver should build")
 }
@@ -634,17 +635,6 @@ fn discover_modules_and_graph_for_test(
         project_module_graph,
         source_tree_index,
         string_table,
-    )
-}
-
-fn rendered_first_error(messages: &CompilerMessages) -> String {
-    let diagnostic = messages
-        .error_diagnostics()
-        .next()
-        .expect("expected one diagnostic");
-    terse::format_terse_diagnostic_with_context(
-        diagnostic,
-        DiagnosticRenderContext::new(&messages.string_table),
     )
 }
 
@@ -1586,38 +1576,37 @@ fn rejects_builder_config_import_without_discovering_the_package_root() {
 }
 
 #[test]
-fn configured_package_folder_registers_project_local_source_metadata() {
+fn legacy_package_folder_does_not_register_project_local_source_metadata() {
     let root = temp_dir("configured_project_local_package_metadata");
     let package_root = root.join("packages/widgets");
     fs::create_dir_all(&package_root).expect("should create project-local package");
+    fs::create_dir_all(root.join("src")).expect("should create entry root");
+    fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
 
     let mut config = Config::new(root.clone());
+    config.entry_root = PathBuf::from("src");
     config.package_folders = vec![PathBuf::from("packages")];
     config.has_explicit_package_folders = true;
 
     let mut string_table = StringTable::new();
-    let discovered = super::source_package_discovery::discover_project_local_source_packages(
+    let resolver = super::project_roots::build_project_path_resolver(
         &config,
-        &root,
+        &crate::builder_surface::SourcePackageRegistry::default(),
+        &crate::builder_surface::SourceFileKindRegistry::default(),
         &mut string_table,
     )
-    .expect("configured package folder should be discovered");
-    let package = discovered
-        .get_root("widgets")
-        .expect("widgets package should be registered");
+    .expect("legacy package folders must not affect canonical Stage 0");
 
-    assert_eq!(
-        package.metadata,
-        crate::builder_surface::PackageMetadata::source(
-            crate::builder_surface::PackageOrigin::ProjectLocal,
-        )
+    assert!(
+        resolver.source_package_roots().is_empty(),
+        "ordinary configured package folders must not register source packages"
     );
 
     fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
-fn package_prefix_collision_with_entry_root_folder_rejected() {
+fn ordinary_package_folder_does_not_collide_with_entry_root() {
     let root = temp_dir("entry_root_lib_collision");
     fs::create_dir_all(root.join("src/helper")).expect("should create src/helper");
     fs::create_dir_all(root.join("lib/helper")).expect("should create lib/helper");
@@ -1642,21 +1631,8 @@ fn package_prefix_collision_with_entry_root_folder_rejected() {
         &mut string_table,
     );
 
-    assert!(
-        result.is_err(),
-        "entry-root folder colliding with source-backed package prefix should fail"
-    );
-    let messages = result.expect_err("checked above");
-    let error_text = rendered_first_error(&messages);
-    assert!(
-        error_text.contains("collides") || error_text.contains("Ambiguous"),
-        "error should mention collision or ambiguity: {error_text}"
-    );
-    assert_has_config_error(&messages);
-    assert!(matches!(
-        first_invalid_config_reason(&messages),
-        InvalidConfigReason::EntryRootPackagePrefixCollision { .. }
-    ));
+    let resolver = result.expect("ordinary package folders are not canonical package roots");
+    assert!(resolver.source_package_roots().is_empty());
 
     fs::remove_dir_all(&root).expect("should remove temp root");
 }
@@ -2640,7 +2616,7 @@ fn authored_config_resolver_uses_canonical_parent_for_noncanonical_spelling() {
 }
 
 #[test]
-fn project_local_lib_directory_is_discovered_as_source_package_root() {
+fn project_local_lib_directory_is_ignored_as_source_package_root() {
     let root = temp_dir("project_local_lib");
     fs::create_dir_all(&root).expect("should create root dir");
     fs::create_dir_all(root.join("lib/helper")).expect("should create lib/helper");
@@ -2650,7 +2626,9 @@ fn project_local_lib_directory_is_discovered_as_source_package_root() {
     fs::write(root.join("lib/helper/utils.moth"), "bar #= 2\n").expect("should write lib file");
     fs::write(root.join("config.moth"), "").expect("should write config");
 
-    let config = Config::new(root.clone());
+    let mut config = Config::new(root.clone());
+    config.package_folders = vec![PathBuf::from("lib")];
+    config.has_explicit_package_folders = true;
     let mut string_table = StringTable::new();
     let resolver = super::project_roots::build_project_path_resolver(
         &config,
@@ -2660,34 +2638,38 @@ fn project_local_lib_directory_is_discovered_as_source_package_root() {
     )
     .expect("resolver should build");
 
-    // Import path `@helper/utils` should resolve to the project-local lib root.
+    assert!(
+        resolver.source_package_roots().is_empty(),
+        "the legacy lib folder must not become a source-backed package root"
+    );
+
+    // Import path `@helper/utils` must not resolve through the legacy lib folder.
     let mut path = crate::compiler_frontend::symbols::interned_path::InternedPath::new();
     path.push_str("helper", &mut string_table);
     path.push_str("utils", &mut string_table);
 
     let importer = root.join("src/@page.moth");
-    let resolved = resolver
-        .resolve_import_to_source_file(&path, &importer, &mut string_table)
-        .expect("should resolve source-backed package import")
-        .path;
-
-    assert_eq!(
-        resolved,
-        fs::canonicalize(root.join("lib/helper/utils.moth")).unwrap(),
-        "should resolve to project-local lib directory"
+    assert!(
+        resolver
+            .resolve_import_to_source_file(&path, &importer, &mut string_table)
+            .is_err(),
+        "legacy lib folders must not resolve as source packages"
     );
 
     fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
-fn package_prefix_collision_with_builder_package_rejected() {
+fn builder_package_prefix_is_independent_of_ordinary_lib_directory() {
     let root = temp_dir("lib_collision");
     fs::create_dir_all(&root).expect("should create root dir");
     fs::create_dir_all(root.join("lib/html")).expect("should create lib/html");
+    fs::create_dir_all(root.join("builder/html")).expect("should create builder/html");
     fs::create_dir_all(root.join("src")).expect("should create src");
     fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(root.join("lib/html/@mod.moth"), "foo #= 1\n").expect("should write root");
+    fs::write(root.join("builder/html/@mod.moth"), "foo #= 1\n")
+        .expect("should write builder package root");
     fs::write(root.join("config.moth"), "").expect("should write config");
 
     let config = Config::new(root.clone());
@@ -2707,27 +2689,17 @@ fn package_prefix_collision_with_builder_package_rejected() {
         &mut string_table,
     );
 
-    assert!(
-        result.is_err(),
-        "should fail when Builder and ProjectLocal package prefixes collide"
+    let resolver = result.expect("builder package should remain independently registered");
+    assert_eq!(
+        resolver.source_package_roots().get("html"),
+        Some(&fs::canonicalize(root.join("builder/html")).unwrap())
     );
-    let messages = result.expect_err("checked above");
-    let error_text = rendered_first_error(&messages);
-    assert!(
-        error_text.contains("collide") || error_text.contains("html"),
-        "error should mention collision: {error_text}"
-    );
-    assert_has_config_error(&messages);
-    assert!(matches!(
-        first_invalid_config_reason(&messages),
-        InvalidConfigReason::SourcePackageBuilderPrefixCollision { .. }
-    ));
 
     fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
-fn configured_package_folder_is_discovered_as_source_package_root() {
+fn configured_package_folder_is_ignored_as_source_package_root() {
     let root = temp_dir("project_local_custom_package_folder");
     fs::create_dir_all(&root).expect("should create root dir");
     fs::create_dir_all(root.join("packages/helper")).expect("should create packages/helper");
@@ -2765,22 +2737,18 @@ fn configured_package_folder_is_discovered_as_source_package_root() {
     path.push_str("utils", &mut string_table);
 
     let importer = root.join("src/@page.moth");
-    let resolved = resolver
-        .resolve_import_to_source_file(&path, &importer, &mut string_table)
-        .expect("should resolve source-backed package import")
-        .path;
-
-    assert_eq!(
-        resolved,
-        fs::canonicalize(root.join("packages/helper/utils.moth")).unwrap(),
-        "should resolve to configured package folder"
+    assert!(
+        resolver
+            .resolve_import_to_source_file(&path, &importer, &mut string_table)
+            .is_err(),
+        "configured package folders must not become source-backed packages"
     );
 
     fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
-fn missing_explicit_package_folder_is_error() {
+fn missing_explicit_package_folder_is_ignored_by_stage0() {
     let root = temp_dir("missing_explicit_package_folder");
     fs::create_dir_all(root.join("src")).expect("should create src");
     fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
@@ -2807,27 +2775,14 @@ fn missing_explicit_package_folder_is_error() {
         &mut string_table,
     );
 
-    assert!(
-        result.is_err(),
-        "missing explicitly configured package folder should fail"
-    );
-    let messages = result.expect_err("checked above");
-    let error_text = rendered_first_error(&messages);
-    assert!(
-        error_text.contains("Configured package folder 'packages' does not exist"),
-        "unexpected error message: {error_text}"
-    );
-    assert_has_config_error(&messages);
-    assert!(matches!(
-        first_invalid_config_reason(&messages),
-        InvalidConfigReason::ConfiguredPackageFolderMissing { .. }
-    ));
+    let resolver = result.expect("legacy package folder validation is outside canonical Stage 0");
+    assert!(resolver.source_package_roots().is_empty());
 
     fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
-fn explicit_package_folder_must_be_directory() {
+fn explicit_package_folder_file_is_ignored_by_stage0() {
     let root = temp_dir("package_folder_not_directory");
     fs::create_dir_all(root.join("src")).expect("should create src");
     fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
@@ -2855,172 +2810,8 @@ fn explicit_package_folder_must_be_directory() {
         &mut string_table,
     );
 
-    let messages = result.expect_err("package scan root file should fail");
-    assert!(matches!(
-        first_invalid_config_reason(&messages),
-        InvalidConfigReason::ConfiguredPackageFolderNotDirectory { .. }
-    ));
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
-}
-
-#[test]
-fn source_package_requires_one_generic_normal_module_root() {
-    let root = temp_dir("source_package_missing_root");
-    fs::create_dir_all(root.join("src")).expect("should create src");
-    fs::create_dir_all(root.join("lib/helper")).expect("should create lib/helper");
-    fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
-    fs::write(root.join("config.moth"), "entry_root #= \"src\"\n").expect("should write config");
-
-    let mut config = Config::new(root.clone());
-    let style_directives = test_style_directives();
-    parse_project_config_for_test(
-        &mut config,
-        &root.join(settings::CONFIG_FILE_NAME),
-        &style_directives,
-    )
-    .expect("config should parse");
-
-    let mut string_table = StringTable::new();
-    let result = super::project_roots::build_project_path_resolver(
-        &config,
-        &crate::builder_surface::SourcePackageRegistry::default(),
-        &crate::builder_surface::SourceFileKindRegistry::default(),
-        &mut string_table,
-    );
-
-    let messages =
-        result.expect_err("source-backed package without a normal module root should fail");
-    assert!(matches!(
-        first_invalid_config_reason(&messages),
-        InvalidConfigReason::SourcePackageMissingRoot { .. }
-    ));
-    let error_text = rendered_first_error(&messages);
-    assert!(error_text.contains("@*.moth"));
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
-}
-
-#[test]
-fn source_package_accepts_cosmetic_normal_module_root_name() {
-    let root = temp_dir("source_package_cosmetic_root");
-    fs::create_dir_all(root.join("src")).expect("should create src");
-    fs::create_dir_all(root.join("lib/helper")).expect("should create lib/helper");
-    fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
-    fs::write(root.join("lib/helper/@package.moth"), "foo #= 1\n")
-        .expect("should write cosmetic root");
-    fs::write(root.join("lib/helper/utils.moth"), "bar #= 2\n")
-        .expect("should write package source");
-    fs::write(root.join("config.moth"), "entry_root #= \"src\"\n").expect("should write config");
-
-    let mut config = Config::new(root.clone());
-    let style_directives = test_style_directives();
-    parse_project_config_for_test(
-        &mut config,
-        &root.join(settings::CONFIG_FILE_NAME),
-        &style_directives,
-    )
-    .expect("config should parse");
-
-    let mut string_table = StringTable::new();
-    super::project_roots::build_project_path_resolver(
-        &config,
-        &crate::builder_surface::SourcePackageRegistry::default(),
-        &crate::builder_surface::SourceFileKindRegistry::default(),
-        &mut string_table,
-    )
-    .expect("cosmetic source-backed package root should pass Stage 0 preflight");
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
-}
-
-#[test]
-fn source_package_rejects_multiple_generic_normal_module_roots() {
-    let root = temp_dir("source_package_multiple_roots");
-    fs::create_dir_all(root.join("src")).expect("should create src");
-    fs::create_dir_all(root.join("lib/helper")).expect("should create lib/helper");
-    fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
-    fs::write(root.join("lib/helper/@first.moth"), "foo #= 1\n").expect("should write first root");
-    fs::write(root.join("lib/helper/@second.moth"), "bar #= 2\n")
-        .expect("should write second root");
-    fs::write(root.join("config.moth"), "entry_root #= \"src\"\n").expect("should write config");
-
-    let mut config = Config::new(root.clone());
-    let style_directives = test_style_directives();
-    parse_project_config_for_test(
-        &mut config,
-        &root.join(settings::CONFIG_FILE_NAME),
-        &style_directives,
-    )
-    .expect("config should parse");
-
-    let mut string_table = StringTable::new();
-    let result = super::project_roots::build_project_path_resolver(
-        &config,
-        &crate::builder_surface::SourcePackageRegistry::default(),
-        &crate::builder_surface::SourceFileKindRegistry::default(),
-        &mut string_table,
-    );
-
-    let messages = result.expect_err("multiple source-backed package roots should fail preflight");
-    assert!(matches!(
-        first_invalid_config_reason(&messages),
-        InvalidConfigReason::SourcePackageMultipleRoots { .. }
-    ));
-    let error_text = rendered_first_error(&messages);
-    assert!(error_text.contains("@first.moth"));
-    assert!(error_text.contains("@second.moth"));
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
-}
-
-#[test]
-fn package_prefix_collision_across_scan_roots_rejected() {
-    let root = temp_dir("duplicate_package_prefixes");
-    fs::create_dir_all(root.join("lib/helper")).expect("should create lib/helper");
-    fs::create_dir_all(root.join("vendor/helper")).expect("should create vendor/helper");
-    fs::create_dir_all(root.join("src")).expect("should create src");
-    fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
-    fs::write(root.join("lib/helper/@mod.moth"), "foo #= 1\n").expect("should write root");
-    fs::write(root.join("vendor/helper/@mod.moth"), "bar #= 2\n").expect("should write root");
-    fs::write(
-        root.join("config.moth"),
-        "package_folders #= { \"lib\", \"vendor\" }\n",
-    )
-    .expect("should write config");
-
-    let mut config = Config::new(root.clone());
-    let style_directives = test_style_directives();
-    parse_project_config_for_test(
-        &mut config,
-        &root.join(settings::CONFIG_FILE_NAME),
-        &style_directives,
-    )
-    .expect("config should parse");
-
-    let mut string_table = StringTable::new();
-    let result = super::project_roots::build_project_path_resolver(
-        &config,
-        &crate::builder_surface::SourcePackageRegistry::default(),
-        &crate::builder_surface::SourceFileKindRegistry::default(),
-        &mut string_table,
-    );
-
-    assert!(
-        result.is_err(),
-        "same source-backed package prefix discovered from two configured folders should fail"
-    );
-    let messages = result.expect_err("checked above");
-    let error_text = rendered_first_error(&messages);
-    assert!(
-        error_text.contains("Configured package folder collision"),
-        "unexpected error message: {error_text}"
-    );
-    assert_has_config_error(&messages);
-    assert!(matches!(
-        first_invalid_config_reason(&messages),
-        InvalidConfigReason::SourcePackagePrefixCollision { .. }
-    ));
+    let resolver = result.expect("legacy package folder validation is outside canonical Stage 0");
+    assert!(resolver.source_package_roots().is_empty());
 
     fs::remove_dir_all(&root).expect("should remove temp root");
 }
@@ -3223,52 +3014,6 @@ fn js_file_with_same_stem_as_folder_does_not_trigger_collision() {
         &mut string_table,
     )
     .expect(".js file with same stem as folder should not trigger collision");
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
-}
-
-#[test]
-fn rejects_moth_file_and_folder_collision_in_source_package() {
-    let root = temp_dir("source_package_moth_folder_collision");
-    fs::create_dir_all(root.join("src")).expect("should create src");
-    fs::create_dir_all(root.join("lib/helper/ui")).expect("should create lib/helper/ui");
-    fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
-    fs::write(root.join("lib/helper/@mod.moth"), "value #= 1\n").expect("should write root");
-    fs::write(root.join("lib/helper/ui.moth"), "value #= 2\n")
-        .expect("should write colliding package file");
-    fs::write(
-        root.join("config.moth"),
-        "entry_root #= \"src\"\npackage_folders #= { \"lib\" }\n",
-    )
-    .expect("should write config");
-
-    let mut config = Config::new(root.clone());
-    let style_directives = test_style_directives();
-    parse_project_config_for_test(
-        &mut config,
-        &root.join(settings::CONFIG_FILE_NAME),
-        &style_directives,
-    )
-    .expect("config should parse");
-
-    let mut string_table = StringTable::new();
-    let result = super::project_roots::build_project_path_resolver(
-        &config,
-        &crate::builder_surface::SourcePackageRegistry::default(),
-        &crate::builder_surface::SourceFileKindRegistry::default(),
-        &mut string_table,
-    );
-
-    assert!(
-        result.is_err(),
-        "source-backed package ui.moth + ui/ collision should be rejected"
-    );
-    let messages = result.expect_err("checked above");
-    assert_has_config_error(&messages);
-    assert!(matches!(
-        first_invalid_config_reason(&messages),
-        InvalidConfigReason::SourceFileFolderCollision { .. }
-    ));
 
     fs::remove_dir_all(&root).expect("should remove temp root");
 }

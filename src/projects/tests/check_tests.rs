@@ -133,19 +133,15 @@ fn assert_timing_sequence(
 #[test]
 fn check_retains_source_package_warning() {
     let root = temp_dir("check_source_package_warning");
-    let package = root.join("packages/warnpkg");
+    let package = root.join("src/warnpkg");
     let src = root.join("src");
     fs::create_dir_all(&package).expect("should create package root");
     fs::create_dir_all(&src).expect("should create entry root");
-    fs::write(
-        root.join("config.moth"),
-        "entry_root #= \"src\"\npackage_folders #= { \"packages\" }\n",
-    )
-    .expect("should write config");
+    fs::write(root.join("config.moth"), "entry_root #= \"src\"\n").expect("should write config");
     fs::write(src.join("@page.moth"), "value = 1\n").expect("should write project root");
     fs::write(
-        package.join("@mod.moth"),
-        "value ~= \"hello\"\nresult ~= \"unset\"\n\nif value is:\n    \"one\" => result = \"one\"\n    \"one\" => result = \"one\"\n    else => result = \"other\"\n;\n",
+        package.join("+package.moth"),
+        "export:\n    run || -> Int:\n        value ~= \"hello\"\n        result ~= \"unset\"\n\n        if value is:\n            \"one\" => result = \"one\"\n            \"one\" => result = \"one\"\n            else => result = \"other\"\n        ;\n        return 1\n    ;\n;\n",
     )
     .expect("should write warning package root");
 

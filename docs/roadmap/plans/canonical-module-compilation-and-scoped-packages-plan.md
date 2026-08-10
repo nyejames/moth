@@ -27,8 +27,8 @@ WORK_SOURCE: continued Phase 5 closeout after Gate B acceptance and the revised 
 BASE_REVISION: 276bc4cb2 (clean revised-plan baseline before R5C6A)
 IMPLEMENTED_CHECKPOINT: 257c4be5c
 RECONCILED_HEAD: 1081eeaa2
-STATUS: active - R5C10B regular audit accepted; final review pending
-CURRENT_SLICE: R5C10B - implementation-coordinator regular audit (complete)
+STATUS: active - R5C10C complete; second independent review pending
+CURRENT_SLICE: R5C10C - canonical package discovery, requester template indexing and generated evidence visibility (complete)
 ACCEPTED_CHECKPOINTS:
 - R5C3C provider agreement and recursive interface closure
 - R5C4A exhaustive canonical token traversal
@@ -76,11 +76,13 @@ VALIDATION_STATE:
 - R5C10B focused private receiver evidence case passed HTML compilation and rendering
 - R5C10B regular auditor `20260810T112902Z-2655eca7` returned `audit_clean`; the read-only child could not rerun Cargo gates, so the coordinator retained the recorded validation evidence
 - R5C10B documentation release build passed and regenerated the progress page output from its committed source
+- R5C10C structural package correction now passes the full integration inventory: 1826/1826 cases, including structural support-facade re-exports, API-only support-root rejection, ignored legacy package-folder configuration and scoped support visibility
+- R5C10C exact gate passed: `cargo fmt --all`, `cargo run --quiet -- tests --audit` (1676 cases, 1826 backend executions), `just validate` (4222 workspace tests, 17 auxiliary tests, 641 xtask tests, 1826/1826 integration cases, docs, benchmark sanity and timers-erasure), and standalone `just bench-ci` (60/60 benchmark preflights)
 AUDITS: interim auditor `20260810T093610Z-d64f9dcf` found one stale DeclarationId comment; corrected; pass-two auditor `20260810T094147Z-9376c565` found no required correction; interim auditor `20260810T105710Z-703236c2` found no required correction; regular auditor `20260810T112902Z-2655eca7` found no required correction
-BLOCKERS: no implementation blocker; final auditor and Gate D remain pending
-NEXT_WORKER_ORDER: final auditor -> Gate D -> compress/archive canonical Phase 5 -> dependency-clauses-and-path-syntax-plan.md
-STOP_REASON: regular audit accepted; paused before the final review boundary
-NEXT_RESUME_ACTION: explicitly resume for the final auditor and Gate D; do not bypass the gate by starting the follow-up plan
+BLOCKERS: second independent review, final auditor and Gate D remain pending; strict entry_root remains deferred to the queued Project Config plan
+NEXT_WORKER_ORDER: reconcile the second independent review -> final auditor -> Gate D -> compress/archive canonical Phase 5 -> dependency-clauses-and-path-syntax-plan.md
+STOP_REASON: R5C10C is validated and checkpoint-ready; paused for the second independent review before the final-audit boundary
+NEXT_RESUME_ACTION: inspect the second independent review against R5C10C; resolve only valid findings, then run the final auditor and Gate D
 FOLLOW_UP_CHAIN:
 1. dependency-clauses-and-path-syntax-plan.md
 2. tir-corrections-and-simplification-plan.md
@@ -314,7 +316,7 @@ Review gates:
 - **Gate B:** accepted at R5C1C
 - **Gate C1:** after R5C6A, before convergence behaviour changes
 - **Gate C2:** after R5C6B, before source-payload ownership changes
-- **Gate D:** after R5C9 deletion audit, R5C10 corrections and the final auditor
+- **Gate D:** after R5C9 deletion audit, R5C10/R5C10C corrections and the final auditor
 
 Reviews are read-only. Corrections land as separate bounded slices.
 
@@ -670,7 +672,7 @@ Counters must prove:
 - no borrow reanalysis without a changed direct input after the initial seed pass
 
 Use this checkpoint for the Gate D review. Resolve any required findings through the bounded
-R5C10 correction lane before the final auditor and Gate D acceptance.
+R5C10/R5C10C correction lane before the final auditor and Gate D acceptance.
 
 ### R5C10 / Gate D corrections
 
@@ -697,6 +699,32 @@ R5C9 deletion audit
 -> R5C10 corrections
 -> final review/auditor
 -> Gate D acceptance
+```
+
+### R5C10C / Gate D ownership cleanup
+
+The first independent final audit identified two Gate D blockers and one bounded hardening item.
+R5C10C keeps the accepted Phase 5 architecture while completing the ownership boundary:
+
+- canonical Stage 0 no longer derives project-local packages from `Config.package_folders`; structural `+*.moth` support roots and independently registered Builder/Core source packages remain active
+- project compilation supplies the resolver with the indexed normal-and-support root table, so support-facade membership, re-exports and public exports use the same Stage 0 facts as module scheduling
+- requester-local generic declarations use a construction-only exact identity-to-path index with duplicate retained-body rejection; the path-keyed template map remains the body owner
+- selected generated evidence targets use a transient validation set rather than fabricated source-visible bindings
+- shared-directory compatibility keeps the retained project facade out of the normal/support resolver root table, so a facade cannot replace the normal entry root
+- the transitional `package_folders` parser/storage and strict empty `entry_root` compatibility remain owned by the queued Project Config plan
+
+R5C10C is implementation-complete and validated. The second independent review remains the next
+pause boundary; final auditor and Gate D must still inspect the correction checkpoint before any
+follow-up plan starts.
+
+The bounded correction sequence is:
+
+```text
+first independent Gate D review
+-> R5C10C ownership corrections
+-> exact validation gate
+-> second independent review
+-> final auditor and Gate D
 ```
 
 ## Phase 5 exit gate

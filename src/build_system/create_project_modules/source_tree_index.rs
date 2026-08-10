@@ -377,7 +377,9 @@ struct SourceInventory {
 ///
 /// `module_identities` is the Stage 0 durable identity and topology table; the project module
 /// graph built from it owns normal entry classification and compile-wave scheduling. `module_roots`
-/// is the narrow frontend normal-root lookup table derived from it for current resolver consumers.
+/// is the narrow normal-root lookup retained for synthetic single-file construction and focused
+/// Stage 0 tests; directory compilation derives its complete normal-and-support table directly
+/// from `module_identities`.
 ///
 /// `sources` is the central contiguous `SourceRecord` table addressed by dense `SourceId`s; it is
 /// the sole source inventory/ownership owner. `owned_source_ids` and `unrooted_source_ids` store
@@ -966,14 +968,17 @@ impl SourceTreeIndex {
         Some(self.module_identities.record(module_id).root_file())
     }
 
+    #[cfg(test)]
     pub(crate) fn module_roots(&self) -> &ModuleRootTable {
         &self.module_roots
     }
 
     /// The Stage 0 durable module identity and topology table.
     ///
-    /// Consumed by the project module graph (built in `project_roots`) and by focused tests; the
-    /// narrow frontend lookup table is available through [`SourceTreeIndex::module_roots`].
+    /// Consumed by the project module graph (built in `project_roots`) and by focused tests. The
+    /// directory frontend derives its complete root lookup from this identity table before
+    /// semantic compilation; [`SourceTreeIndex::module_roots`] remains the normal-only synthetic
+    /// view.
     pub(crate) fn module_identities(&self) -> &ModuleIdentityTable {
         &self.module_identities
     }

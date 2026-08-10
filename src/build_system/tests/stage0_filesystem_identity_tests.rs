@@ -178,7 +178,7 @@ mod non_utf8_filesystem_identity {
     }
 
     #[test]
-    fn project_local_package_prefix_rejects_non_utf8_name() {
+    fn legacy_package_folder_does_not_scan_non_utf8_names() {
         let root = temp_dir("package_prefix_non_utf8");
         let packages_folder = root.join("packages");
         fs::create_dir_all(&packages_folder).expect("should create packages folder");
@@ -186,20 +186,24 @@ mod non_utf8_filesystem_identity {
         let bad_name = OsString::from_vec(vec![0xC3, 0x28]);
         let bad_package = packages_folder.join(bad_name);
         fs::create_dir_all(&bad_package).expect("should create non-UTF-8 named package directory");
+        fs::create_dir_all(root.join("src")).expect("should create entry root");
+        fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
 
         let mut config = Config::new(root.clone());
+        config.entry_root = PathBuf::from("src");
         config.package_folders = vec![PathBuf::from("packages")];
         config.has_explicit_package_folders = true;
 
         let mut string_table = StringTable::new();
-        let messages = super::source_package_discovery::discover_project_local_source_packages(
+        let resolver = super::project_roots::build_project_path_resolver(
             &config,
-            &root,
+            &crate::builder_surface::SourcePackageRegistry::default(),
+            &crate::builder_surface::SourceFileKindRegistry::default(),
             &mut string_table,
         )
-        .expect_err("non-UTF-8 package prefix should be rejected");
+        .expect("legacy package folders must not be scanned");
 
-        assert_file_infrastructure_error(&messages);
+        assert!(resolver.source_package_roots().is_empty());
         fs::remove_dir_all(&root).expect("should remove temp root");
     }
 }
@@ -2379,6 +2383,31 @@ mod owned_source_inventory_tests {
         assert_eq!(
             facade_record_count, 1,
             "the facade source must appear exactly once in the central source table"
+        );
+
+        fs::remove_dir_all(&root).expect("should remove temp root");
+    }
+
+    #[test]
+    fn compilation_root_table_excludes_facade_when_it_shares_entry_root() {
+        let root = temp_dir("facade_resolver_root_table");
+        fs::create_dir_all(&root).expect("should create entry root");
+        fs::write(root.join("@page.moth"), "").expect("should write entry root file");
+        fs::write(root.join("+package.moth"), "").expect("should write facade root file");
+
+        let index = discover_index_with_kinds(&root, ".", "my-project", &html_source_file_kinds());
+        let table = index.module_identities();
+        let compilation_roots = table.derive_compilation_root_table();
+        let canonical_root = fs::canonicalize(&root).expect("test root should canonicalize");
+
+        assert_eq!(
+            compilation_roots.root_file_for_directory(&canonical_root),
+            Some(canonical_root.join("@page.moth").as_path()),
+            "the normal module remains authoritative for the shared project directory"
+        );
+        assert!(
+            !compilation_roots.is_root_file(&canonical_root.join("+package.moth")),
+            "the project facade must not become a resolver module root"
         );
 
         fs::remove_dir_all(&root).expect("should remove temp root");

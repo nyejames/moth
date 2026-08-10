@@ -1,6 +1,6 @@
 entry = "."
 
 [backends.html]
-mode = "success"
+mode = "failure"
 warnings = "forbid"
-rendered_output_contains = ["hello"]
+diagnostic_codes = ["MOTH-RULE-0023"]

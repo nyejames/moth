@@ -258,6 +258,19 @@ impl ScopeContext {
         self
     }
 
+    /// Register exact generated-evidence targets for the current materialisation.
+    ///
+    /// WHAT: supplies transient nominal identities selected by the requester-side evidence map.
+    /// WHY: generated bound validation must accept that exact selection without pretending it is
+    /// an authored source binding or widening ordinary file visibility.
+    pub(crate) fn with_generated_evidence_target_type_ids(
+        mut self,
+        type_ids: Rc<FxHashSet<TypeId>>,
+    ) -> ScopeContext {
+        Rc::make_mut(&mut self.shared).generated_evidence_target_type_ids = type_ids;
+        self
+    }
+
     // --------------------------
     //  Project services and directives
     // --------------------------

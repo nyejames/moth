@@ -1306,6 +1306,9 @@ impl FrontendModuleBuildContext<'_> {
                 materialisation_context_builder.generic_function_templates_mut(),
             )
             .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+            materialisation_context_builder
+                .finalize_generic_template_identity_index()
+                .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
 
             let function_origin_lookup = HirFunctionOriginLookup::from_public_and_private_seeds(
                 public_interface_build.function_origin_seeds,
@@ -1741,7 +1744,9 @@ impl FrontendModuleBuildContext<'_> {
             deferred_generic_requests: nested_requests,
             ..
         } = build_result;
-        let generated_context = generated_context_builder.finish_preparation();
+        let generated_context = generated_context_builder
+            .finish_preparation()
+            .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
         let nested_requests = install_generated_request_contracts(
             &nested_requests,
             &generated_context,

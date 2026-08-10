@@ -95,19 +95,16 @@ fn frontend_benchmark_retains_source_package_warning() {
     let _guard = benchmark_test_guard();
     let temp_dir = tempfile::tempdir().expect("should create temp dir");
     let root = temp_dir.path();
-    let package = root.join("packages/warnpkg");
+    let package = root.join("src/warnpkg");
     let src = root.join("src");
     std::fs::create_dir_all(&package).expect("should create package root");
     std::fs::create_dir_all(&src).expect("should create entry root");
-    std::fs::write(
-        root.join("config.moth"),
-        "entry_root #= \"src\"\npackage_folders #= { \"packages\" }\n",
-    )
-    .expect("should write config");
+    std::fs::write(root.join("config.moth"), "entry_root #= \"src\"\n")
+        .expect("should write config");
     std::fs::write(src.join("@page.moth"), "value = 1\n").expect("should write project root");
     std::fs::write(
-        package.join("@mod.moth"),
-        "value ~= \"hello\"\nresult ~= \"unset\"\n\nif value is:\n    \"one\" => result = \"one\"\n    \"one\" => result = \"one\"\n    else => result = \"other\"\n;\n",
+        package.join("+package.moth"),
+        "export:\n    run || -> Int:\n        value ~= \"hello\"\n        result ~= \"unset\"\n\n        if value is:\n            \"one\" => result = \"one\"\n            \"one\" => result = \"one\"\n            else => result = \"other\"\n        ;\n        return 1\n    ;\n;\n",
     )
     .expect("should write warning package root");
 

@@ -6,10 +6,15 @@
 //! WHY: generated sidecars must reparse a validated generic body against a fresh string table
 //! without retaining donor `StringId`/`InternedPath` handles or a mirrored token-kind enum.
 
-use super::{FrozenStringPool, StableBodySyntax, check_materialisation_row_identity};
+use super::{
+    FrozenStringPool, GenericFunctionTemplate, ModuleMaterialisationPreparation, StableBodySyntax,
+    check_materialisation_row_identity,
+};
+use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
+use crate::compiler_frontend::datatypes::ids::GenericParameterListId;
 use crate::compiler_frontend::numeric_text::token::{
     NumericExponentSign, NumericLiteralKind, NumericLiteralSign, NumericLiteralToken,
 };
@@ -23,6 +28,7 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable}
 use crate::compiler_frontend::tokenizer::tokens::{
     CharPosition, FileTokens, PathTokenItem, SourceLocation, Token, TokenKind,
 };
+use rustc_hash::FxHashMap;
 
 fn location(scope: &str, string_table: &mut StringTable) -> SourceLocation {
     SourceLocation::new(
@@ -252,6 +258,54 @@ fn generated_identity(name: &str) -> GeneratedFunctionIdentity {
         Box::new([CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)]),
         Box::new([]),
     )
+}
+
+fn retained_template(
+    path: InternedPath,
+    declaration_identity: GeneratedDeclarationIdentity,
+    has_body: bool,
+) -> GenericFunctionTemplate {
+    GenericFunctionTemplate {
+        function_path: path.clone(),
+        source_file: path.clone(),
+        declaration_identity: Some(declaration_identity),
+        generic_parameter_owner: None,
+        generic_parameter_list_id: GenericParameterListId(0),
+        signature: FunctionSignature::default(),
+        body_tokens: has_body.then(|| FileTokens::new(path, Vec::new())),
+        declaration_location: SourceLocation::default(),
+    }
+}
+
+#[test]
+fn requester_template_identity_index_is_exact_and_rejects_duplicate_bodies() {
+    let mut string_table = StringTable::new();
+    let identity = generated_identity("indexed").declaration().clone();
+    let body_path = InternedPath::from_single_str("src/indexed.moth", &mut string_table);
+    let imported_path = InternedPath::from_single_str("src/imported.moth", &mut string_table);
+    let mut templates = FxHashMap::default();
+    templates.insert(
+        body_path.clone(),
+        retained_template(body_path.clone(), identity.clone(), true),
+    );
+    templates.insert(
+        imported_path.clone(),
+        retained_template(imported_path, identity.clone(), false),
+    );
+
+    let index = ModuleMaterialisationPreparation::generic_template_identity_index(&templates)
+        .expect("bodyless imported templates must not conflict with retained bodies");
+    assert_eq!(index.get(&identity), Some(&body_path));
+
+    let duplicate_path = InternedPath::from_single_str("src/duplicate.moth", &mut string_table);
+    templates.insert(
+        duplicate_path.clone(),
+        retained_template(duplicate_path, identity, true),
+    );
+    assert!(
+        ModuleMaterialisationPreparation::generic_template_identity_index(&templates).is_err(),
+        "two retained bodies must not publish one declaration identity"
+    );
 }
 
 #[test]

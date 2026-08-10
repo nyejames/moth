@@ -521,26 +521,30 @@ pub(crate) fn validate_generic_function_bound_evidence(
                 continue;
             }
             let evidence_is_visible = trait_is_visible
-                && evidence_target_is_visible(
-                    *concrete_type_id,
-                    type_environment,
-                    context
-                        .shared
-                        .file_visibility
-                        .as_deref()
-                        .map(|visibility| &visibility.visible_source_names),
-                    context
-                        .shared
-                        .file_visibility
-                        .as_deref()
-                        .map(|visibility| &visibility.visible_type_alias_names),
-                    context
-                        .shared
-                        .file_visibility
-                        .as_deref()
-                        .map(|visibility| &visibility.visible_namespace_records),
-                    context.shared.resolved_type_aliases.as_deref(),
-                );
+                && (context
+                    .shared
+                    .generated_evidence_target_type_ids
+                    .contains(concrete_type_id)
+                    || evidence_target_is_visible(
+                        *concrete_type_id,
+                        type_environment,
+                        context
+                            .shared
+                            .file_visibility
+                            .as_deref()
+                            .map(|visibility| &visibility.visible_source_names),
+                        context
+                            .shared
+                            .file_visibility
+                            .as_deref()
+                            .map(|visibility| &visibility.visible_type_alias_names),
+                        context
+                            .shared
+                            .file_visibility
+                            .as_deref()
+                            .map(|visibility| &visibility.visible_namespace_records),
+                        context.shared.resolved_type_aliases.as_deref(),
+                    ));
             let evidence_id = evidence_is_visible
                 .then(|| {
                     evidence_for_type(

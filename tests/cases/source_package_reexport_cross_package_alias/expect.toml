@@ -1,5 +1,5 @@
 entry = "."
 [backends.html]
-mode = "success"
+mode = "failure"
 warnings = "forbid"
-rendered_output_contains = ["Hello"]
+diagnostic_codes = ["MOTH-IMPORT-0005"]

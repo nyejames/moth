@@ -819,7 +819,6 @@ impl GenericTemplateArtefact {
             identity,
             requester_context,
             &requester_string_remap,
-            &source_file,
             &mut environment,
             string_table_ref,
         )
@@ -1887,6 +1886,7 @@ pub(crate) struct ModuleMaterialisationPreparation {
     pub(crate) resolved_function_signatures_by_path:
         FxHashMap<InternedPath, ResolvedFunctionSignature>,
     pub(crate) generic_function_templates_by_path: FxHashMap<InternedPath, GenericFunctionTemplate>,
+    generic_template_paths_by_identity: FxHashMap<GeneratedDeclarationIdentity, InternedPath>,
     pub(crate) resolved_type_aliases_by_path: FxHashMap<InternedPath, ResolvedTypeAnnotation>,
     pub(crate) choice_variant_shells_by_path: FxHashMap<InternedPath, Vec<ChoiceVariant>>,
     pub(crate) declaration_semantics: DeclarationSemanticTable,
@@ -1942,8 +1942,16 @@ impl ModuleMaterialisationPreparationBuilder {
         &self.context
     }
 
-    pub(crate) fn finish_preparation(self) -> ModuleMaterialisationPreparation {
+    pub(crate) fn finish_preparation(
+        mut self,
+    ) -> Result<ModuleMaterialisationPreparation, CompilerError> {
         self.context
+            .rebuild_generic_template_identity_index()
+            .map(|()| self.context)
+    }
+
+    pub(crate) fn finalize_generic_template_identity_index(&mut self) -> Result<(), CompilerError> {
+        self.context.rebuild_generic_template_identity_index()
     }
 
     pub(crate) fn freeze(
@@ -2019,9 +2027,10 @@ impl ModuleMaterialisationPreparationBuilder {
 
 impl ModuleMaterialisationPreparation {
     fn freeze(
-        self,
+        mut self,
         public_interface: &PublicSemanticInterface,
     ) -> Result<Option<ModuleMaterialisationContext>, CompilerError> {
+        self.rebuild_generic_template_identity_index()?;
         let mut templates = self
             .generic_function_templates_by_path
             .values()
@@ -3476,6 +3485,7 @@ impl ModuleMaterialisationPreparation {
             resolved_function_signatures_by_path: (*lookups.resolved_function_signatures_by_path)
                 .clone(),
             generic_function_templates_by_path: lookups.generic_function_templates_by_path.clone(),
+            generic_template_paths_by_identity: FxHashMap::default(),
             resolved_type_aliases_by_path: (*lookups.resolved_type_aliases_by_path).clone(),
             choice_variant_shells_by_path: (*lookups.choice_variant_shells_by_path).clone(),
             declaration_semantics: (*lookups.declaration_semantics).clone(),
@@ -3576,6 +3586,7 @@ impl ModuleMaterialisationPreparation {
 
         Ok(AstModuleEnvironment {
             lookups: Rc::new(lookups),
+            generated_evidence_target_type_ids: Rc::new(FxHashSet::default()),
             type_environment: self.type_environment.clone(),
             resolved_public_type_roots: Default::default(),
             resolved_public_trait_roots: Vec::new(),
@@ -3600,12 +3611,36 @@ impl ModuleMaterialisationPreparation {
         &self,
         identity: &GeneratedDeclarationIdentity,
     ) -> Option<&GenericFunctionTemplate> {
-        self.generic_function_templates_by_path
-            .values()
-            .find(|template| {
-                template.declaration_identity.as_ref() == Some(identity)
-                    && template.body_tokens.is_some()
-            })
+        let path = self.generic_template_paths_by_identity.get(identity)?;
+        let template = self.generic_function_templates_by_path.get(path)?;
+        (template.declaration_identity.as_ref() == Some(identity) && template.body_tokens.is_some())
+            .then_some(template)
+    }
+
+    fn rebuild_generic_template_identity_index(&mut self) -> Result<(), CompilerError> {
+        self.generic_template_paths_by_identity =
+            Self::generic_template_identity_index(&self.generic_function_templates_by_path)?;
+        Ok(())
+    }
+
+    fn generic_template_identity_index(
+        templates: &FxHashMap<InternedPath, GenericFunctionTemplate>,
+    ) -> Result<FxHashMap<GeneratedDeclarationIdentity, InternedPath>, CompilerError> {
+        let mut paths_by_identity = FxHashMap::default();
+        for (path, template) in templates {
+            if template.body_tokens.is_none() {
+                continue;
+            }
+            let Some(identity) = template.declaration_identity.as_ref() else {
+                continue;
+            };
+            if let Some(previous_path) = paths_by_identity.insert(identity.clone(), path.clone()) {
+                return Err(CompilerError::compiler_error(format!(
+                    "Generic template identity {identity:?} is retained at both {previous_path:?} and {path:?}",
+                )));
+            }
+        }
+        Ok(paths_by_identity)
     }
 
     pub(crate) fn materialise_ast(
@@ -3667,12 +3702,10 @@ impl ModuleMaterialisationPreparation {
             .map_err(|error| CompilerMessages::from_error_ref(error, &self.string_table))?;
             type_arguments.push(type_id);
         }
-        let source_file = template.source_file.clone();
         install_generated_request_evidence(
             identity,
             requester_context,
             &requester_string_remap,
-            &source_file,
             &mut environment,
             string_table_ref,
         )
@@ -4319,7 +4352,6 @@ fn install_generated_request_evidence(
     identity: &GeneratedFunctionIdentity,
     requester_context: &ModuleMaterialisationPreparation,
     requester_string_remap: &StringIdRemap,
-    source_file: &InternedPath,
     environment: &mut AstModuleEnvironment,
     string_table: &mut StringTable,
 ) -> Result<(), CompilerError> {
@@ -4332,12 +4364,8 @@ fn install_generated_request_evidence(
                     "Generated evidence target type was not interned in the generated environment",
                 )
             })?;
-        expose_generated_evidence_target(
-            environment,
-            source_file,
-            generated_target_type_id,
-            string_table,
-        )?;
+        Rc::make_mut(&mut environment.generated_evidence_target_type_ids)
+            .insert(generated_target_type_id);
         let generated_trait_id = if let Some(trait_id) = environment
             .lookups
             .trait_environment
@@ -4524,50 +4552,6 @@ fn install_generated_request_evidence(
         }
     }
 
-    Ok(())
-}
-
-/// Make an explicitly selected generated-evidence target visible to generated bound validation.
-///
-/// WHAT: adds the reconstructed nominal's local path to the generated file's transient source
-/// visibility without changing the retained provider interface or the requester environment.
-/// WHY: generated requests carry the exact requester-selected evidence identity. The generated
-/// body must be allowed to validate that evidence even when the target nominal is private to the
-/// declaring artefact and therefore cannot be represented by an imported public origin.
-fn expose_generated_evidence_target(
-    environment: &mut AstModuleEnvironment,
-    source_file: &InternedPath,
-    target_type_id: TypeId,
-    string_table: &mut StringTable,
-) -> Result<(), CompilerError> {
-    let Some(target_path) = environment
-        .type_environment
-        .nominal_path(target_type_id)
-        .cloned()
-    else {
-        return Ok(());
-    };
-
-    let lookups = Rc::make_mut(&mut environment.lookups);
-    let visibility = lookups
-        .import_environment
-        .file_visibility_by_source
-        .get_mut(source_file)
-        .ok_or_else(|| {
-            CompilerError::compiler_error(
-                "Generated evidence target has no declaring-file visibility record",
-            )
-        })?;
-
-    let mut binding_name = string_table.intern("__generated_evidence_target");
-    let mut suffix = 0usize;
-    while visibility.visible_source_names.contains_key(&binding_name) {
-        suffix += 1;
-        binding_name = string_table.intern(&format!("__generated_evidence_target_{suffix}"));
-    }
-    visibility
-        .visible_source_names
-        .insert(binding_name, SourceDeclarationTarget::Local(target_path));
     Ok(())
 }
 

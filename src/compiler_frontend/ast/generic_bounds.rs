@@ -30,6 +30,7 @@ pub(crate) struct GenericBoundEvidenceContext<'a> {
     pub(crate) type_environment: &'a TypeEnvironment,
     pub(crate) trait_environment: Option<&'a TraitEnvironment>,
     pub(crate) trait_evidence_environment: Option<&'a TraitEvidenceEnvironment>,
+    pub(crate) generated_evidence_target_type_ids: Option<&'a FxHashSet<TypeId>>,
     pub(crate) visible_trait_names: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
     pub(crate) visible_source_names: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
     pub(crate) visible_type_alias_names: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
@@ -49,6 +50,7 @@ impl<'a> GenericBoundEvidenceContext<'a> {
             type_environment,
             trait_environment: Some(trait_environment),
             trait_evidence_environment: Some(trait_evidence_environment),
+            generated_evidence_target_type_ids: None,
             visible_trait_names: Some(&visibility.visible_trait_names),
             visible_source_names: Some(&visibility.visible_source_names),
             visible_type_alias_names: Some(&visibility.visible_type_alias_names),
@@ -58,6 +60,12 @@ impl<'a> GenericBoundEvidenceContext<'a> {
     }
 
     pub(crate) fn evidence_target_is_visible(&self, type_id: TypeId) -> bool {
+        if self
+            .generated_evidence_target_type_ids
+            .is_some_and(|type_ids| type_ids.contains(&type_id))
+        {
+            return true;
+        }
         evidence_target_is_visible(
             type_id,
             self.type_environment,

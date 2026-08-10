@@ -8829,10 +8829,10 @@ contract = "language.config.multiple_package_folders_acceptance"
 role = "primary"
 
 [[case]]
-id = "config_package_folder_missing_rejected"
+id = "config_package_folder_missing_ignored"
 path = "config_package_folder_missing_rejected"
 tags = ["integration", "config", "packages", "diagnostics"]
-contract = "language.config.package_folder_missing_rejected"
+contract = "language.config.package_folder_missing_ignored"
 role = "primary"
 
 [[case]]
@@ -8934,24 +8934,24 @@ contract = "language.imports.source_package_facade_sibling_acceptance"
 role = "primary"
 
 [[case]]
-id = "source_package_facade_runtime_stmt"
+id = "source_package_facade_runtime_stmt_rejected"
 path = "source_package_facade_runtime_stmt"
 tags = ["integration", "source-packages", "facades", "diagnostics"]
-contract = "language.imports.source_package_facade_runtime_stmt_acceptance"
+contract = "language.imports.source_package_facade_runtime_stmt_rejected"
 role = "primary"
 
 [[case]]
-id = "source_package_facade_runtime_template"
+id = "source_package_facade_runtime_template_rejected"
 path = "source_package_facade_runtime_template"
 tags = ["integration", "source-packages", "facades", "diagnostics"]
-contract = "language.imports.source_package_facade_runtime_stmt_acceptance"
+contract = "language.imports.source_package_facade_runtime_template_rejected"
 role = "boundary"
 
 [[case]]
-id = "source_package_facade_missing"
+id = "source_package_unrooted_folder_ignored"
 path = "source_package_facade_missing"
 tags = ["integration", "source-packages", "facades", "diagnostics"]
-contract = "language.imports.source_package_facade_missing_rejected"
+contract = "language.imports.source_package_unrooted_folder_ignored"
 role = "primary"
 
 [[case]]
@@ -9060,24 +9060,24 @@ contract = "language.imports.source_package_reexport_external_acceptance"
 role = "boundary"
 
 [[case]]
-id = "source_package_transitive_reexport_external_alias"
+id = "source_support_transitive_sibling_reexport_rejected"
 path = "source_package_transitive_reexport_external_alias"
 tags = ["integration", "language", "imports", "facade", "source-packages"]
-contract = "language.imports.source_package_reexport_external_acceptance"
+contract = "language.imports.source_support_sibling_reexport_rejected"
 role = "boundary"
 
 [[case]]
-id = "source_package_reexport_cross_package_single"
+id = "source_support_sibling_reexport_rejected"
 path = "source_package_reexport_cross_package_single"
 tags = ["integration", "language", "imports", "facade", "source-packages"]
-contract = "language.imports.source_package_reexport_single_acceptance"
+contract = "language.imports.source_support_sibling_reexport_rejected"
 role = "boundary"
 
 [[case]]
-id = "source_package_reexport_cross_package_alias"
+id = "source_support_sibling_reexport_alias_rejected"
 path = "source_package_reexport_cross_package_alias"
 tags = ["integration", "language", "imports", "facade", "source-packages"]
-contract = "language.imports.source_package_reexport_alias_acceptance"
+contract = "language.imports.source_support_sibling_reexport_rejected"
 role = "boundary"
 
 [[case]]

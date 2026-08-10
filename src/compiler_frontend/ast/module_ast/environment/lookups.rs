@@ -124,6 +124,11 @@ pub(crate) struct AstModuleLookups {
 pub(crate) struct AstModuleEnvironment {
     pub(crate) lookups: Rc<AstModuleLookups>,
 
+    /// Exact nominal targets whose requester-selected evidence is being reconstructed for one
+    /// generated body. This transient set is consumed by bound validation and is deliberately
+    /// separate from authored file visibility.
+    pub(crate) generated_evidence_target_type_ids: Rc<FxHashSet<TypeId>>,
+
     // Frontend semantic type identity owned by this module.
     // WHY: AST nodes carry compact TypeIds; the environment carries the canonical table.
     pub(crate) type_environment: TypeEnvironment,

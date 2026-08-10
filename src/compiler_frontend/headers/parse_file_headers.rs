@@ -67,10 +67,9 @@ pub fn parse_file_headers_with_table(
         .as_deref()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| file_tokens.src_path.to_path_buf(string_table));
-    // Stage 0 keeps support (`+*.moth`) and facade roots out of `ModuleRootTable`, so the
-    // resolver-based check only recognises normal `@*.moth` roots. Fall back to the canonical
-    // filename policy so a `+*.moth` support-package root is export-capable when prepared as
-    // part of a consumer compilation.
+    // Directory Stage 0 supplies normal and support roots through `ModuleRootTable`. Keep the
+    // canonical filename check as a fallback for synthetic or otherwise unindexed preparation so
+    // a `+*.moth` support-package root remains export-capable in those contexts too.
     let is_module_root_file_by_name = source_path
         .file_name()
         .and_then(|name| name.to_str())

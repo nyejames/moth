@@ -1,19 +1,20 @@
 //! Prepared module-root lookup data for project-aware path resolution.
 //!
-//! WHAT: stores the canonical normal module-root records prepared by Stage 0 and provides
+//! WHAT: stores the canonical module-root records prepared by Stage 0 and provides
 //! nearest-root lookups for the frontend resolver.
 //! WHY: filesystem discovery and durable module identity belong to Stage 0. The frontend
-//! consumes this narrow lookup table without discovering project structure or owning module
-//! identity, roles or ancestry.
+//! consumes this lookup table without discovering project structure or owning module identity,
+//! roles or ancestry. Directory compilation includes normal and support roots; synthetic
+//! single-file compilation may provide only its normal roots.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-/// Internal index for one prepared normal module-root record.
+/// Internal index for one prepared module-root record.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct ModuleRootId(usize);
 
-/// One canonical normal module root and its containing directory.
+/// One canonical module root and its containing directory.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ModuleRootRecord {
     root_directory: PathBuf,
@@ -29,11 +30,11 @@ impl ModuleRootRecord {
     }
 }
 
-/// Prepared normal module-root records and indexes used by path resolution.
+/// Prepared module-root records and indexes used by path resolution.
 ///
-/// Stage 0 builds this table from the normal roots of its durable module identity table. Support
-/// and facade roots stay out of this table so import resolution and header-role lookup are
-/// unchanged by Phase 2 identity work.
+/// Stage 0 builds this table from its durable module identity table. Directory compilation keeps
+/// normal and support roots available for membership, header-role lookup and same-directory
+/// preparation; synthetic single-file callers can still provide a normal-only table.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct ModuleRootTable {
     records: Vec<ModuleRootRecord>,
