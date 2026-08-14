@@ -33,13 +33,7 @@ Web development is the current focus. The home-grown HTML project builder create
 
 </br>
 
-<img src="./docs/assets/code-snippet-2.webp" width="600px"/>
-
-`@html` is the built-in, source-backed Builder package for HTML projects.
-
-The HTML build system will generate an HTML page from this code:
-
-<img src="./docs/assets/code-snippet-3.webp" width="600px"/>
+Have a look at the [language docs](https://nyejames.github.io/moth/docs/) to get to grip with the basics.
 
 <div align="center">
 
