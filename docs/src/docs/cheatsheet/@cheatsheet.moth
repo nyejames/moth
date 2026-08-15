@@ -1,0 +1,35 @@
+@moth-language-cheatsheet content
+@styles section
+
+cheatsheet_theme #= [$css:
+    pre {
+        color: #0c032d;
+        background-color: #f8f8f2;
+        border-color: #272822;
+        border: 1px solid;
+        padding: 1em 2em;
+    }
+
+    code {
+        font-family: monospace;
+        font-size: 1.1em;
+        background-color: #f8f8f2;
+        padding: 0.2em 0.4em;
+    }
+
+    body {
+        background-color: #d5e3ea;
+        color: #000000;
+        padding: 2em;
+    }
+
+    a {
+        color: #0700cb;
+    }
+]
+
+page_head #= [:<style>[cheatsheet_theme]</style>]
+
+#[section: 
+    [content]
+]

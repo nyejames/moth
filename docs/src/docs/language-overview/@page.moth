@@ -1,17 +1,10 @@
 @blocks-and-statements content as blocks_and_statements
-
 @blocks-and-statements-basic content as blocks_and_statements_basic
-
 @comments-and-naming content as comments_and_naming
-
 @comments-and-naming-basic content as comments_and_naming_basic
-
 @core-values content as core_values
-
 @core-values-basic content as core_values_basic
-
 @strings-and-characters content as strings_and_characters
-
 @strings-and-characters-basic content as strings_and_characters_basic
 
 @styles navbar,
