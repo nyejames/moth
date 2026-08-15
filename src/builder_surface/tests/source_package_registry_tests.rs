@@ -26,7 +26,7 @@ fn iter_returns_roots_in_canonical_prefix_order() {
 
     let prefixes: Vec<&str> = registry
         .iter()
-        .map(|root| root.import_prefix.as_str())
+        .map(|root| root.package_prefix.as_str())
         .collect();
     assert_eq!(prefixes, vec!["alpha", "middle", "zeta"]);
 }
@@ -98,7 +98,7 @@ fn merge_adds_non_overlapping_roots_in_canonical_order() {
 
     let prefixes: Vec<&str> = merged
         .iter()
-        .map(|root| root.import_prefix.as_str())
+        .map(|root| root.package_prefix.as_str())
         .collect();
     assert_eq!(prefixes, vec!["alpha", "html", "widgets"]);
 }

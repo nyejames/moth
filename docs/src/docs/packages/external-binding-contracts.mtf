@@ -1,11 +1,11 @@
-External binding packages expose typed functions, constants and opaque types implemented outside Moth. The HTML builder supports two binding profiles: annotated project-local JavaScript imports and future value-only WIT component imports.
+External binding packages expose typed functions, constants and opaque types implemented outside Moth. The HTML builder supports two binding profiles: annotated project-local JavaScript files and future value-only WIT component imports.
 
-### Annotated JavaScript imports
+### Annotated JavaScript dependencies
 
-The HTML builder supports annotated single-file `.js` imports through `@moth.opaque` and `@moth.sig`. `@moth.sig` declares each exposed function. `@moth.opaque` is required only when signatures use foreign opaque handle types. A function-only module may use `@moth.sig` without `@moth.opaque`. JavaScript export names are runtime implementation details. Moth names come from annotations.
+The HTML builder supports annotated single-file `.js` dependency clauses through `@moth.opaque` and `@moth.sig`. `@moth.sig` declares each exposed function. `@moth.opaque` is required only when signatures use foreign opaque handle types. A function-only module may use `@moth.sig` without `@moth.opaque`. JavaScript export names are runtime implementation details. Moth names come from annotations.
 
 [codeblock, $code("moth"):
-    import @vendor/drawing.js as drawing
+    @vendor/drawing.js as drawing
 ]
 
 #### Annotated JavaScript example
@@ -27,10 +27,10 @@ The HTML builder supports annotated single-file `.js` imports through `@moth.opa
     }
 ]
 
-The Moth import uses the annotation names, not the JavaScript export names:
+The Moth dependency clause uses the annotation names, not the JavaScript export names:
 
 [codeblock, $code("moth"):
-    import @vendor/drawing.js { emphasize, join_label }
+    @vendor/drawing.js emphasize, join_label
 ]
 
 #### Supported JavaScript export forms
@@ -97,6 +97,6 @@ The V1 value-only profile defers WIT resources, callbacks, async operations, fut
 ### Related concepts
 
 - For package origin and backing see @#package-origins-and-backing (Package origins and backing).
-- For import path rules see @#import-paths (Import paths).
+- For dependency path rules see @#dependency-paths (Dependency paths).
 - For Core package API details see @./core (Core packages).
 - For Builder package API details see @./builder (Builder packages).

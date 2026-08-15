@@ -12,10 +12,10 @@ Scoped support packages are `+*.moth` roots in the project source tree. The cont
 
 `+package.moth` makes `@blog` a scoped support package visible to `@site` and its sibling modules.
 
-### Importing from a package
+### Binding from a package
 
 [codeblock, $code("moth"):
-    import @blog {post_title}
+    @blog post_title
 ]
 
 `@blog` resolves to the `blog` directory's support root. The package's public surface comes from its `export:` block.

@@ -1,4 +1,4 @@
-import @widget
+@widget
 
 value widget.Counter = widget.make_counter()
 

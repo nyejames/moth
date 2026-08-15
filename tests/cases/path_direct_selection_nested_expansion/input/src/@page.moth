@@ -1,0 +1,5 @@
+-- Independent path heads retain quoted whitespace components without grouped expansion.
+[@docs/intro.md]
+[@docs/"my folder"/"a file.md"]
+[@docs/"my folder"/b.md]
+[@docs/"my folder"/"another folder"/c.md]

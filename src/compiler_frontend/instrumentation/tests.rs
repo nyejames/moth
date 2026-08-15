@@ -238,7 +238,7 @@ fn ast_counters_are_isolated_per_thread() {
 
 #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
 #[test]
-fn frontend_counters_record_scheduling_metrics_when_stdout_is_suppressed() {
+fn frontend_counters_record_scheduling_and_path_ownership_metrics_when_stdout_is_suppressed() {
     let _guard = super::lock_counter_test();
     let _counter_capture = capture_frontend_counters_for_test();
 
@@ -270,6 +270,15 @@ fn frontend_counters_record_scheduling_metrics_when_stdout_is_suppressed() {
     add_frontend_counter(FrontendCounter::Stage0ParallelSourceLoadCount, 17);
     add_frontend_counter(FrontendCounter::Stage0SerialSourceLoadCount, 18);
     add_frontend_counter(FrontendCounter::Stage0SourceBytesLoaded, 19);
+    add_frontend_counter(
+        FrontendCounter::PersistentGenericPathSyntaxSubsetCopyCount,
+        20,
+    );
+    add_frontend_counter(FrontendCounter::PersistentGenericPathSyntaxRowCopyCount, 21);
+    add_frontend_counter(
+        FrontendCounter::AlreadyGlobalPreparedOutputRemapSkipCount,
+        22,
+    );
 
     log_frontend_counters();
 
@@ -366,6 +375,21 @@ fn frontend_counters_record_scheduling_metrics_when_stdout_is_suppressed() {
         18.0,
     );
     assert_counter_value(&observations.counters, "stage0_source_bytes_loaded", 19.0);
+    assert_counter_value(
+        &observations.counters,
+        "persistent_generic_path_syntax_subset_copy_count",
+        20.0,
+    );
+    assert_counter_value(
+        &observations.counters,
+        "persistent_generic_path_syntax_row_copy_count",
+        21.0,
+    );
+    assert_counter_value(
+        &observations.counters,
+        "already_global_prepared_output_remap_skip_count",
+        22.0,
+    );
 }
 
 #[cfg(all(feature = "timers", feature = "benchmark_counters"))]

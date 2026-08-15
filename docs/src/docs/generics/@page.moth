@@ -1,50 +1,28 @@
-import @generic-declarations {
-    content as generic_declarations,
-}
+@generic-declarations content as generic_declarations
 
-import @generic-declarations-basic {
-    content as generic_declarations_basic,
-}
+@generic-declarations-basic content as generic_declarations_basic
 
-import @type-application {
-    content as type_application,
-}
+@type-application content as type_application
 
-import @type-application-basic {
-    content as type_application_basic,
-}
+@type-application-basic content as type_application_basic
 
-import @generic-inference {
-    content as generic_inference,
-}
+@generic-inference content as generic_inference
 
-import @generic-inference-basic {
-    content as generic_inference_basic,
-}
+@generic-inference-basic content as generic_inference_basic
 
-import @generic-instances {
-    content as generic_instances,
-}
+@generic-instances content as generic_instances
 
-import @generic-instances-basic {
-    content as generic_instances_basic,
-}
+@generic-instances-basic content as generic_instances_basic
 
-import @generic-limits {
-    content as generic_limits,
-}
+@generic-limits content as generic_limits
 
-import @generic-limits-basic {
-    content as generic_limits_basic,
-}
+@generic-limits-basic content as generic_limits_basic
 
-import @styles {
-    navbar,
+@styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager,
-}
+    doc_pager
 
 page_title #= "Generics"
 page_description #= "Declaration-site generics, type application and local inference in Moth."

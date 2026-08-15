@@ -4,7 +4,7 @@
 //! binding lacks its declaration, declaration categories disagree, concrete free or receiver
 //! summaries are missing, or a generic declaration carries an impossible concrete summary.
 //! WHY: consumers treat a successful provider interface as trusted compiler-owned input, so
-//! these failures belong at the publication boundary rather than in source import diagnostics.
+//! these failures belong at the publication boundary rather than in source dependency diagnostics.
 
 use super::super::model::{
     ConcreteCallSummaryRecord, PublicBindingExport, PublicEvidenceOwnership, PublicEvidenceRecord,
@@ -16,7 +16,8 @@ use super::super::{
     LocalPublicInterface, PublicDeclarationRecord, PublicDeclarationSemantics,
     PublicFunctionCategory, PublicGenericTemplateDescriptor, PublicInterfaceDraft,
     PublicReceiverMethodCategory, PublicReceiverMethodSemantics, PublicSemanticInterface,
-    PublicStructSemantics, PublicTraitSemantics, SourceProviderImport, SourceProviderImportSet,
+    PublicStructSemantics, PublicTraitSemantics, SourceProviderDependency,
+    SourceProviderDependencySet,
 };
 use super::test_support::{module_origin, struct_origin};
 use crate::compiler_frontend::canonical_type_identity::{
@@ -38,7 +39,7 @@ use crate::compiler_frontend::semantic_identity::{
     ExportBinding, ModuleRootRole, OriginDeclarationId, OriginFunctionId, OriginTraitId,
     OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity, StablePackageIdentity,
 };
-use crate::compiler_frontend::symbols::identity::{FileId, ImportShellId};
+use crate::compiler_frontend::symbols::identity::{DependencyShellId, FileId};
 
 fn empty_summary() -> PublicCallSummary {
     PublicCallSummary {
@@ -215,7 +216,7 @@ fn rejects_export_binding_without_declaration() {
 
     let error = PublicSemanticInterface::close_from_local(
         local_interface(vec![binding], Vec::new(), Vec::new()),
-        &SourceProviderImportSet::default(),
+        &SourceProviderDependencySet::default(),
         &ExternalPackageRegistry::default(),
     )
     .expect_err("a successful interface cannot publish a dangling binding");
@@ -287,15 +288,15 @@ fn rejects_binding_target_with_wrong_symbol_category_on_consumer_admission() {
         symbol_path: ExternalSymbolPath::from_single("line"),
         category: ExternalSymbolCategory::Type,
     });
-    let provider_imports = SourceProviderImportSet::new(vec![SourceProviderImport {
-        kind: crate::compiler_frontend::public_interface::ProviderImportKind::Authored {
-            shell_id: ImportShellId::new(FileId(0), 0),
+    let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
+        kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
+            shell: DependencyShellId::new(FileId(0), 0),
         },
         interface: &interface,
     }])
     .expect("one authored provider should register");
 
-    let error = provider_imports
+    let error = provider_dependencies
         .validate_binding_targets(&ExternalPackageRegistry::new())
         .expect_err("a category mismatch in a trusted provider interface must fail admission");
 
@@ -438,7 +439,7 @@ fn rejects_declaration_category_mismatch() {
 
     let error = PublicSemanticInterface::close_from_local(
         local_interface(Vec::new(), vec![declaration], Vec::new()),
-        &SourceProviderImportSet::default(),
+        &SourceProviderDependencySet::default(),
         &ExternalPackageRegistry::default(),
     )
     .expect_err("semantic category drift must fail publication");
@@ -471,7 +472,7 @@ fn rejects_direct_private_nominal_before_interface_closure() {
 
     let error = PublicSemanticInterface::close_from_local(
         local_interface(Vec::new(), vec![declaration], Vec::new()),
-        &SourceProviderImportSet::default(),
+        &SourceProviderDependencySet::default(),
         &ExternalPackageRegistry::default(),
     )
     .expect_err("artefact-private nominals cannot enter provider closure");
@@ -530,7 +531,7 @@ fn rejects_missing_concrete_free_function_summary() {
 
     let error = PublicSemanticInterface::close_from_local(
         local_interface(Vec::new(), vec![declaration], Vec::new()),
-        &SourceProviderImportSet::default(),
+        &SourceProviderDependencySet::default(),
         &ExternalPackageRegistry::default(),
     )
     .expect_err("each concrete callable needs exactly one summary");
@@ -554,7 +555,7 @@ fn rejects_concrete_summary_for_generic_template() {
 
     let error = PublicSemanticInterface::close_from_local(
         local_interface(Vec::new(), vec![declaration], vec![summary]),
-        &SourceProviderImportSet::default(),
+        &SourceProviderDependencySet::default(),
         &ExternalPackageRegistry::default(),
     )
     .expect_err("generic base declarations cannot carry concrete summaries");
@@ -587,7 +588,7 @@ fn rejects_missing_concrete_receiver_summary() {
 
     let error = PublicSemanticInterface::close_from_local(
         local_interface(Vec::new(), vec![declaration], Vec::new()),
-        &SourceProviderImportSet::default(),
+        &SourceProviderDependencySet::default(),
         &ExternalPackageRegistry::default(),
     )
     .expect_err("receiver surfaces require their concrete summary closure");
@@ -686,9 +687,9 @@ fn closes_provider_reexport_over_nested_nominal_without_adding_a_public_binding(
             OriginDeclarationId::Function(make_origin.clone()),
         ),
     ];
-    let provider_imports = SourceProviderImportSet::new(vec![SourceProviderImport {
-        kind: crate::compiler_frontend::public_interface::ProviderImportKind::Authored {
-            shell_id: ImportShellId::new(FileId(0), 0),
+    let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
+        kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
+            shell: DependencyShellId::new(FileId(0), 0),
         },
         interface: &provider,
     }])
@@ -696,7 +697,7 @@ fn closes_provider_reexport_over_nested_nominal_without_adding_a_public_binding(
 
     let facade = PublicSemanticInterface::close_from_local(
         local_interface(facade_bindings, Vec::new(), Vec::new()),
-        &provider_imports,
+        &provider_dependencies,
         &ExternalPackageRegistry::default(),
     )
     .expect("the facade should close over provider-owned nested nominal facts");

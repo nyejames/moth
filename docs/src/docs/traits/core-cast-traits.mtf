@@ -19,7 +19,7 @@ Each trait requires one receiver method:
 
 ### Contract
 
-- These traits resolve without imports.
+- These traits resolve without dependency clauses.
 - They cannot be redeclared, imported, exported, aliased or shadowed.
 - They cannot be used as values.
 - The compiler registers builtin evidence for the builtin cast table.

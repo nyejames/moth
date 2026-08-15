@@ -7,6 +7,7 @@
 
 use super::result_type::{infer_inline_result_type, receiver_type_mismatch_context};
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::parse_expression::{
     create_expression_until, create_expression_with_trailing_newline_policy,
@@ -63,16 +64,9 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn same_logi
     left.start_pos.line_number == right.start_pos.line_number
 }
 
-/// File-local boxed diagnostic result alias.
-///
-/// WHAT: the shared inline then/else parser family returns
-/// `Result<T, Box<CompilerDiagnostic>>` through this alias.
-/// WHY: `CompilerDiagnostic` is large enough to trigger `clippy::result_large_err` when
-/// stored directly in a `Result` variant. Boxing the error at this owner boundary keeps
-/// the `Result` envelope small without changing `DiagnosticBag`, `CompilerMessages`, or
-/// any shared error type. The direct callers `inline_if.rs` and `inline_match.rs` consume
-/// the boxed result directly without unbox/rebox churn.
-type InlineThenElseResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// Inline branch expressions share the AST body parser's two-lane error boundary. This avoids
+/// converting a retained-token lifecycle fault into a source diagnostic mid-parse.
+type InlineThenElseResult<T> = Result<T, ExpressionParseError>;
 
 /// Parses the shared `then <branch> else <branch>` inline shape.
 ///
@@ -97,23 +91,21 @@ pub(super) fn parse_inline_then_else(
     token_stream.advance(); // consume `then`
 
     if token_stream.current_token_kind() == &TokenKind::Newline {
-        return Err(Box::new(
-            CompilerDiagnostic::invalid_control_flow_statement(
-                InvalidControlFlowStatementReason::InlineValueIfMultiline,
-                token_stream.current_location(),
-            ),
-        ));
+        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+            InvalidControlFlowStatementReason::InlineValueIfMultiline,
+            token_stream.current_location(),
+        )
+        .into());
     }
 
     // A retained newline is a multiline form. Every other definite boundary means
     // the branch has no value and must not reach expression evaluation.
     if is_missing_produced_value_boundary(token_stream.current_token_kind()) {
-        return Err(Box::new(
-            CompilerDiagnostic::invalid_control_flow_statement(
-                InvalidControlFlowStatementReason::ExpectedValueAfterThen,
-                token_stream.current_location(),
-            ),
-        ));
+        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+            InvalidControlFlowStatementReason::ExpectedValueAfterThen,
+            token_stream.current_location(),
+        )
+        .into());
     }
 
     if expected_result_type_ids.len() > 1 {
@@ -132,8 +124,7 @@ pub(super) fn parse_inline_then_else(
             target: &target,
             label: "then branch",
             string_table,
-        })
-        .map_err(|error| -> CompilerDiagnostic { error.into() })?;
+        })?;
 
         require_else_inline(token_stream, &then_location)?;
         token_stream.advance(); // consume `else`
@@ -150,8 +141,7 @@ pub(super) fn parse_inline_then_else(
             target: &target,
             label: "else branch",
             string_table,
-        })
-        .map_err(|error| -> CompilerDiagnostic { error.into() })?;
+        })?;
 
         let result_type_id = type_interner
             .environment_mut_for_derived_types()
@@ -188,8 +178,7 @@ pub(super) fn parse_inline_then_else(
         string_table,
     });
     let then_expr = if else_follows {
-        create_expression_until(input, &[TokenKind::Else])
-            .map_err(|error| -> CompilerDiagnostic { error.into() })?
+        create_expression_until(input, &[TokenKind::Else])?
     } else {
         create_expression_until(
             input,
@@ -201,8 +190,7 @@ pub(super) fn parse_inline_then_else(
                 TokenKind::CloseParenthesis,
                 TokenKind::CloseCurly,
             ],
-        )
-        .map_err(|error| -> CompilerDiagnostic { error.into() })?
+        )?
     };
 
     require_else_inline(token_stream, &then_location)?;
@@ -230,16 +218,14 @@ pub(super) fn parse_inline_then_else(
         },
         false,
     );
-    let else_expr = create_expression_with_trailing_newline_policy(input)
-        .map_err(|error| -> CompilerDiagnostic { error.into() })?;
+    let else_expr = create_expression_with_trailing_newline_policy(input)?;
 
     if !same_logical_line(&then_location, &else_expr.location) {
-        return Err(Box::new(
-            CompilerDiagnostic::invalid_control_flow_statement(
-                InvalidControlFlowStatementReason::InlineValueIfMultiline,
-                else_expr.location.clone(),
-            ),
-        ));
+        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+            InvalidControlFlowStatementReason::InlineValueIfMultiline,
+            else_expr.location.clone(),
+        )
+        .into());
     }
 
     let result_type_id = if let Some(expected_type_id) = expected_type_id {
@@ -362,21 +348,19 @@ fn require_else_inline(
     then_location: &SourceLocation,
 ) -> InlineThenElseResult<()> {
     if token_stream.current_token_kind() != &TokenKind::Else {
-        return Err(Box::new(
-            CompilerDiagnostic::invalid_control_flow_statement(
-                InvalidControlFlowStatementReason::ValueIfMissingElse,
-                token_stream.current_location(),
-            ),
-        ));
+        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+            InvalidControlFlowStatementReason::ValueIfMissingElse,
+            token_stream.current_location(),
+        )
+        .into());
     }
 
     if !same_logical_line(then_location, &token_stream.current_location()) {
-        return Err(Box::new(
-            CompilerDiagnostic::invalid_control_flow_statement(
-                InvalidControlFlowStatementReason::InlineValueIfMultiline,
-                token_stream.current_location(),
-            ),
-        ));
+        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+            InvalidControlFlowStatementReason::InlineValueIfMultiline,
+            token_stream.current_location(),
+        )
+        .into());
     }
 
     Ok(())
@@ -385,12 +369,11 @@ fn require_else_inline(
 /// Rejects `else then`, which is never valid in inline value-producing `if`.
 fn reject_else_then(token_stream: &FileTokens) -> InlineThenElseResult<()> {
     if token_stream.current_token_kind() == &TokenKind::Then {
-        return Err(Box::new(
-            CompilerDiagnostic::invalid_control_flow_statement(
-                InvalidControlFlowStatementReason::InlineValueIfElseThen,
-                token_stream.current_location(),
-            ),
-        ));
+        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+            InvalidControlFlowStatementReason::InlineValueIfElseThen,
+            token_stream.current_location(),
+        )
+        .into());
     }
 
     Ok(())
@@ -399,12 +382,11 @@ fn reject_else_then(token_stream: &FileTokens) -> InlineThenElseResult<()> {
 /// Rejects a newline immediately after `else` in inline form.
 fn reject_newline_after_else(token_stream: &FileTokens) -> InlineThenElseResult<()> {
     if token_stream.current_token_kind() == &TokenKind::Newline {
-        return Err(Box::new(
-            CompilerDiagnostic::invalid_control_flow_statement(
-                InvalidControlFlowStatementReason::InlineValueIfMultiline,
-                token_stream.current_location(),
-            ),
-        ));
+        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+            InvalidControlFlowStatementReason::InlineValueIfMultiline,
+            token_stream.current_location(),
+        )
+        .into());
     }
 
     Ok(())
@@ -413,12 +395,11 @@ fn reject_newline_after_else(token_stream: &FileTokens) -> InlineThenElseResult<
 /// Rejects an empty `else` branch at its first definite boundary.
 fn reject_empty_value_after_else(token_stream: &FileTokens) -> InlineThenElseResult<()> {
     if is_missing_produced_value_boundary(token_stream.current_token_kind()) {
-        return Err(Box::new(
-            CompilerDiagnostic::invalid_control_flow_statement(
-                InvalidControlFlowStatementReason::ExpectedValueAfterElse,
-                token_stream.current_location(),
-            ),
-        ));
+        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+            InvalidControlFlowStatementReason::ExpectedValueAfterElse,
+            token_stream.current_location(),
+        )
+        .into());
     }
 
     Ok(())

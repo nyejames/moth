@@ -1,4 +1,4 @@
-Every selected normal module is compiled into an immutable module artefact. Its top-level runtime work becomes a dormant compiler-synthesised `start`. The builder selects which modules become entries. Entry assembly activates `start` exactly once. Imported modules expose only their public interface and never activate their root work.
+Every selected normal module is compiled into an immutable module artefact. Its top-level runtime work becomes a dormant compiler-synthesised `start`. The builder selects which modules become entries. Entry assembly activates `start` exactly once. Dependency modules expose only their public interface and never activate their root work.
 
 ### Entry-activated root runtime
 
@@ -6,7 +6,7 @@ The entry-selected module root's top-level runtime code becomes a dormant compil
 
 ### Normal files
 
-Normal helper files define reusable declarations. They do not own an export block and cannot contain top-level runtime statements. The module root imports those declarations and decides which names become public.
+Normal helper files define reusable declarations. They do not own an export block and cannot contain top-level runtime statements. The module root binds those declarations and decides which names become public.
 
 ### Page fragments
 
@@ -21,13 +21,13 @@ Assigned or returned templates are not page fragments by themselves. Only direct
 
 The HTML builder preserves source order between static and runtime fragments. Static fragments are emitted immediately. Runtime fragments use generated slots in the HTML document, then the embedded JavaScript calls the module start function and fills those slots.
 
-### Imported roots
+### Dependency roots
 
-Imported module roots never activate their root runtime. When a module root is imported for its public API, its top-level runtime code, start body and page fragments remain dormant. Only its exported declarations remain available.
+Dependency module roots never activate their root runtime. When a module root is bound for its public API, its top-level runtime code, start body and page fragments remain dormant. Only its exported declarations remain available.
 
 ### Do not put page fragments in helper files
 
-Helper files should define reusable declarations. The module root should import and use them. Page-producing top-level templates belong in the entry-selected module root only.
+Helper files should define reusable declarations. The module root should bind and use them. Page-producing top-level templates belong in the entry-selected module root only.
 
 ### Related concepts
 

@@ -1,21 +1,15 @@
-import @prelude {
-    content as prelude_advanced,
-}
+@prelude content as prelude_advanced
 
-import @prelude-basic {
-    content as prelude_basic,
-}
+@prelude-basic content as prelude_basic
 
-import @styles {
-    navbar,
+@styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager,
-}
+    doc_pager
 
 page_title #= "Prelude policy"
-page_description #= "The small implicit surface available without explicit imports."
+page_description #= "The small implicit surface available without explicit dependency clauses."
 page_head #= language_theme_head
 
 #[navbar]
@@ -25,10 +19,10 @@ page_head #= language_theme_head
 
     # Prelude policy
 
-    The prelude registers the bare `io` namespace without an import. The
-    compiler-owned `Error` type also remains available without an import, but it
+    The prelude registers the bare `io` namespace without a dependency clause. The
+    compiler-owned `Error` type also remains available without a dependency clause, but it
     is a builtin rather than a prelude symbol. Most Core capabilities still
-    require visible imports.
+    require visible dependency bindings.
 ]
 
 #[section:

@@ -1,4 +1,4 @@
-import @core/constants {max_items}
+@core/constants max_items
 
 clamp_page |page Int| -> Int:
     if page < 0:

@@ -1,18 +1,12 @@
-import @text {
-    content as text_advanced,
-}
+@text content as text_advanced
 
-import @text-basic {
-    content as text_basic,
-}
+@text-basic content as text_basic
 
-import @styles {
-    navbar,
+@styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager,
-}
+    doc_pager
 
 page_title #= "Core text"
 page_description #= "Text helper functions for String values."

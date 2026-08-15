@@ -62,6 +62,26 @@ fn assert_invalid_receiver_call(source: &str, expected_reason: InvalidReceiverCa
 // --------------------------
 
 #[test]
+fn function_default_path_token_reports_structured_diagnostic_not_panic() {
+    // A path token nested in a template default lives in the detached parameter
+    // default buffer; the header must own its path row so AST parsing reports the
+    // missing target as a structured diagnostic instead of indexing a missing row.
+    let payload = parse_function_diagnostic_payload(
+        "label |prefix String = [: [@docs/intro.md] ]| -> String:\n    return prefix\n;\n",
+    );
+    assert!(
+        matches!(
+            payload,
+            DiagnosticPayload::InvalidCompileTimePath {
+                reason: crate::compiler_frontend::compiler_messages::InvalidCompileTimePathReason::MissingTarget,
+                ..
+            }
+        ),
+        "expected a structured missing-target diagnostic, got {payload:?}"
+    );
+}
+
+#[test]
 fn parses_function_parameters_and_return_types() {
     let (ast, string_table) =
         parse_single_file_ast("add |left Int, right Int| -> Int:\n    return left + right\n;\n");

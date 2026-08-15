@@ -1,22 +1,19 @@
-The export block can re-export imported symbols so other modules can use them.
+The export block can re-export dependency-bound symbols so other modules can use them.
 
 ### A public re-export
 
 [codeblock, $code("moth"):
     export:
-        import @components/card {
-            CardData as Card,
-            render_card,
-        }
+        @components/card CardData as Card, render_card
     ;
 ]
 
-Other modules can now import `Card` and `render_card` through the module's public surface. `CardData` is not also exported unless the block lists it separately.
+Other modules can now depend on `Card` and `render_card` through the module's public surface. `CardData` is not also exported unless the block lists it separately.
 
 ### Local alias is not public
 
 [codeblock, $code("moth"):
-    import @components/card {CardData as LocalCard}
+    @components/card CardData as LocalCard
 ]
 
-`LocalCard` is file-local. It is not public. Only imports inside the `export:` block become public re-exports.
+`LocalCard` is file-local. It is not public. Only dependency selections inside the `export:` block become public re-exports.

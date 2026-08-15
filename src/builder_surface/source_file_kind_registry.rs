@@ -24,7 +24,7 @@ pub enum SourceFileKind {
     MothTemplate,
     /// Plain Markdown content files.
     ///
-    /// WHY: HTML projects can import Markdown as a generated `content #String` constant.
+    /// WHY: HTML projects can bind Markdown as a generated `content #String` constant.
     PlainMarkdown,
 }
 
@@ -41,7 +41,7 @@ pub struct SupportedSourceFileKind {
 ///
 /// WHAT: collects extensions the active builder wants the compiler to recognize.
 /// WHY: keeps source-kind support declarative and builder-local instead of hard-coding
-///      extensions in Stage 0 or import resolution.
+///      extensions in Stage 0 or dependency resolution.
 ///
 /// `.moth` is always implicitly supported and does not need registration.
 #[derive(Clone, Debug, Default)]
@@ -108,7 +108,7 @@ impl SourceFileKind {
     ///
     /// WHAT: separates recognition from active-builder support.
     /// WHY: Stage 0 must diagnose a known but unsupported source kind, such as template content
-    ///      under a non-HTML builder, instead of falling through to a missing-import error.
+    ///      under a non-HTML builder, instead of falling through to a missing-dependency error.
     pub fn from_extension(extension: &str) -> Option<Self> {
         match extension {
             LANGUAGE_SOURCE_EXTENSION => Some(Self::Moth),

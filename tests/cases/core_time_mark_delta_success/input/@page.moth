@@ -1,11 +1,9 @@
-import @core/time {
-    TimeMark,
+@core/time TimeMark,
     Duration,
     mark_now,
     elapsed_since,
     duration_between,
-    as_milliseconds,
-}
+    as_milliseconds
 
 -- Reduce live time to stable ok/bad output
 mark1 = mark_now()

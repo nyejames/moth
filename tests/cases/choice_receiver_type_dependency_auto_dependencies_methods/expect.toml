@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = ["choice_receiver_type_dependency_auto_dependencies_methods value=ready"]

@@ -1,4 +1,4 @@
-import @./helpers {identity}
+@helpers identity
 
 run |value String|:
     io.line([: [value]])

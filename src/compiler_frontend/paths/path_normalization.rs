@@ -1,7 +1,7 @@
 //! Low-level Moth path normalization helpers.
 //!
 //! These helpers translate already-tokenized `InternedPath` components into filesystem candidate
-//! paths and public path values. They do not own import visibility, public-surface policy, or
+//! paths and public path values. They do not own dependency visibility, public-surface policy, or
 //! diagnostic construction.
 
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry};
@@ -11,44 +11,44 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// A source-file import candidate derived from one extensionless import path.
+/// A source-file dependency candidate derived from one extensionless dependency path.
 ///
 /// WHAT: carries the concrete filesystem candidate plus its typed source kind.
 /// WHY: Stage 0 must keep Moth `.moth` and builder-supported kinds such as Moth template `.mtf`
 ///      distinct before later frontend stages choose the right preparation path.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct ImportCandidate {
+pub(crate) struct DependencyCandidate {
     pub(crate) path: PathBuf,
     pub(crate) kind: SourceFileKind,
-    pub(crate) support: ImportCandidateSupport,
+    pub(crate) support: DependencyCandidateSupport,
     pub(crate) is_parent_fallback: bool,
 }
 
-/// Whether an import candidate can be used by the active builder.
+/// Whether a dependency candidate can be used by the active builder.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ImportCandidateSupport {
+pub(crate) enum DependencyCandidateSupport {
     Supported,
     RecognizedButUnsupported,
 }
 
-/// WHAT: checks whether an import path contains any `..` components.
-/// WHY: parent-directory traversal is not supported in Moth imports.
-pub(crate) fn import_contains_dotdot(
-    import_path: &InternedPath,
+/// WHAT: checks whether a dependency path contains any `..` components.
+/// WHY: parent-directory traversal is not supported in Moth dependencies.
+pub(crate) fn dependency_contains_dotdot(
+    dependency_path: &InternedPath,
     string_table: &StringTable,
 ) -> bool {
-    import_path
+    dependency_path
         .as_components()
         .iter()
         .any(|component| string_table.resolve(*component) == "..")
 }
 
-pub(crate) fn is_relative_import_path(
-    import_path: &InternedPath,
+pub(crate) fn is_relative_dependency_path(
+    dependency_path: &InternedPath,
     string_table: &StringTable,
 ) -> bool {
     matches!(
-        import_path
+        dependency_path
             .as_components()
             .first()
             .map(|component| string_table.resolve(*component)),
@@ -58,12 +58,12 @@ pub(crate) fn is_relative_import_path(
 
 pub(crate) fn join_and_normalize_path(
     base: &Path,
-    import_path: &InternedPath,
+    dependency_path: &InternedPath,
     string_table: &StringTable,
 ) -> PathBuf {
     let mut joined = base.to_path_buf();
 
-    for component in import_path.as_components() {
+    for component in dependency_path.as_components() {
         match string_table.resolve(*component) {
             "." => {}
             ".." => {
@@ -76,22 +76,22 @@ pub(crate) fn join_and_normalize_path(
     joined
 }
 
-pub(crate) fn candidate_import_files_for_source_kinds(
-    normalized_import_path: &Path,
-    import_component_len: usize,
+pub(crate) fn candidate_dependency_files_for_source_kinds(
+    normalized_dependency_path: &Path,
+    dependency_component_len: usize,
     source_file_kinds: &SourceFileKindRegistry,
-) -> Vec<ImportCandidate> {
+) -> Vec<DependencyCandidate> {
     let mut candidates = Vec::new();
 
     add_source_kind_candidates(
         &mut candidates,
-        normalized_import_path.to_path_buf(),
+        normalized_dependency_path.to_path_buf(),
         false,
         source_file_kinds,
     );
 
-    if import_component_len > 1
-        && let Some(parent) = normalized_import_path.parent()
+    if dependency_component_len > 1
+        && let Some(parent) = normalized_dependency_path.parent()
     {
         add_source_kind_candidates(
             &mut candidates,
@@ -105,7 +105,7 @@ pub(crate) fn candidate_import_files_for_source_kinds(
 }
 
 fn add_source_kind_candidates(
-    candidates: &mut Vec<ImportCandidate>,
+    candidates: &mut Vec<DependencyCandidate>,
     base_path: PathBuf,
     is_parent_fallback: bool,
     source_file_kinds: &SourceFileKindRegistry,
@@ -113,12 +113,12 @@ fn add_source_kind_candidates(
     for recognized in SourceFileKind::recognized_kinds() {
         let path = with_extension(base_path.clone(), recognized.extension);
         let support = if source_file_kinds.supports_recognized_extension(recognized.extension) {
-            ImportCandidateSupport::Supported
+            DependencyCandidateSupport::Supported
         } else {
-            ImportCandidateSupport::RecognizedButUnsupported
+            DependencyCandidateSupport::RecognizedButUnsupported
         };
 
-        candidates.push(ImportCandidate {
+        candidates.push(DependencyCandidate {
             path,
             kind: recognized.kind,
             support,

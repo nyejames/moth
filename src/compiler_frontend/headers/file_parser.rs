@@ -1,18 +1,18 @@
 //! Per-file header splitting.
 //!
-//! WHAT: orchestrates one tokenized Moth file into top-level declaration headers, import
+//! WHAT: orchestrates one tokenized Moth file into top-level declaration headers, dependency
 //! records, const-fragment metadata, and the implicit entry `start` body.
-//! WHY: file-level control flow is different from declaration parsing, import recording, and hash
+//! WHY: file-level control flow is different from declaration parsing, dependency recording, and hash
 //! item handling; this module keeps the high-level loop visible while delegated modules own details.
 
 use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
     reserved_trait_keyword, reserved_trait_keyword_error,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidReceiverDeclarationReason,
+    CompilerDiagnostic, InvalidDeclarationReason, InvalidReceiverDeclarationReason,
 };
-use crate::compiler_frontend::headers::file_imports::{
-    parse_and_record_imports, parse_and_record_public_block_imports,
+use crate::compiler_frontend::headers::file_dependency_clauses::{
+    parse_and_record_private_dependency, parse_and_record_public_dependency,
 };
 use crate::compiler_frontend::headers::file_state::HeaderFileParseState;
 use crate::compiler_frontend::headers::hash_items::handle_hash_item;
@@ -25,18 +25,25 @@ use crate::compiler_frontend::headers::top_level_classifier::{
     starts_specialized_generic_conformance_declaration, starts_trait_declaration_after_must,
 };
 use crate::compiler_frontend::headers::types::{
-    FileFrontendPrepareError, FileFrontendPrepareOutput, FileRole, HeaderBuildContext,
-    HeaderExportMode, HeaderKind, HeaderParseContext,
+    DependencySelection, FileFrontendPrepareFailure, FileFrontendPrepareOutput, FileRole, Header,
+    HeaderBuildContext, HeaderExportMode, HeaderKind, HeaderParseContext, HeaderParseFailure,
+    RetainedDependencyClause,
 };
-use crate::compiler_frontend::symbols::string_interning::StringId;
+use crate::compiler_frontend::paths::const_paths::can_serialize_path_component_bare;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
+use rustc_hash::FxHashSet;
 
 /// Boxed diagnostic result for file-local header-item orchestration.
 ///
 /// WHAT: gives the connected helper family one small error boundary.
 /// WHY: the header loop passes structured diagnostics through several item handlers
 ///      without carrying the large value inline at every return.
-type FileParserResult<T> = Result<T, Box<CompilerDiagnostic>>;
+type FileParserResult<T> = Result<T, HeaderParseFailure>;
+
+fn diagnostic_failure(diagnostic: CompilerDiagnostic) -> HeaderParseFailure {
+    HeaderParseFailure::Diagnostic(Box::new(diagnostic))
+}
 
 // Top-level declarations are same-module-visible by default; cross-module public visibility
 // comes only from the root `export:` block. Non-declaration statements are collected into the
@@ -44,14 +51,19 @@ type FileParserResult<T> = Result<T, Box<CompilerDiagnostic>>;
 pub(super) fn parse_headers_in_file(
     token_stream: &mut FileTokens,
     context: &mut HeaderParseContext<'_>,
-) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareError> {
+) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
     let mut state = HeaderFileParseState::new(token_stream.length);
 
     let result = parse_headers_in_file_inner(token_stream, context, &mut state);
 
     match result {
         Ok(()) => finish_file_output(token_stream, context, state),
-        Err(boxed_diagnostic) => Err(state.into_error(*boxed_diagnostic)),
+        Err(HeaderParseFailure::Diagnostic(diagnostic)) => Err(
+            FileFrontendPrepareFailure::Diagnosed(state.into_error(*diagnostic)),
+        ),
+        Err(HeaderParseFailure::Infrastructure(error)) => {
+            Err(FileFrontendPrepareFailure::Infrastructure(error))
+        }
     }
 }
 
@@ -89,8 +101,13 @@ fn parse_headers_in_file_inner(
                 )?;
             }
 
-            HeaderFileItem::Import => {
-                parse_and_record_imports(token_stream, state, context, current_location)?;
+            HeaderFileItem::Dependency => {
+                parse_and_record_private_dependency(
+                    token_stream,
+                    state,
+                    context,
+                    current_location,
+                )?;
             }
 
             HeaderFileItem::Export => {
@@ -143,14 +160,14 @@ fn reject_non_block_export(
 ) -> FileParserResult<()> {
     // `export` is valid only as the module-root `export:` block.
     if !context.file_role.is_export_capable() || context.is_config_file {
-        return Err(Box::new(CompilerDiagnostic::export_outside_module_root(
-            export_location,
-        )));
+        return Err(diagnostic_failure(
+            CompilerDiagnostic::export_outside_module_root(export_location),
+        ));
     }
 
     // Without the block delimiter, the token is not an export target. Keep this diagnostic in
     // header parsing instead of interpreting the following tokens through another syntax path.
-    Err(Box::new(CompilerDiagnostic::expected_token(
+    Err(diagnostic_failure(CompilerDiagnostic::expected_token(
         TokenKind::Colon,
         Some(token_stream.current_token_kind().to_owned()),
         export_location,
@@ -164,21 +181,21 @@ fn handle_export_block(
     export_location: SourceLocation,
 ) -> FileParserResult<()> {
     if !context.file_role.is_export_capable() || context.is_config_file {
-        return Err(Box::new(CompilerDiagnostic::export_outside_module_root(
-            export_location,
-        )));
+        return Err(diagnostic_failure(
+            CompilerDiagnostic::export_outside_module_root(export_location),
+        ));
     }
 
     if state.seen_export_block.is_some() {
-        return Err(Box::new(CompilerDiagnostic::duplicate_export_block(
-            export_location,
-        )));
+        return Err(diagnostic_failure(
+            CompilerDiagnostic::duplicate_export_block(export_location),
+        ));
     }
 
     // The classifier only produces ExportBlock when the current token is `:`, but consume it
     // here so the item parser starts at the first ordinary top-level item.
     if token_stream.current_token_kind() != &TokenKind::Colon {
-        return Err(Box::new(CompilerDiagnostic::expected_token(
+        return Err(diagnostic_failure(CompilerDiagnostic::expected_token(
             TokenKind::Colon,
             Some(token_stream.current_token_kind().to_owned()),
             export_location,
@@ -214,10 +231,12 @@ fn handle_export_block(
     }
 
     if token_stream.current_token_kind() == &TokenKind::Eof {
-        return Err(Box::new(CompilerDiagnostic::unexpected_end_of_file(
-            Some(context.string_table.intern(";")),
-            token_stream.current_location(),
-        )));
+        return Err(diagnostic_failure(
+            CompilerDiagnostic::unexpected_end_of_file(
+                Some(context.string_table.intern(";")),
+                token_stream.current_location(),
+            ),
+        ));
     }
 
     // The block terminator belongs to this parser mode and must not become an implicit start-body
@@ -226,9 +245,9 @@ fn handle_export_block(
     state.export_mode = HeaderExportMode::Private;
 
     if state.export_block_item_count == 0 {
-        return Err(Box::new(CompilerDiagnostic::invalid_export_target(
-            export_location,
-        )));
+        return Err(diagnostic_failure(
+            CompilerDiagnostic::invalid_export_target(export_location),
+        ));
     }
 
     Ok(())
@@ -264,46 +283,93 @@ fn parse_export_block_item(
             )
         }
 
-        HeaderFileItem::Import => {
-            parse_and_record_public_block_imports(token_stream, state, context, current_location)
+        HeaderFileItem::Dependency => {
+            parse_and_record_public_dependency(token_stream, state, context, current_location)
         }
 
-        HeaderFileItem::Export | HeaderFileItem::ExportBlock => Err(Box::new(
+        HeaderFileItem::Export | HeaderFileItem::ExportBlock => Err(diagnostic_failure(
             CompilerDiagnostic::invalid_export_target(current_location),
         )),
 
         HeaderFileItem::Hash {
             at_statement_boundary,
-        } => handle_hash_item(
+        } => Ok(handle_hash_item(
             token_stream,
             state,
             context,
             current_token,
             current_location,
             at_statement_boundary,
-        ),
+        )?),
 
-        HeaderFileItem::RuntimeTemplate | HeaderFileItem::StartBodyToken => Err(Box::new(
-            CompilerDiagnostic::invalid_export_target(current_location),
-        )),
+        HeaderFileItem::RuntimeTemplate | HeaderFileItem::StartBodyToken => Err(
+            diagnostic_failure(CompilerDiagnostic::invalid_export_target(current_location)),
+        ),
 
         HeaderFileItem::ReservedTraitSyntax => {
             if let Some(keyword) = reserved_trait_keyword(&current_token.kind) {
-                return Err(Box::new(reserved_trait_keyword_error(
+                return Err(diagnostic_failure(reserved_trait_keyword_error(
                     keyword,
                     current_location,
                 )));
             }
 
-            Err(Box::new(CompilerDiagnostic::invalid_export_target(
-                current_location,
-            )))
+            Err(diagnostic_failure(
+                CompilerDiagnostic::invalid_export_target(current_location),
+            ))
         }
 
-        HeaderFileItem::Eof => Err(Box::new(CompilerDiagnostic::unexpected_end_of_file(
-            Some(context.string_table.intern(";")),
-            current_location,
-        ))),
+        HeaderFileItem::Eof => Err(diagnostic_failure(
+            CompilerDiagnostic::unexpected_end_of_file(
+                Some(context.string_table.intern(";")),
+                current_location,
+            ),
+        )),
+    }
+}
+
+/// The recognised start of a removed `import` `@path` clause.
+///
+/// WHAT: records the `import` token and the following path token after optional newlines.
+/// WHY: end scanning, replacement generation and diagnostic spans must share one path index
+///      instead of independently skipping trivia from `import` again.
+struct LegacyDependencyStart {
+    import_index: usize,
+    path_index: usize,
+}
+
+/// Recognise only `import`, optional newlines, then a path token.
+///
+/// Comments are not produced as tokens, so comments between the keyword and path are
+/// already transparent. `import = 1` and `import` followed by an unrelated statement
+/// do not match.
+fn recognize_legacy_dependency_start(
+    tokens: &[Token],
+    import_index: usize,
+    string_table: &StringTable,
+) -> Option<LegacyDependencyStart> {
+    let import = tokens.get(import_index)?;
+    let TokenKind::Symbol(name) = import.kind else {
+        return None;
+    };
+    if string_table.resolve(name) != "import" {
+        return None;
+    }
+
+    let mut index = import_index + 1;
+    while tokens
+        .get(index)
+        .is_some_and(|token| token.kind == TokenKind::Newline)
+    {
+        index += 1;
+    }
+
+    match tokens.get(index).map(|token| &token.kind) {
+        Some(TokenKind::Path(_)) => Some(LegacyDependencyStart {
+            import_index,
+            path_index: index,
+        }),
+        _ => None,
     }
 }
 
@@ -315,6 +381,19 @@ fn handle_symbol_item(
     name_id: StringId,
     current_location: SourceLocation,
 ) -> FileParserResult<()> {
+    let import_index = token_stream.index.saturating_sub(1);
+    if let Some(start) =
+        recognize_legacy_dependency_start(&token_stream.tokens, import_index, context.string_table)
+    {
+        return Err(diagnostic_failure(legacy_dependency_clause_diagnostic(
+            token_stream,
+            context.string_table,
+            current_location,
+            context.is_config_file,
+            start,
+        )?));
+    }
+
     let export_mode = state.export_mode;
     handle_symbol_item_with_export_mode(
         token_stream,
@@ -327,6 +406,178 @@ fn handle_symbol_item(
     )
 }
 
+/// Build the one-way migration diagnostic for the removed `import @...` grammar.
+///
+/// A replacement is offered only when the old clause maps mechanically to one current clause.
+/// Filtered namespaces and nested groups deliberately require an author choice.
+fn legacy_dependency_clause_diagnostic(
+    token_stream: &FileTokens,
+    string_table: &mut StringTable,
+    current_location: SourceLocation,
+    is_config_file: bool,
+    start: LegacyDependencyStart,
+) -> Result<CompilerDiagnostic, HeaderParseFailure> {
+    let mut clause_location = token_stream
+        .tokens
+        .get(start.import_index)
+        .map(|token| token.location.clone())
+        .unwrap_or(current_location);
+    let clause_end = legacy_dependency_clause_end(&token_stream.tokens, start.path_index)
+        .and_then(|index| token_stream.tokens.get(index))
+        .map_or(clause_location.end_pos, |token| token.location.end_pos);
+    clause_location.end_pos = clause_end;
+
+    let replacement = if is_config_file {
+        None
+    } else {
+        legacy_dependency_replacement(token_stream, string_table, start.path_index)?
+            .map(|replacement| string_table.intern(&replacement))
+    };
+    Ok(CompilerDiagnostic::legacy_dependency_clause(
+        replacement,
+        clause_location,
+    ))
+}
+
+fn legacy_dependency_clause_end(tokens: &[Token], path_index: usize) -> Option<usize> {
+    let mut index = path_index;
+    let mut brace_depth = 0usize;
+    let mut last = None;
+    while let Some(token) = tokens.get(index) {
+        match token.kind {
+            TokenKind::OpenCurly => brace_depth += 1,
+            TokenKind::CloseCurly => brace_depth = brace_depth.saturating_sub(1),
+            TokenKind::Newline if brace_depth == 0 => break,
+            TokenKind::End | TokenKind::Eof => break,
+            _ => {}
+        }
+        last = Some(index);
+        index += 1;
+    }
+    last
+}
+
+fn legacy_dependency_replacement(
+    token_stream: &FileTokens,
+    string_table: &StringTable,
+    path_index: usize,
+) -> Result<Option<String>, HeaderParseFailure> {
+    let tokens = &token_stream.tokens;
+    let Some(path_token) = tokens.get(path_index) else {
+        return Ok(None);
+    };
+    let TokenKind::Path(path_id) = path_token.kind else {
+        return Ok(None);
+    };
+    let path = token_stream
+        .path_syntax_table()?
+        .try_path_for_token(path_id, &path_token.location)?
+        .root
+        .to_owned();
+    if path.is_empty() {
+        // Exact `@/` is represented by the empty canonical path. Its retained row cannot
+        // distinguish that valid spelling from the invalid bare introducer `@`.
+        return Ok(None);
+    }
+    if path
+        .as_components()
+        .iter()
+        .any(|component| !can_serialize_path_component_bare(string_table.resolve(*component)))
+    {
+        // The canonical path row intentionally does not retain component quoting. Do not emit a
+        // normalized spelling that would turn a valid quoted path into invalid unquoted syntax.
+        return Ok(None);
+    }
+    let path = path.to_portable_string(string_table);
+    let mut replacement = format!("@{path}");
+    let mut index = path_index + 1;
+
+    if tokens
+        .get(index)
+        .is_some_and(|token| token.kind == TokenKind::As)
+    {
+        let Some(Token {
+            kind: TokenKind::Symbol(alias),
+            ..
+        }) = tokens.get(index + 1)
+        else {
+            return Ok(None);
+        };
+        replacement.push_str(" as ");
+        replacement.push_str(string_table.resolve(*alias));
+        index += 2;
+        return Ok(clause_terminator(tokens.get(index)).then_some(replacement));
+    }
+
+    if !tokens
+        .get(index)
+        .is_some_and(|token| token.kind == TokenKind::OpenCurly)
+    {
+        return Ok(clause_terminator(tokens.get(index)).then_some(replacement));
+    }
+    index += 1;
+    replacement.push(' ');
+
+    let mut first_selection = true;
+    loop {
+        while tokens
+            .get(index)
+            .is_some_and(|token| token.kind == TokenKind::Newline)
+        {
+            index += 1;
+        }
+        let Some(token) = tokens.get(index) else {
+            return Ok(None);
+        };
+        if token.kind == TokenKind::CloseCurly {
+            return Ok(
+                (!first_selection && clause_terminator(tokens.get(index + 1)))
+                    .then_some(replacement),
+            );
+        }
+        let TokenKind::Symbol(name) = token.kind else {
+            return Ok(None);
+        };
+        if !first_selection {
+            replacement.push_str(", ");
+        }
+        replacement.push_str(string_table.resolve(name));
+        first_selection = false;
+        index += 1;
+
+        if tokens
+            .get(index)
+            .is_some_and(|token| token.kind == TokenKind::As)
+        {
+            let Some(Token {
+                kind: TokenKind::Symbol(alias),
+                ..
+            }) = tokens.get(index + 1)
+            else {
+                return Ok(None);
+            };
+            replacement.push_str(" as ");
+            replacement.push_str(string_table.resolve(*alias));
+            index += 2;
+        }
+
+        match tokens.get(index).map(|token| &token.kind) {
+            Some(TokenKind::Comma) => index += 1,
+            Some(TokenKind::CloseCurly | TokenKind::Newline) => {}
+            _ => return Ok(None),
+        }
+    }
+}
+
+fn clause_terminator(token: Option<&Token>) -> bool {
+    token.is_none_or(|token| {
+        matches!(
+            token.kind,
+            TokenKind::Newline | TokenKind::End | TokenKind::Eof
+        )
+    })
+}
+
 fn handle_symbol_item_with_export_mode(
     token_stream: &mut FileTokens,
     state: &mut HeaderFileParseState,
@@ -337,9 +588,9 @@ fn handle_symbol_item_with_export_mode(
     export_mode: HeaderExportMode,
 ) -> FileParserResult<()> {
     if export_mode.is_public() && !starts_duplicate_top_level_header_declaration(token_stream) {
-        return Err(Box::new(CompilerDiagnostic::invalid_export_target(
-            current_location,
-        )));
+        return Err(diagnostic_failure(
+            CompilerDiagnostic::invalid_export_target(current_location),
+        ));
     }
 
     if let Some(first_location) = state.encountered_symbols.get(&name_id) {
@@ -353,16 +604,18 @@ fn handle_symbol_item_with_export_mode(
         if !is_conformance_declaration
             && starts_duplicate_top_level_header_declaration(token_stream)
         {
-            return Err(Box::new(CompilerDiagnostic::duplicate_declaration(
-                name_id,
-                Some(first_location.clone()),
-                token_stream.current_location(),
-            )));
+            return Err(diagnostic_failure(
+                CompilerDiagnostic::duplicate_declaration(
+                    name_id,
+                    Some(first_location.clone()),
+                    current_location,
+                ),
+            ));
         }
 
         if !is_conformance_declaration {
             state.push_start_body_token(current_token);
-            // Body-level symbol/import resolution belongs to AST passes. Header parsing only validates
+            // Body-level symbol/dependency resolution belongs to AST passes. Header parsing only validates
             // duplicate top-level declaration starts at this stage.
             return Ok(());
         }
@@ -381,8 +634,8 @@ fn handle_symbol_item_with_export_mode(
     let mut build_context = HeaderBuildContext {
         warnings: &mut state.warnings,
         source_file: &source_file,
-        file_imports: &state.file_import_paths,
-        file_import_entries: &state.file_imports,
+        file_dependency_clauses: &state.file_dependency_clauses,
+        dependency_selections: &state.dependency_selections,
         string_table: context.string_table,
         file_role: context.file_role,
     };
@@ -402,19 +655,21 @@ fn handle_symbol_item_with_export_mode(
                 | HeaderKind::TraitIncompatibility { .. }
         )
     {
-        return Err(Box::new(CompilerDiagnostic::invalid_export_target(
-            current_location,
-        )));
+        return Err(diagnostic_failure(
+            CompilerDiagnostic::invalid_export_target(current_location),
+        ));
     }
 
     if export_mode.is_public()
         && let HeaderKind::Function { signature, .. } = &header.kind
         && is_receiver_method_candidate(signature, context.string_table)
     {
-        return Err(Box::new(CompilerDiagnostic::invalid_receiver_declaration(
-            InvalidReceiverDeclarationReason::ReceiverMethodImportOrExportNotAllowed,
-            current_location,
-        )));
+        return Err(diagnostic_failure(
+            CompilerDiagnostic::invalid_receiver_declaration(
+                InvalidReceiverDeclarationReason::ReceiverMethodImportOrExportNotAllowed,
+                current_location,
+            ),
+        ));
     }
 
     match header.kind {
@@ -444,7 +699,7 @@ fn handle_trait_keyword_header_item(
     current_location: SourceLocation,
 ) -> FileParserResult<()> {
     if let Some(keyword) = reserved_trait_keyword(&current_token.kind) {
-        return Err(Box::new(reserved_trait_keyword_error(
+        return Err(diagnostic_failure(reserved_trait_keyword_error(
             keyword,
             current_location,
         )));
@@ -477,11 +732,22 @@ fn handle_runtime_template_item(
 }
 
 fn finish_file_output(
-    token_stream: &FileTokens,
-    context: &HeaderParseContext<'_>,
+    token_stream: &mut FileTokens,
+    context: &mut HeaderParseContext<'_>,
     state: HeaderFileParseState,
-) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareError> {
-    // Ordinary source files have no semantic consumer for an implicit start. Imported roots are
+) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
+    if let Some(diagnostic) = dependency_generic_parameter_collision(
+        &state.headers,
+        &state.file_dependency_clauses,
+        &state.dependency_selections,
+        context.string_table,
+    ) {
+        return Err(FileFrontendPrepareFailure::Diagnosed(
+            state.into_error(diagnostic),
+        ));
+    }
+
+    // Ordinary source files have no semantic consumer for an implicit start. Dependency-reached roots are
     // intentionally parsed for declarations and exports only; their root body is discarded.
     if matches!(
         context.file_role,
@@ -491,16 +757,91 @@ fn finish_file_output(
         let location = state
             .first_executable_start_body_location()
             .unwrap_or_default();
-        return Err(
-            state.into_error(CompilerDiagnostic::invalid_top_level_runtime_statement(
-                location,
-            )),
-        );
+        return Err(FileFrontendPrepareFailure::Diagnosed(state.into_error(
+            CompilerDiagnostic::invalid_top_level_runtime_statement(location),
+        )));
     }
 
     if context.file_role == FileRole::ActiveModuleRoot {
-        Ok(state.into_entry_output(token_stream, context.file_role))
+        state
+            .into_entry_output(token_stream, context.file_role)
+            .map_err(FileFrontendPrepareFailure::Infrastructure)
     } else {
-        Ok(state.into_non_entry_output(token_stream, context.file_role))
+        state
+            .into_non_entry_output(token_stream, context.file_role)
+            .map_err(FileFrontendPrepareFailure::Infrastructure)
     }
+}
+
+/// Validate generic parameter names against every dependency binding retained by this file.
+///
+/// WHAT: applies the file-wide dependency collision policy after header parsing has retained all
+///       clauses and declaration shells, regardless of their source order.
+/// WHY: dependency visibility is independent of declaration position, while header dispatch must
+///       parse generic syntax before later dependency clauses have been encountered.
+fn dependency_generic_parameter_collision(
+    headers: &[Header],
+    dependency_clauses: &[RetainedDependencyClause],
+    dependency_selections: &[DependencySelection],
+    string_table: &mut StringTable,
+) -> Option<CompilerDiagnostic> {
+    let forbidden_names = dependency_generic_parameter_forbidden_names(
+        dependency_clauses,
+        dependency_selections,
+        string_table,
+    );
+
+    for header in headers {
+        let generic_parameters = match &header.kind {
+            HeaderKind::Function {
+                generic_parameters, ..
+            }
+            | HeaderKind::Struct {
+                generic_parameters, ..
+            }
+            | HeaderKind::Choice {
+                generic_parameters, ..
+            } => generic_parameters,
+            _ => continue,
+        };
+
+        for parameter in &generic_parameters.parameters {
+            if forbidden_names.contains(&parameter.name) {
+                return Some(CompilerDiagnostic::invalid_declaration(
+                    InvalidDeclarationReason::GenericParameterNameCollision {
+                        parameter_name: parameter.name,
+                    },
+                    None,
+                    parameter.location.clone(),
+                ));
+            }
+        }
+    }
+
+    None
+}
+
+fn dependency_generic_parameter_forbidden_names(
+    dependency_clauses: &[RetainedDependencyClause],
+    dependency_selections: &[DependencySelection],
+    string_table: &mut StringTable,
+) -> FxHashSet<StringId> {
+    let mut forbidden_names = FxHashSet::default();
+
+    for clause in dependency_clauses {
+        let selections = clause
+            .selections(dependency_selections)
+            .expect("validated file dependency selection range");
+        if selections.is_empty() {
+            if let Some(local_name) = clause.effective_namespace_local_name(string_table) {
+                forbidden_names.insert(local_name);
+            }
+        } else {
+            for selection in selections {
+                forbidden_names.insert(selection.local_name());
+            }
+        }
+    }
+
+    forbidden_names
 }

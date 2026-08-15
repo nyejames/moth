@@ -268,7 +268,7 @@ pub(crate) fn invalid_multi_bind_message(
             "Malformed multi-bind target list. Expected a symbol target name.".to_string()
         }
         InvalidMultiBindReason::MissingTargetAfterComma => {
-            "Malformed multi-bind target list near ','.".to_string()
+            "A multi-bind comma must be followed by another target. Remove the comma to end the target line, or add the promised target before '='.".to_string()
         }
         InvalidMultiBindReason::MissingAssignmentOperator => {
             "Multi-bind target list is missing a shared '=' assignment operator.".to_string()

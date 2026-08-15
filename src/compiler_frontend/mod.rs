@@ -63,6 +63,10 @@ pub use pipeline::CompilerFrontend;
 pub(crate) use pipeline::{
     FrontendFilePrepareContext, FrontendFilePrepareInput, FrontendFilePrepareSource,
 };
+#[cfg(test)]
+pub(crate) use pipeline::{
+    file_frontend_prepare_count_for_path_for_test, reset_file_frontend_prepare_count_for_test,
+};
 
 /// Flags change the behavior of the core `compiler_frontend` pipeline.
 #[derive(PartialEq, Eq, Debug, Clone)]

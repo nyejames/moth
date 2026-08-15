@@ -289,16 +289,9 @@ pub(crate) fn condition_location_or_loop_location(
 
 pub(crate) fn loop_body_not_const_error(
     error: TemplateError,
-    diagnostic_location: &SourceLocation,
+    _diagnostic_location: &SourceLocation,
 ) -> TemplateError {
-    match error {
-        TemplateError::Diagnostic(diagnostic) => TemplateError::Diagnostic(diagnostic),
-        TemplateError::Infrastructure(_) => CompilerDiagnostic::invalid_template_structure(
-            InvalidTemplateStructureReason::TemplateLoopBodyNotConst,
-            diagnostic_location.clone(),
-        )
-        .into(),
-    }
+    error
 }
 
 /// Evaluates a const template condition and returns the exact value provenance consumed by it.

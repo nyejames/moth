@@ -1,4 +1,4 @@
-import @types/enums {Status, Priority, PermissionLevel}
+@types/enums Status, Priority, PermissionLevel
 
 User = |
     username String,

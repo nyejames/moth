@@ -7,16 +7,16 @@ The filename after `@` or `+` does not matter. `@page.moth`, `@mod.moth` and
 `@api.moth` all create the same normal-root role. One directory cannot contain
 two roots or mix an `@*.moth` root with a `+*.moth` root.
 
-### Import the module, not the root file
+### Bind the module, not the root file
 
-Normal module-root files have no direct import form. Import the directory's public module surface.
+Normal module-root files have no direct dependency form. Bind the directory's public module surface.
 
-The `@` in `@page.moth` marks the file as a module root on disk. The `@` in `import @pages` starts an import path. They share the same symbol but are not combined. Do not write `import @@pages`. The second `@` is invalid.
+The `@` in `@page.moth` marks the file as a module root on disk. The `@` in `@pages` starts a dependency path. They share the same symbol but are not combined. Do not write `@@pages`. The second `@` is invalid.
 
 [codeblock, $code("moth"):
-    import @pages
+    @pages
 ]
 
 ### Two roles
 
-A module can become a page entry or be imported. The compiler checks its top-level work in both cases, but that work runs only when the builder selects the module as an entry.
+A module can become a page entry or a dependency. The compiler checks its top-level work in both cases, but that work runs only when the builder selects the module as an entry.

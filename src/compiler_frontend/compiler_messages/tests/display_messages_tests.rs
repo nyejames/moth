@@ -5,7 +5,7 @@ use crate::compiler_frontend::compiler_errors::{
 };
 use crate::compiler_frontend::compiler_messages::render::{
     relative_display_path_from_root, resolve_source_file_path, resolved_display_path,
-    special_file_name_from_path,
+    special_file_name_from_path, support_root_import_suggestion,
 };
 use crate::compiler_frontend::compiler_messages::{DiagnosticKind, InfrastructureDiagnosticKind};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
@@ -99,6 +99,20 @@ fn special_file_renderer_names_support_roots() {
     assert_eq!(
         special_file_name_from_path(&explicit_path, &string_table),
         "+pkg.moth"
+    );
+}
+
+#[test]
+fn support_root_renderer_suggests_containing_package_directory() {
+    let mut string_table = StringTable::new();
+    let mut path = InternedPath::new();
+    path.push_str("tools", &mut string_table);
+    path.push_str("helpers", &mut string_table);
+    path.push_str("+package", &mut string_table);
+
+    assert_eq!(
+        support_root_import_suggestion(&path, &string_table),
+        " Bind the support package `@tools/helpers` instead of the root file."
     );
 }
 

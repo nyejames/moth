@@ -41,8 +41,8 @@ This plan must complete before entry-local config blocks.
 
 Keep these concepts distinct:
 
-- **Package dependency declaration**: future `import @package` preamble in `config.moth`, owned by the later package plan.
-- **Source import**: ordinary `.moth` visibility/import syntax.
+- **Package dependency declaration**: future config-owned package syntax remains design-gated and is owned by the package dependency plan; this plan does not prescribe its spelling.
+- **Source dependency**: ordinary top-level `.moth` dependency-clause syntax.
 - **Build-input contract**: `#Import` declaration resolved from project values, explicit command inputs, builder globals or defaults.
 
 This plan implements only build-input contracts and `@project`.
@@ -131,7 +131,7 @@ The folded project record produces an immutable synthetic interface at `@project
 Rules:
 
 - `@project` is permanently reserved.
-- Normal project modules and project-owned support packages may import it explicitly.
+- Normal project modules and project-owned support packages may bind it explicitly.
 - It is never implicitly injected.
 - It cannot be directly re-exported.
 - Child modules, dependency aliases, Core, Builder and binding-backed packages cannot claim the root.
@@ -198,7 +198,7 @@ Review gate: verify all commands share one parser and typed carrier.
 - Normalise each declaration into `SourceBuildInputContract`.
 - Reject body-local or unsupported-type declarations before AST.
 - Restrict defaults to the accepted primitive literal/`none` forms.
-- Keep contract shells out of imported symbol bindings and local declaration-ordering edges except where their resolved constant participates normally.
+- Keep contract shells out of dependency-bound symbol bindings and local declaration-ordering edges except where their resolved constant participates normally.
 
 ### Phase 5: Build the project-wide contract barrier
 
@@ -222,7 +222,7 @@ Review gate: audit boundary isolation and prove no second constant evaluator exi
 - Build stable field identities from project identity and field path.
 - Project folded values, locations, fingerprints and provenance.
 - Register the reserved `@project` synthetic interface in Stage 0 visibility.
-- Bind explicit source imports through the ordinary imported-binding boundary.
+- Bind explicit source dependencies through the ordinary dependency-binding boundary.
 - Track dependencies at field granularity.
 
 ### Phase 8: Validate facade provenance
@@ -258,7 +258,7 @@ Cover:
 - module-wide-only declaration placement
 - build/check/dev parity
 - dev rebuild retention
-- `@project` explicit import and collisions
+- `@project` explicit dependency and collisions
 - field-level fingerprints and dependencies
 - no direct re-export
 - facade provenance rejection

@@ -12,7 +12,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::paths::compile_time_paths::{
     CompileTimePathBase, CompileTimePathKind, CompileTimePathResolutionError,
 };
-use crate::compiler_frontend::paths::import_resolution::ImportPathResolutionError;
+use crate::compiler_frontend::paths::dependency_resolution::DependencyPathResolutionError;
 use crate::compiler_frontend::paths::module_roots::{ModuleRootRecord, ModuleRootTable};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
@@ -108,23 +108,25 @@ impl TestHarness {
         path
     }
 
-    fn importer(&self) -> PathBuf {
+    fn declaring_source(&self) -> PathBuf {
         self.project_root.join("src/index.moth")
     }
 }
 
-fn rendered_error_msg(error: &ImportPathResolutionError, string_table: &StringTable) -> String {
+fn rendered_error_msg(error: &DependencyPathResolutionError, string_table: &StringTable) -> String {
     match error {
-        ImportPathResolutionError::Diagnostic(diagnostic) => format_terse_diagnostic_with_context(
-            diagnostic.as_ref(),
-            DiagnosticRenderContext::new(string_table),
-        ),
-        ImportPathResolutionError::Infrastructure(error) => error.msg.clone(),
+        DependencyPathResolutionError::Diagnostic(diagnostic) => {
+            format_terse_diagnostic_with_context(
+                diagnostic.as_ref(),
+                DiagnosticRenderContext::new(string_table),
+            )
+        }
+        DependencyPathResolutionError::Infrastructure(error) => error.msg.clone(),
     }
 }
 
-fn import_diagnostic_payload(error: &ImportPathResolutionError) -> &DiagnosticPayload {
-    let diagnostic = typed_import_diagnostic(error);
+fn dependency_diagnostic_payload(error: &DependencyPathResolutionError) -> &DiagnosticPayload {
+    let diagnostic = typed_dependency_diagnostic(error);
 
     assert_eq!(
         diagnostic.kind,
@@ -136,11 +138,11 @@ fn import_diagnostic_payload(error: &ImportPathResolutionError) -> &DiagnosticPa
     &diagnostic.payload
 }
 
-fn typed_import_diagnostic(
-    error: &ImportPathResolutionError,
+fn typed_dependency_diagnostic(
+    error: &DependencyPathResolutionError,
 ) -> &crate::compiler_frontend::compiler_messages::CompilerDiagnostic {
-    let ImportPathResolutionError::Diagnostic(diagnostic) = error else {
-        panic!("expected typed import diagnostic, got infrastructure error");
+    let DependencyPathResolutionError::Diagnostic(diagnostic) = error else {
+        panic!("expected typed dependency diagnostic, got infrastructure error");
     };
 
     diagnostic.as_ref()
@@ -168,14 +170,14 @@ fn compile_time_path_diagnostic_payload(
 // -----------------------------------------------------------------------
 
 #[test]
-fn relative_file_resolves_from_importer_directory() {
+fn relative_file_resolves_from_declaring_directory() {
     let mut h = TestHarness::new();
     let path = h.make_path(&[".", "pages", "about.moth"]);
-    let importer = h.importer();
+    let declaring_source = h.declaring_source();
 
     let result = h
         .resolver
-        .resolve_compile_time_path(&path, &importer, &mut h.string_table)
+        .resolve_compile_time_path(&path, &declaring_source, &mut h.string_table)
         .expect("relative file should resolve");
 
     assert_eq!(result.base, CompileTimePathBase::RelativeToFile);
@@ -191,11 +193,11 @@ fn relative_file_resolves_from_importer_directory() {
 fn relative_directory_resolves_and_classifies_as_directory() {
     let mut h = TestHarness::new();
     let path = h.make_path(&[".", "pages"]);
-    let importer = h.importer();
+    let declaring_source = h.declaring_source();
 
     let result = h
         .resolver
-        .resolve_compile_time_path(&path, &importer, &mut h.string_table)
+        .resolve_compile_time_path(&path, &declaring_source, &mut h.string_table)
         .expect("relative directory should resolve");
 
     assert_eq!(result.base, CompileTimePathBase::RelativeToFile);
@@ -210,11 +212,11 @@ fn relative_directory_resolves_and_classifies_as_directory() {
 fn entry_root_file_resolves_through_fallback() {
     let mut h = TestHarness::new();
     let path = h.make_path(&["pages", "about.moth"]);
-    let importer = h.importer();
+    let declaring_source = h.declaring_source();
 
     let result = h
         .resolver
-        .resolve_compile_time_path(&path, &importer, &mut h.string_table)
+        .resolve_compile_time_path(&path, &declaring_source, &mut h.string_table)
         .expect("entry root file should resolve");
 
     assert_eq!(result.base, CompileTimePathBase::EntryRoot);
@@ -229,11 +231,11 @@ fn entry_root_file_resolves_through_fallback() {
 fn non_existent_target_is_rejected() {
     let mut h = TestHarness::new();
     let path = h.make_path(&["pages", "does_not_exist.moth"]);
-    let importer = h.importer();
+    let declaring_source = h.declaring_source();
 
     let err = h
         .resolver
-        .resolve_compile_time_path(&path, &importer, &mut h.string_table)
+        .resolve_compile_time_path(&path, &declaring_source, &mut h.string_table)
         .expect_err("missing file should produce error");
 
     assert!(matches!(
@@ -254,11 +256,11 @@ fn path_escaping_project_root_is_rejected() {
     let mut h = TestHarness::new();
     // From src/index.moth, going ../../.. escapes the project root.
     let path = h.make_path(&[".", "..", "..", "..", "escape.txt"]);
-    let importer = h.importer();
+    let declaring_source = h.declaring_source();
 
     let err = h
         .resolver
-        .resolve_compile_time_path(&path, &importer, &mut h.string_table)
+        .resolve_compile_time_path(&path, &declaring_source, &mut h.string_table)
         .expect_err("escape should produce error");
 
     assert!(matches!(
@@ -278,11 +280,11 @@ fn path_escaping_project_root_is_rejected() {
 fn entry_root_directory_classifies_correctly() {
     let mut h = TestHarness::new();
     let path = h.make_path(&["assets", "images"]);
-    let importer = h.importer();
+    let declaring_source = h.declaring_source();
 
     let result = h
         .resolver
-        .resolve_compile_time_path(&path, &importer, &mut h.string_table)
+        .resolve_compile_time_path(&path, &declaring_source, &mut h.string_table)
         .expect("directory should resolve");
 
     assert_eq!(result.kind, CompileTimePathKind::Directory);
@@ -296,70 +298,26 @@ fn entry_root_directory_classifies_correctly() {
 fn relative_path_public_path_keeps_dot_prefix() {
     let mut h = TestHarness::new();
     let path = h.make_path(&[".", "pages", "about.moth"]);
-    let importer = h.importer();
+    let declaring_source = h.declaring_source();
 
     let result = h
         .resolver
-        .resolve_compile_time_path(&path, &importer, &mut h.string_table)
+        .resolve_compile_time_path(&path, &declaring_source, &mut h.string_table)
         .expect("should resolve");
 
     let public = result.public_path.to_portable_string(&h.string_table);
     assert!(public.starts_with("./"));
 }
 
-// -----------------------------------------------------------------------
-// Multi-path resolution (`resolve_compile_time_paths`)
-// -----------------------------------------------------------------------
-
-#[test]
-fn resolve_compile_time_paths_resolves_multiple_paths() {
-    let mut h = TestHarness::new();
-    let path_a = h.make_path(&["assets", "images", "logo.png"]);
-    let path_b = h.make_path(&[".", "pages", "about.moth"]);
-    let importer = h.importer();
-
-    let result = h
-        .resolver
-        .resolve_compile_time_paths(&[path_a, path_b], &importer, &mut h.string_table)
-        .expect("multi-path resolution should succeed");
-
-    assert_eq!(result.paths.len(), 2);
-    assert_eq!(result.paths[0].base, CompileTimePathBase::EntryRoot);
-    assert_eq!(result.paths[0].kind, CompileTimePathKind::File);
-    assert_eq!(result.paths[1].base, CompileTimePathBase::RelativeToFile);
-    assert_eq!(result.paths[1].kind, CompileTimePathKind::File);
-}
-
-#[test]
-fn resolve_compile_time_paths_fails_if_any_path_missing() {
-    let mut h = TestHarness::new();
-    let good = h.make_path(&["assets", "images", "logo.png"]);
-    let bad = h.make_path(&["pages", "nonexistent.txt"]);
-    let importer = h.importer();
-
-    let err = h
-        .resolver
-        .resolve_compile_time_paths(&[good, bad], &importer, &mut h.string_table)
-        .expect_err("should fail when any path is missing");
-
-    assert!(matches!(
-        compile_time_path_diagnostic_payload(&err),
-        DiagnosticPayload::InvalidCompileTimePath {
-            reason: InvalidCompileTimePathReason::MissingTarget,
-            ..
-        }
-    ));
-}
-
 #[test]
 fn empty_path_resolves_as_entry_root_public_directory() {
     let mut h = TestHarness::new();
     let path = InternedPath::new();
-    let importer = h.importer();
+    let declaring_source = h.declaring_source();
 
     let result = h
         .resolver
-        .resolve_compile_time_path(&path, &importer, &mut h.string_table)
+        .resolve_compile_time_path(&path, &declaring_source, &mut h.string_table)
         .expect("empty path should resolve to entry root");
 
     assert_eq!(result.base, CompileTimePathBase::EntryRoot);
@@ -369,7 +327,7 @@ fn empty_path_resolves_as_entry_root_public_directory() {
 }
 
 #[test]
-fn source_package_import_resolves_to_package_root() {
+fn source_package_dependency_resolves_to_package_root() {
     let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
     let project_root = temp_dir.path().to_path_buf();
     let entry_root = project_root.join("src");
@@ -401,10 +359,10 @@ fn source_package_import_resolves_to_package_root() {
     path.push_str("helper", &mut string_table);
     path.push_str("utils", &mut string_table);
 
-    let importer = entry_root.join("index.moth");
+    let declaring_source = entry_root.join("index.moth");
     let result = resolver
-        .resolve_import_as_compile_time_path(&path, &importer, &mut string_table)
-        .expect("source-backed package import should resolve");
+        .resolve_dependency_as_compile_time_path(&path, &declaring_source, &mut string_table)
+        .expect("source-backed package dependency should resolve");
 
     assert_eq!(result.0.base, CompileTimePathBase::SourcePackageRoot);
     assert_eq!(
@@ -450,10 +408,10 @@ fn source_package_prefix_takes_priority_over_entry_root() {
     path.push_str("helper", &mut string_table);
     path.push_str("utils", &mut string_table);
 
-    let importer = entry_root.join("index.moth");
+    let declaring_source = entry_root.join("index.moth");
     let result = resolver
-        .resolve_import_as_compile_time_path(&path, &importer, &mut string_table)
-        .expect("source-backed package import should resolve");
+        .resolve_dependency_as_compile_time_path(&path, &declaring_source, &mut string_table)
+        .expect("source-backed package dependency should resolve");
 
     assert_eq!(result.0.base, CompileTimePathBase::SourcePackageRoot);
     assert_eq!(
@@ -463,7 +421,7 @@ fn source_package_prefix_takes_priority_over_entry_root() {
 }
 
 #[test]
-fn extensionless_import_resolves_supported_moth_template_candidate() {
+fn extensionless_dependency_resolves_supported_moth_template_candidate() {
     let mut registry = SourceFileKindRegistry::new();
     registry.register("mtf", SourceFileKind::MothTemplate);
     let mut h = TestHarness::with_source_file_kinds(&registry);
@@ -471,12 +429,12 @@ fn extensionless_import_resolves_supported_moth_template_candidate() {
     fs::write(h.project_root.join("src/docs/intro.mtf"), "hello").unwrap();
 
     let path = h.make_path(&["docs", "intro"]);
-    let importer = h.importer();
+    let declaring_source = h.declaring_source();
 
     let result = h
         .resolver
-        .resolve_import_to_source_file(&path, &importer, &mut h.string_table)
-        .expect("supported .mtf import should resolve");
+        .resolve_dependency_to_source_file(&path, &declaring_source, &mut h.string_table)
+        .expect("supported .mtf dependency should resolve");
 
     assert_eq!(result.kind, SourceFileKind::MothTemplate);
     assert!(result.path.ends_with("src/docs/intro.mtf"));
@@ -489,13 +447,13 @@ fn recognized_unsupported_moth_template_candidate_reports_source_kind_diagnostic
     fs::write(h.project_root.join("src/docs/intro.mtf"), "hello").unwrap();
 
     let path = h.make_path(&["docs", "intro"]);
-    let importer = h.importer();
+    let declaring_source = h.declaring_source();
 
     let error = h
         .resolver
-        .resolve_import_to_source_file(&path, &importer, &mut h.string_table)
-        .expect_err("unsupported .mtf import should fail");
-    let diagnostic = typed_import_diagnostic(&error);
+        .resolve_dependency_to_source_file(&path, &declaring_source, &mut h.string_table)
+        .expect_err("unsupported .mtf dependency should fail");
+    let diagnostic = typed_dependency_diagnostic(&error);
 
     assert_eq!(
         diagnostic.kind,
@@ -510,7 +468,7 @@ fn recognized_unsupported_moth_template_candidate_reports_source_kind_diagnostic
 }
 
 #[test]
-fn direct_moth_template_extension_import_is_rejected_as_source_extension() {
+fn direct_moth_template_extension_dependency_is_rejected_as_source_extension() {
     let mut registry = SourceFileKindRegistry::new();
     registry.register("mtf", SourceFileKind::MothTemplate);
     let mut h = TestHarness::with_source_file_kinds(&registry);
@@ -518,13 +476,13 @@ fn direct_moth_template_extension_import_is_rejected_as_source_extension() {
     fs::write(h.project_root.join("src/docs/intro.mtf"), "hello").unwrap();
 
     let path = h.make_path(&["docs", "intro.mtf"]);
-    let importer = h.importer();
+    let declaring_source = h.declaring_source();
 
     let error = h
         .resolver
-        .resolve_import_to_source_file(&path, &importer, &mut h.string_table)
-        .expect_err("direct .mtf import should fail");
-    let diagnostic = typed_import_diagnostic(&error);
+        .resolve_dependency_to_source_file(&path, &declaring_source, &mut h.string_table)
+        .expect_err("direct .mtf dependency should fail");
+    let diagnostic = typed_dependency_diagnostic(&error);
 
     assert_eq!(
         diagnostic.kind,
@@ -548,13 +506,13 @@ fn moth_template_and_moth_same_stem_are_ambiguous() {
     fs::write(h.project_root.join("src/docs/intro.mtf"), "hello").unwrap();
 
     let path = h.make_path(&["docs", "intro"]);
-    let importer = h.importer();
+    let declaring_source = h.declaring_source();
 
     let error = h
         .resolver
-        .resolve_import_to_source_file(&path, &importer, &mut h.string_table)
+        .resolve_dependency_to_source_file(&path, &declaring_source, &mut h.string_table)
         .expect_err("same-stem .moth and .mtf should be ambiguous");
-    let diagnostic = typed_import_diagnostic(&error);
+    let diagnostic = typed_dependency_diagnostic(&error);
 
     assert_eq!(
         diagnostic.kind,
@@ -573,13 +531,13 @@ fn moth_template_and_folder_same_stem_are_ambiguous() {
     fs::write(h.project_root.join("src/docs/intro.mtf"), "hello").unwrap();
 
     let path = h.make_path(&["docs", "intro"]);
-    let importer = h.importer();
+    let declaring_source = h.declaring_source();
 
     let error = h
         .resolver
-        .resolve_import_to_source_file(&path, &importer, &mut h.string_table)
+        .resolve_dependency_to_source_file(&path, &declaring_source, &mut h.string_table)
         .expect_err(".mtf and folder with same stem should be ambiguous");
-    let diagnostic = typed_import_diagnostic(&error);
+    let diagnostic = typed_dependency_diagnostic(&error);
 
     assert_eq!(
         diagnostic.kind,
@@ -590,7 +548,7 @@ fn moth_template_and_folder_same_stem_are_ambiguous() {
 }
 
 #[test]
-fn source_import_resolution_preserves_moth_template_folder_ambiguity() {
+fn source_dependency_resolution_preserves_moth_template_folder_ambiguity() {
     let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
     let project_root = temp_dir.path().to_path_buf();
     let entry_root = project_root.join("src");
@@ -616,11 +574,11 @@ fn source_import_resolution_preserves_moth_template_folder_ambiguity() {
     path.push_str("docs", &mut string_table);
     path.push_str("intro", &mut string_table);
 
-    let importer = entry_root.join("index.moth");
+    let declaring_source = entry_root.join("index.moth");
     let error = resolver
-        .resolve_import_to_source_file(&path, &importer, &mut string_table)
+        .resolve_dependency_to_source_file(&path, &declaring_source, &mut string_table)
         .expect_err("source resolution must not hide .mtf/folder ambiguity");
-    let diagnostic = typed_import_diagnostic(&error);
+    let diagnostic = typed_dependency_diagnostic(&error);
 
     assert_eq!(
         diagnostic.kind,
@@ -672,11 +630,11 @@ fn canonicalized_source_package_file_resolves_to_package_prefixed_logical_path()
 }
 
 // -----------------------------------------------------------------------
-// Scan-root vs import-prefix behavior
+// Scan-root vs package-prefix behavior
 // -----------------------------------------------------------------------
 
 #[test]
-fn package_scan_root_name_is_not_import_prefix() {
+fn package_scan_root_name_is_not_package_prefix() {
     let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
     let project_root = temp_dir.path().to_path_buf();
     let entry_root = project_root.join("src");
@@ -710,20 +668,20 @@ fn package_scan_root_name_is_not_import_prefix() {
     path.push_str("lib", &mut string_table);
     path.push_str("thing", &mut string_table);
 
-    let importer = entry_root.join("index.moth");
+    let declaring_source = entry_root.join("index.moth");
     let result = resolver
-        .resolve_import_as_compile_time_path(&path, &importer, &mut string_table)
-        .expect("entry-root fallback import should resolve");
+        .resolve_dependency_as_compile_time_path(&path, &declaring_source, &mut string_table)
+        .expect("entry-root fallback dependency should resolve");
 
     assert_eq!(
         result.0.base,
         CompileTimePathBase::EntryRoot,
-        "scan root name 'lib' must not be treated as an import prefix"
+        "scan root name 'lib' must not be treated as a package prefix"
     );
 }
 
 #[test]
-fn package_direct_child_is_import_prefix() {
+fn package_direct_child_is_package_prefix() {
     let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
     let project_root = temp_dir.path().to_path_buf();
     let entry_root = project_root.join("src");
@@ -755,20 +713,20 @@ fn package_direct_child_is_import_prefix() {
     path.push_str("helper", &mut string_table);
     path.push_str("utils", &mut string_table);
 
-    let importer = entry_root.join("index.moth");
+    let declaring_source = entry_root.join("index.moth");
     let result = resolver
-        .resolve_import_as_compile_time_path(&path, &importer, &mut string_table)
-        .expect("source-backed package import should resolve");
+        .resolve_dependency_as_compile_time_path(&path, &declaring_source, &mut string_table)
+        .expect("source-backed package dependency should resolve");
 
     assert_eq!(
         result.0.base,
         CompileTimePathBase::SourcePackageRoot,
-        "direct child of scan root must be a valid import prefix"
+        "direct child of scan root must be a valid package prefix"
     );
 }
 
 #[test]
-fn entry_root_import_fallback_success() {
+fn entry_root_dependency_fallback_success() {
     let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
     let project_root = temp_dir.path().to_path_buf();
     let entry_root = project_root.join("src");
@@ -792,15 +750,15 @@ fn entry_root_import_fallback_success() {
     path.push_str("pages", &mut string_table);
     path.push_str("about", &mut string_table);
 
-    let importer = entry_root.join("index.moth");
+    let declaring_source = entry_root.join("index.moth");
     let result = resolver
-        .resolve_import_as_compile_time_path(&path, &importer, &mut string_table)
-        .expect("entry-root fallback import should resolve");
+        .resolve_dependency_as_compile_time_path(&path, &declaring_source, &mut string_table)
+        .expect("entry-root fallback dependency should resolve");
 
     assert_eq!(
         result.0.base,
         CompileTimePathBase::EntryRoot,
-        "non-relative imports without a package prefix must fall back to entry root"
+        "non-relative dependencies without a package prefix must fall back to entry root"
     );
 }
 
@@ -840,10 +798,10 @@ fn source_package_prefix_wins_consistently() {
     path.push_str("helper", &mut string_table);
     path.push_str("utils", &mut string_table);
 
-    let importer = entry_root.join("index.moth");
+    let declaring_source = entry_root.join("index.moth");
     let result = resolver
-        .resolve_import_as_compile_time_path(&path, &importer, &mut string_table)
-        .expect("source-backed package import should resolve");
+        .resolve_dependency_as_compile_time_path(&path, &declaring_source, &mut string_table)
+        .expect("source-backed package dependency should resolve");
 
     assert_eq!(
         result.0.base,
@@ -857,11 +815,11 @@ fn source_package_prefix_wins_consistently() {
 }
 
 // -----------------------------------------------------------------------
-// Phase 4 — Import path restriction and canonicalization hardening
+// Phase 4 — Dependency path restriction and canonicalization hardening
 // -----------------------------------------------------------------------
 
 #[test]
-fn import_dotdot_rejected() {
+fn dependency_dotdot_rejected() {
     let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
     let project_root = temp_dir.path().to_path_buf();
     let entry_root = project_root.join("src");
@@ -884,10 +842,10 @@ fn import_dotdot_rejected() {
     path.push_str("shared", &mut string_table);
     path.push_str("math", &mut string_table);
 
-    let importer = entry_root.join("index.moth");
+    let declaring_source = entry_root.join("index.moth");
     let err = resolver
-        .resolve_import_as_compile_time_path(&path, &importer, &mut string_table)
-        .expect_err("'..' in imports should be rejected");
+        .resolve_dependency_as_compile_time_path(&path, &declaring_source, &mut string_table)
+        .expect_err("'..' in dependencies should be rejected");
     let rendered_msg = rendered_error_msg(&err, &string_table);
 
     assert!(
@@ -898,7 +856,7 @@ fn import_dotdot_rejected() {
 }
 
 #[test]
-fn missing_import_target_is_typed_diagnostic() {
+fn missing_dependency_target_is_typed_diagnostic() {
     let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
     let project_root = temp_dir.path().to_path_buf();
     let entry_root = project_root.join("src");
@@ -920,11 +878,11 @@ fn missing_import_target_is_typed_diagnostic() {
     path.push_str("missing", &mut string_table);
     path.push_str("target", &mut string_table);
 
-    let importer = entry_root.join("index.moth");
+    let declaring_source = entry_root.join("index.moth");
     let err = resolver
-        .resolve_import_as_compile_time_path(&path, &importer, &mut string_table)
-        .expect_err("missing import should be rejected");
-    let diagnostic = typed_import_diagnostic(&err);
+        .resolve_dependency_as_compile_time_path(&path, &declaring_source, &mut string_table)
+        .expect_err("missing dependency should be rejected");
+    let diagnostic = typed_dependency_diagnostic(&err);
 
     assert_eq!(
         diagnostic.kind,
@@ -939,7 +897,7 @@ fn missing_import_target_is_typed_diagnostic() {
 }
 
 #[test]
-fn import_escape_project_root_rejected() {
+fn dependency_escape_project_root_rejected() {
     let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
     let project_root = temp_dir.path().to_path_buf();
     let entry_root = project_root.join("src");
@@ -963,12 +921,12 @@ fn import_escape_project_root_rejected() {
     path.push_str("..", &mut string_table);
     path.push_str("escape", &mut string_table);
 
-    let importer = entry_root.join("index.moth");
+    let declaring_source = entry_root.join("index.moth");
     let err = resolver
-        .resolve_import_as_compile_time_path(&path, &importer, &mut string_table)
-        .expect_err("import escaping project root should be rejected");
+        .resolve_dependency_as_compile_time_path(&path, &declaring_source, &mut string_table)
+        .expect_err("dependency escaping project root should be rejected");
     assert!(matches!(
-        import_diagnostic_payload(&err),
+        dependency_diagnostic_payload(&err),
         DiagnosticPayload::InvalidImportPath {
             reason: InvalidImportPathReason::ParentDirectorySegment,
             ..
@@ -984,7 +942,7 @@ fn import_escape_project_root_rejected() {
 }
 
 #[test]
-fn import_escape_package_root_rejected() {
+fn dependency_escape_package_root_rejected() {
     let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
     let project_root = temp_dir.path().to_path_buf();
     let entry_root = project_root.join("src");
@@ -1016,12 +974,12 @@ fn import_escape_package_root_rejected() {
     path.push_str("..", &mut string_table);
     path.push_str("escape", &mut string_table);
 
-    let importer = entry_root.join("index.moth");
+    let declaring_source = entry_root.join("index.moth");
     let err = resolver
-        .resolve_import_as_compile_time_path(&path, &importer, &mut string_table)
-        .expect_err("import escaping package root should be rejected");
+        .resolve_dependency_as_compile_time_path(&path, &declaring_source, &mut string_table)
+        .expect_err("dependency escaping package root should be rejected");
     assert!(matches!(
-        import_diagnostic_payload(&err),
+        dependency_diagnostic_payload(&err),
         DiagnosticPayload::InvalidImportPath {
             reason: InvalidImportPathReason::ParentDirectorySegment,
             ..
@@ -1037,7 +995,7 @@ fn import_escape_package_root_rejected() {
 }
 
 #[test]
-fn concrete_file_import_inside_module_root_is_accepted() {
+fn concrete_file_dependency_inside_module_root_is_accepted() {
     let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
     let project_root = temp_dir.path().to_path_buf();
     let entry_root = project_root.join("src");
@@ -1062,12 +1020,13 @@ fn concrete_file_import_inside_module_root_is_accepted() {
     path.push_str("helper", &mut string_table);
     path.push_str("thing", &mut string_table);
 
-    let importer = entry_root.join("index.moth");
-    let result = resolver.resolve_import_to_source_file(&path, &importer, &mut string_table);
+    let declaring_source = entry_root.join("index.moth");
+    let result =
+        resolver.resolve_dependency_to_source_file(&path, &declaring_source, &mut string_table);
 
     assert!(
         result.is_ok(),
-        "concrete file import inside a module root should resolve at Stage 0"
+        "concrete file dependency inside a module root should resolve at Stage 0"
     );
 }
 
@@ -1113,7 +1072,7 @@ fn nearest_root_parent_walk_chooses_nested_module_root_over_ancestor() {
 }
 
 #[test]
-fn import_case_sensitive_symbol_mismatch_rejected() {
+fn dependency_case_sensitive_symbol_mismatch_rejected() {
     let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
     let project_root = temp_dir.path().to_path_buf();
     let entry_root = project_root.join("src");
@@ -1137,14 +1096,18 @@ fn import_case_sensitive_symbol_mismatch_rejected() {
     path.push_str("pages", &mut string_table);
     path.push_str("About", &mut string_table);
 
-    let importer = entry_root.join("index.moth");
-    let result = resolver.resolve_import_as_compile_time_path(&path, &importer, &mut string_table);
+    let declaring_source = entry_root.join("index.moth");
+    let result = resolver.resolve_dependency_as_compile_time_path(
+        &path,
+        &declaring_source,
+        &mut string_table,
+    );
 
     #[cfg(target_os = "macos")]
     {
         let err = result.expect_err("case mismatch should be rejected on macOS");
         assert!(matches!(
-            import_diagnostic_payload(&err),
+            dependency_diagnostic_payload(&err),
             DiagnosticPayload::InvalidImportPath {
                 reason: InvalidImportPathReason::CaseMismatch { .. },
                 ..
@@ -1169,11 +1132,11 @@ fn import_case_sensitive_symbol_mismatch_rejected() {
 }
 
 // -----------------------------------------------------------------------
-// Plain Markdown import discovery
+// Plain Markdown dependency discovery
 // -----------------------------------------------------------------------
 
 #[test]
-fn markdown_import_resolves_when_registered() {
+fn markdown_dependency_resolves_when_registered() {
     let mut registry = SourceFileKindRegistry::new();
     registry.register("md", SourceFileKind::PlainMarkdown);
     let mut h = TestHarness::with_source_file_kinds(&registry);
@@ -1181,31 +1144,31 @@ fn markdown_import_resolves_when_registered() {
     fs::write(h.project_root.join("src/docs/intro.md"), "# Hello").unwrap();
 
     let path = h.make_path(&["docs", "intro"]);
-    let importer = h.importer();
+    let declaring_source = h.declaring_source();
 
     let result = h
         .resolver
-        .resolve_import_to_source_file(&path, &importer, &mut h.string_table)
-        .expect("registered .md import should resolve");
+        .resolve_dependency_to_source_file(&path, &declaring_source, &mut h.string_table)
+        .expect("registered .md dependency should resolve");
 
     assert_eq!(result.kind, SourceFileKind::PlainMarkdown);
     assert!(result.path.ends_with("src/docs/intro.md"));
 }
 
 #[test]
-fn markdown_import_rejected_when_unsupported() {
+fn markdown_dependency_rejected_when_unsupported() {
     let mut h = TestHarness::new();
     fs::create_dir_all(h.project_root.join("src/docs")).unwrap();
     fs::write(h.project_root.join("src/docs/intro.md"), "# Hello").unwrap();
 
     let path = h.make_path(&["docs", "intro"]);
-    let importer = h.importer();
+    let declaring_source = h.declaring_source();
 
     let error = h
         .resolver
-        .resolve_import_to_source_file(&path, &importer, &mut h.string_table)
-        .expect_err("unregistered .md import should be rejected");
-    let diagnostic = typed_import_diagnostic(&error);
+        .resolve_dependency_to_source_file(&path, &declaring_source, &mut h.string_table)
+        .expect_err("unregistered .md dependency should be rejected");
+    let diagnostic = typed_dependency_diagnostic(&error);
 
     assert_eq!(
         diagnostic.kind,
@@ -1225,13 +1188,13 @@ fn markdown_and_moth_same_stem_are_ambiguous() {
     fs::write(h.project_root.join("src/docs/intro.md"), "# Hello").unwrap();
 
     let path = h.make_path(&["docs", "intro"]);
-    let importer = h.importer();
+    let declaring_source = h.declaring_source();
 
     let error = h
         .resolver
-        .resolve_import_to_source_file(&path, &importer, &mut h.string_table)
+        .resolve_dependency_to_source_file(&path, &declaring_source, &mut h.string_table)
         .expect_err("same-stem .moth and .md should be ambiguous");
-    let diagnostic = typed_import_diagnostic(&error);
+    let diagnostic = typed_dependency_diagnostic(&error);
 
     assert_eq!(
         diagnostic.kind,
@@ -1250,13 +1213,13 @@ fn markdown_and_folder_same_stem_are_ambiguous() {
     fs::write(h.project_root.join("src/docs/intro.md"), "# Hello").unwrap();
 
     let path = h.make_path(&["docs", "intro"]);
-    let importer = h.importer();
+    let declaring_source = h.declaring_source();
 
     let error = h
         .resolver
-        .resolve_import_to_source_file(&path, &importer, &mut h.string_table)
+        .resolve_dependency_to_source_file(&path, &declaring_source, &mut h.string_table)
         .expect_err(".md and folder with same stem should be ambiguous");
-    let diagnostic = typed_import_diagnostic(&error);
+    let diagnostic = typed_dependency_diagnostic(&error);
 
     assert_eq!(
         diagnostic.kind,
@@ -1277,13 +1240,13 @@ fn markdown_and_moth_template_same_stem_are_ambiguous() {
     fs::write(h.project_root.join("src/docs/intro.md"), "# Hello").unwrap();
 
     let path = h.make_path(&["docs", "intro"]);
-    let importer = h.importer();
+    let declaring_source = h.declaring_source();
 
     let error = h
         .resolver
-        .resolve_import_to_source_file(&path, &importer, &mut h.string_table)
+        .resolve_dependency_to_source_file(&path, &declaring_source, &mut h.string_table)
         .expect_err("same-stem .mtf and .md should be ambiguous");
-    let diagnostic = typed_import_diagnostic(&error);
+    let diagnostic = typed_dependency_diagnostic(&error);
 
     assert_eq!(
         diagnostic.kind,

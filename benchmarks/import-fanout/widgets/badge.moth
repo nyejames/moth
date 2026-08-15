@@ -1,5 +1,5 @@
-import @types/enums {Priority}
-import @utils/formatting {format_label}
+@types/enums Priority
+@utils/formatting format_label
 
 render_badge |level Priority| -> String:
     if level is Priority::Critical:

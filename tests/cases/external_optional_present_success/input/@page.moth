@@ -1,4 +1,4 @@
-import @test/optional
+@test/optional
 
 present_text || -> String?:
     return optional.present_text()

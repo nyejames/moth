@@ -46,7 +46,6 @@ pub const MAX_TEMPLATE_CONST_LOOP_ITERATIONS: usize = 1_000_000;
 // Should be recalculated at a later point.
 pub const MINIMUM_STRING_TABLE_CAPACITY: usize = 32;
 pub const SRC_TO_TOKEN_RATIO: usize = 5; // (Maybe) About 1/6 source code to tokens observed
-pub const IMPORTS_CAPACITY: usize = 6; // (No Idea atm)
 pub const EXPORTS_CAPACITY: usize = 6; // (No Idea atm)
 pub const TOKEN_TO_HEADER_RATIO: usize = 35; // (Maybe) About 1/35 tokens to AstNode ratio
 pub const TOKEN_TO_DECLARATION_RATIO: usize = 20; // (Maybe) About 1/20 tokens for each new declaration symbol

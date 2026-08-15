@@ -24,9 +24,9 @@ The renderer is CommonMark-compatible with GFM extensions. It is not the Moth md
 - Double-bracket template bodies and single-bracket insertions are text, not template syntax.
 - Template delimiters, insertions and directives are literal text.
 
-### Compile-time imported content
+### Compile-time dependency content
 
-The rendered HTML is a compile-time String constant. It folds before the importing file uses it. It is not a runtime value.
+The rendered HTML is a compile-time String constant. It folds before the consuming file uses it. It is not a runtime value.
 
 ### Output type
 
@@ -38,11 +38,11 @@ Plain Markdown is available in HTML project builds. The renderer is registered b
 
 ### File ownership and relative path
 
-A `.md` file belongs to the module that contains its directory. It follows the same import path resolution as `.moth` and `.mtf` files.
+A `.md` file belongs to the module that contains its directory. It follows the same dependency-path resolution as `.moth` and `.mtf` files.
 
 ### Related concepts
 
-- For import syntax see @#markdown-imports (Markdown imports).
+- For dependency syntax see @#markdown-dependencies (Markdown dependencies).
 - For renderer features see @#rendering-contract (Rendering contract).
 - For choosing between formats see @#choosing-a-content-format (Choosing a content format).
 - For Moth template files see @../moth-templates/#moth-template-files-files (Moth template files).

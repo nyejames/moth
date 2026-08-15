@@ -17,9 +17,23 @@ pub(crate) enum FrontendCounter {
     SourceFileCount,
     SourceByteCount,
     PreparedFileCount,
+    FilePreparationPassCount,
     TokenCount,
     HeaderCount,
-    ImportCount,
+    PathSyntaxRowCount,
+    PersistentGenericPathSyntaxSubsetCopyCount,
+    PersistentGenericPathSyntaxRowCopyCount,
+    DependencyClauseCount,
+    DependencySelectionCount,
+    RetainedShellCount,
+    ResolvedSourcePackageClauseCount,
+    ResolvedProviderClauseCount,
+    BoundNamespaceClauseCount,
+    BoundSelectedNameCount,
+    // Structural zero: Stage 0 consumes retained clause facts, so a raw token rescan
+    // is unrepresentable. The counter exists so benchmark summaries can assert zero.
+    #[allow(dead_code)]
+    TokenRescanCount,
     TopLevelDeclarationCount,
     ModuleCompilationSerialCount,
     // Retained for benchmark-history schema stability while boundary worklist publication keeps
@@ -134,6 +148,8 @@ pub(crate) enum FrontendCounter {
     ModuleRemapStringIdsCalls,
     FilePrepareOutputRemapCalls,
     FilePrepareErrorRemapCalls,
+    AlreadyGlobalPreparedOutputRemapSkipCount,
+    PreparedFileInvariantValidationCount,
     #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
     FilePrepareNonIdentityPayloadRemaps,
 
@@ -201,9 +217,20 @@ mod detailed {
     static SOURCE_FILE_COUNT: AtomicUsize = AtomicUsize::new(0);
     static SOURCE_BYTE_COUNT: AtomicUsize = AtomicUsize::new(0);
     static PREPARED_FILE_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static FILE_PREPARATION_PASS_COUNT: AtomicUsize = AtomicUsize::new(0);
     static TOKEN_COUNT: AtomicUsize = AtomicUsize::new(0);
     static HEADER_COUNT: AtomicUsize = AtomicUsize::new(0);
-    static IMPORT_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static PATH_SYNTAX_ROW_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static PERSISTENT_GENERIC_PATH_SYNTAX_SUBSET_COPY_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static PERSISTENT_GENERIC_PATH_SYNTAX_ROW_COPY_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static DEPENDENCY_CLAUSE_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static DEPENDENCY_SELECTION_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static RETAINED_SHELL_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static RESOLVED_SOURCE_PACKAGE_CLAUSE_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static RESOLVED_PROVIDER_CLAUSE_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static BOUND_NAMESPACE_CLAUSE_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static BOUND_SELECTED_NAME_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static TOKEN_RESCAN_COUNT: AtomicUsize = AtomicUsize::new(0);
     static TOP_LEVEL_DECLARATION_COUNT: AtomicUsize = AtomicUsize::new(0);
     static MODULE_COMPILATION_SERIAL_COUNT: AtomicUsize = AtomicUsize::new(0);
     static MODULE_COMPILATION_PARALLEL_TASK_COUNT: AtomicUsize = AtomicUsize::new(0);
@@ -278,6 +305,8 @@ mod detailed {
     static STRING_TABLE_DELTA_NON_IDENTITY_ENTRIES: AtomicUsize = AtomicUsize::new(0);
     static FILE_PREPARE_OUTPUT_REMAP_CALLS: AtomicUsize = AtomicUsize::new(0);
     static FILE_PREPARE_ERROR_REMAP_CALLS: AtomicUsize = AtomicUsize::new(0);
+    static ALREADY_GLOBAL_PREPARED_OUTPUT_REMAP_SKIP_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static PREPARED_FILE_INVARIANT_VALIDATION_COUNT: AtomicUsize = AtomicUsize::new(0);
     static FILE_PREPARE_NON_IDENTITY_PAYLOAD_REMAPS: AtomicUsize = AtomicUsize::new(0);
 
     #[cfg(test)]
@@ -363,9 +392,20 @@ mod detailed {
             FrontendCounter::SourceFileCount,
             FrontendCounter::SourceByteCount,
             FrontendCounter::PreparedFileCount,
+            FrontendCounter::FilePreparationPassCount,
             FrontendCounter::TokenCount,
             FrontendCounter::HeaderCount,
-            FrontendCounter::ImportCount,
+            FrontendCounter::PathSyntaxRowCount,
+            FrontendCounter::PersistentGenericPathSyntaxSubsetCopyCount,
+            FrontendCounter::PersistentGenericPathSyntaxRowCopyCount,
+            FrontendCounter::DependencyClauseCount,
+            FrontendCounter::DependencySelectionCount,
+            FrontendCounter::RetainedShellCount,
+            FrontendCounter::ResolvedSourcePackageClauseCount,
+            FrontendCounter::ResolvedProviderClauseCount,
+            FrontendCounter::BoundNamespaceClauseCount,
+            FrontendCounter::BoundSelectedNameCount,
+            FrontendCounter::TokenRescanCount,
             FrontendCounter::TopLevelDeclarationCount,
             FrontendCounter::ModuleCompilationSerialCount,
             FrontendCounter::ModuleCompilationParallelTaskCount,
@@ -454,6 +494,8 @@ mod detailed {
             FrontendCounter::ModuleRemapStringIdsCalls,
             FrontendCounter::FilePrepareOutputRemapCalls,
             FrontendCounter::FilePrepareErrorRemapCalls,
+            FrontendCounter::AlreadyGlobalPreparedOutputRemapSkipCount,
+            FrontendCounter::PreparedFileInvariantValidationCount,
             FrontendCounter::FilePrepareNonIdentityPayloadRemaps,
             FrontendCounter::EstimatedScopeFrames,
             FrontendCounter::ActualScopeFrames,
@@ -486,11 +528,39 @@ mod detailed {
 
             FrontendCounter::PreparedFileCount => &PREPARED_FILE_COUNT,
 
+            FrontendCounter::FilePreparationPassCount => &FILE_PREPARATION_PASS_COUNT,
+
             FrontendCounter::TokenCount => &TOKEN_COUNT,
 
             FrontendCounter::HeaderCount => &HEADER_COUNT,
 
-            FrontendCounter::ImportCount => &IMPORT_COUNT,
+            FrontendCounter::PathSyntaxRowCount => &PATH_SYNTAX_ROW_COUNT,
+
+            FrontendCounter::PersistentGenericPathSyntaxSubsetCopyCount => {
+                &PERSISTENT_GENERIC_PATH_SYNTAX_SUBSET_COPY_COUNT
+            }
+
+            FrontendCounter::PersistentGenericPathSyntaxRowCopyCount => {
+                &PERSISTENT_GENERIC_PATH_SYNTAX_ROW_COPY_COUNT
+            }
+
+            FrontendCounter::DependencyClauseCount => &DEPENDENCY_CLAUSE_COUNT,
+
+            FrontendCounter::DependencySelectionCount => &DEPENDENCY_SELECTION_COUNT,
+
+            FrontendCounter::RetainedShellCount => &RETAINED_SHELL_COUNT,
+
+            FrontendCounter::ResolvedSourcePackageClauseCount => {
+                &RESOLVED_SOURCE_PACKAGE_CLAUSE_COUNT
+            }
+
+            FrontendCounter::ResolvedProviderClauseCount => &RESOLVED_PROVIDER_CLAUSE_COUNT,
+
+            FrontendCounter::BoundNamespaceClauseCount => &BOUND_NAMESPACE_CLAUSE_COUNT,
+
+            FrontendCounter::BoundSelectedNameCount => &BOUND_SELECTED_NAME_COUNT,
+
+            FrontendCounter::TokenRescanCount => &TOKEN_RESCAN_COUNT,
 
             FrontendCounter::TopLevelDeclarationCount => &TOP_LEVEL_DECLARATION_COUNT,
 
@@ -720,6 +790,14 @@ mod detailed {
 
             FrontendCounter::FilePrepareErrorRemapCalls => &FILE_PREPARE_ERROR_REMAP_CALLS,
 
+            FrontendCounter::AlreadyGlobalPreparedOutputRemapSkipCount => {
+                &ALREADY_GLOBAL_PREPARED_OUTPUT_REMAP_SKIP_COUNT
+            }
+
+            FrontendCounter::PreparedFileInvariantValidationCount => {
+                &PREPARED_FILE_INVARIANT_VALIDATION_COUNT
+            }
+
             FrontendCounter::FilePrepareNonIdentityPayloadRemaps => {
                 &FILE_PREPARE_NON_IDENTITY_PAYLOAD_REMAPS
             }
@@ -772,11 +850,39 @@ mod detailed {
 
             FrontendCounter::PreparedFileCount => "prepared file count",
 
+            FrontendCounter::FilePreparationPassCount => "file preparation pass count",
+
             FrontendCounter::TokenCount => "token count",
 
             FrontendCounter::HeaderCount => "header count",
 
-            FrontendCounter::ImportCount => "import count",
+            FrontendCounter::PathSyntaxRowCount => "path syntax row count",
+
+            FrontendCounter::PersistentGenericPathSyntaxSubsetCopyCount => {
+                "persistent generic path-table subset copies"
+            }
+
+            FrontendCounter::PersistentGenericPathSyntaxRowCopyCount => {
+                "persistent generic path rows copied"
+            }
+
+            FrontendCounter::DependencyClauseCount => "dependency clause count",
+
+            FrontendCounter::DependencySelectionCount => "dependency selection count",
+
+            FrontendCounter::RetainedShellCount => "retained shell count",
+
+            FrontendCounter::ResolvedSourcePackageClauseCount => {
+                "resolved source/package clause count"
+            }
+
+            FrontendCounter::ResolvedProviderClauseCount => "resolved provider clause count",
+
+            FrontendCounter::BoundNamespaceClauseCount => "bound namespace clause count",
+
+            FrontendCounter::BoundSelectedNameCount => "bound selected name count",
+
+            FrontendCounter::TokenRescanCount => "token rescan count",
 
             FrontendCounter::TopLevelDeclarationCount => "top-level declaration count",
 
@@ -1010,6 +1116,14 @@ mod detailed {
 
             FrontendCounter::FilePrepareErrorRemapCalls => "file prepare/error remap calls",
 
+            FrontendCounter::AlreadyGlobalPreparedOutputRemapSkipCount => {
+                "already-global prepared output remap skips"
+            }
+
+            FrontendCounter::PreparedFileInvariantValidationCount => {
+                "prepared-file invariant validation count"
+            }
+
             FrontendCounter::FilePrepareNonIdentityPayloadRemaps => {
                 "file prepare/non-identity payload remaps"
             }
@@ -1062,11 +1176,39 @@ mod detailed {
 
             FrontendCounter::PreparedFileCount => "prepared_file_count",
 
+            FrontendCounter::FilePreparationPassCount => "file_preparation_pass_count",
+
             FrontendCounter::TokenCount => "token_count",
 
             FrontendCounter::HeaderCount => "header_count",
 
-            FrontendCounter::ImportCount => "import_count",
+            FrontendCounter::PathSyntaxRowCount => "path_syntax_row_count",
+
+            FrontendCounter::PersistentGenericPathSyntaxSubsetCopyCount => {
+                "persistent_generic_path_syntax_subset_copy_count"
+            }
+
+            FrontendCounter::PersistentGenericPathSyntaxRowCopyCount => {
+                "persistent_generic_path_syntax_row_copy_count"
+            }
+
+            FrontendCounter::DependencyClauseCount => "dependency_clause_count",
+
+            FrontendCounter::DependencySelectionCount => "dependency_selection_count",
+
+            FrontendCounter::RetainedShellCount => "retained_shell_count",
+
+            FrontendCounter::ResolvedSourcePackageClauseCount => {
+                "resolved_source_package_clause_count"
+            }
+
+            FrontendCounter::ResolvedProviderClauseCount => "resolved_provider_clause_count",
+
+            FrontendCounter::BoundNamespaceClauseCount => "bound_namespace_clause_count",
+
+            FrontendCounter::BoundSelectedNameCount => "bound_selected_name_count",
+
+            FrontendCounter::TokenRescanCount => "token_rescan_count",
 
             FrontendCounter::TopLevelDeclarationCount => "top_level_declaration_count",
 
@@ -1297,6 +1439,14 @@ mod detailed {
             FrontendCounter::FilePrepareOutputRemapCalls => "file_prepare_output_remap_calls",
 
             FrontendCounter::FilePrepareErrorRemapCalls => "file_prepare_error_remap_calls",
+
+            FrontendCounter::AlreadyGlobalPreparedOutputRemapSkipCount => {
+                "already_global_prepared_output_remap_skip_count"
+            }
+
+            FrontendCounter::PreparedFileInvariantValidationCount => {
+                "prepared_file_invariant_validation_count"
+            }
 
             FrontendCounter::FilePrepareNonIdentityPayloadRemaps => {
                 "file_prepare_non_identity_payload_remaps"

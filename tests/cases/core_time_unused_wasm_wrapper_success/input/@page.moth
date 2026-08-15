@@ -1,4 +1,4 @@
-import @core/time {Duration, mark_now, elapsed_since, as_milliseconds}
+@core/time Duration, mark_now, elapsed_since, as_milliseconds
 
 -- This function references a JS-only @core/time call but is never reached from start.
 -- HTML-Wasm should succeed because the call is not syntactically reachable.

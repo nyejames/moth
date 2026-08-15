@@ -54,4 +54,4 @@ pub(crate) use overlays::{
     materialize_tir_slot_resolution_overlay, view_context_from_slot_resolution_overlay,
 };
 #[cfg(test)]
-pub(crate) use schema::expand_tir_slot_placeholders;
+pub(crate) use schema::{SlotSchemaError, expand_tir_slot_placeholders};

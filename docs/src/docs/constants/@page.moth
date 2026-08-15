@@ -1,42 +1,24 @@
-import @constant-bindings {
-    content as constant_bindings,
-}
+@constant-bindings content as constant_bindings
 
-import @constant-bindings-basic {
-    content as constant_bindings_basic,
-}
+@constant-bindings-basic content as constant_bindings_basic
 
-import @constant-folding {
-    content as constant_folding,
-}
+@constant-folding content as constant_folding
 
-import @constant-folding-basic {
-    content as constant_folding_basic,
-}
+@constant-folding-basic content as constant_folding_basic
 
-import @const-records {
-    content as const_records,
-}
+@const-records content as const_records
 
-import @const-records-basic {
-    content as const_records_basic,
-}
+@const-records-basic content as const_records_basic
 
-import @const-templates {
-    content as const_templates,
-}
+@const-templates content as const_templates
 
-import @const-templates-basic {
-    content as const_templates_basic,
-}
+@const-templates-basic content as const_templates_basic
 
-import @styles {
-    navbar,
+@styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager,
-}
+    doc_pager
 
 page_title #= "Constants and compile-time behaviour"
 page_description #= "Compile-time bindings, folding, const records and const templates in Moth."

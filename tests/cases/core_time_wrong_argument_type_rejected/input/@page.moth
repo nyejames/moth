@@ -1,4 +1,4 @@
-import @core/time {Duration, TimeMark, Timestamp, duration_from_seconds, elapsed_since, timestamp_from_unix_seconds}
+@core/time Duration, TimeMark, Timestamp, duration_from_seconds, elapsed_since, timestamp_from_unix_seconds
 
 -- Pass String where Float is required for duration construction
 bad1 = duration_from_seconds("one")

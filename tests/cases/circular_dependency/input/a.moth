@@ -1,5 +1,5 @@
 -- Intermediate module in strict top-level cycle.
-import @b { B }
+@b B
 
 A = |
     peer B,

@@ -1,42 +1,24 @@
-import @function-declarations {
-    content as function_declarations,
-}
+@function-declarations content as function_declarations
 
-import @function-declarations-basic {
-    content as function_declarations_basic,
-}
+@function-declarations-basic content as function_declarations_basic
 
-import @parameters-and-defaults {
-    content as parameters_and_defaults,
-}
+@parameters-and-defaults content as parameters_and_defaults
 
-import @parameters-and-defaults-basic {
-    content as parameters_and_defaults_basic,
-}
+@parameters-and-defaults-basic content as parameters_and_defaults_basic
 
-import @calls-and-access {
-    content as calls_and_access,
-}
+@calls-and-access content as calls_and_access
 
-import @calls-and-access-basic {
-    content as calls_and_access_basic,
-}
+@calls-and-access-basic content as calls_and_access_basic
 
-import @returns-and-multiple-values {
-    content as returns_and_multiple_values,
-}
+@returns-and-multiple-values content as returns_and_multiple_values
 
-import @returns-and-multiple-values-basic {
-    content as returns_and_multiple_values_basic,
-}
+@returns-and-multiple-values-basic content as returns_and_multiple_values_basic
 
-import @styles {
-    navbar,
+@styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager,
-}
+    doc_pager
 
 page_title #= "Functions"
 page_description #= "Function declarations, parameters, calls, access and return values in Moth."

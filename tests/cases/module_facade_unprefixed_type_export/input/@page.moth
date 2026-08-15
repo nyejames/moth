@@ -1,6 +1,6 @@
-import @sub { ExportedStruct }
-import @sub { ExportedChoice }
-import @sub { ExportedAlias }
+@sub ExportedStruct
+@sub ExportedChoice
+@sub ExportedAlias
 
 instance = ExportedStruct("hello")
 variant = ExportedChoice::VariantA

@@ -364,7 +364,7 @@ pub(crate) fn invalid_receiver_declaration_message(
             )
         }
         InvalidReceiverDeclarationReason::ReceiverMethodImportOrExportNotAllowed => {
-            "Receiver methods are not imported, exported, or aliased independently. Expose the receiver type; its same-file methods are available through receiver-call syntax when the type is visible."
+            "Receiver methods are not dependency-bound, exported, or aliased independently. Expose the receiver type; its same-file methods are available through receiver-call syntax when the type is visible."
                 .to_string()
         }
     }

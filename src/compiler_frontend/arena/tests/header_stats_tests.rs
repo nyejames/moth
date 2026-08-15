@@ -69,7 +69,7 @@ fn multi_file_declarations_are_aggregated() {
         prepared_syntax,
         &ExternalPackageRegistry::new(),
         &ExternalImportResolutionTable::default(),
-        &crate::compiler_frontend::public_interface::SourceProviderImportSet::default(),
+        &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
         None,
         &mut string_table,
     )

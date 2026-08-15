@@ -1,4 +1,4 @@
-import @utils as utils
+@utils as utils
 
 value = utils.identity("hello")
 [: [value] ]

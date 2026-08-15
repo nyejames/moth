@@ -1,0 +1,3 @@
+@helper greeting
+
+io.line([: same_module_dependency_compile_time_constant greeting=[greeting]])

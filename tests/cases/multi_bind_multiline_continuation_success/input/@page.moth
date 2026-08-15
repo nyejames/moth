@@ -1,0 +1,7 @@
+pair || -> String, Int:
+    return "Priya", 1
+;
+
+name,
+    count = pair()
+io.line([:multi-bind-continuation [name] [count]])

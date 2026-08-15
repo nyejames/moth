@@ -1,4 +1,4 @@
-import @helper { Point, identity }
+@helper Point, identity
 
 original ~= Point(1)
 returned ~= identity(original)

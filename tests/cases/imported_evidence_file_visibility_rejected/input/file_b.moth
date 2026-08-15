@@ -1,4 +1,4 @@
-import @provider { DISPLAY_TEXT, LabelBox, make_label }
+@provider DISPLAY_TEXT, LabelBox, make_label
 
 build_label_box || -> String:
     box = LabelBox(make_label("hidden"))

@@ -9,6 +9,7 @@
 //!      discovery and placeholder expansion keeps each file focused on one
 //!      step of the composition pipeline.
 
+use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::{
     SlotKey, TemplateSegmentOrigin, TemplateType,
 };
@@ -16,7 +17,6 @@ use crate::compiler_frontend::ast::templates::tir::node::TemplateIrNodeKind;
 use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrId, TemplateIrNodeId, TemplateIrStore,
 };
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 
 use rustc_hash::FxHashMap;
@@ -28,19 +28,8 @@ use super::helpers::{
 };
 use super::schema::{TirSlotSchema, collect_tir_slot_schema};
 
-/// Boxed diagnostic result for slot-contribution routing.
-///
-/// WHAT: the two routing functions in this file return `CompilerDiagnostic`
-///       errors whose size triggers Clippy's `result_large_err` lint. Boxing
-///       the `Err` variant behind one file-local alias keeps the diagnostic
-///       value, source location, and semantic fact intact while shrinking the
-///       `Err` variant to a single pointer.
-/// WHY: the enclosing composition boundaries (`ChildWrapperResult` in
-///      `child_wrappers.rs`, `TemplateError::Diagnostic` in `render_unit.rs`)
-///      already hold `Box<CompilerDiagnostic>`, so the boxed error propagates
-///      directly through those paths. Callers that still own a plain
-///      `CompilerDiagnostic` boundary unbox at their call site.
-type ContributionResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// Typed result for slot-contribution routing.
+type ContributionResult<T> = Result<T, TemplateError>;
 
 /// Partitioned TIR node IDs bucketed by slot target.
 ///
@@ -128,9 +117,9 @@ pub(crate) fn route_tir_slot_contributions(
     let schema = collect_tir_slot_schema(store, wrapper_template_id)?;
 
     if !schema.has_any_slots() {
-        return Err(Box::new(internal_compiler_error(
+        return Err(internal_compiler_error(
             "Internal template wrapper state error: expected at least one '$slot' while composing.",
-        )));
+        ));
     }
 
     route_tir_fill_against_schema(store, &schema, fill_template_id, string_table)
@@ -165,9 +154,9 @@ pub(super) fn route_tir_fill_against_schema(
     // loose content that flows into positional or default slots.
     for child_id in fill_children {
         let Some(child_node) = store.get_node(child_id) else {
-            return Err(Box::new(internal_compiler_error(
+            return Err(internal_compiler_error(
                 "TIR slot routing: fill template child node ID was not present in the store.",
-            )));
+            ));
         };
 
         // Resolve an explicit slot-insert helper to its target key and body
@@ -178,9 +167,9 @@ pub(super) fn route_tir_fill_against_schema(
             TemplateIrNodeKind::InsertContribution { template } => Some(*template),
             TemplateIrNodeKind::ChildTemplate { reference, .. } => {
                 let template = store.get_template(reference.root).ok_or_else(|| {
-                    Box::new(internal_compiler_error(
+                    internal_compiler_error(
                         "TIR slot routing: child template ID was not present in the store.",
-                    ))
+                    )
                 })?;
 
                 if matches!(template.kind, TemplateType::SlotInsert(_)) {
@@ -212,16 +201,17 @@ pub(super) fn route_tir_fill_against_schema(
             })?;
 
             let TemplateType::SlotInsert(target_key) = &target_template.kind else {
-                return Err(Box::new(internal_compiler_error(
+                return Err(internal_compiler_error(
                     "TIR slot routing: slot-insert helper is not a SlotInsert template.",
-                )));
+                ));
             };
 
             if !schema.accepts_target(target_key) {
-                return Err(Box::new(unknown_slot_target_error(
+                return Err(unknown_slot_target_error(
                     target_key,
                     target_template.location.to_owned(),
-                )));
+                )
+                .into());
             }
 
             // The slot-insert helper is a routing marker: its body content fills
@@ -273,14 +263,10 @@ pub(super) fn route_tir_fill_against_schema(
         }
 
         if schema.positional_slots.is_empty() {
-            return Err(Box::new(loose_content_without_default_slot_error(
-                fill_location,
-            )));
+            return Err(loose_content_without_default_slot_error(fill_location).into());
         }
 
-        return Err(Box::new(extra_loose_content_without_default_slot_error(
-            fill_location,
-        )));
+        return Err(extra_loose_content_without_default_slot_error(fill_location).into());
     }
 
     Ok(RoutedTirSlotContributions {
@@ -310,9 +296,9 @@ fn collect_insert_contribution_content(
 
     for child_id in insert_children {
         let Some(child_node) = store.get_node(child_id) else {
-            return Err(Box::new(internal_compiler_error(
+            return Err(internal_compiler_error(
                 "TIR slot routing: insert contribution child node ID was not present in the store.",
-            )));
+            ));
         };
 
         match &child_node.kind {
@@ -324,16 +310,17 @@ fn collect_insert_contribution_content(
                 })?;
 
                 let TemplateType::SlotInsert(target_key) = &target_template.kind else {
-                    return Err(Box::new(internal_compiler_error(
+                    return Err(internal_compiler_error(
                         "TIR slot routing: nested InsertContribution referenced a template that is not a SlotInsert helper.",
-                    )));
+                    ));
                 };
 
                 if !schema.accepts_target(target_key) {
-                    return Err(Box::new(unknown_slot_target_error(
+                    return Err(unknown_slot_target_error(
                         target_key,
                         target_template.location.to_owned(),
-                    )));
+                    )
+                    .into());
                 }
 
                 let nested_nodes =
@@ -393,9 +380,9 @@ fn collect_loose_tir_contributions(
 
     for node_id in loose_nodes {
         let node = store.get_node(node_id).ok_or_else(|| {
-            Box::new(internal_compiler_error(
+            internal_compiler_error(
                 "TIR slot routing: loose contribution node ID was not present in the store.",
-            ))
+            )
         })?;
         let starts_new_chunk = {
             matches!(&node.kind, TemplateIrNodeKind::ChildTemplate { .. })
@@ -454,9 +441,9 @@ fn tir_nodes_are_whitespace_only_text(
 
     for node_id in nodes {
         let node = store.get_node(*node_id).ok_or_else(|| {
-            Box::new(internal_compiler_error(
+            internal_compiler_error(
                 "TIR slot routing: loose contribution whitespace check found a node ID that was not present in the store.",
-            ))
+            )
         })?;
 
         let TemplateIrNodeKind::Text { text, .. } = &node.kind else {

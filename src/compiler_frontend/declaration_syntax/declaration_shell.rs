@@ -15,6 +15,7 @@ use crate::compiler_frontend::declaration_syntax::binding_mode::BindingMode;
 use crate::compiler_frontend::declaration_syntax::type_syntax::{
     TypeAnnotationContext, parse_type_annotation,
 };
+use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
 use crate::compiler_frontend::utilities::token_scan::{
@@ -74,6 +75,17 @@ impl DeclarationSyntax {
             reference.remap_string_ids(remap);
         }
         self.location.remap_string_ids(remap);
+    }
+
+    pub fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
+        self.type_annotation.rebind_source_identity(logical_path);
+        for token in &mut self.initializer_tokens {
+            token.location.rebind_source_identity(logical_path);
+        }
+        for reference in &mut self.initializer_references {
+            reference.rebind_source_identity(logical_path);
+        }
+        self.location.rebind_source_identity(logical_path);
     }
 }
 

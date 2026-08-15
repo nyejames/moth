@@ -18,6 +18,7 @@ use crate::compiler_frontend::ast::expressions::expression_rpn::{
     ExpressionRpn, ExpressionRpnItem,
 };
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
+use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template::{
     SlotKey, Style, TemplateSegmentOrigin, TemplateType,
@@ -27,13 +28,14 @@ use crate::compiler_frontend::ast::templates::template_control_flow::{
     build_range_iteration_bindings,
 };
 use crate::compiler_frontend::ast::templates::template_folding::{
-    FoldResolvedExpression, TemplateFoldContext, resolve_fold_bindings_in_expression,
-    selected_option_capture_payload_with_provenance,
+    FoldResolvedExpression, TemplateFoldContext, loop_body_not_const_error,
+    resolve_fold_bindings_in_expression, selected_option_capture_payload_with_provenance,
 };
 use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrBuilder, TemplateIrStore, TemplateIrSummary, TemplateTirPhase, TemplateTirReference,
     TemplateViewContext, TirFoldCache,
 };
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
@@ -70,6 +72,21 @@ fn test_project_path_resolver() -> ProjectPathResolver {
         &crate::builder_surface::SourceFileKindRegistry::default(),
     )
     .expect("test path resolver should be valid")
+}
+
+#[test]
+fn const_loop_body_folding_preserves_infrastructure_failure() {
+    let error = loop_body_not_const_error(
+        TemplateError::Infrastructure(Box::new(CompilerError::compiler_error(
+            "missing const loop body authority",
+        ))),
+        &test_location(1),
+    );
+
+    let TemplateError::Infrastructure(error) = error else {
+        panic!("const loop folding must not rewrite infrastructure as a source diagnostic");
+    };
+    assert_eq!(error.msg, "missing const loop body authority");
 }
 
 #[test]

@@ -104,7 +104,6 @@ pub(crate) fn token_kind_name(token_kind: &TokenKind, string_table: &StringTable
     match token_kind {
         TokenKind::ModuleStart => "module start".to_owned(),
         TokenKind::Eof => "end of file".to_owned(),
-        TokenKind::Import => "`import`".to_owned(),
         TokenKind::Export => "`export`".to_owned(),
         TokenKind::Hash => "`#`".to_owned(),
         TokenKind::Reactive => "`$`".to_owned(),
@@ -116,14 +115,10 @@ pub(crate) fn token_kind_name(token_kind: &TokenKind, string_table: &StringTable
         TokenKind::StringSliceLiteral(value) => {
             format!("string literal \"{}\"", string_table.resolve(*value))
         }
-        TokenKind::Path(items) => {
-            let path = items
-                .iter()
-                .map(|item| item.path.to_portable_string(string_table))
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("path `{path}`")
-        }
+        // `TokenKind::Path` now carries only a dense handle into a file-owned
+        // `PathSyntaxTable`; that table is not part of stable diagnostic facts, so
+        // the renderer names the token class without a file-local spelling.
+        TokenKind::Path(_) => "path".to_owned(),
         TokenKind::NumericLiteral(token) => {
             let text = string_table.resolve(token.normalized_text);
             match token.kind {

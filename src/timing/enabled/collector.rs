@@ -105,7 +105,7 @@ pub(crate) fn try_start_session(
 
 /// Drain the active scope only when it belongs to the given session.
 pub(crate) fn finish_session(id: TimingSessionId) -> BenchmarkObservationSnapshot {
-    let mut guard = lock_collector();
+    let guard = lock_collector();
     let Some(collection) = guard.as_ref() else {
         return BenchmarkObservationSnapshot::default();
     };
@@ -113,12 +113,18 @@ pub(crate) fn finish_session(id: TimingSessionId) -> BenchmarkObservationSnapsho
         return BenchmarkObservationSnapshot::default();
     }
 
-    // Clear the fast-path bits before another session can acquire the
-    // lifecycle lock, then wait for every already-admitted record before
-    // extracting the dense slots. The lifecycle lock stays held throughout
-    // this handoff, so another session cannot reset the slots early.
+    // Clear the fast-path bits while this session still owns the collector. Keep the active
+    // collection installed so a competing start remains busy, but release the mutex before
+    // waiting: an admitted timed expression may still need collector metadata during its body.
+    // Holding the mutex here would deadlock that recorder against the drain.
     runtime::deactivate_session();
+    drop(guard);
     runtime::wait_for_records();
+
+    let mut guard = lock_collector();
+    if guard.as_ref().is_none_or(|collection| collection.id != id) {
+        return BenchmarkObservationSnapshot::default();
+    }
     let collection = guard.take().expect("active collection present");
     let command = collection.command;
     let configuration = collection.configuration;
@@ -153,10 +159,14 @@ pub(crate) fn finish_session(id: TimingSessionId) -> BenchmarkObservationSnapsho
 pub(crate) fn abandon_session(id: TimingSessionId) {
     let mut guard = lock_collector();
     if guard.as_ref().is_some_and(|collection| collection.id == id) {
-        // This runs under the lifecycle lock for the same reason as finish.
         runtime::deactivate_session();
+        drop(guard);
         runtime::wait_for_records();
-        *guard = None;
+
+        guard = lock_collector();
+        if guard.as_ref().is_some_and(|collection| collection.id == id) {
+            *guard = None;
+        }
     }
 }
 

@@ -1,5 +1,5 @@
-import @types { Box }
-import @types { ResultShape }
+@types Box
+@types ResultShape
 
 num_box Box of Int = Box(42)
 str_box Box of String = Box("hello")

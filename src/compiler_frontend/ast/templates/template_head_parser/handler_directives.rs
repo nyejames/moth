@@ -26,8 +26,8 @@ use crate::compiler_frontend::style_directives::{
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation};
 
-/// Boxed diagnostic result shared by handler-directive parsing helpers.
-type HandlerDirectiveResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// Typed result shared by handler-directive parsing helpers.
+type HandlerDirectiveResult<T> = Result<T, TemplateError>;
 
 #[derive(Clone)]
 struct ParsedHandlerDirectiveArgument {
@@ -58,11 +58,11 @@ pub(super) fn apply_handler_style_directive(
     if let Some(factory) = handler_spec.formatter_factory {
         let formatter = factory(parsed_argument.value.as_ref()).map_err(|message| {
             let message_id = string_table.get_or_intern(message);
-            CompilerDiagnostic::invalid_template_directive(
+            TemplateError::from(CompilerDiagnostic::invalid_template_directive(
                 Some(string_table.intern(directive_name)),
                 InvalidTemplateDirectiveReason::invalid_argument_with_detail(message_id),
                 parsed_argument.error_location,
-            )
+            ))
         })?;
 
         build_state.style.formatter = Some(formatter.clone());
@@ -121,11 +121,12 @@ fn parse_optional_handler_style_argument(
     };
 
     let Some(argument_type) = argument_type else {
-        return Err(Box::new(CompilerDiagnostic::invalid_template_directive(
+        return Err(CompilerDiagnostic::invalid_template_directive(
             Some(string_table.intern(directive_name)),
             InvalidTemplateDirectiveReason::DirectiveNotAllowedHere,
             default_location,
-        )));
+        )
+        .into());
     };
 
     let argument_location = expression.location.clone();
@@ -133,16 +134,16 @@ fn parse_optional_handler_style_argument(
     let argument_is_compile_time_constant = expression
         .const_value_kind_with_template_classifier(&mut |template| {
             classify_template_from_effective_tir(template, &context.template_ir_store)
-        })
-        .map_err(TemplateError::into_diagnostic)?
+        })?
         .is_compile_time_value();
 
     if !argument_is_compile_time_constant {
-        return Err(Box::new(CompilerDiagnostic::invalid_template_directive(
+        return Err(CompilerDiagnostic::invalid_template_directive(
             Some(string_table.intern(directive_name)),
             InvalidTemplateDirectiveReason::invalid_argument(),
             argument_location,
-        )));
+        )
+        .into());
     }
 
     let normalized = normalize_provided_style_argument_value(
@@ -174,41 +175,45 @@ fn normalize_provided_style_argument_value(
             ExpressionKind::StringSlice(text) => Ok(StyleDirectiveArgumentValue::String(
                 string_table.resolve(text).to_owned(),
             )),
-            _ => Err(Box::new(CompilerDiagnostic::invalid_template_directive(
+            _ => Err(CompilerDiagnostic::invalid_template_directive(
                 Some(string_table.intern(directive_name)),
                 InvalidTemplateDirectiveReason::invalid_argument(),
                 argument_location.clone(),
-            ))),
+            )
+            .into()),
         },
 
         StyleDirectiveArgumentType::Template => match expression.kind {
             ExpressionKind::Template(template) => Ok(StyleDirectiveArgumentValue::Template(
                 Box::new(*template.to_owned()),
             )),
-            _ => Err(Box::new(CompilerDiagnostic::invalid_template_directive(
+            _ => Err(CompilerDiagnostic::invalid_template_directive(
                 Some(string_table.intern(directive_name)),
                 InvalidTemplateDirectiveReason::invalid_argument(),
                 argument_location.clone(),
-            ))),
+            )
+            .into()),
         },
 
         StyleDirectiveArgumentType::Number => match expression.kind {
             ExpressionKind::Int(value) => Ok(StyleDirectiveArgumentValue::Number(value as f64)),
             ExpressionKind::Float(value) => Ok(StyleDirectiveArgumentValue::Number(value)),
-            _ => Err(Box::new(CompilerDiagnostic::invalid_template_directive(
+            _ => Err(CompilerDiagnostic::invalid_template_directive(
                 Some(string_table.intern(directive_name)),
                 InvalidTemplateDirectiveReason::invalid_argument(),
                 argument_location.clone(),
-            ))),
+            )
+            .into()),
         },
 
         StyleDirectiveArgumentType::Bool => match expression.kind {
             ExpressionKind::Bool(value) => Ok(StyleDirectiveArgumentValue::Bool(value)),
-            _ => Err(Box::new(CompilerDiagnostic::invalid_template_directive(
+            _ => Err(CompilerDiagnostic::invalid_template_directive(
                 Some(string_table.intern(directive_name)),
                 InvalidTemplateDirectiveReason::invalid_argument(),
                 argument_location.clone(),
-            ))),
+            )
+            .into()),
         },
     }
 }

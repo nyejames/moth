@@ -1,5 +1,5 @@
-import @core/constants {app_version}
-import @utils/formatting {format_timestamp}
+@core/constants app_version
+@utils/formatting format_timestamp
 
 render_footer |timestamp String| -> String:
     return [:

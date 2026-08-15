@@ -1,4 +1,4 @@
-import @helper/render { render_value }
+@helper/render render_value
 
 value = render_value(7)
 io.line([: [value]])

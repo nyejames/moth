@@ -6,7 +6,7 @@
 //! module centralizes the small CommonMark/GFM-compatible rendering step so later stages can treat
 //! Markdown as a generated `content #String` without duplicating parser configuration.
 //!
-//! MUST NOT: own import resolution, source-kind registration, diagnostics, asset emission, route
+//! MUST NOT: own dependency resolution, source-kind registration, diagnostics, asset emission, route
 //! rewriting, Moth template behavior, or any compiler stage beyond raw-text-to-HTML conversion.
 
 use pulldown_cmark::{Options, Parser, html};

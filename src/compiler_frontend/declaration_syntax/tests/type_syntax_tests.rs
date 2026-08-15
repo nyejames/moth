@@ -562,7 +562,7 @@ fn alias_expanded_nested_optional_type_is_rejected() {
     let mut visible_type_aliases = FxHashMap::default();
     visible_type_aliases.insert(
         maybe_name,
-        crate::compiler_frontend::headers::import_environment::SourceDeclarationTarget::Local(
+        crate::compiler_frontend::headers::binding_environment::SourceDeclarationTarget::Local(
             maybe_path.to_owned(),
         ),
     );

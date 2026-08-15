@@ -1,4 +1,4 @@
-import @data/constants {base_spacing, double_spacing}
+@data/constants base_spacing, double_spacing
 
 spacing_sum #= base_spacing + double_spacing
 

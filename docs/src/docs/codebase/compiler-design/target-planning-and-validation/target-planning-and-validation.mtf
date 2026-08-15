@@ -103,4 +103,4 @@ Unsupported features in unreachable private functions should not fail validation
 
 ## Exit state
 
-You leave with validated target assignments, capabilities, imports and physical variants. Next: how lowerers turn these explicit inputs into JavaScript and Wasm without reopening source.
+You leave with validated target assignments, capabilities, dependencies and physical variants. Next: how lowerers turn these explicit inputs into JavaScript and Wasm without reopening source.

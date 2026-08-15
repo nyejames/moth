@@ -10,4 +10,4 @@ Use when the content needs compile-time constants, nested templates or builder h
 
 ### `.moth` for full Moth
 
-Use when runtime values, control flow, imports or page fragments are needed.
+Use when runtime values, control flow, dependency clauses or page fragments are needed.

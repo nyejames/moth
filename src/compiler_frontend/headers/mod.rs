@@ -1,19 +1,21 @@
 //! Header parsing stage modules.
 //!
-//! WHAT: extracts file-level declarations/imports and start-function boundaries before AST build.
+//! WHAT: extracts file-level declarations, dependency clauses and start-function boundaries before AST build.
 //! Header parsing also owns top-level symbol collection (`module_symbols`), so dependency sorting
 //! and AST construction receive a pre-built symbol package without a separate manifest stage.
 
+pub(crate) mod binding_environment;
 mod const_fragments;
 mod constant_dependencies;
 mod dependency_canonicalization;
-mod file_imports;
+pub(crate) mod dependency_clause_syntax;
+mod dependency_paths;
+pub(crate) mod dependency_target;
+mod file_dependency_clauses;
 mod file_parser;
 mod file_state;
 mod hash_items;
 mod header_dispatch;
-pub(crate) mod import_environment;
-mod imports;
 pub(crate) mod module_symbols;
 pub(crate) mod moth_template_prepare;
 mod ordering_hints;

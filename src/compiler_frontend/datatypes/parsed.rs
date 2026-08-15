@@ -5,6 +5,7 @@
 //! WHY: unresolved names, inferred positions, and source spelling must not
 //!      be confused with resolved semantic type identity.
 
+use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
@@ -210,6 +211,78 @@ impl ParsedTypeRef {
                 ok.remap_string_ids(remap);
                 err.remap_string_ids(remap);
                 location.remap_string_ids(remap);
+            }
+        }
+    }
+
+    /// Rebind every source span in this parsed type annotation to one final file identity.
+    pub fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
+        match self {
+            ParsedTypeRef::Inferred => {}
+
+            ParsedTypeRef::Named { location, .. }
+            | ParsedTypeRef::Qualified { location, .. }
+            | ParsedTypeRef::BuiltinBool { location }
+            | ParsedTypeRef::BuiltinInt { location }
+            | ParsedTypeRef::BuiltinFloat { location }
+            | ParsedTypeRef::BuiltinString { location }
+            | ParsedTypeRef::BuiltinChar { location }
+            | ParsedTypeRef::BuiltinNone { location }
+            | ParsedTypeRef::This { location } => location.rebind_source_identity(logical_path),
+
+            ParsedTypeRef::Applied {
+                base,
+                arguments,
+                location,
+            } => {
+                base.rebind_source_identity(logical_path);
+                for argument in arguments {
+                    argument.rebind_source_identity(logical_path);
+                }
+                location.rebind_source_identity(logical_path);
+            }
+
+            ParsedTypeRef::Collection {
+                element,
+                location,
+                fixed_capacity,
+            } => {
+                element.rebind_source_identity(logical_path);
+                location.rebind_source_identity(logical_path);
+                if let Some(capacity) = fixed_capacity {
+                    capacity.rebind_source_identity(logical_path);
+                }
+            }
+
+            ParsedTypeRef::Map {
+                key,
+                value,
+                location,
+            } => {
+                key.rebind_source_identity(logical_path);
+                value.rebind_source_identity(logical_path);
+                location.rebind_source_identity(logical_path);
+            }
+
+            ParsedTypeRef::Optional { inner, location } => {
+                inner.rebind_source_identity(logical_path);
+                location.rebind_source_identity(logical_path);
+            }
+
+            ParsedTypeRef::Result { ok, err, location } => {
+                ok.rebind_source_identity(logical_path);
+                err.rebind_source_identity(logical_path);
+                location.rebind_source_identity(logical_path);
+            }
+        }
+    }
+}
+
+impl ParsedCollectionCapacity {
+    fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
+        match self {
+            Self::Literal { location, .. } | Self::BareConstant { location, .. } => {
+                location.rebind_source_identity(logical_path)
             }
         }
     }

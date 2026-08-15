@@ -142,12 +142,12 @@ Review gate: verify one folded value owner and no parallel config-only record re
 
 Review gate: inspect parser context separation, nested folding and projection ownership.
 
-### Phase 4: Export and import anonymous const records
+### Phase 4: Export and bind anonymous const records
 
 - Extend the public folded-value vocabulary with anonymous record values.
 - Validate every exported field recursively.
 - Preserve deterministic field order, canonical scalar/collection/record values and provenance.
-- Import provider values without reparsing or refolding.
+- Bind provider values without reparsing or refolding.
 - Reject any value that would require a runtime anonymous type or private semantic identity.
 
 ### Phase 5: Delete temporary paths and migrate documentation

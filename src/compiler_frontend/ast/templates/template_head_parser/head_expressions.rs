@@ -25,7 +25,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::paths::rendered_path_usage::resolve_compile_time_paths_for_rendered_output;
+use crate::compiler_frontend::paths::rendered_path_usage::resolve_compile_time_path_for_rendered_output;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation};
@@ -37,13 +37,8 @@ pub(super) struct TemplateHeadExpressionContext<'a> {
     pub(super) construction_context: &'a mut TemplateConstructionContext,
 }
 
-/// Boxed diagnostic result shared by head-expression insertion helpers.
-///
-/// Head-expression helpers sit behind the already-boxed template-head parsing
-/// boundary (`TemplateHeadResult` in `head_parser.rs`). Boxing here keeps the
-/// `Err` variant small enough for Clippy's `result_large_err` lint while
-/// preserving every diagnostic value, source location, and semantic fact.
-type HeadExpressionResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// Typed result shared by head-expression insertion helpers.
+type HeadExpressionResult<T> = Result<T, TemplateError>;
 
 fn is_unresolved_constant_placeholder_reference(
     expression: &Expression,
@@ -68,10 +63,11 @@ fn validate_template_head_value_type(
     type_environment: &TypeEnvironment,
 ) -> HeadExpressionResult<()> {
     if type_environment.is_fallible_carrier(expression.type_id) {
-        return Err(Box::new(CompilerDiagnostic::invalid_template_structure(
+        return Err(CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::FallibleValueInTemplateHead,
             location.to_owned(),
-        )));
+        )
+        .into());
     }
 
     // Template head values must be simple scalar types that can render as
@@ -84,12 +80,13 @@ fn validate_template_head_value_type(
         return Ok(());
     }
 
-    Err(Box::new(CompilerDiagnostic::invalid_template_structure(
+    Err(CompilerDiagnostic::invalid_template_structure(
         InvalidTemplateStructureReason::UnsupportedTypeInTemplateHead {
             type_id: expression.type_id,
         },
         location.to_owned(),
-    )))
+    )
+    .into())
 }
 
 /// Handles a template-typed value found in the template head.
@@ -111,17 +108,16 @@ pub(super) fn handle_template_value_in_template_head(
                         "Template head value was missing from the module TIR store.",
                     ),
                 )
-                .into_diagnostic()
-            })
-            .map_err(Box::new)?
+            })?
     };
 
     if context.kind.is_constant_context() && matches!(&template_kind, TemplateType::StringFunction)
     {
-        return Err(Box::new(CompilerDiagnostic::invalid_template_structure(
+        return Err(CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::RuntimeTemplateInConst,
             location.to_owned(),
-        )));
+        )
+        .into());
     }
 
     if matches!(&template_kind, TemplateType::Comment(_)) {
@@ -129,10 +125,11 @@ pub(super) fn handle_template_value_in_template_head(
     }
 
     if matches!(&template_kind, TemplateType::SlotDefinition(_)) {
-        return Err(Box::new(CompilerDiagnostic::invalid_template_structure(
+        return Err(CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::SlotInHead,
             location.to_owned(),
-        )));
+        )
+        .into());
     }
 
     let child_reference = &value.tir_reference;
@@ -182,8 +179,7 @@ pub(super) fn push_template_head_expression(
         expression
             .const_value_kind_with_template_classifier(&mut |template| {
                 classify_template_from_effective_tir(template, &target.context.template_ir_store)
-            })
-            .map_err(TemplateError::into_diagnostic)?
+            })?
             .is_compile_time_value()
     } else {
         false
@@ -193,10 +189,11 @@ pub(super) fn push_template_head_expression(
         && !expression_is_compile_time_constant
         && !is_unresolved_constant_placeholder_reference(&expression, target.context)
     {
-        return Err(Box::new(CompilerDiagnostic::invalid_template_structure(
+        return Err(CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::RuntimeValueInConstTemplateHead,
             location.to_owned(),
-        )));
+        )
+        .into());
     }
 
     // Ordinary `[source]` insertion is a snapshot read. Keep reactive source identity only for
@@ -240,10 +237,11 @@ pub(super) fn push_template_head_reactive_subscription(
     string_table: &StringTable,
 ) -> HeadExpressionResult<()> {
     if target.context.kind.is_constant_context() {
-        return Err(Box::new(CompilerDiagnostic::invalid_template_structure(
+        return Err(CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::ReactiveSubscriptionInConstTemplate,
             location.to_owned(),
-        )));
+        )
+        .into());
     }
 
     validate_template_head_value_type(&expression, location, target.type_environment)?;
@@ -282,50 +280,41 @@ pub(super) fn push_template_head_reactive_subscription(
 /// Coerces a compile-time path token in template head context to string output.
 /// Emits source-file warnings when `.moth` files are inserted into rendered output.
 pub(super) fn push_template_head_path_expression(
-    paths: &[InternedPath],
+    path: &InternedPath,
     token_stream: &FileTokens,
     context: &ScopeContext,
     construction_context: &mut TemplateConstructionContext,
     string_table: &mut StringTable,
 ) -> HeadExpressionResult<()> {
-    if paths.is_empty() {
-        return Err(Box::new(CompilerDiagnostic::invalid_template_structure(
-            InvalidTemplateStructureReason::EmptyPathInTemplateHead,
-            token_stream.current_location(),
-        )));
-    }
-
     let source_scope = context
         .required_source_file_scope("template head path coercion")
-        .map_err(CompilerDiagnostic::from)?;
-    let importer_file = source_scope.to_path_buf(string_table);
-    let (resolved, recorded) = resolve_compile_time_paths_for_rendered_output(
-        paths,
+        .map_err(TemplateError::from)?;
+    let declaring_file = source_scope.to_path_buf(string_table);
+    let (resolved, recorded) = resolve_compile_time_path_for_rendered_output(
+        path,
         context
             .required_project_path_resolver("template head path coercion")
-            .map_err(CompilerDiagnostic::from)?,
-        &importer_file,
+            .map_err(TemplateError::from)?,
+        &declaring_file,
         source_scope,
         &token_stream.current_location(),
         &context.path_format_config,
         string_table,
     )
-    .map_err(CompilerDiagnostic::from)?;
+    .map_err(TemplateError::from)?;
 
     // Warn when a .moth source file path is coerced into template output.
-    for path in &resolved.paths {
-        if path
-            .filesystem_path
-            .extension()
-            .is_some_and(|extension| extension == LANGUAGE_SOURCE_EXTENSION)
-        {
-            let location = token_stream.current_location();
-            let path_str = path.source_path.to_portable_string(string_table);
-            context.emit_warning(CompilerDiagnostic::moth_file_path_in_template_output(
-                string_table.get_or_intern(path_str),
-                location,
-            ));
-        }
+    if resolved
+        .filesystem_path
+        .extension()
+        .is_some_and(|extension| extension == LANGUAGE_SOURCE_EXTENSION)
+    {
+        let location = token_stream.current_location();
+        let path_str = resolved.source_path.to_portable_string(string_table);
+        context.emit_warning(CompilerDiagnostic::moth_file_path_in_template_output(
+            string_table.get_or_intern(path_str),
+            location,
+        ));
     }
 
     // Templates always fold to strings, so path text is eagerly formatted here.

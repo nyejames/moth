@@ -1,4 +1,4 @@
-import @core/text {length}
+@core/text length
 
 bad = length()
 io.line([: [bad]])

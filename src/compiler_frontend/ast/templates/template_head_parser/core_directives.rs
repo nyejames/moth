@@ -14,6 +14,7 @@ use super::directive_args::{
     reject_unexpected_directive_arguments,
 };
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::styles::markdown::markdown_formatter;
 use crate::compiler_frontend::ast::templates::styles::raw::configure_raw_style;
 use crate::compiler_frontend::ast::templates::template::{
@@ -22,17 +23,12 @@ use crate::compiler_frontend::ast::templates::template::{
 use crate::compiler_frontend::ast::templates::template_build_state::TemplateBuildState;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::style_directives::{CoreStyleDirectiveKind, StyleDirectiveKind};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 
-/// Boxed diagnostic result for the connected core-directive family.
-///
-/// Slot/insert dispatch and generic core-style directive parsing propagate
-/// diagnostics through one small boxed boundary, then unbox once at the
-/// genuine plain-diagnostic head-parser caller.
-type CoreDirectiveResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// Typed result for the connected core-directive family.
+type CoreDirectiveResult<T> = Result<T, TemplateError>;
 
 pub(super) fn maybe_parse_slot_or_insert_helper_directive(
     directive_kind: &StyleDirectiveKind,
@@ -81,8 +77,7 @@ pub(super) fn parse_core_style_directive(
 
         CoreStyleDirectiveKind::Children => {
             let children_name = string_table.intern("children");
-            // The children-directive family already returns `Box<CompilerDiagnostic>`,
-            // so it propagates directly through this boxed boundary without unboxing.
+            // Preserve the diagnostic or infrastructure lane selected by the children parser.
             parse_children_style_directive(
                 children_name,
                 token_stream,
@@ -120,16 +115,13 @@ pub(super) fn parse_core_style_directive(
         }
 
         CoreStyleDirectiveKind::Slot | CoreStyleDirectiveKind::Insert => {
-            return Err(Box::new(
-                CompilerError::new(
-                    format!(
-                        "Core style directive '{directive_name}' reached generic style parsing but should have been handled by slot helper dispatch."
-                    ),
-                    token_stream.current_location(),
-                    ErrorType::Compiler,
-                )
-                .into(),
-            ));
+            return Err(TemplateError::from(CompilerError::new(
+                format!(
+                    "Core style directive '{directive_name}' reached generic style parsing but should have been handled by slot helper dispatch."
+                ),
+                token_stream.current_location(),
+                ErrorType::Compiler,
+            )));
         }
     }
 

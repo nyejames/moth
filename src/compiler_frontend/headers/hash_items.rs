@@ -92,8 +92,8 @@ fn handle_top_level_const_template(
     let mut build_context = HeaderBuildContext {
         warnings: &mut state.warnings,
         source_file: &source_file,
-        file_imports: &state.file_import_paths,
-        file_import_entries: &state.file_imports,
+        file_dependency_clauses: &state.file_dependency_clauses,
+        dependency_selections: &state.dependency_selections,
         string_table: context.string_table,
         file_role: context.file_role,
     };

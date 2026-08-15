@@ -21,7 +21,7 @@ use crate::compiler_frontend::datatypes::generic_parameters::{
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
-use crate::compiler_frontend::headers::import_environment::{
+use crate::compiler_frontend::headers::binding_environment::{
     NamespaceRecord, SourceDeclarationTarget,
 };
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationMetadata;

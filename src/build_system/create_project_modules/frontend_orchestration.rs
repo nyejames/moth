@@ -32,9 +32,9 @@ use crate::compiler_frontend::compiler_errors::{
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::ModuleDiagnostics;
 use crate::compiler_frontend::external_packages::{ExternalPackageId, ExternalPackageRegistry};
-use crate::compiler_frontend::headers::import_environment::SourceFunctionTarget;
+use crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    BoundModuleHeaders, FileFrontendPrepareError, FileFrontendPrepareOutput, HeaderKind,
+    BoundModuleHeaders, FileFrontendPrepareFailure, FileFrontendPrepareOutput, HeaderKind,
     HeaderParseOptions, PreparedHeaderSyntax, bind_module_headers, prepare_header_syntax,
 };
 use crate::compiler_frontend::hir::functions::{
@@ -49,14 +49,13 @@ use crate::compiler_frontend::instrumentation::{
 };
 use crate::compiler_frontend::module_dependencies::SortedHeaders;
 use crate::compiler_frontend::module_metadata::HirLoweringResult;
-use crate::compiler_frontend::paths::const_paths::RetainedProviderReference;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::public_call_summary::{
     PublicCallSummaryTransition, validate_public_call_summary_transition,
 };
 use crate::compiler_frontend::public_interface::{
     PublicInterfaceDraftBuilder, PublicInterfaceDraftBuilderInput, PublicSemanticInterface,
-    SourceProviderImportSet,
+    SourceProviderDependencySet,
 };
 use crate::compiler_frontend::public_interface::{
     build_direct_export_seed, build_public_source_nominal_origin_index,
@@ -146,7 +145,22 @@ struct FilePreparationChunk {
 
 struct PreparedFileResult {
     file_index: usize,
-    result: Result<FileFrontendPrepareOutput, FileFrontendPrepareError>,
+    string_domain: PreparedFileStringDomain,
+    result: Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure>,
+}
+
+/// String-ID domain carried with a prepared file before chunk aggregation.
+///
+/// WHAT: distinguishes an output produced against the current module-global table during
+///       synthetic discovery from output produced against this chunk's local table.
+/// WHY: source-kind information is deliberately erased once file preparation starts. The merge
+///      boundary still needs an explicit fact so an already-global retained output never receives
+///      a second exhaustive token/header/path/clause remap when another file makes the chunk
+///      remap non-identity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PreparedFileStringDomain {
+    ChunkLocal,
+    AlreadyGlobal,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -224,9 +238,9 @@ pub(super) struct ModulePreparationContext<'a> {
 
 /// Incremental provider-independent syntax preparation for one indexed directory module.
 ///
-/// Stage 0 prepares each selected source once, reads its retained import shells from the same
+/// Stage 0 prepares each selected source once, reads its retained dependency shells from the same
 /// header output and only then decides which same-module source to prepare next. This keeps
-/// semantic reachability and header ownership aligned without a second lexical import scanner.
+/// semantic reachability and header ownership aligned without a second lexical dependency scanner.
 pub(super) struct ModuleSyntaxDiscovery<'a> {
     context: &'a ModulePreparationContext<'a>,
     entry_file_path: PathBuf,
@@ -262,8 +276,8 @@ pub(super) struct FrontendModuleBuildContext<'a> {
     pub(super) project_path_resolver: Option<ProjectPathResolver>,
     pub(super) style_directives: &'a StyleDirectiveRegistry,
     pub(super) external_packages: Arc<ExternalPackageRegistry>,
-    pub(super) external_import_resolution_table: &'a ExternalImportResolutionTable,
-    pub(super) source_provider_imports: &'a SourceProviderImportSet<'a>,
+    pub(super) external_dependency_resolution_table: &'a ExternalImportResolutionTable,
+    pub(super) source_provider_dependencies: &'a SourceProviderDependencySet<'a>,
     pub(super) source_provider_materialisations: &'a SourceProviderMaterialisationSet<'a>,
     pub(super) builder_runtime_packages: &'a [BuilderRuntimePackageMetadata],
 }
@@ -398,7 +412,9 @@ impl ModulePreparationContext<'_> {
     ///
     /// WHAT: prepares every source file against local string-table forks, merges chunk-local
     ///       string tables in deterministic input order, and runs `prepare_header_syntax` to
-    ///       produce the retained `PreparedHeaderSyntax`. Stops before provider-dependent binding.
+    ///       produce the retained `PreparedHeaderSyntax`. Directory Moth inputs consume retained
+    ///       token streams; synthetic Moth inputs consume complete outputs retained during
+    ///       discovery. Stops before provider-dependent binding.
     ///       After building the per-file source-origin table, resolves the entry file's `FileId`
     ///       through `SourceFileTable` once and validates that the table maps it to the expected
     ///       active origin from `ModuleOriginInput`, then retains the `FileId` and discards the
@@ -437,9 +453,11 @@ impl ModulePreparationContext<'_> {
             entry_file_path,
         )?;
 
-        // 2. Prepare all files against one local string-table per worker chunk. Moth files
-        //    parse retained Stage 0 tokens, Moth template tokenizes its body once and plain Markdown
-        //    bypasses tokenization. Merge/remap once before aggregating header syntax.
+        // 2. Rebind retained synthetic outputs against this module-owned source table, then
+        //    prepare all remaining files against one local string-table per worker chunk. Directory
+        //    Moth files parse retained Stage 0 tokens, synthetic Moth files consume their complete
+        //    retained output, Moth templates tokenize their body once and plain Markdown bypasses
+        //    tokenization. Merge/remap once before aggregating header syntax.
         let (prepared_header_syntax, file_warnings) = timed_stage_attributed!(
             crate::timing::TimingMetric::FrontendPrepare,
             timing_context,
@@ -502,7 +520,7 @@ impl ModulePreparationContext<'_> {
     /// WHAT: assigns deterministic source identities for the prepared module without touching any
     ///       provider interface.
     /// WHY: preparation needs source identities to drive file preparation and header syntax, but
-    ///      not the external package registry or import resolution table.
+    ///      not the external package registry or dependency resolution table.
     fn attach_source_files(
         string_table: &mut StringTable,
         project_path_resolver: &Option<ProjectPathResolver>,
@@ -587,11 +605,13 @@ impl ModulePreparationContext<'_> {
         &self,
         string_table: &mut StringTable,
         source_files: &SourceFileTable,
-        module: Vec<PreparedSourceInput>,
+        mut module: Vec<PreparedSourceInput>,
         entry_file_path: &Path,
         active_root_role: ModuleRootRole,
         source_byte_count: usize,
     ) -> Result<(PreparedHeaderSyntax, Vec<CompilerDiagnostic>), CompilerMessages> {
+        Self::rebind_synthetic_prepared_inputs(&mut module, source_files, string_table)?;
+
         let entry_file_id = source_files
             .get_by_canonical_path(entry_file_path)
             .map(|identity| identity.file_id);
@@ -652,6 +672,54 @@ impl ModulePreparationContext<'_> {
         )
     }
 
+    /// Rebind complete synthetic discovery outputs against the module's retained source table.
+    ///
+    /// WHAT: moves every provisional synthetic `FileId` and source scope onto the exact
+    ///       `SourceFileTable` that `PreparedModule` retains for later semantic binding.
+    /// WHY: Stage 0 must discover and prepare files before the complete closure is known, but
+    ///      module preparation is the sole owner of final source identity. Keeping rebinding here
+    ///      prevents a discarded discovery-time table from becoming a second identity authority.
+    fn rebind_synthetic_prepared_inputs(
+        module: &mut [PreparedSourceInput],
+        source_files: &SourceFileTable,
+        string_table: &StringTable,
+    ) -> Result<(), CompilerMessages> {
+        for input in module {
+            let PreparedSourceInput::MothPrepared {
+                source_path,
+                output,
+                ..
+            } = input
+            else {
+                continue;
+            };
+
+            let identity = source_files
+                .get_by_canonical_path(source_path)
+                .ok_or_else(|| {
+                    CompilerMessages::from_error_ref(
+                        CompilerError::compiler_error(format!(
+                            "module source identity table is missing retained synthetic file {:?}",
+                            source_path
+                        )),
+                        string_table,
+                    )
+                })?;
+            output
+                .rebind_source_identity(
+                    identity.file_id,
+                    identity.logical_path.clone(),
+                    identity.canonical_os_path.clone(),
+                )
+                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+            output
+                .freeze_path_syntax(string_table)
+                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        }
+
+        Ok(())
+    }
+
     /// Merge chunk-local string tables and aggregate prepared file outputs.
     ///
     /// WHAT: all scheduling strategies converge here after producing ordered chunk records.
@@ -704,20 +772,45 @@ impl ModulePreparationContext<'_> {
                         if output.runtime_fragment_count > 0 {
                             runtime_fragment_source_count += 1;
                         }
-                        if !remap_is_identity {
-                            add_frontend_counter(FrontendCounter::FilePrepareOutputRemapCalls, 1);
-                            #[cfg(feature = "benchmark_counters")]
-                            add_frontend_counter(
-                                FrontendCounter::FilePrepareNonIdentityPayloadRemaps,
-                                1,
-                            );
-                            output.remap_string_ids(&remap);
+                        match prepared_file.string_domain {
+                            PreparedFileStringDomain::ChunkLocal => {
+                                if !remap_is_identity {
+                                    add_frontend_counter(
+                                        FrontendCounter::FilePrepareOutputRemapCalls,
+                                        1,
+                                    );
+                                    #[cfg(feature = "benchmark_counters")]
+                                    add_frontend_counter(
+                                        FrontendCounter::FilePrepareNonIdentityPayloadRemaps,
+                                        1,
+                                    );
+                                    output.remap_string_ids(&remap).map_err(|error| {
+                                        CompilerMessages::from_error_ref(error, string_table)
+                                    })?;
+                                }
+                                output.freeze_path_syntax(string_table).map_err(|error| {
+                                    CompilerMessages::from_error_ref(error, string_table)
+                                })?;
+                            }
+                            PreparedFileStringDomain::AlreadyGlobal => {
+                                if !remap_is_identity {
+                                    add_frontend_counter(
+                                        FrontendCounter::AlreadyGlobalPreparedOutputRemapSkipCount,
+                                        1,
+                                    );
+                                }
+                                output.require_frozen_path_syntax().map_err(|error| {
+                                    CompilerMessages::from_error_ref(error, string_table)
+                                })?;
+                            }
                         }
                         warnings.append(&mut output.warnings);
                         prepared_outputs.push(output);
                     }
-                    Err(mut error) => {
-                        if !remap_is_identity {
+                    Err(FileFrontendPrepareFailure::Diagnosed(mut error)) => {
+                        if prepared_file.string_domain == PreparedFileStringDomain::ChunkLocal
+                            && !remap_is_identity
+                        {
                             add_frontend_counter(FrontendCounter::FilePrepareErrorRemapCalls, 1);
                             #[cfg(feature = "benchmark_counters")]
                             add_frontend_counter(
@@ -728,6 +821,9 @@ impl ModulePreparationContext<'_> {
                         }
                         warnings.extend(error.warnings);
                         diagnostics.push(*error.diagnostic);
+                    }
+                    Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
+                        return Err(CompilerMessages::from_error_ref(error, string_table));
                     }
                 }
             }
@@ -749,20 +845,13 @@ impl ModulePreparationContext<'_> {
             return Err(messages);
         }
 
-        let prepared_file_count = prepared_outputs.len();
-        let token_count = prepared_outputs
-            .iter()
-            .map(|output| output.token_count)
-            .sum();
+        record_successful_prepared_outputs(&prepared_outputs);
         let prepared = prepare_header_syntax(prepared_outputs, string_table).map_err(|bag| {
             let mut messages =
                 CompilerMessages::from_diagnostics(bag.into_diagnostics(), string_table.clone());
             messages.prepend_diagnostics_preserving_context(warnings.iter().cloned());
             messages
         })?;
-
-        add_frontend_counter(FrontendCounter::PreparedFileCount, prepared_file_count);
-        add_frontend_counter(FrontendCounter::TokenCount, token_count);
 
         Ok((prepared, warnings))
     }
@@ -849,41 +938,60 @@ impl ModulePreparationContext<'_> {
         let mut results = Vec::with_capacity(plan.file_range.len());
 
         for (file_index, file) in module {
-            let source = match file {
-                PreparedSourceInput::Moth {
-                    source_path,
-                    tokens,
-                    ..
-                } => FrontendFilePrepareSource::Moth {
-                    source_path,
-                    tokens,
-                },
-                PreparedSourceInput::MothTemplate {
-                    source_code,
-                    source_path,
-                } => FrontendFilePrepareSource::MothTemplate {
-                    source_code,
-                    source_path,
-                },
-                PreparedSourceInput::PlainMarkdown {
-                    source_code,
-                    source_path,
-                } => FrontendFilePrepareSource::PlainMarkdown {
-                    source_code,
-                    source_path,
-                },
+            let (string_domain, result) = match file {
+                PreparedSourceInput::MothPrepared { output, .. } => {
+                    (PreparedFileStringDomain::AlreadyGlobal, Ok(*output))
+                }
+                file => {
+                    let source = match file {
+                        PreparedSourceInput::Moth {
+                            source_path,
+                            tokens,
+                            ..
+                        } => FrontendFilePrepareSource::Moth {
+                            source_path,
+                            tokens,
+                        },
+                        PreparedSourceInput::MothTemplate {
+                            source_code,
+                            source_path,
+                        } => FrontendFilePrepareSource::MothTemplate {
+                            source_code,
+                            source_path,
+                        },
+                        PreparedSourceInput::PlainMarkdown {
+                            source_code,
+                            source_path,
+                        } => FrontendFilePrepareSource::PlainMarkdown {
+                            source_code,
+                            source_path,
+                        },
+                        PreparedSourceInput::MothPrepared { .. } => {
+                            unreachable!(
+                                "prepared Moth output was handled before source conversion"
+                            )
+                        }
+                    };
+                    let input = FrontendFilePrepareInput {
+                        source,
+                        const_template_offset,
+                        runtime_fragment_offset,
+                    };
+                    (
+                        PreparedFileStringDomain::ChunkLocal,
+                        CompilerFrontend::prepare_file_frontend_local(
+                            prepare_context,
+                            input,
+                            &mut local_string_table,
+                        ),
+                    )
+                }
             };
-            let input = FrontendFilePrepareInput {
-                source,
-                const_template_offset,
-                runtime_fragment_offset,
-            };
-            let result = CompilerFrontend::prepare_file_frontend_local(
-                prepare_context,
-                input,
-                &mut local_string_table,
-            );
-            results.push(PreparedFileResult { file_index, result });
+            results.push(PreparedFileResult {
+                file_index,
+                string_domain,
+                result,
+            });
         }
 
         FilePreparationChunk {
@@ -900,13 +1008,20 @@ impl ModuleSyntaxDiscovery<'_> {
         &mut self.string_table
     }
 
-    /// Prepare one selected source and return the retained provider references parsed from the
+    /// Prepare one selected source and return the retained provider dependencies parsed from the
     /// same retained header output.
     pub(super) fn prepare_source(
         &mut self,
-        source_order: usize,
         source: PreparedSourceInput,
-    ) -> Result<Vec<RetainedProviderReference>, CompilerMessages> {
+    ) -> Result<FileFrontendPrepareOutput, CompilerMessages> {
+        if matches!(&source, PreparedSourceInput::MothPrepared { .. }) {
+            return Err(CompilerMessages::from_error_ref(
+                CompilerError::compiler_error(
+                    "indexed module syntax discovery received an already-prepared synthetic source",
+                ),
+                &self.string_table,
+            ));
+        }
         let source_byte_len = source.source_byte_len();
         self.contains_moth_template |= source.is_moth_template();
         let entry_file_id = self
@@ -947,6 +1062,9 @@ impl ModuleSyntaxDiscovery<'_> {
                 source_code,
                 source_path,
             },
+            PreparedSourceInput::MothPrepared { .. } => {
+                unreachable!("already-prepared synthetic source was rejected above")
+            }
         };
         let input = FrontendFilePrepareInput {
             source: frontend_source,
@@ -964,7 +1082,7 @@ impl ModuleSyntaxDiscovery<'_> {
             ),
         ) {
             Ok(output) => output,
-            Err(error) => {
+            Err(FileFrontendPrepareFailure::Diagnosed(error)) => {
                 let mut messages = CompilerMessages::from_diagnostics(
                     vec![*error.diagnostic],
                     self.string_table.clone(),
@@ -972,33 +1090,45 @@ impl ModuleSyntaxDiscovery<'_> {
                 messages.prepend_diagnostics_preserving_context(error.warnings);
                 return Err(messages);
             }
+            Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
+                return Err(CompilerMessages::from_error_ref(error, &self.string_table));
+            }
         };
 
         self.source_byte_count += source_byte_len;
         self.warnings.extend(output.warnings.iter().cloned());
-        let providers = output
-            .file_imports
-            .iter()
-            .map(|import| {
-                let mut provider = import.authored_provider.clone();
-                provider.from_grouped = import.from_grouped;
-                provider
-            })
-            .collect();
-        self.prepared_outputs.push((source_order, output));
+        Ok(output)
+    }
 
-        Ok(providers)
+    /// Retain one completed source output after Stage 0 has consumed its dependency facts.
+    ///
+    /// WHAT: commits the already prepared file output to the module's deterministic source-order
+    ///      collection.
+    /// WHY: Stage 0 must consume the retained clause and flat-selection facts before the output is
+    ///      frozen, while source preparation itself remains exactly once.
+    pub(super) fn retain_prepared_output(
+        &mut self,
+        source_order: usize,
+        output: FileFrontendPrepareOutput,
+    ) {
+        self.prepared_outputs.push((source_order, output));
     }
 
     /// Freeze the selected source outputs into the one retained module preparation payload.
     pub(super) fn finish(mut self) -> Result<PreparedModule, CompilerMessages> {
         self.prepared_outputs.sort_by_key(|(order, _)| *order);
-        let prepared_outputs = self
+        let mut prepared_outputs = self
             .prepared_outputs
             .into_iter()
             .map(|(_, output)| output)
             .collect::<Vec<_>>();
+        for output in &mut prepared_outputs {
+            output
+                .freeze_path_syntax(&self.string_table)
+                .map_err(|error| CompilerMessages::from_error_ref(error, &self.string_table))?;
+        }
         let source_file_count = prepared_outputs.len();
+        record_successful_prepared_outputs(&prepared_outputs);
         let prepared_header_syntax = timed_stage_attributed!(
             crate::timing::TimingMetric::FrontendPrepare,
             self.timing_context,
@@ -1032,6 +1162,18 @@ impl ModuleSyntaxDiscovery<'_> {
             source_byte_count: self.source_byte_count,
         })
     }
+}
+
+/// Record successful prepared-file volume at the common pre-aggregation boundary.
+///
+/// Both indexed directory discovery and chunk/synthetic preparation retain the complete file
+/// outputs here. Counting before `prepare_header_syntax` consumes them avoids a second token walk
+/// and keeps attempts (`FilePreparationPassCount`) distinct from successfully retained outputs.
+fn record_successful_prepared_outputs(outputs: &[FileFrontendPrepareOutput]) {
+    let token_count = outputs.iter().map(|output| output.token_count).sum();
+
+    add_frontend_counter(FrontendCounter::PreparedFileCount, outputs.len());
+    add_frontend_counter(FrontendCounter::TokenCount, token_count);
 }
 
 impl FrontendModuleBuildContext<'_> {
@@ -1085,7 +1227,7 @@ impl FrontendModuleBuildContext<'_> {
         // semantic projection re-derives the same origin from the table and validates every
         // directly-defined public header against it.
 
-        let external_import_resolution_table = self.external_import_resolution_table;
+        let external_dependency_resolution_table = self.external_dependency_resolution_table;
 
         let mut compiler = CompilerFrontend::new(
             self.config,
@@ -1105,8 +1247,8 @@ impl FrontendModuleBuildContext<'_> {
                     Self::bind_retained_headers(
                         &mut compiler,
                         prepared_header_syntax,
-                        external_import_resolution_table,
-                        self.source_provider_imports,
+                        external_dependency_resolution_table,
+                        self.source_provider_dependencies,
                         &warnings,
                     )
                 }
@@ -1147,7 +1289,7 @@ impl FrontendModuleBuildContext<'_> {
                 active_root_file_id,
                 &sorted.headers,
                 &sorted.module_symbols,
-                self.source_provider_imports,
+                self.source_provider_dependencies,
                 compiler.external_package_registry.as_ref(),
                 &compiler.string_table,
             )
@@ -1419,7 +1561,7 @@ impl FrontendModuleBuildContext<'_> {
                         })?;
                     PublicSemanticInterface::close_from_local(
                         local_public_interface,
-                        self.source_provider_imports,
+                        self.source_provider_dependencies,
                         compiler.external_package_registry.as_ref(),
                     )
                     .map_err(|error| {
@@ -1460,7 +1602,7 @@ impl FrontendModuleBuildContext<'_> {
 
             let mut external_import_candidates: Vec<
                 crate::build_system::build::ModuleExternalImport,
-            > = external_import_resolution_table
+            > = external_dependency_resolution_table
                 .collect_unique_resolved_imports_for_source_files(&source_logical_paths)
                 .into_iter()
                 .map(
@@ -1542,7 +1684,7 @@ impl FrontendModuleBuildContext<'_> {
 
     /// Bind retained `PreparedHeaderSyntax` against provider interfaces.
     ///
-    /// WHAT: resolves public exports, builds the import environment, canonicalizes dependency
+    /// WHAT: resolves public exports, builds the binding environment, canonicalizes dependency
     ///       edges, and completes constant initializer dependencies. Consumes only the retained
     ///       syntax carried in from preparation — it never retokenizes or reparses source.
     /// WHY: these facts depend on provider interfaces and the project path resolver, so they
@@ -1550,15 +1692,15 @@ impl FrontendModuleBuildContext<'_> {
     fn bind_retained_headers(
         compiler: &mut CompilerFrontend,
         prepared_header_syntax: PreparedHeaderSyntax,
-        external_import_resolution_table: &ExternalImportResolutionTable,
-        source_provider_imports: &SourceProviderImportSet<'_>,
+        external_dependency_resolution_table: &ExternalImportResolutionTable,
+        source_provider_dependencies: &SourceProviderDependencySet<'_>,
         warnings: &[CompilerDiagnostic],
     ) -> Result<BoundModuleHeaders, CompilerMessages> {
         let headers = bind_module_headers(
             prepared_header_syntax,
             compiler.external_package_registry.as_ref(),
-            external_import_resolution_table,
-            source_provider_imports,
+            external_dependency_resolution_table,
+            source_provider_dependencies,
             compiler.project_path_resolver.as_ref(),
             &mut compiler.string_table,
         )
@@ -1860,7 +2002,7 @@ impl FrontendModuleBuildContext<'_> {
         }
         let external_import_candidates = collect_external_import_candidates_for_packages(
             &reachable_package_ids,
-            self.external_import_resolution_table,
+            self.external_dependency_resolution_table,
             self.builder_runtime_packages,
         );
         let mut generated_module = Module {
@@ -2456,14 +2598,6 @@ fn record_file_preparation_strategy(
 
 fn record_header_counters(headers: &BoundModuleHeaders) {
     add_frontend_counter(FrontendCounter::HeaderCount, headers.headers.len());
-
-    let import_count = headers
-        .module_symbols
-        .file_imports_by_source
-        .values()
-        .map(Vec::len)
-        .sum();
-    add_frontend_counter(FrontendCounter::ImportCount, import_count);
 
     let top_level_declaration_count = headers
         .headers

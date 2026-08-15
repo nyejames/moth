@@ -1,42 +1,24 @@
-import @numeric-types {
-    content as numeric_types,
-}
+@numeric-types content as numeric_types
 
-import @numeric-types-basic {
-    content as numeric_types_basic,
-}
+@numeric-types-basic content as numeric_types_basic
 
-import @numeric-literals {
-    content as numeric_literals,
-}
+@numeric-literals content as numeric_literals
 
-import @numeric-literals-basic {
-    content as numeric_literals_basic,
-}
+@numeric-literals-basic content as numeric_literals_basic
 
-import @operators {
-    content as operators,
-}
+@operators content as operators
 
-import @operators-basic {
-    content as operators_basic,
-}
+@operators-basic content as operators_basic
 
-import @checked-arithmetic {
-    content as checked_arithmetic,
-}
+@checked-arithmetic content as checked_arithmetic
 
-import @checked-arithmetic-basic {
-    content as checked_arithmetic_basic,
-}
+@checked-arithmetic-basic content as checked_arithmetic_basic
 
-import @styles {
-    navbar,
+@styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager,
-}
+    doc_pager
 
 page_title #= "Numbers"
 page_description #= "Numeric types, literals, operators and checked arithmetic in Moth."

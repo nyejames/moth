@@ -16,7 +16,7 @@
 //! source data through the retained index, so identity, ancestry and source ownership stay
 //! single-owned.
 //!
-//! Reachable-file discovery resolves cross-module imports through the indexed namespace and
+//! Reachable-file discovery resolves cross-module dependencies through the indexed namespace and
 //! inserts provider-before-consumer edges directly by `ModuleId`, so dependency order is derived
 //! from the canonical graph without another filesystem traversal or identity table.
 //!
@@ -287,7 +287,7 @@ impl ProjectModuleGraph {
         &self.entry_modules
     }
 
-    /// Completed source providers required before one module may bind imports.
+    /// Completed source providers required before one module may bind dependencies.
     pub(crate) fn dependency_providers(
         &self,
         module_id: ModuleId,
@@ -470,9 +470,9 @@ impl ProjectModuleGraph {
     /// WHAT: the production edge-insertion path maps already-resolved `ModuleId`
     ///       identities to the low-level [`add_dependency_edge`] inserter and, for a newly
     ///       inserted edge, retains the exact authored `SourceLocation` carried by the
-    ///       import reference. Duplicate observations are idempotent for the edge and never
+    ///       dependency reference. Duplicate observations are idempotent for the edge and never
     ///       overwrite the retained location; source locations are never used for edge identity.
-    /// WHY: the namespace resolves imports to `ModuleId` directly and then calls this method so
+    /// WHY: the namespace resolves dependencies to `ModuleId` directly and then calls this method so
     ///      the graph stays the single owner of both edge adjacency and retained provenance.
     pub(crate) fn add_resolved_dependency_edge(
         &mut self,

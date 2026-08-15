@@ -51,6 +51,21 @@ fn top_level_comma_detection_ignores_nested_commas() {
         &mut string_table,
     );
     assert!(has_top_level_comma_before_statement_end(&top_level));
+
+    let multiline = stream_from_kinds(
+        vec![
+            TokenKind::Symbol(string_table.intern("a")),
+            TokenKind::Comma,
+            TokenKind::Newline,
+            TokenKind::Symbol(string_table.intern("b")),
+            TokenKind::Assign,
+            TokenKind::Symbol(string_table.intern("pair")),
+            TokenKind::Newline,
+            TokenKind::Eof,
+        ],
+        &mut string_table,
+    );
+    assert!(has_top_level_comma_before_statement_end(&multiline));
 }
 
 #[test]

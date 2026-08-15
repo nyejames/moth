@@ -1,4 +1,4 @@
-import @./helpers {identity}
+@helpers identity
 
 get_fn || -> String:
     return identity

@@ -28,7 +28,7 @@ use crate::compiler_frontend::ast::type_resolution::{
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
-use crate::compiler_frontend::headers::import_environment::NamespaceTypeMember;
+use crate::compiler_frontend::headers::binding_environment::NamespaceTypeMember;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -227,7 +227,7 @@ fn alias_scope_context(
     let visibility = scope_context
         .shared
         .lookups
-        .import_environment
+        .binding_environment
         .visibility_for(source_file)
         .ok()?
         .clone();

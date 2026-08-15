@@ -1,4 +1,4 @@
-import @choices { Traffic }
+@choices Traffic
 
 a Traffic = Traffic::Red
 b Traffic = Traffic::Red

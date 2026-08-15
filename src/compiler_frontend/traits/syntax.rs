@@ -5,9 +5,11 @@
 //!      shape so that later phases (AST, type resolution, evidence validation) can consume it.
 //!
 //! These shells intentionally stay parse-only; semantic trait identity belongs to AST environment
-//! construction after imports, visibility, and type metadata are available.
+//! construction after dependency bindings, visibility and type metadata are available.
 
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::declaration_syntax::signature_members::FunctionSignatureSyntax;
+use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
@@ -93,6 +95,29 @@ impl TraitDeclarationSyntax {
         }
         self.location.remap_string_ids(remap);
     }
+
+    pub fn validate_required_source_prefixes(
+        &self,
+        provisional_source_file: &InternedPath,
+    ) -> Result<(), CompilerError> {
+        for requirement in &self.requirements {
+            requirement.validate_required_source_prefixes(provisional_source_file)?;
+        }
+        Ok(())
+    }
+
+    pub fn rebind_source_identity(
+        &mut self,
+        logical_path: &InternedPath,
+        provisional_source_file: &InternedPath,
+    ) -> Result<(), CompilerError> {
+        self.name_location.rebind_source_identity(logical_path);
+        for requirement in &mut self.requirements {
+            requirement.rebind_source_identity(logical_path, provisional_source_file)?;
+        }
+        self.location.rebind_source_identity(logical_path);
+        Ok(())
+    }
 }
 
 impl TraitRequirementSyntax {
@@ -104,6 +129,26 @@ impl TraitRequirementSyntax {
         self.signature.remap_string_ids(remap);
         self.location.remap_string_ids(remap);
     }
+
+    pub fn validate_required_source_prefixes(
+        &self,
+        provisional_source_file: &InternedPath,
+    ) -> Result<(), CompilerError> {
+        self.signature
+            .validate_required_source_prefixes(provisional_source_file)
+    }
+
+    pub fn rebind_source_identity(
+        &mut self,
+        logical_path: &InternedPath,
+        provisional_source_file: &InternedPath,
+    ) -> Result<(), CompilerError> {
+        self.name_location.rebind_source_identity(logical_path);
+        self.signature
+            .rebind_source_identity(logical_path, provisional_source_file)?;
+        self.location.rebind_source_identity(logical_path);
+        Ok(())
+    }
 }
 
 impl TraitReferenceSyntax {
@@ -113,6 +158,10 @@ impl TraitReferenceSyntax {
         self.name = remap.get(self.name);
         self.location.remap_string_ids(remap);
     }
+
+    pub fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
+        self.location.rebind_source_identity(logical_path);
+    }
 }
 
 impl ConformanceTargetSyntax {
@@ -121,6 +170,10 @@ impl ConformanceTargetSyntax {
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.name = remap.get(self.name);
         self.location.remap_string_ids(remap);
+    }
+
+    pub fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
+        self.location.rebind_source_identity(logical_path);
     }
 }
 
@@ -134,6 +187,14 @@ impl TraitConformanceSyntax {
         }
         self.location.remap_string_ids(remap);
     }
+
+    pub fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
+        self.target.rebind_source_identity(logical_path);
+        for trait_ref in &mut self.traits {
+            trait_ref.rebind_source_identity(logical_path);
+        }
+        self.location.rebind_source_identity(logical_path);
+    }
 }
 
 impl TraitIncompatibilitySyntax {
@@ -146,5 +207,13 @@ impl TraitIncompatibilitySyntax {
             trait_ref.remap_string_ids(remap);
         }
         self.location.remap_string_ids(remap);
+    }
+
+    pub fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
+        self.subject.rebind_source_identity(logical_path);
+        for trait_ref in &mut self.incompatible_traits {
+            trait_ref.rebind_source_identity(logical_path);
+        }
+        self.location.rebind_source_identity(logical_path);
     }
 }

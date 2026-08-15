@@ -4,7 +4,7 @@
 
 ### Implicit scope for Moth template files
 
-Exported compile-time constants from `@html` are visible inside `.mtf` files without an explicit import. This is the primary way authors use the helpers.
+Exported compile-time constants from `@html` are visible inside `.mtf` files without an explicit dependency clause. This is the primary way authors use the helpers.
 
 [codeblock, $code("moth"):
     -- docs/intro.mtf
@@ -13,10 +13,10 @@ Exported compile-time constants from `@html` are visible inside `.mtf` files wit
     [codeblock, $code("moth"): value = 42]
 ]
 
-A `.moth` file that needs specific `@html` symbols can import them explicitly:
+A `.moth` file that needs specific `@html` symbols can bind them explicitly:
 
 [codeblock, $code("moth"):
-    import @html {table, th, td}
+    @html table, th, td
 ]
 
 Same-directory module root constants and `@html` constants don't shadow each other. If both surfaces expose the same visible name, compilation fails with a collision diagnostic. See @../../../moth-templates/#template-scope (Template scope) for the full collision contract.
@@ -212,7 +212,7 @@ content without highlighting or escaping. Highlighting is lexical presentation
 only. It never validates the snippet, resolves names or reports diagnostics.
 Every language profile shares the same general role palette, and the Moth
 profile uses the compiler-owned source-word classification plus bounded lexical
-roles for contracts, functions, directives, import paths and the `io` namespace.
+roles for contracts, functions, directives, dependency paths and the `io` namespace.
 Stateful template-body-aware highlighting stays deferred.
 
 ### Canvas wrapper
@@ -244,7 +244,7 @@ Stateful template-body-aware highlighting stays deferred.
 The `Canvas` struct provides receiver methods for drawing: `set_fill_style`, `fill_rect`, `clear_rect` and `stroke_rect`. Each takes `~Canvas` (mutable receiver) and delegates to the underlying `@web/canvas` free functions.
 
 [codeblock, $code("moth"):
-    import @html {get_canvas}
+    @html get_canvas
 
     canvas ~= get_canvas("my-canvas") catch:
         assert(false, "canvas not found")
@@ -264,9 +264,9 @@ The canvas wrapper functions call through to `@web/canvas`, which emits JavaScri
 
 ### Unsupported source forms
 
-- Direct symbol-path imports such as `import @html/p` face rejection. Use grouped or namespace imports.
+- Direct symbol-path clauses such as `@html/p` face rejection. Use direct selections or a namespace clause.
 - `@html` does not expose opaque types of its own. `Canvas2d` comes from `@web/canvas`.
-- Only compile-time constants are visible inside `.mtf` files. Functions and types require an explicit import in `.moth` files.
+- Only compile-time constants are visible inside `.mtf` files. Functions and types require an explicit dependency clause in `.moth` files.
 
 ### Deferred surfaces
 
@@ -275,6 +275,6 @@ The canvas wrapper functions call through to `@web/canvas`, which emits JavaScri
 ### Related concepts
 
 - For package origin and backing see @../../#package-origins-and-backing (Package origins and backing).
-- For import path rules see @../../#import-paths (Import paths).
+- For dependency-path rules see @../../#dependency-paths (Dependency paths).
 - For `.mtf` implicit scope see @../../../moth-templates/#template-scope (Template scope).
 - For the `@web/canvas` runtime package see @../canvas (@web/canvas).

@@ -1,13 +1,11 @@
-import @core/time {
-    Duration,
+@core/time Duration,
     duration_from_seconds,
     duration_from_milliseconds,
     as_seconds,
     as_milliseconds,
     is_negative,
     abs,
-    clamp,
-}
+    clamp
 
 -- Duration helpers are ordinary external free functions.
 d = duration_from_seconds(2.5)

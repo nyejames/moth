@@ -6,7 +6,7 @@ label |this Counter| -> String:
     return "counter"
 ;
 
-import @helper { Badge }
+@helper Badge
 
 counter = Counter(1)
 badge = Badge(2)

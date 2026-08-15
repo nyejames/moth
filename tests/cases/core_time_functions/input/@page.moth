@@ -1,5 +1,4 @@
-import @core/time {
-    Duration,
+@core/time Duration,
     TimeMark,
     Timestamp,
     mark_now,
@@ -17,8 +16,7 @@ import @core/time {
     timestamp_from_unix_milliseconds,
     unix_seconds,
     unix_milliseconds,
-    to_iso_string,
-}
+    to_iso_string
 
 -- Duration construction and conversions
 d1 = duration_from_seconds(1.5)

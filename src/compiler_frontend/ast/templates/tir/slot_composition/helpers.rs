@@ -11,6 +11,7 @@
 //!      diagnostics. A single shared owner keeps those operations consistent
 //!      without introducing a new broad utility layer.
 
+use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::{SlotKey, Style, TemplateType};
 use crate::compiler_frontend::ast::templates::tir::copy_state::TirCopyState;
 use crate::compiler_frontend::ast::templates::tir::node::TemplateIrNodeKind;
@@ -22,12 +23,11 @@ use crate::compiler_frontend::ast::templates::tir::{
     copy_tir_subtree_with_active_slot_plan,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::compiler_errors::compiler_error_to_diagnostic;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidTemplateSlotReason};
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
-/// Boxed diagnostic result for the shared slot-composition helper family.
-type SlotCompositionResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// Typed result for the shared slot-composition helper family.
+type SlotCompositionResult<T> = Result<T, TemplateError>;
 
 /// Module-local wrapper/fill identity for one structural slot composition.
 ///
@@ -75,14 +75,9 @@ pub(crate) struct ComposedTirRoot {
     pub(crate) slot_context: Option<TemplateViewContext>,
 }
 
-/// Wraps an internal compiler error message as a `CompilerDiagnostic`.
-///
-/// WHAT: converts a `CompilerError` into the user-facing diagnostic type used
-///       by this module's error boundary.
-/// WHY: routing helpers return `CompilerDiagnostic`, but internal invariant
-///      failures are still represented as `CompilerError` first.
-pub(super) fn internal_compiler_error(message: &str) -> CompilerDiagnostic {
-    compiler_error_to_diagnostic(&CompilerError::compiler_error(message))
+/// Builds a template infrastructure failure without rendering it into the source-diagnostic lane.
+pub(super) fn internal_compiler_error(message: &str) -> TemplateError {
+    CompilerError::compiler_error(message).into()
 }
 
 /// Builds the diagnostic for an `$insert(...)` helper that targets a slot the
@@ -148,9 +143,7 @@ pub(super) fn root_node_id_for_template(
         .get_template(template_id)
         .map(|template| template.root)
         .ok_or_else(|| {
-            Box::new(internal_compiler_error(
-                "TIR slot routing: template ID was not present in the store.",
-            ))
+            internal_compiler_error("TIR slot routing: template ID was not present in the store.")
         })
 }
 
@@ -161,9 +154,9 @@ pub(super) fn children_of_node(
     node_id: TemplateIrNodeId,
 ) -> SlotCompositionResult<Vec<TemplateIrNodeId>> {
     let Some(node) = store.get_node(node_id) else {
-        return Err(Box::new(internal_compiler_error(
+        return Err(internal_compiler_error(
             "TIR slot routing: node ID was not present in the store.",
-        )));
+        ));
     };
 
     match &node.kind {
@@ -229,9 +222,9 @@ pub(super) fn location_for_template(
         .get_template(template_id)
         .map(|template| template.location.to_owned())
         .ok_or_else(|| {
-            Box::new(internal_compiler_error(
+            internal_compiler_error(
                 "TIR slot routing: template ID was not present in the store while reading its location.",
-            ))
+            )
         })
 }
 
@@ -247,9 +240,9 @@ pub(super) fn tir_tree_has_slots(
     node_id: TemplateIrNodeId,
 ) -> SlotCompositionResult<bool> {
     let Some(node) = store.get_node(node_id) else {
-        return Err(Box::new(internal_compiler_error(
+        return Err(internal_compiler_error(
             "TIR slot expansion: node ID was not present in the store while checking for slots.",
-        )));
+        ));
     };
 
     match &node.kind {
@@ -268,9 +261,9 @@ pub(super) fn tir_tree_has_slots(
         TemplateIrNodeKind::ChildTemplate { reference, .. } => {
             let template_id = reference.root;
             let Some(child_template) = store.get_template(template_id) else {
-                return Err(Box::new(internal_compiler_error(
+                return Err(internal_compiler_error(
                     "TIR slot expansion: child template ID was not present in the store while checking for slots.",
-                )));
+                ));
             };
 
             tir_tree_has_slots(store, child_template.root)
@@ -335,9 +328,9 @@ pub(super) fn build_tir_fill_template(
         .get_node(location_source_node_id)
         .map(|node| node.location.to_owned())
         .ok_or_else(|| {
-            Box::new(internal_compiler_error(
+            internal_compiler_error(
                 "TIR fill/source template construction: location source node ID was not present in the store.",
-            ))
+            )
         })?;
 
     let summary = summarize_existing_nodes(store, &fill_node_ids);
@@ -365,9 +358,9 @@ pub(super) fn build_composed_wrapper_template(
     expanded_root: TemplateIrNodeId,
 ) -> SlotCompositionResult<TemplateIrId> {
     let wrapper_template = store.get_template(wrapper_template_id).ok_or_else(|| {
-        Box::new(internal_compiler_error(
+        internal_compiler_error(
             "TIR head-chain composition: wrapper template ID was not present in the store.",
-        ))
+        )
     })?;
 
     let mut summary = wrapper_template.summary.to_owned();
@@ -411,9 +404,9 @@ pub(super) fn copy_tir_wrapper_template_with_fresh_slot_occurrence_ids(
     wrapper_template_id: TemplateIrId,
 ) -> SlotCompositionResult<TemplateIrId> {
     let wrapper_template = store.get_template(wrapper_template_id).ok_or_else(|| {
-        Box::new(internal_compiler_error(
+        internal_compiler_error(
             "TIR slot composition: wrapper template ID was not present in the store.",
-        ))
+        )
     })?;
 
     let wrapper_root = wrapper_template.root;
@@ -425,8 +418,7 @@ pub(super) fn copy_tir_wrapper_template_with_fresh_slot_occurrence_ids(
 
     let mut copy_state = TirCopyState::new();
     let copied_root =
-        copy_tir_subtree_with_active_slot_plan(wrapper_root, None, store, &mut copy_state)
-            .map_err(|error| error.into_diagnostic())?;
+        copy_tir_subtree_with_active_slot_plan(wrapper_root, None, store, &mut copy_state)?;
 
     let mut copied_template = TemplateIr::new(
         copied_root,
@@ -453,9 +445,9 @@ pub(super) fn rebuild_root_sequence(
     resolved_children: Vec<TemplateIrNodeId>,
 ) -> SlotCompositionResult<TemplateIrNodeId> {
     let original_root_node = store.get_node(original_root_node_id).ok_or_else(|| {
-        Box::new(internal_compiler_error(
+        internal_compiler_error(
             "TIR head-chain composition: original root node ID was not present in the store.",
-        ))
+        )
     })?;
 
     Ok(store.push_node(TemplateIrNode::new(

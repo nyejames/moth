@@ -67,7 +67,7 @@ Important current implementation facts:
 - `CompilerFrontend::new(...)` currently receives cloned `style_directives`, cloned `external_packages`, and cloned `project_path_resolver`.
 - The returned `Module` currently stores a cloned `external_package_registry`.
 - `record_module_input_counters(...)` already records module count, source file count, and source byte count.
-- `record_header_counters(...)` already records header count, import count, and top-level declaration count.
+- `record_header_counters(...)` already records header count, dependency-clause count, and top-level declaration count.
 
 ### Profiling profile
 
@@ -95,7 +95,7 @@ src/compiler_frontend/instrumentation/
 
 The existing `FrontendCounter` surface already includes counters for:
 
-- module/file/source/token/header/import/declaration volume;
+- module/file/source/token/header/dependency/declaration volume;
 - dependency sorting volume;
 - AST construction and compile-time evaluation volume;
 - HIR and borrow validation volume;
@@ -117,7 +117,7 @@ src/compiler_frontend/headers/parse_file_headers.rs
 `FileFrontendPrepareOutput` already stores:
 
 - `token_count`;
-- `file_imports`;
+- `file_dependency_clauses`;
 - `headers`;
 - `top_level_const_fragments`;
 - `const_template_count`;
@@ -211,13 +211,13 @@ Optimisation use:
 
 ### Header syntax preparation plus interface binding
 
-Header syntax preparation builds declaration shells, import shells and local ordering hints. Interface binding later resolves retained import shells against completed provider interfaces to produce final visibility.
+Header syntax preparation builds declaration shells, dependency shells and local ordering hints. Interface binding later resolves retained dependency shells against completed provider interfaces to produce final visibility.
 
 Optimisation use:
 
 - [ ] Scope frames store body-local declarations only.
 - [ ] Immutable file and module visibility tables are shared by reference or ID.
-- [ ] Avoid copying import visibility into every child context.
+- [ ] Avoid copying binding visibility into every child context.
 - [ ] Immutable provider interfaces are shared rather than cloned per consumer.
 - [ ] Build-owned mutable provider state is separate from reusable builder capability definitions.
 
@@ -547,7 +547,7 @@ or another clearly named frontend stats module if the final owner is different.
   - [x] operators;
   - [x] template starts/body markers;
   - [x] style directives;
-  - [x] imports;
+  - [x] dependencies;
   - [x] hashes;
   - [x] `if`;
   - [x] `loop`;
@@ -577,7 +577,7 @@ src/compiler_frontend/arena/header_stats.rs
   - [x] trait incompatibilities;
   - [x] const templates;
   - [x] start functions;
-  - [x] imports;
+  - [x] dependencies;
   - [x] generic parameters;
   - [x] signature members;
   - [x] choice variants;
@@ -698,7 +698,7 @@ fixtures are clearer as static source inputs.
 The first Samply review showed external package metadata cloning as a surprising hotspot. This phase reduces clone pressure before the deeper AST scope rewrite. It is a targeted quick-win phase and should stay independent from arena work where possible.
 
 Phase 3 completed on 2026-06-18. It added detailed-timer counters for external package clone
-pressure, captured before/after counter data on import-heavy fixtures, and replaced deep registry
+pressure, captured before/after counter data on dependency-heavy fixtures, and replaced deep registry
 clones through the frontend/AST/module/backend handoff with a shared immutable
 `Arc<ExternalPackageRegistry>`. Remaining definition/path/ABI clones are registration-time
 ownership or owned builder-runtime metadata at true module handoff boundaries.
@@ -734,7 +734,7 @@ ownership or owned builder-runtime metadata at true module handoff boundaries.
 
 ### Tests
 
-- [x] Run existing external package/import tests.
+- [x] Run existing external-package dependency tests.
 - [x] Add targeted tests only if ownership/API changes create new invariants. Existing targeted
       coverage was sufficient because semantics did not change.
 - [x] Ensure external JS import fixtures still pass.
@@ -826,9 +826,9 @@ Use the current module shape if it differs, but keep arena internals out of high
 - [x] Implement redeclaration checks using no-shadowing:
   - [x] check current frame;
   - [x] check ancestor frames until file/module boundary as required by current visibility rules;
-  - [x] check shared header-built visibility/import/builtin records.
+  - [x] check shared header-built visibility/dependency/builtin records.
 
-- [x] Ensure import visibility remains header-owned and shared.
+- [x] Ensure binding visibility remains header-owned and shared.
 - [x] Ensure diagnostics keep correct `SourceLocation` and source labels.
 - [x] Add actual arena counters:
   - [x] frames allocated;
@@ -855,13 +855,13 @@ Use the current module shape if it differs, but keep arena internals out of high
   - [x] nested `if`/loop/catch/value-producing blocks;
   - [x] templates capturing values;
   - [x] same-file receiver methods;
-  - [x] imports and aliases;
+  - [x] dependencies and aliases;
   - [x] duplicate declaration diagnostics.
 
 ### Audit / style guide review / validation
 
 - [x] Confirm no user-visible shadowing rule changed.
-- [x] Confirm AST does not rebuild import visibility.
+- [x] Confirm AST does not rebuild binding visibility.
 - [x] Confirm scope arena internals are not embedded in pipeline orchestration files.
 - [x] Confirm stage-local diagnostics still use `CompilerDiagnostic`.
 - [x] Confirm no compatibility wrappers remain.
@@ -893,7 +893,7 @@ estimate into AST emission. Production seeding uses an AST-owned
 function, start, generic-template-validation, and const-template parse contexts. Dynamic generic
 instances and direct AST helper callers remain unseeded and grow normally. The final Phase 5
 evidence pass found no scope-frame under-estimates across docs, template, scope, kitchen-sink, and
-import/module fixtures; capacity/actual ratios ranged from about `2.9x` to `3.8x`. Five recorded
+dependency/module fixtures; capacity/actual ratios ranged from about `2.9x` to `3.8x`. Five recorded
 frontend and end-to-end benchmark invocations showed no measurable regression.
 
 ### Implementation steps
@@ -904,7 +904,7 @@ frontend and end-to-end benchmark invocations showed no measurable regression.
   - [x] `template-stress.moth`;
   - [x] `deep-scope-churn.moth`;
   - [x] `one-module-kitchen-sink.moth`;
-  - [x] import/module fixtures.
+  - [x] dependency/module fixtures.
 
 - [x] Add reported ratios behind detailed timers:
   - [x] estimated / actual;

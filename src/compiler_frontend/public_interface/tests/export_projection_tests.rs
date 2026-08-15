@@ -21,7 +21,7 @@ use crate::compiler_frontend::headers::parse_file_headers::parse_file_headers_te
 use crate::compiler_frontend::headers::parse_file_headers::{FileRole, Header, HeaderKind};
 use crate::compiler_frontend::public_interface::{
     DirectExportSeed, PublicDiagnosticLocation, PublicExportDiagnosticProvenance,
-    PublicSemanticInterface, SourceProviderImport, SourceProviderImportSet,
+    PublicSemanticInterface, SourceProviderDependency, SourceProviderDependencySet,
     build_direct_export_seed, build_public_source_nominal_origin_index,
     build_public_source_trait_origin_index,
 };
@@ -31,7 +31,9 @@ use crate::compiler_frontend::semantic_identity::{
     StablePackageIdentity,
 };
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
-use crate::compiler_frontend::symbols::identity::{FileId, ImportShellId, SourceFileTable};
+use crate::compiler_frontend::symbols::identity::{
+    DependencySelectionId, DependencyShellId, FileId, SourceFileTable,
+};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -83,7 +85,7 @@ fn build_seed_for_project(source: &str, project_name: &str) -> DirectExportSeed 
         file_id,
         &headers.headers,
         &headers.module_symbols,
-        &SourceProviderImportSet::default(),
+        &SourceProviderDependencySet::default(),
         &ExternalPackageRegistry::default(),
         &string_table,
     )
@@ -312,10 +314,7 @@ fn same_module_reexport_preserves_alias_origin_and_authored_provenance() {
         fixture.module_root.clone(),
         [PublicExportEntry {
             export_name: fixture.string_table.intern("PublicValue"),
-            target: PublicExportTarget::Source {
-                path: target_path,
-                import_shell_id: None,
-            },
+            target: PublicExportTarget::SourceDeclaration { path: target_path },
         }]
         .into_iter()
         .collect(),
@@ -326,7 +325,7 @@ fn same_module_reexport_preserves_alias_origin_and_authored_provenance() {
         fixture.active_root_file_id,
         &fixture.headers,
         &fixture.module_symbols,
-        &SourceProviderImportSet::default(),
+        &SourceProviderDependencySet::default(),
         &ExternalPackageRegistry::default(),
         &fixture.string_table,
     )
@@ -404,9 +403,9 @@ fn provider_reexport_preserves_alias_and_provider_provenance() {
         reusable_evidence: Vec::new(),
         concrete_call_summaries: Vec::new(),
     };
-    let provider_imports = SourceProviderImportSet::new(vec![SourceProviderImport {
-        kind: crate::compiler_frontend::public_interface::ProviderImportKind::Authored {
-            shell_id: ImportShellId::new(FileId(0), 0),
+    let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
+        kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
+            shell: DependencyShellId::new(FileId(0), 0),
         },
         interface: &provider_interface,
     }])
@@ -415,9 +414,10 @@ fn provider_reexport_preserves_alias_and_provider_provenance() {
         fixture.module_root.clone(),
         [PublicExportEntry {
             export_name: fixture.string_table.intern("PublicImported"),
-            target: PublicExportTarget::Source {
-                path: target_path,
-                import_shell_id: Some(ImportShellId::new(FileId(0), 0)),
+            target: PublicExportTarget::ProviderSelection {
+                diagnostic_path: target_path,
+                selection: DependencySelectionId::new(DependencyShellId::new(FileId(0), 0), 0),
+                source_name: fixture.string_table.intern("Imported"),
             },
         }]
         .into_iter()
@@ -429,7 +429,7 @@ fn provider_reexport_preserves_alias_and_provider_provenance() {
         fixture.active_root_file_id,
         &fixture.headers,
         &fixture.module_symbols,
-        &provider_imports,
+        &provider_dependencies,
         &ExternalPackageRegistry::default(),
         &fixture.string_table,
     )
@@ -566,7 +566,7 @@ fn active_origin_missing_from_table_fails_internally() {
         file_id,
         &headers.headers,
         &headers.module_symbols,
-        &SourceProviderImportSet::default(),
+        &SourceProviderDependencySet::default(),
         &ExternalPackageRegistry::default(),
         &string_table,
     );
@@ -617,7 +617,7 @@ fn out_of_range_active_root_file_id_fails_internally() {
         FileId(999),
         &headers.headers,
         &headers.module_symbols,
-        &SourceProviderImportSet::default(),
+        &SourceProviderDependencySet::default(),
         &ExternalPackageRegistry::default(),
         &string_table,
     );
@@ -697,7 +697,7 @@ fn conflicting_public_header_ownership_fails_internally() {
         active_file_id,
         &headers.headers,
         &headers.module_symbols,
-        &SourceProviderImportSet::default(),
+        &SourceProviderDependencySet::default(),
         &ExternalPackageRegistry::default(),
         &string_table,
     );
@@ -744,7 +744,7 @@ fn zero_public_exports_still_validates_active_origin() {
         file_id,
         &headers.headers,
         &headers.module_symbols,
-        &SourceProviderImportSet::default(),
+        &SourceProviderDependencySet::default(),
         &ExternalPackageRegistry::default(),
         &string_table,
     );
@@ -809,9 +809,8 @@ fn module_symbols_with_module_root_export_targets(
             export_name: target
                 .name()
                 .expect("an export target path must carry a defining name"),
-            target: PublicExportTarget::Source {
+            target: PublicExportTarget::SourceDeclaration {
                 path: target.clone(),
-                import_shell_id: None,
             },
         })
         .collect();
@@ -833,9 +832,8 @@ fn add_source_package_export_target(
         export_name: target
             .name()
             .expect("an export target path must carry a defining name"),
-        target: PublicExportTarget::Source {
+        target: PublicExportTarget::SourceDeclaration {
             path: target.clone(),
-            import_shell_id: None,
         },
     };
     module_symbols

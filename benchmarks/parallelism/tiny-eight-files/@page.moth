@@ -1,10 +1,10 @@
-import @parts/a { label_a }
-import @parts/b { label_b }
-import @parts/c { label_c }
-import @parts/d { label_d }
-import @parts/e { label_e }
-import @parts/f { label_f }
-import @parts/g { label_g }
+@parts/a label_a
+@parts/b label_b
+@parts/c label_c
+@parts/d label_d
+@parts/e label_e
+@parts/f label_f
+@parts/g label_g
 
 [:
     <ol>

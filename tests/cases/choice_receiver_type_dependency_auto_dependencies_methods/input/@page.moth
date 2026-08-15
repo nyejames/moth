@@ -1,0 +1,4 @@
+@states Status
+
+selected Status = Status::Ready
+[:choice_receiver_type_dependency_auto_dependencies_methods value=[selected.label()]]

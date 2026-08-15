@@ -1,18 +1,12 @@
-import @math {
-    content as math_advanced,
-}
+@math content as math_advanced
 
-import @math-basic {
-    content as math_basic,
-}
+@math-basic content as math_basic
 
-import @styles {
-    navbar,
+@styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager,
-}
+    doc_pager
 
 page_title #= "Core math"
 page_description #= "Math constants and Float helper functions."

@@ -44,11 +44,9 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable}
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
 use crate::compiler_frontend::utilities::token_scan::consume_balanced_template_region;
 
-/// Boxed diagnostic result for the template body-parser family.
-///
-/// Nested body operations share this boundary so large structured diagnostics propagate without
-/// repeated boxing between parser and sentinel helpers.
-type BodyParseResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// Template-body parsing owns recursive template construction, so it carries the template error
+/// boundary rather than reducing an inner retained-data failure to a user diagnostic.
+type BodyParseResult<T> = Result<T, TemplateError>;
 
 // -------------------------
 //  Body Parser Entry
@@ -227,10 +225,11 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
             // Only the error fallback arm needs an owned clone for the diagnostic payload.
             match self.token_stream.current_token_kind() {
                 TokenKind::Eof => {
-                    return Err(Box::new(CompilerDiagnostic::unexpected_end_of_file(
+                    return Err(CompilerDiagnostic::unexpected_end_of_file(
                         Some(self.close_bracket_id),
                         self.token_stream.current_location(),
-                    )));
+                    )
+                    .into());
                 }
 
                 TokenKind::TemplateClose => {
@@ -246,14 +245,13 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
                             construction_context,
                             input.build_state.style.suppress_child_templates,
                         );
-                        return handle_direct_else_marker(
+                        return Ok(handle_direct_else_marker(
                             self.token_stream,
                             else_marker,
                             input.control_context.else_policy,
                             sentinel_target,
                             self.string_table,
-                        )
-                        .map_err(Box::new);
+                        )?);
                     }
 
                     if let Some(loop_marker) =
@@ -300,20 +298,22 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
                 }
 
                 found => {
-                    return Err(Box::new(CompilerDiagnostic::unexpected_token(
+                    return Err(CompilerDiagnostic::unexpected_token(
                         found.clone(),
                         self.token_stream.current_location(),
-                    )));
+                    )
+                    .into());
                 }
             }
 
             self.token_stream.advance();
         }
 
-        Err(Box::new(CompilerDiagnostic::unexpected_end_of_file(
+        Err(CompilerDiagnostic::unexpected_end_of_file(
             Some(self.close_bracket_id),
             last_known_location,
-        )))
+        )
+        .into())
     }
 
     /// Parses an `[if]` body and any `[else if]` / `[else]` followers into a
@@ -480,10 +480,11 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
         self.token_stream.index = if_index + 1;
 
         if next_meaningful_token_is_template_close(self.token_stream, close_index) {
-            return Err(Box::new(CompilerDiagnostic::invalid_template_structure(
+            return Err(CompilerDiagnostic::invalid_template_structure(
                 InvalidTemplateStructureReason::MissingTemplateElseIfCondition,
                 location.clone(),
-            )));
+            )
+            .into());
         }
 
         let parsed_header = parse_if_header(
@@ -499,10 +500,11 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
                 TokenKind::TemplateClose
             )
         {
-            return Err(Box::new(CompilerDiagnostic::invalid_template_structure(
+            return Err(CompilerDiagnostic::invalid_template_structure(
                 InvalidTemplateStructureReason::MalformedTemplateElseIf,
                 self.token_stream.current_location(),
-            )));
+            )
+            .into());
         }
 
         self.token_stream.advance();
@@ -601,12 +603,9 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
                 .get_template(child_template.tir_reference.root)
                 .map(|template_ir| template_ir.kind.clone())
                 .ok_or_else(|| {
-                    Box::new(
-                        TemplateError::from(CompilerError::compiler_error(
-                            "Nested template kind was missing from the parser's owning TIR store.",
-                        ))
-                        .into_diagnostic(),
-                    )
+                    TemplateError::from(CompilerError::compiler_error(
+                        "Nested template kind was missing from the parser's owning TIR store.",
+                    ))
                 })?
         };
 
@@ -616,7 +615,7 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
                 &store,
                 child_template.tir_reference.root,
             )
-            .map_err(|error| TemplateError::from(error).into_diagnostic())?
+            .map_err(TemplateError::from)?
         };
 
         if let Some(contributions) = stored_insert_contributions {
@@ -675,8 +674,7 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
                 // Slot definitions are recorded exclusively in parser TIR
                 // through `record_slot`.
                 construction_context
-                    .record_slot(slot_placeholder, child_template.location.clone())
-                    .map_err(TemplateError::into_diagnostic)?;
+                    .record_slot(slot_placeholder, child_template.location.clone())?;
                 return Ok(());
             }
         }
@@ -695,18 +693,19 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
         marker: &DirectLoopControlMarker,
     ) -> BodyParseResult<()> {
         if input.build_state.style.suppress_child_templates {
-            return Err(Box::new(CompilerDiagnostic::invalid_template_structure(
+            return Err(CompilerDiagnostic::invalid_template_structure(
                 InvalidTemplateStructureReason::TemplateLoopControlInLiteralBody,
                 loop_control_marker_location(marker).clone(),
-            )));
+            )
+            .into());
         }
 
         if !input.control_context.accepts_loop_control() {
-            return Err(Box::new(orphan_loop_control_diagnostic(marker)));
+            return Err(orphan_loop_control_diagnostic(marker).into());
         }
 
         let Some(close_index) = loop_control_marker_close_index(marker) else {
-            return Err(Box::new(malformed_loop_control_reason(marker)));
+            return Err(malformed_loop_control_reason(marker).into());
         };
 
         ensure_loop_control_boundary_before_sentinel(self.token_stream, marker, self.string_table)?;
@@ -719,8 +718,9 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
 
         self.token_stream.index = close_index;
         self.token_stream.advance();
-        ensure_loop_control_boundary_after_sentinel(self.token_stream, marker, self.string_table)
-            .map_err(Box::new)
+        ensure_loop_control_boundary_after_sentinel(self.token_stream, marker, self.string_table)?;
+
+        Ok(())
     }
 }
 
@@ -794,10 +794,11 @@ fn branch_selector_and_context_from_parsed_if_header(
         }
 
         ParsedIfHeader::MatchStyle { scrutinee } => {
-            Err(Box::new(CompilerDiagnostic::invalid_template_structure(
+            Err(CompilerDiagnostic::invalid_template_structure(
                 InvalidTemplateStructureReason::TemplateMatchStyleControlFlowUnsupported,
                 scrutinee.location,
-            )))
+            )
+            .into())
         }
     }
 }
@@ -891,7 +892,7 @@ fn ensure_else_body_starts_on_new_boundary(
     if let TemplateIrNodeKind::Text { text, .. } = &node.kind
         && first_line_has_meaningful_text(string_table.resolve(*text))
     {
-        return Err(Box::new(inline_else_diagnostic(sentinel_location)));
+        return Err(inline_else_diagnostic(sentinel_location).into());
     }
 
     Ok(())

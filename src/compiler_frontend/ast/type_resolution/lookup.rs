@@ -42,7 +42,7 @@ use crate::compiler_frontend::datatypes::generic_identity_bridge::{
 use crate::compiler_frontend::datatypes::{DataType, diagnostic_type_spelling};
 use crate::compiler_frontend::declaration_syntax::type_syntax::TypeAnnotationContext;
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
-use crate::compiler_frontend::headers::import_environment::{
+use crate::compiler_frontend::headers::binding_environment::{
     NamespaceMemberLookup, NamespaceRecordSource, NamespaceTypeMember, lookup_namespace_member,
 };
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
@@ -221,7 +221,7 @@ pub(super) fn resolve_namespaced_type_from_context(
     // deeper than one member in such a record must keep reporting the existing nested
     // traversal diagnostic, which integration fixtures already assert.
     if path.len() > 2 && matches!(record.record_source, NamespaceRecordSource::SourceFile(_)) {
-        return Err(Box::new(CompilerDiagnostic::nested_traversal(
+        return Err(Box::new(CompilerDiagnostic::nested_dependency_traversal(
             root_name,
             location.to_owned(),
         )));

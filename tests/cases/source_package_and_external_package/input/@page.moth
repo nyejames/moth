@@ -1,5 +1,5 @@
-import @core/math {sin, PI}
-import @helper {double}
+@core/math sin, PI
+@helper double
 
 angle = PI / 2.0
 s = sin(angle)

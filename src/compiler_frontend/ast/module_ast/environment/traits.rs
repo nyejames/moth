@@ -129,7 +129,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     ///      environment builder can map trait ids to their builtin target
     ///      and fallibility during evidence registration.
     /// WHY: `cast` requires all twelve `CASTABLE_TO_*` and `TRY_CASTABLE_TO_*`
-    ///      trait names to resolve without imports; sharing one registration
+    ///      trait names to resolve without dependency clauses; sharing one registration
     ///      path with `DISPLAYABLE` keeps the trait environment table-driven
     ///      and prevents drift between the catalogue, the trait definitions,
     ///      and the builtin evidence rows.
@@ -309,7 +309,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         string_table: &mut StringTable,
     ) -> Result<ResolvedTraitDefinition, CompilerMessages> {
         let visibility = self
-            .import_environment
+            .binding_environment
             .visibility_for(&header.source_file)
             .map_err(|error| self.error_messages(error, string_table))?
             .clone();
@@ -424,7 +424,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         } = input;
 
         let visibility = self
-            .import_environment
+            .binding_environment
             .visibility_for(&header.source_file)
             .map_err(|error| self.error_messages(error, string_table))?
             .clone();
@@ -549,12 +549,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             AstTypeInterner::new(&mut self.type_environment, &mut compatibility_cache);
         let signature = function_signature_from_syntax_with_unresolved_types(
             signature_syntax,
+            &header.tokens.path_syntax,
             &signature_context,
             &mut type_interner,
             string_table,
             SignatureTypeFallbackPolicy::StrictCapacity,
         )
-        .map_err(|diagnostic| self.diagnostic_messages(*diagnostic, string_table))?;
+        .map_err(|error| self.expression_error_messages(error, string_table))?;
         self.warnings
             .extend(signature_context.take_emitted_warnings());
 
@@ -584,7 +585,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             };
 
             let visibility = self
-                .import_environment
+                .binding_environment
                 .visibility_for(&header.source_file)
                 .map_err(|error| self.error_messages(error, string_table))?;
 
@@ -616,7 +617,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
             let relation_source_file = header.source_file.clone();
             let visibility = self
-                .import_environment
+                .binding_environment
                 .visibility_for(&header.source_file)
                 .map_err(|error| self.error_messages(error, string_table))?
                 .clone();
@@ -693,7 +694,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         subject: &TraitReferenceSyntax,
         trait_ref: &TraitReferenceSyntax,
         relation_source_file: &crate::compiler_frontend::symbols::interned_path::InternedPath,
-        visibility: &crate::compiler_frontend::headers::import_environment::FileVisibility,
+        visibility: &crate::compiler_frontend::headers::binding_environment::FileVisibility,
         trait_environment: &TraitEnvironment,
         string_table: &mut StringTable,
     ) -> Result<TraitId, CompilerMessages> {
@@ -743,7 +744,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     pub(in crate::compiler_frontend::ast) fn resolve_visible_trait_reference(
         &self,
         trait_ref: &TraitReferenceSyntax,
-        visibility: &crate::compiler_frontend::headers::import_environment::FileVisibility,
+        visibility: &crate::compiler_frontend::headers::binding_environment::FileVisibility,
         trait_environment: &TraitEnvironment,
         string_table: &mut StringTable,
     ) -> Result<TraitId, CompilerMessages> {

@@ -259,7 +259,7 @@ A missing optimisation is valid. A semantic divergence isn't. Unknown external r
 - Silently copy shared values.
 - Destroy borrowed data.
 - Expose source lifetimes.
-- Rediscover source imports or access syntax.
+- Rediscover source dependencies or access syntax.
 - Require deterministic destruction for correctness.
 - Make reactive observability depend on target-specific early release.
 - Assume page memory includes arbitrary imported components.

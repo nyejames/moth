@@ -1,4 +1,4 @@
-import @test/optional
+@test/optional
 
 accept_optional_string |value String?| -> String:
     if value is |text|:

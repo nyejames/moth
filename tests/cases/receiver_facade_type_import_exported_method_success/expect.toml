@@ -1,6 +1,0 @@
-entry = "."
-
-[backends.html]
-mode = "success"
-warnings = "forbid"
-rendered_output_contains = ["receiver_facade_type_import_exported_method_success value=42"]

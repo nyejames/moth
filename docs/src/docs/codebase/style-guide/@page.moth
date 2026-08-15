@@ -1,7 +1,7 @@
-import @style-guide {content as style_content}
-import @testing {content as testing_content}
-import @validation {content as validation_content}
-import @styles {navbar, section, theme_head}
+@style-guide content as style_content
+@testing content as testing_content
+@validation content as validation_content
+@styles navbar, section, theme_head
 
 page_title #= "Codebase development standards"
 page_description #= "Rust code style, testing strategy and validation gates for Moth compiler work."

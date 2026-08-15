@@ -1,0 +1,4 @@
+helper #= "local"
+@helper
+
+io.line([: [helper]])

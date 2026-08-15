@@ -1,4 +1,4 @@
-import @./helpers {identity}
+@helpers identity
 
 int_value = identity(42)
 string_value = identity("hello")

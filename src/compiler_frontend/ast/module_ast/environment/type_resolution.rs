@@ -6,6 +6,7 @@
 
 use super::builder::AstModuleEnvironmentBuilder;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::generic_bounds::{
     GenericBoundEvidenceContext, validate_nominal_generic_bound_evidence,
@@ -43,7 +44,7 @@ use crate::compiler_frontend::declaration_syntax::signature_members::SignatureMe
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use std::sync::Arc;
 
-use crate::compiler_frontend::headers::import_environment::FileVisibility;
+use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -237,7 +238,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     /// Resolves constants and nominal member types in header dependency order.
     ///
     /// WHY: headers are already dependency-sorted; constants are parsed in that order.
-    /// Struct defaults require constant-context parsing and import gates.
+    /// Struct defaults require constant-context parsing and dependency visibility gates.
     /// Trait metadata is available so trait names on fields, payloads, and constant declarations
     /// are rejected as static contracts instead of falling through to an unknown-type diagnostic.
     pub(in crate::compiler_frontend::ast) fn resolve_nominal_members_and_constants(
@@ -291,7 +292,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             };
 
             let visibility = self
-                .import_environment
+                .binding_environment
                 .visibility_for(&header.source_file)
                 .map_err(|error| self.error_messages(error, string_table))?
                 .clone();
@@ -418,7 +419,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
             let source_file_scope = header.canonical_source_file(string_table);
             let visibility = self
-                .import_environment
+                .binding_environment
                 .visibility_for(&header.source_file)
                 .map_err(|error| self.error_messages(error, string_table))?
                 .clone();
@@ -613,7 +614,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             }
 
             let visibility = self
-                .import_environment
+                .binding_environment
                 .visibility_for(&header.source_file)
                 .map_err(|error| self.error_messages(error, string_table))?
                 .clone();
@@ -673,7 +674,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     ) -> Result<(), CompilerMessages> {
         for header in sorted_headers {
             let visibility = self
-                .import_environment
+                .binding_environment
                 .visibility_for(&header.source_file)
                 .map_err(|error| self.error_messages(error, string_table))?
                 .clone();
@@ -837,7 +838,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     generic_parameters, ..
                 } => {
                     let visibility = self
-                        .import_environment
+                        .binding_environment
                         .visibility_for(&header.source_file)
                         .map_err(|error| self.error_messages(error, string_table))?
                         .clone();
@@ -907,7 +908,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     generic_parameters, ..
                 } => {
                     let visibility = self
-                        .import_environment
+                        .binding_environment
                         .visibility_for(&header.source_file)
                         .map_err(|error| self.error_messages(error, string_table))?
                         .clone();
@@ -999,7 +1000,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             };
 
             let visibility = self
-                .import_environment
+                .binding_environment
                 .visibility_for(&header.source_file)
                 .map_err(|error| self.error_messages(error, string_table))?;
 
@@ -1030,7 +1031,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     trait_environment: Some(Rc::clone(&trait_environment)),
                 },
             )
-            .map_err(|diagnostic| self.diagnostic_messages(*diagnostic, string_table))?;
+            .map_err(|error| self.expression_error_messages(error, string_table))?;
 
             self.replace_declaration(declaration.clone())
                 .map_err(|error| self.error_messages(error, string_table))?;
@@ -1063,7 +1064,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         emit_warnings: bool,
     ) -> Result<Vec<Declaration>, CompilerMessages> {
         let visibility = self
-            .import_environment
+            .binding_environment
             .visibility_for(&header.source_file)
             .map_err(|error| self.error_messages(error, string_table))?
             .clone();
@@ -1072,7 +1073,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
         // Parse each field inside a temporary scope so that type-resolution errors
         // can be remapped to the appropriate diagnostic for struct defaults vs choice payloads.
-        let conversion_result = (|| -> Result<Vec<Declaration>, Box<CompilerDiagnostic>> {
+        let conversion_result = (|| -> Result<Vec<Declaration>, ExpressionParseError> {
             let mut compatibility_cache = TypeCompatibilityCache::new();
             let mut type_interner =
                 AstTypeInterner::new(&mut self.type_environment, &mut compatibility_cache);
@@ -1081,16 +1082,21 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             for field in fields {
                 let declaration = signature_member_to_declaration(
                     field,
+                    &header.tokens.path_syntax,
                     &field_context,
                     &mut type_interner,
                     string_table,
                     fallback_policy,
                 )
-                .map_err(|diagnostic| {
-                    Box::new(member_shell_diagnostic_for_context(
-                        *diagnostic,
-                        member_context,
-                    ))
+                .map_err(|error| match error {
+                    ExpressionParseError::Diagnostic(diagnostic) => {
+                        ExpressionParseError::Diagnostic(Box::new(
+                            member_shell_diagnostic_for_context(*diagnostic, member_context),
+                        ))
+                    }
+                    ExpressionParseError::Infrastructure(error) => {
+                        ExpressionParseError::Infrastructure(error)
+                    }
                 })?;
                 declarations.push(declaration);
             }
@@ -1099,7 +1105,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         })();
 
         let declarations = conversion_result
-            .map_err(|diagnostic| self.diagnostic_messages(*diagnostic, string_table))?;
+            .map_err(|error| self.expression_error_messages(error, string_table))?;
 
         if emit_warnings {
             self.warnings.extend(field_context.take_emitted_warnings());

@@ -1,5 +1,5 @@
-import @html { codeblock }
-import @snippet
+@html codeblock
+@snippet
 
 -- The following code block intentionally uses 4-space, empty, and 16-space blank lines; its content baseline is 12 spaces.
 

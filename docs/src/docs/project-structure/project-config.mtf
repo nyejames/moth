@@ -1,6 +1,6 @@
 **Accepted deferred design.** This page defines the final grouped project-config contract. The current compiler still parses and stores the transitional flat `package_folders` field for migration compatibility, but canonical Stage 0 ignores it. See @../progress (Progress) for current support.
 
-`config.moth` is the single project config file. It lives at the project root, is loaded before source-tree discovery and is one self-contained compile-time source file with no source imports or package resolution.
+`config.moth` is the single project config file. It lives at the project root, is loaded before source-tree discovery and is one self-contained compile-time source file with no source dependencies or package resolution.
 
 ### Canonical config
 
@@ -38,7 +38,7 @@
 
 ### Direct project #Import fields
 
-A direct primitive or optional field of `project` may declare a build-input contract using `#Import of T`. Nested project fields cannot declare imports.
+A direct primitive or optional field of `project` may declare a build-input contract using `#Import of T`. Nested project fields cannot declare `#Import` contracts.
 
 Accepted imported-value types are `String`, `Int`, `Float`, `Bool`, `Char` and optional forms of those types.
 
@@ -46,7 +46,7 @@ See @https://github.com/nyejames/moth/blob/main/docs/build-system-design.md (Bui
 
 ### Rejected in config
 
-- Every source import, including relative, project, Core, Builder, dependency and binding-backed imports.
+- Every source dependency clause, including relative, project, Core, Builder, dependency-package and binding-backed clauses.
 - Runtime declarations, mutable bindings, functions, named support types, traits, conformances.
 - Standalone templates and top-level const page fragments.
 - `export:`.

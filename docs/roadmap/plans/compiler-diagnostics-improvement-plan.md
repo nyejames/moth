@@ -77,7 +77,7 @@ NEXT_RESUME_ACTION: launch Phase 4.1c (multiple-success return-shape reason + Sc
 - A binding must already be declared mutable before it can be reassigned or written through.
 - Reassignment and field assignment use ordinary `=`. `~` is not written on assignment targets.
 - Fresh values passed to mutable parameters remain valid without source `~`.
-- External package namespace access and grouped imports are both valid for direct package exports. Diagnostics must not claim otherwise.
+- External package namespace access and delimiter-free direct selections are both valid for direct package exports. Diagnostics must not claim otherwise.
 - Error handling uses Moth's `Error!`, postfix `!` and `catch` terminology. User-facing diagnostics must not describe the source feature as a first-class `Result`.
 - Multi-return calls cannot be received by a single declaration or assignment target. Moth has no implicit dropped return slot and no documented discard syntax.
 
@@ -96,7 +96,7 @@ NEXT_RESUME_ACTION: launch Phase 4.1c (multiple-success return-shape reason + Sc
   - templates for mixed textual interpolation
   - choices for runtime heterogeneity
   - concrete types or bound-provided receiver methods for generic behaviour
-  - grouped imports or namespace qualification according to the actual visible package surface
+  - delimiter-free direct selections or namespace qualification according to the actual visible package surface
 - Do not preserve obsolete diagnostics for removed syntax.
 - Prefer one primary integration case per user-visible contract. Add unit tests only for renderer, tokenizer, scanner or compatibility invariants that integration output cannot isolate.
 
@@ -168,17 +168,15 @@ uses `MOTH-SYNTAX-0031`, while the declaration parser still owns whitespace insi
 unchanged. Table-driven tokenizer coverage protects every compound assignment and each missing-side
 classification, with integration owners for source-visible assignment and mutable-marker wording.
 
-### 2.3 Recognise a missing `@` import prefix before `/` becomes an operator error
+### 2.3 Superseded missing-`@` import-prefix diagnostic
 
 **Original finding:** DIAG-038
 **Status:** Complete in `3b9fdd914`
 
-The lexer's narrow import left-context scan now recognises identifier-led and `./` bare paths
-before `/` can become an operator-spacing error. `ImportPathMissingAtPrefix { authored_path }`
-preserves the complete source spelling, including `.js`, stops before grouped clauses or aliases
-and renders the exact `import @...` correction at the path. General import parsing remains in
-headers. Focused coverage protects single and multi-component paths, relative/provider paths,
-valid `@` imports, division, integer division and comments.
+This completed checkpoint described the former `import @...` grammar. The dependency-clause
+cutover superseded that spelling and its exact replacement guidance. Current diagnostics must
+target top-level `@provider` clauses, must not suggest `@./...`, and must not revive grouped
+selection delimiters. General dependency parsing remains in headers.
 
 ### 2.4 Improve incomplete expression and declaration boundaries
 
@@ -868,7 +866,7 @@ current headers.
   shapes.
 - Do not add a replacement recogniser or describe any loop syntax as old or removed.
 
-## Phase 5: Names, imports, calls and match context
+## Phase 5: Names, dependencies, calls and match context
 
 ### 5.1 Correct generic constructor guidance
 
@@ -899,7 +897,7 @@ Add candidate data to `UnknownTypeName` from the active type-resolution scope:
 - builtin types
 - visible local nominal types
 - visible aliases
-- visible imported and external types
+- visible dependency-bound and external types
 - active generic parameters
 
 Use the existing bounded edit-distance policy. Suggest only a sufficiently close visible candidate.
@@ -910,13 +908,13 @@ Examples:
 - close local type typo -> local type
 - unrelated unknown name -> no suggestion
 
-Do not search private, unimported or out-of-scope types.
+Do not search private, dependency-unbound or out-of-scope types.
 
 ### 5.3 Preserve namespace context and suggest direct members
 
 **Original findings corrected:** DIAG-009, DIAG-048
 **Original DIAG-040 disposition:** Removed. `math.PI` is valid namespace access.
-**Original DIAG-022 disposition:** Removed. Grouped imports of direct external exports are valid.
+**Original DIAG-022 disposition:** Removed. Delimiter-free direct selections of external exports are valid.
 
 Add a namespace-member diagnostic that carries:
 
@@ -927,9 +925,9 @@ Add a namespace-member diagnostic that carries:
 
 Messages:
 
-- unqualified direct member that exists in an imported namespace:
+- unqualified direct member that exists in a dependency namespace:
 
-  > Unknown value `PI`. It is available as `math.PI` from the imported `@core/math` namespace. Use a grouped import if you want the bare name.
+  > Unknown value `PI`. It is available as `math.PI` from the `@core/math` namespace. Use `@core/math PI` if you want the bare name.
 
 - qualified typo:
 
@@ -951,14 +949,14 @@ Rules:
   namespace has that direct value member. If several namespace aliases expose the same name, keep
   the ordinary unknown-value diagnostic rather than choosing one arbitrarily.
 - Do not suggest receiver methods as namespace fields.
-- A grouped import suggestion is valid only for a direct export.
+- A direct-selection suggestion is valid only for a direct export.
 - Sort and deduplicate candidate names before rendering so hash-map iteration cannot affect the
   chosen suggestion or available-member list.
 
-Extend `MissingPackageSymbol` with the same bounded direct-export suggestion policy so `import @core/math { pi }` may suggest `PI` rather than claiming grouped imports are unsupported.
-Build those grouped-import candidates from one-component function, constant and type paths on the
+Extend `MissingPackageSymbol` with the same bounded direct-export suggestion policy so `@core/math pi` may suggest `PI`.
+Build those direct-selection candidates from one-component function, constant and type paths on the
 matched external package. Nested package-local paths are not direct exports and must not be
-offered as grouped imports.
+offered as direct selections.
 
 ### 5.4 Include actual and expected argument counts
 
@@ -1002,7 +1000,7 @@ Carry the authored qualifier and the scrutinee's source-visible choice name:
 
 > Match arm uses qualifier `Size`, but the scrutinee is `Color`. Use a `Color` variant or omit the qualifier.
 
-Imported aliases must render using the visible source name where possible.
+Dependency aliases must render using the visible source name where possible.
 
 #### Payload captures
 
@@ -1311,7 +1309,7 @@ These items must not be implemented as originally proposed.
 | DIAG-007 | Retained, reversed | The binding does need to be mutable. Field assignment is `p.x = ...`, not `~p.x = ...`. |
 | DIAG-017 | Removed as stale | Current rendering identifies `|`, not `/`. A broader parser-context change is not justified without a current reproducible failure. |
 | DIAG-019 | Removed as ambiguous | `MyList {Int}` is a parseable typed declaration missing an initializer. The compiler cannot know it was intended as a type alias. |
-| DIAG-022 | Removed as incorrect | Direct external package exports support grouped imports. A missing symbol may receive a close-name suggestion instead. |
+| DIAG-022 | Removed as incorrect | Direct external package exports support delimiter-free direct selections. A missing symbol may receive a close-name suggestion instead. |
 | DIAG-029 | Removed as incorrect | Raw strings intentionally preserve backslashes and newlines. |
 | DIAG-033 | Removed as ambiguous | Unknown type `A` does not prove that a generic `type A` declaration was intended. |
 | DIAG-034 | Removed as resolved | Current expression typing already emits `BinaryRight` when the right operand is absent. |
@@ -1350,7 +1348,7 @@ After each phase:
 Use `tests/cases/` for:
 
 - quoted-string accepted and rejected source behaviour
-- import syntax
+- dependency syntax
 - malformed value-producing control flow
 - mutable calls and receiver calls
 - assignment and copy syntax

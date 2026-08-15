@@ -29,21 +29,21 @@ For a support package `S` whose nearest ancestor normal module is `P`:
 - `S` is not visible above `P`
 - `S` is not visible outside `P`'s subtree
 - `S` is not visible inside its own private implementation subtree
-- another support package in the same owner scope cannot import `S`
+- another support package in the same owner scope cannot depend on `S`
 
 ### Public surface
 
-Outside importers can only see declarations and grouped re-exports marked public by the support root's `export:` block. Internal implementation files are hidden unless the root re-exports them.
+Outside dependency clauses can only see declarations and direct-selection re-exports marked public by the support root's `export:` block. Internal implementation files are hidden unless the root re-exports them.
 
 ### Private subtrees
 
-The support facade may import ordinary files it owns, any descendant module in its private subtree, support packages from a strictly outer scope and registered packages. It may not import its parent, normal sibling consumers or same-scope support siblings.
+The support facade may depend on ordinary files it owns, any descendant module in its private subtree, support packages from a strictly outer scope and registered packages. It may not depend on its parent, normal sibling consumers or same-scope support siblings.
 
 Consumers see only the support facade's `export:` surface. They cannot address `@markdown/parser` or another implementation path.
 
-### Imported package roots do not produce routes
+### Depended-on package roots do not produce routes
 
-Code imports a support package root rather than activating it as an HTML route.
+Code depends on a support package root rather than activating it as an HTML route.
 Support roots reject top-level runtime work and page fragments. They export
 declarations but produce no HTML artefact. See
 @../project-structure/#html-routing-and-artifacts (HTML routing and artefacts).
@@ -56,4 +56,4 @@ Scoped `+*.moth` packages are ProjectLocal packages backed by Moth source. `@htm
 
 - For module root rules see @../project-structure/#module-roots (Module roots).
 - For the export block see @../project-structure/#public-api (Public API).
-- For import path resolution see @#import-paths (Import paths).
+- For dependency path resolution see @#dependency-paths (Dependency paths).

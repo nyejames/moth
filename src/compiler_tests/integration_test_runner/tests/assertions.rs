@@ -513,7 +513,7 @@ fn warning_build_result(codes: &[&str]) -> BuildResult {
             "MOTH-RULE-0022" => {
                 CompilerDiagnostic::unreachable_match_arm(SourceLocation::default())
             }
-            "MOTH-IMPORT-0003" => CompilerDiagnostic::import_alias_case_mismatch(
+            "MOTH-IMPORT-0003" => CompilerDiagnostic::dependency_alias_case_mismatch(
                 alias,
                 symbol,
                 SourceLocation::default(),

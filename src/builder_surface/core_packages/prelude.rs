@@ -1,7 +1,7 @@
 //! `@core/prelude` package registration.
 //!
 //! WHAT: registers the bare prelude symbols that are available without
-//! explicit imports in every module.
+//! explicit dependency clauses in every module.
 //! WHY: the prelude defines the minimal universal surface; builders must
 //! provide it, but the actual implementations live in specific core packages
 //! such as `@core/io`.

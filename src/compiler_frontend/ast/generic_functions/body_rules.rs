@@ -6,6 +6,7 @@
 //! has proven it does not depend on behavior that unconstrained generic parameters cannot
 //! guarantee before trait bounds exist.
 
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::function_body_to_ast;
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
 use crate::compiler_frontend::ast::module_ast::scope_context::ScopeContext;
@@ -16,7 +17,10 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
-type GenericFunctionBodyValidationResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// Generic body validation executes the ordinary body parser and retains its two-lane failure.
+/// A corrupted frozen token table is an internal compiler failure even while validating a source
+/// generic template.
+type GenericFunctionBodyValidationResult<T> = Result<T, ExpressionParseError>;
 
 /// Input bundle for generic body validation.
 ///
@@ -67,7 +71,7 @@ pub(crate) fn validate_generic_function_body(
         policy,
         template.declaration_location.clone(),
     ) {
-        return Err(Box::new(diagnostic));
+        return Err(diagnostic.into());
     }
 
     Ok(())

@@ -1,0 +1,12 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0019"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0019"
+reason = "invalid_dependency_clause.missing_selection_after_comma"
+path = "input/@page.moth"
+line = 1
+column = 16
+count = 1

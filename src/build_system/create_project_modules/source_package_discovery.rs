@@ -18,20 +18,20 @@ use super::source_tree_index::SourceTreeIndex;
 
 use std::fs;
 
-/// One source-package boundary index paired with its import prefix, in deterministic order.
+/// One source-package boundary index paired with its package prefix, in deterministic order.
 ///
-/// WHAT: owned by [`SourcePackageBoundaryIndexes`] and iterated in import-prefix order so the
+/// WHAT: owned by [`SourcePackageBoundaryIndexes`] and iterated in package-prefix order so the
 /// Stage 0 package-boundary owner preserves one canonical package order at every surface.
 #[derive(Debug)]
 pub(crate) struct SourcePackageBoundaryIndex {
-    import_prefix: String,
+    package_prefix: String,
     index: SourceTreeIndex,
 }
 
 /// The Stage 0 owner of one independent [`SourceTreeIndex`] per selected source-package boundary.
 ///
 /// WHAT: stores one boundary index per registered source-backed package in deterministic
-/// import-prefix order. Each index owns its own stable package identity, dense `SourceId`s,
+/// package-prefix order. Each index owns its own stable package identity, dense `SourceId`s,
 /// `ModuleId`s and ownership tables; raw IDs never cross boundaries.
 /// WHY: the build-system authority requires Core, Builder and dependency source packages to
 /// compile as separate graphs with their own source indexes. This owner is the single Stage 0
@@ -43,14 +43,14 @@ pub(crate) struct SourcePackageBoundaryIndexes {
 }
 
 impl SourcePackageBoundaryIndexes {
-    /// Iterate the boundary indexes in deterministic import-prefix order.
+    /// Iterate the boundary indexes in deterministic package-prefix order.
     ///
     /// Production code derives the resolver view from this iteration; focused tests inspect the
     /// boundary-local indexes through the same single surface.
     pub(crate) fn iter(&self) -> impl Iterator<Item = (&str, &SourceTreeIndex)> {
         self.indexes
             .iter()
-            .map(|entry| (entry.import_prefix.as_str(), &entry.index))
+            .map(|entry| (entry.package_prefix.as_str(), &entry.index))
     }
 
     /// Derive the resolver's narrow package-root view from indexed facts.
@@ -63,13 +63,13 @@ impl SourcePackageBoundaryIndexes {
     pub(crate) fn prepared_source_package_roots(&self) -> PreparedSourcePackageRoots {
         let mut entries = Vec::with_capacity(self.indexes.len());
 
-        for (import_prefix, index) in self.iter() {
+        for (package_prefix, index) in self.iter() {
             let root = index.entry_root().to_path_buf();
             let root_file = index
                 .root_file_for_entry_root()
                 .expect("a successful package boundary index has an entry-root module")
                 .to_path_buf();
-            entries.push((import_prefix.to_owned(), root, root_file));
+            entries.push((package_prefix.to_owned(), root, root_file));
         }
 
         PreparedSourcePackageRoots::from_entries(entries)
@@ -80,7 +80,7 @@ impl SourcePackageBoundaryIndexes {
 ///
 /// WHAT: canonicalizes each registered filesystem root, traverses it as an independent
 /// `SourceTreeIndex` with its own stable package identity, and stores the indexes in
-/// deterministic import-prefix order. The traversal owns direct root discovery and sibling
+/// deterministic package-prefix order. The traversal owns direct root discovery and sibling
 /// `.moth` file/folder collisions for each package tree, so no separate package-root or
 /// package-tree collision scan remains.
 /// WHY: Stage 0 owns filesystem preparation. Each package boundary owns a separate index so
@@ -112,24 +112,24 @@ pub(crate) fn build_source_package_boundary_indexes(
         })?;
 
         let package_identity =
-            StablePackageIdentity::source_package(package.metadata.origin, &package.import_prefix);
+            StablePackageIdentity::source_package(package.metadata.origin, &package.package_prefix);
 
         let index = SourceTreeIndex::discover_package(
             canonical_root,
             package_identity,
-            &package.import_prefix,
+            &package.package_prefix,
             source_file_kinds,
             external_import_providers,
             string_table,
         )?;
 
         indexes.push(SourcePackageBoundaryIndex {
-            import_prefix: package.import_prefix.clone(),
+            package_prefix: package.package_prefix.clone(),
             index,
         });
     }
 
-    // `source_packages.iter()` already yields import-prefix order from the registry's `BTreeMap`,
+    // `source_packages.iter()` already yields package-prefix order from the registry's `BTreeMap`,
     // so the owner preserves one canonical package order without an explicit re-sort.
     Ok(SourcePackageBoundaryIndexes { indexes })
 }

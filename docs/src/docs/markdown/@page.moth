@@ -1,45 +1,27 @@
-import @markdown-files {
-    content as markdown_files,
-}
+@markdown-files content as markdown_files
 
-import @markdown-files-basic {
-    content as markdown_files_basic,
-}
+@markdown-files-basic content as markdown_files_basic
 
-import @markdown-imports {
-    content as markdown_imports,
-}
+@markdown-dependencies content as markdown_dependencies
 
-import @markdown-imports-basic {
-    content as markdown_imports_basic,
-}
+@markdown-dependencies-basic content as markdown_dependencies_basic
 
-import @rendering-contract {
-    content as rendering_contract,
-}
+@rendering-contract content as rendering_contract
 
-import @rendering-contract-basic {
-    content as rendering_contract_basic,
-}
+@rendering-contract-basic content as rendering_contract_basic
 
-import @choosing-a-content-format {
-    content as choosing_a_content_format,
-}
+@choosing-a-content-format content as choosing_a_content_format
 
-import @choosing-a-content-format-basic {
-    content as choosing_a_content_format_basic,
-}
+@choosing-a-content-format-basic content as choosing_a_content_format_basic
 
-import @styles {
-    navbar,
+@styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager,
-}
+    doc_pager
 
 page_title #= "Plain Markdown"
-page_description #= "Plain Markdown content imports for HTML projects."
+page_description #= "Plain Markdown content dependencies for HTML projects."
 page_head #= language_theme_head
 
 #[navbar]
@@ -69,11 +51,11 @@ page_head #= language_theme_head
 
 #[section:
     [doc_level:
-        [$insert("key"):markdown-imports]
-        [$insert("title"):Markdown imports]
-        [$insert("advanced"):[markdown_imports]]
+        [$insert("key"):markdown-dependencies]
+        [$insert("title"):Markdown dependencies]
+        [$insert("advanced"):[markdown_dependencies]]
 
-        [markdown_imports_basic]
+        [markdown_dependencies_basic]
     ]
 ]
 

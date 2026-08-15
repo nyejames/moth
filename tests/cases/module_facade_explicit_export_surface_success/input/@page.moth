@@ -1,12 +1,10 @@
-import @widget {
-    PublicCard,
+@widget PublicCard,
     PublicState,
     PublicText,
     make_state,
     public_title,
     render_card,
-    render_card_or_error,
-}
+    render_card_or_error
 
 card = PublicCard(public_title)
 state PublicState = make_state()

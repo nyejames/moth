@@ -24,7 +24,7 @@ use crate::compiler_frontend::ast::field_access::reference_expression_from_decla
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
-use crate::compiler_frontend::headers::import_environment::NamespaceValueMember;
+use crate::compiler_frontend::headers::binding_environment::NamespaceValueMember;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation};

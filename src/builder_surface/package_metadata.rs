@@ -10,7 +10,7 @@
 ///
 /// WHAT: classifies packages by their provider relationship.
 /// WHY: diagnostics and availability checks need to distinguish core, builder,
-/// project-local and future dependency packages without inspecting import paths.
+/// project-local and future dependency packages without inspecting dependency paths.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum PackageOrigin {
     /// Compiler-owned core packages (e.g. `@core/io`, `@core/math`).

@@ -1,16 +1,17 @@
 //! Per-file header parser state and output assembly.
 //!
 //! WHAT: owns the accumulators used while one token stream is split into declaration headers,
-//! import records, const-fragment metadata, and implicit start-body tokens.
+//! dependency records, const-fragment metadata, and implicit start-body tokens.
 //! WHY: keeping mutable file-local state behind one owner lets `file_parser` read as the
 //! high-level header-state machine instead of a long list of unrelated vectors and counters.
 
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::headers::types::{
-    FileFrontendPrepareError, FileFrontendPrepareOutput, FileImport, FileRole, Header,
-    HeaderExportMode, HeaderKind, TopLevelConstFragment,
+    DependencySelection, FileFrontendPrepareError, FileFrontendPrepareOutput, FileRole, Header,
+    HeaderExportMode, HeaderKind, PreparedFilePathSyntax, RetainedDependencyClause,
+    TopLevelConstFragment,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
 use crate::projects::settings::{
@@ -29,9 +30,13 @@ pub(super) struct HeaderFileParseState {
     pub(super) encountered_symbols: HashMap<StringId, SourceLocation>,
     pub(super) start_body_symbols: HashSet<StringId>,
     pub(super) start_function_body: Vec<Token>,
-    pub(super) seen_imports: HashSet<(InternedPath, Option<StringId>)>,
-    pub(super) file_import_paths: HashSet<InternedPath>,
-    pub(super) file_imports: Vec<FileImport>,
+    pub(super) file_dependency_clauses: Vec<RetainedDependencyClause>,
+    pub(super) dependency_selections: Vec<DependencySelection>,
+    /// Ordinal of the next authored dependency clause in this file.
+    ///
+    /// WHAT: one `DependencyShellId` per authored clause regardless of selected leaf count;
+    ///       every authored clause keeps its own retained shell.
+    pub(super) dependency_clause_count: usize,
     pub(super) top_level_const_fragments: Vec<TopLevelConstFragment>,
     pub(super) runtime_fragment_count: usize,
     pub(super) const_template_count: usize,
@@ -57,9 +62,9 @@ impl HeaderFileParseState {
             ),
             start_body_symbols: HashSet::new(),
             start_function_body: Vec::new(),
-            seen_imports: HashSet::new(),
-            file_import_paths: HashSet::new(),
-            file_imports: Vec::new(),
+            file_dependency_clauses: Vec::new(),
+            dependency_selections: Vec::new(),
+            dependency_clause_count: 0,
             top_level_const_fragments: Vec::new(),
             runtime_fragment_count: 0,
             const_template_count: 0,
@@ -109,18 +114,22 @@ impl HeaderFileParseState {
 
     pub(super) fn into_non_entry_output(
         self,
-        token_stream: &FileTokens,
+        token_stream: &mut FileTokens,
         file_role: FileRole,
-    ) -> FileFrontendPrepareOutput {
+    ) -> Result<FileFrontendPrepareOutput, CompilerError> {
         let has_non_trivial_root_body =
             file_role == FileRole::ActiveModuleRoot && self.has_non_trivial_start_body();
-        FileFrontendPrepareOutput {
+        let path_syntax = PreparedFilePathSyntax::from_file_tokens(token_stream)?;
+
+        Ok(FileFrontendPrepareOutput {
             source_file: token_stream.src_path.to_owned(),
             file_id: token_stream.file_id,
+            path_syntax,
             token_count: self.token_count,
             token_stats: token_stream.token_stats,
             file_role,
-            file_imports: self.file_imports,
+            file_dependency_clauses: self.file_dependency_clauses,
+            dependency_selections: self.dependency_selections,
             canonical_os_path: token_stream.canonical_os_path.clone(),
             headers: self.headers,
             top_level_const_fragments: self.top_level_const_fragments,
@@ -128,44 +137,52 @@ impl HeaderFileParseState {
             runtime_fragment_count: self.runtime_fragment_count,
             has_non_trivial_root_body,
             warnings: self.warnings,
-        }
+        })
     }
 
     pub(super) fn into_entry_output(
         mut self,
-        token_stream: &FileTokens,
+        token_stream: &mut FileTokens,
         file_role: FileRole,
-    ) -> FileFrontendPrepareOutput {
+    ) -> Result<FileFrontendPrepareOutput, CompilerError> {
         let has_non_trivial_root_body = self.has_non_trivial_start_body();
         use crate::compiler_frontend::headers::types::HeaderExportMode;
 
         // Active module root: build the start function header for later AST body parsing.
         // `start` is never a dependency-graph participant, so this header keeps no graph edges.
-        let mut start_tokens = FileTokens::new_with_file_id(
+        let start_tokens = FileTokens::new_substream(
+            token_stream,
             token_stream.src_path.to_owned(),
             token_stream.file_id,
             self.start_function_body,
         );
-        start_tokens.canonical_os_path = token_stream.canonical_os_path.clone();
 
         self.headers.push(Header {
             kind: HeaderKind::StartFunction,
             file_role,
             export_mode: HeaderExportMode::Private,
             local_ordering_hints: HashSet::new(),
-            name_location: SourceLocation::default(),
+            name_location: SourceLocation::new(
+                token_stream.src_path.to_owned(),
+                Default::default(),
+                Default::default(),
+            ),
             tokens: start_tokens,
             source_file: token_stream.src_path.to_owned(),
             capacity_references: Vec::new(),
         });
 
-        FileFrontendPrepareOutput {
+        let path_syntax = PreparedFilePathSyntax::from_file_tokens(token_stream)?;
+
+        Ok(FileFrontendPrepareOutput {
             source_file: token_stream.src_path.to_owned(),
             file_id: token_stream.file_id,
+            path_syntax,
             token_count: self.token_count,
             token_stats: token_stream.token_stats,
             file_role,
-            file_imports: self.file_imports,
+            file_dependency_clauses: self.file_dependency_clauses,
+            dependency_selections: self.dependency_selections,
             canonical_os_path: token_stream.canonical_os_path.clone(),
             headers: self.headers,
             top_level_const_fragments: self.top_level_const_fragments,
@@ -173,7 +190,7 @@ impl HeaderFileParseState {
             runtime_fragment_count: self.runtime_fragment_count,
             has_non_trivial_root_body,
             warnings: self.warnings,
-        }
+        })
     }
 
     pub(super) fn into_error(self, diagnostic: CompilerDiagnostic) -> FileFrontendPrepareError {

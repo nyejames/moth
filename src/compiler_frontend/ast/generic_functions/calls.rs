@@ -832,7 +832,7 @@ pub(crate) fn generic_function_instance_path(
 ) -> InternedPath {
     // WHAT: builds an internal-only path for a concrete generic function instance.
     // WHY: instances are emitted into the consuming module's AST/HIR and are not
-    //      user-visible, importable, or namespace-exposed.
+    //      user-visible, dependency-bindable, or namespace-exposed.
     //
     // The suffix uses module-local numeric TypeId values. This is safe because:
     // - instances are scoped to one module and never shared across modules;

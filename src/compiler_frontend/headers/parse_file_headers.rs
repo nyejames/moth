@@ -12,20 +12,21 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticBag, InvalidDeclarationReason,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::headers::binding_environment::{
+    BindingEnvironmentInput, prepare_binding_environment,
+};
 use crate::compiler_frontend::headers::constant_dependencies::{
     ConstantDependencyInput, add_constant_initializer_dependencies,
 };
 use crate::compiler_frontend::headers::dependency_canonicalization::canonicalize_local_ordering_hints;
 use crate::compiler_frontend::headers::file_parser::parse_headers_in_file;
-use crate::compiler_frontend::headers::import_environment::{
-    ImportEnvironmentInput, prepare_import_environment,
-};
 use crate::compiler_frontend::headers::public_exports::build_public_exports;
 use crate::compiler_frontend::headers::symbol_collection::build_module_symbols;
 use crate::compiler_frontend::headers::types::HeaderParseContext;
 pub use crate::compiler_frontend::headers::types::{
-    BoundModuleHeaders, FileFrontendPrepareError, FileFrontendPrepareOutput, FileImport, FileRole,
-    Header, HeaderKind, HeaderParseOptions, LocalDeclarationOrderingHint, PreparedHeaderSyntax,
+    BoundModuleHeaders, FileFrontendPrepareError, FileFrontendPrepareFailure,
+    FileFrontendPrepareOutput, FileRole, Header, HeaderKind, HeaderParseOptions,
+    LocalDeclarationOrderingHint, PreparedHeaderSyntax, RetainedDependencyClause,
     TopLevelConstFragment,
 };
 // HeaderExportMode is re-exported for focused AST tests that construct Header values with
@@ -54,7 +55,7 @@ pub fn parse_file_headers_with_table(
     string_table: &mut StringTable,
     const_template_offset: usize,
     runtime_fragment_offset: usize,
-) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareError> {
+) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
     let HeaderParseOptions { entry_file_id, .. } = options;
 
     let is_entry_file = match (*entry_file_id, file_tokens.file_id) {
@@ -121,7 +122,7 @@ pub fn prepare_file_from_tokens(
     string_table: &mut StringTable,
     const_template_offset: usize,
     runtime_fragment_offset: usize,
-) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareError> {
+) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
     let fork_source = string_table.fork_source();
     let (mut local_string_table, base_len) = fork_source.fork_for_module().into_parts();
 
@@ -138,13 +139,19 @@ pub fn prepare_file_from_tokens(
 
     match file_output {
         Ok(mut output) => {
-            output.remap_string_ids(&remap);
+            output
+                .remap_string_ids(&remap)
+                .map_err(FileFrontendPrepareFailure::Infrastructure)?;
+            output
+                .freeze_path_syntax(string_table)
+                .map_err(FileFrontendPrepareFailure::Infrastructure)?;
             Ok(output)
         }
-        Err(mut error) => {
+        Err(FileFrontendPrepareFailure::Diagnosed(mut error)) => {
             error.remap_string_ids(&remap);
-            Err(error)
+            Err(FileFrontendPrepareFailure::Diagnosed(error))
         }
+        Err(error @ FileFrontendPrepareFailure::Infrastructure(_)) => Err(error),
     }
 }
 
@@ -152,16 +159,16 @@ pub fn prepare_file_from_tokens(
 /// `PreparedHeaderSyntax`.
 ///
 /// WHAT: consumes already-remapped `FileFrontendPrepareOutput` values, builds the module-wide
-/// symbol package, and collects retained header/import shells, root-activity/fragment metadata,
+/// symbol package, and collects retained header/dependency shells, root-activity/fragment metadata,
 /// and token/header statistics.
 /// WHY: this is the only phase that discovers module-wide top-level declaration syntax. It must
 /// complete before provider interfaces are available so binding can consume retained syntax
 /// without retokenizing or reparsing source.
 pub fn prepare_header_syntax(
-    prepared_files: Vec<FileFrontendPrepareOutput>,
+    mut prepared_files: Vec<FileFrontendPrepareOutput>,
     string_table: &mut StringTable,
 ) -> Result<PreparedHeaderSyntax, DiagnosticBag> {
-    let module_symbols = build_module_symbols(&prepared_files, string_table)?;
+    let module_symbols = build_module_symbols(&mut prepared_files, string_table)?;
 
     let mut headers: Vec<Header> = Vec::new();
     let mut top_level_const_fragments = Vec::new();
@@ -198,7 +205,7 @@ pub fn prepare_header_syntax(
 /// Bind retained `PreparedHeaderSyntax` against provider interfaces to produce
 /// `BoundModuleHeaders`.
 ///
-/// WHAT: resolves public exports, builds the import environment, canonicalizes dependency edges,
+/// WHAT: resolves public exports, builds the header binding environment, canonicalizes dependency edges,
 /// and completes constant initializer dependencies. Does not retokenize source or reparse
 /// declaration syntax — it consumes only the retained `PreparedHeaderSyntax`.
 /// WHY: these facts depend on provider interfaces and the project path resolver, so they cannot
@@ -207,8 +214,8 @@ pub fn prepare_header_syntax(
 pub fn bind_module_headers(
     prepared: PreparedHeaderSyntax,
     external_package_registry: &ExternalPackageRegistry,
-    external_import_resolution_table: &ExternalImportResolutionTable,
-    source_provider_imports: &crate::compiler_frontend::public_interface::SourceProviderImportSet<
+    external_dependency_resolution_table: &ExternalImportResolutionTable,
+    source_provider_dependencies: &crate::compiler_frontend::public_interface::SourceProviderDependencySet<
         '_,
     >,
     project_path_resolver: Option<&ProjectPathResolver>,
@@ -233,7 +240,7 @@ pub fn bind_module_headers(
             &headers,
             resolver,
             external_package_registry,
-            source_provider_imports,
+            source_provider_dependencies,
             string_table,
         )
         .map_err(|boxed_diagnostic| {
@@ -243,25 +250,27 @@ pub fn bind_module_headers(
         })?;
     }
 
-    let import_environment = prepare_import_environment(ImportEnvironmentInput {
-        module_symbols: &mut module_symbols,
+    let binding_environment = prepare_binding_environment(BindingEnvironmentInput {
+        module_symbols: &module_symbols,
         external_package_registry,
-        external_import_resolution_table,
-        source_provider_imports,
+        external_dependency_resolution_table,
+        source_provider_dependencies,
         string_table,
     })
     .map_err(|messages| DiagnosticBag::from_diagnostics(messages.into_diagnostics()))?;
 
     canonicalize_local_ordering_hints(
         &mut headers,
-        &import_environment,
-        &module_symbols.file_imports_by_source,
+        &binding_environment,
+        &module_symbols.file_dependency_clauses_by_source,
+        &module_symbols.dependency_selections_by_source,
+        string_table,
     )?;
 
     let _constant_report = add_constant_initializer_dependencies(ConstantDependencyInput {
         headers: &mut headers,
         module_symbols: &module_symbols,
-        import_environment: &import_environment,
+        binding_environment: &binding_environment,
         string_table,
     })?;
 
@@ -274,7 +283,7 @@ pub fn bind_module_headers(
         token_stats,
         header_stats,
         module_symbols,
-        import_environment,
+        binding_environment,
     })
 }
 
@@ -283,8 +292,8 @@ pub fn bind_module_headers(
 /// WHAT: rejects declaration names that reuse prelude functions and generic parameters that reuse
 /// prelude types, preserving their authored names and locations.
 /// WHY: prelude membership is provider-dependent, so syntax preparation retains these shells
-/// uniformly and binding validates them once the provider interface exists. Import-alias generic
-/// collisions remain syntax-owned; same-file and imported visible-type collisions remain AST-owned.
+/// uniformly and binding validates them once the provider interface exists. Dependency-alias generic
+/// collisions remain syntax-owned; same-file and dependency-bound visible-type collisions remain AST-owned.
 fn validate_prelude_declaration_shells(
     headers: &[Header],
     external_package_registry: &ExternalPackageRegistry,

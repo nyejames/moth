@@ -570,7 +570,7 @@ Required existing case updates:
 - [ ] Update `collection_ordered_runtime_operations` so its growable push is unhandled and its exact runtime output remains unchanged
 - [ ] Preserve `fixed_collection_push_overflow_catch`
 - [ ] Preserve `fixed_collection_js_runtime_capacity`
-- [ ] Review every fixed-capacity import, alias, facade and const-capacity case for the fixed operation identity
+- [ ] Review every fixed-capacity dependency, alias, facade and const-capacity case for the fixed operation identity
 - [ ] Update collection borrow cases without changing the borrow contract they own
 - [ ] Update mutable-parameter cases without weakening their access-mode contract
 
@@ -726,7 +726,7 @@ In `docs/src/docs/packages/core/collections/collections.mtf`:
 - [ ] Mark growable push as void and infallible
 - [ ] Mark fixed push as void-success and fallible on capacity
 - [ ] Keep mutable receiver access for both
-- [ ] Keep direct import unsupported
+- [ ] Keep direct dependency binding unsupported
 - [ ] Keep HTML-Wasm lowering deferred
 
 In `collections-basic.mtf`:

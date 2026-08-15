@@ -8,10 +8,10 @@ diagnostic_codes = ["MOTH-IMPORT-0009"]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-IMPORT-0009"
 path = "input/docs/@home.moth"
-line = 6
+line = 4
 count = 1
 
 [[backends.html.diagnostic_assertions.secondary_labels]]
 occurrence = 1
-line = 89
+line = 87
 column = 6

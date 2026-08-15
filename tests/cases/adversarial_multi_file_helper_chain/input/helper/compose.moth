@@ -1,4 +1,4 @@
-import @helper/prefix { prefix }
+@helper/prefix prefix
 
 compose |value String| -> String:
     left = prefix()

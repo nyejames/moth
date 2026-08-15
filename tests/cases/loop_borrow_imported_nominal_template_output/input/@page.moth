@@ -1,5 +1,5 @@
-import @card {Card}
-import @listing {render_listing}
+@card Card
+@listing render_listing
 
 card = Card("one")
 cards = {card}

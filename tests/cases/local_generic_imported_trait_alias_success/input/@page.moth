@@ -1,4 +1,4 @@
-import @provider { DISPLAY_TEXT as PRINTABLE, Label }
+@provider DISPLAY_TEXT as PRINTABLE, Label
 
 show type Item is PRINTABLE |item Item| -> String:
     return item.display()

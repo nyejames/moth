@@ -77,7 +77,7 @@ Rules:
 - Builder and tooling sections consume backend-neutral folded values.
 - Output settings belong to the active builder section.
 - Named support structs, choices and aliases are not part of config after anonymous const records land.
-- Package dependency declarations are not implemented here. Until the later package plan is accepted, every config import remains rejected before resolution.
+- Package dependency declarations are not implemented here. Until the later package plan is accepted, every config dependency remains rejected before resolution.
 
 ## Recursive schema model
 
@@ -105,7 +105,7 @@ Requirements:
 
 ## Non-goals
 
-- no package dependency imports
+- no package dependency declarations
 - no `#Import` or CLI build-input implementation
 - no `@project`
 - no entry-local `config:` blocks
@@ -220,7 +220,7 @@ Cover:
 - separate project and entry schemas
 - typed builder settings
 - output-root defaults and validation
-- rejection of imports, named support types and legacy flat keys
+- rejection of dependency declarations, named support types and legacy flat keys
 - no config HIR or source graph
 
 ## Validation
@@ -243,4 +243,4 @@ Verify:
 - no flat key registry or string settings map remains
 - project and entry schemas are separate
 - output settings are builder-owned
-- package dependency imports, build inputs and runtime anonymous records remain outside this plan
+- package dependency declarations, build inputs and runtime anonymous records remain outside this plan

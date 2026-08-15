@@ -1,4 +1,4 @@
-import @core/time
+@core/time
 
 -- Use epoch values for stable output
 ts0 = time.timestamp_from_unix_milliseconds(0.0)

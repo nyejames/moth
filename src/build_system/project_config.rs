@@ -27,7 +27,7 @@ use std::path::Path;
 /// WHAT: bundles the style directives and the complete builder surface (external packages,
 /// source-backed packages, and config keys) that config parsing needs.
 /// WHY: `bootstrap_project_build` already computes `BuilderSurface` before config loading. Threading
-/// it through config parsing keeps selected capability metadata available while config import
+/// it through config parsing keeps selected capability metadata available while config dependency
 /// syntax remains rejected by the config parser.
 pub(crate) struct ProjectConfigParseServices<'a> {
     pub style_directives: &'a StyleDirectiveRegistry,

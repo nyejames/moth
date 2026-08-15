@@ -10,15 +10,13 @@ use crate::compiler_frontend::analysis::borrow_checker::{
 };
 use crate::compiler_frontend::arena::FrontendArenaCapacityEstimate;
 use crate::compiler_frontend::ast::{Ast, AstBuildContext, AstBuildInput, AstBuildResult};
-use crate::compiler_frontend::compiler_errors::{
-    CompilerError, CompilerMessages, compiler_error_to_diagnostic,
-};
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticBag};
+use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::moth_template_prepare::prepare_moth_template_file;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    BoundModuleHeaders, FileFrontendPrepareError, FileFrontendPrepareOutput, HeaderParseOptions,
-    parse_file_headers_with_table,
+    BoundModuleHeaders, FileFrontendPrepareError, FileFrontendPrepareFailure,
+    FileFrontendPrepareOutput, HeaderParseOptions, parse_file_headers_with_table,
 };
 use crate::compiler_frontend::headers::plain_markdown_prepare::{
     PlainMarkdownPrepareInput, prepare_plain_markdown_file,
@@ -26,6 +24,7 @@ use crate::compiler_frontend::headers::plain_markdown_prepare::{
 use crate::compiler_frontend::hir::functions::HirFunctionOriginLookup;
 use crate::compiler_frontend::hir::hir_builder::lower_module;
 use crate::compiler_frontend::hir::module::HirModule;
+use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::module_dependencies::{SortedHeaders, resolve_module_dependencies};
 use crate::compiler_frontend::paths::path_format::{OutputPathStyle, PathStringFormatConfig};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
@@ -41,6 +40,60 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::compiler_frontend::module_metadata::HirLoweringResult;
+
+#[cfg(test)]
+use std::collections::HashMap;
+#[cfg(test)]
+use std::sync::{LazyLock, Mutex};
+
+#[cfg(test)]
+static FILE_FRONTEND_PREPARE_COUNTS_FOR_TEST: LazyLock<Mutex<HashMap<PathBuf, usize>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+#[cfg(test)]
+static FILE_FRONTEND_PREPARE_TRACK_PREFIX_FOR_TEST: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+#[cfg(test)]
+fn record_file_frontend_prepare_for_test(source: &FrontendFilePrepareSource) {
+    let source_path = match source {
+        FrontendFilePrepareSource::Moth { source_path, .. }
+        | FrontendFilePrepareSource::MothTemplate { source_path, .. }
+        | FrontendFilePrepareSource::PlainMarkdown { source_path, .. } => source_path,
+    };
+    let prefix = FILE_FRONTEND_PREPARE_TRACK_PREFIX_FOR_TEST
+        .lock()
+        .expect("file preparation test hook lock poisoned");
+    if prefix
+        .as_ref()
+        .is_none_or(|tracked_prefix| source_path.starts_with(tracked_prefix))
+    {
+        *FILE_FRONTEND_PREPARE_COUNTS_FOR_TEST
+            .lock()
+            .expect("file preparation count test hook lock poisoned")
+            .entry(source_path.clone())
+            .or_insert(0) += 1;
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn reset_file_frontend_prepare_count_for_test(tracked_prefix: &Path) {
+    *FILE_FRONTEND_PREPARE_TRACK_PREFIX_FOR_TEST
+        .lock()
+        .expect("file preparation test hook lock poisoned") = Some(tracked_prefix.to_path_buf());
+    FILE_FRONTEND_PREPARE_COUNTS_FOR_TEST
+        .lock()
+        .expect("file preparation count test hook lock poisoned")
+        .clear();
+}
+
+#[cfg(test)]
+pub(crate) fn file_frontend_prepare_count_for_path_for_test(path: &Path) -> usize {
+    FILE_FRONTEND_PREPARE_COUNTS_FOR_TEST
+        .lock()
+        .expect("file preparation count test hook lock poisoned")
+        .get(path)
+        .copied()
+        .unwrap_or(0)
+}
 
 pub struct CompilerFrontend {
     pub(crate) external_package_registry: Arc<ExternalPackageRegistry>,
@@ -201,9 +254,9 @@ impl CompilerFrontend {
         module_path: &Path,
         tokenizer_entry_mode: TokenizerEntryMode,
         string_table: &mut StringTable,
-    ) -> Result<FileTokens, Box<CompilerDiagnostic>> {
+    ) -> Result<FileTokens, FileFrontendPrepareFailure> {
         let identity = source_file_identity(source_files, module_path, string_table)
-            .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
+            .map_err(FileFrontendPrepareFailure::Infrastructure)?;
 
         let mut tokens = tokenize(
             source_code,
@@ -212,7 +265,13 @@ impl CompilerFrontend {
             style_directives,
             string_table,
             identity.file_id,
-        )?;
+        )
+        .map_err(|diagnostic| {
+            FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
+                warnings: Vec::new(),
+                diagnostic,
+            })
+        })?;
         tokens.canonical_os_path = identity.canonical_os_path;
         Ok(tokens)
     }
@@ -228,7 +287,11 @@ impl CompilerFrontend {
         context: &FrontendFilePrepareContext<'_>,
         input: FrontendFilePrepareInput,
         local_string_table: &mut StringTable,
-    ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareError> {
+    ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
+        add_frontend_counter(FrontendCounter::FilePreparationPassCount, 1);
+        #[cfg(test)]
+        record_file_frontend_prepare_for_test(&input.source);
+
         match input.source {
             FrontendFilePrepareSource::PlainMarkdown {
                 source_code,
@@ -236,10 +299,7 @@ impl CompilerFrontend {
             } => {
                 let identity =
                     source_file_identity(context.source_files, &source_path, local_string_table)
-                        .map_err(|error| FileFrontendPrepareError {
-                            warnings: Vec::new(),
-                            diagnostic: Box::new(compiler_error_to_diagnostic(&error)),
-                        })?;
+                        .map_err(FileFrontendPrepareFailure::Infrastructure)?;
                 Ok(prepare_plain_markdown_file(
                     PlainMarkdownPrepareInput {
                         source_code: &source_code,
@@ -259,16 +319,15 @@ impl CompilerFrontend {
                 // re-tokenizing. `tokens` is present by type, so no absent-token panic is possible.
                 let identity =
                     source_file_identity(context.source_files, &source_path, local_string_table)
-                        .map_err(|error| FileFrontendPrepareError {
-                            warnings: Vec::new(),
-                            diagnostic: Box::new(compiler_error_to_diagnostic(&error)),
-                        })?;
+                        .map_err(FileFrontendPrepareFailure::Infrastructure)?;
 
-                tokens.rebind_source_identity(
-                    identity.logical_path,
-                    identity.file_id,
-                    identity.canonical_os_path,
-                );
+                tokens
+                    .rebind_source_identity(
+                        identity.logical_path,
+                        identity.file_id,
+                        identity.canonical_os_path,
+                    )
+                    .map_err(FileFrontendPrepareFailure::Infrastructure)?;
 
                 parse_file_headers_with_table(
                     &mut tokens,
@@ -290,26 +349,17 @@ impl CompilerFrontend {
                         None => unreachable!("Moth template has a tokenizer entry mode"),
                     };
 
-                let tokenization = Self::tokenize_source(
+                let file_tokens = Self::tokenize_source(
                     context.source_files,
                     context.style_directives,
                     &source_code,
                     &source_path,
                     tokenizer_entry_mode,
                     local_string_table,
-                );
+                )?;
 
-                let file_tokens = match tokenization {
-                    Ok(tokens) => tokens,
-                    Err(diagnostic) => {
-                        return Err(FileFrontendPrepareError {
-                            warnings: Vec::new(),
-                            diagnostic,
-                        });
-                    }
-                };
-
-                Ok(prepare_moth_template_file(file_tokens, local_string_table))
+                prepare_moth_template_file(file_tokens, local_string_table)
+                    .map_err(FileFrontendPrepareFailure::Infrastructure)
             }
         }
     }
@@ -360,7 +410,7 @@ impl CompilerFrontend {
             AstBuildInput {
                 headers: sorted.headers,
                 module_symbols: sorted.module_symbols,
-                import_environment: sorted.import_environment,
+                binding_environment: sorted.binding_environment,
                 top_level_const_fragments: sorted.top_level_const_fragments,
             },
             AstBuildContext {

@@ -6,11 +6,14 @@
 //! should see an ordinary constant header instead of a Moth template-specific AST path
 //! or textually wrapped source.
 
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::source_location::CharPosition;
 use crate::compiler_frontend::headers::synthetic_content_header::{
     SyntheticContentHeaderInput, synthetic_content_header,
 };
-use crate::compiler_frontend::headers::types::{FileFrontendPrepareOutput, FileRole};
+use crate::compiler_frontend::headers::types::{
+    FileFrontendPrepareOutput, FileRole, PreparedFilePathSyntax,
+};
 use crate::compiler_frontend::symbols::identity::FileId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -26,21 +29,24 @@ const MOTH_TEMPLATE_MARKDOWN_DIRECTIVE: &str = "md";
 /// policy. This function adds only structural wrapper tokens around those body tokens; it never
 /// prepends or appends source text.
 pub(crate) fn prepare_moth_template_file(
-    file_tokens: FileTokens,
+    mut file_tokens: FileTokens,
     string_table: &mut StringTable,
-) -> FileFrontendPrepareOutput {
+) -> Result<FileFrontendPrepareOutput, CompilerError> {
     let token_count = file_tokens.length;
     let token_stats = file_tokens.token_stats;
+    let path_syntax = PreparedFilePathSyntax::from_file_tokens(&mut file_tokens)?;
     let context = MothTemplatePrepareContext::new(file_tokens, string_table);
     let content_header = context.content_header(string_table);
 
-    FileFrontendPrepareOutput {
+    Ok(FileFrontendPrepareOutput {
         source_file: context.source_file,
         file_id: context.file_id,
+        path_syntax,
         token_count,
         token_stats,
         file_role: FileRole::Normal,
-        file_imports: Vec::new(),
+        file_dependency_clauses: Vec::new(),
+        dependency_selections: Vec::new(),
         canonical_os_path: context.canonical_os_path,
         headers: vec![content_header],
         top_level_const_fragments: Vec::new(),
@@ -48,7 +54,7 @@ pub(crate) fn prepare_moth_template_file(
         runtime_fragment_count: 0,
         has_non_trivial_root_body: false,
         warnings: Vec::new(),
-    }
+    })
 }
 
 /// File-local data needed to synthesize the normal constant header.

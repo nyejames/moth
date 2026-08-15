@@ -1,0 +1,3 @@
+@utils/render render as r
+@other/render render as r
+io.line([: [r(1)]])

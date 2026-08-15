@@ -1,5 +1,5 @@
-import @components/card {Card, render_card}
-import @util/mathish {scale_spacing}
+@components/card Card, render_card
+@util/mathish scale_spacing
 
 render_listing |cards {Card}| -> String:
     output ~= [: <section data-gap="[scale_spacing(2)]">]

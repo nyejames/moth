@@ -58,6 +58,7 @@ fn template_head_unknown_symbol_reports_unknown_value_name_not_unexpected_token(
 
     let diagnostic = Template::new(&mut token_stream, &context, vec![], &mut string_table)
         .expect_err("unknown name in template head should fail");
+    let diagnostic = expect_template_diagnostic(diagnostic);
 
     let unknown_name = string_table.intern("unknown_name");
     assert!(
@@ -70,6 +71,178 @@ fn template_head_unknown_symbol_reports_unknown_value_name_not_unexpected_token(
         ),
         "expected UnknownName for unknown symbol in template head, got: {:?}",
         diagnostic.payload
+    );
+}
+
+#[test]
+fn template_head_expression_preserves_infrastructure_failure() {
+    let mut string_table = StringTable::new();
+    let mut token_stream = template_tokens_from_source("[stale_template]", &mut string_table);
+    let scope = token_stream.src_path.clone();
+    let stale_name = string_table.intern("stale_template");
+    let stale_template = Template {
+        tir_reference: TemplateTirReference {
+            root: TemplateIrId::new(99),
+            phase: TemplateTirPhase::Parsed,
+            context: TemplateViewContext::default(),
+        },
+        location: token_stream.current_location(),
+    };
+    let declaration = Declaration {
+        id: scope.append(stale_name),
+        value: Expression::template(stale_template, ValueMode::ImmutableOwned),
+    };
+    let style_directives = frontend_test_style_directives();
+    let context = with_test_path_context(
+        ScopeContext::new_for_tests(
+            ContextKind::Template,
+            scope.clone(),
+            Rc::new(TopLevelDeclarationTable::new(vec![declaration])),
+            Arc::new(ExternalPackageRegistry::default()),
+            vec![],
+            0,
+        ),
+        &scope,
+        &style_directives,
+    );
+    let mut type_environment = TypeEnvironment::new();
+    let mut compatibility_cache = TypeCompatibilityCache::new();
+    let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
+    let mut build_state = TemplateBuildState::new();
+    let mut construction_context = TemplateConstructionContext::new(
+        context.template_ir_store.clone(),
+        token_stream.current_location(),
+    );
+
+    let error = match parse_template_head(
+        &mut token_stream,
+        TemplateHeadParseRequest {
+            context: &context,
+            type_interner: &mut type_interner,
+            build_state: &mut build_state,
+            construction_context: &mut construction_context,
+            control_flow_validation: TemplateControlFlowValidationMode::RuntimeCapable,
+            string_table: &mut string_table,
+        },
+    ) {
+        Err(error) => error,
+        Ok(_) => panic!("stale template authority must fail during head expression parsing"),
+    };
+
+    let TemplateError::Infrastructure(error) = error else {
+        panic!("stale template authority must remain an infrastructure failure");
+    };
+    assert!(
+        error.msg.contains("missing same-store template"),
+        "unexpected infrastructure error: {error:?}"
+    );
+}
+
+#[test]
+fn template_head_path_lookup_preserves_infrastructure_failure() {
+    let mut string_table = StringTable::new();
+    let mut token_stream = template_tokens_from_source("[@core/math]", &mut string_table);
+    let path_token = token_stream
+        .tokens
+        .iter_mut()
+        .find(|token| matches!(token.kind, TokenKind::Path(_)))
+        .expect("expected a path token in the template head");
+    if let TokenKind::Path(id) = &mut path_token.kind {
+        *id = crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE;
+    }
+
+    let scope = token_stream.src_path.clone();
+    let style_directives = frontend_test_style_directives();
+    let context = with_test_path_context(
+        runtime_template_context(&scope, &mut string_table),
+        &scope,
+        &style_directives,
+    );
+    let mut type_environment = TypeEnvironment::new();
+    let mut compatibility_cache = TypeCompatibilityCache::new();
+    let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
+    let mut build_state = TemplateBuildState::new();
+    let mut construction_context = TemplateConstructionContext::new(
+        context.template_ir_store.clone(),
+        token_stream.current_location(),
+    );
+
+    let error = match parse_template_head(
+        &mut token_stream,
+        TemplateHeadParseRequest {
+            context: &context,
+            type_interner: &mut type_interner,
+            build_state: &mut build_state,
+            construction_context: &mut construction_context,
+            control_flow_validation: TemplateControlFlowValidationMode::RuntimeCapable,
+            string_table: &mut string_table,
+        },
+    ) {
+        Err(error) => error,
+        Ok(_) => panic!("a tampered template-head path handle must fail"),
+    };
+
+    let TemplateError::Infrastructure(error) = error else {
+        panic!("template-head path corruption must remain an infrastructure failure");
+    };
+    assert!(
+        error.msg.contains("absent PathSyntaxId marker")
+            || error
+                .msg
+                .contains("does not belong to the consumed path token"),
+        "unexpected infrastructure error: {error:?}"
+    );
+}
+
+#[test]
+fn handler_directive_argument_preserves_infrastructure_failure() {
+    assert_stale_template_directive_argument_is_infrastructure("[$code(stale_template): body]");
+}
+
+#[test]
+fn children_directive_argument_preserves_infrastructure_failure() {
+    assert_stale_template_directive_argument_is_infrastructure("[$children(stale_template): body]");
+}
+
+fn assert_stale_template_directive_argument_is_infrastructure(source: &str) {
+    let mut string_table = StringTable::new();
+    let mut token_stream = template_tokens_from_source(source, &mut string_table);
+    let scope = token_stream.src_path.clone();
+    let stale_name = string_table.intern("stale_template");
+    let stale_template = Template {
+        tir_reference: TemplateTirReference {
+            root: TemplateIrId::new(99),
+            phase: TemplateTirPhase::Parsed,
+            context: TemplateViewContext::default(),
+        },
+        location: token_stream.current_location(),
+    };
+    let declaration = Declaration {
+        id: scope.append(stale_name),
+        value: Expression::template(stale_template, ValueMode::ImmutableOwned),
+    };
+    let style_directives = frontend_test_style_directives();
+    let context = with_test_path_context(
+        ScopeContext::new_for_tests(
+            ContextKind::Template,
+            scope.clone(),
+            Rc::new(TopLevelDeclarationTable::new(vec![declaration])),
+            Arc::new(ExternalPackageRegistry::default()),
+            vec![],
+            0,
+        ),
+        &scope,
+        &style_directives,
+    );
+
+    let error = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+        .expect_err("stale directive argument authority must fail during expression parsing");
+    let TemplateError::Infrastructure(error) = error else {
+        panic!("stale directive argument authority must remain an infrastructure failure");
+    };
+    assert!(
+        error.msg.contains("missing same-store template"),
+        "unexpected infrastructure error: {error:?}"
     );
 }
 
@@ -296,6 +469,7 @@ fn template_option_capture_binding_is_not_visible_in_else_branch() {
         &mut string_table,
     )
     .expect_err("option-present capture should not be visible in template else branch");
+    let diagnostic = expect_template_diagnostic(diagnostic);
 
     // Unknown names in template heads now produce a structured UnknownName
     // diagnostic instead of a generic UnexpectedToken, which is the intended
@@ -345,6 +519,7 @@ fn template_control_flow_suffix_requires_comma_after_head_items() {
 
     let diagnostic = Template::new(&mut token_stream, &context, vec![], &mut string_table)
         .expect_err("missing comma before template control-flow suffix should fail");
+    let diagnostic = expect_template_diagnostic(diagnostic);
 
     assert!(matches!(
         diagnostic.payload,
@@ -582,6 +757,7 @@ fn template_else_if_option_capture_binding_is_branch_local() {
         &mut string_table,
     )
     .expect_err("else-if option capture should not be visible in the fallback branch");
+    let diagnostic = expect_template_diagnostic(diagnostic);
 
     // Unknown names in template heads now produce a structured UnknownName
     // diagnostic instead of a generic UnexpectedToken.
@@ -1806,6 +1982,7 @@ fn const_required_template_conditional_loop_reports_runtime_condition() {
         &mut string_table,
     )
     .expect_err("const-required conditional loop should reject runtime conditions");
+    let diagnostic = expect_template_diagnostic(diagnostic);
 
     assert_invalid_template_structure(
         &diagnostic,
@@ -1852,6 +2029,7 @@ fn const_required_template_loop_reports_non_const_collection_source() {
         &mut string_table,
     )
     .expect_err("const-required loop should reject runtime collection source");
+    let diagnostic = expect_template_diagnostic(diagnostic);
 
     assert_invalid_template_structure(
         &diagnostic,
@@ -1896,6 +2074,7 @@ fn const_required_template_loop_reports_non_const_body() {
         &mut string_table,
     )
     .expect_err("const-required loop should reject runtime body content");
+    let diagnostic = expect_template_diagnostic(diagnostic);
 
     assert_invalid_template_structure(
         &diagnostic,
@@ -2002,8 +2181,10 @@ fn const_required_template_loop_reports_expansion_limit() {
         &mut fold_context,
         crate::compiler_frontend::ast::templates::tir::TemplatePreparationMode::ConstRequired,
     )
-    .expect_err("const loop should enforce expansion limit")
-    .into_diagnostic();
+    .expect_err("const loop should enforce expansion limit");
+    let TemplateError::Diagnostic(error) = error else {
+        panic!("const loop expansion limit should remain a source diagnostic");
+    };
 
     assert_invalid_template_structure(
         &error,
@@ -2227,6 +2408,7 @@ fn const_required_template_option_capture_reports_runtime_scrutinee_diagnostic()
         &mut string_table,
     )
     .expect_err("const-required option capture should be deferred");
+    let diagnostic = expect_template_diagnostic(diagnostic);
 
     assert_invalid_template_structure(
         &diagnostic,
@@ -2258,6 +2440,7 @@ fn const_required_template_if_rejects_runtime_local_condition() {
     let diagnostic =
         Template::new_const_required(&mut token_stream, &context, vec![], &mut string_table)
             .expect_err("const-required template if should reject runtime local condition");
+    let diagnostic = expect_template_diagnostic(diagnostic);
 
     assert_invalid_template_structure(
         &diagnostic,
@@ -2276,7 +2459,7 @@ fn imported_const_template_context(
     let mut visible_bindings = FxHashMap::default();
     visible_bindings.insert(
         visible_name,
-        crate::compiler_frontend::headers::import_environment::SourceDeclarationTarget::Local(
+        crate::compiler_frontend::headers::binding_environment::SourceDeclarationTarget::Local(
             declaration.id.clone(),
         ),
     );
@@ -2400,8 +2583,10 @@ fn parse_template_error(
     let mut token_stream = template_tokens_from_source(source, &mut string_table);
     let context = new_constant_context(token_stream.src_path.clone());
 
-    *Template::new(&mut token_stream, &context, vec![], &mut string_table)
-        .expect_err("template source should fail")
+    expect_template_diagnostic(
+        Template::new(&mut token_stream, &context, vec![], &mut string_table)
+            .expect_err("template source should fail"),
+    )
 }
 
 fn parse_runtime_template(source: &str) -> (Template, ScopeContext, StringTable) {
@@ -2513,15 +2698,17 @@ fn parse_control_flow_template_after_composition_error(
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
 
-    *Template::new_nested_template(
-        &mut token_stream,
-        &context,
-        &mut type_interner,
-        Vec::new(),
-        &mut string_table,
-        NestedTemplateParseOptions::runtime_capable(),
+    expect_template_diagnostic(
+        Template::new_nested_template(
+            &mut token_stream,
+            &context,
+            &mut type_interner,
+            Vec::new(),
+            &mut string_table,
+            NestedTemplateParseOptions::runtime_capable(),
+        )
+        .expect_err("control-flow template should fail during composition"),
     )
-    .expect_err("control-flow template should fail during composition")
 }
 
 fn parse_runtime_template_without_validation(
@@ -2609,8 +2796,10 @@ fn parse_const_required_template_error(
     let mut token_stream = template_tokens_from_source(source, &mut string_table);
     let context = new_constant_context(token_stream.src_path.clone());
 
-    *Template::new_const_required(&mut token_stream, &context, vec![], &mut string_table)
-        .expect_err("const-required template source should fail")
+    expect_template_diagnostic(
+        Template::new_const_required(&mut token_stream, &context, vec![], &mut string_table)
+            .expect_err("const-required template source should fail"),
+    )
 }
 
 #[test]
@@ -2651,6 +2840,9 @@ fn const_required_template_if_validates_branch_condition_through_tir_view_overla
     let store = context.template_ir_store.borrow();
     let error = validate_const_required_template_control_flow(&template, &store)
         .expect_err("TirView overlay should make the branch condition non-const");
+    let TemplateError::Diagnostic(error) = error else {
+        panic!("non-const branch should remain a source diagnostic");
+    };
 
     assert_invalid_template_structure(
         &error,
@@ -2696,6 +2888,9 @@ fn const_required_template_loop_validates_header_through_tir_view_overlay() {
     let store = context.template_ir_store.borrow();
     let error = validate_const_required_template_control_flow(&template, &store)
         .expect_err("TirView overlay should turn the conditional loop into const true");
+    let TemplateError::Diagnostic(error) = error else {
+        panic!("non-const loop should remain a source diagnostic");
+    };
 
     assert_invalid_template_structure(
         &error,
@@ -2728,15 +2923,13 @@ fn const_required_validation_reports_missing_effective_node_as_internal_error() 
     let error = validate_const_required_template_control_flow(&template, &store)
         .expect_err("missing root node should be an internal error, not a silent success");
 
-    let DiagnosticPayload::InfrastructureError { msg, .. } = &error.payload else {
-        panic!(
-            "expected InfrastructureError for missing effective node, got: {:?}",
-            error.payload
-        );
+    let TemplateError::Infrastructure(error) = error else {
+        panic!("missing effective node should remain an infrastructure error");
     };
     assert!(
-        msg.contains("does not exist in the module store"),
-        "error message should mention missing node, got: {msg}"
+        error.msg.contains("does not exist in the module store"),
+        "error message should mention missing node, got: {}",
+        error.msg
     );
 }
 
@@ -2843,7 +3036,9 @@ fn runtime_template_if_rejects_unresolved_slot_through_tir_view() {
     let error = validate_runtime_template_control_flow_slot_artifacts(&template, &store)
         .expect_err("TirView path should report the unresolved slot in the branch body");
 
-    let diagnostic = error.into_diagnostic();
+    let TemplateError::Diagnostic(diagnostic) = error else {
+        panic!("unresolved runtime slot should remain a source diagnostic");
+    };
     assert_invalid_template_structure(
         &diagnostic,
         InvalidTemplateStructureReason::RuntimeControlFlowUnresolvedSlot,
@@ -2864,7 +3059,9 @@ fn runtime_template_if_rejects_unresolved_insert_through_tir_view() {
     let error = validate_runtime_template_control_flow_slot_artifacts(&template, &store)
         .expect_err("TirView path should report the escaped insert in the branch body");
 
-    let diagnostic = error.into_diagnostic();
+    let TemplateError::Diagnostic(diagnostic) = error else {
+        panic!("unresolved runtime insert should remain a source diagnostic");
+    };
     assert_invalid_template_structure(
         &diagnostic,
         InvalidTemplateStructureReason::RuntimeControlFlowUnresolvedInsert,
@@ -2989,20 +3186,13 @@ fn runtime_validation_reports_missing_view_context_as_internal_error() {
 }
 
 fn assert_internal_template_error_contains(error: TemplateError, expected_message: &str) {
-    let diagnostic = error.into_diagnostic();
-    let CompilerDiagnostic {
-        payload: DiagnosticPayload::InfrastructureError { msg, .. },
-        ..
-    } = &diagnostic
-    else {
-        panic!(
-            "expected InfrastructureError, got: {:?}",
-            diagnostic.payload
-        );
+    let TemplateError::Infrastructure(error) = error else {
+        panic!("malformed template authority should remain an infrastructure error");
     };
     assert!(
-        msg.contains(expected_message),
-        "error message should contain {expected_message:?}, got: {msg}"
+        error.msg.contains(expected_message),
+        "error message should contain {expected_message:?}, got: {}",
+        error.msg
     );
 }
 

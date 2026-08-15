@@ -72,11 +72,11 @@ Source calls use explicit target classes:
 
 Generated concrete functions add another stable target class once materialised.
 
-HIR stores no import aliases as semantic authority and no backend runtime names as identity. Beside HIR, the compiler records **per-function link facts**: call edges, helper and capability needs, reactive features, numeric and cast operations, path and asset requirements, project-context provenance and generated-function requests.
+HIR stores no dependency aliases as semantic authority and no backend runtime names as identity. Beside HIR, the compiler records **per-function link facts**: call edges, helper and capability needs, reactive features, numeric and cast operations, path and asset requirements, project-context provenance and generated-function requests.
 
 Those facts are the linking authority later stages consume.
 
-**Diagram placeholder:** Local, imported, generated and binding-backed calls point to explicit identities
+**Diagram placeholder:** Local, dependency-bound, generated and binding-backed calls point to explicit identities
 
 *Caption: simplified link facts.*
 *Question: how does a backend know its dependencies?*
@@ -120,7 +120,7 @@ Keep internal failures separate from source diagnostics. Authors did not "misuse
 - **Accepted design:** HIR forms the first backend-facing semantic IR.
 - **Current implementation:** progress rows for HIR and backend handoff.
 - **Queued work:** mixed backend plans may add structured derived Wasm views.
-- **Deferred or outside scope:** TIR, generic solving and source imports inside HIR.
+- **Deferred or outside scope:** TIR, generic solving and source dependencies inside HIR.
 
 ## Exit state
 

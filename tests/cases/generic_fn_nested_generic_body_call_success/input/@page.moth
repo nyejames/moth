@@ -1,4 +1,4 @@
-import @./helpers {forward}
+@helpers forward
 
 value = forward(42)
 [: [value] ]

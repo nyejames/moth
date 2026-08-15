@@ -12,6 +12,7 @@ use super::token_checkpoint::TokenCheckpoint;
 use crate::compiler_frontend::ast::ContextKind;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::MatchExhaustiveness;
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::parse_expression::create_expression_until;
 use crate::compiler_frontend::ast::expressions::parse_expression_input::{
@@ -48,7 +49,7 @@ pub(super) fn try_parse_inline_single_predicate_value_match(
     receiver_kind: ValueReceiverKind,
     string_table: &mut StringTable,
     location: SourceLocation,
-) -> Option<Result<Expression, CompilerDiagnostic>> {
+) -> Option<Result<Expression, ExpressionParseError>> {
     let checkpoint = TokenCheckpoint::capture(token_stream);
 
     let mut scrutinee_type = ExpectedType::Infer;
@@ -65,10 +66,11 @@ pub(super) fn try_parse_inline_single_predicate_value_match(
     });
     let scrutinee = match create_expression_until(input, &[TokenKind::Is]) {
         Ok(expression) => expression,
-        Err(_) => {
+        Err(ExpressionParseError::Diagnostic(_)) => {
             checkpoint.restore(token_stream);
             return None;
         }
+        Err(error @ ExpressionParseError::Infrastructure(_)) => return Some(Err(error)),
     };
 
     if token_stream.current_token_kind() != &TokenKind::Is {
@@ -104,40 +106,39 @@ pub(super) fn try_parse_inline_single_predicate_value_match(
         string_table,
     ) {
         Ok(pattern) => pattern,
-        Err(diagnostic) => return Some(Err(*diagnostic)),
+        Err(error) => return Some(Err(error)),
     };
 
     if token_stream.current_token_kind() != &TokenKind::Then {
         return Some(Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ExpectedColonAfterCondition,
             token_stream.current_location(),
-        )));
+        )
+        .into()));
     }
 
     if !same_logical_line(&location, &token_stream.current_location()) {
         return Some(Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::InlineValueIfMultiline,
             token_stream.current_location(),
-        )));
+        )
+        .into()));
     }
 
     checkpoint.commit();
 
-    Some(
-        parse_inline_value_match(InlineValueMatchParseInput {
-            token_stream,
-            context,
-            then_context: &parsed_pattern.arm_scope,
-            type_interner,
-            expected_result_type_ids,
-            receiver_kind,
-            string_table,
-            scrutinee,
-            pattern: parsed_pattern.pattern,
-            location,
-        })
-        .map_err(|boxed_diagnostic| *boxed_diagnostic),
-    )
+    Some(parse_inline_value_match(InlineValueMatchParseInput {
+        token_stream,
+        context,
+        then_context: &parsed_pattern.arm_scope,
+        type_interner,
+        expected_result_type_ids,
+        receiver_kind,
+        string_table,
+        scrutinee,
+        pattern: parsed_pattern.pattern,
+        location,
+    }))
 }
 
 struct InlineValueMatchParseInput<'a, 'b> {
@@ -153,17 +154,9 @@ struct InlineValueMatchParseInput<'a, 'b> {
     location: SourceLocation,
 }
 
-/// File-local boxed diagnostic result alias.
-///
-/// WHAT: the inline single-predicate value-match parser returns
-/// `Result<T, Box<CompilerDiagnostic>>` through this alias.
-/// WHY: `CompilerDiagnostic` is large enough to trigger `clippy::result_large_err` when
-/// stored directly in a `Result` variant. Boxing the error at the owner boundary keeps
-/// the `Result` envelope small without changing `DiagnosticBag`, `CompilerMessages`, or
-/// any shared error type. The still-plain `parse_inline_then_else` result is adapted at
-/// its narrow call site; the caller `try_parse_inline_single_predicate_value_match`
-/// unboxes once at the plain speculative `Option<Result<...>>` boundary.
-type InlineValueMatchResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// The speculative outer parser may discard only authored diagnostics. Once a match shape is
+/// accepted, the inner parser retains `CompilerError` until AST emission.
+type InlineValueMatchResult<T> = Result<T, ExpressionParseError>;
 
 fn parse_inline_value_match(
     input: InlineValueMatchParseInput<'_, '_>,

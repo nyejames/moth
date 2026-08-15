@@ -128,7 +128,7 @@ A `MayConsume` summary means the call path can receive responsibility when the c
 
 `AlwaysConsumes` may describe a specialised already-proven call path. It must not turn a source function into a mandatory-consuming API.
 
-Call transfer uses resolved metadata, not source imports or runtime names.
+Call transfer uses resolved metadata, not source dependencies or runtime names.
 
 ## Side-table outputs
 

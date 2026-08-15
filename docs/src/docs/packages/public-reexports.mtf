@@ -1,34 +1,61 @@
-The `export:` block can re-export grouped imports from other files, creating a public API surface that exposes imported declarations under controlled names.
+The `export:` block can re-export selected dependency bindings from other files, creating a public API surface that exposes declarations under controlled names.
 
-### Grouped re-export
+### Direct-selection re-export
 
 [codeblock, $code("moth"):
     export:
-        import @components/card {
-            CardData as Card,
-            render_card,
-        }
+        @components/card CardData as Card, render_card
 
-        import @core/math {
-            PI,
-            sin,
-        }
+        @core/math PI, sin
     ;
 ]
 
-`Card`, `render_card`, `PI` and `sin` become accessible to cross-module imports. A grouped alias inside `export:` becomes the public name. The original `CardData` name is not also exported unless it is listed separately.
+`Card`, `render_card`, `PI` and `sin` become accessible to cross-module dependency clauses. A leaf alias inside `export:` becomes the public name. The original `CardData` name is not also exported unless it is listed separately.
+
+### Re-export list termination
+
+The path and the first selected name must start on the same physical line. A comma explicitly
+continues the selection list across a following newline:
+
+[codeblock, $code("moth"):
+    export:
+        @components/card CardData,
+            render_card
+    ;
+]
+
+Without a comma, a newline ends the re-export clause. A trailing comma is invalid because a comma
+always promises another selected name.
+
+[codeblock, $code("moth"):
+    export:
+        -- Error
+        @components/card CardData, render_card,
+    ;
+]
 
 ### Renamed public re-export
 
-The `as` alias inside an export-block re-export defines the public API name. The original source name is what the module imports privately. The alias is what other modules see when importing the module's public surface.
+The `as` alias inside an export-block re-export defines the public API name. The original source name is what the module binds privately. The alias is what other modules see when depending on the module's public surface.
 
-### Exported imported types, constants and functions
+### Re-export rules
 
-Any importable declaration can be re-exported: functions, structs, choices, type aliases, traits and compile-time constants.
+- Only explicit non-empty direct-selection lists are valid dependency re-exports.
+- Whole namespaces cannot be re-exported implicitly.
+- Clause-level namespace `as` is invalid inside `export:`.
+- Leaf aliases define public API names.
+- Selected names are flat identifiers and may not qualify nested declarations.
+- Non-leaf namespace aliases are invalid because namespace exports remain deferred.
+- Re-exports preserve declaration origins.
+- Re-export syntax does not create namespace values.
 
-### Re-export does not make local import alias automatically public
+### Exported dependency types, constants and functions
 
-A private `import @path { Symbol as LocalName }` outside the export block creates a file-local alias. It does not become public. Only an `import` inside the `export:` block creates a public re-export.
+Any bindable declaration can be re-exported: functions, structs, choices, type aliases, traits and compile-time constants.
+
+### Re-export does not make a local alias automatically public
+
+A private `@path Symbol as LocalName` clause outside the export block creates a file-local alias. It does not become public. Only a dependency clause inside the `export:` block creates a public re-export.
 
 ### Public name collisions
 
@@ -46,4 +73,4 @@ Legacy inline `export` syntax (without the `:` block delimiter) is rejected with
 
 - For the export block see @../project-structure/#public-api (Public API).
 - For visibility rules see @#module-visibility (Module visibility).
-- For import alias rules see @../aliases/#import-aliases (Import aliases).
+- For dependency alias rules see @../aliases/#dependency-aliases (Dependency aliases).

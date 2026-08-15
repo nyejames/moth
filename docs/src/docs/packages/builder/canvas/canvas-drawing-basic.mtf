@@ -1,15 +1,15 @@
-`@web/canvas` gives you 2D canvas drawing. Import it when you need to draw
+`@web/canvas` gives you 2D canvas drawing. Bind it when you need to draw
 shapes, text, images or pixels onto a `<canvas>` element.
 
 The package ships as a skeleton. It will grow as the language and standard
 library mature.
 
-### Importing
+### Binding
 
-Bring in the functions you need with a grouped import.
+Bind the functions you need with a direct-selection clause.
 
 [codeblock, $code("moth"):
-    import @web/canvas {get_canvas, context_2d, set_fill_style, fill_rect}
+    @web/canvas get_canvas, context_2d, set_fill_style, fill_rect
 
     canvas = get_canvas("my-canvas") catch:
         assert(false, "canvas not found")

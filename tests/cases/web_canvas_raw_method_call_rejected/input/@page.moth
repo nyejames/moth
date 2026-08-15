@@ -1,4 +1,4 @@
-import @web/canvas { get_canvas, Canvas2d, context_2d }
+@web/canvas get_canvas, Canvas2d, context_2d
 
 run |id String| -> String, Error!:
     canvas_ref = get_canvas(id)!

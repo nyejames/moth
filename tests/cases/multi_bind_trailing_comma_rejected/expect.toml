@@ -1,0 +1,12 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0002"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0002"
+reason = "invalid_multi_bind.missing_target_after_comma"
+path = "input/@page.moth"
+line = 5
+column = 6
+count = 1

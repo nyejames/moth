@@ -1,3 +1,3 @@
-import @helper { use_public }
+@helper use_public
 
 io.line([: [use_public]])

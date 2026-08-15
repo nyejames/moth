@@ -1,6 +1,6 @@
-The prelude gives you a few names without an import. It keeps common output convenient without making every Core package global.
+The prelude gives you a few names without a dependency clause. It keeps common output convenient without making every Core package global.
 
-### What you get without importing
+### What you get without a dependency clause
 
 The `io` namespace comes available in normal source files. It exposes Core IO helpers such as `io.line(...)`.
 
@@ -10,12 +10,12 @@ The `io` namespace comes available in normal source files. It exposes Core IO he
 
 The compiler-owned `Error` type also stays available for `Error!` flows.
 
-### What still needs an import
+### What still needs a dependency clause
 
-Most Core packages require explicit imports:
+Most Core packages require explicit dependency clauses:
 
 [codeblock, $code("moth"):
-    import @core/math {sin}
-    import @core/time {mark_now}
+    @core/math sin
+    @core/time mark_now
 ]
 For the full prelude contract, collision rules and builder ownership, see @./ (Prelude policy advanced).

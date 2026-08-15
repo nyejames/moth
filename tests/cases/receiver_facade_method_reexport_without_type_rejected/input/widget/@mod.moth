@@ -1,3 +1,3 @@
 export:
-    import @impl { tick }
+    @impl tick
 ;

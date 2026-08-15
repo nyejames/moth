@@ -25,7 +25,6 @@ use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrNodeKind, TemplateIrStore, TemplateWrapperSetId,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
-use crate::compiler_frontend::compiler_messages::compiler_errors::compiler_error_to_diagnostic;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidTemplateSlotReason};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
@@ -37,32 +36,17 @@ use super::child_wrappers::wrap_tir_node_in_wrappers_into;
 use super::contributions::RoutedTirSlotContributions;
 use super::helpers::{SlotResolutionComposition, internal_compiler_error, tir_tree_has_slots};
 
-/// Boxed diagnostic result for the TIR slot-schema family.
-///
-/// WHAT: the twelve schema, placeholder-collection, slot-expansion, wrapper
-///       application, and unresolved-slot helpers in this file return
-///       `CompilerDiagnostic` errors whose size triggers Clippy's
-///       `result_large_err` lint. Boxing the `Err` variant behind one
-///       file-local alias keeps the diagnostic value, source location, and
-///       semantic fact intact while shrinking the `Err` variant to a single
-///       pointer.
-/// WHY: the enclosing composition boundaries (`HeadChainResult`,
-///      `ContributionResult`, `ChildWrapperResult`) already hold
-///      `Box<CompilerDiagnostic>`, so the boxed error propagates directly
-///      through those paths. External template-owned callers propagate the
-///      same box into `TemplateError` or `TemplateSlotError` through the
-///      zero-cost `From<Box<CompilerDiagnostic>>` conversions added alongside
-///      this boxing.
-type SlotSchemaResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// Typed result for placeholder collection and slot expansion.
+type SlotSchemaResult<T> = Result<T, TemplateError>;
 
 /// Narrow error boundary for the schema walk itself.
 ///
 /// WHAT: keeps source slot diagnostics and malformed TIR authority in their
 ///       owning typed lanes while the single schema traversal serves both
 ///       composition and handoff.
-/// WHY: composition converts infrastructure failures at its existing
-///      diagnostic boundary, while HIR handoff can move the original
-///      `CompilerError` without reverse-converting a `DiagnosticPayload`.
+/// WHY: composition preserves the same source/infrastructure distinction through
+///      `TemplateError`, while HIR handoff can move the original `CompilerError`
+///      without reverse-converting a `DiagnosticPayload`.
 #[derive(Debug)]
 pub(crate) enum SlotSchemaError {
     Diagnostic(Box<CompilerDiagnostic>),
@@ -70,15 +54,6 @@ pub(crate) enum SlotSchemaError {
 }
 
 type SlotSchemaCollectionResult<T> = Result<T, SlotSchemaError>;
-
-impl SlotSchemaError {
-    fn into_diagnostic(self) -> CompilerDiagnostic {
-        match self {
-            SlotSchemaError::Diagnostic(diagnostic) => *diagnostic,
-            SlotSchemaError::Infrastructure(error) => compiler_error_to_diagnostic(error.as_ref()),
-        }
-    }
-}
 
 impl From<CompilerDiagnostic> for SlotSchemaError {
     fn from(diagnostic: CompilerDiagnostic) -> Self {
@@ -95,14 +70,6 @@ impl From<Box<CompilerDiagnostic>> for SlotSchemaError {
 impl From<CompilerError> for SlotSchemaError {
     fn from(error: CompilerError) -> Self {
         SlotSchemaError::Infrastructure(Box::new(error))
-    }
-}
-
-/// Preserves the existing composition diagnostic lane without rebuilding an
-/// internal error from its rendered diagnostic payload.
-impl From<SlotSchemaError> for Box<CompilerDiagnostic> {
-    fn from(error: SlotSchemaError) -> Self {
-        Box::new(error.into_diagnostic())
     }
 }
 
@@ -451,9 +418,9 @@ fn collect_tir_slot_placeholders_from_node(
     placeholders: &mut Vec<TirSlotPlaceholder>,
 ) -> SlotSchemaResult<()> {
     let Some(node) = store.get_node(node_id) else {
-        return Err(Box::new(internal_compiler_error(
+        return Err(internal_compiler_error(
             "TIR slot placeholder collection: node ID was not present in the store.",
-        )));
+        ));
     };
 
     match &node.kind {
@@ -472,9 +439,9 @@ fn collect_tir_slot_placeholders_from_node(
             // root naturally collects those placeholders in document order.
             let template_id = reference.root;
             let Some(child_template) = store.get_template(template_id) else {
-                return Err(Box::new(internal_compiler_error(
+                return Err(internal_compiler_error(
                     "TIR slot placeholder collection: child template ID was not present in the store.",
-                )));
+                ));
             };
 
             collect_tir_slot_placeholders_from_node(store, child_template.root, placeholders)?;
@@ -562,9 +529,9 @@ pub(crate) fn expand_tir_slot_placeholders_into(
     slot_compositions: &mut Vec<SlotResolutionComposition>,
 ) -> SlotSchemaResult<TemplateIrNodeId> {
     let Some(template) = store.get_template(wrapper_template_id) else {
-        return Err(Box::new(internal_compiler_error(
+        return Err(internal_compiler_error(
             "TIR slot expansion: wrapper template ID was not present in the store.",
-        )));
+        ));
     };
 
     // Fast path: if the wrapper tree contains no Slot nodes, the original root
@@ -599,9 +566,9 @@ fn expand_tir_slot_placeholders_from_node(
     slot_compositions: &mut Vec<SlotResolutionComposition>,
 ) -> SlotSchemaResult<TemplateIrNodeId> {
     let Some(node) = store.get_node(node_id).cloned() else {
-        return Err(Box::new(internal_compiler_error(
+        return Err(internal_compiler_error(
             "TIR slot expansion: node ID was not present in the store.",
-        )));
+        ));
     };
 
     match &node.kind {
@@ -666,8 +633,7 @@ fn expand_tir_slot_placeholders_from_node(
             let mut wrapped_nodes = Vec::with_capacity(contribution_nodes.len());
             for node_id in contribution_nodes {
                 let current_node_id = if tir_node_is_control_flow_root(store, *node_id)? {
-                    let shape = classify_tir_contribution_node(store, *node_id)
-                        .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
+                    let shape = classify_tir_contribution_node(store, *node_id)?;
                     if let Some(wrapper_set_id) =
                         conditional_wrapper_set_for_control_flow(store, placeholder, &shape)?
                     {
@@ -703,9 +669,9 @@ fn expand_tir_slot_placeholders_from_node(
         TemplateIrNodeKind::ChildTemplate { reference, .. } => {
             let child_template_id = reference.root;
             let Some(child_template) = store.get_template(child_template_id).cloned() else {
-                return Err(Box::new(internal_compiler_error(
+                return Err(internal_compiler_error(
                     "TIR slot expansion: child template ID was not present in the store.",
-                )));
+                ));
             };
 
             let child_schema = collect_tir_slot_schema(store, child_template_id)?;
@@ -894,9 +860,7 @@ fn apply_tir_wrapper_set_to_node(
     slot_compositions: &mut Vec<SlotResolutionComposition>,
 ) -> SlotSchemaResult<TemplateIrNodeId> {
     let wrapper_set = store.get_wrapper_set(wrapper_set_id).ok_or_else(|| {
-        Box::new(internal_compiler_error(
-            "TIR slot expansion: placeholder referenced a missing wrapper set.",
-        ))
+        internal_compiler_error("TIR slot expansion: placeholder referenced a missing wrapper set.")
     })?;
 
     let wrapper_template_ids: Vec<TemplateIrId> = wrapper_set
@@ -933,8 +897,7 @@ fn apply_tir_wrapper_sets_to_contribution(
 ) -> SlotSchemaResult<TemplateIrNodeId> {
     let mut current_node_id = node_id;
 
-    let shape = classify_tir_contribution_node(store, current_node_id)
-        .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
+    let shape = classify_tir_contribution_node(store, current_node_id)?;
     if let Some(wrapper_set_id) = placeholder.child_wrapper_set
         && shape.is_child_template_contribution
         && !shape.skips_parent_child_wrappers
@@ -948,8 +911,7 @@ fn apply_tir_wrapper_sets_to_contribution(
         )?;
     }
 
-    let post_shape = classify_tir_contribution_node(store, current_node_id)
-        .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
+    let post_shape = classify_tir_contribution_node(store, current_node_id)?;
     if let Some(wrapper_set_id) = placeholder.applied_child_wrapper_set
         && !placeholder.skip_parent_child_wrappers
         && post_shape.is_child_template_contribution
@@ -979,9 +941,9 @@ fn tir_node_is_control_flow_root(
     node_id: TemplateIrNodeId,
 ) -> SlotSchemaResult<bool> {
     let node = store.get_node(node_id).ok_or_else(|| {
-        Box::new(internal_compiler_error(
+        internal_compiler_error(
             "TIR slot expansion: contribution node ID was not present in the store while checking control flow.",
-        ))
+        )
     })?;
 
     let is_control_flow_root = match &node.kind {
@@ -989,9 +951,9 @@ fn tir_node_is_control_flow_root(
         TemplateIrNodeKind::ChildTemplate { reference, .. } => {
             let template_id = reference.root;
             let template = store.get_template(template_id).ok_or_else(|| {
-                Box::new(internal_compiler_error(
+                internal_compiler_error(
                     "TIR slot expansion: module-local child template ID was not present in the TIR store while checking control flow.",
-                ))
+                )
             })?;
 
             store
@@ -1022,9 +984,9 @@ fn conditional_wrapper_set_for_control_flow(
 
     if let Some(wrapper_set_id) = placeholder.child_wrapper_set {
         let wrapper_set = store.get_wrapper_set(wrapper_set_id).ok_or_else(|| {
-            Box::new(internal_compiler_error(
+            internal_compiler_error(
                 "TIR slot expansion: conditional child wrapper set ID was not present in the store.",
-            ))
+            )
         })?;
 
         if !shape.skips_parent_child_wrappers {
@@ -1034,9 +996,9 @@ fn conditional_wrapper_set_for_control_flow(
 
     if let Some(wrapper_set_id) = placeholder.applied_child_wrapper_set {
         let wrapper_set = store.get_wrapper_set(wrapper_set_id).ok_or_else(|| {
-            Box::new(internal_compiler_error(
+            internal_compiler_error(
                 "TIR slot expansion: conditional applied wrapper set ID was not present in the store.",
-            ))
+            )
         })?;
 
         if !placeholder.skip_parent_child_wrappers {
@@ -1067,18 +1029,18 @@ fn attach_conditional_wrapper_set(
     wrapper_set_id: TemplateWrapperSetId,
 ) -> SlotSchemaResult<TemplateIrNodeId> {
     let node = store.get_node(node_id).cloned().ok_or_else(|| {
-        Box::new(internal_compiler_error(
+        internal_compiler_error(
             "TIR slot expansion: control-flow node ID was not present in the store.",
-        ))
+        )
     })?;
 
     let (reference, location) = match &node.kind {
         TemplateIrNodeKind::ChildTemplate { reference, .. } => {
             let template_id = reference.root;
             let Some(template) = store.get_template(template_id).cloned() else {
-                return Err(Box::new(internal_compiler_error(
+                return Err(internal_compiler_error(
                     "TIR slot expansion: control-flow child template was not present in the store.",
-                )));
+                ));
             };
 
             let merged_wrapper_set_id = merge_wrapper_sets(
@@ -1149,17 +1111,17 @@ fn merge_wrapper_sets(
 
     if let Some(existing_id) = existing {
         let existing_set = store.get_wrapper_set(existing_id).ok_or_else(|| {
-            Box::new(internal_compiler_error(
+            internal_compiler_error(
                 "TIR slot expansion: existing conditional wrapper set ID was not present in the store.",
-            ))
+            )
         })?;
         combined.extend(existing_set.wrappers.iter().copied());
     }
 
     let additional_set = store.get_wrapper_set(additional).ok_or_else(|| {
-        Box::new(internal_compiler_error(
+        internal_compiler_error(
             "TIR slot expansion: additional conditional wrapper set ID was not present in the store.",
-        ))
+        )
     })?;
     combined.extend(additional_set.wrappers.iter().copied());
 
@@ -1172,14 +1134,14 @@ fn required_wrapper_set_count(
     wrapper_set_id: TemplateWrapperSetId,
 ) -> SlotSchemaResult<u32> {
     let wrapper_set = store.get_wrapper_set(wrapper_set_id).ok_or_else(|| {
-        Box::new(internal_compiler_error(
+        internal_compiler_error(
             "TIR slot expansion: required wrapper set ID was not present in the store.",
-        ))
+        )
     })?;
 
     u32::try_from(wrapper_set.wrappers.len()).map_err(|_| {
-        Box::new(internal_compiler_error(
+        internal_compiler_error(
             "TIR slot expansion: wrapper-set count exceeded the supported summary range.",
-        ))
+        )
     })
 }

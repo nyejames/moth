@@ -5,7 +5,7 @@ use crate::compiler_frontend::paths::compile_time_paths::{
 };
 use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
-use crate::compiler_frontend::paths::rendered_path_usage::resolve_compile_time_paths_for_rendered_output;
+use crate::compiler_frontend::paths::rendered_path_usage::resolve_compile_time_path_for_rendered_output;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{CharPosition, SourceLocation};
@@ -63,7 +63,7 @@ impl TestHarness {
         self.path(&["src", "@page.moth"])
     }
 
-    fn importer_file(&self) -> PathBuf {
+    fn declaring_file(&self) -> PathBuf {
         self.project_root.join("src/@page.moth")
     }
 
@@ -87,13 +87,13 @@ fn entry_root_render_capture_records_semantics_and_origin_aware_text() {
     let mut harness = TestHarness::new();
     let source_scope = harness.source_scope();
     let path = harness.path(&["assets", "images", "logo.png"]);
-    let importer_file = harness.importer_file();
+    let declaring_file = harness.declaring_file();
     let render_location = harness.render_location();
 
-    let (_, recorded) = resolve_compile_time_paths_for_rendered_output(
-        &[path],
+    let (_, recorded) = resolve_compile_time_path_for_rendered_output(
+        &path,
         &harness.resolver,
-        &importer_file,
+        &declaring_file,
         &source_scope,
         &render_location,
         &PathStringFormatConfig {
@@ -126,13 +126,13 @@ fn entry_root_render_capture_records_entry_root_semantics() {
     let mut harness = TestHarness::new();
     let source_scope = harness.source_scope();
     let path = harness.path(&["images", "entry.png"]);
-    let importer_file = harness.importer_file();
+    let declaring_file = harness.declaring_file();
     let render_location = harness.render_location();
 
-    let (_, recorded) = resolve_compile_time_paths_for_rendered_output(
-        &[path],
+    let (_, recorded) = resolve_compile_time_path_for_rendered_output(
+        &path,
         &harness.resolver,
-        &importer_file,
+        &declaring_file,
         &source_scope,
         &render_location,
         &PathStringFormatConfig::default(),
@@ -155,13 +155,13 @@ fn relative_render_capture_preserves_relative_text() {
     let mut harness = TestHarness::new();
     let source_scope = harness.source_scope();
     let path = harness.path(&[".", "docs", "local.png"]);
-    let importer_file = harness.importer_file();
+    let declaring_file = harness.declaring_file();
     let render_location = harness.render_location();
 
-    let (_, recorded) = resolve_compile_time_paths_for_rendered_output(
-        &[path],
+    let (_, recorded) = resolve_compile_time_path_for_rendered_output(
+        &path,
         &harness.resolver,
-        &importer_file,
+        &declaring_file,
         &source_scope,
         &render_location,
         &PathStringFormatConfig {
@@ -187,13 +187,13 @@ fn custom_origin_changes_rendered_text_but_not_semantic_public_path() {
     let mut harness = TestHarness::new();
     let source_scope = harness.source_scope();
     let path = harness.path(&["assets", "images", "logo.png"]);
-    let importer_file = harness.importer_file();
+    let declaring_file = harness.declaring_file();
     let render_location = harness.render_location();
 
-    let (_, recorded) = resolve_compile_time_paths_for_rendered_output(
-        &[path],
+    let (_, recorded) = resolve_compile_time_path_for_rendered_output(
+        &path,
         &harness.resolver,
-        &importer_file,
+        &declaring_file,
         &source_scope,
         &render_location,
         &PathStringFormatConfig {

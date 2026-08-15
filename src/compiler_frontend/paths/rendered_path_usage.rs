@@ -7,10 +7,10 @@
 //! text, but output placement policy must stay builder-owned rather than frontend-owned.
 
 use crate::compiler_frontend::paths::compile_time_paths::{
-    CompileTimePathBase, CompileTimePathKind, CompileTimePathResolutionError, CompileTimePaths,
+    CompileTimePath, CompileTimePathBase, CompileTimePathKind, CompileTimePathResolutionError,
 };
 use crate::compiler_frontend::paths::path_format::{
-    PathStringFormatConfig, format_compile_time_paths,
+    PathStringFormatConfig, format_compile_time_path,
 };
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
@@ -67,18 +67,18 @@ pub struct RecordedRenderedPaths {
 ///
 /// WHY: path-to-string output must stay consistent across call sites, and builders must not lose
 /// provenance when the frontend eagerly formats text.
-pub(crate) fn resolve_compile_time_paths_for_rendered_output(
-    paths: &[InternedPath],
+pub(crate) fn resolve_compile_time_path_for_rendered_output(
+    path: &InternedPath,
     project_path_resolver: &ProjectPathResolver,
-    importer_file: &Path,
+    declaring_file: &Path,
     source_file_scope: &InternedPath,
     render_location: &SourceLocation,
     path_format_config: &PathStringFormatConfig,
     string_table: &mut StringTable,
-) -> Result<(CompileTimePaths, RecordedRenderedPaths), CompileTimePathResolutionError> {
+) -> Result<(CompileTimePath, RecordedRenderedPaths), CompileTimePathResolutionError> {
     let resolved =
-        project_path_resolver.resolve_compile_time_paths(paths, importer_file, string_table)?;
-    let recorded = record_compile_time_paths_for_rendered_output(
+        project_path_resolver.resolve_compile_time_path(path, declaring_file, string_table)?;
+    let recorded = record_compile_time_path_for_rendered_output(
         &resolved,
         source_file_scope,
         render_location,
@@ -89,37 +89,33 @@ pub(crate) fn resolve_compile_time_paths_for_rendered_output(
     Ok((resolved, recorded))
 }
 
-/// Capture rendered-output facts for already-resolved compile-time paths.
+/// Capture rendered-output facts for an already-resolved compile-time path.
 ///
 /// WHAT: keeps generic rendered-output coercion paths aligned with template-head rendering when a
-/// caller already holds `CompileTimePaths`.
+/// caller already holds the canonical `CompileTimePath`.
 ///
 /// WHY: every rendered compile-time path-to-string boundary used for HTML/template output must
 /// record usage facts consistently in v1.
-pub(crate) fn record_compile_time_paths_for_rendered_output(
-    paths: &CompileTimePaths,
+pub(crate) fn record_compile_time_path_for_rendered_output(
+    path: &CompileTimePath,
     source_file_scope: &InternedPath,
     render_location: &SourceLocation,
     path_format_config: &PathStringFormatConfig,
     string_table: &StringTable,
 ) -> RecordedRenderedPaths {
-    let usages = paths
-        .paths
-        .iter()
-        .map(|path| RenderedPathUsage {
-            source_path: path.source_path.clone(),
-            filesystem_path: path.filesystem_path.clone(),
-            public_path: path.public_path.clone(),
-            base: path.base.clone(),
-            kind: path.kind.clone(),
-            source_file_scope: source_file_scope.clone(),
-            render_location: render_location.clone(),
-        })
-        .collect();
+    let usage = RenderedPathUsage {
+        source_path: path.source_path.clone(),
+        filesystem_path: path.filesystem_path.clone(),
+        public_path: path.public_path.clone(),
+        base: path.base.clone(),
+        kind: path.kind.clone(),
+        source_file_scope: source_file_scope.clone(),
+        render_location: render_location.clone(),
+    };
 
     RecordedRenderedPaths {
-        rendered_text: format_compile_time_paths(paths, path_format_config, string_table),
-        usages,
+        rendered_text: format_compile_time_path(path, path_format_config, string_table),
+        usages: vec![usage],
     }
 }
 

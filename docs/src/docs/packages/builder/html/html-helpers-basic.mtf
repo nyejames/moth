@@ -3,7 +3,7 @@ strings during compilation and produce no runtime code.
 
 ### Using helpers in `.mtf` files
 
-`.mtf` files see `@html` constants without an import. You can use them
+`.mtf` files see `@html` constants without a dependency clause. You can use them
 directly.
 
 [codeblock, $code("text"):
@@ -13,12 +13,12 @@ directly.
     [codeblock, $code("moth"): value = 42]
 ]
 
-### Importing helpers in `.moth` files
+### Binding helpers in `.moth` files
 
-`.moth` files need an explicit import to use `@html` symbols.
+`.moth` files need an explicit dependency clause to use `@html` symbols.
 
 [codeblock, $code("moth"):
-    import @html {table, th, td}
+    @html table, th, td
 ]
 
 ### Available helpers
@@ -53,7 +53,7 @@ profiles share the same palette.
 `@html` wraps `@web/canvas` drawing into a `Canvas` struct with methods.
 
 [codeblock, $code("moth"):
-    import @html {get_canvas}
+    @html get_canvas
 
     canvas ~= get_canvas("my-canvas") catch:
         assert(false, "canvas not found")

@@ -1,0 +1,11 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-IMPORT-0005"]
+message_contains = ["module.js/missing"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-IMPORT-0005"
+path = "input/@page.moth"
+line = 1
+count = 1

@@ -1,4 +1,4 @@
-import @sub { PUBLIC_TRAIT }
+@sub PUBLIC_TRAIT
 
 Widget = |
     name String,

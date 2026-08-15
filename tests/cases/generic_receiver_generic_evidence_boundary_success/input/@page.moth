@@ -1,4 +1,4 @@
-import @provider { DISPLAY_TEXT, Box }
+@provider DISPLAY_TEXT, Box
 
 Label = |
     text String,

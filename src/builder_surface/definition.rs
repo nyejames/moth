@@ -28,7 +28,7 @@ pub struct BuilderSurface {
     pub config_keys: ProjectConfigKeyRegistry,
     pub external_import_providers: ExternalImportProviderRegistry,
     pub external_import_cache: ExternalImportProviderCache,
-    pub external_import_resolution_table: ExternalImportResolutionTable,
+    pub external_dependency_resolution_table: ExternalImportResolutionTable,
     pub builder_runtime_packages: Vec<BuilderRuntimePackageMetadata>,
     pub source_file_kinds: SourceFileKindRegistry,
     /// Source-backed package prefixes whose constants are implicitly visible in `.mtf` files.
@@ -72,7 +72,7 @@ impl BuilderSurface {
             config_keys,
             external_import_providers: ExternalImportProviderRegistry::empty(),
             external_import_cache: ExternalImportProviderCache::new(),
-            external_import_resolution_table: ExternalImportResolutionTable::new(),
+            external_dependency_resolution_table: ExternalImportResolutionTable::new(),
             builder_runtime_packages: Vec::new(),
             source_file_kinds: SourceFileKindRegistry::new(),
             implicit_template_scope_source_packages: BTreeSet::new(),
@@ -82,10 +82,10 @@ impl BuilderSurface {
     /// Declare a source-backed package whose exported constants enter `.mtf` implicit scope.
     pub fn register_implicit_template_scope_source_package(
         &mut self,
-        import_prefix: impl Into<String>,
+        package_prefix: impl Into<String>,
     ) {
         self.implicit_template_scope_source_packages
-            .insert(import_prefix.into());
+            .insert(package_prefix.into());
     }
 
     /// Exposes the currently supported optional core packages for the HTML builder.

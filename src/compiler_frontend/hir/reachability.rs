@@ -3,7 +3,7 @@
 //! WHAT: records direct CFG and call facts per HIR function, then builds exact unions from roots
 //! selected by build-owned link planning.
 //! WHY: later phases need one retained view of executable runtime facts without re-scanning HIR,
-//! import syntax, or inventing target-specific reachability rules.
+//! dependency syntax, or inventing target-specific reachability rules.
 //!
 //! This is intentionally a syntactic HIR analysis. It does not fold constants, eliminate dead
 //! branches, inspect borrow facts, or perform backend lowering.

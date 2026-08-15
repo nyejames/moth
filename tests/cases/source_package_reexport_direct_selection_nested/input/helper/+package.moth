@@ -1,0 +1,3 @@
+export:
+    @internal/clock seconds
+;

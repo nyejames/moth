@@ -1,8 +1,0 @@
-[backends.html]
-mode = "failure"
-warnings = "forbid"
-diagnostic_codes = ["MOTH-SYNTAX-0019"]
-
-[[backends.html.diagnostic_assertions]]
-code = "MOTH-SYNTAX-0019"
-reason = "invalid_import_clause.double_alias_in_grouped_entry"

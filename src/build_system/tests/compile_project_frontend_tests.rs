@@ -68,14 +68,11 @@ fn directory_graph_retains_independent_diagnostics_without_blocked_consumer_casc
     fs::create_dir_all(dir.join("consumer")).expect("should create second consumer module");
     fs::create_dir_all(dir.join("independent")).expect("should create independent module");
     fs::write(dir.join("config.moth"), "").expect("should write config");
-    fs::write(
-        dir.join("@page.moth"),
-        "import @provider { run }\nvalue = run()\n",
-    )
-    .expect("should write blocked consumer");
+    fs::write(dir.join("@page.moth"), "@provider run\nvalue = run()\n")
+        .expect("should write blocked consumer");
     fs::write(
         dir.join("consumer/@mod.moth"),
-        "import @provider { run }\nvalue = run()\n",
+        "@provider run\nvalue = run()\n",
     )
     .expect("should write second blocked consumer");
     fs::write(
@@ -146,7 +143,8 @@ fn failed_directory_preparation_keeps_unfinished_module_metadata_out_of_completi
     let dir = temp_dir("timing_failed_directory_preparation");
     fs::create_dir_all(&dir).expect("should create project directory");
     fs::write(dir.join("config.moth"), "").expect("should write config");
-    fs::write(dir.join("@page.moth"), "import\n#[:ok]\n").expect("should write malformed entry");
+    fs::write(dir.join("@page.moth"), "@core/math sin,\n#[:ok]\n")
+        .expect("should write malformed entry");
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
@@ -706,11 +704,8 @@ fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_
     fs::create_dir_all(&package).expect("should create package root");
     fs::create_dir_all(&src).expect("should create entry root");
     fs::write(dir.join("config.moth"), "entry_root #= \"src\"\n").expect("should write config");
-    fs::write(
-        src.join("@page.moth"),
-        "import @broken { run }\nvalue = run()\n",
-    )
-    .expect("should write blocked project consumer");
+    fs::write(src.join("@page.moth"), "@broken run\nvalue = run()\n")
+        .expect("should write blocked project consumer");
     fs::write(
         package.join("@mod.moth"),
         "export:\n    run || -> Int:\n        return missing_package_value\n    ;\n;\n",
@@ -1021,7 +1016,7 @@ export:
     .expect("should write provider");
     fs::write(
         dir.join("@page.moth"),
-        r#"import @provider { forward }
+        r#"@provider forward
 
 export:
     Box type T = |
@@ -1163,7 +1158,7 @@ fn generated_sidecars_reconstruct_hidden_facade_nominal_closure() {
     fs::write(
         dir.join("facade/@mod.moth"),
         r#"export:
-    import @provider { Wrapper, make }
+    @provider Wrapper, make
 ;
 "#,
     )
@@ -1180,8 +1175,8 @@ fn generated_sidecars_reconstruct_hidden_facade_nominal_closure() {
     .expect("should write generic provider");
     fs::write(
         dir.join("@page.moth"),
-        r#"import @facade { Wrapper, make }
-import @generics { identity }
+        r#"@facade Wrapper, make
+@generics identity
 
 wrapped Wrapper = identity(make())
 "#,
@@ -1565,11 +1560,8 @@ fn provider_created_package_registry_survives_into_module() {
     let dir = temp_dir("provider_registry_survives");
     fs::create_dir_all(&dir).expect("should create temp dir");
     fs::write(dir.join("config.moth"), "").expect("should write config");
-    fs::write(
-        dir.join("@page.moth"),
-        "import @./drawing.js { draw }\nvalue = draw()\n",
-    )
-    .expect("should write page");
+    fs::write(dir.join("@page.moth"), "@drawing.js draw\nvalue = draw()\n")
+        .expect("should write page");
     fs::write(dir.join("drawing.js"), "export function draw() {}\n").expect("should write js");
 
     let mut config = Config::new(dir.clone());
@@ -1627,12 +1619,12 @@ fn provider_runtime_assets_deduped_for_repeated_imports() {
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
         dir.join("@page.moth"),
-        "import @./drawing.js { draw }\nimport @other { run }\nvalue = draw()\nother_value = run()\n",
+        "@drawing.js draw\n@other run\nvalue = draw()\nother_value = run()\n",
     )
     .expect("should write entry");
     fs::write(
         dir.join("other.moth"),
-        "import @./drawing.js { draw as render }\nrun || -> Int:\n    return render()\n;\n",
+        "@drawing.js draw as render\nrun || -> Int:\n    return render()\n;\n",
     )
     .expect("should write helper");
     fs::write(dir.join("drawing.js"), "export function draw() {}\n").expect("should write js");
@@ -1685,11 +1677,10 @@ fn entry_runtime_metadata_ignores_unreachable_external_calls() {
     let dir = temp_dir("provider_runtime_metadata_unreachable");
     fs::create_dir_all(&dir).expect("should create temp dir");
     fs::write(dir.join("config.moth"), "").expect("should write config");
-    fs::write(dir.join("@page.moth"), "import @other { run }\nvalue = 1\n")
-        .expect("should write entry");
+    fs::write(dir.join("@page.moth"), "@other run\nvalue = 1\n").expect("should write entry");
     fs::write(
         dir.join("other.moth"),
-        "import @./drawing.js { get_number }\nrun || -> Int, Error!:\n    return get_number()!\n;\n",
+        "@drawing.js get_number\nrun || -> Int, Error!:\n    return get_number()!\n;\n",
     )
     .expect("should write helper source");
     fs::write(
@@ -1772,7 +1763,7 @@ fn entry_runtime_metadata_ignores_unreachable_source_package_wrappers() {
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
         dir.join("@page.moth"),
-        "import @html { canvas }\npage_canvas_id #= canvas\nvalue = 1\n",
+        "@html canvas\npage_canvas_id #= canvas\nvalue = 1\n",
     )
     .expect("should write page");
 
@@ -1842,11 +1833,8 @@ fn provider_backed_import_with_js_lowering_passes_html_build() {
     let dir = temp_dir("provider_js_lowering_html");
     fs::create_dir_all(&dir).expect("should create temp dir");
     fs::write(dir.join("config.moth"), "").expect("should write config");
-    fs::write(
-        dir.join("@page.moth"),
-        "import @./drawing.js { draw }\nvalue = draw()\n",
-    )
-    .expect("should write page");
+    fs::write(dir.join("@page.moth"), "@drawing.js draw\nvalue = draw()\n")
+        .expect("should write page");
     fs::write(dir.join("drawing.js"), "export function draw() {}\n").expect("should write js");
 
     let mut config = Config::new(dir.clone());
@@ -1899,7 +1887,7 @@ fn linked_module_js_lowering_is_observed_separately() {
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
         dir.join("@page.moth"),
-        "import @phase6helper { helper }\nvalue = helper()\n",
+        "@phase6helper helper\nvalue = helper()\n",
     )
     .expect("should write page");
     fs::write(
@@ -2109,11 +2097,8 @@ fn single_file_rejects_optional_core_package_not_exposed_by_builder() {
     let dir = temp_dir("single_file_optional_core_not_exposed");
     fs::create_dir_all(&dir).expect("should create temp dir");
     let moth_path = dir.join("test.moth");
-    fs::write(
-        &moth_path,
-        "import @core/text {length}\nvalue = length(\"abc\")\n",
-    )
-    .expect("should write .moth");
+    fs::write(&moth_path, "@core/text length\nvalue = length(\"abc\")\n")
+        .expect("should write .moth");
 
     let mut config = Config::new(moth_path);
     let style_directives = StyleDirectiveRegistry::built_ins();
@@ -2267,19 +2252,19 @@ fn directory_project_remaps_delta_collisions_across_modules() {
 }
 
 #[test]
-fn provider_backed_grouped_import_compiles_and_reuses_cache() {
+fn provider_backed_direct_selection_compiles_and_reuses_cache() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = temp_dir("provider_grouped_import_cache");
+    let dir = temp_dir("provider_direct_selection_cache");
     fs::create_dir_all(&dir).expect("should create temp dir");
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
         dir.join("@page.moth"),
-        "import @./drawing.js { draw as render }\nimport @other { run }\nvalue = render()\nother_value = run()\n",
+        "@drawing.js draw as render\n@other run\nvalue = render()\nother_value = run()\n",
     )
     .expect("should write page");
     fs::write(
         dir.join("other.moth"),
-        "import @./drawing.js { draw as render_again }\nrun || -> Int:\n    return render_again()\n;\n",
+        "@drawing.js draw as render_again\nrun || -> Int:\n    return render_again()\n;\n",
     )
     .expect("should write helper source");
     fs::write(dir.join("drawing.js"), "export function draw() {}\n").expect("should write js");
@@ -2298,7 +2283,7 @@ fn provider_backed_grouped_import_compiles_and_reuses_cache() {
         &mut frontend_surface,
         &mut string_table,
     )
-    .expect("provider-backed grouped imports should compile");
+    .expect("provider-backed direct selections should compile");
 
     assert_eq!(
         calls.load(Ordering::SeqCst),
@@ -2309,21 +2294,21 @@ fn provider_backed_grouped_import_compiles_and_reuses_cache() {
         modules
             .successful_module_views()
             .any(module_contains_external_call),
-        "HIR should lower provider-backed grouped calls to external function IDs"
+        "HIR should lower provider-backed direct-selection calls to external function IDs"
     );
 
     fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
 #[test]
-fn provider_backed_namespace_import_exposes_function_and_type_members() {
+fn provider_backed_namespace_binding_exposes_function_and_type_members() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = temp_dir("provider_namespace_import");
+    let dir = temp_dir("provider_namespace_binding");
     fs::create_dir_all(&dir).expect("should create temp dir");
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
         dir.join("@page.moth"),
-        "import @./drawing.js\nwidget drawing.Widget = drawing.make_widget()\nvalue = drawing.draw()\n",
+        "@drawing.js as drawing\nwidget drawing.Widget = drawing.make_widget()\nvalue = drawing.draw()\n",
     )
     .expect("should write page");
     fs::write(dir.join("drawing.js"), "export function draw() {}\n").expect("should write js");
@@ -2342,12 +2327,12 @@ fn provider_backed_namespace_import_exposes_function_and_type_members() {
         &mut frontend_surface,
         &mut string_table,
     )
-    .expect("provider-backed namespace import should compile");
+    .expect("provider-backed namespace binding should compile");
 
     assert_eq!(
         calls.load(Ordering::SeqCst),
         1,
-        "namespace import should resolve the JS file once"
+        "namespace binding should resolve the JS file once"
     );
     assert!(
         modules
@@ -2368,17 +2353,17 @@ fn provider_backed_same_bare_name_from_different_directories_gets_distinct_packa
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
         dir.join("@page.moth"),
-        "import @a/use { run_a }\nimport @b/use { run_b }\nvalue_a = run_a()\nvalue_b = run_b()\n",
+        "@a/use run_a\n@b/use run_b\nvalue_a = run_a()\nvalue_b = run_b()\n",
     )
     .expect("should write page");
     fs::write(
         dir.join("a/use.moth"),
-        "import @./helper.js { draw as draw_a }\nrun_a || -> Int:\n    return draw_a()\n;\n",
+        "@a/helper.js draw as draw_a\nrun_a || -> Int:\n    return draw_a()\n;\n",
     )
     .expect("should write a source");
     fs::write(
         dir.join("b/use.moth"),
-        "import @./helper.js { draw as draw_b }\nrun_b || -> Int:\n    return draw_b()\n;\n",
+        "@b/helper.js draw as draw_b\nrun_b || -> Int:\n    return draw_b()\n;\n",
     )
     .expect("should write b source");
     fs::write(dir.join("a/helper.js"), "export function draw() {}\n").expect("should write a js");
@@ -2423,7 +2408,7 @@ fn provider_backed_opaque_type_passes_to_same_package_function() {
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
         dir.join("@page.moth"),
-        "import @./drawing.js { make_widget, use_widget }\nwidget = make_widget()\nvalue = use_widget(widget)\n",
+        "@drawing.js make_widget, use_widget\nwidget = make_widget()\nvalue = use_widget(widget)\n",
     )
     .expect("should write page");
     fs::write(dir.join("drawing.js"), "export function draw() {}\n").expect("should write js");
@@ -2463,7 +2448,7 @@ fn provider_backed_opaque_type_from_different_package_is_rejected() {
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
         dir.join("@page.moth"),
-        "import @./a/drawing.js { make_widget }\nimport @./b/drawing.js { use_widget }\nwidget = make_widget()\nvalue = use_widget(widget)\n",
+        "@a/drawing.js make_widget\n@b/drawing.js use_widget\nwidget = make_widget()\nvalue = use_widget(widget)\n",
     )
     .expect("should write page");
     fs::write(dir.join("a/drawing.js"), "export function draw() {}\n").expect("should write a js");
@@ -2564,14 +2549,14 @@ fn builder_surface_with_html_js_provider() -> BuilderSurface {
 }
 
 #[test]
-fn html_js_provider_namespace_import_resolves() {
+fn html_js_provider_namespace_binding_resolves() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let dir = temp_dir("html_js_provider_namespace");
     fs::create_dir_all(&dir).expect("should create temp dir");
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
         dir.join("@page.moth"),
-        "import @./drawing.js\nvalue = drawing.draw()\n",
+        "@drawing.js as drawing\nvalue = drawing.draw()\n",
     )
     .expect("should write page");
     fs::write(
@@ -2593,7 +2578,7 @@ fn html_js_provider_namespace_import_resolves() {
         &mut frontend_surface,
         &mut string_table,
     )
-    .expect("real JS provider namespace import should compile");
+    .expect("real JS provider namespace binding should compile");
 
     assert!(
         modules
@@ -2606,14 +2591,14 @@ fn html_js_provider_namespace_import_resolves() {
 }
 
 #[test]
-fn html_js_provider_grouped_import_resolves() {
+fn html_js_provider_direct_selection_resolves() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let dir = temp_dir("html_js_provider_grouped");
     fs::create_dir_all(&dir).expect("should create temp dir");
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
         dir.join("@page.moth"),
-        "import @./drawing.js { draw as render }\nvalue = render()\n",
+        "@drawing.js draw as render\nvalue = render()\n",
     )
     .expect("should write page");
     fs::write(
@@ -2635,27 +2620,27 @@ fn html_js_provider_grouped_import_resolves() {
         &mut frontend_surface,
         &mut string_table,
     )
-    .expect("real JS provider grouped import should compile");
+    .expect("real JS provider direct selections should compile");
 
     assert!(
         modules
             .successful_module_views()
             .any(|module| module_contains_external_module_export(module, "draw")),
-        "HIR should preserve grouped alias JS export metadata"
+        "HIR should preserve direct-selection alias JS export metadata"
     );
 
     fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
 #[test]
-fn html_js_provider_grouped_alias_for_function_and_opaque_type_resolves() {
+fn html_js_provider_direct_alias_for_function_and_opaque_type_resolves() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = temp_dir("html_js_provider_grouped_alias");
+    let dir = temp_dir("html_js_provider_direct_alias");
     fs::create_dir_all(&dir).expect("should create temp dir");
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
         dir.join("@page.moth"),
-        "import @./drawing.js { Widget as Canvas, draw as render }\nvalue = render()\n",
+        "@drawing.js Widget as Canvas, draw as render\nvalue = render()\n",
     )
     .expect("should write page");
     fs::write(
@@ -2677,7 +2662,7 @@ fn html_js_provider_grouped_alias_for_function_and_opaque_type_resolves() {
         &mut frontend_surface,
         &mut string_table,
     )
-    .expect("grouped alias for function and opaque type should compile");
+    .expect("direct alias for function and opaque type should compile");
 
     assert!(
         modules
@@ -2697,7 +2682,7 @@ fn html_js_provider_receiver_method_in_project_local_js_rejected() {
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
         dir.join("@page.moth"),
-        "import @./drawing.js { make_canvas, fill_rect }\ncanvas ~= make_canvas()\n~canvas.fill_rect(0.0, 0.0, 1.0, 1.0)\n",
+        "@drawing.js make_canvas, fill_rect\ncanvas ~= make_canvas()\n~canvas.fill_rect(0.0, 0.0, 1.0, 1.0)\n",
     )
     .expect("should write page");
     fs::write(
@@ -2740,12 +2725,12 @@ fn html_js_provider_repeated_imports_reuse_cache() {
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
         dir.join("@page.moth"),
-        "import @./drawing.js { draw }\nimport @other { run }\nvalue = draw()\nother_value = run()\n",
+        "@drawing.js draw\n@other run\nvalue = draw()\nother_value = run()\n",
     )
     .expect("should write entry");
     fs::write(
         dir.join("other.moth"),
-        "import @./drawing.js { draw as render_again }\nrun || -> Int:\n    return render_again()\n;\n",
+        "@drawing.js draw as render_again\nrun || -> Int:\n    return render_again()\n;\n",
     )
     .expect("should write helper source");
     fs::write(
@@ -2791,7 +2776,7 @@ fn html_js_provider_fallible_function_with_error_return_compiles() {
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
         dir.join("@page.moth"),
-        "import @./drawing.js { Canvas, get_canvas }\nrun || -> Canvas, Error!:\n    return get_canvas(\"game\")!\n;\n",
+        "@drawing.js Canvas, get_canvas\nrun || -> Canvas, Error!:\n    return get_canvas(\"game\")!\n;\n",
     )
     .expect("should write page");
     fs::write(
@@ -2893,14 +2878,11 @@ fn diagnosed_provider_retains_independent_successful_module() {
     fs::create_dir_all(dir.join("consumer")).expect("should create second consumer module");
     fs::create_dir_all(dir.join("independent")).expect("should create independent module");
     fs::write(dir.join("config.moth"), "").expect("should write config");
-    fs::write(
-        dir.join("@page.moth"),
-        "import @provider { run }\nvalue = run()\n",
-    )
-    .expect("should write blocked consumer");
+    fs::write(dir.join("@page.moth"), "@provider run\nvalue = run()\n")
+        .expect("should write blocked consumer");
     fs::write(
         dir.join("consumer/@mod.moth"),
-        "import @provider { run }\nvalue = run()\n",
+        "@provider run\nvalue = run()\n",
     )
     .expect("should write second blocked consumer");
     fs::write(
@@ -3025,95 +3007,6 @@ fn source_package_warning_retained_by_frontend_outcome() {
     assert!(
         messages.warning_count() >= 1,
         "render boundary should retain the source-package warning"
-    );
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
-}
-
-#[test]
-fn same_module_import_never_cross_binds_to_suffix_provider_edge() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    // WHAT: a same-module grouped import whose normalized path ends with a cross-module edge's
-    //       authored path must stay a local binding.
-    // WHY: the removed suffix matcher compared normalized import paths against authored edge
-    //       paths, so `@a/child { value }` (normalized `.../a/child/value`) could match the edge
-    //       authored by `@child { value }`. The shell identity makes the join exact, and
-    //       same-module imports never enter the provider-interface map.
-    let dir = temp_dir("same_module_suffix_cross_bind");
-    fs::create_dir_all(dir.join("src/child")).expect("should create child module dir");
-    fs::create_dir_all(dir.join("src/a/child")).expect("should create local file dir");
-    fs::write(dir.join("config.moth"), "").expect("should write config");
-    fs::write(
-        dir.join("src/@page.moth"),
-        "import @child { value as child_value }\nimport @other { result }\nio.line([: [child_value()] [result]])\n",
-    )
-    .expect("should write page root");
-    fs::write(
-        dir.join("src/other.moth"),
-        "import @a/child { value as local_value }\nresult #= local_value\n",
-    )
-    .expect("should write same-module file");
-    fs::write(
-        dir.join("src/child/@child.moth"),
-        "export:\n    value || -> Int:\n        return 2\n    ;\n;\n",
-    )
-    .expect("should write child module");
-    fs::write(dir.join("src/a/child/value.moth"), "value #= \"local\"\n")
-        .expect("should write local value file");
-
-    let mut config = Config::new(dir.clone());
-    let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
-    let frontend = compile_project_frontend(
-        &mut config,
-        BuildProfile::Dev,
-        None,
-        &style_directives,
-        &mut BuilderSurface::with_mandatory_core(),
-        &mut string_table,
-    )
-    .expect("the frontend outcome must build");
-
-    assert!(
-        !frontend.has_diagnosed_or_blocked(),
-        "the same-module import must stay a local binding; binding it to the child function \
-         would diagnose the function-as-value constant"
-    );
-
-    let page_module = frontend
-        .project
-        .modules
-        .successful_artefacts_in_module_id_order()
-        .map(|artifact| &artifact.module)
-        .find(|module| {
-            module
-                .metadata
-                .entry_point
-                .file_name()
-                .and_then(|name| name.to_str())
-                == Some("@page.moth")
-        })
-        .expect("page module should compile");
-
-    // The cross-module child import must still resolve through its own edge while the
-    // suffix-sharing same-module import resolves locally.
-    assert!(
-        page_module
-            .executable
-            .hir
-            .blocks
-            .iter()
-            .any(|block| block.statements.iter().any(|statement| {
-                matches!(
-                    &statement.kind,
-                    crate::compiler_frontend::hir::statements::HirStatementKind::Call {
-                        target: crate::compiler_frontend::external_packages::CallTarget::CrossModule(origin),
-                        ..
-                    } if origin.defining_name() == "value"
-                        && origin.module_origin().logical_module_path() == "src/child"
-                )
-            })),
-        "the child module edge must bind the explicit cross-module import"
     );
 
     fs::remove_dir_all(&dir).expect("should remove temp dir");

@@ -1,42 +1,24 @@
-import @statement-if {
-    content as statement_if,
-}
+@statement-if content as statement_if
 
-import @statement-if-basic {
-    content as statement_if_basic,
-}
+@statement-if-basic content as statement_if_basic
 
-import @value-producing-if {
-    content as value_producing_if,
-}
+@value-producing-if content as value_producing_if
 
-import @value-producing-if-basic {
-    content as value_producing_if_basic,
-}
+@value-producing-if-basic content as value_producing_if_basic
 
-import @pattern-matching {
-    content as pattern_matching,
-}
+@pattern-matching content as pattern_matching
 
-import @pattern-matching-basic {
-    content as pattern_matching_basic,
-}
+@pattern-matching-basic content as pattern_matching_basic
 
-import @patterns-and-exhaustiveness {
-    content as patterns_and_exhaustiveness,
-}
+@patterns-and-exhaustiveness content as patterns_and_exhaustiveness
 
-import @patterns-and-exhaustiveness-basic {
-    content as patterns_and_exhaustiveness_basic,
-}
+@patterns-and-exhaustiveness-basic content as patterns_and_exhaustiveness_basic
 
-import @styles {
-    navbar,
+@styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager,
-}
+    doc_pager
 
 page_title #= "Branching"
 page_description #= "If statements, value-producing control flow, pattern matching and exhaustiveness in Moth."

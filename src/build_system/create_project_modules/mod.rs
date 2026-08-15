@@ -10,15 +10,17 @@
 //! - `source_tree_index`        — project and source-package boundary source-tree indexing with
 //!   root discovery and collision checks
 //! - `module_identity`          — Stage 0 durable module identity and structural topology
-//! - `module_namespace`         — boundary-aware indexed module namespaces for source-import resolution
+//! - `module_namespace`         — boundary-aware indexed module namespaces for dependency resolution
 //! - `project_module_graph`      — canonical structural project module graph and compile order
 //! - `module_inventory`         — project-level module assembly
 //! - `prepared_source`          — state-safe source-kind input handoff
 //! - `prepared_module`          — retained module-preparation payload handed to semantic compilation
 //! - `module_artifact_store`    — completed immutable artefacts, dense slot mapping and outcomes
 //! - `compiled_boundary`        — retained project/source-package graph boundaries and frontend outcome
-//! - `source_discovery`         — Stage 0 source traversal, owned-input preparation and structural provider resolution
-//! - `source_scanning`          — retained single-pass source tokenisation and import extraction
+//! - `source_discovery`         — Stage 0 source traversal, owned-input preparation and
+//!   structural provider resolution
+//! - `source_preparation`       — retained single-pass source tokenisation and complete Moth-file
+//!   preparation
 //! - `project_structure_diagnostics` — typed Stage 0 project diagnostics
 //! - `source_discovery_error`   — Stage 0 boundary between diagnostics and file/tooling errors
 //! - `source_loading`           — raw file I/O
@@ -44,7 +46,7 @@ mod source_discovery;
 pub(crate) mod source_discovery_error;
 pub(crate) mod source_loading;
 pub(crate) mod source_package_discovery;
-pub(crate) mod source_scanning;
+pub(crate) mod source_preparation;
 mod source_tree_index;
 
 #[cfg(test)]

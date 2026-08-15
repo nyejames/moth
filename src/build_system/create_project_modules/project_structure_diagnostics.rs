@@ -52,7 +52,7 @@ pub(super) fn path_id(path: &Path, string_table: &mut StringTable) -> StringId {
 /// Build an infrastructure error for a filesystem name that cannot be represented as UTF-8.
 ///
 /// WHAT: retains the offending path in a `CompilerError` so the build boundary can render it.
-/// WHY: a non-UTF-8 filesystem name cannot enter the string table or import namespace. It is an
+/// WHY: a non-UTF-8 filesystem name cannot enter the string table or dependency namespace. It is an
 ///      unrepresentable filesystem input, not an authored config mistake, so it uses the
 ///      `CompilerError` lane rather than `CompilerDiagnostic`.
 pub(super) fn non_utf8_filesystem_name_error(

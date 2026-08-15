@@ -5,6 +5,7 @@
 //! WHY: header parsing owns declaration-shell discovery, but AST owns type resolution and
 //! expression parsing. Keeping this module AST-free preserves that stage boundary.
 
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
     reserved_trait_keyword_error, reserved_trait_keyword_or_dispatch_mismatch,
 };
@@ -98,6 +99,31 @@ impl SignatureMemberSyntax {
         }
         self.location.remap_string_ids(remap);
     }
+
+    pub fn validate_required_source_prefix(
+        &self,
+        provisional_source_file: &InternedPath,
+    ) -> Result<(), CompilerError> {
+        self.id
+            .try_rebind_required_prefix(provisional_source_file, provisional_source_file)?;
+        Ok(())
+    }
+
+    pub fn rebind_source_identity(
+        &mut self,
+        logical_path: &InternedPath,
+        provisional_source_file: &InternedPath,
+    ) -> Result<(), CompilerError> {
+        self.id = self
+            .id
+            .try_rebind_required_prefix(provisional_source_file, logical_path)?;
+        self.type_annotation.rebind_source_identity(logical_path);
+        for token in &mut self.default_tokens {
+            token.location.rebind_source_identity(logical_path);
+        }
+        self.location.rebind_source_identity(logical_path);
+        Ok(())
+    }
 }
 
 impl FunctionReturnSyntax {
@@ -107,6 +133,14 @@ impl FunctionReturnSyntax {
         self.type_annotation.remap_string_ids(remap);
         self.location.remap_string_ids(remap);
     }
+
+    pub fn rebind_source_identity(
+        &mut self,
+        logical_path: &crate::compiler_frontend::symbols::interned_path::InternedPath,
+    ) {
+        self.type_annotation.rebind_source_identity(logical_path);
+        self.location.rebind_source_identity(logical_path);
+    }
 }
 
 impl ReturnSlotSyntax {
@@ -115,6 +149,14 @@ impl ReturnSlotSyntax {
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.value.remap_string_ids(remap);
         self.location.remap_string_ids(remap);
+    }
+
+    pub fn rebind_source_identity(
+        &mut self,
+        logical_path: &crate::compiler_frontend::symbols::interned_path::InternedPath,
+    ) {
+        self.value.rebind_source_identity(logical_path);
+        self.location.rebind_source_identity(logical_path);
     }
 }
 
@@ -128,6 +170,30 @@ impl FunctionSignatureSyntax {
         for return_slot in &mut self.returns {
             return_slot.remap_string_ids(remap);
         }
+    }
+
+    pub fn validate_required_source_prefixes(
+        &self,
+        provisional_source_file: &InternedPath,
+    ) -> Result<(), CompilerError> {
+        for parameter in &self.parameters {
+            parameter.validate_required_source_prefix(provisional_source_file)?;
+        }
+        Ok(())
+    }
+
+    pub fn rebind_source_identity(
+        &mut self,
+        logical_path: &InternedPath,
+        provisional_source_file: &InternedPath,
+    ) -> Result<(), CompilerError> {
+        for parameter in &mut self.parameters {
+            parameter.rebind_source_identity(logical_path, provisional_source_file)?;
+        }
+        for return_slot in &mut self.returns {
+            return_slot.rebind_source_identity(logical_path);
+        }
+        Ok(())
     }
 }
 

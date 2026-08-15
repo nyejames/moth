@@ -684,7 +684,12 @@ fn parse_type_slice(
         .unwrap_or_else(|| outer_stream.current_location());
     slice_tokens.push(Token::new(TokenKind::Eof, eof_location));
 
-    let mut stream = FileTokens::new(outer_stream.src_path.clone(), slice_tokens);
+    let mut stream = FileTokens::new_path_free_substream(
+        outer_stream.src_path.clone(),
+        outer_stream.file_id,
+        outer_stream.canonical_os_path.clone(),
+        slice_tokens,
+    );
     let parsed_type = parse_required_type(&mut stream, context, string_table)?;
     let next_token = if stream.current_token_kind() == &TokenKind::Eof {
         None

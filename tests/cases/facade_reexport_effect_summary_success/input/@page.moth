@@ -1,4 +1,4 @@
-import @helper { Counter, alias_of, fresh_counter, bump }
+@helper Counter, alias_of, fresh_counter, bump
 
 describe |value Counter| -> String:
     return [:facade_reexport_effect_summary_success alias-step=[value.step]]

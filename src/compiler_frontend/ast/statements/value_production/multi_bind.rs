@@ -11,6 +11,7 @@ use super::receiver::{
     try_parse_value_block_at_receiver, validate_value_match_completeness,
 };
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, MatchExhaustiveness, NodeKind};
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::parse_expression::create_expression_until;
 use crate::compiler_frontend::ast::expressions::parse_expression_input::{
@@ -44,17 +45,9 @@ use crate::compiler_frontend::type_coercion::parse_context::CastTargetContext;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
 
-/// File-local boxed diagnostic result alias.
-///
-/// WHAT: every local helper in this module returns `Result<T, Box<CompilerDiagnostic>>` through
-/// this alias.
-/// WHY: `CompilerDiagnostic` is large enough to trigger `clippy::result_large_err` when stored
-/// directly in a `Result` variant. Boxing the error at the owner boundary keeps the `Result`
-/// envelope small without changing `DiagnosticBag`, `CompilerMessages`, or any shared error type.
-/// Already-boxed helpers (condition validation, match-header dispatch, statement dispatch) flow
-/// through unchanged; still-plain external helpers (value-block receiver parsing, completeness
-/// validation, inferred-value parsing, expression parsing) are adapted at their narrow call sites.
-type MultiBindValueResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// Value-producing multi-bind bodies recurse into the AST body parser, so they preserve the
+/// source-diagnostic and retained-data-infrastructure lanes for expression callers.
+type MultiBindValueResult<T> = Result<T, ExpressionParseError>;
 
 // ----------------------------
 //  Multi-bind value blocks
@@ -89,8 +82,7 @@ pub fn try_parse_multi_bind_value_block(
             &expected_types,
             ValueReceiverKind::MultiBind,
             string_table,
-        )
-        .map(|result| result.map_err(Box::new));
+        );
     }
 
     Some(parse_inferred_multi_bind_value_block(
@@ -127,12 +119,11 @@ fn parse_inferred_multi_bind_value_block(
     }
 
     if if_condition_is_missing(token_stream) {
-        return Err(Box::new(
-            CompilerDiagnostic::invalid_control_flow_statement(
-                InvalidControlFlowStatementReason::ExpectedConditionAfterIf,
-                token_stream.current_location(),
-            ),
-        ));
+        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+            InvalidControlFlowStatementReason::ExpectedConditionAfterIf,
+            token_stream.current_location(),
+        )
+        .into());
     }
 
     let mut condition_type = ExpectedType::Infer;
@@ -147,8 +138,7 @@ fn parse_inferred_multi_bind_value_block(
         value_mode: &ValueMode::ImmutableOwned,
         string_table,
     });
-    let condition = create_expression_until(input, &[TokenKind::Then, TokenKind::Colon])
-        .map_err(|err| Box::new(err.into()))?;
+    let condition = create_expression_until(input, &[TokenKind::Then, TokenKind::Colon])?;
     ensure_if_statement_condition(&condition, type_interner.environment())?;
 
     if token_stream.current_token_kind() == &TokenKind::Then {
@@ -177,12 +167,11 @@ fn parse_inferred_multi_bind_value_block(
         });
     }
 
-    Err(Box::new(
-        CompilerDiagnostic::invalid_control_flow_statement(
-            InvalidControlFlowStatementReason::ExpectedColonAfterCondition,
-            token_stream.current_location(),
-        ),
-    ))
+    Err(CompilerDiagnostic::invalid_control_flow_statement(
+        InvalidControlFlowStatementReason::ExpectedColonAfterCondition,
+        token_stream.current_location(),
+    )
+    .into())
 }
 
 fn collect_known_slot_types(known_slot_types: &[Option<TypeId>]) -> Option<Vec<TypeId>> {
@@ -241,16 +230,14 @@ fn parse_inferred_multi_bind_value_match(
         value_mode: &ValueMode::ImmutableOwned,
         string_table,
     });
-    let scrutinee =
-        create_expression_until(input, &[TokenKind::Is]).map_err(|err| Box::new(err.into()))?;
+    let scrutinee = create_expression_until(input, &[TokenKind::Is])?;
 
     if token_stream.current_token_kind() != &TokenKind::Is {
-        return Err(Box::new(
-            CompilerDiagnostic::invalid_control_flow_statement(
-                InvalidControlFlowStatementReason::ExpectedColonAfterCondition,
-                token_stream.current_location(),
-            ),
-        ));
+        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+            InvalidControlFlowStatementReason::ExpectedColonAfterCondition,
+            token_stream.current_location(),
+        )
+        .into());
     }
     token_stream.advance();
 
@@ -280,12 +267,11 @@ fn parse_inferred_multi_bind_value_match(
     let produced_value_sets =
         collect_match_multi_produced_values(&parsed_match.arms, parsed_match.default.as_deref());
     if produced_value_sets.is_empty() {
-        return Err(Box::new(
-            CompilerDiagnostic::invalid_control_flow_statement(
-                InvalidControlFlowStatementReason::ValueIfNoProducingPath,
-                location.clone(),
-            ),
-        ));
+        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+            InvalidControlFlowStatementReason::ValueIfNoProducingPath,
+            location.clone(),
+        )
+        .into());
     }
 
     for values in &produced_value_sets {
@@ -343,23 +329,21 @@ fn parse_inferred_inline_multi_bind_value_if(
     token_stream.advance(); // consume `then`
 
     if token_stream.current_token_kind() == &TokenKind::Newline {
-        return Err(Box::new(
-            CompilerDiagnostic::invalid_control_flow_statement(
-                InvalidControlFlowStatementReason::InlineValueIfMultiline,
-                token_stream.current_location(),
-            ),
-        ));
+        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+            InvalidControlFlowStatementReason::InlineValueIfMultiline,
+            token_stream.current_location(),
+        )
+        .into());
     }
 
     // A retained newline is a multiline form. Every other definite boundary means
     // the branch has no first value.
     if is_missing_produced_value_boundary(token_stream.current_token_kind()) {
-        return Err(Box::new(
-            CompilerDiagnostic::invalid_control_flow_statement(
-                InvalidControlFlowStatementReason::ExpectedValueAfterThen,
-                token_stream.current_location(),
-            ),
-        ));
+        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+            InvalidControlFlowStatementReason::ExpectedValueAfterThen,
+            token_stream.current_location(),
+        )
+        .into());
     }
 
     let then_values = parse_fixed_arity_inferred_values(
@@ -368,52 +352,46 @@ fn parse_inferred_inline_multi_bind_value_if(
         type_interner,
         target_count,
         string_table,
-    )
-    .map_err(|err| Box::new(err.into()))?;
+    )?;
 
     if token_stream.current_token_kind() != &TokenKind::Else {
-        return Err(Box::new(
-            CompilerDiagnostic::invalid_control_flow_statement(
-                InvalidControlFlowStatementReason::ValueIfMissingElse,
-                token_stream.current_location(),
-            ),
-        ));
+        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+            InvalidControlFlowStatementReason::ValueIfMissingElse,
+            token_stream.current_location(),
+        )
+        .into());
     }
     if !same_logical_line(&then_location, &token_stream.current_location()) {
-        return Err(Box::new(
-            CompilerDiagnostic::invalid_control_flow_statement(
-                InvalidControlFlowStatementReason::InlineValueIfMultiline,
-                token_stream.current_location(),
-            ),
-        ));
+        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+            InvalidControlFlowStatementReason::InlineValueIfMultiline,
+            token_stream.current_location(),
+        )
+        .into());
     }
 
     token_stream.advance(); // consume `else`
 
     if token_stream.current_token_kind() == &TokenKind::Then {
-        return Err(Box::new(
-            CompilerDiagnostic::invalid_control_flow_statement(
-                InvalidControlFlowStatementReason::InlineValueIfElseThen,
-                token_stream.current_location(),
-            ),
-        ));
+        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+            InvalidControlFlowStatementReason::InlineValueIfElseThen,
+            token_stream.current_location(),
+        )
+        .into());
     }
     if token_stream.current_token_kind() == &TokenKind::Newline {
-        return Err(Box::new(
-            CompilerDiagnostic::invalid_control_flow_statement(
-                InvalidControlFlowStatementReason::InlineValueIfMultiline,
-                token_stream.current_location(),
-            ),
-        ));
+        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+            InvalidControlFlowStatementReason::InlineValueIfMultiline,
+            token_stream.current_location(),
+        )
+        .into());
     }
 
     if is_missing_produced_value_boundary(token_stream.current_token_kind()) {
-        return Err(Box::new(
-            CompilerDiagnostic::invalid_control_flow_statement(
-                InvalidControlFlowStatementReason::ExpectedValueAfterElse,
-                token_stream.current_location(),
-            ),
-        ));
+        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+            InvalidControlFlowStatementReason::ExpectedValueAfterElse,
+            token_stream.current_location(),
+        )
+        .into());
     }
 
     let else_values = parse_fixed_arity_inferred_values(
@@ -422,8 +400,7 @@ fn parse_inferred_inline_multi_bind_value_if(
         type_interner,
         target_count,
         string_table,
-    )
-    .map_err(|err| Box::new(err.into()))?;
+    )?;
 
     let result_type_ids = unify_and_validate_inferred_slots(
         &then_values,
@@ -484,12 +461,11 @@ fn parse_inferred_block_multi_bind_value_if(
     emit_collected_warnings(context, then_warnings);
 
     if token_stream.current_token_kind() != &TokenKind::Else {
-        return Err(Box::new(
-            CompilerDiagnostic::invalid_control_flow_statement(
-                InvalidControlFlowStatementReason::ValueIfMissingElse,
-                token_stream.current_location(),
-            ),
-        ));
+        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+            InvalidControlFlowStatementReason::ValueIfMissingElse,
+            token_stream.current_location(),
+        )
+        .into());
     }
     token_stream.advance(); // consume `else`
 
@@ -514,28 +490,25 @@ fn parse_inferred_block_multi_bind_value_if(
     let else_terminates = matches!(else_flow, BranchFlow::Terminates);
 
     if !then_produces && !then_terminates {
-        return Err(Box::new(
-            CompilerDiagnostic::invalid_control_flow_statement(
-                InvalidControlFlowStatementReason::ValueIfBranchFallsThrough,
-                location.clone(),
-            ),
-        ));
+        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+            InvalidControlFlowStatementReason::ValueIfBranchFallsThrough,
+            location.clone(),
+        )
+        .into());
     }
     if !else_produces && !else_terminates {
-        return Err(Box::new(
-            CompilerDiagnostic::invalid_control_flow_statement(
-                InvalidControlFlowStatementReason::ValueIfBranchFallsThrough,
-                location.clone(),
-            ),
-        ));
+        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+            InvalidControlFlowStatementReason::ValueIfBranchFallsThrough,
+            location.clone(),
+        )
+        .into());
     }
     if !then_produces && !else_produces {
-        return Err(Box::new(
-            CompilerDiagnostic::invalid_control_flow_statement(
-                InvalidControlFlowStatementReason::ValueIfNoProducingPath,
-                location.clone(),
-            ),
-        ));
+        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+            InvalidControlFlowStatementReason::ValueIfNoProducingPath,
+            location.clone(),
+        )
+        .into());
     }
 
     let then_values = extract_first_multi_produced_values(&then_body);
@@ -603,32 +576,35 @@ fn unify_and_validate_inferred_slots(
             if then_expr.type_id != *known
                 && !is_declaration_compatible(*known, then_expr.type_id, type_environment)
             {
-                return Err(Box::new(CompilerDiagnostic::type_mismatch(
+                return Err(CompilerDiagnostic::type_mismatch(
                     *known,
                     then_expr.type_id,
                     TypeMismatchContext::Assignment,
                     then_expr.location.clone(),
-                )));
+                )
+                .into());
             }
             if else_expr.type_id != *known
                 && !is_declaration_compatible(*known, else_expr.type_id, type_environment)
             {
-                return Err(Box::new(CompilerDiagnostic::type_mismatch(
+                return Err(CompilerDiagnostic::type_mismatch(
                     *known,
                     else_expr.type_id,
                     TypeMismatchContext::Assignment,
                     else_expr.location.clone(),
-                )));
+                )
+                .into());
             }
             *known
         } else {
             if then_expr.type_id != else_expr.type_id {
-                return Err(Box::new(CompilerDiagnostic::type_mismatch(
+                return Err(CompilerDiagnostic::type_mismatch(
                     then_expr.type_id,
                     else_expr.type_id,
                     TypeMismatchContext::Assignment,
                     location.clone(),
-                )));
+                )
+                .into());
             }
             then_expr.type_id
         };
@@ -652,12 +628,11 @@ fn infer_multi_bind_result_slots(
     location: &SourceLocation,
 ) -> MultiBindValueResult<Vec<TypeId>> {
     if then_values.is_none() && else_values.is_none() {
-        return Err(Box::new(
-            CompilerDiagnostic::invalid_control_flow_statement(
-                InvalidControlFlowStatementReason::ValueIfNoProducingPath,
-                location.clone(),
-            ),
-        ));
+        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+            InvalidControlFlowStatementReason::ValueIfNoProducingPath,
+            location.clone(),
+        )
+        .into());
     }
 
     let mut result_types = Vec::with_capacity(known_slot_types.len());
@@ -739,22 +714,22 @@ fn infer_unknown_match_slot_type(
 
     for values in produced_value_sets {
         let Some(expression) = values.get(slot_index) else {
-            return Err(Box::new(
-                CompilerDiagnostic::invalid_control_flow_statement(
-                    InvalidControlFlowStatementReason::ValueIfNoProducingPath,
-                    location.clone(),
-                ),
-            ));
+            return Err(CompilerDiagnostic::invalid_control_flow_statement(
+                InvalidControlFlowStatementReason::ValueIfNoProducingPath,
+                location.clone(),
+            )
+            .into());
         };
 
         if let Some(existing) = inferred_type {
             if existing != expression.type_id {
-                return Err(Box::new(CompilerDiagnostic::type_mismatch(
+                return Err(CompilerDiagnostic::type_mismatch(
                     existing,
                     expression.type_id,
                     TypeMismatchContext::Assignment,
                     location.clone(),
-                )));
+                )
+                .into());
             }
         } else {
             inferred_type = Some(expression.type_id);
@@ -762,10 +737,11 @@ fn infer_unknown_match_slot_type(
     }
 
     inferred_type.ok_or_else(|| {
-        Box::new(CompilerDiagnostic::invalid_control_flow_statement(
+        CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ValueIfNoProducingPath,
             location.clone(),
-        ))
+        )
+        .into()
     })
 }
 
@@ -777,12 +753,13 @@ fn infer_unknown_slot_type(
     match (then_expr, else_expr) {
         (Some(then_expr), Some(else_expr)) => {
             if then_expr.type_id != else_expr.type_id {
-                return Err(Box::new(CompilerDiagnostic::type_mismatch(
+                return Err(CompilerDiagnostic::type_mismatch(
                     then_expr.type_id,
                     else_expr.type_id,
                     TypeMismatchContext::Assignment,
                     location.clone(),
-                )));
+                )
+                .into());
             }
 
             Ok(then_expr.type_id)
@@ -790,12 +767,11 @@ fn infer_unknown_slot_type(
 
         (Some(expression), None) | (None, Some(expression)) => Ok(expression.type_id),
 
-        (None, None) => Err(Box::new(
-            CompilerDiagnostic::invalid_control_flow_statement(
-                InvalidControlFlowStatementReason::ValueIfNoProducingPath,
-                location.clone(),
-            ),
-        )),
+        (None, None) => Err(CompilerDiagnostic::invalid_control_flow_statement(
+            InvalidControlFlowStatementReason::ValueIfNoProducingPath,
+            location.clone(),
+        )
+        .into()),
     }
 }
 
@@ -815,12 +791,13 @@ fn validate_expression_against_slot(
         return Ok(());
     }
 
-    Err(Box::new(CompilerDiagnostic::type_mismatch(
+    Err(CompilerDiagnostic::type_mismatch(
         expected_type,
         expression.type_id,
         TypeMismatchContext::Assignment,
         location.clone(),
-    )))
+    )
+    .into())
 }
 
 fn validate_optional_produced_arity(
@@ -837,21 +814,23 @@ fn validate_optional_produced_arity(
     }
 
     if values.len() > target_count {
-        return Err(Box::new(CompilerDiagnostic::invalid_return_shape(
+        return Err(CompilerDiagnostic::invalid_return_shape(
             InvalidReturnShapeReason::TooManyReturnValues {
                 expected_count: target_count,
             },
             location.clone(),
-        )));
+        )
+        .into());
     }
 
-    Err(Box::new(CompilerDiagnostic::invalid_return_shape(
+    Err(CompilerDiagnostic::invalid_return_shape(
         InvalidReturnShapeReason::TooFewReturnValues {
             expected_count: target_count,
             provided_count: values.len(),
         },
         location.clone(),
-    )))
+    )
+    .into())
 }
 
 /// Wraps expressions in `Coerced` nodes where the target type differs from the natural type.
@@ -941,12 +920,13 @@ fn coerce_produced_values_in_body(
                     }
 
                     if !is_declaration_compatible(*expected_type, expr.type_id, type_environment) {
-                        return Err(Box::new(CompilerDiagnostic::type_mismatch(
+                        return Err(CompilerDiagnostic::type_mismatch(
                             *expected_type,
                             expr.type_id,
                             TypeMismatchContext::Assignment,
                             expr.location.clone(),
-                        )));
+                        )
+                        .into());
                     }
 
                     *expr = Expression::coerced(expr.clone(), *expected_type);

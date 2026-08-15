@@ -1,23 +1,22 @@
-//! Boundary-aware module namespaces for indexed source-import resolution.
+//! Boundary-aware module namespaces for indexed source-dependency resolution.
 //!
 //! WHAT: builds one `ModuleNamespace` per indexed project or source-package module from Stage 0
-//! indexed facts. Each namespace maps extensionless module-relative import paths to explicit
+//! indexed facts. Each namespace maps extensionless module-relative dependency paths to explicit
 //! tagged entries (same-module source, provider-owned file, cross-module target). Registered
 //! binding packages and source-backed package surfaces are explicit shared entries keyed by
-//! import prefix.
+//! dependency prefix.
 //! WHY: replaces filesystem candidate probing and public-surface fallback with indexed
 //! lookups, keeping boundary identity attached to boundary-local `SourceId`/`ModuleId`. The
 //! canonical path leaves the namespace only as the IO/enqueue handle for the current compiler.
 //!
 //! Resolution rules:
-//! - normal compiler-semantic source lookup starts from the importing source's owning module
+//! - normal compiler-semantic source lookup starts from the declaring source's owning module
 //!   namespace and resolves bare module/package surfaces explicitly
 //! - `@./` and parent traversal are rejected through structured diagnostics
 //! - private child/support bypass is rejected through structured diagnostics
 //! - no `read_dir`, `exists`, `canonicalize` or fallback-candidate probing runs after the
 //!   indexes exist
-//! - provider-backed relative forms such as `@./drawing.js` remain separate and are not
-//!   broadened by this owner
+//! - provider-backed paths follow the same owning-module-root contract as compiler-semantic paths
 
 use super::module_identity::{ModuleId, ModuleIdentityTable};
 use super::project_module_graph::{ProjectModuleGraph, is_support_visible_in_identity_table};
@@ -30,13 +29,13 @@ use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidImportPathReason};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
-use crate::compiler_frontend::paths::const_paths::ProviderImportPathView;
+use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath;
 use crate::compiler_frontend::paths::path_normalization::{
-    import_contains_dotdot, is_relative_import_path,
+    dependency_contains_dotdot, is_relative_dependency_path,
 };
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source_packages::root_file::{
-    import_path_references_config_file, import_path_references_support_root_file,
+    dependency_path_references_config_file, dependency_path_references_support_root_file,
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -44,7 +43,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-/// One explicit namespace entry for one import path within one module namespace.
+/// One explicit namespace entry for one dependency path within one module namespace.
 ///
 /// Entries are tagged records with no precedence chain: a same-module source is never
 /// interchangeable with a cross-module target, and resolution is a single lookup rather than an
@@ -64,7 +63,7 @@ enum NamespaceEntry {
 
 /// One boundary-aware namespace for one indexed module.
 ///
-/// WHAT: the pre-computed lookup table from extensionless module-relative import path to one
+/// WHAT: the pre-computed lookup table from extensionless module-relative dependency path to one
 /// explicit `NamespaceEntry`. Built once from indexed facts and consumed by the live reachable
 /// traversal without further filesystem access.
 #[derive(Clone, Debug)]
@@ -120,19 +119,17 @@ pub(crate) enum NamespaceBoundary {
     Package,
 }
 
-/// The result of resolving one compiler-semantic import through a namespace.
+/// The result of resolving one compiler-semantic dependency through a namespace.
 #[derive(Clone, Debug)]
-pub(crate) enum ResolvedImport {
+pub(crate) enum ResolvedDependency {
     /// A source file in the same module (project or package boundary).
     ///
     /// The traversal queues the canonical path as the IO handle with the indexed source kind.
     /// `source_id` is the boundary-local `SourceId` from the namespace entry, carried directly so
     /// the semantic-set builder records same-owner membership without re-resolving through paths.
-    /// `consumer_module_id` is the importing file's owning module inside the active boundary.
+    /// `consumer_module_id` is the declaring file's owning module inside the active boundary.
     SameModuleSource {
         source_id: SourceId,
-        #[cfg(test)]
-        canonical_path: PathBuf,
         consumer_module_id: ModuleId,
     },
     /// A cross-module target in the active project or package boundary.
@@ -145,14 +142,14 @@ pub(crate) enum ResolvedImport {
         #[cfg(test)]
         root_file: PathBuf,
     },
-    /// A source-backed package facade selected by its registered import prefix.
+    /// A source-backed package facade selected by its registered dependency prefix.
     SourcePackageSurface {
         consumer_module_id: ModuleId,
-        import_prefix: String,
+        dependency_prefix: String,
         #[cfg(test)]
         root_file: PathBuf,
     },
-    /// A registered binding-backed package handled by frontend import binding.
+    /// A registered binding-backed package handled by frontend dependency binding.
     BindingPackage,
 }
 
@@ -170,7 +167,7 @@ pub(crate) enum ResolvedImport {
 pub(crate) struct ModuleNamespaceSet {
     /// One namespace per project module, indexed by project `ModuleId`.
     project_namespaces: Vec<ModuleNamespace>,
-    /// One set of namespaces per source-package boundary, keyed by import prefix.
+    /// One set of namespaces per source-package boundary, keyed by dependency prefix.
     /// Each inner `Vec` is indexed by the package boundary's local `ModuleId`.
     package_namespaces: BTreeMap<String, Vec<ModuleNamespace>>,
     /// Registered Core, Builder and dependency package paths without their leading `@`.
@@ -182,17 +179,17 @@ pub(crate) struct ModuleNamespaceSet {
 /// Borrowed directory-project namespace context used by canonical header-owned discovery.
 ///
 /// The namespace set and project index form one lookup authority: the set resolves boundary-local
-/// identities and the index supplies the project importer's ownership plus canonical IO handles.
+/// identities and the index supplies the project declaring_source's ownership plus canonical IO handles.
 /// Single-file synthetic compilation carries no value of this type.
 #[derive(Clone, Copy)]
-pub(crate) struct DirectoryImportResolution<'a> {
+pub(crate) struct DirectoryDependencyResolution<'a> {
     namespace_set: &'a ModuleNamespaceSet,
     source_tree_index: &'a SourceTreeIndex,
     boundary: NamespaceBoundary,
     package_prefix: Option<&'a str>,
 }
 
-impl<'a> DirectoryImportResolution<'a> {
+impl<'a> DirectoryDependencyResolution<'a> {
     pub(crate) fn project(
         namespace_set: &'a ModuleNamespaceSet,
         source_tree_index: &'a SourceTreeIndex,
@@ -207,26 +204,26 @@ impl<'a> DirectoryImportResolution<'a> {
 
     pub(crate) fn package(
         namespace_set: &'a ModuleNamespaceSet,
-        import_prefix: &'a str,
+        dependency_prefix: &'a str,
         source_tree_index: &'a SourceTreeIndex,
     ) -> Self {
         Self {
             namespace_set,
             source_tree_index,
             boundary: NamespaceBoundary::Package,
-            package_prefix: Some(import_prefix),
+            package_prefix: Some(dependency_prefix),
         }
     }
 
-    pub(crate) fn resolve_import(
+    pub(crate) fn resolve_dependency(
         self,
-        provider: ProviderImportPathView<'_>,
-        importing_canonical_path: &Path,
+        provider: &RetainedDependencyPath,
+        declaring_canonical_path: &Path,
         string_table: &mut StringTable,
-    ) -> Result<ResolvedImport, CompilerDiagnostic> {
-        self.namespace_set.resolve_import(
+    ) -> Result<ResolvedDependency, CompilerDiagnostic> {
+        self.namespace_set.resolve_dependency(
             provider,
-            importing_canonical_path,
+            declaring_canonical_path,
             self.source_tree_index,
             self.boundary,
             self.package_prefix,
@@ -234,13 +231,13 @@ impl<'a> DirectoryImportResolution<'a> {
         )
     }
 
-    pub(crate) fn has_binding_package_import(
+    pub(crate) fn has_binding_package_dependency(
         self,
-        import_path: &InternedPath,
+        dependency_path: &InternedPath,
         string_table: &StringTable,
     ) -> bool {
         self.namespace_set
-            .binding_package_prefix(import_path, string_table)
+            .binding_package_prefix(dependency_path, string_table)
             .is_some()
     }
 
@@ -252,14 +249,14 @@ impl<'a> DirectoryImportResolution<'a> {
     pub(crate) fn resolve_provider_target(
         self,
         provider_path: &InternedPath,
-        importing_canonical_path: &Path,
-        import_location: &SourceLocation,
+        declaring_canonical_path: &Path,
+        dependency_location: &SourceLocation,
         string_table: &mut StringTable,
     ) -> Result<PathBuf, CompilerDiagnostic> {
         self.namespace_set.resolve_provider_target(
             provider_path,
-            importing_canonical_path,
-            import_location,
+            declaring_canonical_path,
+            dependency_location,
             self.source_tree_index,
             string_table,
         )
@@ -308,46 +305,45 @@ impl ModuleNamespaceSet {
         }
     }
 
-    /// Resolve one compiler-semantic import through the boundary-aware namespace.
+    /// Resolve one compiler-semantic dependency through the boundary-aware namespace.
     ///
-    /// WHAT: determines the importing file's boundary and owning module from the project or
+    /// WHAT: determines the declaring file's boundary and owning module from the project or
     /// package index, rejects obsolete `@./` and parent traversal, rejects explicit source
-    /// extensions, resolves source-backed package surfaces, and looks up the import path in
-    /// the owning module's namespace. Returns a tagged `ResolvedImport` carrying the canonical
+    /// extensions, resolves source-backed package surfaces, and looks up the dependency path in
+    /// the owning module's namespace. Returns a tagged `ResolvedDependency` carrying the canonical
     /// path as the IO handle and the boundary-local `ModuleId` for project graph edges.
     /// WHY: replaces the legacy filesystem source-surface fallback and candidate probing with
     /// indexed facts.
-    pub(crate) fn resolve_import(
+    pub(crate) fn resolve_dependency(
         &self,
-        provider: ProviderImportPathView<'_>,
-        importing_canonical_path: &Path,
+        provider: &RetainedDependencyPath,
+        declaring_canonical_path: &Path,
         source_tree_index: &SourceTreeIndex,
         boundary: NamespaceBoundary,
         package_prefix: Option<&str>,
         string_table: &mut StringTable,
-    ) -> Result<ResolvedImport, CompilerDiagnostic> {
-        let import_path = provider.path;
-        let import_location = provider.path_location;
-        reject_invalid_path_components(import_path, import_location, string_table)?;
-        reject_direct_special_file_import(provider, string_table)?;
-        reject_explicit_source_extension(import_path, import_location, string_table)?;
+    ) -> Result<ResolvedDependency, CompilerDiagnostic> {
+        let dependency_path = &provider.path;
+        let dependency_location = &provider.location;
+        reject_invalid_path_components(dependency_path, dependency_location, string_table)?;
+        reject_direct_special_file_dependency(provider, string_table)?;
+        reject_explicit_source_extension(dependency_path, dependency_location, string_table)?;
 
-        let full_components = provider.path.as_components();
-        let prefix_components = structural_provider_components(provider);
+        let prefix_components = provider.path.as_components();
         let source_id = source_tree_index
-            .source_id_for_canonical_path(importing_canonical_path)
+            .source_id_for_canonical_path(declaring_canonical_path)
             .ok_or_else(|| {
                 CompilerDiagnostic::missing_import_target(
-                    import_path.clone(),
-                    import_location.clone(),
+                    dependency_path.clone(),
+                    dependency_location.clone(),
                 )
             })?;
         let SourceOwnership::Owned(consumer_module_id) =
             source_tree_index.source(source_id).ownership()
         else {
             return Err(CompilerDiagnostic::missing_import_target(
-                import_path.clone(),
-                import_location.clone(),
+                dependency_path.clone(),
+                dependency_location.clone(),
             ));
         };
         let namespace = match boundary {
@@ -362,12 +358,12 @@ impl ModuleNamespaceSet {
         };
         let index = source_tree_index;
 
-        let key = portable_import_key(prefix_components, string_table);
+        let key = portable_dependency_key(prefix_components, string_table);
 
         if namespace.is_ambiguous(&key) {
             return Err(CompilerDiagnostic::ambiguous_import_target(
-                import_path.clone(),
-                import_location.clone(),
+                dependency_path.clone(),
+                dependency_location.clone(),
             ));
         }
 
@@ -376,33 +372,33 @@ impl ModuleNamespaceSet {
 
         if source_package_surface.is_some() && binding_package_prefix.is_some() {
             return Err(CompilerDiagnostic::ambiguous_import_target(
-                import_path.clone(),
-                import_location.clone(),
+                dependency_path.clone(),
+                dependency_location.clone(),
             ));
         }
 
         if let Some(binding_prefix) = binding_package_prefix {
             if namespace_conflicts_with_package_prefix(namespace, binding_prefix) {
                 return Err(CompilerDiagnostic::ambiguous_import_target(
-                    import_path.clone(),
-                    import_location.clone(),
+                    dependency_path.clone(),
+                    dependency_location.clone(),
                 ));
             }
 
-            return Ok(ResolvedImport::BindingPackage);
+            return Ok(ResolvedDependency::BindingPackage);
         }
 
-        if let Some((import_prefix, _root_file)) = source_package_surface {
+        if let Some((dependency_prefix, _root_file)) = source_package_surface {
             if namespace_conflicts_with_package_prefix(namespace, &key) {
                 return Err(CompilerDiagnostic::ambiguous_import_target(
-                    import_path.clone(),
-                    import_location.clone(),
+                    dependency_path.clone(),
+                    dependency_location.clone(),
                 ));
             }
 
-            return Ok(ResolvedImport::SourcePackageSurface {
+            return Ok(ResolvedDependency::SourcePackageSurface {
                 consumer_module_id,
-                import_prefix: import_prefix.to_owned(),
+                dependency_prefix: dependency_prefix.to_owned(),
                 #[cfg(test)]
                 root_file: _root_file.to_path_buf(),
             });
@@ -410,34 +406,9 @@ impl ModuleNamespaceSet {
 
         if self.is_source_package_private_path(&key) {
             return Err(CompilerDiagnostic::cross_module_import_not_exported(
-                import_path.clone(),
-                import_location.clone(),
+                dependency_path.clone(),
+                dependency_location.clone(),
             ));
-        }
-
-        // A grouped item under an owned directory may name its source file directly. Package
-        // and prefix collisions have already been classified above, so an exact same-module
-        // source cannot win through lookup order.
-        if provider.from_grouped {
-            let complete_key = portable_import_key(full_components, string_table);
-            if namespace.is_ambiguous(&complete_key) {
-                return Err(CompilerDiagnostic::ambiguous_import_target(
-                    import_path.clone(),
-                    import_location.clone(),
-                ));
-            }
-            if let Some(entry) = namespace.entries.get(&complete_key)
-                && matches!(entry, NamespaceEntry::SameModuleSource { .. })
-            {
-                return resolve_entry(
-                    entry,
-                    index,
-                    consumer_module_id,
-                    import_path,
-                    import_location,
-                    string_table,
-                );
-            }
         }
 
         if let Some(entry) = namespace.entries.get(&key) {
@@ -445,31 +416,31 @@ impl ModuleNamespaceSet {
                 entry,
                 index,
                 consumer_module_id,
-                import_path,
-                import_location,
+                dependency_path,
+                dependency_location,
                 string_table,
             );
         }
 
         if find_module_bypass_prefix(&namespace.entries, &key).is_some() {
             return Err(CompilerDiagnostic::cross_module_import_not_exported(
-                import_path.clone(),
-                import_location.clone(),
+                dependency_path.clone(),
+                dependency_location.clone(),
             ));
         }
 
         Err(CompilerDiagnostic::missing_import_target(
-            import_path.clone(),
-            import_location.clone(),
+            dependency_path.clone(),
+            dependency_location.clone(),
         ))
     }
 
     fn binding_package_prefix<'a>(
         &'a self,
-        import_path: &InternedPath,
+        dependency_path: &InternedPath,
         string_table: &StringTable,
     ) -> Option<&'a str> {
-        let key = portable_import_key(import_path.as_components(), string_table);
+        let key = portable_dependency_key(dependency_path.as_components(), string_table);
         self.binding_package_prefix_for_key(&key)
     }
 
@@ -489,65 +460,60 @@ impl ModuleNamespaceSet {
     fn resolve_provider_target(
         &self,
         provider_path: &InternedPath,
-        importing_canonical_path: &Path,
-        import_location: &SourceLocation,
+        declaring_canonical_path: &Path,
+        dependency_location: &SourceLocation,
         project_source_tree_index: &SourceTreeIndex,
         string_table: &mut StringTable,
     ) -> Result<PathBuf, CompilerDiagnostic> {
-        if import_contains_dotdot(provider_path, string_table) {
+        if dependency_contains_dotdot(provider_path, string_table) {
             return Err(CompilerDiagnostic::invalid_import_path(
                 provider_path.clone(),
                 InvalidImportPathReason::ParentDirectorySegment,
-                import_location.clone(),
+                dependency_location.clone(),
             ));
         }
 
-        let (namespace, index, importer_relative_path) = match project_source_tree_index
-            .source_id_for_canonical_path(importing_canonical_path)
+        let (namespace, index) = match project_source_tree_index
+            .source_id_for_canonical_path(declaring_canonical_path)
         {
             Some(source_id) => {
-                let importer_record = project_source_tree_index.source(source_id);
-                let SourceOwnership::Owned(module_id) = importer_record.ownership() else {
+                let consumer_record = project_source_tree_index.source(source_id);
+                let SourceOwnership::Owned(module_id) = consumer_record.ownership() else {
                     return Err(CompilerDiagnostic::missing_import_target(
                         provider_path.clone(),
-                        import_location.clone(),
+                        dependency_location.clone(),
                     ));
                 };
                 (
                     &self.project_namespaces[module_id.index()],
                     project_source_tree_index,
-                    owned_relative_source_path(importer_record),
                 )
             }
             None => {
                 let (package_prefix, package_index, module_id) = self
-                    .find_package_namespace_owner(importing_canonical_path)
+                    .find_package_namespace_owner(declaring_canonical_path)
                     .ok_or_else(|| {
                         CompilerDiagnostic::missing_import_target(
                             provider_path.clone(),
-                            import_location.clone(),
+                            dependency_location.clone(),
                         )
                     })?;
                 let namespaces = self
                     .package_namespaces
                     .get(package_prefix)
                     .expect("package prefix found by find_package_namespace_owner");
-                let source_id = package_index
-                    .source_id_for_canonical_path(importing_canonical_path)
-                    .expect("package owner lookup found the importing source");
-                (
-                    &namespaces[module_id.index()],
-                    package_index,
-                    owned_relative_source_path(package_index.source(source_id)),
-                )
+                package_index
+                    .source_id_for_canonical_path(declaring_canonical_path)
+                    .expect("package owner lookup found the declaring source");
+                (&namespaces[module_id.index()], package_index)
             }
         };
 
-        let key = provider_import_key(provider_path, importer_relative_path, string_table);
+        let key = portable_dependency_key(provider_path.as_components(), string_table);
         if namespace.is_ambiguous(&key) {
             return Err(CompilerDiagnostic::ambiguous_import_target(
                 provider_path.clone(),
-                import_location.clone(),
+                dependency_location.clone(),
             ));
         }
 
@@ -559,18 +525,18 @@ impl ModuleNamespaceSet {
             | Some(NamespaceEntry::SameModuleSource { .. }) => {
                 Err(CompilerDiagnostic::cross_module_import_not_exported(
                     provider_path.clone(),
-                    import_location.clone(),
+                    dependency_location.clone(),
                 ))
             }
             None if find_module_bypass_prefix(&namespace.entries, &key).is_some() => {
                 Err(CompilerDiagnostic::cross_module_import_not_exported(
                     provider_path.clone(),
-                    import_location.clone(),
+                    dependency_location.clone(),
                 ))
             }
             None => Err(CompilerDiagnostic::missing_import_target(
                 provider_path.clone(),
-                import_location.clone(),
+                dependency_location.clone(),
             )),
         }
     }
@@ -578,59 +544,41 @@ impl ModuleNamespaceSet {
     /// Check whether the complete provider path matches a source-backed package prefix and return
     /// the package's root file.
     fn find_source_package_surface(&self, provider_path: &str) -> Option<(&str, &Path)> {
-        for (import_prefix, package_index) in self.package_boundary_indexes.iter() {
-            if import_prefix == provider_path {
+        for (dependency_prefix, package_index) in self.package_boundary_indexes.iter() {
+            if dependency_prefix == provider_path {
                 return package_index
                     .root_file_for_entry_root()
-                    .map(|root_file| (import_prefix, root_file));
+                    .map(|root_file| (dependency_prefix, root_file));
             }
         }
         None
     }
 
-    /// Whether an import tries to traverse below a registered source-package facade.
+    /// Whether a dependency tries to traverse below a registered source-package facade.
     fn is_source_package_private_path(&self, provider_path: &str) -> bool {
         self.package_boundary_indexes
             .iter()
-            .any(|(import_prefix, _)| {
+            .any(|(dependency_prefix, _)| {
                 provider_path
-                    .strip_prefix(import_prefix)
+                    .strip_prefix(dependency_prefix)
                     .is_some_and(|remainder| remainder.starts_with('/'))
             })
     }
 
-    /// Find the package boundary, index and owning module for a canonical importing path.
+    /// Find the package boundary, index and owning module for a canonical declaring path.
     fn find_package_namespace_owner(
         &self,
         canonical_path: &Path,
     ) -> Option<(&str, &SourceTreeIndex, ModuleId)> {
-        for (import_prefix, package_index) in self.package_boundary_indexes.iter() {
+        for (dependency_prefix, package_index) in self.package_boundary_indexes.iter() {
             if let Some(source_id) = package_index.source_id_for_canonical_path(canonical_path) {
                 let ownership = package_index.source(source_id).ownership();
                 if let SourceOwnership::Owned(module_id) = ownership {
-                    return Some((import_prefix, package_index, module_id));
+                    return Some((dependency_prefix, package_index, module_id));
                 }
             }
         }
         None
-    }
-}
-
-/// Return the provider-prefix components for one parsed import item.
-///
-/// Grouped import paths retain their requested item as the last component. Stage 0 resolves the
-/// complete grouped path against the namespace first (see `resolve_import`): when it denotes an
-/// indexed same-module compiler-semantic source the item file is queued directly, otherwise the
-/// provider prefix returned here selects a module, source-package or binding-package facade.
-/// Non-grouped paths are already provider paths and are returned unchanged.
-fn structural_provider_components(
-    provider: ProviderImportPathView<'_>,
-) -> &[crate::compiler_frontend::symbols::string_interning::StringId] {
-    let components = provider.path.as_components();
-    if provider.from_grouped {
-        &components[..components.len().saturating_sub(1)]
-    } else {
-        components
     }
 }
 
@@ -669,7 +617,7 @@ fn build_package_namespaces(
 ) -> BTreeMap<String, Vec<ModuleNamespace>> {
     let mut package_namespaces: BTreeMap<String, Vec<ModuleNamespace>> = BTreeMap::new();
 
-    for (import_prefix, package_index) in package_boundary_indexes.iter() {
+    for (dependency_prefix, package_index) in package_boundary_indexes.iter() {
         let identities = package_index.module_identities();
         let module_count = identities.module_ids().count();
         let mut namespaces = (0..module_count)
@@ -682,7 +630,7 @@ fn build_package_namespaces(
             populate_package_cross_module_targets(namespace, identities, module_id);
         }
 
-        package_namespaces.insert(import_prefix.to_owned(), namespaces);
+        package_namespaces.insert(dependency_prefix.to_owned(), namespaces);
     }
 
     package_namespaces
@@ -691,7 +639,7 @@ fn build_package_namespaces(
 /// Add same-module source entries for one module from its owned source IDs.
 ///
 /// Each owned source's extensionless module-relative logical path becomes a namespace key.
-/// Root files (names starting with `@` or `+`) are excluded because direct root imports are
+/// Root files (names starting with `@` or `+`) are excluded because direct root dependencies are
 /// rejected.
 fn populate_same_module_entries(
     namespace: &mut ModuleNamespace,
@@ -824,7 +772,7 @@ fn populate_package_cross_module_targets(
     }
 }
 
-/// Compute the extensionless module-relative import key for one target module, relative to the
+/// Compute the extensionless module-relative dependency key for one target module, relative to the
 /// owning module's logical path.
 fn relative_module_key(
     owning_path: &str,
@@ -866,10 +814,10 @@ fn support_package_key(identities: &ModuleIdentityTable, support_id: ModuleId) -
 }
 
 // ---------------------------------------------------------------------------
-// Import resolution helpers
+// Dependency resolution helpers
 // ---------------------------------------------------------------------------
 
-/// Resolve a namespace entry to a `ResolvedImport`, looking up the canonical path and root file
+/// Resolve a namespace entry to a `ResolvedDependency`, looking up the canonical path and root file
 /// from the owning boundary's `SourceTreeIndex`.
 ///
 /// For a same-module source, the entry's `supported` flag is checked so a recognized-but-
@@ -880,10 +828,10 @@ fn resolve_entry(
     entry: &NamespaceEntry,
     index: &SourceTreeIndex,
     consumer_module_id: ModuleId,
-    import_path: &InternedPath,
-    import_location: &SourceLocation,
+    dependency_path: &InternedPath,
+    dependency_location: &SourceLocation,
     string_table: &mut StringTable,
-) -> Result<ResolvedImport, CompilerDiagnostic> {
+) -> Result<ResolvedDependency, CompilerDiagnostic> {
     match entry {
         NamespaceEntry::SameModuleSource {
             source_id,
@@ -893,15 +841,13 @@ fn resolve_entry(
             if !record.supported() {
                 let extension_id = string_table.intern(source_kind.extension());
                 return Err(CompilerDiagnostic::unsupported_source_file_kind(
-                    import_path.clone(),
+                    dependency_path.clone(),
                     extension_id,
-                    import_location.clone(),
+                    dependency_location.clone(),
                 ));
             }
-            Ok(ResolvedImport::SameModuleSource {
+            Ok(ResolvedDependency::SameModuleSource {
                 source_id: *source_id,
-                #[cfg(test)]
-                canonical_path: record.canonical_path().to_path_buf(),
                 consumer_module_id,
             })
         }
@@ -912,54 +858,57 @@ fn resolve_entry(
                 .record(*target_module_id)
                 .root_file()
                 .to_path_buf();
-            Ok(ResolvedImport::CrossModule {
+            Ok(ResolvedDependency::CrossModule {
                 provider_module_id: *target_module_id,
                 consumer_module_id,
                 #[cfg(test)]
                 root_file,
             })
         }
-        NamespaceEntry::SameModuleProvider { .. } => Err(
-            CompilerDiagnostic::missing_import_target(import_path.clone(), import_location.clone()),
-        ),
+        NamespaceEntry::SameModuleProvider { .. } => {
+            Err(CompilerDiagnostic::missing_import_target(
+                dependency_path.clone(),
+                dependency_location.clone(),
+            ))
+        }
     }
 }
 
 /// Reject direct support-root and config paths before namespace absence can change the diagnostic.
-fn reject_direct_special_file_import(
-    provider: ProviderImportPathView<'_>,
+fn reject_direct_special_file_dependency(
+    provider: &RetainedDependencyPath,
     string_table: &StringTable,
 ) -> Result<(), CompilerDiagnostic> {
-    if import_path_references_support_root_file(provider.path, provider.from_grouped, string_table)
-        || import_path_references_config_file(provider.path, provider.from_grouped, string_table)
+    if dependency_path_references_support_root_file(&provider.path, string_table)
+        || dependency_path_references_config_file(&provider.path, string_table)
     {
         return Err(CompilerDiagnostic::direct_special_file_import(
             provider.path.clone(),
-            provider.path_location.clone(),
+            provider.location.clone(),
         ));
     }
 
     Ok(())
 }
 
-/// Reject path components that cannot participate in a module-root-relative import.
+/// Reject path components that cannot participate in a module-root-relative dependency.
 fn reject_invalid_path_components(
-    import_path: &InternedPath,
-    import_location: &SourceLocation,
+    dependency_path: &InternedPath,
+    dependency_location: &SourceLocation,
     string_table: &mut StringTable,
 ) -> Result<(), CompilerDiagnostic> {
-    if import_contains_dotdot(import_path, string_table) {
+    if dependency_contains_dotdot(dependency_path, string_table) {
         return Err(CompilerDiagnostic::invalid_import_path(
-            import_path.clone(),
+            dependency_path.clone(),
             InvalidImportPathReason::ParentDirectorySegment,
-            import_location.clone(),
+            dependency_location.clone(),
         ));
     }
 
-    if is_relative_import_path(import_path, string_table) {
+    if is_relative_dependency_path(dependency_path, string_table) {
         return Err(CompilerDiagnostic::bare_file_import(
-            import_path.clone(),
-            import_location.clone(),
+            dependency_path.clone(),
+            dependency_location.clone(),
         ));
     }
 
@@ -968,22 +917,22 @@ fn reject_invalid_path_components(
 
 /// Reject explicit compiler-semantic source extensions after direct special files are classified.
 fn reject_explicit_source_extension(
-    import_path: &InternedPath,
-    import_location: &SourceLocation,
+    dependency_path: &InternedPath,
+    dependency_location: &SourceLocation,
     string_table: &mut StringTable,
 ) -> Result<(), CompilerDiagnostic> {
-    if let Some(extension) = explicit_source_extension(import_path, string_table) {
+    if let Some(extension) = explicit_source_extension(dependency_path, string_table) {
         let diagnostic = if extension == SourceFileKind::Moth.extension() {
             CompilerDiagnostic::explicit_moth_extension(
-                import_path.clone(),
-                import_location.clone(),
+                dependency_path.clone(),
+                dependency_location.clone(),
             )
         } else {
             let extension_id = string_table.intern(&extension);
             CompilerDiagnostic::explicit_source_extension(
-                import_path.clone(),
+                dependency_path.clone(),
                 extension_id,
-                import_location.clone(),
+                dependency_location.clone(),
             )
         };
         return Err(diagnostic);
@@ -994,10 +943,10 @@ fn reject_explicit_source_extension(
 
 /// Check whether any path component carries a recognised source-file extension.
 fn explicit_source_extension(
-    import_path: &InternedPath,
+    dependency_path: &InternedPath,
     string_table: &StringTable,
 ) -> Option<String> {
-    for component in import_path.as_components() {
+    for component in dependency_path.as_components() {
         let segment = string_table.resolve(*component);
         let Some(extension) = Path::new(segment)
             .extension()
@@ -1012,8 +961,8 @@ fn explicit_source_extension(
     None
 }
 
-/// Convert import-path components to a portable forward-slash namespace key.
-fn portable_import_key(
+/// Convert dependency-path components to a portable forward-slash namespace key.
+fn portable_dependency_key(
     components: &[crate::compiler_frontend::symbols::string_interning::StringId],
     string_table: &StringTable,
 ) -> String {
@@ -1022,44 +971,6 @@ fn portable_import_key(
         .map(|component| string_table.resolve(*component))
         .collect::<Vec<_>>()
         .join("/")
-}
-
-/// Convert a provider-owned path to its module-relative namespace key.
-///
-/// Provider files retain their explicit extension and may use the dedicated leading `./` form;
-/// that marker selects the current module but is not part of the indexed key.
-fn provider_import_key(
-    import_path: &InternedPath,
-    importer_relative_path: &str,
-    string_table: &StringTable,
-) -> String {
-    let components = import_path
-        .as_components()
-        .iter()
-        .map(|component| string_table.resolve(*component))
-        .collect::<Vec<_>>();
-
-    if components
-        .first()
-        .is_some_and(|component| *component == ".")
-    {
-        let relative_target = components[1..].join("/");
-        return Path::new(importer_relative_path)
-            .parent()
-            .unwrap_or_else(|| Path::new(""))
-            .join(relative_target)
-            .to_string_lossy()
-            .replace('\\', "/");
-    }
-
-    components.join("/")
-}
-
-fn owned_relative_source_path(record: &super::source_tree_index::SourceRecord) -> &str {
-    match record.logical_identity() {
-        SourceLogicalIdentity::Owned(identity) => identity.relative_source_path(),
-        SourceLogicalIdentity::Unrooted(_) => "",
-    }
 }
 
 /// Strip the file extension from a portable forward-slash source path.

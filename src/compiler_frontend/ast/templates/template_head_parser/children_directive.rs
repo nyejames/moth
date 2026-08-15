@@ -27,8 +27,8 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation};
 
-/// Boxed diagnostic result for the connected `$children` directive family.
-type ChildrenDirectiveResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// Typed result for the connected `$children` directive family.
+type ChildrenDirectiveResult<T> = Result<T, TemplateError>;
 
 /// Parses the `$children(template_or_string)` directive which specifies a
 /// wrapper template to apply around all direct child templates in the body.
@@ -47,7 +47,7 @@ pub(super) fn parse_children_style_directive(
         type_interner,
         string_table,
     )
-    .map_err(|diagnostic| {
+    .map_err(|error| error.map_diagnostic(|diagnostic| {
         // Convert the generic EmptyArguments reason into the children-specific
         // InvalidChildrenArgument so rendered guidance mentions wrapper templates
         // and strings rather than generic empty parens.
@@ -66,7 +66,7 @@ pub(super) fn parse_children_style_directive(
         } else {
             diagnostic
         }
-    })?;
+    }))?;
     let argument_location = directive_argument.location.clone();
 
     // The wrapper must be fully known at compile time; runtime expressions
@@ -74,16 +74,16 @@ pub(super) fn parse_children_style_directive(
     let argument_is_compile_time_constant = directive_argument
         .const_value_kind_with_template_classifier(&mut |template| {
             classify_template_from_effective_tir(template, &context.template_ir_store)
-        })
-        .map_err(TemplateError::into_diagnostic)?
+        })?
         .is_compile_time_value();
 
     if !argument_is_compile_time_constant {
-        return Err(Box::new(CompilerDiagnostic::invalid_template_directive(
+        return Err(CompilerDiagnostic::invalid_template_directive(
             Some(string_table.intern("children")),
             InvalidTemplateDirectiveReason::InvalidChildrenArgument,
             argument_location,
-        )));
+        )
+        .into());
     }
 
     // Normalize the argument at the directive boundary. Accepted wrappers
@@ -102,9 +102,7 @@ pub(super) fn parse_children_style_directive(
                             "`$children` referenced a template missing from the module TIR store.",
                         ),
                     )
-                    .into_diagnostic()
-                })
-                .map_err(Box::new)?;
+                })?;
             if matches!(
                 child_kind,
                 TemplateType::StringFunction
@@ -112,11 +110,12 @@ pub(super) fn parse_children_style_directive(
                     | TemplateType::SlotInsert(_)
                     | TemplateType::Comment(_)
             ) {
-                return Err(Box::new(CompilerDiagnostic::invalid_template_directive(
+                return Err(CompilerDiagnostic::invalid_template_directive(
                     Some(string_table.intern("children")),
                     InvalidTemplateDirectiveReason::InvalidChildrenArgument,
                     argument_location,
-                )));
+                )
+                .into());
             }
 
             // The wrapper-reference helper reports internal authority failures
@@ -124,9 +123,7 @@ pub(super) fn parse_children_style_directive(
             // diagnostic lane stays the infrastructure lane rather than a
             // fabricated user-facing directive diagnostic.
             wrapper_reference_for_template(&child_template, &current_store)
-                .map_err(TemplateError::from)
-                .map_err(TemplateError::into_diagnostic)
-                .map_err(Box::new)?
+                .map_err(TemplateError::from)?
         }
 
         ExpressionKind::StringSlice(value) => normalize_string_child_wrapper_reference(
@@ -134,15 +131,15 @@ pub(super) fn parse_children_style_directive(
             argument_location,
             context,
             string_table,
-        )
-        .map_err(TemplateError::into_diagnostic)?,
+        )?,
 
         _ => {
-            return Err(Box::new(CompilerDiagnostic::invalid_template_directive(
+            return Err(CompilerDiagnostic::invalid_template_directive(
                 Some(string_table.intern("children")),
                 InvalidTemplateDirectiveReason::InvalidChildrenArgument,
                 argument_location,
-            )));
+            )
+            .into());
         }
     };
 

@@ -468,7 +468,7 @@ Replace the module-job block with exactly:
 
 ```text
 receive retained syntax and completed provider interfaces
--> bind import shells
+-> bind dependency shells
 -> order local declarations
 -> run AST semantics
 -> lower and validate HIR
@@ -875,14 +875,14 @@ Declared `group` / `into` syntax is accepted end-state design with implementatio
 In the runtime WIT metadata section, replace:
 
 ```markdown
-The importer requires stable:
+The consumer requires stable:
 - stable package identity
 ```
 
 with:
 
 ```markdown
-The importer requires:
+The consumer requires:
 - stable package identity
 ```
 

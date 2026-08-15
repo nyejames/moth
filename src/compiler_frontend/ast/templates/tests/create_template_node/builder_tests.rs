@@ -62,6 +62,7 @@ fn template_head_fallback_unknown_directive_uses_standard_metadata() {
     );
     let fallback_error = Template::new(&mut token_stream, &context, vec![], &mut string_table)
         .expect_err("template-head fallback should reject missing registry directives");
+    let fallback_error = expect_template_diagnostic(fallback_error);
 
     match &fallback_error.payload {
         DiagnosticPayload::InvalidTemplateDirective {
@@ -157,6 +158,7 @@ fn builder_registered_noop_directive_rejects_parenthesized_arguments_by_default(
 
     let error = Template::new(&mut token_stream, &context, vec![], &mut string_table)
         .expect_err("default no-op directives should reject parenthesized arguments");
+    let error = expect_template_diagnostic(error);
 
     match &error.payload {
         DiagnosticPayload::InvalidTemplateDirective {
@@ -224,6 +226,7 @@ fn builder_registered_handler_directive_rejects_multiple_arguments() {
 
     let error = Template::new(&mut token_stream, &context, vec![], &mut string_table)
         .expect_err("handler directives should reject multiple arguments");
+    let error = expect_template_diagnostic(error);
     assert!(matches!(
         &error.payload,
         DiagnosticPayload::UnexpectedToken {
@@ -260,6 +263,7 @@ fn builder_registered_handler_directive_rejects_runtime_argument_values() {
 
     let error = Template::new(&mut token_stream, &context, vec![], &mut string_table)
         .expect_err("handler directives should reject runtime-only argument values");
+    let error = expect_template_diagnostic(error);
     assert!(matches!(
         &error.payload,
         DiagnosticPayload::InvalidTemplateDirective {

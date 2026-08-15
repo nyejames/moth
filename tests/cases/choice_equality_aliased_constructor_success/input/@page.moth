@@ -1,4 +1,4 @@
-import @choices { Response as R }
+@choices Response as R
 
 a R = R::Err("bad")
 b R = R::Err("bad")

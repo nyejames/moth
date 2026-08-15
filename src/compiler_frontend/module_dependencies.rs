@@ -17,7 +17,7 @@
 
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType, SourceLocation};
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticBag};
-use crate::compiler_frontend::headers::import_environment::HeaderImportEnvironment;
+use crate::compiler_frontend::headers::binding_environment::HeaderBindingEnvironment;
 use crate::compiler_frontend::headers::module_symbols::{ModuleSymbols, PublicExportEntry};
 use crate::compiler_frontend::headers::parse_file_headers::{
     BoundModuleHeaders, Header, HeaderKind, LocalDeclarationOrderingHint, TopLevelConstFragment,
@@ -43,7 +43,7 @@ pub(crate) struct SortedHeaders {
     pub(crate) const_fragment_count: usize,
     pub(crate) has_non_trivial_root_body: bool,
     pub(crate) module_symbols: ModuleSymbols,
-    pub(crate) import_environment: HeaderImportEnvironment,
+    pub(crate) binding_environment: HeaderBindingEnvironment,
 }
 
 /// Tracks which modules are temporarily marked (in the current DFS stack)
@@ -160,7 +160,7 @@ impl<'a> DependencyGraph<'a> {
             ));
         }
 
-        // Source-backed package public imports can use a public prefix path that differs from the
+        // Source-backed package public dependencies can use a public prefix path that differs from the
         // concrete root-file header path. Accept those public edges without treating them as
         // graph nodes.
         if self.is_source_package_public_export_path(requested_path, string_table) {
@@ -219,7 +219,7 @@ impl<'a> DependencyGraph<'a> {
     ) -> ResolvedDependencyEdge {
         // Stage 3 turns a retained local declaration-ordering hint into a sortable graph edge.
         // It consumes the typed hint rather than reconstructing the requested path from
-        // FileImport or source syntax.
+        // RetainedDependencyClause or source syntax.
         let requested_path = hint.path();
         let location = header.name_location.to_owned();
         let source_order = self.source_order_for_requested_path(requested_path, string_table);
@@ -352,14 +352,14 @@ pub fn resolve_module_dependencies(
         const_fragment_count,
         has_non_trivial_root_body,
         mut module_symbols,
-        import_environment,
+        binding_environment,
         ..
     } = parsed;
 
     // Partition: StartFunction headers are appended last, not sorted.
     // WHY: start is build-system-only and has no dependents. Module-root declarations remain graph
     // participants because other modules can depend on their public constants and type surfaces;
-    // header import visibility, not dependency sorting, owns whether those declarations are visible.
+    // header dependency visibility, not dependency sorting, owns whether those declarations are visible.
     let mut start_headers: Vec<Header> = Vec::new();
     let top_level_headers: Vec<Header> = headers
         .into_iter()
@@ -382,7 +382,7 @@ pub fn resolve_module_dependencies(
         let graph = DependencyGraph::from_headers(
             top_level_headers,
             &module_symbols.source_package_public_exports,
-            &import_environment.imported_declarations_by_local_path,
+            &binding_environment.imported_declarations_by_local_path,
             string_table,
         );
         let mut diagnostic_bag = DiagnosticBag::new();
@@ -444,7 +444,7 @@ pub fn resolve_module_dependencies(
         const_fragment_count,
         has_non_trivial_root_body,
         module_symbols,
-        import_environment,
+        binding_environment,
     })
 }
 

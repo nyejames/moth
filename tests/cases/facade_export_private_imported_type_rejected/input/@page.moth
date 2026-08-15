@@ -1,5 +1,3 @@
-import @sub {
-    render,
-}
+@sub render
 
 [: loaded]

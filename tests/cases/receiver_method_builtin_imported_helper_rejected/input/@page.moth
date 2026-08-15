@@ -1,4 +1,4 @@
-import @extensions
+@extensions
 
 value = 7
 [:unreachable [value.label()]]

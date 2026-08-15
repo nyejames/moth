@@ -1,4 +1,4 @@
-import @data/theme {Theme, default_theme}
+@data/theme Theme, default_theme
 
 RenderTheme as Theme
 

@@ -12,10 +12,10 @@ A token carries at least:
 - the **authored spelling** as it appeared in source
 - a **source location** span pointing back at the file
 
-Take the page import:
+Take the page dependency clause:
 
 [codeblock, $code("moth"):
-import @greeting { greet }
+@greeting greet
 ]
 
 A lexer might emit a sequence in this spirit:
@@ -27,18 +27,8 @@ A lexer might emit a sequence in this spirit:
     ]
 
     [td:
-        [: `import`]
-        [: keyword or identifier reserved by grammar]
-    ]
-
-    [td:
         [: `@greeting`]
         [: package or module path atom]
-    ]
-
-    [td:
-        [: `{`]
-        [: delimiter]
     ]
 
     [td:
@@ -46,10 +36,6 @@ A lexer might emit a sequence in this spirit:
         [: identifier]
     ]
 
-    [td:
-        [: `}`]
-        [: delimiter]
-    ]
 ]
 
 Exact kind names live in the tokenizer. The teaching point stays fixed: boundaries enter here, meaning does not.
@@ -65,7 +51,7 @@ Identifiers, delimiters, operators and literals each become discrete pieces. The
 
 Every useful diagnostic eventually points at text the author wrote. Locations make that possible without forcing every later stage to keep the entire file string beside every node forever.
 
-A span says "these characters in this source identity." When interface binding later fails to find `greet`, the diagnostic can underline the import name rather than shrug at "somewhere in the module."
+A span says "these characters in this source identity." When interface binding later fails to find `greet`, the diagnostic can underline the selected name rather than shrug at "somewhere in the module."
 
 Tokenization attaches locations. It does not decide that `greet` is a function. That decision waits for binding and AST.
 
@@ -84,7 +70,7 @@ Not every file starts in the same lexical mode.
 
 Those paths converge. Moth template preparation synthesises an ordinary private `content #String` declaration whose initializer is a Markdown template over the body tokens. Markdown preparation can contribute the same declaration shape with a synthetic string literal. Later stages see ordinary declarations, not a forever-special document dialect in HIR.
 
-The greeting project uses `.moth` files. Document kinds still matter because the same compiler owners serve docs sites and content imports without a second semantic pipeline.
+The greeting project uses `.moth` files. Document kinds still matter because the same compiler owners serve docs sites and content dependencies without a second semantic pipeline.
 
 **Diagram placeholder:** moth, mtf and md use different entry preparation then converge
 
@@ -108,7 +94,7 @@ Tokenization recognises spelling, locations and delimiter context. It may reject
 
 It does **not**:
 
-- resolve imports
+- resolve dependencies
 - build types
 - fold constants
 - understand templates as semantic structures
@@ -120,7 +106,7 @@ If a stage after the lexer rediscovers token boundaries from raw text, something
 
 - invalid character, escape, delimiter or lexical spacing
 - source-kind preparation failure
-- import, type and template semantic errors that only look lexical when misdiagnosed
+- dependency, type and template semantic errors that only look lexical when misdiagnosed
 
 Defer semantic errors to their owning stages. A good lexer stays humble.
 
@@ -143,4 +129,4 @@ Defer semantic errors to their owning stages. A good lexer stays humble.
 
 ## Exit state
 
-You leave with located tokens and source-kind prepared payloads. Next: which declarations and import relationships those tokens describe.
+You leave with located tokens and source-kind prepared payloads. Next: which declarations and dependency relationships those tokens describe.

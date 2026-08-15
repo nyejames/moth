@@ -6,6 +6,7 @@
 //! statement-position filtering and targeted diagnostics.
 
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::expressions::parse_expression::create_expression;
@@ -100,7 +101,7 @@ fn parse_and_validate_statement_expression(
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
-) -> Result<Expression, Box<CompilerDiagnostic>> {
+) -> Result<Expression, ExpressionParseError> {
     let mut inferred = ExpectedType::Infer;
     let expression = create_expression(
         token_stream,
@@ -110,18 +111,18 @@ fn parse_and_validate_statement_expression(
         &ValueMode::ImmutableOwned,
         false,
         string_table,
-    )
-    .map_err(|error| Box::new(CompilerDiagnostic::from(error)))?;
+    )?;
 
     if let Some(diagnostic) = rejects_discarded_fallible_success(&expression) {
-        return Err(Box::new(diagnostic));
+        return Err(diagnostic.into());
     }
 
     if !is_expression_statement(&expression) {
-        return Err(Box::new(CompilerDiagnostic::unexpected_token(
+        return Err(CompilerDiagnostic::unexpected_token(
             token_stream.current_token_kind().to_owned(),
             token_stream.current_location(),
-        )));
+        )
+        .into());
     }
 
     Ok(expression)
@@ -132,7 +133,7 @@ pub(crate) fn parse_expression_statement_candidate(
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
-) -> Result<Expression, Box<CompilerDiagnostic>> {
+) -> Result<Expression, ExpressionParseError> {
     parse_and_validate_statement_expression(token_stream, context, type_interner, string_table)
 }
 
@@ -142,6 +143,6 @@ pub(crate) fn parse_symbol_expression_statement_candidate(
     _symbol_id: StringId,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
-) -> Result<Expression, Box<CompilerDiagnostic>> {
+) -> Result<Expression, ExpressionParseError> {
     parse_and_validate_statement_expression(token_stream, context, type_interner, string_table)
 }

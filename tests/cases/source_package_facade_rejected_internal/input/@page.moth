@@ -1,1 +1,1 @@
-import @helper { internal_helper }
+@helper internal_helper

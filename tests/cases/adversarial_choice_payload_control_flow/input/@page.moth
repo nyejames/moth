@@ -1,5 +1,5 @@
-import @types { TaskResult }
-import @types { format_task }
+@types TaskResult
+@types format_task
 
 -- Const payload choice
 default_success #= TaskResult::Success(42, "default")

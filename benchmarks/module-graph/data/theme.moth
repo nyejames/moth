@@ -1,4 +1,4 @@
-import @data/constants {double_spacing, app_title}
+@data/constants double_spacing, app_title
 
 Theme = |
     name String,

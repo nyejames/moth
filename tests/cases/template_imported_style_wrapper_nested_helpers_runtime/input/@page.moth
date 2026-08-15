@@ -1,4 +1,4 @@
-import @styles/docs_style {table}
+@styles/docs_style table
 
 label ~= "A"
 

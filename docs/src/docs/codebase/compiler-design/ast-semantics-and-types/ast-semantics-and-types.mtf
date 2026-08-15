@@ -17,7 +17,7 @@ A **semantic tree** (still often stored as AST nodes in Moth) adds resolved fact
 
 **Name resolution** connects spellings to declarations. **Type checking** checks that operations and values agree under language rules. **Semantic identity** names the underlying declaration or type in a way that survives aliases and module boundaries.
 
-Before checking, the page call is unresolved shape. After checking, it is a fact later stages may lower without reopening the import list.
+Before checking, the page call is unresolved shape. After checking, it is a fact later stages may lower without reopening the dependency clauses.
 
 **Diagram placeholder:** Unresolved names gain symbol, argument and return facts
 
@@ -26,16 +26,16 @@ Before checking, the page call is unresolved shape. After checking, it is a fact
 
 ## Environments and visibility
 
-AST consumes **bound file visibility**. It may validate semantic use of visible symbols. It does not rebuild imports or rediscover top-level visibility. If a top-level name cannot be found by walking sorted declarations and bound visibility, the missing fact belongs earlier in the pipeline.
+AST consumes **bound file visibility**. It may validate semantic use of visible symbols. It does not rebuild dependency bindings or rediscover top-level visibility. If a top-level name cannot be found by walking sorted declarations and bound visibility, the missing fact belongs earlier in the pipeline.
 
-Scopes nest inside bodies. The collision policy does not. All user-visible names share one rule: same-file declarations, source imports, binding imports, aliases, prelude symbols and builtins cannot silently shadow one another.
+Scopes nest inside bodies. The collision policy does not. All user-visible names share one rule: same-file declarations, source dependencies, binding-backed dependencies, aliases, prelude symbols and builtins cannot silently shadow one another.
 
-Local declarations, imports and reserved interfaces remain distinct origins even when their spellings sit in one lookup table.
+Local declarations, dependency bindings and reserved interfaces remain distinct origins even when their spellings sit in one lookup table.
 
 **Diagram placeholder:** Two visible declarations trigger one collision result
 
 *Caption: accepted visibility policy.*
-*Question: who owns a name when two imports want the same spelling?*
+*Question: who owns a name when two dependencies want the same spelling?*
 
 ## Type identity
 

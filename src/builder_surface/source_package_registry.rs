@@ -1,11 +1,11 @@
 //! Source-backed package registry.
 //!
 //! WHAT: tracks builder-provided and project-local source-backed package roots.
-//! WHY: source-backed package imports resolve to actual `.moth` files, not binding-backed
+//! WHY: source-backed package dependencies resolve to actual `.moth` files, not binding-backed
 //!      packages, so the path resolver needs to know where each package prefix lives.
 
 //! Roots are stored in a `BTreeMap` so that iteration surfaces one canonical
-//! import-prefix order at every Stage 0 and header boundary, with no need for
+//! package-prefix order at every Stage 0 and header boundary, with no need for
 //! downstream consumers to re-sort.
 
 use crate::builder_surface::package_metadata::{PackageMetadata, PackageOrigin};
@@ -13,9 +13,9 @@ use crate::builder_surface::package_metadata::{PackageMetadata, PackageOrigin};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-/// Registry of source-backed package roots indexed by their import prefix.
+/// Registry of source-backed package roots indexed by their package prefix.
 ///
-/// WHAT: maps `@`-stripped import prefixes like `"html"` to filesystem roots.
+/// WHAT: maps `@`-stripped package prefixes like `"html"` to filesystem roots.
 /// WHY: the path resolver checks these prefixes before falling back to entry-root resolution.
 #[derive(Clone, Debug, Default)]
 pub struct SourcePackageRegistry {
@@ -30,22 +30,22 @@ impl SourcePackageRegistry {
     /// Register a filesystem source-backed package root.
     pub fn register_filesystem_root(
         &mut self,
-        import_prefix: impl Into<String>,
+        package_prefix: impl Into<String>,
         root: PathBuf,
         origin: PackageOrigin,
     ) {
-        let prefix = import_prefix.into();
+        let prefix = package_prefix.into();
         self.roots.insert(
             prefix.clone(),
             SourcePackageRoot {
-                import_prefix: prefix,
+                package_prefix: prefix,
                 root: ProvidedSourceRoot::Filesystem(root),
                 metadata: PackageMetadata::source(origin),
             },
         );
     }
 
-    /// Returns the root for a given import prefix, if any.
+    /// Returns the root for a given package prefix, if any.
     pub fn get_root(&self, prefix: &str) -> Option<&SourcePackageRoot> {
         self.roots.get(prefix)
     }
@@ -63,7 +63,7 @@ impl SourcePackageRegistry {
     /// Merge another registry into this one, returning collision errors.
     pub fn merge(&mut self, other: &SourcePackageRegistry) -> Result<(), Vec<String>> {
         let mut collisions = Vec::new();
-        // The BTreeMap already iterates in canonical import-prefix order, so
+        // The BTreeMap already iterates in canonical package-prefix order, so
         // multi-collision diagnostics are reported deterministically.
         for (prefix, root) in &other.roots {
             if self.roots.contains_key(prefix) {
@@ -83,7 +83,7 @@ impl SourcePackageRegistry {
 /// One source-backed package root.
 #[derive(Clone, Debug)]
 pub struct SourcePackageRoot {
-    pub import_prefix: String,
+    pub package_prefix: String,
     pub root: ProvidedSourceRoot,
     pub metadata: PackageMetadata,
 }

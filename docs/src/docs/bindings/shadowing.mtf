@@ -13,7 +13,7 @@ Moth doesn't allow a visible name to be redeclared.
 ### Rules
 
 - A declaration can't reuse a value name that stays visible.
-- A declaration can't collide with a visible type, alias, import, builtin or reserved name.
+- A declaration can't collide with a visible type, alias, dependency binding, builtin or reserved name.
 - Function parameters and loop bindings follow the same rule.
 - A nested child scope can't shadow a name from its parent scope.
 - Assignment to an existing mutable binding is not a redeclaration.
@@ -31,5 +31,5 @@ Moth doesn't allow a visible name to be redeclared.
     ;
 ]
 
-Import, module public-surface and namespace collisions add more specific rules, but they build
+Dependency, module public-surface and namespace collisions add more specific rules, but they build
 on the same no-shadowing principle.

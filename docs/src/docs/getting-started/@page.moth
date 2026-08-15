@@ -1,13 +1,11 @@
-import @styles {
-    navbar,
+@styles navbar,
     section,
     styled_table,
     header,
     data,
     codeblock,
     language_theme_head,
-    doc_pager_next,
-}
+    doc_pager_next
 
 page_title #= "Getting Started with moth"
 page_description #= "How to use the Moth compiler CLI, create a project, run the dev server, and read compiler diagnostics."
@@ -288,7 +286,7 @@ page_head #= language_theme_head
 
     [codeblock, $code("bash"):
         E|type|src/@page.moth|4:12|Expected Bool, found Int|help=Use a Bool expression here.
-        W|identifier_naming_convention|src/button.moth|1:1|Import alias case mismatch
+        W|identifier_naming_convention|src/button.moth|1:1|Dependency alias case mismatch
     ]
 ]
 
@@ -338,7 +336,7 @@ page_head #= language_theme_head
         [data:
             [: Syntax Error]
             [: The source text could not be parsed as Moth syntax.]
-            [: Check punctuation, block delimiters, template brackets, imports and declaration shape.]
+            [: Check punctuation, block delimiters, template brackets, dependency clauses and declaration shape.]
         ]
 
         [data:
@@ -350,12 +348,12 @@ page_head #= language_theme_head
         [data:
             [: Language Rule Error]
             [: The syntax is valid, but it violates a language rule.]
-            [: Check things like mutability, import visibility, unsupported feature surfaces, duplicate names or invalid top-level code.]
+            [: Check things like mutability, binding visibility, unsupported feature surfaces, duplicate names or invalid top-level code.]
         ]
 
         [data:
             [: Missing File or Directory]
-            [: The project references a file, directory, import path or output path that cannot be resolved.]
+            [: The project references a file, directory, dependency path or output path that cannot be resolved.]
             [: Check spelling, relative paths, [$html:`entry_root`] and project config.]
         ]
 
@@ -389,11 +387,11 @@ page_head #= language_theme_head
     ## Warnings and future suggestions
 
     Warnings are for code that can still compile but deserves attention.
-    Current warnings include things like malformed CSS/HTML template content, large tracked assets, naming convention issues and import alias case mismatches.
+    Current warnings include things like malformed CSS/HTML template content, large tracked assets, naming convention issues and dependency alias case mismatches.
 
     Moth separates correctness from style pressure.
     The future `suggest` command will become the pedantic style and cleanup pass: closer to a full Clippy-style assistant for Moth code.
-    Noisy suggestions such as unused variables, unused imports, unused declarations and more specific style improvements belong there.
+    Noisy suggestions such as unused variables, unused dependency bindings, unused declarations and more specific style improvements belong there.
 
     The intended workflow will be:
 

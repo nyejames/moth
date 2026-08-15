@@ -23,7 +23,7 @@ Generic bounds use traits to promise that a generic parameter provides certain b
 - A bound may enable a unique required receiver call inside the generic declaration.
 - Bound calls resolve statically to concrete source methods.
 - Concrete values still use ordinary visible methods.
-- Conformance does not import methods into scope.
+- Conformance does not bind methods into scope.
 - Backends do not receive trait objects or runtime evidence tables.
 - `where` syntax is rejected.
 - File-local evidence-backed dispatch outside reusable conformance is outside scope.

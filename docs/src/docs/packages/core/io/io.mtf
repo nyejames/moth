@@ -1,4 +1,4 @@
-`@core/io` owns console output and input polling. The prelude injects the bare `io` namespace as a compile-time alias to `@core/io`, so normal source files can call `io.line(...)` without an explicit import. An explicit `import @core/io` binds the same `io` namespace. An alias such as `import @core/io as output` creates a file-local namespace name.
+`@core/io` owns console output and input polling. The prelude injects the bare `io` namespace as a compile-time alias to `@core/io`, so normal source files can call `io.line(...)` without an explicit dependency clause. An explicit `@core/io` clause binds the same `io` namespace. An alias such as `@core/io as output` creates a file-local namespace name.
 
 `@core/io` belongs to the binding-backed Core package family. It exposes free functions and one opaque type. It does not expose source-defined receiver methods. See @../../#package-origins-and-backing (Package origins and backing) for origin and backing rules.
 
@@ -205,7 +205,7 @@ Browser input events arrive through the host event loop. A synchronous infinite 
 - Do not inspect `Input` fields directly.
 - Do not pass non-string values to console helpers.
 - Do not pass the `io` namespace record itself as a runtime value.
-- Direct symbol-path imports such as `import @core/io/line` face rejection. Use grouped or namespace imports.
+- Direct symbol-path clauses such as `@core/io/line` face rejection. Use direct selections or a namespace clause.
 
 ### Deferred IO surfaces
 
@@ -215,4 +215,4 @@ Deferred IO domains include filesystem and path IO, fetch and network IO, timers
 
 - For prelude policy see @../prelude (Prelude policy).
 - For package origin and backing see @../../#package-origins-and-backing (Package origins and backing).
-- For import path rules see @../../#import-paths (Import paths).
+- For dependency-path rules see @../../#dependency-paths (Dependency paths).

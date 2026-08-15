@@ -194,7 +194,7 @@ impl FrontendProject {
             prepared_syntax,
             &self.frontend.external_package_registry,
             &ExternalImportResolutionTable::default(),
-            &crate::compiler_frontend::public_interface::SourceProviderImportSet::default(),
+            &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
             options.project_path_resolver.as_ref(),
             &mut self.frontend.string_table,
         )
@@ -264,12 +264,12 @@ fn compiles_single_file_program_through_borrow_check() {
 }
 
 #[test]
-fn compiles_multi_file_import_program_through_borrow_check() {
+fn compiles_multi_file_dependency_program_through_borrow_check() {
     let mut project = FrontendProject::new(
         &[
             (
                 "src/@page.moth",
-                "import @helper { add }\nresult = add(1, 2)\nio.line([: [result]])\n",
+                "@helper add\nresult = add(1, 2)\nio.line([: [result]])\n",
             ),
             (
                 "src/helper.moth",

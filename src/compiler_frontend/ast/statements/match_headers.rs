@@ -7,6 +7,7 @@
 //! statement-body parsing or constructing temporary `MatchArm` bodies.
 
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::parse_expression::create_expression_until;
 use crate::compiler_frontend::ast::expressions::parse_expression_input::{
@@ -63,14 +64,12 @@ struct ParsedMatchPatternHeader {
     arm_scope: ScopeContext,
 }
 
-/// Boxed diagnostic result for all match-header parsing functions.
+/// Two-lane result for all match-header parsing functions.
 ///
-/// WHAT: every function in this module returns errors as `Box<CompilerDiagnostic>`.
-/// WHY: `CompilerDiagnostic` is large enough to trigger `clippy::result_large_err`;
-/// boxing the error variant keeps the success path cheap and matches the
-/// already-boxed `IfHeaderResult` and `BranchingResult` conventions used by the
-/// surrounding AST statement parsers.
-type MatchHeaderResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// WHAT: preserves authored match diagnostics and retained-token infrastructure failures.
+/// WHY: guard expressions and option capture parsing can consume a frozen prepared-file stream,
+/// so an invalid retained table must reach the module boundary as `CompilerError`.
+type MatchHeaderResult<T> = Result<T, ExpressionParseError>;
 
 /// Parse one reusable match-arm header.
 ///
@@ -175,8 +174,7 @@ fn parse_match_guard(
         value_mode: &ValueMode::ImmutableOwned,
         string_table,
     });
-    let guard_expression = create_expression_until(input, guard_end_tokens)
-        .map_err(|expression_error| Box::new(CompilerDiagnostic::from(expression_error)))?;
+    let guard_expression = create_expression_until(input, guard_end_tokens)?;
     let type_environment = type_interner.environment();
     ensure_match_guard_condition(&guard_expression, type_environment)?;
 
@@ -233,12 +231,13 @@ fn parse_match_pattern_header(
             if let TokenKind::Symbol(_) = token_stream.current_token_kind()
                 && !option_pattern_constructor_like(token_stream)
             {
-                return Err(Box::new(CompilerDiagnostic::invalid_match_pattern(
+                return Err(CompilerDiagnostic::invalid_match_pattern(
                     InvalidMatchPatternReason::BareCaptureOnOptionalScrutinee,
                     None,
                     None,
                     token_stream.current_location(),
-                )));
+                )
+                .into());
             }
 
             let pattern =
@@ -289,33 +288,37 @@ fn parse_match_pattern_header(
 
 fn reject_invalid_pattern_suffix(token_stream: &FileTokens) -> MatchHeaderResult<()> {
     if token_stream.current_token_kind() == &TokenKind::TypeParameterBracket {
-        return Err(Box::new(deferred_feature_reason_diagnostic(
+        return Err(deferred_feature_reason_diagnostic(
             DeferredFeatureReason::CaptureTaggedPattern,
             token_stream.current_location(),
-        )));
+        )
+        .into());
     }
 
     if token_stream.current_token_kind() == &TokenKind::As {
-        return Err(Box::new(CompilerDiagnostic::invalid_match_pattern(
+        return Err(CompilerDiagnostic::invalid_match_pattern(
             InvalidMatchPatternReason::AsNotValid,
             None,
             None,
             token_stream.current_location(),
-        )));
+        )
+        .into());
     }
 
     if token_stream.current_token_kind() == &TokenKind::Colon {
-        return Err(Box::new(CompilerDiagnostic::invalid_match_arm(
+        return Err(CompilerDiagnostic::invalid_match_arm(
             InvalidMatchArmReason::LegacyColonSyntax,
             token_stream.current_location(),
-        )));
+        )
+        .into());
     }
 
     if token_stream.current_token_kind() == &TokenKind::Arrow {
-        return Err(Box::new(CompilerDiagnostic::invalid_match_arm(
+        return Err(CompilerDiagnostic::invalid_match_arm(
             InvalidMatchArmReason::InvalidArrow,
             token_stream.current_location(),
-        )));
+        )
+        .into());
     }
 
     Ok(())
@@ -359,12 +362,13 @@ fn build_arm_scope_with_choice_captures(
 
         // Enforce no-shadowing: the local binding name must not collide with any visible local.
         if let Some(_existing) = arm_scope.get_reference(&binding_name) {
-            return Err(Box::new(CompilerDiagnostic::invalid_match_pattern(
+            return Err(CompilerDiagnostic::invalid_match_pattern(
                 InvalidMatchPatternReason::CaptureBindingShadowsVariable,
                 None,
                 None,
                 capture.binding_location.clone(),
-            )));
+            )
+            .into());
         }
 
         let binding_name_str = string_table.resolve(binding_name).to_owned();

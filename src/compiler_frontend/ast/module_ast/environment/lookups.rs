@@ -22,7 +22,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariant;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
-use crate::compiler_frontend::headers::import_environment::HeaderImportEnvironment;
+use crate::compiler_frontend::headers::binding_environment::HeaderBindingEnvironment;
 use crate::compiler_frontend::headers::module_symbols::{
     GenericDeclarationMetadata, ModuleSymbols,
 };
@@ -49,7 +49,7 @@ pub(crate) struct AstModuleLookups {
     // Header-stage source data.
     // WHY: these are moved straight from the header/dependency-sort phase; AST does not rebuild them.
     pub(crate) module_symbols: ModuleSymbols,
-    pub(crate) import_environment: HeaderImportEnvironment,
+    pub(crate) binding_environment: HeaderBindingEnvironment,
     pub(crate) warnings: Vec<CompilerDiagnostic>,
 
     // Declaration tables and resolved constant artifacts.
@@ -95,7 +95,7 @@ pub(crate) struct AstModuleLookups {
     /// identity only to source declarations that can be concrete type arguments.
     pub(crate) source_nominal_paths: Rc<FxHashSet<InternedPath>>,
 
-    // Receiver method catalog built from visible declarations and imports.
+    // Receiver method catalog built from visible declarations and dependencies.
     pub(crate) receiver_methods: Rc<ReceiverMethodCatalog>,
 
     // Resolved trait metadata.

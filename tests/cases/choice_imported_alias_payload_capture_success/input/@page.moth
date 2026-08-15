@@ -1,4 +1,4 @@
-import @choices/Response { Response as Reply }
+@choices/Response Response as Reply
 
 e = Reply::Err("captured")
 

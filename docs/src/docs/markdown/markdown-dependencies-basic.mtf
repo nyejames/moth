@@ -1,0 +1,15 @@
+Bind a `.md` file the same way as any other source file.
+
+### Bind and use
+
+[codeblock, $code("moth"):
+    @docs/intro content as intro_html
+
+    [: [intro_html] ]
+]
+
+The `content` constant is the rendered HTML string.
+
+### Do not include the extension
+
+`@docs/intro.md content` is rejected. Use `@docs/intro content`.

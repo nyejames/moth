@@ -62,11 +62,10 @@ use crate::compiler_frontend::{
 
 const SYNTHETIC_CONTENT_CONSTANT_NAME: &str = "content";
 
-/// Boxed diagnostic result for the template construction family.
-///
-/// Template construction owns this large diagnostic boundary. Plain diagnostics are boxed once
-/// here and existing boxed callers propagate without an unbox/rebox cycle.
-type TemplateConstructionResult = Result<Template, Box<CompilerDiagnostic>>;
+/// Template construction is the durable local error boundary for head/body/TIR work. It carries
+/// source diagnostics and internal TIR or retained-syntax failures separately until the AST
+/// caller selects its reporting lane.
+type TemplateConstructionResult = Result<Template, TemplateError>;
 
 /// The immediate result of const-required construction.
 ///
@@ -81,7 +80,7 @@ pub(crate) struct ConstRequiredTemplateConstruction {
 }
 
 type ConstRequiredTemplateConstructionResult =
-    Result<ConstRequiredTemplateConstruction, Box<CompilerDiagnostic>>;
+    Result<ConstRequiredTemplateConstruction, TemplateError>;
 
 // -------------------------
 //  Template Construction
@@ -283,8 +282,7 @@ impl Template {
                     context,
                     string_table,
                 },
-            )
-            .map_err(TemplateError::into_diagnostic)?;
+            )?;
         }
 
         // Finish the parser builder-state TIR with a provisional kind. The
@@ -313,8 +311,7 @@ impl Template {
             &style,
             context,
             string_table,
-        )
-        .map_err(TemplateError::into_diagnostic)?;
+        )?;
 
         {
             // Head-chain composition materializes slot routing as needed, while
@@ -345,8 +342,7 @@ impl Template {
                         TemplateError::from(CompilerError::compiler_error(
                             "Template head-chain composition started from a missing TIR root.",
                         ))
-                    })
-                    .map_err(TemplateError::into_diagnostic)?
+                    })?
             };
 
             // Run shared-store head-chain composition. The store borrow is
@@ -390,8 +386,7 @@ impl Template {
                         TemplateError::from(CompilerError::compiler_error(
                             "Template head-chain composition lost its source TIR template.",
                         ))
-                    })
-                    .map_err(TemplateError::into_diagnostic)?;
+                    })?;
                 let composed_template_id = template_ir_store.push_template(TemplateIr::new(
                     composed.root,
                     original_template.style,
@@ -430,7 +425,7 @@ impl Template {
                     &build_state.child_wrappers,
                     &context.template_ir_store,
                 )
-                .map_err(|error| TemplateError::from(error).into_diagnostic())?;
+                .map_err(TemplateError::from)?;
             }
         }
 
@@ -450,8 +445,8 @@ impl Template {
                 TemplateTirPhase::Composed,
                 tir_reference.context,
             )
-            .map_err(|error| TemplateError::from(error).into_diagnostic())?;
-            classify_effective_tir_view_template(&view).map_err(TemplateError::into_diagnostic)?
+            .map_err(TemplateError::from)?;
+            classify_effective_tir_view_template(&view)?
         };
 
         build_state.refresh_kind_from_tir_classification(&template_classification);
@@ -462,10 +457,11 @@ impl Template {
             TemplateType::Comment(CommentDirectiveKind::Doc)
         ) && !template_classification.shape_const_evaluable
         {
-            return Err(Box::new(CompilerDiagnostic::invalid_template_structure(
+            return Err(CompilerDiagnostic::invalid_template_structure(
                 InvalidTemplateStructureReason::NonFoldableDocComment,
                 construction_context.location().to_owned(),
-            )));
+            )
+            .into());
         }
 
         // `$insert(...)` helpers are allowed to survive while a template still has
@@ -483,7 +479,7 @@ impl Template {
                 &context.template_ir_store.borrow(),
                 tir_reference.root,
             )
-            .map_err(|error| TemplateError::from(error).into_diagnostic())?
+            .map_err(TemplateError::from)?
             .is_some();
         if !matches!(build_state.kind, TemplateType::SlotInsert(_))
             && !template_classification.has_unresolved_slots
@@ -491,11 +487,12 @@ impl Template {
             && !tir_reference.phase.is_at_least(TemplateTirPhase::Composed)
             && !is_stored_insert_carrier
         {
-            return Err(Box::new(CompilerDiagnostic::invalid_template_slot(
+            return Err(CompilerDiagnostic::invalid_template_slot(
                 InvalidTemplateSlotReason::InsertOutsideParentSlot,
                 None,
                 construction_context.location().to_owned(),
-            )));
+            )
+            .into());
         }
 
         // Write the parser-local classification through the store owner before
@@ -503,12 +500,10 @@ impl Template {
         let template_id = tir_reference.root;
         let mut template_ir_store = context.template_ir_store.borrow_mut();
         if !template_ir_store.set_template_kind(template_id, build_state.kind.to_owned()) {
-            return Err(Box::new(
-                TemplateError::from(CompilerError::compiler_error(
-                    "Constructed template kind could not be initialized in its TIR store.",
-                ))
-                .into_diagnostic(),
-            ));
+            return Err(CompilerError::compiler_error(
+                "Constructed template kind could not be initialized in its TIR store.",
+            )
+            .into());
         }
         drop(template_ir_store);
 
@@ -525,8 +520,7 @@ impl Template {
         ) {
             let store = context.template_ir_store.borrow();
 
-            validate_runtime_template_control_flow_slot_artifacts(&template, &store)
-                .map_err(TemplateError::into_diagnostic)?;
+            validate_runtime_template_control_flow_slot_artifacts(&template, &store)?;
         }
 
         increment_frontend_counter(FrontendCounter::TemplateCount);

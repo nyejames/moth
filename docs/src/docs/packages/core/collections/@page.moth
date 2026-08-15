@@ -1,18 +1,12 @@
-import @collections {
-    content as collections_advanced,
-}
+@collections content as collections_advanced
 
-import @collections-basic {
-    content as collections_basic,
-}
+@collections-basic content as collections_basic
 
-import @styles {
-    navbar,
+@styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager,
-}
+    doc_pager
 
 page_title #= "Core collections"
 page_description #= "Ordered collection literals and common collection methods."
@@ -27,7 +21,7 @@ page_head #= language_theme_head
 
     Moth collections store ordered values through language-owned literals and
     methods backed by `@core/collections`. The package remains implicit because
-    collection syntax belongs to the language rather than a user import.
+    collection syntax belongs to the language rather than a user dependency clause.
 ]
 
 #[section:

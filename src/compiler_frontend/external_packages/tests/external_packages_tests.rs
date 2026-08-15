@@ -251,7 +251,7 @@ fn package_prefix_lookup_returns_longest_registered_package() {
     let mut string_table = StringTable::new();
     let path = import_path(&["test", "pkg", "open"], &mut string_table);
     let matched = registry
-        .longest_package_prefix_for_import(&path, &string_table)
+        .longest_package_prefix_for_dependency(&path, &string_table)
         .expect("package prefix should match");
 
     assert_eq!(matched.package_path, "@test/pkg");
@@ -260,14 +260,14 @@ fn package_prefix_lookup_returns_longest_registered_package() {
 }
 
 #[test]
-fn package_prefix_lookup_supports_exact_namespace_imports() {
+fn package_prefix_lookup_supports_exact_namespace_bindings() {
     let mut registry = ExternalPackageRegistry::new();
     crate::builder_surface::core_packages::register_core_math_package(&mut registry);
 
     let mut string_table = StringTable::new();
     let path = import_path(&["core", "math"], &mut string_table);
     let matched = registry
-        .longest_package_prefix_for_import(&path, &string_table)
+        .longest_package_prefix_for_dependency(&path, &string_table)
         .expect("core math package should match");
 
     assert_eq!(matched.package_path, "@core/math");
@@ -283,8 +283,8 @@ fn virtual_package_detection_uses_symbol_suffixes() {
     let package_symbol = import_path(&["core", "math", "sin"], &mut string_table);
     let source_path = import_path(&["core", "missing", "sin"], &mut string_table);
 
-    assert!(registry.is_virtual_package_import(&package_symbol, &string_table));
-    assert!(!registry.is_virtual_package_import(&source_path, &string_table));
+    assert!(registry.is_virtual_package_dependency(&package_symbol, &string_table));
+    assert!(!registry.is_virtual_package_dependency(&source_path, &string_table));
 }
 
 // ------------------------------------------------------------------
@@ -965,7 +965,7 @@ fn core_io_public_type_is_not_registered() {
 }
 
 /// Verifies that the prelude registers `io` as a namespace alias to `@core/io`.
-/// WHAT: source files can write `io.line(...)` without an explicit import.
+/// WHAT: source files can write `io.line(...)` without an explicit dependency clause.
 /// WHY: the prelude must expose the lowercase namespace, not a bare function or type.
 #[test]
 fn prelude_registers_io_namespace_alias_to_core_io() {

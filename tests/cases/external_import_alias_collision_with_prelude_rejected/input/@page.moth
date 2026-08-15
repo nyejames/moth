@@ -1,2 +1,2 @@
-import @core/math { sin as io }
+@core/math sin as io
 io.line([: [1.0]])

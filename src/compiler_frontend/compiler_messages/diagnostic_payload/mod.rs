@@ -254,7 +254,7 @@ pub enum DiagnosticPayload {
         expected_style: NamingConvention,
     },
 
-    ImportAliasCaseMismatch {
+    DependencyAliasCaseMismatch {
         alias: StringId,
         symbol: StringId,
     },
@@ -300,9 +300,14 @@ pub enum DiagnosticPayload {
         path_kind: PathKind,
     },
 
-    InvalidImportClause {
-        clause_kind: ImportClauseKind,
-        reason: InvalidImportClauseReason,
+    InvalidDependencyClause {
+        clause_kind: DependencyClauseKind,
+        reason: InvalidDependencyClauseReason,
+    },
+
+    LegacyDependencyClause {
+        reason: LegacyDependencyClauseReason,
+        replacement: Option<StringId>,
     },
 
     InvalidTypeAnnotation {
@@ -523,7 +528,7 @@ pub enum DiagnosticPayload {
         reason: InvalidCompileTimePathReason,
     },
 
-    ImportRecordUsedAsValue {
+    DependencyNamespaceUsedAsValue {
         record_name: StringId,
     },
 
@@ -531,7 +536,7 @@ pub enum DiagnosticPayload {
         record_name: StringId,
     },
 
-    NestedTraversal {
+    NestedDependencyTraversal {
         record_name: StringId,
     },
 
@@ -572,6 +577,7 @@ pub enum DiagnosticPayload {
 
     DuplicatePublicExport {
         name: StringId,
+        first_location: SourceLocation,
     },
 
     PrivateTypeInExportedApi {
@@ -663,7 +669,8 @@ impl DiagnosticPayload {
             Self::InvalidStringEscape { reason } => reason.stable_reason_key(),
             Self::InvalidNumberLiteral { reason, .. } => reason.stable_reason_key(),
             Self::InvalidGenericApplication { reason } => reason.stable_reason_key(),
-            Self::InvalidImportClause { reason, .. } => reason.stable_reason_key(),
+            Self::InvalidDependencyClause { reason, .. } => reason.stable_reason_key(),
+            Self::LegacyDependencyClause { reason, .. } => reason.stable_reason_key(),
             Self::InvalidTypeAnnotation { reason, .. } => reason.stable_reason_key(),
             Self::InvalidCollectionType { reason } => reason.stable_reason_key(),
             Self::InvalidMapType { reason } => reason.stable_reason_key(),

@@ -1,4 +1,4 @@
-`io` gives your program console output and input polling. The prelude makes `io` available without an import, so you can start writing output right away.
+`io` gives your program console output and input polling. The prelude makes `io` available without a dependency clause, so you can start writing output right away.
 
 ### Writing to the console
 

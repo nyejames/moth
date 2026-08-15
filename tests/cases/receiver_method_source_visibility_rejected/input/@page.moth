@@ -1,4 +1,4 @@
-import @helper { tick }
+@helper tick
 
 run || -> String:
     return "should_fail"

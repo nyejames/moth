@@ -1,4 +1,4 @@
-import @utils { Wrapper, make_wrapper }
+@utils Wrapper, make_wrapper
 
 value = make_wrapper(42)
 

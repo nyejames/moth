@@ -5,17 +5,21 @@
 
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::arena::TokenStats;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 pub use crate::compiler_frontend::compiler_messages::source_location::{
     CharPosition, SourceLocation,
 };
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
+use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
 use crate::compiler_frontend::symbols::identity::FileId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 use crate::token_log;
 use std::iter::Peekable;
+use std::ops::Deref;
 use std::path::PathBuf;
 use std::str::Chars;
+use std::sync::Arc;
 
 /// Entry policy for one tokenizer invocation.
 ///
@@ -104,66 +108,143 @@ impl Token {
     }
 }
 
-/// WHAT: One path entry produced by the path tokenizer, with optional per-entry alias.
-/// WHY: Grouped import syntax `import @base { a as x, b }` needs each expanded path to
-///      carry its own alias and source location. Storing alias metadata in the token
-///      payload avoids reparsing and keeps alias data attached to the entry that
-///      produced it.
-#[derive(Clone, Debug, PartialEq)]
-pub struct PathTokenItem {
-    pub path: InternedPath,
-    pub alias: Option<StringId>,
-    pub path_location: SourceLocation,
-    pub alias_location: Option<SourceLocation>,
-    /// True when this entry came from grouped path syntax, even if the group
-    /// expanded to only one path.
-    pub from_grouped: bool,
+/// The path-table lifecycle for one token stream.
+///
+/// WHAT: a tokenized source keeps the only mutable table owner while header syntax is being
+///       prepared. Header substreams defer their table reference until the prepared-file owner
+///       has completed its one string remap and source-identity rebind, then share the frozen
+///       immutable table.
+/// WHY: an `Arc` is used only after the construction owner has finished mutating the table. This
+///      prevents ordinary substreams from copying rows while also preventing copy-on-write or
+///      mutable shared path tables during final preparation.
+#[derive(Clone, Debug)]
+pub enum FilePathSyntax {
+    Preparing(Arc<PathSyntaxTable>),
+    Deferred,
+    Shared(Arc<PathSyntaxTable>),
 }
 
-impl PathTokenItem {
-    /// Remap all interned string IDs in this path token item into a merged string table.
-    ///
-    /// WHAT: updates `path`, `alias`, and both locations after a string-table merge.
-    /// WHY: path token items carry `InternedPath` and `SourceLocation` data that must stay
-    ///      valid when per-file local tables are merged into the module/global table.
-    pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        self.try_remap_string_ids(&mut |id| {
-            Ok::<StringId, std::convert::Infallible>(remap.get(id))
+impl FilePathSyntax {
+    fn preparing(table: PathSyntaxTable) -> Self {
+        Self::Preparing(Arc::new(table))
+    }
+
+    fn shared(table: PathSyntaxTable) -> Self {
+        Self::Shared(Arc::new(table))
+    }
+
+    fn permanent_substream(&self) -> Self {
+        match self {
+            // Header syntax does not inspect retained body tokens while parsing the file. Keep
+            // the body deferred so the prepared-file owner remains the sole mutable table owner.
+            Self::Preparing(_) | Self::Deferred => Self::Deferred,
+            Self::Shared(table) => Self::Shared(Arc::clone(table)),
+        }
+    }
+
+    fn frozen_substream(&self) -> Result<Self, CompilerError> {
+        match self {
+            Self::Shared(table) => Ok(Self::Shared(Arc::clone(table))),
+            Self::Preparing(_) => Err(CompilerError::compiler_error(
+                "retained AST substream requested a path table before the prepared file froze",
+            )),
+            Self::Deferred => Err(CompilerError::compiler_error(
+                "retained AST substream requested a path table before it was attached",
+            )),
+        }
+    }
+
+    fn table(&self) -> Result<&PathSyntaxTable, CompilerError> {
+        match self {
+            Self::Preparing(table) | Self::Shared(table) => Ok(table),
+            Self::Deferred => Err(CompilerError::compiler_error(
+                "retained token stream was read before its prepared-file path table froze",
+            )),
+        }
+    }
+
+    fn preparing_table_mut(&mut self) -> Result<&mut PathSyntaxTable, CompilerError> {
+        let Self::Preparing(table) = self else {
+            return Err(CompilerError::compiler_error(
+                "path-table mutation was requested after the file preparation owner froze",
+            ));
+        };
+
+        Arc::get_mut(table).ok_or_else(|| {
+            CompilerError::compiler_error(
+                "path-table mutation was requested while a temporary parser still held a shared view",
+            )
         })
-        .expect("token string-ID remapping is infallible");
     }
 
-    /// Remap every interned string payload through one exhaustive, in-place, fallible walker.
+    fn take_preparing_table(&mut self) -> Result<Arc<PathSyntaxTable>, CompilerError> {
+        let state = std::mem::replace(self, Self::Deferred);
+        match state {
+            Self::Preparing(table) => Ok(table),
+            Self::Deferred => Err(CompilerError::compiler_error(
+                "prepared-file output attempted to take a path table from a deferred stream",
+            )),
+            Self::Shared(_) => Err(CompilerError::compiler_error(
+                "prepared-file output attempted to take an already-frozen path table",
+            )),
+        }
+    }
+
+    fn require_deferred(&self) -> Result<(), CompilerError> {
+        if matches!(self, Self::Deferred) {
+            return Ok(());
+        }
+
+        Err(CompilerError::compiler_error(
+            "prepared-file header stream must remain deferred until its file-owned path table freezes",
+        ))
+    }
+
+    fn require_shared_table(&self, expected: &Arc<PathSyntaxTable>) -> Result<(), CompilerError> {
+        match self {
+            Self::Shared(table) if Arc::ptr_eq(table, expected) => Ok(()),
+            Self::Shared(_) => Err(CompilerError::compiler_error(
+                "prepared-file header stream shares a different path table than its file owner",
+            )),
+            Self::Preparing(_) => Err(CompilerError::compiler_error(
+                "prepared-file header stream retained a mutable path table after file freeze",
+            )),
+            Self::Deferred => Err(CompilerError::compiler_error(
+                "prepared-file header stream was not attached to the frozen file-owned path table",
+            )),
+        }
+    }
+
+    /// Attach after a whole-file preflight has proven this stream is deferred.
     ///
-    /// WHAT: the single canonical `PathTokenItem` string-ID traversal for ordinary remaps,
-    ///       frozen body capture and frozen body materialisation.
-    /// WHY: every payload-bearing field is listed explicitly here; remapping mutates existing
-    ///      allocations instead of rebuilding the item, so path vectors keep their allocation.
-    pub fn try_remap_string_ids<E>(
-        &mut self,
-        map: &mut impl FnMut(StringId) -> Result<StringId, E>,
-    ) -> Result<(), E> {
-        self.path.try_remap_string_ids(map)?;
-        if let Some(alias) = &mut self.alias {
-            *alias = map(*alias)?;
-        }
-        self.path_location.try_remap_string_ids(map)?;
-        if let Some(alias_location) = &mut self.alias_location {
-            alias_location.try_remap_string_ids(map)?;
-        }
-        Ok(())
+    /// This intentionally has no fallible branch. `FileFrontendPrepareOutput` first checks every
+    /// retained header, then changes the file owner to frozen and attaches all streams in one
+    /// non-failing commit section. Adding an `Arc` clone never copies table rows or enables COW.
+    fn attach_preflighted_shared(&mut self, table: Arc<PathSyntaxTable>) {
+        debug_assert!(matches!(self, Self::Deferred));
+        *self = Self::Shared(table);
     }
 }
 
-/// WHAT: Extract bare paths from a slice of path token items.
-/// WHY: Non-import consumers (template heads, project config) only need the path data.
-pub fn path_token_paths(items: &[PathTokenItem]) -> Vec<InternedPath> {
-    items.iter().map(|item| item.path.clone()).collect()
+impl Deref for FilePathSyntax {
+    type Target = PathSyntaxTable;
+
+    fn deref(&self) -> &Self::Target {
+        // Every production consumer runs after the prepared-file freeze boundary. Reaching this
+        // point while deferred is therefore an internal lifecycle violation, while public
+        // validation APIs use `FileTokens::path_syntax_table` and return `CompilerError` instead.
+        self.table()
+            .expect("path syntax must be attached before a retained token stream is consumed")
+    }
 }
 
 #[derive(Clone, Debug)]
 pub struct FileTokens {
     pub tokens: Vec<Token>,
+    /// File-owned authored path trees referenced by `TokenKind::Path` handles.
+    ///
+    /// WHAT: the one file-owned path table lifecycle shared by retained token substreams.
+    pub path_syntax: FilePathSyntax,
     pub src_path: InternedPath,
     /// Stable source-file identity for this token stream.
     ///
@@ -181,26 +262,76 @@ pub struct FileTokens {
 }
 
 impl FileTokens {
+    #[cfg(test)]
     pub fn new(src_path: InternedPath, tokens: Vec<Token>) -> FileTokens {
-        Self::new_with_identity(src_path, None, None, tokens)
+        Self::new_with_identity(src_path, None, None, tokens, PathSyntaxTable::new())
     }
 
-    pub fn new_with_file_id(
-        src_path: InternedPath,
-        file_id: Option<FileId>,
-        tokens: Vec<Token>,
-    ) -> FileTokens {
-        Self::new_with_identity(src_path, file_id, None, tokens)
-    }
-
+    /// Construct the sole mutable path-table owner for a newly tokenized source file.
     pub fn new_with_identity(
         src_path: InternedPath,
         file_id: Option<FileId>,
         canonical_os_path: Option<PathBuf>,
         tokens: Vec<Token>,
+        path_syntax: PathSyntaxTable,
+    ) -> FileTokens {
+        Self::with_path_syntax(
+            src_path,
+            file_id,
+            canonical_os_path,
+            tokens,
+            FilePathSyntax::preparing(path_syntax),
+        )
+    }
+
+    /// Construct a stream from an already-frozen table owned by a generated persistent artefact.
+    ///
+    /// This is deliberately separate from source construction: generated generic materialisation
+    /// is the only path that receives an independently captured table rather than the prepared
+    /// source's immutable shared table.
+    pub(crate) fn new_frozen_with_identity(
+        src_path: InternedPath,
+        file_id: Option<FileId>,
+        canonical_os_path: Option<PathBuf>,
+        tokens: Vec<Token>,
+        path_syntax: PathSyntaxTable,
+    ) -> FileTokens {
+        Self::with_path_syntax(
+            src_path,
+            file_id,
+            canonical_os_path,
+            tokens,
+            FilePathSyntax::shared(path_syntax),
+        )
+    }
+
+    /// Construct a retained token stream that will receive its table from the completed
+    /// prepared-file owner.
+    pub fn new_deferred_with_identity(
+        src_path: InternedPath,
+        file_id: Option<FileId>,
+        canonical_os_path: Option<PathBuf>,
+        tokens: Vec<Token>,
+    ) -> FileTokens {
+        Self::with_path_syntax(
+            src_path,
+            file_id,
+            canonical_os_path,
+            tokens,
+            FilePathSyntax::Deferred,
+        )
+    }
+
+    fn with_path_syntax(
+        src_path: InternedPath,
+        file_id: Option<FileId>,
+        canonical_os_path: Option<PathBuf>,
+        tokens: Vec<Token>,
+        path_syntax: FilePathSyntax,
     ) -> FileTokens {
         FileTokens {
             length: tokens.len(),
+            path_syntax,
             src_path,
             file_id,
             canonical_os_path,
@@ -208,6 +339,121 @@ impl FileTokens {
             token_stats: TokenStats::default(),
             index: 0,
         }
+    }
+
+    /// Build a permanent sub-stream over a token slice.
+    ///
+    /// Header bodies defer the path-table attachment until the prepared-file owner freezes.
+    /// Later AST substreams clone only the immutable table handle.
+    pub fn new_substream(
+        source: &FileTokens,
+        src_path: InternedPath,
+        file_id: Option<FileId>,
+        tokens: Vec<Token>,
+    ) -> FileTokens {
+        Self::with_path_syntax(
+            src_path,
+            file_id,
+            source.canonical_os_path.clone(),
+            tokens,
+            source.path_syntax.permanent_substream(),
+        )
+    }
+
+    /// Build a short-lived parser stream for syntax that cannot contain path handles.
+    ///
+    /// WHAT: provides speculative parsers with token and source-location identity but no
+    ///       `PathSyntaxTable` access.
+    /// WHY: type-slice parsing reuses the ordinary type grammar while splitting collection
+    ///      syntax. That grammar never reads `TokenKind::Path`, so acquiring the prepared file's
+    ///      mutable table would add a fallible lifecycle edge and temporarily prevent the real
+    ///      file owner from remapping or rebinding its one table.
+    pub(crate) fn new_path_free_substream(
+        src_path: InternedPath,
+        file_id: Option<FileId>,
+        canonical_os_path: Option<PathBuf>,
+        tokens: Vec<Token>,
+    ) -> FileTokens {
+        Self::with_path_syntax(
+            src_path,
+            file_id,
+            canonical_os_path,
+            tokens,
+            FilePathSyntax::Deferred,
+        )
+    }
+
+    /// Build a downstream parser stream over already-frozen file syntax.
+    ///
+    /// AST consumers use this for defaults, declaration initializers and loop headers. The table
+    /// handle is cloned, while path rows and their dense IDs remain owned by the prepared source.
+    pub fn new_from_slice(
+        src_path: InternedPath,
+        file_id: Option<FileId>,
+        canonical_os_path: Option<PathBuf>,
+        tokens: Vec<Token>,
+        source_path_syntax: &FilePathSyntax,
+    ) -> Result<FileTokens, CompilerError> {
+        Ok(Self::with_path_syntax(
+            src_path,
+            file_id,
+            canonical_os_path,
+            tokens,
+            source_path_syntax.frozen_substream()?,
+        ))
+    }
+
+    /// Return the canonical path table once the stream has reached a readable lifecycle state.
+    pub fn path_syntax_table(&self) -> Result<&PathSyntaxTable, CompilerError> {
+        self.path_syntax.table()
+    }
+
+    /// Move the sole mutable path-table owner into a prepared-file output.
+    pub(crate) fn take_preparing_path_syntax(
+        &mut self,
+    ) -> Result<Arc<PathSyntaxTable>, CompilerError> {
+        self.path_syntax.take_preparing_table()
+    }
+
+    /// Verify that a retained header has not received a file-owned table before the output's
+    /// atomic freeze boundary.
+    pub(crate) fn require_deferred_path_syntax(&self) -> Result<(), CompilerError> {
+        self.path_syntax.require_deferred()
+    }
+
+    /// Verify that a frozen retained header points at this exact immutable table allocation.
+    pub(crate) fn require_shared_path_syntax(
+        &self,
+        path_syntax: &Arc<PathSyntaxTable>,
+    ) -> Result<(), CompilerError> {
+        self.path_syntax.require_shared_table(path_syntax)
+    }
+
+    /// Commit a table attachment after `require_deferred_path_syntax` passed for every header.
+    pub(crate) fn attach_preflighted_shared_path_syntax(
+        &mut self,
+        path_syntax: Arc<PathSyntaxTable>,
+    ) {
+        self.path_syntax.attach_preflighted_shared(path_syntax);
+    }
+
+    /// Freeze a standalone token stream used by an AST-focused unit test.
+    ///
+    /// Production preparation moves the mutable table into `FileFrontendPrepareOutput`, validates
+    /// the complete file, and attaches the resulting immutable table to retained headers. These
+    /// direct parser tests have no retained header output, but they still model the AST's
+    /// post-freeze input contract rather than letting parser substreams read a mutable table.
+    #[cfg(test)]
+    pub(crate) fn freeze_path_syntax_for_test(&mut self) {
+        let path_syntax = std::mem::replace(&mut self.path_syntax, FilePathSyntax::Deferred);
+        self.path_syntax = match path_syntax {
+            FilePathSyntax::Preparing(path_syntax) | FilePathSyntax::Shared(path_syntax) => {
+                FilePathSyntax::Shared(path_syntax)
+            }
+            FilePathSyntax::Deferred => {
+                panic!("test token stream did not retain a file-owned path table to freeze")
+            }
+        };
     }
 
     pub fn current_token_kind(&self) -> &TokenKind {
@@ -277,43 +523,61 @@ impl FileTokens {
         for token in &mut self.tokens {
             token.remap_string_ids(remap);
         }
+
+        // Path tokens carry dense handles. The prepared-file output owns the single path-table
+        // remap, so substreams remap only their local token and semantic-path payloads here.
     }
 
     /// Rebind this token stream to a new module source identity.
     ///
     /// WHAT: replaces `src_path`, `file_id`, `canonical_os_path`, every top-level token
-    ///       location scope, and every `PathTokenItem` path/alias location scope with the
+    ///       location scope, and every path-syntax table row location scope with the
     ///       supplied logical path and file identity.
     /// WHY: Stage 0 tokenizes each `.moth` file once against a filesystem identity. After the
     ///      complete module file set is known, `SourceFileTable` assigns the module logical
     ///      path, deterministic `FileId`, and canonical OS path. Retained tokens must adopt
-    ///      that identity so downstream header parsing, diagnostics, and import shells see the
-    ///      same logical source scope as freshly tokenized files.
+    ///      that identity so downstream header parsing, diagnostics, and dependency shells see
+    ///      the same logical source scope as freshly tokenized files.
     ///
-    /// This method does not change import path payloads (`PathTokenItem.path`) or source spans
-    /// (`start_pos`/`end_pos`). Only the source-scope identity is rebound.
+    /// This method does not change path roots or source spans (`start_pos`/`end_pos`). Only
+    /// the source-scope identity is rebound, once through the owned path syntax table.
     pub fn rebind_source_identity(
         &mut self,
         logical_path: InternedPath,
         file_id: Option<FileId>,
         canonical_os_path: Option<PathBuf>,
-    ) {
+    ) -> Result<(), CompilerError> {
+        // Acquire the unique mutable owner before changing any identity field so an invalid
+        // lifecycle state cannot leave a partially rebound source stream behind.
+        self.path_syntax.preparing_table_mut()?;
         self.src_path = logical_path.clone();
+        self.rebind_file_identity(logical_path, file_id, canonical_os_path);
+        self.path_syntax
+            .preparing_table_mut()?
+            .rebind_source_identity(&self.src_path);
+        Ok(())
+    }
+
+    /// Rebind file-owned identity while preserving this stream's semantic path.
+    ///
+    /// Header and detached syntax substreams use `src_path` for declaration paths such as
+    /// `module/function`, not only for the owning file. Synthetic discovery therefore needs to
+    /// update their locations and file identity without erasing that semantic suffix.
+    pub fn rebind_file_identity(
+        &mut self,
+        logical_path: InternedPath,
+        file_id: Option<FileId>,
+        canonical_os_path: Option<PathBuf>,
+    ) {
         self.file_id = file_id;
         self.canonical_os_path = canonical_os_path;
 
         for token in &mut self.tokens {
             token.location.scope = logical_path.clone();
-
-            if let TokenKind::Path(items) = &mut token.kind {
-                for item in items {
-                    item.path_location.scope = logical_path.clone();
-                    if let Some(alias_location) = &mut item.alias_location {
-                        alias_location.scope = logical_path.clone();
-                    }
-                }
-            }
         }
+
+        // The prepared-file owner rebinds the shared path table once after all retained
+        // substreams have been assembled. Header streams only update their own token locations.
     }
 }
 
@@ -335,6 +599,9 @@ pub struct TokenStream<'a> {
     // keep code-specific state on the current template frame and pop it naturally
     // when that template closes.
     pub template_mode_stack: Vec<TemplateModeFrame>,
+    /// Path syntax rows built while lexing; moved into `FileTokens` when tokenization
+    /// completes.
+    pub path_syntax: PathSyntaxTable,
 }
 
 // WHAT: Metadata for one template nesting level in the tokenizer.
@@ -393,6 +660,7 @@ impl<'a> TokenStream<'a> {
             start_position: Default::default(),
             mode,
             template_mode_stack: vec![TemplateModeFrame::initial(mode, initial_close_policy)],
+            path_syntax: PathSyntaxTable::new(),
         }
     }
 
@@ -542,9 +810,6 @@ pub enum TokenKind {
     ModuleStart, // Contains module name space
     Eof,         // End of the file
 
-    // Module Import
-    /// For Wasm files or host environment - importing from a different module or the host
-    Import,
     /// Module-root API marker for the strict `export:` block; exposes declarations or re-exports
     /// through the module's public export surface. Not a general visibility keyword.
     Export,
@@ -565,7 +830,7 @@ pub enum TokenKind {
 
     // Values
     StringSliceLiteral(StringId),
-    Path(Vec<PathTokenItem>), // Compile time path resolution
+    Path(PathSyntaxId), // Compile time path resolution; dense handle into FileTokens.path_syntax
     NumericLiteral(NumericLiteralToken),
     CharLiteral(char),
     RawStringLiteral(StringId),
@@ -752,16 +1017,11 @@ impl TokenKind {
             TokenKind::StringSliceLiteral(value) => *value = map(*value)?,
             TokenKind::RawStringLiteral(value) => *value = map(*value)?,
             TokenKind::NumericLiteral(value) => value.try_remap_string_ids(map)?,
-            TokenKind::Path(items) => {
-                for item in items {
-                    item.try_remap_string_ids(map)?;
-                }
-            }
+            TokenKind::Path(_) => {}
             TokenKind::CharLiteral(_)
             | TokenKind::BoolLiteral(_)
             | TokenKind::ModuleStart
             | TokenKind::Eof
-            | TokenKind::Import
             | TokenKind::Export
             | TokenKind::Hash
             | TokenKind::Reactive

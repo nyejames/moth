@@ -144,13 +144,13 @@ pub(crate) fn compile_time_evaluation_error_suggestion(
             "A constant cannot depend on itself. Use a different value or compute it differently."
         }
         CompileTimeEvaluationErrorReason::ConstantNotVisible => {
-            "Import the compile-time constant before using it in this constant initializer."
+            "Bind the compile-time constant before using it in this constant initializer."
         }
         CompileTimeEvaluationErrorReason::NonConstantReferenceInConstant => {
             "Only reference constants in constant declarations and const templates."
         }
         CompileTimeEvaluationErrorReason::SameFileForwardConstantReference => {
-            "Move the referenced constant above this declaration, or import it from another file."
+            "Move the referenced constant above this declaration, or bind it from another file."
         }
         CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable => {
             "Constants may only contain compile-time values and constant references."
@@ -241,9 +241,6 @@ pub(crate) fn invalid_template_structure_message(
         }
         crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::EmptyPathInTemplateHead => {
             "Path token in template head cannot be empty.".to_string()
-        }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::PathAliasInTemplateHead => {
-            "Path aliases are only valid in import clauses.".to_string()
         }
         crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::IncompatibleHeadItem => {
             "This template head item is incompatible with other meaningful items in this template head.".to_string()

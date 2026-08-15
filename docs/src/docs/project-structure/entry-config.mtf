@@ -4,11 +4,11 @@ Entry config covers `@project` and entry-local `config:` blocks. Both feed build
 
 ### `@project`
 
-The folded `project` record produces a specialised immutable `ProjectGlobalsInterface` under the permanently reserved `@project` import root.
+The folded `project` record produces a specialised immutable `ProjectGlobalsInterface` under the permanently reserved `@project` dependency root.
 
 `@project` exposes direct project fields as namespace members. It doesn't expose another value named `project`.
 
-Normal project modules and project-owned support packages may explicitly import `@project`. It is never implicitly injected.
+Normal project modules and project-owned support packages may explicitly bind `@project`. It is never implicitly injected.
 
 The following may not claim the `@project` root:
 
@@ -24,7 +24,7 @@ The following may not claim the `@project` root:
 Internal project modules may expose declarations derived from project values. The compiler retains project-context provenance on every affected public semantic fact. The external project package facade rejects prohibited project-context exposure.
 
 [codeblock, $code("moth"):
-    import @project { version, entry_root }
+    @project version, entry_root
 
     page_title #= [: v[version]]
 ]
@@ -44,16 +44,16 @@ Placement rules:
 - invalid inside executable bodies
 - invalid in `config.moth`
 
-The block contains section records only. Imports, aliases, helper constants, support types and source `#Import` declarations live outside the block in the normal root file.
+The block contains section records only. Dependency clauses, aliases, helper constants, support types and source `#Import` declarations live outside the block in the normal root file.
 
 The block uses the root file's ordinary compile-time visibility. It may reference:
 
-- imported constants
+- dependency-bound constants
 - `@project`
 - same-file constants declared before the block
 - resolved source `#Import` constants
 - foldable local const-record types
-- selected-builder compile-time values available through normal module imports
+- selected-builder compile-time values available through normal module dependency clauses
 
 Same-file forward references remain invalid.
 
@@ -61,7 +61,7 @@ The block creates no ordinary module symbol, HIR or project-global value. It can
 
 Active entry sections are schema-validated. Inactive sections are parsed and folded but not schema-validated.
 
-Every normal module selected into the current command's semantic graph has its block validated whether or not an entry activates it. Imported modules never apply their entry metadata to an importer.
+Every normal module selected into the current command's semantic graph has its block validated whether or not an entry activates it. Dependency modules never apply their entry metadata to a consumer.
 
 Only active artefact-builder settings contribute entry activity.
 

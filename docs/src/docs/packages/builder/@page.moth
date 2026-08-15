@@ -1,4 +1,4 @@
-import @styles {navbar, section, language_theme_head, doc_pager}
+@styles navbar, section, language_theme_head, doc_pager
 
 page_title #= "Builder packages"
 page_description #= "HTML builder helpers and canvas drawing packages provided by the HTML builder."
@@ -7,7 +7,7 @@ page_head #= language_theme_head
 #[navbar]
 
 #[section, $md:
-    @../../ (Documentation) / @../ (Packages and imports) / Builder packages
+    @../../ (Documentation) / @../ (Packages and dependencies) / Builder packages
 
     # Builder packages
 

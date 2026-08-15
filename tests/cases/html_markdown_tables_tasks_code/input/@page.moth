@@ -1,4 +1,4 @@
-import @docs/intro
+@docs/intro
 
 intro_content #String = intro.content
 

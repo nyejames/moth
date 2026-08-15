@@ -1,0 +1,4 @@
+@counter Counter
+
+value = Counter(41)
+[:receiver_type_dependency_auto_dependencies_methods value=[value.tick()]]

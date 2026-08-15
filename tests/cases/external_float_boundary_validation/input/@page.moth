@@ -1,4 +1,4 @@
-import @./bad_float.js {unsafe_float}
+@bad_float.js unsafe_float
 
 load_code || -> Int, Error!:
     value = unsafe_float()

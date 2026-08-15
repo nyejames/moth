@@ -245,8 +245,7 @@ fn parse_catch_fallible_handler_body(
         type_interner,
         warnings,
         string_table,
-    )
-    .map_err(ExpressionParseError::from)?;
+    )?;
 
     validate_catch_fallible_handler_value_requirement(
         site.value_required,

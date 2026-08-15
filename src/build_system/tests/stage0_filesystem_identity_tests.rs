@@ -567,7 +567,7 @@ mod source_package_boundary_indexes_tests {
         let indexes = build_indexes(&source_packages, &mut string_table)
             .expect("two package roots should build two boundary indexes");
 
-        // Deterministic import-prefix order.
+        // Deterministic package-prefix order.
         let prefixes: Vec<&str> = indexes.iter().map(|(prefix, _)| prefix).collect();
         assert_eq!(
             prefixes,
@@ -2753,7 +2753,7 @@ mod owned_source_inventory_tests {
             util_record.canonical_path()
         );
 
-        // The canonical-path lookup map resolves an importer to its owning record.
+        // The canonical-path lookup map resolves a consumer to its owning record.
         let page_canonical = page_record.canonical_path();
         let page_lookup_id = index
             .source_id_for_canonical_path(page_canonical)
@@ -3066,7 +3066,7 @@ mod project_module_graph_tests {
             !graph.is_support_visible_to_consumer(support_id, assets_id),
             "support must not be visible to a same-scope support sibling"
         );
-        // A support facade in a strictly nested normal scope may import outer support packages.
+        // A support facade in a strictly nested normal scope may depend on outer support packages.
         assert!(
             graph.is_support_visible_to_consumer(support_id, extras_id),
             "nested support facade should see a support package from a strictly outer scope"

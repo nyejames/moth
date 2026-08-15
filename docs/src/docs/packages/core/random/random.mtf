@@ -1,15 +1,15 @@
-`@core/random` provides random number helpers. It belongs to the binding-backed Core package family with no prelude alias, so it requires an explicit import.
+`@core/random` provides random number helpers. It belongs to the binding-backed Core package family with no prelude alias, so it requires an explicit dependency clause.
 
 `@core/random` carries Core origin with ExternalBinding backing. See @../../#package-origins-and-backing (Package origins and backing) for origin and backing rules.
 
-### Import roots
+### Dependency roots
 
-Import individual symbols or the whole namespace:
+Bind individual symbols or the whole namespace:
 
 [codeblock, $code("moth"):
-    import @core/random {random_float, random_int}
+    @core/random random_float, random_int
 
-    import @core/random
+    @core/random
 
     value = random.random_float()
     die_roll = random.random_int(1, 6)
@@ -55,7 +55,7 @@ HTML-Wasm lacks a Wasm lowering for these functions. See @../../../progress (pro
 
 ### Unsupported source forms
 
-- Direct symbol-path imports face rejection. Use grouped or namespace imports.
+- Direct symbol-path clauses face rejection. Use direct selections or a namespace clause.
 - Named arguments lack support. Binding-backed calls stay positional-only.
 - The package does not expose receiver methods, opaque types, constants or `Error!` channels.
 
@@ -66,4 +66,4 @@ Seeded random and non-JS lowerings remain deferred. See @../../../progress (prog
 ### Related concepts
 
 - For package origin and backing see @../../#package-origins-and-backing (Package origins and backing).
-- For import path rules see @../../#import-paths (Import paths).
+- For dependency-path rules see @../../#dependency-paths (Dependency paths).

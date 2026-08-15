@@ -1,10 +1,10 @@
 //! Unit tests for compile-time path string formatting.
 
 use crate::compiler_frontend::paths::compile_time_paths::{
-    CompileTimePath, CompileTimePathBase, CompileTimePathKind, CompileTimePaths,
+    CompileTimePath, CompileTimePathBase, CompileTimePathKind,
 };
 use crate::compiler_frontend::paths::path_format::{
-    OutputPathStyle, PathStringFormatConfig, format_compile_time_path, format_compile_time_paths,
+    OutputPathStyle, PathStringFormatConfig, format_compile_time_path,
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -167,88 +167,4 @@ fn entry_root_empty_directory_with_custom_origin_formats_as_origin_root() {
     };
 
     assert_eq!(format_compile_time_path(&path, &config, &st), "/moth/");
-}
-
-// -----------------------------------------------------------------------
-// Multi-path formatting (`format_compile_time_paths`)
-// -----------------------------------------------------------------------
-
-#[test]
-fn format_multiple_paths_joins_with_comma() {
-    let mut st = StringTable::new();
-    let path_a = make_path(
-        &["assets", "logo.png"],
-        CompileTimePathBase::EntryRoot,
-        CompileTimePathKind::File,
-        &mut st,
-    );
-    let path_b = make_path(
-        &["assets", "style.css"],
-        CompileTimePathBase::EntryRoot,
-        CompileTimePathKind::File,
-        &mut st,
-    );
-    let paths = CompileTimePaths {
-        paths: vec![path_a, path_b],
-    };
-    let config = PathStringFormatConfig::default();
-
-    assert_eq!(
-        format_compile_time_paths(&paths, &config, &st),
-        "/assets/logo.png, /assets/style.css"
-    );
-}
-
-#[test]
-fn format_single_path_in_multi_wrapper_has_no_comma() {
-    let mut st = StringTable::new();
-    let path = make_path(
-        &[".", "readme.txt"],
-        CompileTimePathBase::RelativeToFile,
-        CompileTimePathKind::File,
-        &mut st,
-    );
-    let paths = CompileTimePaths { paths: vec![path] };
-    let config = PathStringFormatConfig::default();
-
-    assert_eq!(
-        format_compile_time_paths(&paths, &config, &st),
-        "./readme.txt"
-    );
-}
-
-#[test]
-fn format_multiple_paths_with_mixed_bases_and_origin() {
-    let mut st = StringTable::new();
-    let root_path = make_path(
-        &["assets", "logo.png"],
-        CompileTimePathBase::EntryRoot,
-        CompileTimePathKind::File,
-        &mut st,
-    );
-    let relative_path = make_path(
-        &[".", "local.txt"],
-        CompileTimePathBase::RelativeToFile,
-        CompileTimePathKind::File,
-        &mut st,
-    );
-    let dir_path = make_path(
-        &["docs"],
-        CompileTimePathBase::EntryRoot,
-        CompileTimePathKind::Directory,
-        &mut st,
-    );
-    let paths = CompileTimePaths {
-        paths: vec![root_path, relative_path, dir_path],
-    };
-    let config = PathStringFormatConfig {
-        origin: String::from("/mysite"),
-        output_style: OutputPathStyle::Portable,
-    };
-
-    // Root-based gets origin, relative stays relative, entry-root gets origin + trailing slash
-    assert_eq!(
-        format_compile_time_paths(&paths, &config, &st),
-        "/mysite/assets/logo.png, ./local.txt, /mysite/docs/"
-    );
 }

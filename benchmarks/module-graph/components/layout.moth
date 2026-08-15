@@ -1,6 +1,6 @@
-import @components/card {Card, render_card}
-import @components/listing {render_listing}
-import @data/constants {app_title}
+@components/card Card, render_card
+@components/listing render_listing
+@data/constants app_title
 
 render_page |card Card| -> String:
     rendered_card = render_card(card)

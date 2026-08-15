@@ -13,23 +13,45 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct FileId(pub u32);
 
-/// Build-local identity of one retained import shell inside one source file.
+/// Build-local identity of one retained dependency shell inside one source file.
 ///
 /// WHAT: pairs the source file's stable `FileId` with the shell's ordinal within that file so
-///       Stage 0 edges and header import shells join by identity instead of path text.
+///       Stage 0 edges and header dependency shells join by identity instead of path text.
 /// WHY: provider binding must not compare path components or suffixes; the header preparation
 ///      pass assigns one ID per retained shell and the graph keeps that exact ID on its edges.
 ///      Every retained shell carries a real file identity; synthetic tests obtain a real test
 ///      `FileId` from test support.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct ImportShellId {
+pub struct DependencyShellId {
     pub source: FileId,
     pub ordinal: u32,
 }
 
-impl ImportShellId {
+impl DependencyShellId {
     pub fn new(source: FileId, ordinal: u32) -> Self {
         Self { source, ordinal }
+    }
+}
+
+/// Identity of one selected name inside one retained dependency clause.
+///
+/// WHAT: pairs the authored clause's `DependencyShellId` with the selection's clause-local
+///       index so public-interface projection can retain the exact selected binding.
+/// WHY: provider resolution belongs to the whole shell. Only consumers that need to identify a
+///      particular exported name carry this narrower identity; Stage 0 and provider joins use the
+///      shell directly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct DependencySelectionId {
+    pub shell: DependencyShellId,
+    pub selected_index: u32,
+}
+
+impl DependencySelectionId {
+    pub fn new(shell: DependencyShellId, selected_index: u32) -> Self {
+        Self {
+            shell,
+            selected_index,
+        }
     }
 }
 
@@ -135,6 +157,53 @@ impl SourceFileTable {
     pub fn get_by_canonical_path(&self, canonical_path: &Path) -> Option<&SourceFileIdentity> {
         let file_id = self.canonical_to_id.get(canonical_path)?;
         self.get(*file_id)
+    }
+
+    /// Register one canonical source file and return its file identity.
+    ///
+    /// WHAT: appends the file with the next identity, computing its logical path with the
+    ///       same rules as `build`; a repeated canonical path returns the existing identity.
+    /// WHY: synthetic single-file traversal prepares each discovered file before the full
+    ///      inventory is known, and header preparation stamps shells from real `FileId`s.
+    pub fn insert(
+        &mut self,
+        canonical_path: PathBuf,
+        entry_file_path: &Path,
+        project_path_resolver: Option<&ProjectPathResolver>,
+        string_table: &mut StringTable,
+    ) -> Result<FileId, CompilerError> {
+        if let Some(identity) = self.get_by_canonical_path(&canonical_path) {
+            return Ok(identity.file_id);
+        }
+
+        let fallback_root = entry_file_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."));
+        let logical = if let Some(resolver) = project_path_resolver {
+            resolver.logical_path_for_canonical_file(&canonical_path, string_table)?
+        } else {
+            logical_path_for_single_file_mode(&canonical_path, &fallback_root)
+        };
+        let logical_path = InternedPath::try_from_filesystem_path(&logical, string_table)
+            .map_err(|NonUtf8PathComponent { path }| {
+                CompilerError::file_error(
+                    &path,
+                    format!(
+                        "Source file logical path {path:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
+                    ),
+                    string_table,
+                )
+            })?;
+
+        let file_id = FileId(self.files.len() as u32);
+        self.canonical_to_id.insert(canonical_path.clone(), file_id);
+        self.files.push(SourceFileIdentity {
+            file_id,
+            canonical_os_path: canonical_path,
+            logical_path,
+        });
+        Ok(file_id)
     }
 
     pub fn get(&self, file_id: FileId) -> Option<&SourceFileIdentity> {

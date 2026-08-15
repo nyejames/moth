@@ -1,4 +1,4 @@
-import @types { Response }
+@types Response
 
 e = Response::Err("bad")
 if e is:

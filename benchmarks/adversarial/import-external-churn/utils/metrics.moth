@@ -1,7 +1,7 @@
-import @data/models { Metric, Status }
-import @utils/math { wave }
-import @utils/text { prefix }
-import @utils/random { random_score }
+@data/models Metric, Status
+@utils/math wave
+@utils/text prefix
+@utils/random random_score
 
 build_metric |name String, phase Float| -> Metric:
     value = wave(phase)

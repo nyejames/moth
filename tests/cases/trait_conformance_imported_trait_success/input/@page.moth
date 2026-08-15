@@ -1,4 +1,4 @@
-import @./traits { RENDERABLE }
+@traits RENDERABLE
 
 Card = |
     title String,

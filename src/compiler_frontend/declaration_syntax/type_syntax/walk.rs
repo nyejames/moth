@@ -17,7 +17,7 @@ pub(crate) fn for_each_named_type_in_parsed_ref(
         ParsedTypeRef::Named { name, .. } => visitor(*name),
         ParsedTypeRef::Qualified { path, .. } => {
             // Dependency discovery only needs the final nominal type name.
-            // Intermediate namespace components are import-record labels, not
+            // Intermediate namespace components are dependency-namespace labels, not
             // declaration dependencies.
             if let Some(name) = path.last() {
                 visitor(*name);

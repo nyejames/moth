@@ -24,7 +24,7 @@ pub enum CompileTimePathKind {
 /// How the path was resolved relative to the project layout.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CompileTimePathBase {
-    /// Resolved relative to the importing file (`./` or `../`).
+    /// Resolved relative to the declaring file (`./` or `../`).
     RelativeToFile,
     /// First segment matched a source-backed package prefix.
     SourcePackageRoot,
@@ -60,17 +60,6 @@ pub struct CompileTimePath {
 
     /// Whether the target is a file or a directory.
     pub kind: CompileTimePathKind,
-}
-
-/// A collection of one or more resolved compile-time path values.
-///
-/// WHAT: wraps multiple resolved paths from a single path expression.
-/// WHY: grouped path syntax (`@dir {a, b}`) produces multiple paths from one token. This type
-/// carries them as a unit so expressions and string coercion can handle the 1-or-many case
-/// uniformly.
-#[derive(Clone, Debug)]
-pub struct CompileTimePaths {
-    pub paths: Vec<CompileTimePath>,
 }
 
 /// Failure while resolving a general compile-time path literal.
@@ -115,11 +104,11 @@ impl From<CompileTimePathResolutionError> for CompilerDiagnostic {
 /// WHAT: checks that the resolved filesystem target exists and classifies it.
 /// WHY: compile-time path validation requires the target to exist.
 ///
-/// NOTE: `string_table` is only used to intern the importer file path for diagnostics.
+/// NOTE: `string_table` is only used to intern the declaring file path for diagnostics.
 pub(crate) fn classify_existing_target(
     filesystem_path: &Path,
     source_path: &InternedPath,
-    importer_file: &Path,
+    declaring_file: &Path,
     string_table: &mut StringTable,
 ) -> Result<CompileTimePathKind, CompileTimePathResolutionError> {
     if filesystem_path.is_file() {
@@ -127,7 +116,7 @@ pub(crate) fn classify_existing_target(
     } else if filesystem_path.is_dir() {
         Ok(CompileTimePathKind::Directory)
     } else {
-        let location = SourceLocation::from_path(importer_file, string_table);
+        let location = SourceLocation::from_path(declaring_file, string_table);
         let diagnostic = CompilerDiagnostic::invalid_compile_time_path(
             source_path.clone(),
             InvalidCompileTimePathReason::MissingTarget,

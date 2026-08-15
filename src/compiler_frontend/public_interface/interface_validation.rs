@@ -5,7 +5,7 @@
 //! concrete-call-summary joins before the build system publishes the interface to another wave.
 //! WHY: a successful provider slot is compiler-owned trusted input. Missing or contradictory
 //! facts must fail at publication as [`CompilerError`] rather than becoming consumer source
-//! diagnostics or silently disappearing during import projection.
+//! diagnostics or silently disappearing during dependency projection.
 
 use super::model::{
     PublicDeclarationSemantics, PublicEvidenceRecord, PublicFunctionCategory,

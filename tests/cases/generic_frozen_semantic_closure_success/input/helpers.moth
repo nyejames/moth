@@ -1,4 +1,4 @@
-import @./support as support
+@support as support
 
 default_size #= 10
 Size as Int

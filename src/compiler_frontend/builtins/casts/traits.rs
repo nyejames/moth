@@ -168,7 +168,7 @@ pub(crate) fn builtin_cast_trait_name(trait_kind: CoreCastTrait) -> &'static str
 /// Returns `true` when `name` matches one of the twelve compiler-owned core
 /// cast trait source spellings.
 ///
-/// WHAT: centralises the exact-name check so header symbol collection, import
+/// WHAT: centralises the exact-name check so header symbol collection, dependency binding
 ///      registration, and public export validation can all reject user code
 ///      that tries to claim a core cast trait name.
 /// WHY: the trait name table is the single source of truth; every collision
@@ -182,7 +182,7 @@ pub(crate) fn is_core_cast_trait_name(name: &str) -> bool {
 
 /// Calls `callback` once for each compiler-owned core cast trait source name.
 ///
-/// WHAT: lets header/import code reserve or enumerate the 12 core cast trait
+/// WHAT: lets header and dependency-binding code reserve or enumerate the 12 core cast trait
 ///      names without depending on the full metadata table shape.
 /// WHY: keeps the core cast trait name set as the single source of truth while
 ///      allowing stage-local consumers such as the visible-name registry to

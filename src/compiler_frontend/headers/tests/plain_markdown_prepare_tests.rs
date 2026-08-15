@@ -44,7 +44,7 @@ fn produces_exactly_one_header() {
     assert_eq!(output.headers.len(), 1);
     assert_eq!(output.token_count, 0, "Markdown files are not tokenized");
     assert_eq!(output.file_role, FileRole::Normal);
-    assert!(output.file_imports.is_empty());
+    assert!(output.file_dependency_clauses.is_empty());
     assert!(output.top_level_const_fragments.is_empty());
     assert_eq!(output.const_template_count, 0);
     assert_eq!(output.runtime_fragment_count, 0);

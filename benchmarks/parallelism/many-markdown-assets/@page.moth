@@ -1,11 +1,11 @@
-import @docs/intro
-import @docs/setup
-import @docs/usage
-import @docs/api
-import @docs/faq
-import @docs/release
-import @docs/notes
-import @docs/summary
+@docs/intro
+@docs/setup
+@docs/usage
+@docs/api
+@docs/faq
+@docs/release
+@docs/notes
+@docs/summary
 
 intro_content #String = intro.content
 setup_content #String = setup.content

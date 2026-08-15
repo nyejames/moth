@@ -3,17 +3,83 @@
 //! WHAT: validates struct definitions, defaults, constructors, and field access.
 //! WHY: struct parsing feeds both type resolution and HIR place lowering.
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
-use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
+use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
+use crate::compiler_frontend::ast::templates::error::TemplateError;
+use crate::compiler_frontend::ast::templates::template::Template;
+use crate::compiler_frontend::ast::templates::tir::{
+    TemplateIrId, TemplateIrStore, TemplateTirPhase, TemplateTirReference, TemplateViewContext,
+};
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticLabelMessage, DiagnosticLabelStyle, DiagnosticPayload, GenericInferenceSubject,
     InvalidFieldAccessReason, InvalidGenericInstantiationReason,
 };
+use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::declaration_syntax::r#struct::validate_struct_default_values;
+use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::tests::ast_fixture_support::start_function_body;
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
+use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
+use crate::compiler_frontend::value_mode::ValueMode;
+
+#[test]
+fn body_local_struct_default_preserves_missing_template_authority() {
+    let store = Rc::new(RefCell::new(TemplateIrStore::new()));
+    let fields = [Declaration {
+        id: InternedPath::new(),
+        value: Expression::template(
+            Template {
+                tir_reference: TemplateTirReference {
+                    root: TemplateIrId::new(99),
+                    phase: TemplateTirPhase::Composed,
+                    context: TemplateViewContext::default(),
+                },
+                location: SourceLocation::default(),
+            },
+            ValueMode::ImmutableOwned,
+        ),
+    }];
+
+    let error = validate_struct_default_values(&fields, &store)
+        .expect_err("missing struct-default TIR authority must fail");
+
+    assert!(matches!(error, TemplateError::Infrastructure(_)));
+}
+
+#[test]
+fn authored_runtime_struct_default_remains_a_source_diagnostic() {
+    let store = Rc::new(RefCell::new(TemplateIrStore::new()));
+    let fields = [Declaration {
+        id: InternedPath::new(),
+        value: Expression::reference_with_type_id(
+            InternedPath::new(),
+            DataType::Bool,
+            builtin_type_ids::BOOL,
+            SourceLocation::default(),
+            ValueMode::ImmutableReference,
+            ConstRecordState::RuntimeValue,
+        ),
+    }];
+
+    let error = validate_struct_default_values(&fields, &store)
+        .expect_err("runtime struct default must be rejected");
+    let TemplateError::Diagnostic(diagnostic) = error else {
+        panic!("authored runtime default should remain a source diagnostic");
+    };
+
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::InvalidStructDefaultValue
+    ));
+}
 
 #[test]
 fn parses_struct_definitions_with_field_defaults() {

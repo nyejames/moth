@@ -605,6 +605,16 @@ static RECORD_ADMISSION_REACHED: AtomicBool = AtomicBool::new(false);
 static RECORD_SESSION_DEACTIVATED: AtomicBool = AtomicBool::new(false);
 
 #[cfg(test)]
+thread_local! {
+    /// Marks the one recorder thread selected by a drain-synchronization test.
+    ///
+    /// A process-global pause can accidentally capture unrelated parallel tests that also record
+    /// timings. Keeping targeting thread-local makes the synchronization hook observational for
+    /// every other test thread.
+    static RECORD_ADMISSION_PAUSE_TARGET: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(test)]
 pub(crate) struct RecordAdmissionPauseGuard;
 
 #[cfg(test)]
@@ -640,8 +650,14 @@ pub(crate) fn record_session_deactivated_for_test() -> bool {
 }
 
 #[cfg(test)]
+pub(crate) fn target_record_admission_pause_for_current_thread() {
+    RECORD_ADMISSION_PAUSE_TARGET.with(|target| target.set(true));
+}
+
+#[cfg(test)]
 fn pause_after_record_admission_for_test() {
-    if RECORD_ADMISSION_PAUSED.load(Ordering::Acquire) {
+    let targeted = RECORD_ADMISSION_PAUSE_TARGET.with(|target| target.replace(false));
+    if targeted && RECORD_ADMISSION_PAUSED.load(Ordering::Acquire) {
         RECORD_ADMISSION_REACHED.store(true, Ordering::Release);
         while RECORD_ADMISSION_PAUSED.load(Ordering::Acquire) {
             std::thread::yield_now();

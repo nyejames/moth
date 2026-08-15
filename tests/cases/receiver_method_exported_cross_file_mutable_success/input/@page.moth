@@ -1,4 +1,4 @@
-import @helper { Resettable }
+@helper Resettable
 
 r ~= Resettable(42)
 ~r.reset()

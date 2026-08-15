@@ -4,7 +4,7 @@
 //!       detecting duplicate declarations, incompatible trait pairs, and checking method
 //!       compatibility.
 //! WHY: Fuses syntactic headers, resolved traits, visible trait-incompatibility metadata,
-//!      method catalogs, and import rules into a consistent, valid `TraitEvidenceEnvironment`.
+//!      method catalogs and dependency-binding rules into a consistent, valid `TraitEvidenceEnvironment`.
 
 use super::diagnostics::{invalid_conformance, previous_declaration_label};
 use super::environment::{TraitEvidenceDefinition, TraitEvidenceEnvironment};
@@ -19,7 +19,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::headers::import_environment::HeaderImportEnvironment;
+use crate::compiler_frontend::headers::binding_environment::HeaderBindingEnvironment;
 use crate::compiler_frontend::headers::parse_file_headers::{FileRole, Header, HeaderKind};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -42,7 +42,7 @@ pub(crate) struct ValidateTraitEvidenceInput<'a> {
     pub(crate) trait_environment: &'a TraitEnvironment,
     pub(crate) receiver_methods: &'a ReceiverMethodCatalog,
     pub(crate) type_environment: &'a TypeEnvironment,
-    pub(crate) import_environment: &'a HeaderImportEnvironment,
+    pub(crate) binding_environment: &'a HeaderBindingEnvironment,
     pub(crate) nominal_type_ids_by_path: &'a FxHashMap<InternedPath, TypeId>,
     pub(crate) struct_source_by_path: &'a FxHashMap<InternedPath, InternedPath>,
     pub(crate) choice_source_by_path: &'a FxHashMap<InternedPath, InternedPath>,
@@ -98,7 +98,7 @@ pub(crate) fn validate_trait_evidence(
         }
 
         let visibility = input
-            .import_environment
+            .binding_environment
             .visibility_for(&header.source_file)
             .map_err(|_| {
                 invalid_conformance(

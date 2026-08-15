@@ -1,4 +1,4 @@
-import @card {Card, render_card}
+@card Card, render_card
 
 render_listing |cards {Card}| -> String:
     output ~= [: <section>]

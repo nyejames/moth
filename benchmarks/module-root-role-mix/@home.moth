@@ -1,5 +1,5 @@
-import @api {format_status}
-import @toolkit {join_with}
+@api format_status
+@toolkit join_with
 
 title #= "Module Root Role Mix"
 

@@ -1,12 +1,10 @@
-import @./metrics.js {
-    create_metric,
+@metrics.js create_metric,
     load_metric_label,
     metric_label,
     set_metric_value,
-    MetricHandle,
-}
-import @./formatters.js as fmt
-import @core/math { PI }
+    MetricHandle
+@formatters.js as fmt
+@core/math PI
 
 metric ~MetricHandle = create_metric("alpha", 7)
 set_metric_value(~metric, 21)

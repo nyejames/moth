@@ -1,5 +1,0 @@
-[backends.html]
-mode = "failure"
-warnings = "forbid"
-diagnostic_codes = ["MOTH-SYNTAX-0031"]
-message_contains = ["Import paths must begin with `@`", "Write `import @vendor/drawing.js`"]

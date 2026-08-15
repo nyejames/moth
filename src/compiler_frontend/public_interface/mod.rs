@@ -59,10 +59,10 @@
 //! Boundary: the draft is private to compiler/build orchestration and never reaches backends.
 //! It is not the final `PublicSemanticInterface`.
 
+mod dependency_bindings;
 mod direct_projection;
 mod evidence_projection;
 mod export_projection;
-mod import_bindings;
 mod interface_closure;
 mod interface_validation;
 mod interface_view;
@@ -74,15 +74,16 @@ mod type_projection;
 
 // Re-export the production API surface so callers import from
 // `crate::compiler_frontend::public_interface::{...}`.
+pub(crate) use dependency_bindings::{
+    ProviderDependencyKind, ProviderInterfaceId, ResolvedDependencyClause,
+    SourceProviderDependency, SourceProviderDependencySet,
+};
 pub(crate) use direct_projection::{PublicInterfaceDraftBuilder, PublicInterfaceDraftBuilderInput};
 #[cfg(test)]
 pub(crate) use export_projection::DirectExportSeed;
 pub(crate) use export_projection::{
     build_direct_export_seed, build_public_source_nominal_origin_index,
     build_public_source_trait_origin_index,
-};
-pub(crate) use import_bindings::{
-    ProviderImportKind, ProviderInterfaceId, SourceProviderImport, SourceProviderImportSet,
 };
 #[cfg(test)]
 pub(crate) use model::LocalPublicInterface;
@@ -104,8 +105,9 @@ pub(crate) use receiver_projection::CallableSeed;
 use evidence_projection::{EvidenceProjectionContext, project_reusable_evidence};
 #[cfg(test)]
 pub(crate) use model::{
-    ConcreteCallSummaryRecord, PublicEvidenceOwnership, PublicEvidenceRequirementMapping,
-    PublicFunctionSemantics, PublicGenericTemplateDescriptor, PublicTraitSemantics,
+    ConcreteCallSummaryRecord, PublicBindingExport, PublicEvidenceOwnership,
+    PublicEvidenceRequirementMapping, PublicFunctionSemantics, PublicGenericTemplateDescriptor,
+    PublicTraitSemantics,
 };
 #[cfg(test)]
 pub(crate) use receiver_projection::CallableSeedKind;

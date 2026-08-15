@@ -8,6 +8,7 @@
 
 use crate::ast_log;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, MatchExhaustiveness, NodeKind};
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::function_body_to_ast;
 use crate::compiler_frontend::ast::statements::if_headers::{ParsedIfHeader, parse_if_header};
@@ -32,10 +33,12 @@ use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
 
-type BranchingResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// Branches recursively parse function bodies, so retained-data failures travel to the module
+/// emission boundary instead of being recast as authored control-flow diagnostics.
+type BranchingResult<T> = Result<T, ExpressionParseError>;
 
-fn branching_error(diagnostic: CompilerDiagnostic) -> Box<CompilerDiagnostic> {
-    Box::new(diagnostic)
+fn branching_error(diagnostic: CompilerDiagnostic) -> ExpressionParseError {
+    diagnostic.into()
 }
 
 /// Intermediate result of parsing a single match arm, carrying the arm itself

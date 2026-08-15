@@ -4,7 +4,9 @@ use super::{DevServerOptions, resolve_dev_runtime_paths, validate_dev_entry_path
 use crate::build_system::build::{BackendBuilder, Project, ProjectBuilder};
 use crate::builder_surface::BuilderSurface;
 use crate::compiler_frontend::Flag;
-use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, InvalidImportClauseReason};
+use crate::compiler_frontend::compiler_messages::{
+    DiagnosticPayload, InvalidDependencyClauseReason,
+};
 #[cfg(unix)]
 use crate::compiler_frontend::compiler_messages::{InvalidConfigReason, InvalidOutputFolderReason};
 use crate::compiler_frontend::style_directives::{
@@ -225,7 +227,7 @@ fn resolve_dev_runtime_paths_rejects_empty_dev_folder() {
 fn resolve_dev_runtime_paths_return_config_load_failures() {
     let root = temp_dir("bad_config");
     fs::create_dir_all(&root).expect("should create temp root");
-    fs::write(root.join(CONFIG_FILE_NAME), "import\n").expect("should write bad config");
+    fs::write(root.join(CONFIG_FILE_NAME), "@core/math sin\n").expect("should write bad config");
 
     let builder = ProjectBuilder::new(Box::new(NoopBuilder));
     let messages = resolve_dev_runtime_paths(&builder, &root, &[])
@@ -236,8 +238,8 @@ fn resolve_dev_runtime_paths_return_config_load_failures() {
     assert!(
         matches!(
             &diagnostics[0].payload,
-            DiagnosticPayload::InvalidImportClause {
-                reason: InvalidImportClauseReason::ExpectedPath,
+            DiagnosticPayload::InvalidDependencyClause {
+                reason: InvalidDependencyClauseReason::DependencyClauseNotAllowed,
                 ..
             }
         ),

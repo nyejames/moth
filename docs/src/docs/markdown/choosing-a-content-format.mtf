@@ -20,11 +20,11 @@ Choose the content format based on what the content needs.
 - Runtime values or runtime control flow are needed.
 - Full slot and wrapper composition is needed.
 - The content is part of broader program logic.
-- Imports, declarations or page fragments are needed in the same file.
+- Dependency clauses, declarations or page fragments are needed in the same file.
 
 ### Distinguishing raw asset files
 
-Raw asset files such as images, stylesheets or JavaScript files are not content imports. They are tracked assets handled by the builder. Use normal Moth asset paths when a file should participate in tracked-asset output.
+Raw asset files such as images, stylesheets or JavaScript files are not content dependencies. They are tracked assets handled by the builder. Use normal Moth asset paths when a file should participate in tracked-asset output.
 
 ### Distinguishing package source
 

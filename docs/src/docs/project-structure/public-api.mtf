@@ -27,8 +27,8 @@ The `export:` block is the only public API marker. It is valid only in a module 
 
 ### Allowed inside export:
 
-- grouped source imports (re-exports)
-- grouped external imports
+- direct-selection source clauses (re-exports)
+- direct-selection external clauses
 - functions
 - structs
 - choices
@@ -46,7 +46,7 @@ The `export:` block is the only public API marker. It is valid only in a module 
 - trait conformances
 - trait incompatibility declarations
 - receiver methods as directly exported symbols
-- bare namespace imports or exports
+- bare namespace dependency bindings or exports
 - wildcard exports
 - export lists
 - function alias exports
@@ -57,23 +57,17 @@ Runtime statements inside the block are rejected with `MOTH-RULE-0080`. Legacy i
 
 ### Re-exports
 
-The export block can re-export grouped imports from other files:
+The export block can re-export direct selections from other files:
 
 [codeblock, $code("moth"):
     export:
-        import @components/card {
-            CardData as Card,
-            render_card,
-        }
+        @components/card CardData as Card, render_card
 
-        import @core/math {
-            PI,
-            sin,
-        }
+        @core/math PI, sin
     ;
 ]
 
-The grouped alias becomes the public name. In this example cross-module consumers can import `Card`, not `CardData`, unless the export block lists `CardData` separately.
+The selected alias becomes the public name. In this example cross-module consumers can depend on `Card`, not `CardData`, unless the export block lists `CardData` separately.
 
 ### `#` constants are compile-time, not visibility
 
@@ -82,7 +76,7 @@ The `#` marker on a binding means compile-time constant. It does not control cro
 ### Same-module versus cross-module visibility
 
 - Normal declarations in any file within a module are visible to other files in the same module by default.
-- Cross-module imports can only access declarations marked public by the module root's `export:` block.
+- Cross-module dependencies can only access declarations marked public by the module root's `export:` block.
 - Private declarations in the module root file are not available to other modules.
 - A module root with no `export:` block exports nothing.
 

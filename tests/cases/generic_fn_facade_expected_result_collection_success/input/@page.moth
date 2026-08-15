@@ -1,4 +1,4 @@
-import @utils {exported_empty_values}
+@utils exported_empty_values
 
 numbers {Int} = exported_empty_values()
 

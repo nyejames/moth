@@ -3,7 +3,7 @@
 //! WHAT: turns raw `.md` source into a private synthetic `content #String` declaration.
 //! WHY: later frontend stages should see an ordinary folded constant, not Markdown-specific AST,
 //!      HIR, borrow-checker, or backend paths.
-//! MUST NOT: tokenize Markdown, inspect it as Moth syntax, scan rendered HTML for imports or
+//! MUST NOT: tokenize Markdown, inspect it as Moth syntax, scan rendered HTML for dependencies or
 //!           symbols, or produce runtime fragments.
 
 use crate::compiler_frontend::arena::TokenStats;
@@ -11,7 +11,9 @@ use crate::compiler_frontend::compiler_messages::source_location::CharPosition;
 use crate::compiler_frontend::headers::synthetic_content_header::{
     SyntheticContentHeaderInput, synthetic_content_header,
 };
-use crate::compiler_frontend::headers::types::{FileFrontendPrepareOutput, FileRole};
+use crate::compiler_frontend::headers::types::{
+    FileFrontendPrepareOutput, FileRole, PreparedFilePathSyntax,
+};
 use crate::compiler_frontend::plain_markdown::render_plain_markdown;
 use crate::compiler_frontend::symbols::identity::FileId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
@@ -72,10 +74,12 @@ pub(crate) fn prepare_plain_markdown_file(
     FileFrontendPrepareOutput {
         source_file: content_header.source_file.clone(),
         file_id: input.file_id,
+        path_syntax: PreparedFilePathSyntax::empty(),
         token_count: 0,
         token_stats: TokenStats::default(),
         file_role: FileRole::Normal,
-        file_imports: Vec::new(),
+        file_dependency_clauses: Vec::new(),
+        dependency_selections: Vec::new(),
         canonical_os_path,
         headers: vec![content_header],
         top_level_const_fragments: Vec::new(),

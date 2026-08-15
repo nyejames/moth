@@ -14,6 +14,7 @@ use super::head_expressions::{
 };
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::tir::TemplateConstructionContext;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
@@ -22,13 +23,8 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 
-/// Boxed diagnostic result for reactive subscription parsing.
-///
-/// Sits behind the already-boxed template-head parsing boundary
-/// (`TemplateHeadResult` in `head_parser.rs`). Boxing here keeps the `Err`
-/// variant small enough for Clippy's `result_large_err` lint while
-/// preserving every diagnostic value, source location, and semantic fact.
-type ReactiveSubscriptionResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// Typed result for reactive subscription parsing.
+type ReactiveSubscriptionResult<T> = Result<T, TemplateError>;
 
 /// Parses and validates a `$(source)` template subscription.
 ///
@@ -44,28 +40,31 @@ pub(super) fn parse_reactive_subscription(
 
     token_stream.advance();
     if token_stream.current_token_kind() != &TokenKind::OpenParenthesis {
-        return Err(Box::new(CompilerDiagnostic::invalid_template_structure(
+        return Err(CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::ReactiveSubscriptionComplexExpression,
             subscription_location,
-        )));
+        )
+        .into());
     }
 
     token_stream.advance();
     let source_name = match token_stream.current_token_kind() {
         TokenKind::CloseParenthesis => {
-            return Err(Box::new(CompilerDiagnostic::invalid_template_structure(
+            return Err(CompilerDiagnostic::invalid_template_structure(
                 InvalidTemplateStructureReason::ReactiveSubscriptionEmpty,
                 token_stream.current_location(),
-            )));
+            )
+            .into());
         }
 
         TokenKind::Symbol(source_name) => *source_name,
 
         _ => {
-            return Err(Box::new(CompilerDiagnostic::invalid_template_structure(
+            return Err(CompilerDiagnostic::invalid_template_structure(
                 InvalidTemplateStructureReason::ReactiveSubscriptionComplexExpression,
                 token_stream.current_location(),
-            )));
+            )
+            .into());
         }
     };
 
@@ -79,24 +78,27 @@ pub(super) fn parse_reactive_subscription(
             InvalidTemplateStructureReason::ReactiveSubscriptionComplexExpression
         };
 
-        return Err(Box::new(CompilerDiagnostic::invalid_template_structure(
+        return Err(CompilerDiagnostic::invalid_template_structure(
             reason,
             token_stream.current_location(),
-        )));
+        )
+        .into());
     }
 
     let Some(reference) = context.get_reference(&source_name) else {
-        return Err(Box::new(CompilerDiagnostic::unexpected_token(
+        return Err(CompilerDiagnostic::unexpected_token(
             TokenKind::Symbol(source_name),
             source_location,
-        )));
+        )
+        .into());
     };
 
     let Some(source) = reference.value.reactive_source.clone() else {
-        return Err(Box::new(CompilerDiagnostic::invalid_template_structure(
+        return Err(CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::ReactiveSubscriptionNonReactiveSource,
             source_location,
-        )));
+        )
+        .into());
     };
 
     let expression = Expression::reference_with_type_id(

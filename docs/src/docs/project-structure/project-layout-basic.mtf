@@ -16,7 +16,7 @@ module. The text after `@` stays cosmetic, so `@page.moth`, `@api.moth` and
 
 A `+*.moth` root creates a scoped support package instead of a normal module.
 For example, `shared/+package.moth` creates `@shared`. Its owner module, normal
-sibling modules and their descendants may import it. Other support packages in
+sibling modules and their descendants may depend on it. Other support packages in
 the same scope and the package's private implementation subtree cannot. A
 directory cannot contain both `@*.moth` and `+*.moth` roots.
 

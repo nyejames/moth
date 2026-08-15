@@ -387,7 +387,7 @@ fn parse_variant_name(
 
 /// Check whether a leading qualifier symbol resolves to the scrutinee choice type.
 ///
-/// WHAT: when the user writes `Status::Ready`, `Status` may be a module import or
+/// WHAT: when the user writes `Status::Ready`, `Status` may be a module dependency namespace or
 /// a local alias that points to the same choice declaration as the scrutinee.
 /// WHY: this allows qualified variant names even when the qualifier name differs
 /// from the choice's declared leaf name, as long as the symbol refers to the same type.

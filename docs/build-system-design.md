@@ -31,7 +31,7 @@ refactors or thorough reviews.
 | Command selection, builder capabilities or tooling overlays | `Selected command and capability surface`; `Command and tooling policies` | The compiler sections for any new semantic capability or validation root |
 | `config.moth`, project fields, `#Import`, `@project`, builder sections, entry config or bootstrap order | `Project bootstrap` and the exact relevant subsection | `docs/compiler-design-overview.md` > `Frontend stages > Stage 4: AST semantics > Constants, build inputs and const records` when compiler folding or handoff changes |
 | Source discovery, ownership, semantic source sets, check-only units or source preparation | `Source indexing and source sets`; `Prepared-source orchestration` | `docs/compiler-design-overview.md` > `Compiler input and result boundary` and the relevant Stage 1 to Stage 3 section |
-| Module roots, import topology, support packages, project facades, namespaces or package classification | `Project and package topology` and the exact relevant subsection | The canonical unsuffixed project-structure and package language references |
+| Module roots, dependency topology, support packages, project facades, namespaces or package classification | `Project and package topology` and the exact relevant subsection | The canonical unsuffixed project-structure and package language references |
 | Dependency, Core or Builder source package graphs | `Project and package topology > Dependency package graphs` or `Core and Builder source package graphs` | Compiler public-interface, provenance, fingerprint and generated-function sections |
 | Compile waves, diagnosed or blocked modules, deterministic merging or `ProjectCompilation` | `Deterministic scheduling and graph outcomes` | `docs/compiler-design-overview.md` > `Compiler input and result boundary` and `Diagnostics and deterministic identity` |
 | Generated request aggregation, scheduling or sidecar reuse | `Generated-function worklist` | `docs/compiler-design-overview.md` > `Generated concrete functions` |
@@ -44,11 +44,11 @@ refactors or thorough reviews.
 ## Architectural invariants
 
 - One command selects one artefact builder and any active tooling overlays before config schema validation begins.
-- `config.moth` is one self-contained compile-time source file with no source imports or package resolution.
+- `config.moth` is one self-contained compile-time source file with no source dependency clauses or package resolution.
 - Stage 0 owns one canonical graph, file ownership, legal project/module graph topology and deterministic scheduling for each project or package boundary.
 - A physical module is semantically compiled once inside that boundary.
 - Tokenization and declaration-shell parsing happen once. Stage 0 reuses prepared syntax for graph construction, later interface binding and module compilation.
-- Structural provider references, imported symbol bindings and module-local declaration-ordering edges are different data classes.
+- Structural provider references, dependency symbol bindings and module-local declaration-ordering edges are different data classes.
 - Successful module and dependency artefacts are immutable.
 - A diagnosed module exposes no partial public interface.
 - Tooling may inspect successful independent branches, but project builders receive success-only linkable project payloads.
@@ -98,11 +98,11 @@ One artefact builder runs per `build` or `dev` invocation. Tooling overlays exte
 Config bootstrap operates on exactly one authored source identity. It does not construct:
 
 - a package resolver
-- a config import graph
+- a config dependency graph
 - a config source set
 - a second project source scan
 
-An authored `import` declaration is rejected before path resolution with a structured diagnostic.
+An authored dependency clause is rejected before path resolution with a structured diagnostic.
 
 Config uses the ordinary compiler owners for its one file:
 
@@ -128,7 +128,7 @@ Allowed source includes:
 
 Rejected source includes:
 
-- every source import, including relative, project, Core, Builder, dependency and binding-backed imports
+- every source dependency clause, including relative, project, Core, Builder, dependency and binding-backed clauses
 - runtime declarations
 - mutable bindings
 - functions
@@ -198,7 +198,7 @@ Accepted imported-value types are:
 
 Nested project fields cannot declare `#Import`. Nested project fields do not provide unqualified source input values.
 
-`#Import` is constant-source syntax rather than a source import or wrapper type.
+`#Import` is constant-source syntax rather than a source dependency clause or wrapper type.
 
 A direct project `#Import` value resolves in this order:
 
@@ -211,11 +211,11 @@ Resolution happens during config compilation before Stage 0 applies fields such 
 
 Project defaults may use the ordinary allowed single-file config constant surface. Their final folded value becomes part of the project-wide contract.
 
-A fixed direct project field is not an import contract. When a same-name source `#Import` uses the same primitive type and optionality, the fixed field is its authoritative provider and blocks CLI override. Same-name source declarations must still agree with each other on required or default state and on the normalised default value.
+A fixed direct project field is not a `#Import` contract. When a same-name source `#Import` uses the same primitive type and optionality, the fixed field is its authoritative provider and blocks CLI override. Same-name source declarations must still agree with each other on required or default state and on the normalised default value.
 
 ### `ProjectGlobalsInterface` and `@project`
 
-The folded `project` record produces a specialised immutable `ProjectGlobalsInterface` under the permanently reserved `@project` import root.
+The folded `project` record produces a specialised immutable `ProjectGlobalsInterface` under the permanently reserved `@project` dependency root.
 
 The interface contains:
 
@@ -232,7 +232,7 @@ It is classified as project-local and Moth-source-backed for provenance and capa
 
 `@project` exposes direct project fields as namespace members. It does not expose another value named `project`.
 
-Normal project modules and project-owned support packages may explicitly import `@project`. It is never implicitly injected.
+Normal project modules and project-owned support packages may explicitly declare a dependency on `@project`. It is never implicitly injected.
 
 The following may not claim the `@project` root:
 
@@ -368,16 +368,16 @@ Placement rules:
 
 The block contains section records only.
 
-Imports, aliases, helper constants, support types and source `#Import` declarations live outside the block in the normal root file.
+Dependency clauses, aliases, helper constants, support types and source `#Import` declarations live outside the block in the normal root file.
 
 The block uses the root file's ordinary compile-time visibility. It may reference:
 
-- imported constants
+- dependency-bound constants
 - `@project`
 - same-file constants declared before the block
 - resolved source `#Import` constants
 - foldable local const-record types
-- selected-builder compile-time values available through normal module imports
+- selected-builder compile-time values available through normal module dependency clauses
 
 Same-file forward references remain invalid.
 
@@ -393,7 +393,7 @@ Active entry sections are schema-validated. Inactive sections are parsed and fol
 
 The block is optional. Its active artefact-builder section is also optional so tooling-only metadata remains possible.
 
-Every normal module selected into the current command's semantic graph has its block validated whether or not an entry activates it. Imported modules never apply their entry metadata to an importer.
+Every normal module selected into the current command's semantic graph has its block validated whether or not an entry activates it. Modules reached through dependency clauses never apply their entry metadata to the declaring file.
 
 Only active artefact-builder settings contribute entry activity.
 
@@ -423,7 +423,7 @@ select command, artefact builder, build profile and tooling overlays
 -> lower backend artefacts
 ```
 
-Config compilation tokenizes and parses one self-contained `config.moth`, orders config declarations, resolves direct project `#Import` sources while AST folds config, and validates the completed project record and active project sections. Inactive config sections are folded during config compilation even though their schemas are not active. Project config creates no source import graph.
+Config compilation tokenizes and parses one self-contained `config.moth`, orders config declarations, resolves direct project `#Import` sources while AST folds config, and validates the completed project record and active project sections. Inactive config sections are folded during config compilation even though their schemas are not active. Project config creates no source dependency graph.
 
 ## Source indexing and source sets
 
@@ -475,7 +475,7 @@ The semantic source set determines the module's semantic source fingerprint. Che
 A module's `SemanticSourceSet` contains:
 
 - its root file
-- every owned `.moth` file reachable through source imports
+- every owned `.moth` file reachable through source dependency clauses
 - every reachable builder-supported source asset such as `.mtf` or `.md`
 - any other source-kind input explicitly defined as semantic by the selected builder
 
@@ -491,7 +491,7 @@ Each orphan becomes a check-only source unit under its nearest module namespace.
 
 A check-only unit cannot become a backend root or link input.
 
-This distinction lets tooling diagnose abandoned or disconnected source without changing import semantics.
+This distinction lets tooling diagnose abandoned or disconnected source without changing dependency semantics.
 
 ## Prepared-source orchestration
 
@@ -501,7 +501,7 @@ Prepared syntax may contain:
 
 - tokens or source-kind payloads
 - declaration shells
-- import shells
+- dependency clause shells
 - structural provider references
 - local declaration-ordering hints
 - source `#Import` contract shells
@@ -512,15 +512,15 @@ Prepared syntax may contain:
 
 Stage 0 consumes structural provider references to finalise graphs. It does not bind source symbols itself.
 
-When a provider interface is available, the compiler's interface-binding phase resolves retained import shells into stable imported symbol bindings and final visibility. Binding does not reparse source.
+When a provider interface is available, the compiler's interface-binding phase resolves retained dependency clauses into stable dependency symbol bindings and final visibility. Binding does not reparse source.
 
 The three classes remain distinct:
 
 - structural provider references for Stage 0
-- imported symbol bindings for compiler visibility and AST
+- dependency symbol bindings for compiler visibility and AST
 - local declaration-ordering edges for compiler Stage 3
 
-Stage 0 never implements a competing import grammar or lightweight scanner that later reparses the same syntax surface.
+Stage 0 never implements a competing dependency grammar or lightweight scanner that later reparses the same syntax surface.
 
 Provider-backed discovery remains serial while it mutates shared package identities, provider caches, resolution tables or diagnostic identity. Parallel provider discovery requires deterministic provider deltas and remapping first.
 
@@ -531,9 +531,9 @@ Stage 0 produces structure, resolved build-input contracts and compiler inputs. 
 Terminology is strict:
 
 - A module is one directory-scoped compilation and visibility unit rooted by `@*.moth` or `+*.moth`.
-- A package is a named reusable `@...` import root and future dependency or distribution unit.
+- A package is a named reusable `@...` dependency root and future distribution unit.
 - A binding is a typed bridge to an implementation outside Moth source.
-- A prelude is implicit import policy rather than a package kind.
+- A prelude is implicit dependency policy rather than a package kind.
 - Library is informal wording only.
 
 ### Module roots and dormant work
@@ -560,9 +560,9 @@ Support modules and the project package facade are API-only:
 
 Every normal module in the command's semantic graph has dormant root work fully compiled, borrow-validated and locally lifetime-analysed. Entry assembly activates already compiled work only.
 
-### Module-root-relative imports
+### Module-root-relative dependency clauses
 
-Source imports resolve from the importing file's owning module root rather than the file's physical directory.
+Source dependency clauses resolve from the declaring file's owning module root rather than the file's physical directory.
 
 Example:
 
@@ -578,7 +578,7 @@ src/
 Inside `renderer.moth`:
 
 ```moth
-import @accounts { Account }
+@accounts Account
 ```
 
 This resolves to `src/accounts.moth`. It does not search beside `renderer.moth`.
@@ -591,10 +591,12 @@ Rules:
 - Reaching a child normal module or support package ends filesystem traversal and exposes only its facade.
 - Paths such as `@child/internal` cannot bypass a facade.
 - Scoped support packages are injected by package name.
-- Provider imports use an explicit owner and do not silently reintroduce file-relative lookup.
+- Provider clauses use an explicit owner and do not silently reintroduce file-relative lookup.
+- One clause resolves one provider, module facade or package surface. Direct selections are flat
+  binding names inside that resolved surface and never create independent provider edges.
 - Compiler interface binding consumes the Stage 0 namespace and does not probe ordered fallback candidates.
 
-A normal module may import:
+A normal module may declare dependencies on:
 
 - ordinary files it owns
 - unrooted directories it owns
@@ -603,7 +605,7 @@ A normal module may import:
 - registered Core, Builder and dependency packages
 - provider files explicitly permitted by the active builder
 
-A normal module may not import:
+A normal module may not declare dependencies on:
 
 - its parent
 - an ancestor
@@ -638,7 +640,7 @@ site/
         └── @article.moth
 ```
 
-`@markdown` is visible to `site`, `pages` and `article`. Its private descendants may be imported by the `markdown` facade, but consumers cannot address them through `@markdown/parser` or another implementation path.
+`@markdown` is visible to `site`, `pages` and `article`. Its private descendants may be depended on by the `markdown` facade, but consumers cannot address them through `@markdown/parser` or another implementation path.
 
 For a support package `S` whose nearest ancestor normal module is `P`:
 
@@ -646,23 +648,23 @@ For a support package `S` whose nearest ancestor normal module is `P`:
 - `S` is visible to normal sibling modules and their descendants.
 - `S` is not visible above `P`.
 - `S` is not visible outside `P`'s subtree.
-- `S` is not imported from its own private implementation descendants.
-- Another support package in the same owner scope cannot import `S`.
+- `S` is not depended on from its own private implementation descendants.
+- Another support package in the same owner scope cannot depend on `S`.
 
-The support facade may import:
+The support facade may depend on:
 
 - ordinary files it owns
 - any descendant module in its private subtree
 - support packages from a strictly outer scope
 - registered packages
 
-It may not import its parent, normal sibling consumers or same-scope support siblings.
+It may not depend on its parent, normal sibling consumers or same-scope support siblings.
 
 Consumers see only the support facade's `export:` surface.
 
 The same support-package name may appear in disjoint scopes. Overlapping scopes are rejected with diagnostics that point to both declarations and explain the overlap.
 
-Direct normal-sibling imports remain disallowed. A future design may revisit them only with real project evidence, cycle diagnostics and a reason the shared behaviour cannot live in a scoped support package.
+Direct normal-sibling dependency clauses remain disallowed. A future design may revisit them only with real project evidence, cycle diagnostics and a reason the shared behaviour cannot live in a scoped support package.
 
 ### Project package facade
 
@@ -676,7 +678,7 @@ The facade:
 
 - never bypasses an `export:` boundary
 - is not visible to internal project modules
-- cannot import `@project`
+- cannot declare a dependency on `@project`
 - cannot expose a semantic fact that depends on project-private context
 - has no root runtime activity
 - emits no route
@@ -700,7 +702,7 @@ The facade package identity comes from `project.name`.
 
 ### Namespace and collision policy
 
-No import uses precedence, nearest-match shadowing or ordered fallback.
+No dependency clause uses precedence, nearest-match shadowing or ordered fallback.
 
 Reject overlapping visible identities between:
 
@@ -754,7 +756,7 @@ Accepted mappings include:
 
 Origin and backing classify provenance and implementation. They do not change:
 
-- import syntax
+- dependency clause syntax
 - namespace precedence
 - visibility
 - export or facade privacy
@@ -847,7 +849,7 @@ For each module job:
 
 ```text
 receive retained syntax and completed provider interfaces
--> bind import shells
+-> bind dependency clauses
 -> order local declarations
 -> run AST semantics
 -> lower and validate HIR
@@ -1011,13 +1013,13 @@ An `EntryAssembly` selects one already compiled normal module and activates only
 - resolved active entry settings
 - entry-owned runtime requirements
 
-Imported normal modules expose public interfaces without executing root work.
+Normal modules reached through dependency clauses expose public interfaces without executing root work.
 
 Support modules and the project package facade never execute root work.
 
 Entry assembly never triggers parsing, type checking, HIR generation, generic inference, borrow validation or lifetime-region validation.
 
-The implicit `start` is non-exported, non-importable and infallible. The builder does not define a fallible start channel or an error-fragment policy.
+The implicit `start` is non-exported, cannot be bound through a dependency clause and is infallible. The builder does not define a fallible start channel or an error-fragment policy.
 
 ### Package assembly
 
@@ -1044,7 +1046,7 @@ A union may include:
 
 Module-wide summaries may be cached as derived indexes. They are not the linking authority.
 
-The build system does not repeatedly scan source, rebuild imports or reopen AST to discover runtime dependencies.
+The build system does not repeatedly scan source, rebuild dependency clauses or reopen AST to discover runtime dependencies.
 
 ### Target-validation roots
 
@@ -1321,7 +1323,7 @@ A serialised module, package or generated artefact is reusable only when compati
 - stable project or package identity
 - source fingerprint
 - config fingerprint
-- imported public-interface fingerprints
+- dependency public-interface fingerprints
 - required Core capability-interface fingerprints
 - required Builder capability-interface fingerprints
 - target-independent frontend feature configuration
@@ -1339,7 +1341,7 @@ Normal builds do not attempt best-effort deserialisation, partial migration or c
 Current paths are navigation aids rather than permanent architecture.
 
 - Project bootstrap and config: `src/build_system/project_config/`, `src/projects/settings.rs`
-- Source indexing, graph construction and scheduling: `src/build_system/create_project_modules/`, `src/build_system/build.rs`
+- Source indexing, graph construction and scheduling: `src/build_system/create_project_modules/`, `src/build_system/build.rs`. Stage 0 graph edges keep module identity, retained shell identity and diagnostic location rather than cloning file-owned paths.
 - Builder capability surface: `src/builder_surface/`
 - Commands and tooling overlays: `src/projects/cli.rs`, `src/projects/check.rs`, `src/projects/dev_server/`
 - HTML project builder and entry assembly: `src/projects/html_project/`

@@ -142,6 +142,7 @@ pub use templates::top_level_templates::AstDocFragmentKind;
 // Imports for the AST entry point and body-parsing helper.
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration};
 use crate::compiler_frontend::ast::const_values::facts::AstConstFacts;
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::module_ast::build_context::AstPhaseContext;
 use crate::compiler_frontend::ast::module_ast::emission::AstEmitter;
 use crate::compiler_frontend::ast::module_ast::environment::{
@@ -160,7 +161,7 @@ use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::headers::import_environment::HeaderImportEnvironment;
+use crate::compiler_frontend::headers::binding_environment::HeaderBindingEnvironment;
 use crate::compiler_frontend::headers::module_symbols::ModuleSymbols;
 use crate::compiler_frontend::headers::parse_file_headers::{
     Header, HeaderKind, TopLevelConstFragment,
@@ -248,7 +249,7 @@ pub struct Ast {
 /// provider interface or header-stage binding vocabulary.
 #[derive(Clone, Debug)]
 pub(crate) struct AstImportedFunctionContract {
-    pub(crate) target: crate::compiler_frontend::headers::import_environment::SourceFunctionTarget,
+    pub(crate) target: crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget,
     pub(crate) summary: crate::compiler_frontend::public_call_summary::PublicCallSummary,
     pub(crate) fallible_carrier_type_id: Option<TypeId>,
 }
@@ -288,7 +289,7 @@ pub struct AstBuildResult {
 pub struct AstBuildInput {
     pub headers: Vec<Header>,
     pub module_symbols: ModuleSymbols,
-    pub import_environment: HeaderImportEnvironment,
+    pub binding_environment: HeaderBindingEnvironment,
     pub top_level_const_fragments: Vec<TopLevelConstFragment>,
 }
 
@@ -300,7 +301,7 @@ impl Ast {
     /// [`AstBuildResult`] carrying executable `Ast` and the two projection side results.
     ///
     /// WHY: Centralizes the pass sequence so the full compilation pipeline is readable in
-    /// one place without implementation details. Symbol discovery and import visibility are
+    /// one place without implementation details. Symbol discovery and dependency visibility are
     /// owned by the header/dependency stages and passed in via `AstBuildInput`.
     // The entry point keeps the obvious `new` name while returning the closed build result that
     // bundles executable `Ast` with its projection side results; renaming would lose the canonical
@@ -313,7 +314,7 @@ impl Ast {
         let AstBuildInput {
             headers,
             module_symbols,
-            import_environment,
+            binding_environment,
             top_level_const_fragments,
         } = input;
 
@@ -333,7 +334,7 @@ impl Ast {
             &headers,
             AstEnvironmentInput {
                 module_symbols,
-                import_environment,
+                binding_environment,
             },
             string_table,
         )?;
@@ -465,7 +466,7 @@ pub(crate) fn function_body_to_ast(
     type_interner: &mut AstTypeInterner<'_>,
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
-) -> Result<Vec<AstNode>, Box<CompilerDiagnostic>> {
+) -> Result<Vec<AstNode>, ExpressionParseError> {
     parse_function_body_statements(token_stream, context, type_interner, warnings, string_table)
 }
 

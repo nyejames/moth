@@ -1,8 +1,0 @@
-entry = "."
-
-[backends.html]
-mode = "success"
-warnings = "forbid"
-rendered_output_contains = [
-    "module_facade_wrapper_import result=wrapped",
-]

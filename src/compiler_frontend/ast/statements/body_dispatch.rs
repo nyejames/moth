@@ -6,6 +6,7 @@
 
 use crate::ast_log;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::statements::asserts::parse_assert_statement;
 use crate::compiler_frontend::ast::statements::body_expr_stmt::parse_expression_statement_candidate;
@@ -41,10 +42,15 @@ use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::projects::settings;
 
-type StatementDispatchResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// AST body parsing carries authored diagnostics and internal retained-data failures separately.
+///
+/// The module emitter is the reporting boundary: it renders diagnostics and forwards
+/// `CompilerError` values unchanged. Nested statement parsers therefore must not collapse this
+/// result back into a diagnostic while constructing temporary frozen-table substreams.
+type StatementDispatchResult<T> = Result<T, ExpressionParseError>;
 
-fn statement_dispatch_error(diagnostic: CompilerDiagnostic) -> Box<CompilerDiagnostic> {
-    Box::new(diagnostic)
+fn statement_dispatch_error(diagnostic: CompilerDiagnostic) -> ExpressionParseError {
+    diagnostic.into()
 }
 
 /// Produce a diagnostic for a deferred block keyword (`checked`, `async`).
@@ -207,8 +213,7 @@ pub(crate) fn parse_function_body_statements(
                     &context,
                     type_interner,
                     string_table,
-                )
-                .map_err(CompilerDiagnostic::from)?;
+                )?;
             }
 
             TokenKind::Return | TokenKind::ReturnBang => {
@@ -309,8 +314,7 @@ pub(crate) fn parse_function_body_statements(
                     target: active_target,
                     label: "then fallback values",
                     string_table,
-                })
-                .map_err(CompilerDiagnostic::from)?;
+                })?;
 
                 body_nodes.push(AstNode {
                     kind: NodeKind::ThenValue(ProducedValues {

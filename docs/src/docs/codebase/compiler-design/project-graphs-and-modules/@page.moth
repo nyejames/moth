@@ -1,5 +1,5 @@
-import @project-graphs-and-modules {content as reference_content}
-import @styles {navbar, section, theme_head}
+@project-graphs-and-modules content as reference_content
+@styles navbar, section, theme_head
 
 page_title #= "04. Project graphs and modules"
 page_description #= "How Moth turns project files into deterministic module and package graphs."

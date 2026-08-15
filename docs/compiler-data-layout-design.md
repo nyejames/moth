@@ -65,6 +65,8 @@ approval and a corresponding architecture update:
 - complex token payloads and unusual diagnostic data use typed side stores rather than widening
   common records.
 - `PathId` is a genuine interned path identity, not a wrapper around an owned component vector.
+- one file-owned `PathSyntaxTable` owns every authored path in a source; path tokens carry dense
+  `PathSyntaxId` handles and never expanded per-component payloads.
 - diagnostic families are declared through one schema authority.
 - user mistakes, operational infrastructure failures and compiler bugs are three separate failure
   lanes.
@@ -82,7 +84,6 @@ experiment, recording the result and updating this document in the same slice:
 - compact array-of-structs versus struct-of-arrays token storage
 - the exact internal record shapes of uncommon token and diagnostic side stores
 - whether extended spans are deduplicated within one source
-- whether simple paths receive an inline token fast path
 - a terminator-match encoding, but only if it meets every stop/go rule in this document
 - additional packing inside already fixed-width records when every encoded domain has a formal,
   tested bound
@@ -147,6 +148,7 @@ integers must also retain their stated logical size on supported 32-bit targets.
 | `Option<SourceSpan>` | 8 bytes | niche-encoded absence |
 | `PathId` | 4 bytes | non-zero path-table identity, `Copy` |
 | `Option<PathId>` | 4 bytes | niche-encoded absence |
+| `PathSyntaxId` | 4 bytes | dense file-local path-syntax handle; zero means no path row |
 | `TokenShape` | 8 bytes | fixed tag, flags and one `u32` payload |
 | `DiagnosticToken` | 8 bytes | compact diagnostic projection of a token |
 | `DiagnosticCode` | 2 bytes | explicit non-zero internal code |
@@ -175,7 +177,7 @@ The following are also hard rules:
 | `SourceLocation { InternedPath, start line/column, end line/column }` | `SourceSpan { SourceId, LocalSpan }` |
 | source paths cloned into each token and diagnostic | one path and source record in shared tables |
 | `Token { TokenKind, SourceLocation }` | source-owned `TokenShape` plus `LocalSpan` |
-| `TokenKind::Path(Vec<PathTokenItem>)` | fixed token payload plus typed path-group side store |
+| `TokenKind::Path(Vec<PathTokenItem>)` | `TokenKind::Path(PathSyntaxId)` into one file-owned `PathSyntaxTable` |
 | declaration shells clone `Vec<Token>` | `TokenRange` into immutable source-owned tokens |
 | `InternedPath(Vec<StringId>)` | `PathId` into a dense path trie/table |
 | wide `CompilerDiagnostic` and `DiagnosticPayload` | small `DiagnosticDraft`, 32-byte `DiagnosticRecord`, side stores |
@@ -601,9 +603,8 @@ Payload policy:
 
 - punctuation, keywords and structural tokens use `data = 0`
 - symbols, directives and ordinary string-like literals may store a compact ID directly
-- simple unaliased paths may store a `PathId` directly when the measured fast path is retained
-- numeric details, grouped paths and other complex lexical facts use a typed source-local side-store
-  ID
+- authored path tokens carry one dense `PathSyntaxId` handle into the file-owned path syntax table
+- numeric details and other complex lexical facts use a typed source-local side-store ID
 - adding a new token family may not widen `TokenShape`
 
 ### Source-owned token store
@@ -614,7 +615,7 @@ pub struct SourceTokens {
     shapes: Box<[TokenShape]>,
     spans: Box<[LocalSpan]>,
     numeric_literals: NumericLiteralStore,
-    path_groups: PathGroupStore,
+    path_syntax: PathSyntaxTable,
     token_stats: TokenStats,
 }
 ```
@@ -647,44 +648,50 @@ pub struct TokenRef<'a> {
 
 - ranges are half-open
 - `TokenRef` borrows a canonical token; parser APIs do not clone complete tokens
-- declaration shells, import shells and retained syntax store `TokenRange` or typed range wrappers
+- declaration shells, dependency clause shells and retained syntax store `TokenRange` or typed range wrappers
 - no retained syntax structure owns `Vec<Token>`
 - a range is valid only with the `SourceTokens` for its `SourceId`
 - bounds violations in trusted internal records are compiler bugs
 - malformed user source produces diagnostics before an invalid range can be constructed
 
-### Path token side stores
+### Path syntax table
 
-A simple ungrouped path should use the token's own `LocalSpan` and direct `PathId` payload when the
-fast path survives profiling.
-
-Grouped paths and aliases use source-local stores:
+One file-owned `PathSyntaxTable` owns every authored path in a source. A path token carries one
+dense `PathSyntaxId` handle instead of an expanded per-component payload. Dependency selections are
+owned by retained dependency clauses, not by this path table.
 
 ```rust
-#[repr(C)]
-struct PathGroupRecord {
-    item_start: u32,
-    item_count: u32,
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct PathSyntaxId(u32);
+
+pub struct PathSyntaxTable {
+    paths: Vec<PathSyntax>,
 }
 
 #[repr(C)]
-struct PathTokenItemRecord {
-    path: PathId,
-    path_span: LocalSpan,
-    alias: PathAliasId,
-    flags: u32,
-}
-
-#[repr(C)]
-struct PathAliasRecord {
-    name: StringId,
-    span: LocalSpan,
+pub struct PathSyntax {
+    root: PathId,
+    location: LocalSpan,
 }
 ```
 
-`PathAliasId(0)` means no alias. The grouped-origin bit belongs in item flags. The exact cold-store
-record layout may be tightened after measurement, but a path item never owns a vector-backed path or
-a global source span when the enclosing source is already known.
+Rules:
+
+- `PathSyntaxId(0)` means no path row. It is an absent marker, never a valid identity.
+- one authored path exists exactly once as one `PathSyntax` row
+- `TokenKind::Path(PathSyntaxId)` is the only path-token vocabulary; there is no second stable
+  path-token shape and no inline path fast path
+- token-driven consumers look up rows with a token-aware ownership check so a same-index handle
+  from another file-owned table cannot be treated as valid
+- dependency clause shape, selected-name order, aliases and source-versus-provider target
+  classification are retained separately by the header dependency-clause owner
+- the table is owned by the source-owned token store and freezes with it
+- string-table remapping visits the table once for path roots
+- source identity rebinding updates table locations once
+- frozen generic bodies retain only the referenced path rows
+- no path row owns a vector-backed path or a global source span when the enclosing source is
+  already known
 
 ### Numeric token side store
 
@@ -710,7 +717,7 @@ Projection rules:
 
 - static tokens preserve only their tag
 - names and literals preserve the one compact ID needed for useful rendering
-- a grouped or simple path normally projects to the path category and, only when useful, a `PathId`
+- a path normally projects to the path category and, only when useful, a `PathId`
 - numeric literals preserve the authored text or kind needed by the diagnostic, not the complete
   tokenizer record
 - a diagnostic must remain renderable after the source token side store is dropped or independently
@@ -1186,7 +1193,7 @@ for rendering convenience.
 
 ### Lane 1: user-caused diagnostics
 
-User source, project structure, configuration, imports, type errors, rule violations, borrow errors,
+User source, project structure, configuration, dependency clauses, type errors, rule violations, borrow errors,
 target-contract failures, warnings and deliberate deferred-feature messages use typed
 `DiagnosticDraft` values.
 
@@ -1399,12 +1406,13 @@ Before changing representation, record with the exact CI toolchain:
 - `size_of` and alignment for every hard-layout type and current predecessor
 - total sources and source bytes
 - total tokens and current token bytes
-- current `TokenKind` and `PathTokenItem` sizes
+- current `TokenKind` size and path-token payload shape
 - total source-location instances where measurable
 - current diagnostic, payload, label and reason sizes
 - diagnostic counts, secondary-label counts and variable-list counts
 - span start and length histograms
-- path count, unique path count, component count and clone/remap pressure
+- path count, unique path count, path syntax row count, dependency-selection count, component count
+  and clone/remap pressure
 - string-table full clones
 - full `TypeEnvironment` values retained solely for diagnostics
 - peak retained frontend bytes or a repeatable allocation proxy
@@ -1419,7 +1427,7 @@ The corpus must include:
 
 - docs project release build/check
 - existing focused frontend benchmark suite
-- path/import-heavy multi-file project
+- path-heavy multi-file project
 - token-heavy large source
 - template-heavy source with short and long spans
 - generic/type-heavy source
@@ -1496,8 +1504,7 @@ Tests cover:
 - every token tag and payload policy
 - reserved flag validation
 - token shape/span length equality
-- simple and grouped path records
-- alias spans
+- simple path records
 - numeric side data
 - range bounds
 - source-owned retained declaration syntax

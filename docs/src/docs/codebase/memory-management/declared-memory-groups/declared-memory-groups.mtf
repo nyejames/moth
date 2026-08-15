@@ -84,7 +84,7 @@ Rules:
 - Group identity is not source type identity.
 - Group closure occurs on every exit: fallthrough, `return`, `return!`, `break`, recovery exit, and checked-operation failure path.
 
-The group name is local to the current executable body scope. It cannot collide with a visible value, type, import, constant, reactive source or active group. A group is not a value. Groups are invalid in constants, config, signatures, fields, choices, traits and export surfaces.
+The group name is local to the current executable body scope. It cannot collide with a visible value, type, dependency binding, constant, reactive source or active group. A group is not a value. Groups are invalid in constants, config, signatures, fields, choices, traits and export surfaces.
 
 ## into declaration placement
 

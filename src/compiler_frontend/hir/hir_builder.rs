@@ -340,7 +340,7 @@ impl<'a> HirBuilder<'a> {
             .values()
             .filter_map(|contract| match (&contract.target, contract.fallible_carrier_type_id) {
                 (
-                    crate::compiler_frontend::headers::import_environment::SourceFunctionTarget::Imported {
+                    crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget::Imported {
                         origin,
                         ..
                     },
@@ -354,7 +354,7 @@ impl<'a> HirBuilder<'a> {
             .values()
             .filter_map(|contract| match (&contract.target, contract.fallible_carrier_type_id) {
                 (
-                    crate::compiler_frontend::headers::import_environment::SourceFunctionTarget::Generated {
+                    crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget::Generated {
                         identity,
                         ..
                     },
@@ -368,7 +368,7 @@ impl<'a> HirBuilder<'a> {
             .values()
             .filter_map(|contract| match (&contract.target, contract.fallible_carrier_type_id) {
                 (
-                    crate::compiler_frontend::headers::import_environment::SourceFunctionTarget::ModulePrivate {
+                    crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget::ModulePrivate {
                         identity,
                         ..
                     },
@@ -381,19 +381,19 @@ impl<'a> HirBuilder<'a> {
             .imported_functions_by_name
             .values()
             .filter_map(|contract| match &contract.target {
-                crate::compiler_frontend::headers::import_environment::SourceFunctionTarget::Imported { origin, .. } => {
+                crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget::Imported { origin, .. } => {
                     Some((origin.clone(), contract.summary.clone()))
                 }
-                crate::compiler_frontend::headers::import_environment::SourceFunctionTarget::Local(_)
-                | crate::compiler_frontend::headers::import_environment::SourceFunctionTarget::Generated { .. }
-                | crate::compiler_frontend::headers::import_environment::SourceFunctionTarget::ModulePrivate { .. } => None,
+                crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget::Local(_)
+                | crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget::Generated { .. }
+                | crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget::ModulePrivate { .. } => None,
             })
             .collect();
         self.module.module_private_call_summaries = self
             .imported_functions_by_name
             .values()
             .filter_map(|contract| match &contract.target {
-                crate::compiler_frontend::headers::import_environment::SourceFunctionTarget::ModulePrivate {
+                crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget::ModulePrivate {
                     identity,
                     ..
                 } => Some((identity.clone(), contract.summary.clone())),
@@ -404,7 +404,7 @@ impl<'a> HirBuilder<'a> {
             .imported_functions_by_name
             .values()
             .filter_map(|contract| match &contract.target {
-                crate::compiler_frontend::headers::import_environment::SourceFunctionTarget::Generated {
+                crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget::Generated {
                     identity,
                     ..
                 } => Some((identity.clone(), contract.summary.clone())),

@@ -1,15 +1,15 @@
-`@core/math` provides `Float` constants and helper functions. It belongs to the binding-backed Core package family with no prelude alias, so it requires an explicit import.
+`@core/math` provides `Float` constants and helper functions. It belongs to the binding-backed Core package family with no prelude alias, so it requires an explicit dependency clause.
 
 `@core/math` carries Core origin with ExternalBinding backing. See @../../#package-origins-and-backing (Package origins and backing) for origin and backing rules.
 
-### Import roots
+### Dependency bindings
 
-Import individual symbols or the whole namespace:
+Bind individual symbols or the whole namespace:
 
 [codeblock, $code("moth"):
-    import @core/math {PI, sin, clamp}
+    @core/math PI, sin, clamp
 
-    import @core/math
+    @core/math
 
     angle = math.PI / 2.0
     result = math.sin(angle)
@@ -18,7 +18,7 @@ Import individual symbols or the whole namespace:
 A namespace alias creates a file-local name:
 
 [codeblock, $code("moth"):
-    import @core/math as math
+    @core/math as math
 ]
 
 ### Constants
@@ -191,7 +191,7 @@ HTML-Wasm lacks a Wasm lowering for these functions. See @../../../progress (pro
 
 ### Unsupported source forms
 
-- Direct symbol-path imports such as `import @core/math/sin` face rejection. Use grouped or namespace imports.
+- Direct symbol-path clauses such as `@core/math/sin` face rejection. Use direct selections or a namespace clause.
 - Named arguments lack support. Binding-backed calls stay positional-only.
 - The package does not expose receiver methods, opaque types or `Error!` channels.
 
@@ -202,5 +202,5 @@ Deferred math surfaces include integer math helpers, checked overflow modes, bro
 ### Related concepts
 
 - For package origin and backing see @../../#package-origins-and-backing (Package origins and backing).
-- For import path rules see @../../#import-paths (Import paths).
+- For dependency-path rules see @../../#dependency-paths (Dependency paths).
 - For `Float` language semantics see @../../../numbers (Numbers).

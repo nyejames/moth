@@ -65,7 +65,14 @@ pub(crate) fn parse_single_file_ast_build_result(
 
     let output =
         prepare_file_from_tokens(file_tokens, &file_path, &options, &mut string_table, 0, 0)
-            .map_err(|error| error.diagnostic)?;
+            .map_err(|error| match error {
+                crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareFailure::Diagnosed(
+                    error,
+                ) => error.diagnostic,
+                crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareFailure::Infrastructure(
+                    error,
+                ) => panic!("single-file test preparation hit infrastructure failure: {error:?}"),
+            })?;
 
     let prepared_syntax =
         prepare_header_syntax(vec![output], &mut string_table).map_err(|bag| {
@@ -85,7 +92,7 @@ pub(crate) fn parse_single_file_ast_build_result(
         prepared_syntax,
         external_package_registry.as_ref(),
         &ExternalImportResolutionTable::default(),
-        &crate::compiler_frontend::public_interface::SourceProviderImportSet::default(),
+        &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
         options.project_path_resolver.as_ref(),
         &mut string_table,
     )
@@ -120,7 +127,7 @@ pub(crate) fn parse_single_file_ast_build_result(
         AstBuildInput {
             headers: sorted.headers,
             module_symbols: sorted.module_symbols,
-            import_environment: sorted.import_environment,
+            binding_environment: sorted.binding_environment,
             top_level_const_fragments: sorted.top_level_const_fragments,
         },
         AstBuildContext {
@@ -188,4 +195,12 @@ pub(crate) fn tokenize_source_for_test(
         tokenizer_entry_mode,
         &mut frontend.string_table,
     )
+    .map_err(|error| match error {
+        crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareFailure::Diagnosed(
+            error,
+        ) => error.diagnostic,
+        crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareFailure::Infrastructure(
+            error,
+        ) => panic!("tokenization test hit infrastructure failure: {error:?}"),
+    })
 }

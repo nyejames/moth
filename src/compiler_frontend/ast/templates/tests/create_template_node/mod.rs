@@ -1,6 +1,7 @@
 use super::*;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::{TemplateSegmentOrigin, TemplateType};
 use crate::compiler_frontend::ast::templates::template_folding::{
     TemplateEmission, TemplateFoldResult,
@@ -86,6 +87,11 @@ fn template_tokens_from_source_with_style_directives(
         .iter()
         .position(|token| matches!(token.kind, TokenKind::TemplateHead))
         .expect("expected a template opener");
+
+    // Template AST parsing is downstream of the prepared-file freeze boundary. Preserve that
+    // production lifecycle in direct parser tests so nested expression substreams share the
+    // immutable table instead of a mutable tokenizer-owned one.
+    tokens.freeze_path_syntax_for_test();
 
     tokens
 }
@@ -356,15 +362,33 @@ fn template_parse_rendered_error_with_style_directives(
         .iter()
         .position(|token| matches!(token.kind, TokenKind::TemplateHead))
         .expect("expected a template opener");
+    token_stream.freeze_path_syntax_for_test();
     let context = new_constant_context_with_style_directives(
         token_stream.src_path.to_owned(),
         style_directives,
     );
 
-    let diagnostic = Template::new(&mut token_stream, &context, vec![], &mut string_table)
+    let error = Template::new(&mut token_stream, &context, vec![], &mut string_table)
         .expect_err("template should fail to parse");
+    let diagnostic = expect_template_diagnostic(error);
 
     render_test_diagnostic(&diagnostic, &string_table)
+}
+
+/// Extract the source-diagnostic lane expected by a template parser test.
+///
+/// Template construction now preserves internal retained-data failures separately. Tests that
+/// exercise authored source rejection must state that expectation instead of treating a compiler
+/// infrastructure error as an interchangeable diagnostic.
+fn expect_template_diagnostic(
+    error: TemplateError,
+) -> crate::compiler_frontend::compiler_messages::CompilerDiagnostic {
+    match error {
+        TemplateError::Diagnostic(diagnostic) => *diagnostic,
+        TemplateError::Infrastructure(error) => {
+            panic!("expected a template source diagnostic, got infrastructure failure: {error:?}")
+        }
+    }
 }
 
 fn render_test_diagnostic(

@@ -1,14 +1,14 @@
-import @core/constants {app_name, app_version}
-import @core/constants {build_timestamp as built_at}
-import @types/models {User, UserProfile}
-import @types/enums {Status, Priority}
-import @utils/formatting {format_label, format_timestamp}
-import @utils/math {clamp}
-import @widgets/header {render_header}
-import @widgets/footer {render_footer}
-import @widgets/card {render_card, Card}
-import @pages/home {render_home}
-import @pages/about {render_about}
+@core/constants app_name, app_version
+@core/constants build_timestamp as built_at
+@types/models User, UserProfile
+@types/enums Status, Priority
+@utils/formatting format_label, format_timestamp
+@utils/math clamp
+@widgets/header render_header
+@widgets/footer render_footer
+@widgets/card render_card, Card
+@pages/home render_home
+@pages/about render_about
 
 page_title #= [: [app_name] v[app_version]]
 

@@ -3,9 +3,9 @@
 -- constants, aliases, structs, choices, traits, generics, templates, collections,
 -- maps, receivers, control flow, and external package calls.
 
-import @core/math { PI, sin, cos }
-import @core/text { length, contains, starts_with }
-import @core/random { random_int }
+@core/math PI, sin, cos
+@core/text length, contains, starts_with
+@core/random random_int
 
 -- Aliases
 Id as Int

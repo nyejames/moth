@@ -11,6 +11,7 @@
 //! Struct node emission reads the resolved field table produced by environment construction.
 
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind, SourceLocation};
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::function_body_to_ast;
 use crate::compiler_frontend::ast::generic_functions::{
     GenericFunctionBodyValidationInput, GenericFunctionInstance, GenericFunctionInstanceKey,
@@ -56,7 +57,7 @@ use crate::compiler_frontend::datatypes::generic_parameters::{
 use crate::compiler_frontend::datatypes::ids::{
     GenericParameterId, GenericParameterListId, TypeId,
 };
-use crate::compiler_frontend::headers::import_environment::FileVisibility;
+use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -317,7 +318,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             let visibility = Rc::new(
                 self.environment
                     .lookups
-                    .import_environment
+                    .binding_environment
                     .visibility_for(&header.source_file)
                     .map_err(|error| self.error_messages(error, string_table))?
                     .clone(),
@@ -717,7 +718,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         let visibility = Rc::new(
             self.environment
                 .lookups
-                .import_environment
+                .binding_environment
                 .visibility_for(&template.source_file)
                 .map_err(|error| self.error_messages(error, string_table))?
                 .clone(),
@@ -763,7 +764,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             string_table,
         ) {
             Ok(body) => body,
-            Err(diagnostic) => {
+            Err(ExpressionParseError::Diagnostic(diagnostic)) => {
                 let diagnostic = with_generic_instantiation_context(
                     *diagnostic,
                     GenericInstantiationDiagnosticContext {
@@ -773,6 +774,9 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                     },
                 );
                 return Err(self.diagnostic_messages(diagnostic, string_table));
+            }
+            Err(ExpressionParseError::Infrastructure(error)) => {
+                return Err(self.error_messages(*error, string_table));
             }
         };
 
@@ -900,7 +904,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             warnings: &mut self.warnings,
             string_table,
         })
-        .map_err(|diagnostic| self.diagnostic_messages(*diagnostic, string_table))
+        .map_err(|error| self.expression_error_messages(error, string_table))
     }
 
     fn emit_function(
@@ -974,7 +978,8 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             string_table,
         );
 
-        let body = body_result.map_err(|error| self.diagnostic_messages(*error, string_table))?;
+        let body =
+            body_result.map_err(|error| self.expression_error_messages(error, string_table))?;
 
         self.validate_body_terminality(
             &body,
@@ -1034,7 +1039,8 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             string_table,
         );
 
-        let body = body_result.map_err(|error| self.diagnostic_messages(*error, string_table))?;
+        let body =
+            body_result.map_err(|error| self.expression_error_messages(error, string_table))?;
 
         // --------------------------
         //  Synthesize implicit start signature and emit node
@@ -1138,8 +1144,8 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             string_table,
         );
 
-        let template =
-            template_result.map_err(|error| self.diagnostic_messages(*error, string_table))?;
+        let template = template_result
+            .map_err(|error| self.expression_error_messages(error.into(), string_table))?;
 
         Ok(template)
     }
@@ -1258,6 +1264,22 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 self.diagnostic_messages(*diagnostic, string_table)
             }
             TemplateError::Infrastructure(error) => self.error_messages(*error, string_table),
+        }
+    }
+
+    /// Converts the AST parser's two-lane failure without downgrading retained-data errors.
+    fn expression_error_messages(
+        &self,
+        error: ExpressionParseError,
+        string_table: &StringTable,
+    ) -> CompilerMessages {
+        match error {
+            ExpressionParseError::Diagnostic(diagnostic) => {
+                self.diagnostic_messages(*diagnostic, string_table)
+            }
+            ExpressionParseError::Infrastructure(error) => {
+                self.error_messages(*error, string_table)
+            }
         }
     }
 

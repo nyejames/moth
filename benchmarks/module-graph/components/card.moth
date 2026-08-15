@@ -1,5 +1,5 @@
-import @data/theme {default_theme, accent}
-import @util/formatting {render_badge as badge}
+@data/theme default_theme, accent
+@util/formatting render_badge as badge
 
 Card = |
     title String,

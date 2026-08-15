@@ -1,0 +1,15 @@
+Bind Moth template content with normal extensionless dependency clauses.
+
+### Bind and use
+
+[codeblock, $code("moth"):
+    @docs/intro content as intro
+
+    [: [intro] ]
+]
+
+The `content` constant is a compile-time string. Insert it wherever you want.
+
+### Do not include the extension
+
+`@docs/intro.mtf content` is rejected. Use `@docs/intro content`.

@@ -63,13 +63,13 @@ Avoid aliasing unless it clearly improves readability.
 - Prefer context structs for shared state instead of noisy or repetitive parameter lists.
 - Keep new abstractions small, stage-local and easy to justify.
 - Avoid `.unwrap()` unless it is blatantly safe and tied to an internal invariant.
-- Prefer `.to_owned()` over `.clone()` when copying owned string-like data. Use `.clone()` when a general copy is genuinely required and clearer.
+- Avoid `.to_owned()` and `.clone()` whenever possible, prefer borrowing when possible and find patterns that avoid copies.
 
 For test-file placement, see `testing.mtf`.
 
 ### Readable Rust style
 
-Compiler code should optimise for fast human review. Dense code is harder to scan and easier to extend badly.
+Compiler code should optimise for fast review. Dense code is harder to scan and easier to extend badly.
 
 Prefer code that reads as a sequence of named steps and makes data flow obvious before every detail is understood. The main function for a module or pass should also read as a sequence of named steps.
 
@@ -91,7 +91,7 @@ Prefer this:
 
 [codeblock, $code("rust"):
     let source_file = header.source_file.clone();
-    let visibility = import_environment.visibility_for(&source_file)?;
+    let visibility = binding_environment.visibility_for(&source_file)?;
 
     // Resolve type aliases before constants because constant folding may depend on alias-expanded types.
     self.resolve_type_aliases(&headers, visibility, string_table)?;
@@ -112,7 +112,7 @@ Prefer this:
 Be comment-positive, but not noisy. Comments should be grammatical and readable. Do not narrate syntax, repeat a descriptive name or paraphrase a clear signature.
 
 [codeblock, $code("rust"):
-    // Register same-file declarations before imports so aliases cannot shadow local names.
+    // Register same-file declarations before dependencies so aliases cannot shadow local names.
     for declaration in same_file_declarations {
         visible_names.register_same_file_declaration(declaration)?;
     }
@@ -205,8 +205,8 @@ Avoid:
 Prefer named types and straightforward flow:
 
 [codeblock, $code("rust"):
-    pub(crate) struct ImportResolution {
-        pub(crate) target: ResolvedImportTarget,
+    pub(crate) struct DependencyResolution {
+        pub(crate) target: ResolvedDependencyTarget,
         pub(crate) local_name: StringId,
         pub(crate) location: SourceLocation,
     }
@@ -215,7 +215,7 @@ Prefer named types and straightforward flow:
 Instead of:
 
 [codeblock, $code("rust"):
-    Result<(ResolvedImportTarget, StringId, SourceLocation), CompilerError>
+    Result<(ResolvedDependencyTarget, StringId, SourceLocation), CompilerError>
 ]
 
 A few more lines are fine when the result is easier to inspect and harder to misuse.
@@ -232,7 +232,7 @@ Keep macro usage minimal. Use small declarative macros only where they clearly r
 
 ### Section banners
 
-Use section banners only for real phase boundaries in long functions, large files or complex orchestration such as parsing, lowering, template folding, import resolution, diagnostic rendering or build flow.
+Use section banners only for real phase boundaries in long functions, large files or complex orchestration such as parsing, lowering, template folding, dependency resolution, diagnostic rendering or build flow.
 
 Use exactly this format:
 

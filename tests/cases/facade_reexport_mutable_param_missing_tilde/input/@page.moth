@@ -1,4 +1,4 @@
-import @helper { Counter, bump }
+@helper Counter, bump
 
 c ~= Counter(5)
 bump(c)

@@ -22,7 +22,6 @@ use crate::compiler_frontend::ast::templates::tir::view::TemplateTirPhase;
 use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrId, TemplateIrNode, TemplateIrNodeId, TemplateIrNodeKind, TemplateIrStore,
 };
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use std::cell::RefCell;
@@ -35,8 +34,8 @@ use super::helpers::{
 use super::overlays::allocate_slot_resolution_context;
 use super::schema::{collect_tir_slot_schema, expand_tir_slot_placeholders_into};
 
-/// Boxed diagnostic result for the TIR head-chain composition family.
-type HeadChainResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// Typed result for the TIR head-chain composition family.
+type HeadChainResult<T> = Result<T, TemplateError>;
 
 /// Bundles the shared state threaded through recursive chain resolution.
 ///
@@ -231,9 +230,9 @@ pub(super) fn root_sequence_children(
     node_id: TemplateIrNodeId,
 ) -> HeadChainResult<Option<&[TemplateIrNodeId]>> {
     let Some(node) = store.get_node(node_id) else {
-        return Err(Box::new(internal_compiler_error(
+        return Err(internal_compiler_error(
             "TIR head-chain composition: root node ID was not present in the store.",
-        )));
+        ));
     };
 
     match &node.kind {
@@ -353,9 +352,9 @@ fn is_tir_receiver(
     node_id: TemplateIrNodeId,
 ) -> HeadChainResult<Option<TemplateTirChildReference>> {
     let Some(node) = store.get_node(node_id) else {
-        return Err(Box::new(internal_compiler_error(
+        return Err(internal_compiler_error(
             "TIR head-chain composition: child node ID was not present in the store while checking receiver.",
-        )));
+        ));
     };
 
     let TemplateIrNodeKind::ChildTemplate { reference, .. } = &node.kind else {
@@ -363,9 +362,9 @@ fn is_tir_receiver(
     };
 
     let Some(template_ir) = store.get_template(reference.root) else {
-        return Err(Box::new(internal_compiler_error(
+        return Err(internal_compiler_error(
             "TIR head-chain composition: child template ID was not present in the store.",
-        )));
+        ));
     };
 
     if matches!(
@@ -569,7 +568,7 @@ fn resolve_tir_chain_layer(
             inputs.string_table,
             &original_location,
         )
-        .map_err(|error| TemplateError::from(error).into_diagnostic())?
+        .map_err(TemplateError::from)?
     } else {
         // Const-evaluable fill: structurally expand slot placeholders into the
         // wrapper tree. This is the compile-time composition path that produces

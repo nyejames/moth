@@ -124,6 +124,20 @@ struct ExpectedWordRole {
     role: CodeHighlightRole,
 }
 
+/// Bounded presentation state for one delimiter-free source dependency clause.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum DependencyHighlightState {
+    #[default]
+    None,
+    AfterPath,
+    ExpectNamespaceAlias,
+    AfterNamespaceAlias,
+    AfterSelection,
+    ExpectSelectionAlias,
+    AfterSelectionAlias,
+    ExpectSelection,
+}
+
 pub(crate) fn code_formatter_factory(
     argument: Option<&StyleDirectiveArgumentValue>,
 ) -> Result<Formatter, String> {
@@ -365,6 +379,7 @@ struct CodeScanner<'source> {
     in_pipe_group: bool,
     css_brace_depth: usize,
     expected_word_role: Option<ExpectedWordRole>,
+    dependency_state: DependencyHighlightState,
 }
 
 impl<'source> CodeScanner<'source> {
@@ -382,6 +397,7 @@ impl<'source> CodeScanner<'source> {
             in_pipe_group: false,
             css_brace_depth: 0,
             expected_word_role: None,
+            dependency_state: DependencyHighlightState::None,
         }
     }
 
@@ -501,6 +517,7 @@ impl<'source> CodeScanner<'source> {
                     // Commas continue conformance lists but end a generic bound list.
                     if byte == b',' {
                         self.transition_after_comma();
+                        self.continue_dependency_after_comma();
                         self.expected_word_role = None;
                         self.index += 1;
                         return;
@@ -724,6 +741,10 @@ impl<'source> CodeScanner<'source> {
     /// Classifies one Moth word through the compiler-owned classes and the
     /// bounded lexical heuristics.
     fn moth_word_role(&mut self, word: &str, word_end: usize) -> Option<CodeHighlightRole> {
+        if let Some(role) = self.dependency_word_role(word) {
+            return Some(role);
+        }
+
         // Attached bang forms are keyword spans.
         if let Some(prefix) = word.strip_suffix('!')
             && attached_bang_keyword_token_kind(prefix).is_some()
@@ -902,6 +923,10 @@ impl<'source> CodeScanner<'source> {
         ) {
             self.contract_state = ContractState::None;
         }
+
+        if self.dependency_state != DependencyHighlightState::ExpectSelection {
+            self.dependency_state = DependencyHighlightState::None;
+        }
     }
 
     /// Continues a conformance list after a comma or ends a generic bound list
@@ -914,6 +939,48 @@ impl<'source> CodeScanner<'source> {
             },
             ContractState::AfterName(ContractListKind::GenericBound) => ContractState::None,
             _ => self.contract_state,
+        };
+    }
+
+    fn dependency_word_role(&mut self, word: &str) -> Option<CodeHighlightRole> {
+        match self.dependency_state {
+            DependencyHighlightState::AfterPath if word == "as" => {
+                self.dependency_state = DependencyHighlightState::ExpectNamespaceAlias;
+                Some(CodeHighlightRole::Keyword)
+            }
+            DependencyHighlightState::AfterPath | DependencyHighlightState::ExpectSelection => {
+                self.dependency_state = DependencyHighlightState::AfterSelection;
+                Some(CodeHighlightRole::Nominal)
+            }
+            DependencyHighlightState::AfterSelection if word == "as" => {
+                self.dependency_state = DependencyHighlightState::ExpectSelectionAlias;
+                Some(CodeHighlightRole::Keyword)
+            }
+            DependencyHighlightState::ExpectNamespaceAlias => {
+                self.dependency_state = DependencyHighlightState::AfterNamespaceAlias;
+                Some(CodeHighlightRole::Nominal)
+            }
+            DependencyHighlightState::ExpectSelectionAlias => {
+                self.dependency_state = DependencyHighlightState::AfterSelectionAlias;
+                Some(CodeHighlightRole::Nominal)
+            }
+            DependencyHighlightState::AfterNamespaceAlias
+            | DependencyHighlightState::AfterSelection
+            | DependencyHighlightState::AfterSelectionAlias
+            | DependencyHighlightState::None => {
+                self.dependency_state = DependencyHighlightState::None;
+                None
+            }
+        }
+    }
+
+    fn continue_dependency_after_comma(&mut self) {
+        self.dependency_state = match self.dependency_state {
+            DependencyHighlightState::AfterSelection
+            | DependencyHighlightState::AfterSelectionAlias => {
+                DependencyHighlightState::ExpectSelection
+            }
+            _ => DependencyHighlightState::None,
         };
     }
 
@@ -1097,7 +1164,20 @@ impl<'source> CodeScanner<'source> {
         }
 
         self.expected_word_role = None;
+        self.dependency_state = if self.moth_dependency_clause_path_starts_here(run_start) {
+            DependencyHighlightState::AfterPath
+        } else {
+            DependencyHighlightState::None
+        };
         self.emit_highlighted_range(output, run_start, end, CodeHighlightRole::String);
+    }
+
+    fn moth_dependency_clause_path_starts_here(&self, path_start: usize) -> bool {
+        let line_start = self.source[..path_start]
+            .rfind('\n')
+            .map_or(0, |newline| newline + 1);
+        let prefix = self.source[line_start..path_start].trim();
+        prefix.is_empty() || prefix == "export:"
     }
 
     /// True when the cursor sits at the first byte of a line.
@@ -1647,7 +1727,7 @@ fn consume_while(bytes: &[u8], mut index: usize, predicate: impl Fn(u8) -> bool)
     index
 }
 
-/// True when `byte` may continue a tolerant Moth import/resource path run.
+/// True when `byte` may continue a tolerant Moth dependency/resource path run.
 fn is_moth_path_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'/' | b'.' | b'-')
 }

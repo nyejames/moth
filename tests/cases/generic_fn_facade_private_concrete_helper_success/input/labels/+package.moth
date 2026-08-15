@@ -1,4 +1,4 @@
-import @internal {label_impl}
+@internal label_impl
 
 export:
     label type T |value T| -> String:

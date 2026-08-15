@@ -81,7 +81,15 @@ fn compile_one_source(
     .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
     compiler.set_source_files(source_files);
 
-    let prepared = prepare_source_file(&mut compiler, &source_path, source_text)?;
+    let mut prepared = prepare_source_file(&mut compiler, &source_path, source_text)?;
+
+    // This direct service has one final source and one final string domain. Freeze its
+    // file-owned path table before header aggregation so AST parsing sees the same immutable
+    // prepared-file contract as directory and synthetic module compilation.
+    prepared
+        .freeze_path_syntax(&compiler.string_table)
+        .map_err(|error| CompilerMessages::from_error(error, compiler.string_table.clone()))?;
+
     let prepared_syntax = prepare_header_syntax(vec![prepared], &mut compiler.string_table)
         .map_err(|bag| {
             CompilerMessages::from_diagnostics(
@@ -94,7 +102,7 @@ fn compile_one_source(
         prepared_syntax,
         compiler.external_package_registry.as_ref(),
         &ExternalImportResolutionTable::default(),
-        &crate::compiler_frontend::public_interface::SourceProviderImportSet::default(),
+        &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
         compiler.project_path_resolver.as_ref(),
         &mut compiler.string_table,
     )
@@ -194,11 +202,20 @@ fn prepare_source_file(
     };
 
     CompilerFrontend::prepare_file_frontend_local(&context, input, &mut compiler.string_table)
-        .map_err(|mut error| {
-            let mut messages =
-                CompilerMessages::from_diagnostic(*error.diagnostic, compiler.string_table.clone());
-            messages.prepend_diagnostics_preserving_context(error.warnings.drain(..));
-            messages
+        .map_err(|error| match error {
+            crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareFailure::Diagnosed(
+                error,
+            ) => {
+                let mut messages = CompilerMessages::from_diagnostic(
+                    *error.diagnostic,
+                    compiler.string_table.clone(),
+                );
+                messages.prepend_diagnostics_preserving_context(error.warnings);
+                messages
+            }
+            crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareFailure::Infrastructure(
+                error,
+            ) => CompilerMessages::from_error(error, compiler.string_table.clone()),
         })
 }
 

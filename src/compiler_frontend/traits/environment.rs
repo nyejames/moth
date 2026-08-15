@@ -54,7 +54,7 @@ pub(crate) enum CoreTraitKind {
 /// WHAT: stores resolved trait definitions indexed by canonical path, a
 ///      `core_traits_by_name` table that resolves compiler-owned trait
 ///      names (such as `DISPLAYABLE`, `CASTABLE_TO_INT`, ...) without
-///      touching the user-visible `visible_trait_names` import map, a
+///      touching the user-visible `visible_trait_names` binding map, a
 ///      `core_trait_kinds` side table that classifies core traits so the
 ///      AST environment builder can wire builtin cast evidence rows, an
 ///      `incompatible_traits` symmetric store for trait-pair metadata, and a
@@ -62,7 +62,7 @@ pub(crate) enum CoreTraitKind {
 ///      relations authored by an explicitly public `TRAIT must not TRAIT`
 ///      header in an export-capable root.
 /// WHY: AST traits and core cast traits must both be reachable from source
-///      spellings, but core traits must resolve without imports and must
+///      spellings, but core traits must resolve without dependency clauses and must
 ///      not share a code path with user declarations. Sharing one registry
 ///      also keeps the trait environment from growing a parallel field
 ///      for every new core trait. Mutual-incompatibility metadata is owned
@@ -359,7 +359,7 @@ impl TraitEnvironment {
     /// Registers another consumer-local spelling for an existing trait.
     ///
     /// Imported aliases share one canonical trait identity and one dense `TraitId`. Retaining
-    /// every bound path lets visibility and public-surface checks compare the exact local import
+    /// every bound path lets visibility and public-surface checks compare the exact local dependency
     /// target without treating an alias as another trait definition.
     pub(crate) fn register_path(
         &mut self,

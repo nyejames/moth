@@ -1,4 +1,4 @@
-import @provider { Card }
+@provider Card
 
 render type Item is CASTABLE_TO_STRING |item Item| -> String:
     text String = cast item

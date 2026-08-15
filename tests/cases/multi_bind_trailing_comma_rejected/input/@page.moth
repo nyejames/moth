@@ -1,0 +1,6 @@
+pair || -> String, Int:
+    return "Priya", 1
+;
+
+name,
+    = pair()

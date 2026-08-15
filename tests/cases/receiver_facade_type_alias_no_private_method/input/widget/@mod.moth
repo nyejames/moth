@@ -1,7 +1,7 @@
-import @impl { Counter, make_counter_impl }
+@impl Counter, make_counter_impl
 
 export:
-    import @impl { Counter }
+    @impl Counter
 
     PublicCounter as Counter
 

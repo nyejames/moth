@@ -1,4 +1,4 @@
-import @provider { Box }
+@provider Box
 
 value = Box(42)
 

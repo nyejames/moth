@@ -160,6 +160,7 @@ fn children_directive_rejects_runtime_values() {
 
     let error = Template::new(&mut token_stream, &context, vec![], &mut string_table)
         .expect_err("children directive should reject runtime values");
+    let error = expect_template_diagnostic(error);
 
     match &error.payload {
         DiagnosticPayload::InvalidTemplateDirective {
@@ -255,6 +256,7 @@ fn children_directive_argument_ending_at_template_boundary_uses_children_reason(
 
     let error = Template::new(&mut token_stream, &context, vec![], &mut string_table)
         .expect_err("empty $children argument at a template boundary should fail to parse");
+    let error = expect_template_diagnostic(error);
 
     match &error.payload {
         DiagnosticPayload::InvalidTemplateDirective {

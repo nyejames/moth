@@ -1,18 +1,12 @@
-import @html-helpers {
-    content as html_advanced,
-}
+@html-helpers content as html_advanced
 
-import @html-helpers-basic {
-    content as html_basic,
-}
+@html-helpers-basic content as html_basic
 
-import @styles {
-    navbar,
+@styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager,
-}
+    doc_pager
 
 page_title #= "@html"
 page_description #= "Compile-time HTML helpers and canvas wrapper from the HTML builder."

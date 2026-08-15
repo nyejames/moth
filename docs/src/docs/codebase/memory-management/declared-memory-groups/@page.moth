@@ -1,5 +1,5 @@
-import @declared-memory-groups {content as reference_content}
-import @styles {navbar, section, theme_head}
+@declared-memory-groups content as reference_content
+@styles navbar, section, theme_head
 
 page_title #= "Declared memory groups"
 page_description #= "Accepted deferred group / into semantics and hard destination lifetimes."

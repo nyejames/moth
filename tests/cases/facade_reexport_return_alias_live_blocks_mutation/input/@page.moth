@@ -1,4 +1,4 @@
-import @helper { Counter, alias_of }
+@helper Counter, alias_of
 
 c ~= Counter(5)
 a = alias_of(c)

@@ -1,58 +1,32 @@
-import @reactive-sources {
-    content as reactive_sources,
-}
+@reactive-sources content as reactive_sources
 
-import @reactive-sources-basic {
-    content as reactive_sources_basic,
-}
+@reactive-sources-basic content as reactive_sources_basic
 
-import @subscriptions {
-    content as subscriptions,
-}
+@subscriptions content as subscriptions
 
-import @subscriptions-basic {
-    content as subscriptions_basic,
-}
+@subscriptions-basic content as subscriptions_basic
 
-import @reactive-parameters {
-    content as reactive_parameters,
-}
+@reactive-parameters content as reactive_parameters
 
-import @reactive-parameters-basic {
-    content as reactive_parameters_basic,
-}
+@reactive-parameters-basic content as reactive_parameters_basic
 
-import @mutation-and-invalidation {
-    content as mutation_and_invalidation,
-}
+@mutation-and-invalidation content as mutation_and_invalidation
 
-import @mutation-and-invalidation-basic {
-    content as mutation_and_invalidation_basic,
-}
+@mutation-and-invalidation-basic content as mutation_and_invalidation_basic
 
-import @runtime-sinks {
-    content as runtime_sinks,
-}
+@runtime-sinks content as runtime_sinks
 
-import @runtime-sinks-basic {
-    content as runtime_sinks_basic,
-}
+@runtime-sinks-basic content as runtime_sinks_basic
 
-import @reactivity-scope {
-    content as reactivity_scope,
-}
+@reactivity-scope content as reactivity_scope
 
-import @reactivity-scope-basic {
-    content as reactivity_scope_basic,
-}
+@reactivity-scope-basic content as reactivity_scope_basic
 
-import @styles {
-    navbar,
+@styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager,
-}
+    doc_pager
 
 page_title #= "Reactivity"
 page_description #= "Reactive sources, template subscriptions and live sinks in Moth."

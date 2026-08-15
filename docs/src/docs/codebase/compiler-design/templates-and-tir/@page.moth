@@ -1,5 +1,5 @@
-import @templates-and-tir {content as reference_content}
-import @styles {navbar, section, theme_head}
+@templates-and-tir content as reference_content
+@styles navbar, section, theme_head
 
 page_title #= "09. Templates and TIR"
 page_description #= "How Moth preserves template structure before runtime lowering."

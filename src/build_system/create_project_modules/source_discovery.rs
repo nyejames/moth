@@ -1,11 +1,11 @@
 //! Stage 0 source traversal, owned-input preparation and shared structural-provider resolution.
 //!
-//! Given an entry `.moth` file, the synthetic path walks its import declarations transitively to
+//! Given an entry `.moth` file, the synthetic path walks its dependency clauses transitively to
 //! build the complete set of source files for one single-file module. Directory projects prepare
 //! owned `SourceId`s through the direct-input helper in this module. Both paths assemble
 //! `PreparedSourceInput` values for downstream compilation stages.
 // Stage 0 deliberately returns full diagnostic/infrastructure payloads in `SourceDiscoveryError`
-// so import discovery does not erase source locations or downgrade filesystem failures.
+// so dependency discovery does not erase source locations or downgrade filesystem failures.
 
 use crate::builder_surface::SourceFileKind;
 use crate::builder_surface::external_import_providers::cache::ExternalImportCacheKey;
@@ -19,13 +19,18 @@ use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages}
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
-use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
-use crate::compiler_frontend::paths::const_paths::{
-    ProviderImportPathView, RetainedProviderReference, ScannedProviderReference,
+use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath;
+use crate::compiler_frontend::headers::dependency_target::{
+    DependencyTargetKind, decode_dependency_target,
 };
-use crate::compiler_frontend::paths::path_normalization::join_and_normalize_path;
+use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
+use crate::compiler_frontend::paths::path_normalization::{
+    is_relative_dependency_path, join_and_normalize_path,
+};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
+use crate::compiler_frontend::paths::path_resolution::ResolvedDependencyFile;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
+use crate::compiler_frontend::symbols::identity::SourceFileTable;
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
@@ -40,11 +45,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::module_identity::ModuleId;
-use super::module_namespace::DirectoryImportResolution;
+use super::module_namespace::DirectoryDependencyResolution;
 use super::prepared_source::PreparedSourceInput;
 use super::source_discovery_error::SourceDiscoveryError;
 use super::source_loading::{extract_source_code, read_source_code, source_read_error};
-use super::source_scanning::{ScannedImportSource, scan_imports_with_source};
+use super::source_preparation::{PreparedDiscoverySource, prepare_discovery_source};
 use super::source_tree_index::{SourceClassification, SourceId, SourceTreeIndex};
 
 /// Minimum cache-miss count before Stage 0 uses Rayon for raw source loading.
@@ -57,7 +62,7 @@ pub(super) const STAGE0_PARALLEL_SOURCE_LOAD_MIN_FILES: usize = 8;
 ///
 /// WHAT: groups provider metadata, the external package registry, and build-scoped provider
 /// cache/table state.
-/// WHY: Stage 0 needs to mutate provider results while walking imports, but callers should not
+/// WHY: Stage 0 needs to mutate provider results while walking dependencies, but callers should not
 /// thread four closely related provider arguments through every discovery function.
 pub(crate) struct ExternalImportDiscoveryState<'a> {
     pub(super) external_packages: &'a mut ExternalPackageRegistry,
@@ -72,33 +77,36 @@ pub(super) enum StructuralProviderAction {
     Handled,
 }
 
-/// Resolve provider-backed and binding-backed import classes before indexed source resolution.
+/// Resolve provider-backed and binding-backed dependency classes before indexed source resolution.
 ///
 /// Directory module scheduling calls this with provider references retained by header syntax.
 /// It never scans tokens or source text.
 pub(super) fn resolve_structural_provider_reference(
-    provider: &RetainedProviderReference,
+    provider: &RetainedDependencyPath,
     canonical_file: &Path,
     project_path_resolver: &ProjectPathResolver,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
-    directory_import_resolution: DirectoryImportResolution<'_>,
+    directory_dependency_resolution: DirectoryDependencyResolution<'_>,
     string_table: &mut StringTable,
 ) -> Result<StructuralProviderAction, SourceDiscoveryError> {
-    match handle_provider_capable_import(
-        &provider.path,
-        &provider.path_location,
-        canonical_file,
-        project_path_resolver,
+    match handle_provider_capable_dependency(
+        ProviderCapableDependencyInput {
+            dependency_path: &provider.path,
+            dependency_location: &provider.location,
+            target: &provider.target,
+            canonical_file,
+            project_path_resolver,
+            directory_dependency_resolution: Some(directory_dependency_resolution),
+            string_table,
+        },
         external_imports,
-        Some(directory_import_resolution),
-        string_table,
     )? {
-        ImportPolicyAction::QueueLocal => Ok(StructuralProviderAction::ResolveSource),
-        ImportPolicyAction::Skip => Ok(StructuralProviderAction::Handled),
+        DependencyPolicyAction::QueueLocal => Ok(StructuralProviderAction::ResolveSource),
+        DependencyPolicyAction::Skip => Ok(StructuralProviderAction::Handled),
     }
 }
 
-/// A reachable source file plus the source kind selected by import resolution.
+/// A reachable source file plus the source kind selected by dependency resolution.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) struct ReachableSourceFile {
     pub(super) path: PathBuf,
@@ -107,40 +115,41 @@ pub(super) struct ReachableSourceFile {
 
 /// Stage 0 inventory for synthetic single-file compilation.
 ///
-/// WHAT: owns the deterministic source closure and the retained lexical scan for each reachable
-///       `.moth` file when no directory-project `SourceTreeIndex` ownership inventory is used.
-/// WHY: `assemble_input_files_from_inventory` moves each scanned source body into one
-///      `PreparedSourceInput` value. Directory projects prepare their owned `SourceId`s directly
-///      in the module-inventory queue instead of using this synthetic traversal cache.
+/// WHAT: owns the deterministic source closure and the complete retained file output for each
+///       reachable `.moth` file when no directory-project `SourceTreeIndex` ownership inventory
+///       is used.
+/// WHY: synthetic discovery prepares each Moth file before resolving its dependencies, then moves that
+///      complete output into the module input lane after final identities are known. Directory
+///      projects prepare their owned `SourceId`s directly in the module-inventory queue instead.
 pub(super) struct ReachableSourceInventory {
     pub(super) files: Vec<ReachableSourceFile>,
-    local_source_cache: FxHashMap<PathBuf, ScannedImportSource>,
+    local_source_cache: FxHashMap<PathBuf, PreparedDiscoverySource>,
 }
 
 /// One resolved dependency edge ready for direct insertion into the project module graph.
 ///
 /// WHAT: records that an authored structural provider reference resolved through the
 ///       boundary-aware namespace from a consumer project module to a provider project
-///       module, carrying both `ModuleId` values and the exact authored import-clause
+///       module, carrying both `ModuleId` values and the exact authored dependency-clause
 ///       `SourceLocation`.
 /// WHY: the namespace resolves to boundary-local `ModuleId`s directly, so the graph inserts
 ///      a provider-before-consumer edge without a path-to-ID mapping step. The authored
 ///      source location is retained in the graph side table so a later diagnostic owner can
-///      attribute the edge to the exact import clause without reparsing.
+///      attribute the edge to the exact dependency clause without reparsing.
 #[derive(Clone, Debug)]
 pub(crate) struct ResolvedDependencyEdge {
     pub(super) provider_module_id: ModuleId,
     pub(super) consumer_module_id: ModuleId,
-    pub(super) provider: RetainedProviderReference,
+    pub(super) dependency_shell_id: crate::compiler_frontend::symbols::identity::DependencyShellId,
     pub(super) graph_location: SourceLocation,
 }
 
-/// One authored import from a module to a separately compiled source-package facade.
+/// One authored dependency from a module to a separately compiled source-package facade.
 #[derive(Clone, Debug)]
-pub(crate) struct ResolvedSourcePackageImport {
+pub(crate) struct ResolvedSourcePackageDependency {
     pub(super) consumer_module_id: ModuleId,
-    pub(super) import_prefix: String,
-    pub(super) provider: RetainedProviderReference,
+    pub(super) dependency_prefix: String,
+    pub(super) dependency_shell_id: crate::compiler_frontend::symbols::identity::DependencyShellId,
 }
 
 /// Reachable discovery output pairing the file inventory with direct dependency edges.
@@ -148,7 +157,7 @@ pub(crate) struct ResolvedSourcePackageImport {
 /// WHAT: the complete retained inventory plus the project-local `ModuleId` edges observed during
 ///       one traversal. Both the provider-capable serial path and the provider-free
 ///       worker path return this so the inventory merge has one shape.
-/// WHY: dependency edges are collected at the same local-import resolution join as the file
+/// WHY: dependency edges are collected at the same local-dependency resolution join as the file
 ///      inventory, so they share the traversal owner and stay deterministic regardless of which
 ///      discovery path produced them.
 pub(super) struct ReachableDiscoveryResult {
@@ -177,7 +186,7 @@ struct LoadedMissingSourceFile {
     source_code: String,
 }
 
-/// Mutable traversal outputs shared by the source-import queue helpers.
+/// Mutable traversal outputs shared by the source-dependency queue helpers.
 struct ReachableQueue<'a> {
     reachable: &'a BTreeSet<ReachableSourceFile>,
     queue: &'a mut VecDeque<ReachableSourceFile>,
@@ -232,7 +241,7 @@ pub(super) fn collect_reachable_input_files(
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     string_table: &mut StringTable,
 ) -> Result<CollectedReachableInputs, CompilerMessages> {
-    // 1. Traverse the import graph to find all paths and retained resolved edges.
+    // 1. Traverse the dependency graph to find all paths and retained resolved edges.
     let discovery = match discover_reachable_source_files(
         entry_path,
         project_path_resolver,
@@ -351,14 +360,13 @@ pub(super) fn prepare_owned_source_input(
 /// Assemble `PreparedSourceInput` values without a semantic set (single-file synthetic path).
 fn assemble_reachable_files(
     files: Vec<ReachableSourceFile>,
-    mut source_cache: FxHashMap<PathBuf, ScannedImportSource>,
+    mut source_cache: FxHashMap<PathBuf, PreparedDiscoverySource>,
     string_table: &mut StringTable,
 ) -> Result<Vec<PreparedSourceInput>, CompilerMessages> {
     let input_file_count = files.len();
     let mut input_slots: Vec<Option<PreparedSourceInput>> =
         (0..input_file_count).map(|_| None).collect();
     let mut missing_sources = Vec::new();
-
     for (input_index, source_file) in files.into_iter().enumerate() {
         fill_input_slot(
             &mut source_cache,
@@ -375,7 +383,7 @@ fn assemble_reachable_files(
 
 /// Fill one input slot from the retained cache or queue it for disk loading.
 fn fill_input_slot(
-    source_cache: &mut FxHashMap<PathBuf, ScannedImportSource>,
+    source_cache: &mut FxHashMap<PathBuf, PreparedDiscoverySource>,
     canonical_path: &Path,
     source_kind: SourceFileKind,
     input_index: usize,
@@ -384,12 +392,15 @@ fn fill_input_slot(
 ) {
     if let Some(scanned_source) = source_cache.remove(canonical_path) {
         add_frontend_counter(FrontendCounter::Stage0SourceCacheHitCount, 1);
-        let source_byte_len = scanned_source.source_code.len();
+        let PreparedDiscoverySource {
+            prepared_output,
+            source_byte_len,
+        } = scanned_source;
 
-        input_slots[input_index] = Some(PreparedSourceInput::Moth {
+        input_slots[input_index] = Some(PreparedSourceInput::MothPrepared {
             source_byte_len,
             source_path: canonical_path.to_path_buf(),
-            tokens: Box::new(scanned_source.tokens),
+            output: Box::new(prepared_output),
         });
     } else {
         add_frontend_counter(FrontendCounter::Stage0SourceCacheMissCount, 1);
@@ -448,59 +459,59 @@ fn load_and_join_input_slots(
 //  Reachable Discovery
 // -------------------------
 
-/// Action a traversal policy wants the shared BFS to take for one import path.
-enum ImportPolicyAction {
-    /// Do not follow this import.
+/// Action a traversal policy wants the shared BFS to take for one dependency path.
+enum DependencyPolicyAction {
+    /// Do not follow this dependency.
     Skip,
-    /// Resolve and queue the import as a normal local Moth import.
+    /// Resolve and queue the dependency as a normal local Moth dependency.
     QueueLocal,
 }
 
-/// Stage 0 import policy that customizes the shared reachable-file traversal.
+/// Stage 0 dependency policy that customizes the shared reachable-file traversal.
 ///
-/// WHAT: the provider-capable path owns external imports while the shared BFS owns queue
+/// WHAT: the provider-capable path owns external-provider resolution while the shared BFS owns queue
 ///       handling, canonicalization, source preparation and local queuing.
 ///
-/// The policy only decides import actions for the synthetic single-file traversal. Directory
+/// The policy only decides dependency actions for the synthetic single-file traversal. Directory
 /// projects use indexed discovery and prepare each owned `SourceId` directly in the module queue;
 /// the synthetic traversal alone retains its isolated local scan cache until input assembly.
-enum ImportPolicy<'a, 'b> {
+enum DependencyPolicy<'a, 'b> {
     /// Full provider-capable path. Mutates provider cache and resolution tables.
     Capable {
         external_imports: &'a mut ExternalImportDiscoveryState<'b>,
     },
 }
 
-impl<'a, 'b> ImportPolicy<'a, 'b> {
-    /// Decide how to handle one import path.
-    fn handle_import(
+struct ProviderCapableDependencyInput<'a> {
+    dependency_path: &'a InternedPath,
+    dependency_location: &'a SourceLocation,
+    target: &'a DependencyTargetKind,
+    canonical_file: &'a Path,
+    project_path_resolver: &'a ProjectPathResolver,
+    directory_dependency_resolution: Option<DirectoryDependencyResolution<'a>>,
+    string_table: &'a mut StringTable,
+}
+
+impl<'a, 'b> DependencyPolicy<'a, 'b> {
+    /// Decide how to handle one dependency path.
+    fn handle_dependency(
         &mut self,
-        import_path: &InternedPath,
-        import_location: &SourceLocation,
-        canonical_file: &Path,
-        project_path_resolver: &ProjectPathResolver,
-        directory_import_resolution: Option<DirectoryImportResolution<'_>>,
-        string_table: &mut StringTable,
-    ) -> Result<ImportPolicyAction, SourceDiscoveryError> {
+        input: ProviderCapableDependencyInput<'_>,
+    ) -> Result<DependencyPolicyAction, SourceDiscoveryError> {
         match self {
-            ImportPolicy::Capable {
+            DependencyPolicy::Capable {
                 external_imports: state,
-            } => handle_provider_capable_import(
-                import_path,
-                import_location,
-                canonical_file,
-                project_path_resolver,
-                state,
-                directory_import_resolution,
-                string_table,
-            ),
+            } => handle_provider_capable_dependency(input, state),
         }
     }
 }
 
-/// Result of scanning one `.moth` file during traversal.
+/// Read/preparation accounting for one `.moth` file during traversal.
+///
+/// The complete `PreparedDiscoverySource` remains in `local_source_cache`; this result deliberately
+/// carries no detached clause vector because a retained clause range is meaningful only with its
+/// owning file selection table.
 struct ScannedMothSource {
-    imports: Vec<ScannedProviderReference>,
     fresh_read: bool,
     source_byte_count: usize,
 }
@@ -508,32 +519,39 @@ struct ScannedMothSource {
 fn scan_and_cache_local_moth_source(
     canonical_file: &Path,
     style_directives: &StyleDirectiveRegistry,
-    local_source_cache: &mut FxHashMap<PathBuf, ScannedImportSource>,
+    project_path_resolver: &ProjectPathResolver,
+    entry_file_path: &Path,
+    source_files: &mut SourceFileTable,
+    local_source_cache: &mut FxHashMap<PathBuf, PreparedDiscoverySource>,
     string_table: &mut StringTable,
 ) -> Result<ScannedMothSource, SourceDiscoveryError> {
-    if let Some(scanned) = local_source_cache.get(canonical_file) {
+    if local_source_cache.contains_key(canonical_file) {
         return Ok(ScannedMothSource {
-            imports: scanned.imports.clone(),
             fresh_read: false,
             source_byte_count: 0,
         });
     }
 
-    let scanned = scan_imports_with_source(canonical_file, style_directives, string_table)?;
-    let imports = scanned.imports.clone();
-    let source_byte_count = scanned.source_code.len();
+    let scanned = prepare_discovery_source(
+        canonical_file,
+        style_directives,
+        &Some(project_path_resolver.clone()),
+        entry_file_path,
+        source_files,
+        string_table,
+    )?;
+    let source_byte_count = scanned.source_byte_len;
     local_source_cache.insert(canonical_file.to_path_buf(), scanned);
 
     Ok(ScannedMothSource {
-        imports,
         fresh_read: true,
         source_byte_count,
     })
 }
 
-/// BFS over the synthetic single-file compilation's import declarations.
+/// BFS over the synthetic single-file compilation's dependency clauses.
 ///
-/// WHAT: follows each Moth file's declared imports, resolves them to canonical typed source
+/// WHAT: follows each Moth file's declared dependencies, resolves them to canonical typed source
 ///       files, and returns the full ordered set of files reachable from the entry points.
 /// WHY: directory projects use indexed header-owned discovery; this filesystem traversal exists
 ///      only for a file invoked directly as one synthetic module.
@@ -547,14 +565,28 @@ fn traverse_reachable_source_files(
     entry_paths: &[PathBuf],
     project_path_resolver: &ProjectPathResolver,
     style_directives: &StyleDirectiveRegistry,
-    policy: &mut ImportPolicy<'_, '_>,
+    policy: &mut DependencyPolicy<'_, '_>,
     string_table: &mut StringTable,
 ) -> Result<ReachableTraversalOutcome, SourceDiscoveryError> {
     let mut reachable = BTreeSet::new();
     let mut queue = VecDeque::new();
     let mut local_source_cache = FxHashMap::default();
+    // Traversal-local source identities: header preparation stamps retained shells from real
+    // FileIds, but the full inventory is unknown during the BFS. `prepare_module` later
+    // rebuilds the deterministic sorted table and rebinds every token to it.
+    let mut traversal_source_files = SourceFileTable::empty();
     #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
-    let mut imports_scanned: usize = 0;
+    let mut dependency_clauses_scanned: usize = 0;
+
+    // The entry identity table keys on canonical paths; canonicalize the entry once so
+    // header preparation recognises the active root by FileId instead of path text.
+    let canonical_entry_path = fs::canonicalize(&entry_paths[0]).map_err(|error| {
+        CompilerError::file_error(
+            &entry_paths[0],
+            format!("Failed to canonicalize entry file path: {error}"),
+            string_table,
+        )
+    })?;
 
     // Seed with entry points in deterministic order.
     for entry_path in entry_paths {
@@ -597,7 +629,7 @@ fn traverse_reachable_source_files(
             }
             SourceFileKind::PlainMarkdown => {
                 // Markdown files are importless content assets. They are carried forward for
-                // header-stage preparation but are never scanned for imports.
+                // header-stage preparation but are never scanned for dependencies.
                 continue;
             }
             SourceFileKind::Moth => {}
@@ -606,6 +638,9 @@ fn traverse_reachable_source_files(
         let scanned = match scan_and_cache_local_moth_source(
             &canonical_file,
             style_directives,
+            project_path_resolver,
+            &canonical_entry_path,
+            &mut traversal_source_files,
             &mut local_source_cache,
             string_table,
         ) {
@@ -622,34 +657,41 @@ fn traverse_reachable_source_files(
             );
         }
 
-        let import_references = scanned.imports.clone();
+        let dependency_clauses = &local_source_cache
+            .get(&canonical_file)
+            .expect("fresh or cached Moth source must remain in the complete source cache")
+            .prepared_output
+            .file_dependency_clauses;
         #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
         {
-            imports_scanned += import_references.len();
+            dependency_clauses_scanned += dependency_clauses.len();
         }
 
-        for provider in &import_references {
-            // Stage 0 resolves reachability through the provider path today; the structural
-            // reference retains `path_location` for the graph boundary alongside that path.
-            let import_path = &provider.path;
-            let action = policy.handle_import(
-                import_path,
-                &provider.path_location,
-                &canonical_file,
+        for clause in dependency_clauses {
+            // Stage 0 resolves each retained clause root once. Direct selections remain binding
+            // facts inside the completed provider surface and never become independent source
+            // paths during discovery.
+            let provider = &clause.dependency;
+            let dependency_path = &provider.path;
+            let action = policy.handle_dependency(ProviderCapableDependencyInput {
+                dependency_path,
+                dependency_location: &provider.location,
+                target: &provider.target,
+                canonical_file: &canonical_file,
                 project_path_resolver,
-                None,
+                directory_dependency_resolution: None,
                 string_table,
-            )?;
+            })?;
 
             match action {
-                ImportPolicyAction::Skip => continue,
-                ImportPolicyAction::QueueLocal => {
+                DependencyPolicyAction::Skip => continue,
+                DependencyPolicyAction::QueueLocal => {
                     let mut reachable_queue = ReachableQueue {
                         reachable: &reachable,
                         queue: &mut queue,
                     };
-                    let result = resolve_and_queue_local_import(
-                        provider.path_view(),
+                    let result = resolve_and_queue_local_dependency(
+                        provider,
                         &canonical_file,
                         project_path_resolver,
                         string_table,
@@ -669,8 +711,8 @@ fn traverse_reachable_source_files(
         reachable.len() as f64,
     );
     counter_observation!(
-        "stage0.reachable_discovery.imports_scanned",
-        imports_scanned as f64,
+        "stage0.reachable_discovery.dependency_clauses_scanned",
+        dependency_clauses_scanned as f64,
     );
 
     Ok(ReachableTraversalOutcome {
@@ -681,9 +723,9 @@ fn traverse_reachable_source_files(
     })
 }
 
-/// BFS over import declarations starting from `entry_point`, preserving source kind.
+/// BFS over dependency clauses starting from `entry_point`, preserving source kind.
 ///
-/// WHAT: follows each Moth file's declared imports, resolves them to canonical typed source
+/// WHAT: follows each Moth file's declared dependencies, resolves them to canonical typed source
 /// files, and returns the full ordered set of files reachable from the entry point.
 /// WHY: source kind belongs to Stage 0 input discovery. Builder-supported content assets can be
 ///      loaded and carried forward without being treated as Moth module roots.
@@ -694,7 +736,7 @@ pub(super) fn discover_reachable_source_files(
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     string_table: &mut StringTable,
 ) -> Result<ReachableDiscoveryResult, SourceDiscoveryError> {
-    let mut policy = ImportPolicy::Capable { external_imports };
+    let mut policy = DependencyPolicy::Capable { external_imports };
 
     let outcome = traverse_reachable_source_files(
         &[entry_point.to_path_buf()],
@@ -709,14 +751,14 @@ pub(super) fn discover_reachable_source_files(
     })
 }
 
-/// Resolve a compiler-semantic Moth import and enqueue its indexed or synthetic-file target.
+/// Resolve a compiler-semantic Moth dependency and enqueue its indexed or synthetic-file target.
 ///
 /// WHAT: handles cross-module root queuing, implementation-file discovery and direct dependency
-///       edge retention for an import that is not provider-backed or a virtual package import.
+///       edge retention for a dependency that is not provider-backed or a virtual package dependency.
 /// WHY: one owner keeps indexed resolution, same-module queuing and graph-edge retention aligned.
 ///      A graph edge is retained only when indexed resolution crosses project module roots.
-fn resolve_and_queue_local_import(
-    provider: ProviderImportPathView<'_>,
+fn resolve_and_queue_local_dependency(
+    provider: &RetainedDependencyPath,
     canonical_file: &Path,
     project_path_resolver: &ProjectPathResolver,
     string_table: &mut StringTable,
@@ -731,23 +773,44 @@ fn resolve_and_queue_local_import(
     )
 }
 
-/// Resolve a compiler-semantic import through the filesystem-backed resolver for single-file
+/// Resolve a compiler-semantic dependency through the filesystem-backed resolver for single-file
 /// synthetic compilation.
 ///
-/// Single-file compilation has no directory source index or project module graph, so it retains
-/// the original resolver path. No dependency edges are collected because there is no project
-/// module graph to populate.
+/// Single-file compilation has no directory source index or project module graph, so ordinary bare
+/// source clauses use the prepared owning-module-root table while relative and registered-package
+/// paths use the normal filesystem resolver. No dependency edges are collected because there is
+/// no project module graph to populate.
 fn resolve_and_queue_via_filesystem(
-    provider: ProviderImportPathView<'_>,
+    provider: &RetainedDependencyPath,
     canonical_file: &Path,
     project_path_resolver: &ProjectPathResolver,
     string_table: &mut StringTable,
     reachable_queue: &mut ReachableQueue<'_>,
 ) -> Result<(), SourceDiscoveryError> {
-    let resolved = project_path_resolver
-        .resolve_import_to_source_file(provider.path, canonical_file, string_table)
-        .map_err(SourceDiscoveryError::from)?;
+    let resolved = if is_relative_dependency_path(&provider.path, string_table)
+        || project_path_resolver
+            .source_package_root_for_dependency(&provider.path, string_table)
+            .is_some()
+    {
+        project_path_resolver
+            .resolve_dependency_to_source_file(&provider.path, canonical_file, string_table)
+            .map_err(SourceDiscoveryError::from)?
+    } else {
+        match resolve_module_root_bare_dependency(
+            &provider.path,
+            canonical_file,
+            project_path_resolver,
+            string_table,
+        )? {
+            Some(resolved) => resolved,
+            None => project_path_resolver
+                .resolve_dependency_to_source_file(&provider.path, canonical_file, string_table)
+                .map_err(SourceDiscoveryError::from)?,
+        }
+    };
 
+    // Extensionless source clauses bind to a resolved source file in the synthetic traversal.
+    add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
     let resolved_source_file = resolved_source_file(&resolved.path, resolved.kind);
     if !reachable_queue.reachable.contains(&resolved_source_file) {
         reachable_queue.queue.push_back(resolved_source_file);
@@ -756,77 +819,154 @@ fn resolve_and_queue_via_filesystem(
     Ok(())
 }
 
-fn handle_provider_capable_import(
-    import_path: &InternedPath,
-    import_location: &SourceLocation,
+/// Resolve a bare dependency from the retained module-root topology before entry-root lookup.
+///
+/// WHAT: maps a module path to its prepared root facade, or resolves a bare dependency from the
+///      declaring file's owning module root.
+/// WHY: synthetic discovery has no indexed namespace, but it must still implement the same
+///      module-root-relative source contract as directory discovery without allowing an entry-root
+///      namesake to shadow the declaring module's source.
+fn resolve_module_root_bare_dependency(
+    provider: &InternedPath,
     canonical_file: &Path,
     project_path_resolver: &ProjectPathResolver,
-    external_imports: &mut ExternalImportDiscoveryState<'_>,
-    directory_import_resolution: Option<DirectoryImportResolution<'_>>,
     string_table: &mut StringTable,
-) -> Result<ImportPolicyAction, SourceDiscoveryError> {
-    // Skip virtual package imports — AST resolution handles those.
+) -> Result<Option<ResolvedDependencyFile>, SourceDiscoveryError> {
+    let Some(first_component) = provider.as_components().first() else {
+        return Ok(None);
+    };
+    let first_segment = string_table.resolve(*first_component);
+    if matches!(first_segment, "." | "..") {
+        return Ok(None);
+    }
+
+    let module_root = project_path_resolver.module_root_for_file(canonical_file);
+    let Some(module_root) = module_root else {
+        return Ok(None);
+    };
+
+    let root_candidate = join_and_normalize_path(&module_root, provider, string_table);
+    if let Some(root_file) = project_path_resolver.module_root_file_for_directory(&root_candidate) {
+        return Ok(Some(ResolvedDependencyFile {
+            path: root_file,
+            kind: SourceFileKind::Moth,
+        }));
+    }
+
+    if module_root == project_path_resolver.entry_root() {
+        return Ok(None);
+    }
+
+    let module_prefix = module_root
+        .strip_prefix(project_path_resolver.entry_root())
+        .ok()
+        .ok_or_else(|| {
+            SourceDiscoveryError::from(CompilerError::compiler_error(format!(
+                "Owning module root '{}' is outside entry root '{}'",
+                module_root.display(),
+                project_path_resolver.entry_root().display()
+            )))
+        })?;
+    let module_prefix = InternedPath::try_from_filesystem_path(module_prefix, string_table)
+        .map_err(|NonUtf8PathComponent { path }| {
+            SourceDiscoveryError::from(CompilerError::file_error(
+                &path,
+                format!(
+                    "Owning module path {path:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
+                ),
+                string_table,
+            ))
+        })?;
+    let mut module_local_components = module_prefix.as_components().to_vec();
+    module_local_components.extend_from_slice(provider.as_components());
+    let module_local_provider = InternedPath::from_components(module_local_components);
+
+    project_path_resolver
+        .resolve_dependency_to_source_file(&module_local_provider, canonical_file, string_table)
+        .map(Some)
+        .map_err(SourceDiscoveryError::from)
+}
+
+fn handle_provider_capable_dependency(
+    input: ProviderCapableDependencyInput<'_>,
+    external_imports: &mut ExternalImportDiscoveryState<'_>,
+) -> Result<DependencyPolicyAction, SourceDiscoveryError> {
+    let ProviderCapableDependencyInput {
+        dependency_path,
+        dependency_location,
+        target,
+        canonical_file,
+        project_path_resolver,
+        directory_dependency_resolution,
+        string_table,
+    } = input;
+    // Skip virtual package dependencies — AST resolution handles those.
     if external_imports
         .external_packages
-        .is_virtual_package_import(import_path, string_table)
+        .is_virtual_package_dependency(dependency_path, string_table)
     {
-        if directory_import_resolution.is_some_and(|resolution| {
-            resolution.has_binding_package_import(import_path, string_table)
+        if directory_dependency_resolution.is_some_and(|resolution| {
+            resolution.has_binding_package_dependency(dependency_path, string_table)
         }) {
-            return Ok(ImportPolicyAction::QueueLocal);
+            return Ok(DependencyPolicyAction::QueueLocal);
         }
-        return Ok(ImportPolicyAction::Skip);
+        // Extensionless binding-package clauses bind through the external package registry.
+        add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
+        return Ok(DependencyPolicyAction::Skip);
     }
 
     // Check for unsupported builder-specific core packages.
     if let Some(package_path) = external_imports
         .external_packages
-        .unsupported_known_package_import(import_path, string_table)
+        .unsupported_known_package_dependency(dependency_path, string_table)
     {
         return Err(SourceDiscoveryError::from(
             unsupported_builder_package_error(canonical_file, package_path, string_table),
         ));
     }
 
-    // Detect provider-backed import prefixes (e.g. `./drawing.js` from
-    //    `@./drawing.js/draw` or `@./drawing.js`).
-    //    If a provider supports the extension, resolve the prefix, call the provider,
-    //    and register the result. Do not add external files to the Moth input list.
-    if let Some((prefix_path, prefix_str, extension)) =
-        provider_backed_import_prefix(import_path, string_table)
+    // Consume the retained provider classification. Header syntax already identified the
+    // first explicit non-source extension, so Stage 0 must not rescan path components.
+    if let Some(decoded) = decode_dependency_target(dependency_path, target, string_table)
+        .map_err(SourceDiscoveryError::from)?
     {
+        let prefix_path = decoded.prefix_path();
+        let prefix_str = prefix_path.to_portable_string(string_table);
+        let extension = decoded.extension_spelling().to_owned();
         if let Some(provider) = external_imports.providers.find_by_extension(&extension) {
             let result = resolve_provider_backed_import(
                 ProviderBackedImportRequest {
-                    importer_canonical_path: canonical_file,
-                    import_path,
-                    import_location,
+                    consumer_canonical_path: canonical_file,
+                    import_path: dependency_path,
+                    import_location: dependency_location,
                     prefix_path: &prefix_path,
                     raw_prefix: &prefix_str,
                     provider,
                     project_path_resolver,
-                    directory_import_resolution,
+                    directory_dependency_resolution,
                 },
                 external_imports,
                 string_table,
             );
             result?;
             counter_observation!("stage0.reachable_discovery.provider_imports", 1.0);
-            return Ok(ImportPolicyAction::Skip);
+            // Explicit-extension registered-provider clauses bind through the provider registry.
+            add_frontend_counter(FrontendCounter::ResolvedProviderClauseCount, 1);
+            return Ok(DependencyPolicyAction::Skip);
         }
 
         // No provider registered for this extension — report unsupported extension.
         return Err(SourceDiscoveryError::from(
             unsupported_external_extension_error(
                 canonical_file,
-                import_path,
+                dependency_path,
                 &extension,
                 string_table,
             ),
         ));
     }
 
-    Ok(ImportPolicyAction::QueueLocal)
+    Ok(DependencyPolicyAction::QueueLocal)
 }
 
 fn load_missing_sources(
@@ -992,55 +1132,15 @@ fn queue_same_directory_root_for_moth_template(
 //  Provider-backed import resolution
 // -------------------------
 
-/// Scans the components of an import path and returns the first file prefix whose final component
-/// has an explicit non-`.moth` extension.
-///
-/// WHAT: for grouped syntax such as `import @./drawing.js { draw }` the tokenized path is
-/// `@./drawing.js/draw`; this helper extracts the prefix `./drawing.js` and the extension `js`.
-/// For a bare namespace import such as `import @./helper.js` the path is `@./helper.js`; the
-/// prefix is `./helper.js`.
-/// WHY: provider resolution must happen for the file prefix, while any remaining components are
-/// symbol names to be resolved inside the provider-created package.
-fn provider_backed_import_prefix(
-    import_path: &InternedPath,
-    string_table: &StringTable,
-) -> Option<(InternedPath, String, String)> {
-    let components = import_path.as_components();
-    if components.is_empty() {
-        return None;
-    }
-
-    // Walk components to find the provider-owned file segment. Any later path components are
-    // grouped-import symbol names, not filesystem path segments.
-    for (index, component) in components.iter().enumerate() {
-        let segment = string_table.resolve(*component);
-        let path = Path::new(segment);
-        let Some(extension) = path.extension().and_then(|ext| ext.to_str()) else {
-            continue;
-        };
-
-        if SourceFileKind::from_extension(extension).is_some() {
-            continue;
-        }
-
-        let prefix_components = components[..=index].to_vec();
-        let prefix_path = InternedPath::from_components(prefix_components);
-        let prefix_str = prefix_path.to_portable_string(string_table);
-        return Some((prefix_path, prefix_str, extension.to_owned()));
-    }
-
-    None
-}
-
 struct ProviderBackedImportRequest<'a> {
-    importer_canonical_path: &'a Path,
+    consumer_canonical_path: &'a Path,
     import_path: &'a InternedPath,
     import_location: &'a SourceLocation,
     prefix_path: &'a InternedPath,
     raw_prefix: &'a str,
     provider: &'a std::sync::Arc<dyn ExternalImportProvider>,
     project_path_resolver: &'a ProjectPathResolver,
-    directory_import_resolution: Option<DirectoryImportResolution<'a>>,
+    directory_dependency_resolution: Option<DirectoryDependencyResolution<'a>>,
 }
 
 /// Resolves a provider-backed import prefix to a canonical filesystem path, checks the build cache,
@@ -1051,13 +1151,13 @@ fn resolve_provider_backed_import(
     string_table: &mut StringTable,
 ) -> Result<(), SourceDiscoveryError> {
     // Directory projects resolve provider-owned targets through the same boundary-aware
-    // namespace as compiler-semantic imports. Single-file synthetic compilation retains its
+    // namespace as compiler-semantic dependencies. Single-file synthetic compilation retains its
     // separate filesystem-backed resolver.
-    let canonical_source_path = match request.directory_import_resolution {
+    let canonical_source_path = match request.directory_dependency_resolution {
         Some(resolution) => resolution
             .resolve_provider_target(
                 request.prefix_path,
-                request.importer_canonical_path,
+                request.consumer_canonical_path,
                 request.import_location,
                 string_table,
             )
@@ -1084,14 +1184,14 @@ fn resolve_provider_target_via_filesystem(
 ) -> Result<PathBuf, SourceDiscoveryError> {
     let canonical_source_path = resolve_provider_prefix_to_canonical_path(
         request.prefix_path,
-        request.importer_canonical_path,
+        request.consumer_canonical_path,
         request.project_path_resolver,
         string_table,
     )?;
 
     // Enforce module/package boundaries for provider-backed imports.
-    check_provider_import_module_boundary(
-        request.importer_canonical_path,
+    check_provider_dependency_module_boundary(
+        request.consumer_canonical_path,
         &canonical_source_path,
         request.import_path,
         request.project_path_resolver,
@@ -1120,20 +1220,13 @@ fn invoke_provider_and_record_resolution(
     // Use cached result when available.
     if let Some(cached) = external_imports.cache.get(&cache_key) {
         let source_file_logical = source_file_logical_path(
-            request.importer_canonical_path,
+            request.consumer_canonical_path,
             request.project_path_resolver,
             string_table,
         )?;
-        let import_prefix_logical = source_file_logical_path(
-            &canonical_source_path,
-            request.project_path_resolver,
-            string_table,
-        )?;
-        insert_external_import_resolution(
-            external_imports.resolution_table,
+        external_imports.resolution_table.insert(
             source_file_logical,
             request.raw_prefix,
-            import_prefix_logical,
             cached.clone(),
         );
         return Ok(());
@@ -1144,7 +1237,7 @@ fn invoke_provider_and_record_resolution(
         canonical_source_path: canonical_source_path.clone(),
         source_location:
             crate::compiler_frontend::compiler_messages::source_location::SourceLocation::from_path(
-                request.importer_canonical_path,
+                request.consumer_canonical_path,
                 string_table,
             ),
     };
@@ -1166,43 +1259,16 @@ fn invoke_provider_and_record_resolution(
         external_imports.cache.insert(cache_key, resolved.clone());
 
         let source_file_logical = source_file_logical_path(
-            request.importer_canonical_path,
+            request.consumer_canonical_path,
             request.project_path_resolver,
             string_table,
         )?;
-        let import_prefix_logical = source_file_logical_path(
-            &canonical_source_path,
-            request.project_path_resolver,
-            string_table,
-        )?;
-        insert_external_import_resolution(
-            external_imports.resolution_table,
-            source_file_logical,
-            request.raw_prefix,
-            import_prefix_logical,
-            resolved,
-        );
+        external_imports
+            .resolution_table
+            .insert(source_file_logical, request.raw_prefix, resolved);
     }
 
     Ok(())
-}
-
-fn insert_external_import_resolution(
-    external_import_resolution_table: &mut ExternalImportResolutionTable,
-    source_file_logical: String,
-    raw_import_prefix: &str,
-    logical_import_prefix: String,
-    resolved: crate::builder_surface::external_import_providers::provider::ResolvedExternalImport,
-) {
-    external_import_resolution_table.insert(
-        source_file_logical.clone(),
-        logical_import_prefix.clone(),
-        resolved.clone(),
-    );
-
-    if raw_import_prefix != logical_import_prefix {
-        external_import_resolution_table.insert(source_file_logical, raw_import_prefix, resolved);
-    }
 }
 
 /// Resolves a provider import prefix to a canonical filesystem path without selecting a compiler
@@ -1212,20 +1278,36 @@ fn insert_external_import_resolution(
 /// extension candidate selection used by isolated compiler-source resolution.
 fn resolve_provider_prefix_to_canonical_path(
     prefix_path: &InternedPath,
-    importer_file: &Path,
+    declaring_file: &Path,
     project_path_resolver: &ProjectPathResolver,
     string_table: &mut StringTable,
 ) -> Result<PathBuf, SourceDiscoveryError> {
-    let (base_kind, filesystem_base) = project_path_resolver
-        .resolve_path_base_for_provider(prefix_path, importer_file, string_table)
-        .map_err(SourceDiscoveryError::from)?;
+    let (base_kind, filesystem_base) = if let Some(package_root) =
+        project_path_resolver.source_package_root_for_dependency(prefix_path, string_table)
+    {
+        (
+            crate::compiler_frontend::paths::compile_time_paths::CompileTimePathBase::SourcePackageRoot,
+            package_root,
+        )
+    } else {
+        // Dependency paths are module-root-relative. Synthetic traversal has no indexed module
+        // namespace, so it derives the same owning boundary from the resolver's retained module
+        // roots and uses the entry root only for the default module.
+        let module_root = project_path_resolver
+            .module_root_for_file(declaring_file)
+            .unwrap_or_else(|| project_path_resolver.entry_root().to_path_buf());
+        (
+            crate::compiler_frontend::paths::compile_time_paths::CompileTimePathBase::EntryRoot,
+            module_root,
+        )
+    };
 
     let normalized = join_and_normalize_path(&filesystem_base, prefix_path, string_table);
 
     let canonical = fs::canonicalize(&normalized)
         .map_err(|error| {
             CompilerError::file_error(
-                importer_file,
+                declaring_file,
                 format!(
                     "Failed to canonicalize external import prefix '{}': {error}",
                     normalized.display()
@@ -1235,12 +1317,12 @@ fn resolve_provider_prefix_to_canonical_path(
         })
         .map_err(SourceDiscoveryError::from)?;
 
-    crate::compiler_frontend::paths::import_resolution::validate_import_boundary(
+    crate::compiler_frontend::paths::dependency_resolution::validate_dependency_boundary(
         &canonical,
         &base_kind,
         &filesystem_base,
         prefix_path,
-        importer_file,
+        declaring_file,
         string_table,
     )
     .map_err(SourceDiscoveryError::from)?;
@@ -1273,25 +1355,25 @@ fn source_file_logical_path(
 //  Provider import boundary check
 // -------------------------
 
-/// Enforce that a provider-backed import does not cross a module or source-backed package boundary.
+/// Enforce that a provider-backed dependency does not cross a module or source-backed package boundary.
 ///
 /// WHAT: .js files are private implementation details of the module or package that owns them.
-///       Cross-module or cross-package .js imports bypass the public surface and are rejected.
-/// WHY: provider-backed imports must obey the same visibility boundaries as .moth source imports.
-fn check_provider_import_module_boundary(
-    importer_file: &Path,
+///       Cross-module or cross-package .js dependencies bypass the public surface and are rejected.
+/// WHY: provider-backed dependencies must obey the same visibility boundaries as .moth source dependencies.
+fn check_provider_dependency_module_boundary(
+    declaring_file: &Path,
     target_file: &Path,
-    import_path: &InternedPath,
+    dependency_path: &InternedPath,
     project_path_resolver: &ProjectPathResolver,
     string_table: &mut StringTable,
 ) -> Result<(), SourceDiscoveryError> {
-    let importer_container = provider_import_container(project_path_resolver, importer_file);
-    let target_container = provider_import_container(project_path_resolver, target_file);
+    let consumer_container = provider_dependency_container(project_path_resolver, declaring_file);
+    let target_container = provider_dependency_container(project_path_resolver, target_file);
 
-    if importer_container != target_container {
-        let location = SourceLocation::from_path(importer_file, string_table);
+    if consumer_container != target_container {
+        let location = SourceLocation::from_path(declaring_file, string_table);
         return Err(SourceDiscoveryError::from(
-            CompilerDiagnostic::cross_module_import_not_exported(import_path.clone(), location),
+            CompilerDiagnostic::cross_module_import_not_exported(dependency_path.clone(), location),
         ));
     }
 
@@ -1302,7 +1384,7 @@ fn check_provider_import_module_boundary(
 ///
 /// WHAT: returns the module root, source-backed package root, or entry root that contains the file.
 /// WHY: two files in the same container may freely import each other's .js files.
-fn provider_import_container(
+fn provider_dependency_container(
     project_path_resolver: &ProjectPathResolver,
     file: &Path,
 ) -> Option<PathBuf> {
@@ -1330,21 +1412,21 @@ fn provider_import_container(
 // -------------------------
 
 fn unsupported_builder_package_error(
-    importer: &Path,
+    consumer_file: &Path,
     package_path: &str,
     string_table: &mut StringTable,
 ) -> CompilerDiagnostic {
     let package_path_id = string_table.intern(package_path);
     let location =
         crate::compiler_frontend::compiler_messages::source_location::SourceLocation::from_path(
-            importer,
+            consumer_file,
             string_table,
         );
     CompilerDiagnostic::unsupported_builder_package(package_path_id, location)
 }
 
 fn unsupported_external_extension_error(
-    importer: &Path,
+    consumer_file: &Path,
     import_path: &InternedPath,
     extension: &str,
     string_table: &mut StringTable,
@@ -1352,7 +1434,7 @@ fn unsupported_external_extension_error(
     let extension_id = string_table.intern(extension);
     let location =
         crate::compiler_frontend::compiler_messages::source_location::SourceLocation::from_path(
-            importer,
+            consumer_file,
             string_table,
         );
     CompilerDiagnostic::unsupported_external_extension(import_path.clone(), extension_id, location)

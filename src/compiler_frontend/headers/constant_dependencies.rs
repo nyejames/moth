@@ -10,8 +10,8 @@ use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticBag,
 };
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
-use crate::compiler_frontend::headers::import_environment::{
-    FileVisibility, HeaderImportEnvironment, NamespaceTypeMember, NamespaceValueMember,
+use crate::compiler_frontend::headers::binding_environment::{
+    FileVisibility, HeaderBindingEnvironment, NamespaceTypeMember, NamespaceValueMember,
 };
 use crate::compiler_frontend::headers::module_symbols::{GenericDeclarationKind, ModuleSymbols};
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
@@ -28,7 +28,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 pub(crate) struct ConstantDependencyInput<'a> {
     pub(crate) headers: &'a mut [Header],
     pub(crate) module_symbols: &'a ModuleSymbols,
-    pub(crate) import_environment: &'a HeaderImportEnvironment,
+    pub(crate) binding_environment: &'a HeaderBindingEnvironment,
     pub(crate) string_table: &'a mut StringTable,
 }
 
@@ -67,7 +67,7 @@ pub(crate) fn add_constant_initializer_dependencies(
     let ConstantDependencyInput {
         headers,
         module_symbols,
-        import_environment,
+        binding_environment,
         string_table,
     } = input;
 
@@ -130,7 +130,7 @@ pub(crate) fn add_constant_initializer_dependencies(
             continue;
         }
 
-        let visibility = match import_environment.visibility_for(&header.source_file) {
+        let visibility = match binding_environment.visibility_for(&header.source_file) {
             Ok(v) => v,
             Err(error) => {
                 diagnostic_bag.push(compiler_error_to_diagnostic(&error));
@@ -148,8 +148,8 @@ pub(crate) fn add_constant_initializer_dependencies(
                 &constant_positions,
                 &struct_or_choice_paths,
                 module_symbols,
-                &import_environment.imported_declarations_by_local_path,
-                &import_environment.imported_declarations_by_origin,
+                &binding_environment.imported_declarations_by_local_path,
+                &binding_environment.imported_declarations_by_origin,
             );
 
             match resolution {
@@ -185,7 +185,10 @@ pub(crate) fn add_constant_initializer_dependencies(
                         report.cross_file_edges += 1;
                     }
 
-                    edges_to_add.push((header_index, LocalDeclarationOrderingHint::new(path)));
+                    edges_to_add.push((
+                        header_index,
+                        LocalDeclarationOrderingHint::source_owned(path),
+                    ));
                 }
 
                 // Type aliases live in the type namespace. They do not create value dependency edges.

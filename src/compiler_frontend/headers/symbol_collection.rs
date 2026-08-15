@@ -1,6 +1,6 @@
 //! Order-independent header symbol collection.
 //!
-//! WHAT: validates declared names, builds per-file import/export maps, records generic declaration
+//! WHAT: validates declared names, builds per-file dependency/export maps, records generic declaration
 //! metadata, and stages builtin declarations during header parsing.
 //! WHY: this work depends only on parsed headers, not dependency order. Keeping it separate lets
 //! `prepare_header_syntax` stay orchestration-first and leaves dependency sorting as the owner of
@@ -28,17 +28,17 @@ use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 
 /// Collect all order-independent top-level symbol metadata from parsed (unsorted) headers.
 ///
-/// WHAT: registers every prepared file path, per-file imports, and declared symbols.
-/// WHY: import-only files may produce no declaration headers but still contribute file metadata
-/// and imports to the module symbol package.
+/// WHAT: registers every prepared file path, per-file dependency clauses, and declared symbols.
+/// WHY: dependency-only files may produce no declaration headers but still contribute file
+/// metadata and clauses to the module symbol package.
 pub(super) fn build_module_symbols(
-    prepared_files: &[FileFrontendPrepareOutput],
+    prepared_files: &mut [FileFrontendPrepareOutput],
     string_table: &mut StringTable,
 ) -> Result<ModuleSymbols, DiagnosticBag> {
     let mut module_symbols = ModuleSymbols::empty();
     let mut diagnostic_bag = DiagnosticBag::new();
 
-    for file_output in prepared_files {
+    for file_output in prepared_files.iter() {
         module_symbols
             .module_file_paths
             .insert(file_output.source_file.to_owned());
@@ -50,13 +50,6 @@ pub(super) fn build_module_symbols(
             module_symbols.canonical_os_path_by_source.insert(
                 file_output.source_file.to_owned(),
                 canonical_os_path.to_owned(),
-            );
-        }
-
-        if !file_output.file_imports.is_empty() {
-            module_symbols.file_imports_by_source.insert(
-                file_output.source_file.to_owned(),
-                file_output.file_imports.to_owned(),
             );
         }
 
@@ -82,6 +75,24 @@ pub(super) fn build_module_symbols(
 
     if diagnostic_bag.has_errors() {
         return Err(diagnostic_bag);
+    }
+
+    // The retained clause and selection tables have completed validation above. Move them into
+    // the module-owned package now so binding reads one canonical table without cloning every
+    // prepared file's selections before the file output is consumed.
+    for file_output in prepared_files.iter_mut() {
+        if !file_output.file_dependency_clauses.is_empty() {
+            module_symbols.file_dependency_clauses_by_source.insert(
+                file_output.source_file.to_owned(),
+                std::mem::take(&mut file_output.file_dependency_clauses),
+            );
+        }
+        if !file_output.dependency_selections.is_empty() {
+            module_symbols.dependency_selections_by_source.insert(
+                file_output.source_file.to_owned(),
+                std::mem::take(&mut file_output.dependency_selections),
+            );
+        }
     }
 
     register_builtin_symbols(&mut module_symbols, string_table);
@@ -150,7 +161,7 @@ pub(super) fn is_receiver_method_candidate(
 /// Extract the parsed receiver type name from a receiver-method candidate.
 ///
 /// WHAT: records `Counter` from `tick |this Counter|` before semantic type resolution.
-/// WHY: header import preparation can then auto-import only methods attached to an imported
+/// WHY: header binding preparation can then bind only methods attached to a provider
 ///      nominal type from the same surface instead of every receiver method in that file.
 fn receiver_method_receiver_name(
     signature: &FunctionSignatureSyntax,
@@ -178,10 +189,10 @@ fn receiver_method_receiver_name(
     }
 }
 
-fn is_importable_for_symbol_collection(header: &Header) -> bool {
+fn is_dependency_bindable_for_symbol_collection(header: &Header) -> bool {
     if header.file_role == FileRole::ImportedModuleRoot {
         // Imported roots are compiled only as public module surfaces; private declarations stay
-        // available for resolving the root's own exported signatures, not for importer lookup.
+        // available for resolving the root's own exported signatures, not for consumer lookup.
         return header.export_mode == HeaderExportMode::Public;
     }
 
@@ -203,7 +214,7 @@ fn register_header_symbol(
                 module_symbols,
                 &header.tokens.src_path,
                 &header.source_file,
-                is_importable_for_symbol_collection(header),
+                is_dependency_bindable_for_symbol_collection(header),
             );
             register_generic_declaration_metadata(
                 module_symbols,
@@ -232,7 +243,7 @@ fn register_header_symbol(
                 module_symbols,
                 &header.tokens.src_path,
                 &header.source_file,
-                is_importable_for_symbol_collection(header),
+                is_dependency_bindable_for_symbol_collection(header),
             );
             module_symbols
                 .nominal_type_paths
@@ -252,7 +263,7 @@ fn register_header_symbol(
                 module_symbols,
                 &header.tokens.src_path,
                 &header.source_file,
-                is_importable_for_symbol_collection(header),
+                is_dependency_bindable_for_symbol_collection(header),
             );
             module_symbols
                 .nominal_type_paths
@@ -278,7 +289,7 @@ fn register_header_symbol(
                 module_symbols,
                 &header.tokens.src_path,
                 &header.source_file,
-                is_importable_for_symbol_collection(header),
+                is_dependency_bindable_for_symbol_collection(header),
             );
             module_symbols
                 .constant_paths
@@ -290,7 +301,7 @@ fn register_header_symbol(
                 module_symbols,
                 &header.tokens.src_path,
                 &header.source_file,
-                is_importable_for_symbol_collection(header),
+                is_dependency_bindable_for_symbol_collection(header),
             );
             module_symbols
                 .type_alias_paths
@@ -304,7 +315,7 @@ fn register_header_symbol(
                 module_symbols,
                 &header.tokens.src_path,
                 &header.source_file,
-                is_importable_for_symbol_collection(header),
+                is_dependency_bindable_for_symbol_collection(header),
             );
             module_symbols
                 .trait_paths
@@ -313,12 +324,12 @@ fn register_header_symbol(
 
         HeaderKind::TraitConformance { .. } => {
             // Conformance declarations are compile-time metadata. They do not introduce a new
-            // importable symbol; AST validates and indexes evidence later.
+            // dependency-bindable symbol; AST validates and indexes evidence later.
         }
 
         HeaderKind::TraitIncompatibility { .. } => {
             // Incompatibility declarations are compile-time metadata. They do not introduce a new
-            // importable symbol; AST validates and records the relation after trait registration.
+            // dependency-bindable symbol; AST validates and records the relation after trait registration.
         }
     }
 }

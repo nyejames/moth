@@ -76,7 +76,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             };
 
             let visibility = self
-                .import_environment
+                .binding_environment
                 .visibility_for(&header.source_file)
                 .map_err(|error| self.error_messages(error, string_table))?
                 .clone();
@@ -173,12 +173,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     AstTypeInterner::new(&mut self.type_environment, &mut compatibility_cache);
                 let signature = function_signature_from_syntax_with_unresolved_types(
                     signature,
+                    &header.tokens.path_syntax,
                     &signature_context,
                     &mut type_interner,
                     string_table,
                     SignatureTypeFallbackPolicy::StrictCapacity,
                 )
-                .map_err(|diagnostic| self.diagnostic_messages(*diagnostic, string_table))?;
+                .map_err(|error| self.expression_error_messages(error, string_table))?;
                 self.warnings
                     .extend(signature_context.take_emitted_warnings());
                 signature
@@ -423,13 +424,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     ///
     /// WHAT: catches impossible duplicate visible methods for the same receiver and method name.
     /// WHY: source methods travel with receiver type visibility, so this is a defensive
-    /// Stage 4 check over the Stage 2 visibility package rather than an import-alias validator.
+    /// Stage 4 check over the Stage 2 visibility package rather than a dependency-alias validator.
     pub(in crate::compiler_frontend::ast) fn validate_receiver_method_visibility_invariants(
         &self,
         receiver_methods: &ReceiverMethodCatalog,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
-        for file_visibility in self.import_environment.file_visibility_by_source.values() {
+        for file_visibility in self.binding_environment.file_visibility_by_source.values() {
             for visible_methods in file_visibility.visible_receiver_methods.values() {
                 for visible_method in visible_methods {
                     let Some(method_entry) = receiver_methods

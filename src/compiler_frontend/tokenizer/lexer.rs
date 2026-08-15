@@ -27,10 +27,9 @@ use crate::compiler_frontend::tokenizer::text_modes::{
     tokenize_string, tokenize_template_body,
 };
 use crate::compiler_frontend::tokenizer::tokens::{
-    CharPosition, FileTokens, SourceLocation, TemplateBodyMode, Token, TokenKind, TokenStream,
-    TokenizeMode, TokenizerEntryMode,
+    FileTokens, SourceLocation, TemplateBodyMode, Token, TokenKind, TokenStream, TokenizeMode,
+    TokenizerEntryMode,
 };
-use crate::compiler_frontend::utilities::basic::CharacterParsing;
 use crate::projects::settings;
 use crate::token_log;
 use std::iter::Peekable;
@@ -377,109 +376,6 @@ fn missing_whitespace_side(missing_left: bool, missing_right: bool) -> Option<Mi
     }
 }
 
-/// Recognise a bare import path that is missing its required `@` prefix.
-///
-/// WHAT: when the last meaningful token is `import` and the current position starts an
-/// identifier-led path (such as `core` or `core/math`) or a `./` relative path, scan the
-/// complete authored spelling and return a missing-`@` diagnostic spanning it.
-/// WHY: without this, a bare `import core/math` reaches the `/` operator before the
-/// compiler realises the prefix is missing, producing a confusing spacing error at the
-/// slash instead of pointing at the whole authored path.
-///
-/// This is a narrow lexical scan for the correction fact only. It does not validate or
-/// resolve import paths; that ownership stays with `parse_file_path` and the import
-/// clause parser. The scan stops at whitespace, structural delimiters and template
-/// boundaries, so it never consumes a grouped `{` clause or an `as` alias (aliases are
-/// preceded by whitespace). Parent-relative `../` paths are intentionally not
-/// recognised here, because `@../` is not supported syntax.
-fn recognise_missing_at_import_prefix(
-    stream: &mut TokenStream<'_>,
-    context: LexerTokenContext<'_>,
-    current_char: char,
-    string_table: &mut StringTable,
-) -> Option<CompilerDiagnostic> {
-    if !matches!(context.last_meaningful_token_kind, Some(TokenKind::Import)) {
-        return None;
-    }
-
-    let starts_identifier_led = current_char.is_alphabetic()
-        || (current_char == '_'
-            && stream
-                .peek()
-                .is_some_and(|character| is_identifier_continue(*character)));
-    let starts_relative_current = current_char == '.' && stream.peek() == Some(&'/');
-
-    if !starts_identifier_led && !starts_relative_current {
-        return None;
-    }
-
-    // `as` directly after `import` is the alias keyword with a missing path, not a path itself.
-    // Peek without advancing so the import-clause parser keeps ownership of that mistake.
-    let mut alias_lookahead = stream.chars.clone();
-    if current_char == 'a'
-        && alias_lookahead.next() == Some('s')
-        && alias_lookahead
-            .peek()
-            .is_none_or(|character| is_missing_at_prefix_scan_boundary(*character))
-    {
-        return None;
-    }
-
-    // The first path character was already consumed at the top of the token loop, so the
-    // stream cursor rests one column past it. Step back one column so the span covers the
-    // complete authored path, matching how `parse_file_path` spans a valid `@` path.
-    let path_start = CharPosition {
-        char_column: stream.start_position.char_column.saturating_sub(1),
-        ..stream.start_position
-    };
-
-    let mut authored_path = String::new();
-    authored_path.push(current_char);
-
-    if starts_relative_current {
-        let slash = stream.advance_after_peek(
-            "Tokenizer peeked the relative-current slash but could not advance the stream.",
-        );
-        authored_path.push(slash);
-    }
-
-    while let Some(&next_char) = stream.peek() {
-        if is_missing_at_prefix_scan_boundary(next_char) {
-            break;
-        }
-
-        let consumed = stream.advance_after_peek(
-            "Tokenizer peeked a missing-@ import path character but could not advance the stream.",
-        );
-        authored_path.push(consumed);
-    }
-
-    let authored_path_id = string_table.intern(&authored_path);
-
-    Some(CompilerDiagnostic::common_syntax_mistake(
-        CommonSyntaxMistakeReason::ImportPathMissingAtPrefix {
-            authored_path: authored_path_id,
-        },
-        SourceLocation::new(stream.file_path.to_owned(), path_start, stream.position),
-    ))
-}
-
-/// WHAT: characters that end the narrow missing-`@` import-path scan.
-/// WHY: the scan captures the authored spelling only. It stops at whitespace and
-/// structural, grouped, config and template delimiters so it never consumes a grouped
-/// clause, alias or unrelated operator. Path separators (`/` and `\`) plus component
-/// characters such as `.` and `-` are consumed so the complete spelling is preserved.
-fn is_missing_at_prefix_scan_boundary(character: char) -> bool {
-    if character.is_whitespace() {
-        return true;
-    }
-
-    matches!(
-        character,
-        '{' | '}' | ',' | ':' | '[' | ']' | '(' | ')' | '<' | '>' | '"' | '|' | '?' | '*' | ';'
-    )
-}
-
 fn unary_negation_spacing_error(stream: &mut TokenStream<'_>) -> CompilerDiagnostic {
     CompilerDiagnostic::common_syntax_mistake(
         CommonSyntaxMistakeReason::InvalidUnaryNegationSpacing,
@@ -581,7 +477,13 @@ pub fn tokenize(
     let mut tokens: Vec<Token> = Vec::with_capacity(initial_capacity);
     let mut stream = TokenStream::new(source_code, src_path, entry_mode);
 
-    let mut token: Token = Token::new(TokenKind::ModuleStart, SourceLocation::default());
+    // `ModuleStart` is synthetic, but it can remain in a retained dormant `start` body. Give it
+    // the source file scope so every token that crosses the prepared-file boundary has one
+    // coherent source identity.
+    let mut token = Token::new(
+        TokenKind::ModuleStart,
+        SourceLocation::new(src_path.to_owned(), Default::default(), Default::default()),
+    );
     let mut last_meaningful_token_kind: Option<TokenKind> = None;
     let mut meaningful_token_before_last_kind: Option<TokenKind> = None;
     let mut token_stats = TokenStats::default();
@@ -612,7 +514,13 @@ pub fn tokenize(
 
     tokens.push(token);
 
-    let mut file_tokens = FileTokens::new_with_file_id(src_path.to_owned(), file_id, tokens);
+    let mut file_tokens = FileTokens::new_with_identity(
+        src_path.to_owned(),
+        file_id,
+        None,
+        tokens,
+        stream.path_syntax,
+    );
     file_tokens.token_stats = token_stats;
     Ok(file_tokens)
 }
@@ -695,15 +603,6 @@ fn get_token_kind(
 
         // Ignore leading whitespace for the next token's source location.
         stream.update_start_position();
-
-        // A bare import path missing its `@` prefix (such as `import core/math` or
-        // `import ./utils`) is recognised here, before normal identifier, dot or
-        // operator tokenization turns the path into a confusing operator error.
-        if let Some(diagnostic) =
-            recognise_missing_at_import_prefix(stream, context, current_char, string_table)
-        {
-            return Err(Box::new(diagnostic));
-        }
 
         // ---------------------
         //  Template delimiters
@@ -1392,23 +1291,6 @@ pub(crate) fn tokenize_identifier_or_keyword(
             stream.new_location(),
         )));
     }
-}
-
-/// Consume horizontal whitespace (spaces, tabs) but stop at newlines.
-/// WHY: Newlines are significant tokens; this helper lets callers skip indentation
-/// without consuming line boundaries.
-pub fn consume_non_newline_whitespace(stream: &mut TokenStream) -> bool {
-    let mut consumed = false;
-
-    while stream
-        .peek()
-        .is_some_and(|character| character.is_non_newline_whitespace())
-    {
-        stream.next();
-        consumed = true;
-    }
-
-    consumed
 }
 
 /// Consume all whitespace including newlines.

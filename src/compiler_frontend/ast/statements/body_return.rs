@@ -5,6 +5,7 @@
 //! logic keeps body dispatch simple and prevents return rules from leaking across modules.
 
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::parse_expression::{
     create_expression, create_multiple_expressions,
@@ -39,7 +40,7 @@ pub(crate) fn parse_return_statement(
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
-) -> Result<(), Box<CompilerDiagnostic>> {
+) -> Result<(), ExpressionParseError> {
     if context.expected_result_type_ids.is_empty()
         && context.expected_error_type.is_none()
         && !matches!(
@@ -47,12 +48,11 @@ pub(crate) fn parse_return_statement(
             ContextKind::Function | ContextKind::CatchHandler
         )
     {
-        return Err(Box::new(
-            CompilerDiagnostic::invalid_control_flow_statement(
-                InvalidControlFlowStatementReason::ReturnOutsideFunction,
-                token_stream.current_location(),
-            ),
-        ));
+        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+            InvalidControlFlowStatementReason::ReturnOutsideFunction,
+            token_stream.current_location(),
+        )
+        .into());
     }
 
     let is_error_return = token_stream.current_token_kind() == &TokenKind::ReturnBang;
@@ -64,19 +64,19 @@ pub(crate) fn parse_return_statement(
 
     if is_error_return {
         let Some(expected_error_type_id) = context.expected_error_type else {
-            return Err(Box::new(
-                CompilerDiagnostic::invalid_control_flow_statement(
-                    InvalidControlFlowStatementReason::ReturnBangOutsideErrorFunction,
-                    token_stream.current_location(),
-                ),
-            ));
+            return Err(CompilerDiagnostic::invalid_control_flow_statement(
+                InvalidControlFlowStatementReason::ReturnBangOutsideErrorFunction,
+                token_stream.current_location(),
+            )
+            .into());
         };
 
         if is_return_terminator(token_stream.current_token_kind()) {
-            return Err(Box::new(CompilerDiagnostic::invalid_return_shape(
+            return Err(CompilerDiagnostic::invalid_return_shape(
                 InvalidReturnShapeReason::MissingReturnBangValue,
                 token_stream.current_location(),
-            )));
+            )
+            .into());
         }
 
         let mut expected_error = ExpectedType::Known(expected_error_type_id);
@@ -88,8 +88,7 @@ pub(crate) fn parse_return_statement(
             &ValueMode::ImmutableOwned,
             false,
             string_table,
-        )
-        .map_err(|error| Box::new(CompilerDiagnostic::from(error)))?;
+        )?;
 
         let returned_error = coerce_expression_to_explicit_type_boundary(
             returned_error,
@@ -109,10 +108,11 @@ pub(crate) fn parse_return_statement(
     }
 
     if token_stream.current_token_kind() == &TokenKind::Bang {
-        return Err(Box::new(CompilerDiagnostic::unexpected_token(
+        return Err(CompilerDiagnostic::unexpected_token(
             TokenKind::Bang,
             token_stream.current_location(),
-        )));
+        )
+        .into());
     }
 
     // --------------------------
@@ -131,18 +131,17 @@ pub(crate) fn parse_return_statement(
             string_table,
         ) {
             Some(Ok(expr)) => expr,
-            Some(Err(diagnostic)) => return Err(Box::new(diagnostic)),
+            Some(Err(error)) => return Err(error),
             None => {
                 // Token was `if` but parsing failed at a deeper level.
                 // The helper has already advanced past `if` and reported its
                 // own diagnostic, so we should not fall through to normal
                 // return parsing which would produce a secondary error.
-                return Err(Box::new(
-                    CompilerDiagnostic::invalid_control_flow_statement(
-                        InvalidControlFlowStatementReason::ExpectedColonAfterCondition,
-                        token_stream.current_location(),
-                    ),
-                ));
+                return Err(CompilerDiagnostic::invalid_control_flow_statement(
+                    InvalidControlFlowStatementReason::ExpectedColonAfterCondition,
+                    token_stream.current_location(),
+                )
+                .into());
             }
         };
 
@@ -180,18 +179,20 @@ pub(crate) fn parse_return_statement(
         if is_return_terminator(token_stream.current_token_kind()) {
             Vec::new()
         } else {
-            return Err(Box::new(CompilerDiagnostic::invalid_return_shape(
+            return Err(CompilerDiagnostic::invalid_return_shape(
                 InvalidReturnShapeReason::ReturnValuesWithBareSignature,
                 token_stream.current_location(),
-            )));
+            )
+            .into());
         }
     } else {
         if is_return_terminator(token_stream.current_token_kind()) {
             let expected_count = context.expected_result_type_ids.len();
-            return Err(Box::new(CompilerDiagnostic::invalid_return_shape(
+            return Err(CompilerDiagnostic::invalid_return_shape(
                 InvalidReturnShapeReason::BareReturnWithExpectedValues { expected_count },
                 token_stream.current_location(),
-            )));
+            )
+            .into());
         }
 
         let parsed_return_values = create_multiple_expressions(
@@ -201,15 +202,15 @@ pub(crate) fn parse_return_statement(
             "return values",
             false,
             string_table,
-        )
-        .map_err(|error| Box::new(CompilerDiagnostic::from(error)))?;
+        )?;
 
         if token_stream.current_token_kind() == &TokenKind::Comma {
             let expected_count = context.expected_result_type_ids.len();
-            return Err(Box::new(CompilerDiagnostic::invalid_return_shape(
+            return Err(CompilerDiagnostic::invalid_return_shape(
                 InvalidReturnShapeReason::TooManyReturnValues { expected_count },
                 token_stream.current_location(),
-            )));
+            )
+            .into());
         }
 
         let mut coerced_values: Vec<Expression> = Vec::with_capacity(parsed_return_values.len());

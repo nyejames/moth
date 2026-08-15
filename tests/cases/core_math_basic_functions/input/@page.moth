@@ -1,4 +1,4 @@
-import @core/math {sin, cos, pow, sqrt, clamp}
+@core/math sin, cos, pow, sqrt, clamp
 
 angle = 0.0
 s = sin(angle)

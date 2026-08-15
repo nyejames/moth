@@ -15,7 +15,7 @@ use super::model::{
     PublicInterfaceDraft, PublicReceiverMethodCategory, PublicReceiverMethodSemantics,
     PublicSemanticInterface, PublicStructSemantics, PublicTraitSemantics, TraitSurfaceTypeIdentity,
 };
-use super::{ProviderInterfaceId, SourceProviderImportSet};
+use super::{ProviderInterfaceId, SourceProviderDependencySet};
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalEvidenceIdentity, CanonicalTraitIdentity, CanonicalTypeIdentity,
 };
@@ -31,7 +31,7 @@ impl PublicSemanticInterface {
     /// Close one completed local surface over the immutable interfaces selected by Stage 0.
     pub(crate) fn close_from_local(
         local: LocalPublicInterface,
-        provider_imports: &SourceProviderImportSet<'_>,
+        provider_dependencies: &SourceProviderDependencySet<'_>,
         external_registry: &ExternalPackageRegistry,
     ) -> Result<Self, CompilerError> {
         let LocalPublicInterface {
@@ -59,7 +59,7 @@ impl PublicSemanticInterface {
         direct.validate_closure_input()?;
 
         let mut providers: Vec<(ProviderInterfaceId, &PublicSemanticInterface)> =
-            provider_imports.providers().collect();
+            provider_dependencies.providers().collect();
         providers.sort_by(|left, right| left.1.module_origin.cmp(&right.1.module_origin));
         // Collapse repeated references to one completed interface by its exact provider ID.
         // Two distinct interfaces that claim the same module origin stay separate so the
@@ -643,7 +643,7 @@ impl<'provider> ClosureSelection<'provider> {
     /// Move the selected direct records out once and clone the selected provider records.
     ///
     /// Final vectors are sorted by stable semantic identity so publication order never depends
-    /// on provider import order.
+    /// on provider dependency order.
     fn materialize(
         self,
         direct: &mut PublicSemanticInterface,

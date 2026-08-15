@@ -8,6 +8,7 @@
 use crate::ast_log;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::function_body_to_ast;
 use crate::compiler_frontend::ast::statements::loop_headers::{
     ParsedLoopHeader, parse_loop_header_tokens,
@@ -20,11 +21,9 @@ use crate::compiler_frontend::utilities::token_scan::NestingDepth;
 
 /// Stage-local result for loop statement AST construction.
 ///
-/// WHY: `CompilerDiagnostic` is large enough that returning it directly inside a
-/// `Result` triggers `clippy::result_large_err`. Boxing at this boundary keeps
-/// the loop-statement owner uniform with `loop_headers` without changing
-/// diagnostic semantics.
-type LoopResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// WHY: loop-header parsing can detect an invalid frozen token-table lifecycle. That is an
+/// internal compiler error, while ordinary loop syntax remains a typed source diagnostic.
+type LoopResult<T> = Result<T, ExpressionParseError>;
 
 /// Parse a complete `loop` statement after the `loop` keyword has been consumed.
 pub fn create_loop(
@@ -45,14 +44,16 @@ pub fn create_loop(
         .iter()
         .all(|token| matches!(token.kind, TokenKind::Newline))
     {
-        return Err(Box::new(CompilerDiagnostic::invalid_loop_header(
+        return Err(CompilerDiagnostic::invalid_loop_header(
             InvalidLoopHeaderReason::EmptyHeader,
             location.clone(),
-        )));
+        )
+        .into());
     }
 
     let (parsed_loop_header, body_context) = parse_loop_header_tokens(
         header_tokens,
+        &token_stream.path_syntax,
         context,
         type_interner,
         warnings,
@@ -102,20 +103,22 @@ fn find_loop_header_colon_index(token_stream: &FileTokens) -> LoopResult<usize> 
         }
 
         if is_top_level && matches!(token.kind, TokenKind::End | TokenKind::Eof) {
-            return Err(Box::new(CompilerDiagnostic::invalid_loop_header(
+            return Err(CompilerDiagnostic::invalid_loop_header(
                 InvalidLoopHeaderReason::MissingColon,
                 token.location.clone(),
-            )));
+            )
+            .into());
         }
 
         nesting_depth.step(&token.kind);
         search_index += 1;
     }
 
-    Err(Box::new(CompilerDiagnostic::invalid_loop_header(
+    Err(CompilerDiagnostic::invalid_loop_header(
         InvalidLoopHeaderReason::MissingColon,
         token_stream.current_location(),
-    )))
+    )
+    .into())
 }
 
 #[cfg(test)]

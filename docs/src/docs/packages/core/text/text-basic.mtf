@@ -1,11 +1,11 @@
-`@core/text` gives you helper functions for `String` values. Import it when you need to check length, emptiness or substrings.
+`@core/text` gives you helper functions for `String` values. Bind it when you need to check length, emptiness or substrings.
 
-### Importing
+### Binding
 
-Bring in the functions you need with a grouped import.
+Bind the functions you need with a direct-selection clause.
 
 [codeblock, $code("moth"):
-    import @core/text {length, contains}
+    @core/text length, contains
 
     name = "Priya"
     count = length(name)

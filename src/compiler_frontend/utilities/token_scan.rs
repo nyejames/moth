@@ -10,6 +10,7 @@
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
 
@@ -38,6 +39,10 @@ impl InitializerReference {
             *dot_member = remap.get(*dot_member);
         }
         self.location.remap_string_ids(remap);
+    }
+
+    pub fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
+        self.location.rebind_source_identity(logical_path);
     }
 }
 
@@ -69,7 +74,7 @@ pub(crate) fn collect_symbol_references(tokens: &[Token]) -> Vec<InitializerRefe
         }
 
         // Header dependency sorting only needs a shallow member hint. AST still owns the full
-        // expression parse, but `namespace.member` constants need this member name so imports
+        // expression parse, but `namespace.member` constants need this member name so dependencies
         // like `intro.content` can create an ordering edge to the imported constant.
         let dot_member = if matches!(next, Some(TokenKind::Dot)) {
             tokens
@@ -410,6 +415,12 @@ pub(crate) fn has_top_level_comma_before_statement_end(token_stream: &FileTokens
         let token_kind = &token_stream.tokens[index].kind;
         let at_top_level = depth.is_top_level();
 
+        // A top-level comma activates multi-bind parsing before a following newline can end the
+        // statement. The multi-bind owner then consumes only comma-promised continuation lines.
+        if at_top_level && matches!(token_kind, TokenKind::Comma) {
+            return true;
+        }
+
         if at_top_level
             && matches!(
                 token_kind,
@@ -417,10 +428,6 @@ pub(crate) fn has_top_level_comma_before_statement_end(token_stream: &FileTokens
             )
         {
             break;
-        }
-
-        if at_top_level && matches!(token_kind, TokenKind::Comma) {
-            return true;
         }
 
         depth.step(token_kind);

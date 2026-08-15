@@ -1,0 +1,20 @@
+@declarations-dependencies-and-ordering content as reference_content
+@styles navbar, section, theme_head
+
+page_title #= "06. Declarations, dependencies and ordering"
+page_description #= "How retained syntax becomes bound visibility and ordered declarations."
+page_head #= theme_head
+
+#[navbar]
+
+#[section, $md:
+    @../ (Compiler design) / 06. Declarations, dependencies and ordering
+
+    Prepared shells, bound dependencies and local declaration order give each module its top-level silhouette before bodies type-check.
+]
+
+#[section, reference_content]
+
+#[section, $md:
+    @../ (Compiler design) / @../tokenization (Previous) / @../ast-semantics-and-types (Next)
+]

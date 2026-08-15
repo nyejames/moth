@@ -1,5 +1,5 @@
-import @overview {content as reference_content}
-import @styles {navbar, section, theme_head}
+@overview content as reference_content
+@styles navbar, section, theme_head
 
 page_title #= "Compiler design: source to page"
 page_description #= "A chronological educational tour of Moth's compiler and build pipeline."

@@ -1,2 +1,2 @@
-import @helper
+@helper
 #[:<p>from entry</p>]

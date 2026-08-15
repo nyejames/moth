@@ -1,0 +1,4 @@
+@helper
+
+value = helper.cos(0.0)
+io.line([: module_facade_binding_namespace_success value=[value]])

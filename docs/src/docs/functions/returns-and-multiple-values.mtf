@@ -29,6 +29,17 @@ A function may declare and return more than one success value.
 
 The receiving multi-bind must match the success arity.
 
+Multi-bind targets may continue on a following line only after a comma:
+
+[codeblock, $code("moth"):
+    name,
+        count = pair()
+]
+
+A comma promises another target, so a trailing comma before `=` is invalid. This is the same
+continuation rule used by delimiter-free dependency selections. Delimited collections and call
+arguments keep their own list grammar.
+
 Multiple return values are not a user-visible tuple value. A normal
 single-target declaration cannot receive a multi-return call.
 

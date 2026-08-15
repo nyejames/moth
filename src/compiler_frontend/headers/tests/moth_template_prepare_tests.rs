@@ -23,8 +23,8 @@ use crate::compiler_frontend::declaration_syntax::binding_mode::BindingMode;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::PublicFoldedValue;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    FileFrontendPrepareOutput, HeaderKind, HeaderParseOptions, bind_module_headers,
-    prepare_file_from_tokens, prepare_header_syntax,
+    FileFrontendPrepareFailure, FileFrontendPrepareOutput, HeaderKind, HeaderParseOptions,
+    bind_module_headers, prepare_file_from_tokens, prepare_header_syntax,
 };
 use crate::compiler_frontend::headers::types::{FileRole, HeaderExportMode};
 use crate::compiler_frontend::module_dependencies::resolve_module_dependencies;
@@ -38,7 +38,7 @@ use crate::compiler_frontend::pipeline::{
 use crate::compiler_frontend::public_interface::{
     PublicConstantSemantics, PublicDeclarationRecord, PublicDeclarationSemantics,
     PublicDiagnosticLocation, PublicExportDiagnosticProvenance, PublicSemanticInterface,
-    SourceProviderImport, SourceProviderImportSet,
+    SourceProviderDependency, SourceProviderDependencySet,
 };
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::semantic_identity::{
@@ -73,16 +73,44 @@ fn prepare_directly(source: &str) -> (FileFrontendPrepareOutput, StringTable) {
     )
     .expect("Moth template body should tokenize");
 
-    let output = prepare_moth_template_file(file_tokens, &mut string_table);
+    let output = prepare_moth_template_file(file_tokens, &mut string_table)
+        .expect("freshly tokenized Moth template should own a preparing path table");
     (output, string_table)
+}
+
+#[test]
+fn preparation_preserves_invalid_path_table_lifecycle_as_compiler_error() {
+    let mut string_table = StringTable::new();
+    let source_path = InternedPath::from_single_str("invalid-lifecycle.mtf", &mut string_table);
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut file_tokens = tokenize(
+        "# Heading",
+        &source_path,
+        TokenizerEntryMode::for_source_file_kind(SourceFileKind::MothTemplate)
+            .expect("Moth template should have a tokenizer entry mode"),
+        &style_directives,
+        &mut string_table,
+        None,
+    )
+    .expect("test Moth template should tokenize");
+    let _path_syntax = file_tokens
+        .take_preparing_path_syntax()
+        .expect("fresh token stream should own its preparing path table");
+
+    let error = match prepare_moth_template_file(file_tokens, &mut string_table) {
+        Ok(_) => panic!("a deferred source token stream must fail through CompilerError"),
+        Err(error) => error,
+    };
+
+    assert!(
+        format!("{error:?}").contains("deferred stream"),
+        "error should retain the path-table lifecycle failure: {error:?}"
+    );
 }
 
 fn prepare_via_pipeline(
     source: &str,
-) -> Result<
-    FileFrontendPrepareOutput,
-    crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareError,
-> {
+) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
     let source_files = SourceFileTable::empty();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let entry_file_path = PathBuf::from("src/@page.moth");
@@ -141,9 +169,12 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable) {
         runtime_fragment_offset: 0,
     };
     let mut string_table = StringTable::new();
-    let prepared_file =
+    let mut prepared_file =
         CompilerFrontend::prepare_file_frontend_local(&context, input, &mut string_table)
             .expect("Moth template source should prepare");
+    prepared_file
+        .freeze_path_syntax(&string_table)
+        .expect("single-file Moth template output should satisfy the prepared-file invariant gate");
 
     let prepared_syntax = prepare_header_syntax(vec![prepared_file], &mut string_table)
         .expect("Moth template header syntax should prepare");
@@ -151,7 +182,7 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable) {
         prepared_syntax,
         &external_package_registry,
         &ExternalImportResolutionTable::default(),
-        &crate::compiler_frontend::public_interface::SourceProviderImportSet::default(),
+        &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
         Some(&project_path_resolver),
         &mut string_table,
     )
@@ -164,7 +195,7 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable) {
         AstBuildInput {
             headers: sorted_headers.headers,
             module_symbols: sorted_headers.module_symbols,
-            import_environment: sorted_headers.import_environment,
+            binding_environment: sorted_headers.binding_environment,
             top_level_const_fragments: sorted_headers.top_level_const_fragments,
         },
         AstBuildContext {
@@ -326,10 +357,12 @@ impl MothTemplateScopeFixture {
         &self,
         moth_template_relative_path: &str,
         prepared_relative_paths: &[&str],
-        source_provider_imports: &crate::compiler_frontend::public_interface::SourceProviderImportSet<'_>,
+        source_provider_dependencies: &crate::compiler_frontend::public_interface::SourceProviderDependencySet<'_>,
     ) -> Result<(Ast, StringTable), Box<CompilerDiagnostic>> {
-        let (ast, string_table) = self
-            .compile_module_ast_with_providers(prepared_relative_paths, source_provider_imports)?;
+        let (ast, string_table) = self.compile_module_ast_with_providers(
+            prepared_relative_paths,
+            source_provider_dependencies,
+        )?;
 
         self.assert_ast_contains_moth_template_content(
             &ast,
@@ -345,25 +378,25 @@ impl MothTemplateScopeFixture {
         prepared_relative_paths: &[&str],
     ) -> Result<(Ast, StringTable), Box<CompilerDiagnostic>> {
         let html_interface = empty_provider_interface("html");
-        let provider_imports = SourceProviderImportSet::new(vec![SourceProviderImport {
+        let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
             kind:
-                crate::compiler_frontend::public_interface::ProviderImportKind::ImplicitTemplate {
+                crate::compiler_frontend::public_interface::ProviderDependencyKind::ImplicitTemplate {
                     package_prefix: "html",
                 },
             interface: &html_interface,
         }])
         .expect("one implicit template provider should register");
-        self.compile_module_ast_with_providers(prepared_relative_paths, &provider_imports)
+        self.compile_module_ast_with_providers(prepared_relative_paths, &provider_dependencies)
     }
 
     fn compile_module_ast_with_providers(
         &self,
         prepared_relative_paths: &[&str],
-        source_provider_imports: &crate::compiler_frontend::public_interface::SourceProviderImportSet<'_>,
+        source_provider_dependencies: &crate::compiler_frontend::public_interface::SourceProviderDependencySet<'_>,
     ) -> Result<(Ast, StringTable), Box<CompilerDiagnostic>> {
         let (headers, mut string_table) = self.prepare_and_bind_headers_with_providers(
             prepared_relative_paths,
-            source_provider_imports,
+            source_provider_dependencies,
         )?;
         let sorted_headers = resolve_module_dependencies(headers, &mut string_table)
             .map_err(first_diagnostic_from_bag)?;
@@ -377,7 +410,7 @@ impl MothTemplateScopeFixture {
             AstBuildInput {
                 headers: sorted_headers.headers,
                 module_symbols: sorted_headers.module_symbols,
-                import_environment: sorted_headers.import_environment,
+                binding_environment: sorted_headers.binding_environment,
                 top_level_const_fragments: sorted_headers.top_level_const_fragments,
             },
             AstBuildContext {
@@ -441,21 +474,24 @@ impl MothTemplateScopeFixture {
         Box<CompilerDiagnostic>,
     > {
         let html_interface = empty_provider_interface("html");
-        let provider_imports = SourceProviderImportSet::new(vec![SourceProviderImport {
+        let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
             kind:
-                crate::compiler_frontend::public_interface::ProviderImportKind::ImplicitTemplate {
+                crate::compiler_frontend::public_interface::ProviderDependencyKind::ImplicitTemplate {
                     package_prefix: "html",
                 },
             interface: &html_interface,
         }])
         .expect("one implicit template provider should register");
-        self.prepare_and_bind_headers_with_providers(prepared_relative_paths, &provider_imports)
+        self.prepare_and_bind_headers_with_providers(
+            prepared_relative_paths,
+            &provider_dependencies,
+        )
     }
 
     fn prepare_and_bind_headers_with_providers(
         &self,
         prepared_relative_paths: &[&str],
-        source_provider_imports: &crate::compiler_frontend::public_interface::SourceProviderImportSet<'_>,
+        source_provider_dependencies: &crate::compiler_frontend::public_interface::SourceProviderDependencySet<'_>,
     ) -> Result<
         (
             crate::compiler_frontend::headers::parse_file_headers::BoundModuleHeaders,
@@ -465,7 +501,7 @@ impl MothTemplateScopeFixture {
     > {
         self.prepare_and_bind_headers_with_providers_with_table(
             prepared_relative_paths,
-            source_provider_imports,
+            source_provider_dependencies,
         )
         .map_err(|(diagnostic, _string_table)| diagnostic)
     }
@@ -473,7 +509,7 @@ impl MothTemplateScopeFixture {
     fn prepare_and_bind_headers_with_providers_with_table(
         &self,
         prepared_relative_paths: &[&str],
-        source_provider_imports: &crate::compiler_frontend::public_interface::SourceProviderImportSet<'_>,
+        source_provider_dependencies: &crate::compiler_frontend::public_interface::SourceProviderDependencySet<'_>,
     ) -> Result<
         (
             crate::compiler_frontend::headers::parse_file_headers::BoundModuleHeaders,
@@ -516,7 +552,14 @@ impl MothTemplateScopeFixture {
                         TokenizerEntryMode::SourceFile,
                         &mut string_table,
                     )
-                    .map_err(|diagnostic| (diagnostic, string_table.clone()))?;
+                    .map_err(|error| match error {
+                        FileFrontendPrepareFailure::Diagnosed(error) => {
+                            (error.diagnostic, string_table.clone())
+                        }
+                        FileFrontendPrepareFailure::Infrastructure(error) => {
+                            panic!("fixture tokenization hit infrastructure failure: {error:?}")
+                        }
+                    })?;
                     FrontendFilePrepareSource::Moth {
                         source_path,
                         tokens: Box::new(tokens),
@@ -538,9 +581,19 @@ impl MothTemplateScopeFixture {
                 runtime_fragment_offset: 0,
             };
 
-            let output =
+            let mut output =
                 CompilerFrontend::prepare_file_frontend_local(&context, input, &mut string_table)
-                    .map_err(|error| (error.diagnostic, string_table.clone()))?;
+                    .map_err(|error| match error {
+                    FileFrontendPrepareFailure::Diagnosed(error) => {
+                        (error.diagnostic, string_table.clone())
+                    }
+                    FileFrontendPrepareFailure::Infrastructure(error) => {
+                        panic!("fixture preparation hit infrastructure failure: {error:?}")
+                    }
+                })?;
+            output
+                .freeze_path_syntax(&string_table)
+                .expect("fixture prepared output should satisfy the prepared-file invariant gate");
             prepared_files.push(output);
         }
 
@@ -550,7 +603,7 @@ impl MothTemplateScopeFixture {
             prepared_syntax,
             &external_package_registry,
             &ExternalImportResolutionTable::default(),
-            source_provider_imports,
+            source_provider_dependencies,
             Some(&self.project_path_resolver),
             &mut string_table,
         )
@@ -732,7 +785,7 @@ fn moth_template_preparation_produces_private_content_constant() {
     let declaration = content_constant(&output);
 
     assert_eq!(output.file_role, FileRole::Normal);
-    assert!(output.file_imports.is_empty());
+    assert!(output.file_dependency_clauses.is_empty());
     assert!(output.top_level_const_fragments.is_empty());
     assert_eq!(output.runtime_fragment_count, 0);
     assert_eq!(output.const_template_count, 0);
@@ -885,6 +938,9 @@ fn unescaped_outer_close_diagnostic_flows_through_pipeline_preparation() {
     let Err(error) = prepare_via_pipeline("]") else {
         panic!("unescaped implicit Moth template close should fail during preparation");
     };
+    let FileFrontendPrepareFailure::Diagnosed(error) = error else {
+        panic!("unescaped template close must be a source diagnostic");
+    };
 
     assert!(error.warnings.is_empty());
     assert_eq!(
@@ -913,14 +969,14 @@ fn double_dash_remains_body_text() {
 
 #[test]
 fn declaration_like_text_remains_markdown_body_text() {
-    let (output, string_table) = prepare_directly("import @docs/intro\ncontent #String = value");
+    let (output, string_table) = prepare_directly("@docs/intro\ncontent #String = value");
     let declaration = content_constant(&output);
 
     assert!(declaration.initializer_references.is_empty());
     assert!(declaration.initializer_tokens.iter().any(|token| matches!(
         &token.kind,
         TokenKind::StringSliceLiteral(id)
-            if string_table.resolve(*id) == "import @docs/intro\ncontent #String = value"
+            if string_table.resolve(*id) == "@docs/intro\ncontent #String = value"
     )));
 }
 
@@ -931,28 +987,34 @@ fn module_root_export_syntax_can_target_moth_template_content() {
     let entry_path = PathBuf::from("src/@page.moth");
 
     let root_output = prepare_moth_source(
-        "export:\n    import @./intro { content as intro }\n;\n",
+        "export:\n    @intro content as intro\n;\n",
         &root_file_path,
         &entry_path,
         &mut string_table,
     );
 
-    assert_eq!(root_output.file_imports.len(), 1);
+    assert_eq!(root_output.file_dependency_clauses.len(), 1);
     assert_eq!(
-        root_output.file_imports[0].export_mode,
+        root_output.file_dependency_clauses[0].export_mode,
         HeaderExportMode::Public
     );
     assert_eq!(
-        root_output.file_imports[0]
-            .provider
+        root_output.file_dependency_clauses[0]
+            .dependency
             .path
             .to_portable_string(&string_table),
-        "src/intro/content"
+        "intro"
     );
+    let selections = root_output.file_dependency_clauses[0]
+        .selections(&root_output.dependency_selections)
+        .expect("retained template export selection range should be valid");
+    assert_eq!(selections.len(), 1);
+    assert_eq!(string_table.resolve(selections[0].source_name), "content");
     assert_eq!(
-        root_output.file_imports[0]
-            .alias
-            .map(|alias| string_table.resolve(alias)),
+        selections[0]
+            .local_alias
+            .as_ref()
+            .map(|alias| string_table.resolve(alias.name)),
         Some("intro")
     );
 }
@@ -981,7 +1043,7 @@ fn moth_template_header_visibility_contains_implicit_html_constants() {
         InternedPath::try_from_filesystem_path(&moth_template_logical_path, &mut string_table)
             .expect("test path should be UTF-8");
     let visibility = headers
-        .import_environment
+        .binding_environment
         .visibility_for(&moth_template_source)
         .expect("Moth template visibility should exist");
     let p_name = string_table.intern("p");
@@ -1087,7 +1149,7 @@ fn exported_html_functions_are_not_visible_to_moth_template_body() {
 #[test]
 fn moth_template_sees_capability_selected_provider_constants_without_provider_headers() {
     // Simulates the production path: source-backed providers are separate compiled modules whose
-    // completed interfaces are available through SourceProviderImportSet, but whose source
+    // completed interfaces are available through SourceProviderDependencySet, but whose source
     // headers are not in the consumer module's prepared files. The `.mtf` implicit scope must
     // collect constant exports from every capability-selected provider, not only `@html`.
     let fixture =
@@ -1153,16 +1215,16 @@ fn moth_template_sees_capability_selected_provider_constants_without_provider_he
         concrete_call_summaries: Vec::new(),
     };
 
-    let provider_imports =
-        SourceProviderImportSet::new(vec![
-        SourceProviderImport {
-            kind: crate::compiler_frontend::public_interface::ProviderImportKind::ImplicitTemplate {
+    let provider_dependencies =
+        SourceProviderDependencySet::new(vec![
+        SourceProviderDependency {
+            kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::ImplicitTemplate {
                 package_prefix: "html",
             },
             interface: &html_interface,
         },
-        SourceProviderImport {
-            kind: crate::compiler_frontend::public_interface::ProviderImportKind::ImplicitTemplate {
+        SourceProviderDependency {
+            kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::ImplicitTemplate {
                 package_prefix: "custom",
             },
             interface: &custom_interface,
@@ -1174,7 +1236,7 @@ fn moth_template_sees_capability_selected_provider_constants_without_provider_he
         .compile_moth_template_ast_with_providers(
             "src/intro.mtf",
             &["src/intro.mtf"],
-            &provider_imports,
+            &provider_dependencies,
         )
         .expect(".mtf body should see @html constant through provider interface");
 
@@ -1229,10 +1291,11 @@ fn provider_interface_collision_remaps_authored_declaration_location() {
         reusable_evidence: Vec::new(),
         concrete_call_summaries: Vec::new(),
     };
-    let provider_imports = SourceProviderImportSet::new(vec![SourceProviderImport {
-        kind: crate::compiler_frontend::public_interface::ProviderImportKind::ImplicitTemplate {
-            package_prefix: "html",
-        },
+    let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
+        kind:
+            crate::compiler_frontend::public_interface::ProviderDependencyKind::ImplicitTemplate {
+                package_prefix: "html",
+            },
         interface: &html_interface,
     }])
     .expect("one implicit template provider should register");
@@ -1240,7 +1303,7 @@ fn provider_interface_collision_remaps_authored_declaration_location() {
     let (diagnostic, diagnostic_string_table) = match fixture
         .prepare_and_bind_headers_with_providers_with_table(
             &["src/docs/@mod.moth", "src/docs/intro.mtf"],
-            &provider_imports,
+            &provider_dependencies,
         ) {
         Ok(_) => panic!("provider and same-directory constants should collide"),
         Err((diagnostic, string_table)) => (*diagnostic, string_table),
@@ -1367,10 +1430,7 @@ fn moth_template_const_record_field_access_folds_in_template_head() {
 #[test]
 fn root_supplied_content_constant_can_be_referenced_normally() {
     let fixture = MothTemplateScopeFixture::new(&[
-        (
-            "src/docs/@mod.moth",
-            "export:\n    import @./other { content }\n;\n",
-        ),
+        ("src/docs/@mod.moth", "export:\n    @other content\n;\n"),
         ("src/docs/other.mtf", "shared body"),
         ("src/docs/intro.mtf", "[content]"),
     ]);
@@ -1410,10 +1470,7 @@ fn generated_self_content_is_not_visible_to_moth_template_body() {
 #[test]
 fn self_originating_content_reexport_is_excluded_from_moth_template_body_scope() {
     let fixture = MothTemplateScopeFixture::new(&[
-        (
-            "src/docs/@mod.moth",
-            "export:\n    import @./intro { content }\n;\n",
-        ),
+        ("src/docs/@mod.moth", "export:\n    @intro content\n;\n"),
         ("src/docs/intro.mtf", "[content]"),
     ]);
     let diagnostic = fixture.compile_moth_template_diagnostic(
@@ -1438,12 +1495,12 @@ fn self_originating_content_reexport_is_excluded_from_moth_template_body_scope()
 }
 
 #[test]
-fn moth_grouped_imports_moth_template_content_as_folded_string_constant() {
+fn moth_dependency_binds_template_content_as_folded_string_constant() {
     let fixture = MothTemplateScopeFixture::new(&[
         ("src/@page.moth", ""),
         (
             "src/main.moth",
-            "import @./intro { content as intro_content }\nfrom_intro #String = intro_content\n",
+            "@intro content as intro_content\nfrom_intro #String = intro_content\n",
         ),
         ("src/intro.mtf", "# Intro"),
     ]);
@@ -1463,12 +1520,12 @@ fn moth_grouped_imports_moth_template_content_as_folded_string_constant() {
 }
 
 #[test]
-fn moth_namespace_imports_moth_template_content_as_folded_string_constant() {
+fn moth_namespace_dependency_binds_template_content_as_folded_string_constant() {
     let fixture = MothTemplateScopeFixture::new(&[
         ("src/@page.moth", ""),
         (
             "src/main.moth",
-            "import @./intro\nfrom_intro #String = intro.content\n",
+            "@intro\nfrom_intro #String = intro.content\n",
         ),
         ("src/intro.mtf", "# Intro"),
     ]);
@@ -1493,7 +1550,7 @@ fn imported_bd_file_produces_no_runtime_or_start_behavior() {
         ("src/@page.moth", ""),
         (
             "src/main.moth",
-            "import @./intro\nfrom_intro #String = intro.content\n",
+            "@intro\nfrom_intro #String = intro.content\n",
         ),
         ("src/intro.mtf", "# Heading"),
     ]);
@@ -1724,7 +1781,7 @@ fn moth_template_folded_output_matches_authored_markdown_template() {
         prepared_syntax,
         &external_package_registry,
         &ExternalImportResolutionTable::default(),
-        &crate::compiler_frontend::public_interface::SourceProviderImportSet::default(),
+        &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
         Some(&project_path_resolver),
         &mut string_table,
     )
@@ -1737,7 +1794,7 @@ fn moth_template_folded_output_matches_authored_markdown_template() {
         AstBuildInput {
             headers: sorted_headers.headers,
             module_symbols: sorted_headers.module_symbols,
-            import_environment: sorted_headers.import_environment,
+            binding_environment: sorted_headers.binding_environment,
             top_level_const_fragments: sorted_headers.top_level_const_fragments,
         },
         AstBuildContext {

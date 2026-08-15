@@ -12,13 +12,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
         let imported = self
-            .import_environment
+            .binding_environment
             .imported_declarations_by_local_path
             .clone();
 
         for (local_path, origin) in imported {
             let Some(record) = self
-                .import_environment
+                .binding_environment
                 .imported_declarations_by_origin
                 .get(&origin)
                 .cloned()
@@ -116,7 +116,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             }
 
             let header_contract = self
-                .import_environment
+                .binding_environment
                 .imported_functions_by_local_path
                 .get(&local_path)
                 .ok_or_else(|| {
@@ -132,7 +132,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 AstImportedFunctionContract {
                     target: header_contract.target.clone(),
                     summary: self
-                        .import_environment
+                        .binding_environment
                         .imported_call_summaries_by_origin
                         .get(&summary_origin(header_contract).map_err(|error| {
                             CompilerMessages::from_error_ref(error, string_table)
@@ -159,7 +159,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
         let imported = self
-            .import_environment
+            .binding_environment
             .imported_declarations_by_local_path
             .clone();
         let mut imported = imported.into_iter().collect::<Vec<_>>();
@@ -170,7 +170,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 _ => None,
             })
             .collect::<FxHashSet<_>>();
-        for (origin, record) in &self.import_environment.imported_declarations_by_origin {
+        for (origin, record) in &self.binding_environment.imported_declarations_by_origin {
             let OriginDeclarationId::Type(type_origin) = origin else {
                 continue;
             };
@@ -197,7 +197,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 continue;
             };
             let Some(record) = self
-                .import_environment
+                .binding_environment
                 .imported_declarations_by_origin
                 .get(&origin)
                 .cloned()
@@ -335,7 +335,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 }
 
                 let header_contract = self
-                    .import_environment
+                    .binding_environment
                     .imported_functions_by_local_path
                     .get(&method_path)
                     .cloned();
@@ -368,7 +368,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     AstImportedFunctionContract {
                         target: header_contract.target.clone(),
                         summary: self
-                            .import_environment
+                            .binding_environment
                             .imported_call_summaries_by_origin
                             .get(&summary_origin(&header_contract).map_err(|error| {
                                 CompilerMessages::from_error_ref(error, string_table)
@@ -519,10 +519,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
 /// The stable function origin whose shared call summary a header-stage contract references.
 fn summary_origin(
-    contract: &crate::compiler_frontend::headers::import_environment::ImportedFunctionContract,
+    contract: &crate::compiler_frontend::headers::binding_environment::ImportedFunctionContract,
 ) -> Result<crate::compiler_frontend::semantic_identity::OriginFunctionId, CompilerError> {
     match &contract.target {
-        crate::compiler_frontend::headers::import_environment::SourceFunctionTarget::Imported {
+        crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget::Imported {
             origin,
             ..
         } => Ok(origin.clone()),

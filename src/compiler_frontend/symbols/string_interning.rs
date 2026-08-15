@@ -329,6 +329,22 @@ impl StringTable {
         unsafe { self.strings.get_unchecked(local_index).as_ref() }
     }
 
+    /// Resolve an interned string ID, or `None` when the handle is not in this table.
+    ///
+    /// WHAT: gives retained-state validators a fallible lookup for interned extensions and
+    ///       other handles that may have been remapped incorrectly.
+    /// WHY: `resolve` is only safe for IDs issued by this table. Malformed retained state
+    ///      must become `CompilerError`, not an unchecked index.
+    #[inline]
+    pub fn try_resolve(&self, id: StringId) -> Option<&str> {
+        let index = id.0 as usize;
+        if index >= self.len() {
+            return None;
+        }
+
+        Some(self.resolve(id))
+    }
+
     /// Efficiently intern a String by taking ownership, avoiding an extra allocation
     /// if the string is new.
     ///

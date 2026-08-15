@@ -1,4 +1,4 @@
-import @utils {wrap}
+@utils wrap
 
 value = wrap(42)
 [: [value] ]

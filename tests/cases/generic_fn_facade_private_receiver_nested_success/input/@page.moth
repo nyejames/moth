@@ -1,4 +1,4 @@
-import @utils {DISPLAY_TEXT, make}
+@utils DISPLAY_TEXT, make
 
 Label = |
     text String,

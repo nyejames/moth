@@ -1,18 +1,12 @@
-import @io {
-    content as io_advanced,
-}
+@io content as io_advanced
 
-import @io-basic {
-    content as io_basic,
-}
+@io-basic content as io_basic
 
-import @styles {
-    navbar,
+@styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager,
-}
+    doc_pager
 
 page_title #= "Core IO"
 page_description #= "Console output and input polling helpers in Moth."
@@ -26,7 +20,7 @@ page_head #= language_theme_head
     # Core IO
 
     `io` provides console output and explicit input polling. The prelude exposes
-    its namespace without an import, while templates handle value formatting
+    its namespace without a dependency clause, while templates handle value formatting
     before text crosses the output boundary.
 ]
 

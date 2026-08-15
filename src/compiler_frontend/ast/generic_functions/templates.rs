@@ -27,7 +27,7 @@ pub(crate) struct GenericFunctionTemplate {
     pub(crate) generic_parameter_owner: Option<GenericDeclarationOrigin>,
     pub(crate) generic_parameter_list_id: GenericParameterListId,
     pub(crate) signature: FunctionSignature,
-    /// Only the declaring module retains body syntax. A requester imports the semantic contract
+    /// Only the declaring module retains body syntax. A requester consumes the semantic contract
     /// and emits a generated-sidecar request without copying this payload.
     pub(crate) body_tokens: Option<FileTokens>,
     pub(crate) declaration_location: SourceLocation,

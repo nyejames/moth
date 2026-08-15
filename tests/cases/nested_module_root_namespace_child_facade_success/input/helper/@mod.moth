@@ -1,4 +1,4 @@
-import @child
+@child
 
 export:
     greet || -> String:

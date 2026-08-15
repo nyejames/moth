@@ -3,7 +3,7 @@
 //! WHAT: provides `ScopeContext` methods that resolve names to local declarations,
 //! source-visible symbols, receiver methods, and external package items.
 //! WHY: expression and type parsing need a single, consistent lookup surface that
-//! respects file-local visibility, import aliases, and receiver-call boundaries.
+//! respects file-local visibility, dependency aliases and receiver-call boundaries.
 //!
 //! All lookups in this file are read-only with respect to `ScopeContext` state.
 //! Mutations to local declarations and visibility live in sibling modules
@@ -111,7 +111,7 @@ impl ScopeContext {
                 return Some(ScopeDeclarationRef::Shared(declaration));
             }
             // file_visibility is set but name not found — do not fall back.
-            // This ensures import aliases hide the original name.
+            // This ensures dependency aliases hide the original name.
             return None;
         }
 
@@ -373,7 +373,7 @@ impl ScopeContext {
     ///
     /// WHAT: returns the import-site location for an explicit external import. Prelude-injected
     /// symbols have no authored source location, so this returns `None` for them.
-    /// WHY: AST duplicate-declaration diagnostics use the authored import location as the
+    /// WHY: AST duplicate-declaration diagnostics use the authored dependency location as the
     /// secondary label. Returning `None` for prelude symbols lets the diagnostic omit the
     /// secondary label instead of fabricating an empty `SourceLocation::default()`.
     pub(crate) fn lookup_visible_external_function_location(

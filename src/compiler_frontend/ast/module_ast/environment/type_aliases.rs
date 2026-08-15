@@ -39,7 +39,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             };
 
             let visibility = self
-                .import_environment
+                .binding_environment
                 .visibility_for(&header.source_file)
                 .map_err(|error| self.error_messages(error, string_table))?
                 .clone();

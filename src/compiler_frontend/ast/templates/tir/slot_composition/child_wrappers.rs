@@ -19,6 +19,7 @@
 //! `apply_inherited_child_wrappers_to_body_root` in `render_unit.rs`, which
 //! calls `wrap_tir_node_in_wrappers` for non-control-flow children.
 
+use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::{Style, TemplateType};
 use crate::compiler_frontend::ast::templates::tir::overlays::TemplateViewContext;
 use crate::compiler_frontend::ast::templates::tir::refs::TemplateTirChildReference;
@@ -27,7 +28,6 @@ use crate::compiler_frontend::ast::templates::tir::view::TemplateTirPhase;
 use crate::compiler_frontend::ast::templates::tir::{
     TemplateIr, TemplateIrId, TemplateIrNode, TemplateIrNodeId, TemplateIrNodeKind, TemplateIrStore,
 };
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
@@ -37,14 +37,8 @@ use super::helpers::{
 };
 use super::schema::expand_tir_slot_placeholders_into;
 
-/// Boxed diagnostic result for child-wrapper application.
-///
-/// Sits behind the already-boxed template composition boundaries (for
-/// example `TemplateError::Diagnostic` in `render_unit.rs`). Boxing here keeps
-/// the `Err` variant small enough for Clippy's `result_large_err` lint
-/// while preserving every diagnostic value, source location, and semantic
-/// fact. The production wrapper helpers all share this one file-local boundary.
-type ChildWrapperResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// Typed result for child-wrapper application.
+type ChildWrapperResult<T> = Result<T, TemplateError>;
 
 /// Wraps a single direct child `ChildTemplate` node in all inherited wrappers.
 ///

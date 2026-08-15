@@ -5,6 +5,7 @@
 //! WHY: scope tracking in the compiler frontend produces many paths with shared prefixes; interning
 //!      avoids redundant string storage and makes path comparisons cheap.
 
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use std::path::{Path, PathBuf};
 
@@ -166,8 +167,7 @@ impl InternedPath {
         self.components.len()
     }
 
-    /// Test-only convenience helper for asserting empty-root behavior.
-    #[cfg(test)]
+    /// Returns whether this path is the empty root path.
     pub fn is_empty(&self) -> bool {
         self.components.is_empty()
     }
@@ -197,6 +197,44 @@ impl InternedPath {
             .iter()
             .zip(prefix.components.iter())
             .all(|(a, b)| a == b)
+    }
+
+    /// Replace one source-owned path prefix while preserving the semantic suffix.
+    ///
+    /// WHAT: rebases declaration and ordering paths from a provisional source-file identity to
+    ///       the final logical source identity assigned after synthetic discovery.
+    /// WHY: header token substreams use paths such as `source_file/declaration`; replacing the
+    ///      whole path would erase the declaration component and make dependency graph keys
+    ///      diverge from the retained declaration headers.
+    pub fn rebind_prefix(&self, old_prefix: &InternedPath, new_prefix: &InternedPath) -> Self {
+        if !self.starts_with(old_prefix) {
+            return self.clone();
+        }
+
+        let suffix = &self.components[old_prefix.components.len()..];
+        let mut components = Vec::with_capacity(new_prefix.len() + suffix.len());
+        components.extend_from_slice(&new_prefix.components);
+        components.extend_from_slice(suffix);
+        Self { components }
+    }
+
+    /// Rebind a path that is required to be owned by one provisional source identity.
+    ///
+    /// WHAT: checks that the old source prefix is present before preserving the semantic suffix.
+    /// WHY: provider spellings may intentionally be prefix-free and use [`Self::rebind_prefix`],
+    ///      but retained header paths, source-local ordering hints and declaration-member paths
+    ///      must never silently survive final source-identity rebinding unchanged.
+    pub fn try_rebind_required_prefix(
+        &self,
+        old_prefix: &InternedPath,
+        new_prefix: &InternedPath,
+    ) -> Result<Self, CompilerError> {
+        if !self.starts_with(old_prefix) {
+            return Err(CompilerError::compiler_error(
+                "source-owned retained path is missing its provisional source prefix",
+            ));
+        }
+        Ok(self.rebind_prefix(old_prefix, new_prefix))
     }
 
     /// Check if this path ends with the given suffix path

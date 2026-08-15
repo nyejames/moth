@@ -1,0 +1,3 @@
+@helper.moth
+
+io.line([: [helper.greet()]])

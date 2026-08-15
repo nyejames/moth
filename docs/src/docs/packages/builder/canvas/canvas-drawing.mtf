@@ -2,14 +2,14 @@
 
 `@web/canvas` ships as a skeleton. The current surface covers element management, context state, rectangles, paths, text, gradients, patterns, image drawing, image data and pixel access. It will grow as the language stabilises and the standard library expands.
 
-### Import roots
+### Dependency roots
 
-Import individual symbols or the whole namespace:
+Bind individual symbols or the whole namespace:
 
 [codeblock, $code("moth"):
-    import @web/canvas {get_canvas, context_2d, fill_rect}
+    @web/canvas get_canvas, context_2d, fill_rect
 
-    import @web/canvas
+    @web/canvas
 ]
 
 ### Opaque types
@@ -1152,7 +1152,7 @@ The Wasm backend rejects reachable `@web/canvas` calls before lowering. Canvas s
 
 ### Unsupported source forms
 
-- Direct symbol-path imports such as `import @web/canvas/get_canvas` face rejection. Use grouped or namespace imports.
+- Direct symbol-path clauses such as `@web/canvas/get_canvas` face rejection. Use direct selections or a namespace clause.
 - Named arguments are not supported. Binding-backed calls stay positional-only.
 - The package does not expose receiver methods, source-defined types or constants.
 - Opaque types cannot be constructed or inspected from Moth source.
@@ -1164,5 +1164,5 @@ The Wasm backend rejects reachable `@web/canvas` calls before lowering. Canvas s
 ### Related concepts
 
 - For package origin and backing see @../../#package-origins-and-backing (Package origins and backing).
-- For import path rules see @../../#import-paths (Import paths).
+- For dependency-path rules see @../../#dependency-paths (Dependency paths).
 - For the `@html` source-backed wrapper see @../html (@html).

@@ -1,4 +1,4 @@
-import @core/math {PI, TAU, E}
+@core/math PI, TAU, E
 
 pi = PI
 tau = TAU

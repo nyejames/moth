@@ -1,5 +1,5 @@
-import @html {table}
-import @styles {navbar, section, theme_head, codeblock}
+@html table
+@styles navbar, section, theme_head, codeblock
 
 page_title #= "Codebase documentation"
 page_description #= "Internal compiler and build-system references for maintainers and curious readers."

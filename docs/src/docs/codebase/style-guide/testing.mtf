@@ -253,7 +253,7 @@ For new type-system syntax, include:
 
 - positive usage
 - value/type namespace misuse
-- import visibility
+- binding visibility
 - duplicates
 - cross-file resolution
 - target/backend rejection where relevant

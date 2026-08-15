@@ -1,9 +1,9 @@
-import @types/models {User, UserProfile}
-import @types/enums {Status, Priority}
-import @core/constants {max_items_per_page}
-import @utils/formatting {format_label}
-import @widgets/card {Card}
-import @widgets/badge {render_badge}
+@types/models User, UserProfile
+@types/enums Status, Priority
+@core/constants max_items_per_page
+@utils/formatting format_label
+@widgets/card Card
+@widgets/badge render_badge
 
 render_home |user User| -> String:
     if user.status is Status::Active:

@@ -1,5 +1,5 @@
-import @core/math { PI, sin, cos, sqrt }
-import @data/constants { base_count, scale_factor }
+@core/math PI, sin, cos, sqrt
+@data/constants base_count, scale_factor
 
 scaled_count || -> Int:
     return base_count * scale_factor

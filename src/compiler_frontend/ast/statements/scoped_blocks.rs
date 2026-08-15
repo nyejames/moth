@@ -4,22 +4,16 @@
 //! WHY: scoped blocks are statement syntax, not symbol-led declarations or labels.
 
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext, function_body_to_ast};
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, ReservedNameOwner};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
 
-/// File-local boxed diagnostic result alias.
-///
-/// WHAT: `parse_scoped_block_statement` returns `Result<T, Box<CompilerDiagnostic>>` through
-/// this alias.
-/// WHY: `CompilerDiagnostic` is large enough to trigger `clippy::result_large_err` when stored
-/// directly in a `Result` variant. Boxing the error at the owner boundary keeps the `Result`
-/// envelope small without changing `DiagnosticBag`, `CompilerMessages`, or any shared error
-/// type. The existing boxed `StatementDispatchResult` caller boundary in `body_dispatch.rs`
-/// receives this result directly with no unbox/rebox adapter.
-type ScopedBlockResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// Scoped blocks recurse into the AST body parser, so they preserve its diagnostic and
+/// infrastructure lanes until module emission.
+type ScopedBlockResult<T> = Result<T, ExpressionParseError>;
 
 /// Build a diagnostic for using a reserved block keyword (e.g. `block`) as a variable name.
 ///
@@ -48,19 +42,21 @@ pub(crate) fn parse_scoped_block_statement(
 
         operator_token if operator_token.is_assignment_operator() => {
             let block_keyword_id = string_table.intern("block");
-            return Err(Box::new(reserved_block_keyword_as_name_error(
+            return Err(reserved_block_keyword_as_name_error(
                 block_keyword_id,
                 string_table,
                 statement_location,
-            )));
+            )
+            .into());
         }
 
         unexpected_token_kind => {
-            return Err(Box::new(CompilerDiagnostic::expected_token(
+            return Err(CompilerDiagnostic::expected_token(
                 TokenKind::Colon,
                 Some(unexpected_token_kind.clone()),
                 token_stream.current_location(),
-            )));
+            )
+            .into());
         }
     }
 

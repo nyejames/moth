@@ -1,15 +1,15 @@
-`@core/text` provides helper functions for `String` values. It belongs to the binding-backed Core package family with no prelude alias, so it requires an explicit import.
+`@core/text` provides helper functions for `String` values. It belongs to the binding-backed Core package family with no prelude alias, so it requires an explicit dependency clause.
 
 `@core/text` carries Core origin with ExternalBinding backing. See @../../#package-origins-and-backing (Package origins and backing) for origin and backing rules.
 
-### Import roots
+### Dependency roots
 
-Import individual symbols or the whole namespace:
+Bind individual symbols or the whole namespace:
 
 [codeblock, $code("moth"):
-    import @core/text {length, contains}
+    @core/text length, contains
 
-    import @core/text
+    @core/text
 
     name = "Priya"
     count = text.length(name)
@@ -77,7 +77,7 @@ availability.
 
 ### Unsupported source forms
 
-- Direct symbol-path imports such as `import @core/text/length` face rejection. Use grouped or namespace imports.
+- Direct symbol-path clauses such as `@core/text/length` face rejection. Use direct selections or a namespace clause.
 - Named arguments lack support. Binding-backed calls stay positional-only.
 - The package does not expose receiver methods, opaque types or `Error!` channels.
 - Receiver-method forms on `String` values remain deferred. Use the free functions.
@@ -89,5 +89,5 @@ Deferred text surfaces include receiver-method forms, string splitting and joini
 ### Related concepts
 
 - For package origin and backing see @../../#package-origins-and-backing (Package origins and backing).
-- For import path rules see @../../#import-paths (Import paths).
+- For dependency-path rules see @../../#dependency-paths (Dependency paths).
 - For `String` language semantics see @../../../language-overview/#strings-and-characters (Strings and characters).

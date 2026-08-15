@@ -10,7 +10,7 @@
 //! `ast/expressions/parse_expression_identifiers.rs` and is intentionally separate.
 
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
-use crate::compiler_frontend::compiler_errors::compiler_error_to_diagnostic;
+use crate::compiler_frontend::compiler_errors::{CompilerError, compiler_error_to_diagnostic};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::DeferredFeatureReason;
 use crate::compiler_frontend::compiler_messages::DiagnosticBag;
@@ -70,6 +70,25 @@ impl ChoiceVariantSyntax {
         self.payload.remap_string_ids(remap);
         self.location.remap_string_ids(remap);
     }
+
+    pub fn validate_required_source_prefixes(
+        &self,
+        provisional_source_file: &InternedPath,
+    ) -> Result<(), CompilerError> {
+        self.payload
+            .validate_required_source_prefixes(provisional_source_file)
+    }
+
+    pub fn rebind_source_identity(
+        &mut self,
+        logical_path: &InternedPath,
+        provisional_source_file: &InternedPath,
+    ) -> Result<(), CompilerError> {
+        self.payload
+            .rebind_source_identity(logical_path, provisional_source_file)?;
+        self.location.rebind_source_identity(logical_path);
+        Ok(())
+    }
 }
 
 impl ChoiceVariantPayloadSyntax {
@@ -83,6 +102,37 @@ impl ChoiceVariantPayloadSyntax {
                 for field in fields {
                     field.remap_string_ids(remap);
                 }
+            }
+        }
+    }
+
+    pub fn validate_required_source_prefixes(
+        &self,
+        provisional_source_file: &InternedPath,
+    ) -> Result<(), CompilerError> {
+        match self {
+            Self::Unit => Ok(()),
+            Self::Record { fields } => {
+                for field in fields {
+                    field.validate_required_source_prefix(provisional_source_file)?;
+                }
+                Ok(())
+            }
+        }
+    }
+
+    pub fn rebind_source_identity(
+        &mut self,
+        logical_path: &InternedPath,
+        provisional_source_file: &InternedPath,
+    ) -> Result<(), CompilerError> {
+        match self {
+            Self::Unit => Ok(()),
+            Self::Record { fields } => {
+                for field in fields {
+                    field.rebind_source_identity(logical_path, provisional_source_file)?;
+                }
+                Ok(())
             }
         }
     }

@@ -1,7 +1,7 @@
 //! Error boundary for Stage 0 source discovery.
 //!
 //! Source discovery can fail in two different ways:
-//! - source-level diagnostics from tokenizing/import parsing,
+//! - source-level diagnostics from tokenizing/dependency-clause parsing,
 //! - filesystem or tooling failures before a stable source representation exists.
 //!
 //! Keeping those paths distinct prevents Stage 0 from downgrading typed diagnostics into a lossy
@@ -9,7 +9,7 @@
 
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
-use crate::compiler_frontend::paths::import_resolution::ImportPathResolutionError;
+use crate::compiler_frontend::paths::dependency_resolution::DependencyPathResolutionError;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 /// Stage 0 source discovery failure.
@@ -52,13 +52,13 @@ impl From<CompilerMessages> for SourceDiscoveryError {
     }
 }
 
-impl From<ImportPathResolutionError> for SourceDiscoveryError {
-    fn from(error: ImportPathResolutionError) -> Self {
+impl From<DependencyPathResolutionError> for SourceDiscoveryError {
+    fn from(error: DependencyPathResolutionError) -> Self {
         match error {
-            ImportPathResolutionError::Diagnostic(diagnostic) => {
+            DependencyPathResolutionError::Diagnostic(diagnostic) => {
                 SourceDiscoveryError::Diagnostic(diagnostic)
             }
-            ImportPathResolutionError::Infrastructure(error) => {
+            DependencyPathResolutionError::Infrastructure(error) => {
                 SourceDiscoveryError::Infrastructure(error)
             }
         }

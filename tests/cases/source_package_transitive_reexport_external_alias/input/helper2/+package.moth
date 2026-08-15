@@ -1,9 +1,7 @@
 export:
-    import @helper1 {
-        sin as sine,
+    @helper1 sin as sine,
         PI as CIRCLE_RATIO,
         Duration as Span,
         duration_from_seconds as make_span,
-        as_seconds as span_seconds,
-    }
+        as_seconds as span_seconds
 ;

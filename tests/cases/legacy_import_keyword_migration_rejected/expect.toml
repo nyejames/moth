@@ -1,0 +1,11 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0035"]
+message_contains = ["@core/math sin as sine"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0035"
+reason = "legacy_dependency_clause.import_keyword"
+path = "input/@page.moth"
+line = 1

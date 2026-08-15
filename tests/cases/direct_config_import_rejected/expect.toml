@@ -1,7 +1,0 @@
-entry = "."
-
-[backends.html]
-mode = "failure"
-warnings = "forbid"
-diagnostic_codes = ["MOTH-IMPORT-0008"]
-message_contains = ["Cannot import directly from 'config.moth'"]

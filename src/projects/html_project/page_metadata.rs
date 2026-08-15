@@ -2,7 +2,7 @@
 //!
 //! WHAT: reads a strict reserved subset of top-level module constants from HIR metadata.
 //! WHY: page metadata should stay builder-local and deterministic without introducing new
-//!      language surface area or hidden imports.
+//!      language surface area or hidden dependencies.
 
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidPageMetadataReason};

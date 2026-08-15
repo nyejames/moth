@@ -1,5 +1,5 @@
-import @memory-management-and-gc {content as reference_content}
-import @styles {navbar, section, theme_head}
+@memory-management-and-gc content as reference_content
+@styles navbar, section, theme_head
 
 page_title #= "12. Memory management and GC"
 page_description #= "Why GC and access validation solve different memory problems."

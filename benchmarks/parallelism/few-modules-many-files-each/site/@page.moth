@@ -1,5 +1,5 @@
-import @copy { site_title }
-import @panel { render_site_panel }
+@copy site_title
+@panel render_site_panel
 
 [:
     <main>

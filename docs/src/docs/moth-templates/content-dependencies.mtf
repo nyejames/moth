@@ -1,0 +1,73 @@
+Moth template content is bound with normal extensionless source dependency clause syntax. The bound `content` constant is a compile-time string.
+
+### Dependency syntax
+
+[codeblock, $code("moth"):
+    @docs/intro
+
+    [: [intro.content] ]
+]
+
+A bare namespace clause exposes `content` as a field. A direct selection binds it directly:
+
+[codeblock, $code("moth"):
+    @docs/intro content as intro_content
+
+    [: [intro_content] ]
+]
+
+### Aliasing content
+
+Use `as` to give the bound content a local name. This is the standard form when multiple content files are depended on by the same page.
+
+### Compile-time string semantics
+
+The bound `content` is a `#String` compile-time constant. It has already folded by the time the declaring file uses it. It is not a runtime value.
+
+### Use in a page or template
+
+Insert the bound content into a template body:
+
+[codeblock, $code("moth"):
+    @docs/intro content as intro
+
+    [: [intro] ]
+]
+
+The caller decides where to insert it. Bound content does not become a page fragment automatically.
+
+### Explicit extensions are rejected for source content
+
+[codeblock, $code("moth"):
+    @docs/intro.mtf content
+]
+
+This is rejected with `MOTH-IMPORT-0024`. Use `@docs/intro` without the `.mtf` extension.
+
+### Relative path resolution
+
+Content dependency clauses follow the same path resolution rules as normal source dependency clauses. Both `@intro` and `@docs/intro` resolve from the declaring file's owning module root; the latter selects `docs/intro` below that root. `@./...` has no supported meaning.
+
+### Dependencies from root or helper files
+
+A `.mtf` file can be depended on from a module root, a normal source file, or both. The dependency path resolves the same way regardless of the declaring file's role.
+
+### Bound content does not become a page fragment
+
+Binding a `.mtf` file and inserting its content into a template does not create a page fragment. The caller controls where the content appears. Only direct top-level templates in the entry-selected module root become page fragments.
+
+### Visibility and module boundary
+
+A `.mtf` file's `content` is subject to the same module visibility rules as other declarations. Cross-module dependency clauses can only access `content` if the module root's `export:` block re-exports it.
+
+[codeblock, $code("moth"):
+    export:
+        @intro content as intro
+    ;
+]
+
+### Related concepts
+
+- For moth template file structure see @#moth-template-files-files (Moth template files).
+- For scope rules see @#template-scope (Template scope).
+- For visibility rules see @../packages/#module-visibility (Module visibility).

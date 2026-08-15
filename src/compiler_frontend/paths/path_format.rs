@@ -8,7 +8,7 @@
 //! consume consistent output without reimplementing the rules.
 
 use crate::compiler_frontend::paths::compile_time_paths::{
-    CompileTimePath, CompileTimePathBase, CompileTimePathKind, CompileTimePaths,
+    CompileTimePath, CompileTimePathBase, CompileTimePathKind,
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -111,22 +111,6 @@ fn ensure_trailing_slash(s: &str) -> String {
     } else {
         format!("{s}/")
     }
-}
-
-/// WHAT: formats multiple compile-time paths as a comma-separated string.
-/// WHY: grouped path expressions (`@dir {a, b}`) coerce to comma-separated
-///      lists so all resolved paths are represented in the output.
-pub fn format_compile_time_paths(
-    paths: &CompileTimePaths,
-    config: &PathStringFormatConfig,
-    string_table: &StringTable,
-) -> String {
-    paths
-        .paths
-        .iter()
-        .map(|p| format_compile_time_path(p, config, string_table))
-        .collect::<Vec<_>>()
-        .join(", ")
 }
 
 /// Applies the origin prefix to an absolute site path.

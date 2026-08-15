@@ -24,6 +24,7 @@ use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::parse_expression::create_expression;
+use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template_build_state::TemplateBuildState;
 use crate::compiler_frontend::ast::templates::template_control_flow::{
     TemplateBodyParseMode, TemplateControlFlowValidationMode,
@@ -41,16 +42,14 @@ use crate::compiler_frontend::style_directives::{
     StyleDirectiveKind, StyleDirectiveSpec, TemplateHeadCompatibility, TemplateHeadTag,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind, path_token_paths};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::utilities::token_scan::NestingDepth;
 use crate::compiler_frontend::value_mode::ValueMode;
 
-/// Boxed diagnostic result for template-head parsing and local dispatch.
-///
-/// Head compatibility, item parsing and directive dispatch propagate through
-/// one owner into the already boxed template-construction boundary.
-type TemplateHeadResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// Template-head parsing is a stage-local join. It keeps a retained-data lifecycle failure in
+/// `TemplateError` until template construction returns to the expression/emission boundary.
+type TemplateHeadResult<T> = Result<T, TemplateError>;
 
 /// Result of parsing a template head.
 pub(crate) struct ParsedTemplateHead {
@@ -84,10 +83,11 @@ fn enforce_head_compatibility(
     {
         Ok(())
     } else {
-        Err(Box::new(CompilerDiagnostic::invalid_template_structure(
+        Err(CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::IncompatibleHeadItem,
             token_stream.current_location(),
-        )))
+        )
+        .into())
     }
 }
 
@@ -197,10 +197,11 @@ pub fn parse_template_head(
         // closing ] delimiter. This is a malformed template, not a valid stream
         // boundary; the user needs a structured diagnostic.
         if token == TokenKind::Eof {
-            return Err(Box::new(CompilerDiagnostic::unexpected_end_of_file(
+            return Err(CompilerDiagnostic::unexpected_end_of_file(
                 Some(string_table.intern("]")),
                 token_stream.current_location(),
-            )));
+            )
+            .into());
         }
 
         // A closing ] without a body is a valid empty template.
@@ -216,10 +217,11 @@ pub fn parse_template_head(
                 .seen_tags
                 .intersects(TemplateHeadTag::SLOT_DIRECTIVE)
             {
-                return Err(Box::new(CompilerDiagnostic::invalid_template_structure(
+                return Err(CompilerDiagnostic::invalid_template_structure(
                     InvalidTemplateStructureReason::SlotInHead,
                     token_stream.current_location(),
-                )));
+                )
+                .into());
             }
 
             token_stream.advance();
@@ -233,27 +235,30 @@ pub fn parse_template_head(
             && !matches!(token, TokenKind::If | TokenKind::Loop)
             && let Some(control_flow_location) = find_unseparated_control_flow_suffix(token_stream)
         {
-            return Err(Box::new(CompilerDiagnostic::invalid_template_structure(
+            return Err(CompilerDiagnostic::invalid_template_structure(
                 InvalidTemplateStructureReason::MissingCommaBeforeControlFlowSuffix,
                 control_flow_location,
-            )));
+            )
+            .into());
         }
 
         // Make sure there is a comma before the next token.
         if separator_state == TemplateHeadSeparatorState::ExpectSeparatorOrBody {
             if matches!(token, TokenKind::If | TokenKind::Loop) {
-                return Err(Box::new(CompilerDiagnostic::invalid_template_structure(
+                return Err(CompilerDiagnostic::invalid_template_structure(
                     InvalidTemplateStructureReason::MissingCommaBeforeControlFlowSuffix,
                     token_stream.current_location(),
-                )));
+                )
+                .into());
             }
 
             if token != TokenKind::Comma {
-                return Err(Box::new(CompilerDiagnostic::expected_token(
+                return Err(CompilerDiagnostic::expected_token(
                     TokenKind::Comma,
                     Some(token),
                     token_stream.current_location(),
-                )));
+                )
+                .into());
             }
 
             separator_state = TemplateHeadSeparatorState::ExpectItem;
@@ -269,10 +274,11 @@ pub fn parse_template_head(
                     .seen_tags
                     .intersects(TemplateHeadTag::SLOT_DIRECTIVE)
                 {
-                    return Err(Box::new(CompilerDiagnostic::invalid_template_structure(
+                    return Err(CompilerDiagnostic::invalid_template_structure(
                         InvalidTemplateStructureReason::SlotInHead,
                         token_stream.current_location(),
-                    )));
+                    )
+                    .into());
                 }
 
                 let body_mode = parse_if_suffix(
@@ -290,10 +296,11 @@ pub fn parse_template_head(
                     .seen_tags
                     .intersects(TemplateHeadTag::SLOT_DIRECTIVE)
                 {
-                    return Err(Box::new(CompilerDiagnostic::invalid_template_structure(
+                    return Err(CompilerDiagnostic::invalid_template_structure(
                         InvalidTemplateStructureReason::SlotInHead,
                         token_stream.current_location(),
-                    )));
+                    )
+                    .into());
                 }
 
                 let body_mode = parse_loop_suffix(
@@ -307,10 +314,11 @@ pub fn parse_template_head(
             }
 
             TokenKind::Else => {
-                return Err(Box::new(CompilerDiagnostic::invalid_template_structure(
+                return Err(CompilerDiagnostic::invalid_template_structure(
                     InvalidTemplateStructureReason::ElseInTemplateHead,
                     token_stream.current_location(),
-                )));
+                )
+                .into());
             }
 
             TokenKind::Reactive => {
@@ -330,12 +338,12 @@ pub fn parse_template_head(
                 apply_head_compatibility(&mut head_state, &meaningful_item_compatibility);
             }
 
-            // Variable, template, and import-namespace references.
+            // Variable, template and dependency-namespace references.
             //
             // Known template references that should be inlined preserve their
             // wrapper/slot semantics. Everything else routes through the ordinary
             // expression parser so that namespace member access (`intro.content`),
-            // bare import-record misuse (`intro`), field access, and unknown names
+            // bare dependency-namespace misuse (`intro`), field access and unknown names
             // all get structured diagnostics instead of generic `UnexpectedToken`.
             TokenKind::Symbol(name) => {
                 enforce_head_compatibility(
@@ -388,7 +396,7 @@ pub fn parse_template_head(
                         false,
                         string_table,
                     )
-                    .map_err(CompilerDiagnostic::from)?;
+                    .map_err(TemplateError::from)?;
 
                     push_template_head_expression(
                         expression,
@@ -426,7 +434,7 @@ pub fn parse_template_head(
                         false,
                         string_table,
                     )
-                    .map_err(CompilerDiagnostic::from)?;
+                    .map_err(TemplateError::from)?;
 
                     push_template_head_expression(
                         expression,
@@ -441,10 +449,11 @@ pub fn parse_template_head(
                     defer_comma_advance = true;
                     apply_head_compatibility(&mut head_state, &meaningful_item_compatibility);
                 } else {
-                    return Err(Box::new(CompilerDiagnostic::unexpected_token(
+                    return Err(CompilerDiagnostic::unexpected_token(
                         TokenKind::This,
                         token_stream.current_location(),
-                    )));
+                    )
+                    .into());
                 }
             }
 
@@ -470,7 +479,7 @@ pub fn parse_template_head(
                     false,
                     string_table,
                 )
-                .map_err(CompilerDiagnostic::from)?;
+                .map_err(TemplateError::from)?;
 
                 push_template_head_expression(
                     expression,
@@ -486,22 +495,21 @@ pub fn parse_template_head(
                 apply_head_compatibility(&mut head_state, &meaningful_item_compatibility);
             }
 
-            // Import path references
-            TokenKind::Path(items) => {
+            // Path references
+            TokenKind::Path(path_id) => {
                 enforce_head_compatibility(
                     &head_state,
                     &meaningful_item_compatibility,
                     token_stream,
                 )?;
-                if items.iter().any(|item| item.alias.is_some()) {
-                    return Err(Box::new(CompilerDiagnostic::invalid_template_structure(
-                        InvalidTemplateStructureReason::PathAliasInTemplateHead,
-                        token_stream.current_location(),
-                    )));
-                }
-                let paths = path_token_paths(&items);
+                let path_root = token_stream
+                    .path_syntax
+                    .try_path_for_token(path_id, &token_stream.current_location())
+                    .map_err(TemplateError::from)?
+                    .root
+                    .clone();
                 push_template_head_path_expression(
-                    &paths,
+                    &path_root,
                     token_stream,
                     context,
                     construction_context,
@@ -528,7 +536,7 @@ pub fn parse_template_head(
                     true,
                     string_table,
                 )
-                .map_err(CompilerDiagnostic::from)?;
+                .map_err(TemplateError::from)?;
 
                 push_template_head_expression(
                     expression,
@@ -551,11 +559,12 @@ pub fn parse_template_head(
                 head_state.has_explicit_template_directive = true;
                 let directive_name = string_table.resolve(directive).to_owned();
                 let Some(spec) = context.style_directives.find(&directive_name) else {
-                    return Err(Box::new(CompilerDiagnostic::invalid_template_directive(
+                    return Err(CompilerDiagnostic::invalid_template_directive(
                         Some(directive),
                         InvalidTemplateDirectiveReason::UnknownDirective,
                         token_stream.current_location(),
-                    )));
+                    )
+                    .into());
                 };
 
                 enforce_head_compatibility(&head_state, &spec.head_compatibility, token_stream)?;
@@ -586,10 +595,11 @@ pub fn parse_template_head(
             // Separators
             TokenKind::Comma => {
                 // Multiple commas in succession.
-                return Err(Box::new(CompilerDiagnostic::unexpected_token(
+                return Err(CompilerDiagnostic::unexpected_token(
                     TokenKind::Comma,
                     token_stream.current_location(),
-                )));
+                )
+                .into());
             }
 
             // Newlines / empty things in the template head are ignored.
@@ -600,19 +610,21 @@ pub fn parse_template_head(
             }
 
             _ => {
-                return Err(Box::new(CompilerDiagnostic::unexpected_token(
+                return Err(CompilerDiagnostic::unexpected_token(
                     token,
                     token_stream.current_location(),
-                )));
+                )
+                .into());
             }
         }
 
         // Guard against malformed or truncated synthetic token streams.
         if token_stream.index >= token_stream.length {
-            return Err(Box::new(CompilerDiagnostic::unexpected_end_of_file(
+            return Err(CompilerDiagnostic::unexpected_end_of_file(
                 Some(string_table.intern("]")),
                 last_known_location,
-            )));
+            )
+            .into());
         }
 
         if token_stream.current_token_kind() == &TokenKind::StartTemplateBody {
@@ -624,10 +636,11 @@ pub fn parse_template_head(
         }
 
         if token_stream.current_token_kind() == &TokenKind::Eof {
-            return Err(Box::new(CompilerDiagnostic::unexpected_end_of_file(
+            return Err(CompilerDiagnostic::unexpected_end_of_file(
                 Some(string_table.intern("]")),
                 token_stream.current_location(),
-            )));
+            )
+            .into());
         }
 
         if token_stream.current_token_kind() == &TokenKind::TemplateClose {
@@ -643,10 +656,11 @@ pub fn parse_template_head(
         }
     }
 
-    Err(Box::new(CompilerDiagnostic::unexpected_end_of_file(
+    Err(CompilerDiagnostic::unexpected_end_of_file(
         Some(string_table.intern("]")),
         last_known_location,
-    )))
+    )
+    .into())
 }
 
 /// Dispatches a `$directive` token using the already-resolved registry spec.
@@ -689,7 +703,9 @@ fn parse_style_directive_from_spec(
         mark_template_body_whitespace_style_controlled(build_state);
     }
 
-    directive_result.map(|_| false)
+    directive_result?;
+
+    Ok(false)
 }
 
 /// Scans ahead for unseparated `if` / `loop` suffix tokens.

@@ -1,5 +1,5 @@
-import @moth-design-choices {content as reference_content}
-import @styles {navbar, section, theme_head}
+@moth-design-choices content as reference_content
+@styles navbar, section, theme_head
 
 page_title #= "02. Why Moth makes different choices"
 page_description #= "The design trade-offs behind Moth's language and compiler."

@@ -42,6 +42,7 @@ pub(super) fn parse_trait_declaration(
     context: &mut HeaderBuildContext<'_>,
 ) -> TraitHeaderResult<TraitDeclarationSyntax> {
     let mut requirements = Vec::new();
+    let trait_path = context.source_file.append(declaration_name);
 
     token_stream.skip_newlines();
 
@@ -64,7 +65,7 @@ pub(super) fn parse_trait_declaration(
             }
 
             _ => {
-                let requirement = parse_trait_requirement(token_stream, context)?;
+                let requirement = parse_trait_requirement(token_stream, &trait_path, context)?;
                 requirements.push(requirement);
             }
         }
@@ -80,6 +81,7 @@ pub(super) fn parse_trait_declaration(
 
 fn parse_trait_requirement(
     token_stream: &mut FileTokens,
+    trait_path: &InternedPath,
     context: &mut HeaderBuildContext<'_>,
 ) -> TraitHeaderResult<TraitRequirementSyntax> {
     let name_location = token_stream.current_location();
@@ -98,8 +100,10 @@ fn parse_trait_requirement(
         ));
     }
 
-    let method_path = InternedPath::from_single_str("trait_requirement", context.string_table)
-        .append(method_name);
+    // Requirement-member identifiers are retained declaration syntax, so they must live below
+    // the same source-owned prefix as every other header path. The trait and method suffixes
+    // keep members from distinct requirements distinct without inventing a parallel namespace.
+    let method_path = trait_path.append(method_name);
 
     let signature = parse_trait_requirement_signature_syntax(
         token_stream,

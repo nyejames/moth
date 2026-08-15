@@ -1,6 +1,4 @@
-import @shared {
-    PublicData,
-}
+@shared PublicData
 
 export:
     render |value PublicData| -> String:

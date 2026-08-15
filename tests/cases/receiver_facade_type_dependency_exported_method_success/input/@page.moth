@@ -1,0 +1,5 @@
+@widget Counter
+
+value Counter = Counter(41)
+
+[:receiver_facade_type_dependency_exported_method_success value=[value.tick()]]

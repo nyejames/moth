@@ -15,7 +15,6 @@ use super::*;
 pub enum NameNamespace {
     Value,
     Type,
-    Import,
     Module,
     Field,
     Variant,
@@ -454,54 +453,61 @@ pub enum PathKind {
     TrailingSeparator,
     InvalidRoot,
     InvalidComponent,
-    InvalidGroupedSyntax,
     OnlyRootSlashSupported,
-    SlashBeforeGroup,
     EmptyComponent,
     WhitespaceMustBeQuoted,
     MissingSeparator,
-    MissingClosingBrace,
     MissingClosingQuote,
     InvalidEscape,
-    EmptyGroupedBlock,
-    EntriesNeedCommas,
-    MultipleCommas,
-    AliasOnlyOnLeaf,
-    NestedGroupNeedsPrefix,
-    GroupedEntryEmpty,
-    GroupedPrefixTrailingSeparator,
-    /// A path component starts with `@` after the import introducer was consumed.
+    /// A path component starts with `@` after the dependency introducer was consumed.
     ///
-    /// WHAT: the first `@` in `import @path` introduces the import path. A second `@` in
+    /// WHAT: the first `@` introduces the dependency path. A second `@` in
     ///       any component (such as `@@pages` or `@helper/@home`) is not a valid module name.
     /// WHY: normal module-root filenames such as `@page.moth` are cosmetic filesystem markers,
-    ///      not import names. The module's import identity comes from its directory.
+    ///      not dependency names. The module's dependency identity comes from its directory.
     LeadingAtInPathComponent,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum ImportClauseKind {
-    Import,
-    Alias,
-    Grouped,
+pub enum DependencyClauseKind {
+    Namespace,
+    NamespaceAlias,
+    DirectSelection,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum InvalidImportClauseReason {
+pub enum InvalidDependencyClauseReason {
     MissingPath,
     ExpectedPath,
+    ExpectedSelectionName,
     MissingAlias,
     ExpectedAliasName,
-    AliasNotValidIdentifier,
-    AliasIsKeyword,
-    GroupedWithTrailingAlias,
-    PerEntryAndTrailingAlias,
-    MultipleTrailingAliases,
-    DoubleAliasInGroupedEntry,
+    DuplicateSelectionName,
+    DuplicateSelectionLocalName,
+    LegacyBraceSelections,
+    MissingSelectionAfterComma,
+    MissingCommaBetweenSelections,
+    NamespaceAliasWithSelections,
+    InvalidSelectionDelimiter,
+    DependencyClauseNotAllowed,
+    ProviderRequiresBinding,
+    /// A continuation comma consumed a declaration-start token as a dependency selection.
+    ///
+    /// WHAT: the comma after a selection kept the clause open, so the following declaration
+    ///       name was parsed as another selection. The diagnostic points at that name with a
+    ///       secondary label on the continuation comma.
+    ContinuationEnteredStatement,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum LegacyDependencyClauseReason {
+    ImportKeyword,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum InvalidImportPathReason {
+    PublicRoot,
+    CurrentDirectorySegment,
     ParentDirectorySegment,
     EscapesProjectRoot,
     EscapesSourcePackageRoot,
@@ -519,7 +525,9 @@ impl InvalidImportPathReason {
                 *expected = remap.get(*expected);
             }
 
-            Self::ParentDirectorySegment
+            Self::PublicRoot
+            | Self::CurrentDirectorySegment
+            | Self::ParentDirectorySegment
             | Self::EscapesProjectRoot
             | Self::EscapesSourcePackageRoot => {}
         }
@@ -694,7 +702,6 @@ pub enum InvalidTemplateStructureReason {
     ReactiveSubscriptionInConstTemplate,
     ReactiveSubscriptionOutsideTemplate,
     EmptyPathInTemplateHead,
-    PathAliasInTemplateHead,
     IncompatibleHeadItem,
     HelperOutsideWrapperSlot,
     RuntimeControlFlowUnresolvedSlot,
@@ -1708,7 +1715,6 @@ pub enum CommonSyntaxMistakeReason {
     InvalidSymbolicSpacing { error: SymbolicSpacingError },
     InvalidUnaryNegationSpacing,
     UnsupportedUnaryPlus,
-    ImportPathMissingAtPrefix { authored_path: StringId },
 }
 
 impl CommonSyntaxMistakeReason {
@@ -1717,10 +1723,6 @@ impl CommonSyntaxMistakeReason {
             CommonSyntaxMistakeReason::FunctionKeyword { keyword }
             | CommonSyntaxMistakeReason::StructKeyword { keyword } => {
                 *keyword = remap.get(*keyword);
-            }
-
-            CommonSyntaxMistakeReason::ImportPathMissingAtPrefix { authored_path } => {
-                *authored_path = remap.get(*authored_path);
             }
 
             CommonSyntaxMistakeReason::EqualityOperator

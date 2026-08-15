@@ -1,5 +1,5 @@
-import @core/random { random_int }
-import @data/constants { base_count }
+@core/random random_int
+@data/constants base_count
 
 random_index || -> Int:
     return random_int(0, base_count)

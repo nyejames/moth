@@ -26,7 +26,7 @@ Owns:
 - removal of the source `import` keyword
 - extensionless source/package clauses
 - registered explicit-extension provider clauses
-- grouped and filtered namespace binding
+- flat direct-selection and namespace binding
 - explicit re-export rules
 - repository, docs and editor-grammar syntax migration
 

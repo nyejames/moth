@@ -1,4 +1,4 @@
-import @styles {navbar, section, theme_head}
+@styles navbar, section, theme_head
 
 page_title #= "Documentation"
 page_description #= "Moth language, project and compiler documentation."
@@ -38,7 +38,7 @@ page_head #= theme_head
     ## Projects and content
 
     - @./project-structure (Project structure)
-    - @./packages (Packages and imports)
+    - @./packages (Packages and dependencies)
     - @./packages/core (Core packages)
     - @./moth-templates (Moth template files)
     - @./markdown (Plain Markdown)

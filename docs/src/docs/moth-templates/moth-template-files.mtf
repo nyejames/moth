@@ -18,7 +18,7 @@ A `.mtf` file exposes exactly one generated constant: `content #String`. The con
 
 ### File is content-oriented
 
-A `.mtf` file is not a normal declaration file. It does not contain authored imports, declarations, frontmatter or metadata. It is a template body that produces a folded string.
+A `.mtf` file is not a normal declaration file. It does not contain authored dependency clauses, declarations, frontmatter or metadata. It is a template body that produces a folded string.
 
 ### Comments and punctuation
 
@@ -26,7 +26,7 @@ Because the file body is a template body, `--` is content text, not a Moth comme
 
 ### Source file path and module ownership
 
-A `.mtf` file belongs to the module that contains its directory. It can be imported by same-module files and re-exported through the module root's `export:` block.
+A `.mtf` file belongs to the module that contains its directory. Same-module files can bind its generated `content` constant, and the module root can re-export that constant through its `export:` block.
 
 ### Target and builder availability
 
@@ -35,6 +35,6 @@ Moth template files are available in HTML project builds. The `.mtf` body sees a
 ### Related concepts
 
 - For the Markdown subset see @#implicit-markdown (Implicit Markdown).
-- For import syntax see @#content-imports (Content imports).
+- For dependency syntax see @#content-dependencies (Content dependencies).
 - For scope rules see @#template-scope (Template scope).
 - For limitations see @#moth-template-files-limits (Moth template limits).

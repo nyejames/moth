@@ -1,0 +1,6 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = [
+    "same_module_dependency_compile_time_constant greeting=hello",
+]

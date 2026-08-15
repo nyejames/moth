@@ -1,4 +1,4 @@
-import @types { Box }
+@types Box
 
 value Box of Int = Box(1)
 

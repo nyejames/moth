@@ -1,11 +1,11 @@
-`@core/random` gives you random number helpers. Import it when you need random `Float` or `Int` values.
+`@core/random` gives you random number helpers. Bind it when you need random `Float` or `Int` values.
 
-### Importing
+### Binding
 
-Bring in the functions you need with a grouped import.
+Bind the functions you need with a direct-selection clause.
 
 [codeblock, $code("moth"):
-    import @core/random {random_float, random_int}
+    @core/random random_float, random_int
 
     value = random_float()
     die_roll = random_int(1, 6)

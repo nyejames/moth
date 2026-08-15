@@ -9,6 +9,7 @@
 use crate::ast_log;
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ExpressionKind, ReactiveSource, ReactiveSourceKind,
 };
@@ -52,19 +53,21 @@ use crate::compiler_frontend::symbols::identifier_policy::{
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::signature_position::check_signature_common_mistake;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{
+    FilePathSyntax, FileTokens, SourceLocation, Token, TokenKind,
+};
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_explicit_type_boundary;
 use crate::compiler_frontend::type_coercion::parse_context::{
     CastTargetContext, ExpectedCollectionContext, ExpectedType, cast_target_context_for_type_id,
     parse_expectation_for_type_id,
 };
 
-/// Stage-local result for body-local declaration parsing and lowering.
+/// Body-local declaration parsing shares the AST body error lane.
 ///
-/// Boxing keeps the diagnostic result small while the declaration entry points share one
-/// explicit boundary. Plain diagnostic producers are boxed here and existing boxed producers
-/// propagate without an unbox/rebox cycle.
-type DeclarationResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// A declaration initializer or signature default can require a temporary substream over a
+/// frozen file table. If that retained-table invariant fails, the error must reach module
+/// emission as `CompilerError`, not become an authored declaration diagnostic.
+type DeclarationResult<T> = Result<T, ExpressionParseError>;
 
 /// Returns `Some(capacity)` when the parsed type is a capacity-only shorthand `{N}`.
 ///
@@ -89,13 +92,12 @@ fn capacity_only_shorthand(type_ref: &ParsedTypeRef) -> Option<&ParsedCollection
 fn initializer_is_compile_time_constant(
     initializer: &Expression,
     context: &ScopeContext,
-) -> Result<bool, CompilerDiagnostic> {
+) -> Result<bool, TemplateError> {
     initializer
         .const_value_kind_with_template_classifier(&mut |template| {
             classify_template_from_effective_tir(template, &context.template_ir_store)
         })
         .map(|kind| kind.is_compile_time_value())
-        .map_err(TemplateError::into_diagnostic)
 }
 
 /// Apply binding-level reactive identity after the initializer has been fully typed.
@@ -161,11 +163,12 @@ pub(crate) fn new_declaration(
     ensure_not_keyword_shadow_identifier(symbol_id, token_stream.current_location(), string_table)?;
 
     if is_reserved_builtin_symbol(&declaration_name) {
-        return Err(Box::new(CompilerDiagnostic::invalid_declaration(
+        return Err(CompilerDiagnostic::invalid_declaration(
             InvalidDeclarationReason::ReservedBuiltinName,
             Some(symbol_id),
             token_stream.current_location(),
-        )));
+        )
+        .into());
     }
 
     // Capture the authored binding-name location before advancing past the name token.
@@ -240,7 +243,7 @@ pub(crate) fn new_declaration(
     }
 
     if let Some(error) = check_signature_common_mistake(token_stream) {
-        return Err(Box::new(error));
+        return Err(error.into());
     }
 
     // ----------------------------
@@ -275,6 +278,7 @@ pub(crate) fn new_declaration(
     let declaration = resolve_declaration_syntax(
         declaration_syntax,
         qualified_name,
+        &token_stream.path_syntax,
         &mut *context,
         type_interner,
         string_table,
@@ -315,6 +319,7 @@ fn function_signature_receiver(
 pub fn resolve_declaration_syntax(
     declaration_syntax: DeclarationSyntax,
     qualified_name: InternedPath,
+    path_syntax: &FilePathSyntax,
     context: &mut ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
@@ -325,11 +330,12 @@ pub fn resolve_declaration_syntax(
     let is_reactive_binding = declaration_syntax.binding_mode.is_reactive();
     let value_mode = declaration_syntax.value_mode();
     if declaration_syntax.binding_mode.is_mutable() && context.kind.is_constant_context() {
-        return Err(Box::new(CompilerDiagnostic::invalid_declaration(
+        return Err(CompilerDiagnostic::invalid_declaration(
             InvalidDeclarationReason::ConstantCannotBeMutable,
             None,
             declaration_syntax.location.clone(),
-        )));
+        )
+        .into());
     }
 
     // ----------------------------
@@ -352,14 +358,22 @@ pub fn resolve_declaration_syntax(
             TokenKind::Eof,
             declaration_syntax.location.to_owned(),
         ));
-        let mut initializer_stream = FileTokens::new(qualified_name.to_owned(), initializer_tokens);
+        let mut initializer_stream = FileTokens::new_from_slice(
+            qualified_name.to_owned(),
+            None,
+            None,
+            initializer_tokens,
+            path_syntax,
+        )
+        .map_err(ExpressionParseError::from)?;
 
         // Shorthand requires an immediate collection literal initializer.
         if initializer_stream.current_token_kind() != &TokenKind::OpenCurly {
-            return Err(Box::new(CompilerDiagnostic::invalid_collection_type(
+            return Err(CompilerDiagnostic::invalid_collection_type(
                 InvalidCollectionTypeReason::ShorthandNonLiteralRhs,
                 initializer_stream.current_location(),
-            )));
+            )
+            .into());
         }
 
         let collection_context = ExpectedCollectionContext::CapacityOnlyShorthand {
@@ -393,19 +407,21 @@ pub fn resolve_declaration_syntax(
         if declaration_syntax.binding_mode.is_compile_time()
             && !initializer_is_compile_time_constant
         {
-            return Err(Box::new(CompilerDiagnostic::compile_time_evaluation_error(
+            return Err(CompilerDiagnostic::compile_time_evaluation_error(
                 CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable,
                 qualified_name.name(),
                 declaration_syntax.location.clone(),
-            )));
+            )
+            .into());
         }
 
         initializer_stream.skip_newlines();
         if initializer_stream.current_token_kind() != &TokenKind::Eof {
-            return Err(Box::new(CompilerDiagnostic::unexpected_token(
+            return Err(CompilerDiagnostic::unexpected_token(
                 initializer_stream.current_token_kind().to_owned(),
                 initializer_stream.current_location(),
-            )));
+            )
+            .into());
         }
 
         parsed_initializer.value_mode = value_mode.to_owned();
@@ -468,7 +484,14 @@ pub fn resolve_declaration_syntax(
         TokenKind::Eof,
         declaration_syntax.location.to_owned(),
     ));
-    let mut initializer_stream = FileTokens::new(qualified_name.to_owned(), initializer_tokens);
+    let mut initializer_stream = FileTokens::new_from_slice(
+        qualified_name.to_owned(),
+        None,
+        None,
+        initializer_tokens,
+        path_syntax,
+    )
+    .map_err(ExpressionParseError::from)?;
 
     // Check the first token before dispatching so we don't wastefully call
     // `create_expression` recursively when the initializer is a struct definition.
@@ -495,6 +518,7 @@ pub fn resolve_declaration_syntax(
             for field in &field_syntax {
                 params.push(signature_member_to_declaration(
                     field,
+                    path_syntax,
                     &constant_context,
                     type_interner,
                     string_table,
@@ -502,12 +526,8 @@ pub fn resolve_declaration_syntax(
                 )?);
             }
 
-            if let Err(bag) = validate_struct_default_values(&params, &context.template_ir_store) {
-                let diagnostics = bag.into_diagnostics();
-                if let Some(first) = diagnostics.into_iter().next() {
-                    return Err(Box::new(first));
-                }
-            }
+            validate_struct_default_values(&params, &context.template_ir_store)
+                .map_err(ExpressionParseError::from)?;
 
             Expression::struct_definition(
                 params,
@@ -583,8 +603,7 @@ pub fn resolve_declaration_syntax(
                     },
                     false,
                 );
-                create_expression_with_trailing_newline_policy(input)
-                    .map_err(|error| Box::new(error.into()))?
+                create_expression_with_trailing_newline_policy(input)?
             };
 
             if let Some(declared_type_id) = declared_type_id {
@@ -614,11 +633,12 @@ pub fn resolve_declaration_syntax(
     };
 
     if declaration_syntax.binding_mode.is_compile_time() && !initializer_is_compile_time_constant {
-        return Err(Box::new(CompilerDiagnostic::compile_time_evaluation_error(
+        return Err(CompilerDiagnostic::compile_time_evaluation_error(
             CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable,
             qualified_name.name(),
             declaration_syntax.location.clone(),
-        )));
+        )
+        .into());
     }
 
     // Defensive: ensure the initializer parser consumed all tokens.
@@ -631,17 +651,19 @@ pub fn resolve_declaration_syntax(
             .option_inner_type(parsed_initializer.type_id)
             .is_some()
     {
-        return Err(Box::new(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::DirectOptionFallbackSyntax,
             initializer_stream.current_location(),
-        )));
+        )
+        .into());
     }
 
     if initializer_stream.current_token_kind() != &TokenKind::Eof {
-        return Err(Box::new(CompilerDiagnostic::unexpected_token(
+        return Err(CompilerDiagnostic::unexpected_token(
             initializer_stream.current_token_kind().to_owned(),
             initializer_stream.current_location(),
-        )));
+        )
+        .into());
     }
 
     // Reject immutable bindings initialized with an empty fixed collection literal.
@@ -654,10 +676,11 @@ pub fn resolve_declaration_syntax(
             && let ExpressionKind::Collection(items) = &parsed_initializer.kind
             && items.is_empty()
         {
-            return Err(Box::new(CompilerDiagnostic::invalid_collection_type(
+            return Err(CompilerDiagnostic::invalid_collection_type(
                 InvalidCollectionTypeReason::EmptyImmutableFixedCollection,
                 parsed_initializer.location.clone(),
-            )));
+            )
+            .into());
         }
     }
 

@@ -27,7 +27,7 @@ use crate::compiler_frontend::compiler_messages::source_location::SourceLocation
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
 #[cfg(test)]
-use crate::compiler_frontend::paths::compile_time_paths::CompileTimePaths;
+use crate::compiler_frontend::paths::compile_time_paths::CompileTimePath;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 
@@ -86,12 +86,12 @@ pub enum ExpressionKind {
     Bool(bool),
     Char(char),
 
-    /// Compile-time path literal(s) — one or more resolved paths from grouped syntax.
+    /// One resolved compile-time path literal.
     ///
     /// Deferred until source path expression parsing is wired. Retained because const folding,
     /// HIR lowering, and path tests already share this AST shape.
     #[cfg(test)]
-    Path(Box<CompileTimePaths>),
+    Path(Box<CompileTimePath>),
 
     /// Reference to a variable by name.
     Reference(InternedPath),

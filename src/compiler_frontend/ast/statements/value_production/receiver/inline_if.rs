@@ -7,21 +7,13 @@
 use super::ValueIfParseInput;
 use super::expression_build::{build_value_if_expression, then_value_node};
 use super::inline_then_else::{InlineThenElseInput, parse_inline_then_else};
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueIfBlock;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 
-/// File-local boxed diagnostic result alias.
-///
-/// WHAT: the inline-if parser returns `Result<T, Box<CompilerDiagnostic>>` through
-/// this alias.
-/// WHY: `CompilerDiagnostic` is large enough to trigger `clippy::result_large_err` when
-/// stored directly in a `Result` variant. Boxing the error at the owner boundary keeps
-/// the `Result` envelope small without changing `DiagnosticBag`, `CompilerMessages`, or
-/// any shared error type. The still-plain `parse_inline_then_else` result is adapted at
-/// its narrow call site; the caller in `receiver/mod.rs` unboxes once at the plain
-/// accumulation boundary.
-type InlineIfResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// Inline branch expression parsing can encounter a retained-data lifecycle failure, so this
+/// private join uses the AST expression error lane rather than pre-rendering it as a diagnostic.
+type InlineIfResult<T> = Result<T, ExpressionParseError>;
 
 /// Parses an inline Bool value-if after the condition has been parsed.
 ///

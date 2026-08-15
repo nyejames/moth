@@ -1,4 +1,4 @@
-import @util/formatting {format_label}
+@util/formatting format_label
 
 Card = |
     title String,

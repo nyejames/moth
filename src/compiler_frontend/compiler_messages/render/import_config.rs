@@ -1,6 +1,6 @@
 //! Config, import, and path diagnostic prose.
 //!
-//! WHAT: renders diagnostics tied to project configuration, source imports, and compile-time paths.
+//! WHAT: renders diagnostics tied to project configuration, source dependencies, and compile-time paths.
 //! WHY: these messages share path/string-table formatting concerns and are separate from
 //! expression/type/rule diagnostic rendering.
 
@@ -24,7 +24,7 @@ pub(crate) fn invalid_config_message(
             }
         }
         InvalidConfigReason::ConfigImportUnsupported => {
-            "`config.moth` is self-contained and does not support imports.".to_owned()
+            "`config.moth` is self-contained and does not support dependency clauses.".to_owned()
         }
         InvalidConfigReason::FunctionUnsupported => {
             "`config.moth` does not support user-defined functions. Use earlier private helper constants for reusable folded values.".to_owned()
@@ -47,7 +47,7 @@ pub(crate) fn invalid_config_message(
             )
         }
         InvalidConfigReason::UnsupportedStatement => {
-            "`config.moth` supports known setting declarations plus import/type support declarations only.".to_owned()
+            "`config.moth` supports known setting declarations plus `#Import`/type support declarations only.".to_owned()
         }
         InvalidConfigReason::StandaloneTemplateUnsupported => {
             "`config.moth` does not support standalone templates or page fragments. Assign a folded template to a known setting instead.".to_owned()
@@ -134,7 +134,7 @@ pub(crate) fn invalid_config_message(
             prefix,
             entry_folder,
         } => format!(
-            "Entry-root folder '{}' collides with source-backed package prefix '@{}'. Ambiguous imports are disallowed.",
+            "Entry-root folder '{}' collides with source-backed package prefix '@{}'. Ambiguous dependencies are disallowed.",
             string_table.resolve(*entry_folder),
             string_table.resolve(*prefix),
         ),
@@ -184,7 +184,7 @@ pub(crate) fn invalid_config_message(
             folder_name,
             directory,
         } => format!(
-            "Project structure collision: '{}' and folder '{}' share the same import name in '{}'. Compiler-recognized source files and folders in the same directory must have unique import names. Rename one of them to keep import paths unambiguous.",
+            "Project structure collision: '{}' and folder '{}' share the same dependency name in '{}'. Compiler-recognized source files and folders in the same directory must have unique dependency names. Rename one of them to keep dependency paths unambiguous.",
             string_table.resolve(*file_name),
             string_table.resolve(*folder_name),
             string_table.resolve(*directory),
@@ -324,20 +324,28 @@ pub(crate) fn invalid_import_path_message(
     string_table: &StringTable,
 ) -> String {
     match reason {
+        InvalidImportPathReason::PublicRoot => {
+            "Dependency paths must name a provider under the owning module root; '@/' cannot be used as a dependency.".to_owned()
+        }
+        InvalidImportPathReason::CurrentDirectorySegment => format!(
+            "Dependency paths resolve from the owning module root, so '@./{}' is not supported. Remove './'.",
+            path.to_portable_string(string_table)
+                .trim_start_matches("./")
+        ),
         InvalidImportPathReason::ParentDirectorySegment => format!(
-            "Import paths containing '..' are not supported: '{}'",
+            "Dependency paths containing '..' are not supported: '{}'",
             path.to_portable_string(string_table)
         ),
         InvalidImportPathReason::EscapesProjectRoot => format!(
-            "Import escapes the project root and is not allowed: '{}'",
+            "Dependency path escapes the project root and is not allowed: '{}'",
             path.to_portable_string(string_table)
         ),
         InvalidImportPathReason::EscapesSourcePackageRoot => format!(
-            "Import escapes the source-backed package root and is not allowed: '{}'",
+            "Dependency path escapes the source-backed package root and is not allowed: '{}'",
             path.to_portable_string(string_table)
         ),
         InvalidImportPathReason::CaseMismatch { provided, expected } => format!(
-            "Import path case mismatch: '{}' should be '{}'.",
+            "Dependency path case mismatch: '{}' should be '{}'.",
             string_table.resolve(provided),
             string_table.resolve(expected),
         ),
@@ -375,12 +383,8 @@ pub(crate) fn invalid_path_message(path_kind: PathKind) -> &'static str {
         PathKind::InvalidComponent => {
             "Invalid path component. Use path components without syntax delimiters or cross-platform reserved filename characters."
         }
-        PathKind::InvalidGroupedSyntax => "Invalid grouped path syntax.",
         PathKind::OnlyRootSlashSupported => {
             "Only exact \"@/\" is supported as the public root path. Use '@name/...' for rooted paths."
-        }
-        PathKind::SlashBeforeGroup => {
-            "Slash-before-group syntax is not supported. Use 'base { ... }'."
         }
         PathKind::EmptyComponent => "Empty path component. Consecutive separators are not allowed.",
         PathKind::WhitespaceMustBeQuoted => {
@@ -389,26 +393,16 @@ pub(crate) fn invalid_path_message(path_kind: PathKind) -> &'static str {
         PathKind::MissingSeparator => {
             "Missing path separator. Path components must be separated by '/'."
         }
-        PathKind::MissingClosingBrace => "Grouped path is missing a closing '}'.",
         PathKind::MissingClosingQuote => {
             "Unclosed quoted path component. Quoted components must end with a double quote."
         }
         PathKind::InvalidEscape => {
             "Invalid escape in quoted path component. Only '\"' and '\\' are supported."
         }
-        PathKind::EmptyGroupedBlock => "Grouped path requires at least one entry.",
-        PathKind::EntriesNeedCommas => "Grouped path entries must be separated by commas.",
-        PathKind::MultipleCommas => "Consecutive commas are not allowed in grouped paths.",
-        PathKind::AliasOnlyOnLeaf => "Path aliases are only valid on leaf entries.",
-        PathKind::NestedGroupNeedsPrefix => "Nested groups require a non-empty prefix.",
-        PathKind::GroupedEntryEmpty => "Grouped path entry cannot be empty.",
-        PathKind::GroupedPrefixTrailingSeparator => {
-            "Grouped path prefix cannot end with a separator."
-        }
         PathKind::LeadingAtInPathComponent => {
-            "The leading '@' starts an import path and is not part of the module name.\n\
-             Import the module directory, for example `import @pages`.\n\
-             Normal module-root filenames such as `@page.moth` are not imported directly."
+            "The leading '@' starts a dependency path and is not part of the module name.\n\
+             Depend on the module directory, for example `@pages`.\n\
+             Normal module-root filenames such as `@page.moth` are not referenced directly."
         }
     }
 }
@@ -419,9 +413,9 @@ pub(crate) fn direct_symbol_path_import_message(
 ) -> String {
     let path_text = path.to_portable_string(string_table);
     format!(
-        "Direct symbol-path imports are not supported: `@{path_text}`.\n\
-         Import from the containing surface with grouped syntax, such as `import @path/to/file {{ symbol }}`, \
-         or import the containing namespace and access a member with `namespace.symbol`.",
+        "Direct symbol dependency paths are not supported: `@{path_text}`.\n\
+         Select the symbol from its containing surface, such as `@path/to/file symbol`, \
+         or bind the containing namespace and access `namespace.symbol`.",
     )
 }
 
@@ -431,11 +425,11 @@ pub(crate) fn invalid_namespace_default_name_message(
 ) -> String {
     let path_text = path.to_portable_string(string_table);
     let stem = path.name().map(|n| string_table.resolve(n)).unwrap_or("");
-    // Ensure the rendered example includes the @ prefix that import paths require.
+    // Ensure the rendered example includes the @ prefix that dependency paths require.
     let at_prefix = if path_text.starts_with('@') { "" } else { "@" };
     format!(
-        "Cannot derive an import namespace name from `{stem}`.\n\
-         Use an explicit alias, for example `import {at_prefix}{path_text} as my_name`.",
+        "Cannot derive a dependency namespace name from `{stem}`.\n\
+         Use an explicit alias, for example `{at_prefix}{path_text} as my_name`.",
     )
 }
 
@@ -447,8 +441,8 @@ pub(crate) fn duplicate_import_surface_member_message(
     let path_text = surface_path.to_portable_string(string_table);
     let member = string_table.resolve(member_name);
     format!(
-        "Import surface `{path_text}` exposes more than one member named `{member}`.\n\
-         Moth import records require unique member names, even across value and type contexts.\n\
+        "Dependency surface `{path_text}` exposes more than one member named `{member}`.\n\
+         Moth dependency namespace records require unique member names, even across value and type contexts.\n\
          Rename or alias one of the exported members.",
     )
 }
@@ -460,7 +454,7 @@ pub(crate) fn explicit_moth_extension_message(
     let path_text = path.to_portable_string(string_table);
     let extensionless_path = path_text.strip_suffix(".moth").unwrap_or(&path_text);
     format!(
-        "Import paths must not include the `.moth` extension: `@{path_text}`.\n\
+        "Dependency paths must not include the `.moth` extension: `@{path_text}`.\n\
          Use `@{extensionless_path}` instead.",
     )
 }
@@ -475,7 +469,7 @@ pub(crate) fn explicit_source_extension_message(
     let suffix = format!(".{extension}");
     let extensionless_path = path_text.strip_suffix(&suffix).unwrap_or(&path_text);
     format!(
-        "Import paths must not include the `.{extension}` source-file extension: `@{path_text}`.\n\
+        "Dependency paths must not include the `.{extension}` source-file extension: `@{path_text}`.\n\
          Use `@{extensionless_path}` instead.",
     )
 }
@@ -488,8 +482,8 @@ pub(crate) fn unsupported_source_file_kind_message(
     let path = path.to_portable_string(string_table);
     let extension = string_table.resolve(extension);
     format!(
-        "Import `{path}` resolves to a recognized source file kind `.{extension}`, but this builder does not support it.\n\
-         Use a builder that supports `.{extension}` files or import a Moth source file instead.",
+        "Dependency `{path}` resolves to a recognized source file kind `.{extension}`, but this builder does not support it.\n\
+         Use a builder that supports `.{extension}` files or depend on a Moth source file instead.",
     )
 }
 
@@ -502,7 +496,7 @@ pub(crate) fn invalid_source_file_entry_message(
     let extension = string_table.resolve(extension);
     format!(
         "Entry file `{path}` uses the `.{extension}` source-file kind, but source assets cannot be compiled as page or module entries.\n\
-         Import this file from a `.moth` entry file using extensionless import syntax, or use a `.moth`/`@page.moth` file as the build entry.",
+         Depend on this file from a `.moth` entry file using extensionless dependency syntax, or use a `.moth`/`@page.moth` file as the build entry.",
     )
 }
 
@@ -536,7 +530,7 @@ pub(crate) fn unsupported_external_extension_message(
     let ext = string_table.resolve(extension);
     format!(
         "External file import `{path}` uses extension `.{ext}`, which is not supported by this builder.\n\
-         Register an external import provider for `.{ext}` or import a Moth source file instead.",
+         Register an external import provider for `.{ext}` or depend on a Moth source file instead.",
     )
 }
 
@@ -550,16 +544,16 @@ pub(crate) fn invalid_external_module_message(
     format!("External JS module `{path}` is invalid.\n{message}")
 }
 
-pub(crate) fn import_record_used_as_value_message(
+pub(crate) fn dependency_namespace_used_as_value_message(
     record_name: StringId,
     string_table: &StringTable,
 ) -> String {
     let name = string_table.resolve(record_name);
     format!(
-        "`{name}` is an import namespace, not a value.\n\
-         Use `{name}.member` for imported values or `{name}.Type` in type position.\n\
+        "`{name}` is a dependency namespace binding, not a value.\n\
+         Use `{name}.member` for bound values or `{name}.Type` in type position.\n\
          For Moth template and Markdown content files, the generated string is always `{name}.content`.\n\
-         Alternative: import @path {{ content as {name} }}",
+         Alternative: `@path content as {name}`",
     )
 }
 
@@ -570,7 +564,7 @@ pub(crate) fn const_record_used_as_value_message(
     let name = string_table.resolve(record_name);
     format!(
         "Records are compile-time field records and cannot be used as values.\n\
-         They are used to group named fields, module imports, and compile-time members.\n\
+         They are used to group named fields, module dependencies, and compile-time members.\n\
          Access a field instead, for example `{name}.member`.",
     )
 }
@@ -584,70 +578,95 @@ pub(crate) fn namespace_type_value_misuse_message(
     let name = string_table.resolve(name);
     match (expected, found) {
         (NamespaceTypeValueMisuseKind::Type, NamespaceTypeValueMisuseKind::Value) => {
-            format!("`{name}` is a value member of the import record and cannot be used as a type.")
+            format!(
+                "`{name}` is a value member of the dependency namespace and cannot be used as a type."
+            )
         }
         (NamespaceTypeValueMisuseKind::Value, NamespaceTypeValueMisuseKind::Type) => {
-            format!("`{name}` is a type member of the import record and cannot be used as a value.")
+            format!(
+                "`{name}` is a type member of the dependency namespace and cannot be used as a value."
+            )
         }
         (NamespaceTypeValueMisuseKind::Value, NamespaceTypeValueMisuseKind::Namespace) => {
             format!(
-                "`{name}` is a namespace member of the import record and cannot be used as a value or type."
+                "`{name}` is a namespace member of the dependency namespace and cannot be used as a value or type."
             )
         }
         (NamespaceTypeValueMisuseKind::Type, NamespaceTypeValueMisuseKind::Namespace) => {
             format!(
-                "`{name}` is a namespace member of the import record and cannot be used as a type."
+                "`{name}` is a namespace member of the dependency namespace and cannot be used as a type."
             )
         }
         (NamespaceTypeValueMisuseKind::Namespace, NamespaceTypeValueMisuseKind::Value) => {
             format!(
-                "`{name}` is a value member of the import record and cannot be used as a namespace."
+                "`{name}` is a value member of the dependency namespace and cannot be used as a namespace."
             )
         }
         (NamespaceTypeValueMisuseKind::Namespace, NamespaceTypeValueMisuseKind::Type) => {
             format!(
-                "`{name}` is a type member of the import record and cannot be used as a namespace."
+                "`{name}` is a type member of the dependency namespace and cannot be used as a namespace."
             )
         }
         _ => format!("`{name}` cannot be used in this context."),
     }
 }
 
-pub(crate) fn nested_traversal_message(
+pub(crate) fn nested_dependency_traversal_message(
     _record_name: StringId,
     _string_table: &StringTable,
 ) -> String {
     String::from(
-        "Import records do not expose nested filesystem paths as fields.\n\
-         Import the child path directly, for example `import @child/path as child`, or use a nested grouped import.",
+        "Dependency namespace records do not expose nested filesystem paths as fields.\n\
+         Bind the child path directly as a separate clause, for example `@child/path as child`.",
     )
 }
 
-pub(crate) fn invalid_import_clause_message(reason: InvalidImportClauseReason) -> &'static str {
+pub(crate) fn invalid_dependency_clause_message(
+    reason: InvalidDependencyClauseReason,
+) -> &'static str {
     match reason {
-        InvalidImportClauseReason::MissingPath => "Expected a path after the 'import' keyword.",
-        InvalidImportClauseReason::ExpectedPath => {
-            "Expected a path after the 'import' keyword, found something else."
+        InvalidDependencyClauseReason::MissingPath => {
+            "Expected a dependency path beginning with `@`."
         }
-        InvalidImportClauseReason::MissingAlias => {
-            "Expected an alias after `as`.\nWrite `import @path as local_name` or `import @path { symbol as local_name }`."
+        InvalidDependencyClauseReason::ExpectedPath => {
+            "Expected a dependency path beginning with `@`, found something else."
         }
-        InvalidImportClauseReason::ExpectedAliasName => "Expected alias name after `as`.",
-        InvalidImportClauseReason::AliasNotValidIdentifier => {
-            "Import alias must be a valid local binding name."
+        InvalidDependencyClauseReason::ExpectedSelectionName => {
+            "Expected a direct selected name. Dependency selections are flat identifiers separated by commas."
         }
-        InvalidImportClauseReason::AliasIsKeyword => "Import alias cannot be a reserved keyword.",
-        InvalidImportClauseReason::GroupedWithTrailingAlias => {
-            "Grouped imports cannot use one alias for the whole group.\nAlias individual entries instead: `import @path { symbol as local_name }`."
+        InvalidDependencyClauseReason::MissingAlias => {
+            "Expected an alias after `as`.\nWrite `@path as local_name` or `@path symbol as local_name`."
         }
-        InvalidImportClauseReason::PerEntryAndTrailingAlias => {
-            "Cannot use both per-entry aliases and a group-level alias."
+        InvalidDependencyClauseReason::ExpectedAliasName => "Expected alias name after `as`.",
+        InvalidDependencyClauseReason::DuplicateSelectionName => {
+            "A dependency clause cannot select the same surface member more than once. Keep one selection and use its local alias."
         }
-        InvalidImportClauseReason::MultipleTrailingAliases => {
-            "Import clauses can only have one alias."
+        InvalidDependencyClauseReason::DuplicateSelectionLocalName => {
+            "A dependency clause cannot bind two selections to the same local name. Rename or alias one selection."
         }
-        InvalidImportClauseReason::DoubleAliasInGroupedEntry => {
-            "Grouped import entries can only have one alias."
+        InvalidDependencyClauseReason::LegacyBraceSelections => {
+            "Dependency selections no longer use braces. Write selected names directly after the path, separated by commas."
+        }
+        InvalidDependencyClauseReason::MissingSelectionAfterComma => {
+            "A dependency-clause comma must be followed by another selected name. Remove the comma to end the clause, or add the promised selection. Trailing commas are not allowed."
+        }
+        InvalidDependencyClauseReason::MissingCommaBetweenSelections => {
+            "Dependency selections must be separated by commas. After a continued line, remove the previous comma to end the clause or complete the promised selection."
+        }
+        InvalidDependencyClauseReason::NamespaceAliasWithSelections => {
+            "A namespace alias cannot be followed by direct selections. Use either `@path as namespace` or `@path name, other`."
+        }
+        InvalidDependencyClauseReason::InvalidSelectionDelimiter => {
+            "Dependency selections are delimiter-free. Parentheses, pipes, colon blocks and other selection delimiters are not allowed."
+        }
+        InvalidDependencyClauseReason::DependencyClauseNotAllowed => {
+            "Dependency clauses are not allowed in this file kind."
+        }
+        InvalidDependencyClauseReason::ProviderRequiresBinding => {
+            "An explicit-extension provider clause requires a namespace alias or at least one direct selection."
+        }
+        InvalidDependencyClauseReason::ContinuationEnteredStatement => {
+            "The comma continued the dependency clause, so this name was consumed as the next selected dependency name. Remove the comma to end the clause and start the following statement."
         }
     }
 }
@@ -657,10 +676,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn import_record_used_as_value_message_contains_record_name_and_content_hint() {
+    fn dependency_namespace_used_as_value_message_contains_name_and_content_hint() {
         let mut string_table = StringTable::new();
         let record_name = string_table.intern("intro");
-        let message = import_record_used_as_value_message(record_name, &string_table);
+        let message = dependency_namespace_used_as_value_message(record_name, &string_table);
 
         assert!(
             message.contains("`intro`"),
@@ -672,7 +691,7 @@ mod tests {
         );
         assert!(
             message.contains("content as intro"),
-            "message should mention grouped `content as ...` import: {message}"
+            "message should mention the `content as ...` dependency selection: {message}"
         );
     }
 

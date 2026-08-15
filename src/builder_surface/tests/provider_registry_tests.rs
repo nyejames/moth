@@ -232,8 +232,8 @@ fn resolution_table_deduplicates_repeated_imports_from_same_source_file() {
     let resolved = resolution_table_import(1);
 
     // Same source file, two different prefixes, same package.
-    table.insert("src/main.moth", "@./helper.js", resolved.clone());
-    table.insert("src/main.moth", "@./helper", resolved);
+    table.insert("src/main.moth", "helper.js", resolved.clone());
+    table.insert("src/main.moth", "helper", resolved);
 
     let result =
         table.collect_unique_resolved_imports_for_source_files(&["src/main.moth".to_owned()]);
@@ -246,8 +246,8 @@ fn resolution_table_deduplicates_repeated_imports_from_same_source_file() {
 fn resolution_table_replacing_same_source_prefix_updates_collected_package() {
     let mut table = ExternalImportResolutionTable::new();
 
-    table.insert("src/main.moth", "@./helper.js", resolution_table_import(1));
-    table.insert("src/main.moth", "@./helper.js", resolution_table_import(2));
+    table.insert("src/main.moth", "helper.js", resolution_table_import(1));
+    table.insert("src/main.moth", "helper.js", resolution_table_import(2));
 
     let result =
         table.collect_unique_resolved_imports_for_source_files(&["src/main.moth".to_owned()]);
@@ -256,7 +256,7 @@ fn resolution_table_replacing_same_source_prefix_updates_collected_package() {
     assert_eq!(result[0].package_id, ExternalPackageId(2));
 
     let retrieved = table
-        .get("src/main.moth", "@./helper.js")
+        .get("src/main.moth", "helper.js")
         .expect("replacement should keep exact lookup available");
     assert_eq!(retrieved.package_id, ExternalPackageId(2));
     assert_eq!(retrieved.exported_types, vec![ExternalTypeId(2)]);
@@ -270,13 +270,17 @@ fn resolution_table_replacing_same_source_prefix_updates_collected_package() {
 fn resolution_table_collects_different_packages_from_different_source_files() {
     let mut table = ExternalImportResolutionTable::new();
 
-    // Same prefix, different source files, different packages.
-    table.insert("src/main.moth", "@./lib.js", resolution_table_import(1));
-    table.insert("src/other.moth", "@./lib.js", resolution_table_import(2));
+    // Same module-relative prefix in different owning modules may resolve to distinct packages.
+    table.insert("src/@page.moth", "lib.js", resolution_table_import(1));
+    table.insert(
+        "src/feature/@page.moth",
+        "lib.js",
+        resolution_table_import(2),
+    );
 
     let result = table.collect_unique_resolved_imports_for_source_files(&[
-        "src/main.moth".to_owned(),
-        "src/other.moth".to_owned(),
+        "src/@page.moth".to_owned(),
+        "src/feature/@page.moth".to_owned(),
     ]);
 
     assert_eq!(result.len(), 2);
@@ -290,9 +294,9 @@ fn resolution_table_orders_results_by_package_id_regardless_of_insert_order() {
     let mut table = ExternalImportResolutionTable::new();
 
     // Insert out of order.
-    table.insert("src/a.moth", "@./a.js", resolution_table_import(5));
-    table.insert("src/b.moth", "@./b.js", resolution_table_import(3));
-    table.insert("src/c.moth", "@./c.js", resolution_table_import(7));
+    table.insert("src/a.moth", "a.js", resolution_table_import(5));
+    table.insert("src/b.moth", "b.js", resolution_table_import(3));
+    table.insert("src/c.moth", "c.js", resolution_table_import(7));
 
     let result = table.collect_unique_resolved_imports_for_source_files(&[
         "src/a.moth".to_owned(),

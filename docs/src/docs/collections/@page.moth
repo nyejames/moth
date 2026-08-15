@@ -1,50 +1,28 @@
-import @collection-literals {
-    content as collection_literals,
-}
+@collection-literals content as collection_literals
 
-import @collection-literals-basic {
-    content as collection_literals_basic,
-}
+@collection-literals-basic content as collection_literals_basic
 
-import @growable-collections {
-    content as growable_collections,
-}
+@growable-collections content as growable_collections
 
-import @growable-collections-basic {
-    content as growable_collections_basic,
-}
+@growable-collections-basic content as growable_collections_basic
 
-import @fixed-collections {
-    content as fixed_collections,
-}
+@fixed-collections content as fixed_collections
 
-import @fixed-collections-basic {
-    content as fixed_collections_basic,
-}
+@fixed-collections-basic content as fixed_collections_basic
 
-import @collection-operations {
-    content as collection_operations,
-}
+@collection-operations content as collection_operations
 
-import @collection-operations-basic {
-    content as collection_operations_basic,
-}
+@collection-operations-basic content as collection_operations_basic
 
-import @hash-maps {
-    content as hash_maps,
-}
+@hash-maps content as hash_maps
 
-import @hash-maps-basic {
-    content as hash_maps_basic,
-}
+@hash-maps-basic content as hash_maps_basic
 
-import @styles {
-    navbar,
+@styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager,
-}
+    doc_pager
 
 page_title #= "Collections and maps"
 page_description #= "Collections, fixed capacity, builtin operations and insertion-ordered maps in Moth."

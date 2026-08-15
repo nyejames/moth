@@ -3,7 +3,7 @@
 //! WHAT: rejects explicit public exports whose authored type surfaces require a type name that is
 //! not part of the same module-root public export surface, and exported trait metadata relations
 //! that expose private trait names.
-//! WHY: importers can only name declarations exposed by the module-root public export surface.
+//! WHY: consumers can only name declarations exposed by the module-root public export surface.
 //! AST environment owns this check because it has canonical `TypeId`s, resolved trait identities,
 //! and the header-built public export maps.
 
@@ -436,11 +436,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     /// Validate exported `TRAIT must not TRAIT` relations in a module-root public export.
     ///
     /// WHAT: an exported incompatibility relation is part of the module root's public trait metadata,
-    ///      so importers must be able to name both sides from that public export. The check rejects a
+    ///      so consumers must be able to name both sides from that public export. The check rejects a
     ///      relation when exactly one side is public/nameable from that export and the other is not.
     ///      Core traits are always public/nameable; private-private relations remain valid.
     /// WHY: without this check, a public trait could reference a private trait name in exported
-    ///      metadata, forcing importers to know a name they cannot legally spell.
+    ///      metadata, forcing consumers to know a name they cannot legally spell.
     fn validate_public_trait_incompatibility_surface(
         &self,
         incompatibility: &TraitIncompatibilitySyntax,
@@ -449,7 +449,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
         let visibility = self
-            .import_environment
+            .binding_environment
             .visibility_for(public_root_file)
             .map_err(|error| self.error_messages(error, string_table))?
             .clone();

@@ -61,6 +61,6 @@ Receiver-method visibility follows receiver-type visibility.
 
 - A method becomes callable wherever its receiver type is visible.
 - Methods are not imported, aliased or re-exported independently.
-- Namespace imports may expose the receiver type, but its methods are not namespace fields.
+- Namespace bindings may expose the receiver type, but its methods are not namespace fields.
 - A module public surface exposes same-file receiver methods when it exposes the receiver type.
 - A field and receiver method on the same type cannot use the same name.

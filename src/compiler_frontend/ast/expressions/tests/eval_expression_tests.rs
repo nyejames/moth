@@ -20,7 +20,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::paths::compile_time_paths::{
-    CompileTimePath, CompileTimePathBase, CompileTimePathKind, CompileTimePaths,
+    CompileTimePath, CompileTimePathBase, CompileTimePathKind,
 };
 use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
@@ -74,14 +74,12 @@ fn ordinary_expression_rejects_path_string_concatenation() {
     let source_scope = InternedPath::from_single_str("@page.moth", &mut string_table);
     let asset_path = InternedPath::from_single_str("assets", &mut string_table)
         .join_str("logo.png", &mut string_table);
-    let compile_time_paths = CompileTimePaths {
-        paths: vec![CompileTimePath {
-            source_path: asset_path.clone(),
-            filesystem_path: std::env::temp_dir().join("moth_eval_expression_logo.png"),
-            public_path: asset_path.clone(),
-            base: CompileTimePathBase::EntryRoot,
-            kind: CompileTimePathKind::File,
-        }],
+    let compile_time_path = CompileTimePath {
+        source_path: asset_path.clone(),
+        filesystem_path: std::env::temp_dir().join("moth_eval_expression_logo.png"),
+        public_path: asset_path.clone(),
+        base: CompileTimePathBase::EntryRoot,
+        kind: CompileTimePathKind::File,
     };
     let context = ScopeContext::new_for_tests(
         ContextKind::Template,
@@ -99,7 +97,7 @@ fn ordinary_expression_rejects_path_string_concatenation() {
 
     let nodes = vec![
         ExpressionRpnItem::Operand(Expression::path(
-            compile_time_paths,
+            compile_time_path,
             SourceLocation::default(),
         )),
         ExpressionRpnItem::Operator {

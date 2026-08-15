@@ -13,6 +13,8 @@
 
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::InvalidConfigReason;
+use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath;
+use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -22,16 +24,16 @@ use crate::projects::settings::Config;
 use rustc_hash::FxHashMap;
 
 use std::collections::{BTreeSet, VecDeque};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::frontend_orchestration::ModulePreparationContext;
 use super::module_identity::ModuleId;
-use super::module_namespace::{DirectoryImportResolution, ResolvedImport};
+use super::module_namespace::{DirectoryDependencyResolution, ResolvedDependency};
 use super::prepared_module::PreparedModule;
 use super::project_module_graph::ProjectModuleGraph;
 use super::project_structure_diagnostics::{config_diagnostic_messages, path_id};
 use super::source_discovery::{
-    ExternalImportDiscoveryState, ResolvedDependencyEdge, ResolvedSourcePackageImport,
+    ExternalImportDiscoveryState, ResolvedDependencyEdge, ResolvedSourcePackageDependency,
     StructuralProviderAction, prepare_owned_source_input, resolve_structural_provider_reference,
 };
 use super::source_tree_index::{SourceClassification, SourceOwnership};
@@ -84,14 +86,27 @@ pub(crate) struct ModuleCompilationJob {
 struct ModuleCompilationJobBatch {
     drafts: Vec<ModuleCompilationJobDraft>,
     resolved_edges: Vec<ResolvedDependencyEdge>,
-    source_package_imports: Vec<ResolvedSourcePackageImport>,
+    source_package_dependencies: Vec<ResolvedSourcePackageDependency>,
+}
+
+fn resolve_directory_dependency_path(
+    directory_dependency_resolution: DirectoryDependencyResolution<'_>,
+    provider: &RetainedDependencyPath,
+    source_path: &Path,
+    string_table: &mut StringTable,
+) -> Result<ResolvedDependency, CompilerMessages> {
+    directory_dependency_resolution
+        .resolve_dependency(provider, source_path, string_table)
+        .map_err(|diagnostic| {
+            CompilerMessages::from_diagnostics(vec![diagnostic], string_table.clone())
+        })
 }
 
 /// Immutable Stage 0 owners shared while the serial discovery pass prepares graph modules.
 struct ModuleDiscoveryContext<'a> {
     project_path_resolver: &'a ProjectPathResolver,
     style_directives: &'a StyleDirectiveRegistry,
-    directory_import_resolution: DirectoryImportResolution<'a>,
+    directory_dependency_resolution: DirectoryDependencyResolution<'a>,
     project_module_graph: &'a ProjectModuleGraph,
     source_origin_lookup: &'a FxHashMap<PathBuf, StableModuleOriginIdentity>,
 }
@@ -110,7 +125,7 @@ struct ModuleDiscoveryContext<'a> {
 pub(crate) struct ModuleCompilationSchedule {
     waves: Vec<Vec<ModuleCompilationJob>>,
     provider_bindings: Vec<ResolvedDependencyEdge>,
-    source_package_imports: Vec<ResolvedSourcePackageImport>,
+    source_package_dependencies: Vec<ResolvedSourcePackageDependency>,
 }
 
 impl ModuleCompilationSchedule {
@@ -127,12 +142,12 @@ impl ModuleCompilationSchedule {
     ) -> (
         Vec<Vec<ModuleCompilationJob>>,
         Vec<ResolvedDependencyEdge>,
-        Vec<ResolvedSourcePackageImport>,
+        Vec<ResolvedSourcePackageDependency>,
     ) {
         (
             self.waves,
             self.provider_bindings,
-            self.source_package_imports,
+            self.source_package_dependencies,
         )
     }
 }
@@ -140,7 +155,7 @@ impl ModuleCompilationSchedule {
 /// Discovers one compilation job for every canonical module in the directory project.
 ///
 /// Root files are seeded from every graph node in deterministic `ModuleId`
-/// order. Reachable-file discovery retains direct `ModuleId` edges for cross-module imports;
+/// order. Reachable-file discovery retains direct `ModuleId` edges for cross-module dependencies;
 /// after discovery completes the edges enter the graph as provider-before-consumer order, and the
 /// returned modules are ordered by the populated graph's compile waves. The directory compiler
 /// consumes these waves sequentially; each job may use Rayon for file preparation, but semantic
@@ -155,7 +170,7 @@ pub(crate) fn discover_all_modules_in_project(
     project_module_graph: &mut ProjectModuleGraph,
     style_directives: &StyleDirectiveRegistry,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
-    directory_import_resolution: DirectoryImportResolution<'_>,
+    directory_dependency_resolution: DirectoryDependencyResolution<'_>,
     string_table: &mut StringTable,
     #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
 ) -> Result<ModuleCompilationSchedule, CompilerMessages> {
@@ -165,7 +180,7 @@ pub(crate) fn discover_all_modules_in_project(
         project_module_graph,
         style_directives,
         external_imports,
-        directory_import_resolution,
+        directory_dependency_resolution,
         true,
         string_table,
         #[cfg(feature = "timers")]
@@ -180,7 +195,7 @@ pub(crate) fn discover_all_modules_in_package(
     package_module_graph: &mut ProjectModuleGraph,
     style_directives: &StyleDirectiveRegistry,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
-    directory_import_resolution: DirectoryImportResolution<'_>,
+    directory_dependency_resolution: DirectoryDependencyResolution<'_>,
     string_table: &mut StringTable,
     #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
 ) -> Result<ModuleCompilationSchedule, CompilerMessages> {
@@ -190,7 +205,7 @@ pub(crate) fn discover_all_modules_in_package(
         package_module_graph,
         style_directives,
         external_imports,
-        directory_import_resolution,
+        directory_dependency_resolution,
         false,
         string_table,
         #[cfg(feature = "timers")]
@@ -205,14 +220,14 @@ fn discover_all_modules_in_boundary(
     project_module_graph: &mut ProjectModuleGraph,
     style_directives: &StyleDirectiveRegistry,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
-    directory_import_resolution: DirectoryImportResolution<'_>,
+    directory_dependency_resolution: DirectoryDependencyResolution<'_>,
     require_normal_entry: bool,
     string_table: &mut StringTable,
     #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
 ) -> Result<ModuleCompilationSchedule, CompilerMessages> {
     let seeds = module_seeds_in_module_id_order(project_module_graph);
     let source_origin_lookup = project_module_graph
-        .build_source_origin_lookup(directory_import_resolution.source_tree_index())
+        .build_source_origin_lookup(directory_dependency_resolution.source_tree_index())
         .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
     if require_normal_entry && project_module_graph.entry_modules().is_empty() {
@@ -229,13 +244,13 @@ fn discover_all_modules_in_boundary(
     let ModuleCompilationJobBatch {
         drafts,
         resolved_edges,
-        source_package_imports,
+        source_package_dependencies,
     } = discover_modules_serial_provider_capable(
         &seeds,
         ModuleDiscoveryContext {
             project_path_resolver,
             style_directives,
-            directory_import_resolution,
+            directory_dependency_resolution,
             project_module_graph,
             source_origin_lookup: &source_origin_lookup,
         },
@@ -246,7 +261,7 @@ fn discover_all_modules_in_boundary(
     )?;
 
     // Insert the resolved dependency edges directly by ModuleId before the graph completes.
-    // Edges are idempotent, so duplicate retained import shells collapse without changing the
+    // Edges are idempotent, so duplicate retained dependency shells collapse without changing the
     // graph.
     insert_resolved_dependency_edges(project_module_graph, &resolved_edges, string_table)?;
 
@@ -266,7 +281,7 @@ fn discover_all_modules_in_boundary(
         project_module_graph,
         drafts,
         resolved_edges,
-        source_package_imports,
+        source_package_dependencies,
         string_table,
     )
 }
@@ -364,7 +379,7 @@ fn order_discovered_modules_by_compile_waves(
     project_module_graph: &ProjectModuleGraph,
     drafts: Vec<ModuleCompilationJobDraft>,
     provider_bindings: Vec<ResolvedDependencyEdge>,
-    source_package_imports: Vec<ResolvedSourcePackageImport>,
+    source_package_dependencies: Vec<ResolvedSourcePackageDependency>,
     string_table: &mut StringTable,
 ) -> Result<ModuleCompilationSchedule, CompilerMessages> {
     let waves = project_module_graph
@@ -442,14 +457,14 @@ fn order_discovered_modules_by_compile_waves(
     Ok(ModuleCompilationSchedule {
         waves: grouped_waves,
         provider_bindings,
-        source_package_imports,
+        source_package_dependencies,
     })
 }
 
 /// Prepare every graph module through the canonical header-owned Stage 0 path.
 ///
 /// Each owned source ID is read and tokenized directly into the module's input lane, then its
-/// retained header import shells drive indexed reachability and provider resolution. The loop
+/// retained header dependency shells drive indexed reachability and provider resolution. The loop
 /// stays serial because provider discovery mutates build-scoped registries; semantic module
 /// compilation remains serial while each module may parallelize file preparation.
 fn discover_modules_serial_provider_capable(
@@ -462,17 +477,17 @@ fn discover_modules_serial_provider_capable(
     let ModuleDiscoveryContext {
         project_path_resolver,
         style_directives,
-        directory_import_resolution,
+        directory_dependency_resolution,
         project_module_graph,
         source_origin_lookup,
     } = context;
     let mut drafts = Vec::with_capacity(seeds.len());
     let mut resolved_edges = Vec::new();
-    let mut source_package_imports = Vec::new();
+    let mut source_package_dependencies = Vec::new();
 
     for seed in seeds {
         let module_edge_start = resolved_edges.len();
-        let source_tree_index = directory_import_resolution.source_tree_index();
+        let source_tree_index = directory_dependency_resolution.source_tree_index();
         let candidate_source_ids = source_tree_index
             .owned_source_ids(seed.module_id)
             .iter()
@@ -580,73 +595,79 @@ fn discover_modules_serial_provider_capable(
                 Ok(input) => input,
                 Err(error) => return Err(error.into_messages(syntax.string_table_mut())),
             };
-            let providers = syntax.prepare_source(order, input)?;
-            for provider in providers {
+            let prepared_output = syntax.prepare_source(input)?;
+            for dependency in &prepared_output.file_dependency_clauses {
+                let provider = &dependency.dependency;
                 let action = match resolve_structural_provider_reference(
-                    &provider,
+                    provider,
                     &source_path,
                     project_path_resolver,
                     external_imports,
-                    directory_import_resolution,
+                    directory_dependency_resolution,
                     syntax.string_table_mut(),
                 ) {
                     Ok(action) => action,
                     Err(error) => return Err(error.into_messages(syntax.string_table_mut())),
                 };
-                if matches!(action, StructuralProviderAction::Handled) {
+                if matches!(&action, StructuralProviderAction::Handled) {
                     continue;
                 }
 
-                let resolved = directory_import_resolution
-                    .resolve_import(
-                        provider.path_view(),
-                        &source_path,
-                        syntax.string_table_mut(),
-                    )
-                    .map_err(|diagnostic| {
-                        CompilerMessages::from_diagnostics(
-                            vec![diagnostic],
-                            syntax.string_table_mut().clone(),
-                        )
-                    })?;
+                let resolved = resolve_directory_dependency_path(
+                    directory_dependency_resolution,
+                    provider,
+                    &source_path,
+                    syntax.string_table_mut(),
+                )?;
                 match resolved {
-                    ResolvedImport::SameModuleSource {
+                    ResolvedDependency::SameModuleSource {
                         source_id: target_source_id,
                         consumer_module_id,
                         ..
                     } => {
+                        add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
                         if consumer_module_id != seed.module_id {
                             return Err(graph_inventory_mismatch_error(
-                                "Same-module import resolved to another module".to_owned(),
+                                "Same-module dependency resolved to another module".to_owned(),
                                 syntax.string_table_mut(),
                             ));
                         }
-                        if queued.insert(target_source_id) {
+                        let inserted = queued.insert(target_source_id);
+                        if inserted {
                             queue.push_back(target_source_id);
                         }
                     }
-                    ResolvedImport::CrossModule {
+                    ResolvedDependency::CrossModule {
                         provider_module_id,
                         consumer_module_id,
                         ..
-                    } => resolved_edges.push(ResolvedDependencyEdge {
-                        provider_module_id,
+                    } => {
+                        add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
+                        resolved_edges.push(ResolvedDependencyEdge {
+                            provider_module_id,
+                            consumer_module_id,
+                            dependency_shell_id: provider.dependency_shell_id,
+                            graph_location: provider.location.clone(),
+                        });
+                    }
+                    ResolvedDependency::SourcePackageSurface {
                         consumer_module_id,
-                        graph_location: provider.path_location.clone(),
-                        provider: provider.clone(),
-                    }),
-                    ResolvedImport::SourcePackageSurface {
-                        consumer_module_id,
-                        import_prefix,
+                        dependency_prefix,
                         ..
-                    } => source_package_imports.push(ResolvedSourcePackageImport {
-                        consumer_module_id,
-                        import_prefix,
-                        provider: provider.clone(),
-                    }),
-                    ResolvedImport::BindingPackage => {}
+                    } => {
+                        add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
+                        source_package_dependencies.push(ResolvedSourcePackageDependency {
+                            consumer_module_id,
+                            dependency_prefix,
+                            dependency_shell_id: provider.dependency_shell_id,
+                        });
+                    }
+                    ResolvedDependency::BindingPackage => {
+                        add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
+                    }
                 }
             }
+            syntax.retain_prepared_output(order, prepared_output);
         }
         let prepared = syntax.finish()?;
         #[cfg(feature = "timers")]
@@ -673,6 +694,6 @@ fn discover_modules_serial_provider_capable(
     Ok(ModuleCompilationJobBatch {
         drafts,
         resolved_edges,
-        source_package_imports,
+        source_package_dependencies,
     })
 }

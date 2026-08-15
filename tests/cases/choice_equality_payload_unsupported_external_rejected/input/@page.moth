@@ -1,4 +1,4 @@
-import @test/pkg-a { PkgError }
+@test/pkg-a PkgError
 
 Response :: Success, Err | handle PkgError |;
 

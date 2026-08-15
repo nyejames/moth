@@ -63,6 +63,13 @@ impl GenericParameter {
             trait_bound.remap_string_ids(remap);
         }
     }
+
+    pub fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
+        self.location.rebind_source_identity(logical_path);
+        for trait_bound in &mut self.trait_bounds {
+            trait_bound.rebind_source_identity(logical_path);
+        }
+    }
 }
 
 impl GenericParameterList {
@@ -72,6 +79,12 @@ impl GenericParameterList {
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         for parameter in &mut self.parameters {
             parameter.remap_string_ids(remap);
+        }
+    }
+
+    pub fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
+        for parameter in &mut self.parameters {
+            parameter.rebind_source_identity(logical_path);
         }
     }
 
@@ -94,6 +107,10 @@ impl GenericTraitBound {
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.trait_name = remap.get(self.trait_name);
         self.location.remap_string_ids(remap);
+    }
+
+    pub fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
+        self.location.rebind_source_identity(logical_path);
     }
 }
 

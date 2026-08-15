@@ -1,5 +1,5 @@
-import @provider { DISPLAY_TEXT as PRINTABLE, make_label }
-import @visibility_anchor { anchor }
+@provider DISPLAY_TEXT as PRINTABLE, make_label
+@visibility_anchor anchor
 
 show type Item is PRINTABLE |item Item| -> String:
     return item.display()

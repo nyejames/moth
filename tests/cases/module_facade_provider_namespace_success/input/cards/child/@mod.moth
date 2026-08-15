@@ -1,0 +1,8 @@
+export:
+    greet || -> String:
+        return "source-member"
+    ;
+    friendly || -> String:
+        return "facade-name-member"
+    ;
+;

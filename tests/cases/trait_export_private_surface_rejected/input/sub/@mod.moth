@@ -1,4 +1,4 @@
-import @internal { PrivateType }
+@internal PrivateType
 
 export:
     PUBLIC_TRAIT must:

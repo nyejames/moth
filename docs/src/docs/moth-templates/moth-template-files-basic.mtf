@@ -10,12 +10,12 @@ A `.mtf` file is Markdown that lives inside Moth's template world.
     [p: This paragraph is styled by the @html builder helper.]
 ]
 
-No imports, no declarations, no frontmatter. Content only.
+No dependency clauses, no declarations, no frontmatter. Content only.
 
-### Import the result
+### Bind the result
 
 [codeblock, $code("moth"):
-    import @docs/intro {content as intro}
+    @docs/intro content as intro
 
     [: [intro] ]
 ]

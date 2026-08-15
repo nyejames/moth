@@ -5,7 +5,7 @@
 //! WHY: `.mtf` and `.md` both expose a single generated content constant but differ in how their
 //!      initializer tokens are produced. This helper removes that duplication without changing
 //!      either source kind's output shape.
-//! MUST NOT: render Markdown, tokenize source, parse imports, own source-kind decisions, or
+//! MUST NOT: render Markdown, tokenize source, parse dependency clauses, own source-kind decisions, or
 //!           construct source-location facts from filesystem paths.
 
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
@@ -48,9 +48,12 @@ pub(crate) fn synthetic_content_header(
     let content_name = string_table.intern(SYNTHETIC_CONTENT_NAME);
     let header_path = input.source_file.append(content_name);
 
-    let mut header_tokens =
-        FileTokens::new_with_file_id(header_path.clone(), input.file_id, Vec::new());
-    header_tokens.canonical_os_path = input.canonical_os_path;
+    let header_tokens = FileTokens::new_deferred_with_identity(
+        header_path.clone(),
+        input.file_id,
+        input.canonical_os_path,
+        Vec::new(),
+    );
 
     let declaration = DeclarationSyntax {
         binding_mode: BindingMode::CompileTimeConstant,

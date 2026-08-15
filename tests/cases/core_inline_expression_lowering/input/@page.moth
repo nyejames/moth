@@ -1,6 +1,6 @@
-import @core/math {sin, cos, pow, clamp}
-import @core/time {duration_from_seconds, timestamp_from_unix_milliseconds}
-import @core/random {random_float}
+@core/math sin, cos, pow, clamp
+@core/time duration_from_seconds, timestamp_from_unix_milliseconds
+@core/random random_float
 
 angle = 1.0
 s = sin(angle)

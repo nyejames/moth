@@ -1,0 +1,5 @@
+@models/User User as DocsUser
+@consumer use_it
+
+u = DocsUser("Nye")
+io.line([: [u.name]])

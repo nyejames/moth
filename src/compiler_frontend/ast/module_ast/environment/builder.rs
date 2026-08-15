@@ -1,11 +1,12 @@
 //! AST module environment builder.
 //!
-//! WHAT: consumes header-built import visibility and resolves declarations, constants, nominal
+//! WHAT: consumes header-built dependency visibility and resolves declarations, constants, nominal
 //! types, function signatures, and receiver catalog data into a stable semantic environment.
 //! WHY: after this phase completes, AST emission can parse bodies against a stable environment
 //! instead of depending on pass-order-specific accumulator fields.
 
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration};
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ExpressionKind, ReactiveSource, ReactiveSourceKind,
 };
@@ -59,8 +60,8 @@ use crate::compiler_frontend::folded_value::{
     PublicConstTemplate, PublicConstTemplateKind, PublicConstTemplatePiece,
     PublicConstTemplateSlot, PublicFoldedField, PublicFoldedValue, PublicTemplateSlotKey,
 };
-use crate::compiler_frontend::headers::import_environment::{
-    FileVisibility, HeaderImportEnvironment,
+use crate::compiler_frontend::headers::binding_environment::{
+    FileVisibility, HeaderBindingEnvironment,
 };
 use crate::compiler_frontend::headers::module_symbols::{
     GenericDeclarationMetadata, ModuleSymbols,
@@ -98,7 +99,8 @@ pub(crate) use import_projection::imported_nominal_path;
 /// Collect the set of source declaration paths re-exported through the root's `export:` block
 /// from private files in the same module.
 ///
-/// WHAT: iterates the header-built public export maps and collects every `PublicExportTarget::Source`
+/// WHAT: iterates the header-built public export maps and collects every
+/// `PublicExportTarget::SourceDeclaration`
 /// path whose canonical source file belongs to the active module. These are declarations from
 /// private files re-exported through the root's public surface.
 /// WHY: the resolved public type-root table needs to include re-exported declarations so the
@@ -117,11 +119,7 @@ fn collect_reexport_target_paths(
     };
     for entries in module_symbols.module_root_public_exports.values() {
         for entry in entries {
-            let crate::compiler_frontend::headers::module_symbols::PublicExportTarget::Source {
-                path,
-                ..
-            } = &entry.target
-            else {
+            let Some(path) = entry.target.source_path() else {
                 continue;
             };
             let Some(target_source) = module_symbols.canonical_source_by_symbol_path.get(path)
@@ -161,8 +159,8 @@ pub(crate) struct AstModuleEnvironmentBuilder<'context, 'services> {
     // Header-owned module symbol package from the header/dependency-sort phase.
     pub(crate) module_symbols: ModuleSymbols,
 
-    // Header-built import visibility consumed directly; AST does not rebuild import bindings.
-    pub(crate) import_environment: HeaderImportEnvironment,
+    // Header-built dependency visibility is consumed directly; AST does not rebuild dependency bindings.
+    pub(crate) binding_environment: HeaderBindingEnvironment,
 
     // Mutable environment-building state.
     pub(crate) warnings: Vec<CompilerDiagnostic>,
@@ -211,7 +209,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         Self {
             context,
             module_symbols: ModuleSymbols::empty(),
-            import_environment: HeaderImportEnvironment::default(),
+            binding_environment: HeaderBindingEnvironment::default(),
             warnings: Vec::new(),
             declaration_table: Rc::new(TopLevelDeclarationTable::new(Vec::new())),
             module_constants: Vec::new(),
@@ -246,7 +244,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     ) -> Result<AstModuleEnvironment, CompilerMessages> {
         let AstEnvironmentInput {
             mut module_symbols,
-            import_environment,
+            binding_environment,
         } = input;
 
         // Move header-owned data into the builder state.
@@ -257,8 +255,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         let struct_source_by_path = std::mem::take(&mut module_symbols.struct_source_by_path);
 
         self.module_symbols = module_symbols;
-        self.import_environment = import_environment;
-        self.warnings = self.import_environment.warnings.clone();
+        self.binding_environment = binding_environment;
+        self.warnings = self.binding_environment.warnings.clone();
         self.declaration_table = Rc::new(TopLevelDeclarationTable::new(declarations));
         self.builtin_struct_ast_nodes = builtin_struct_ast_nodes;
         self.resolved_struct_fields_by_path = resolved_struct_fields_by_path;
@@ -323,7 +321,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         #[cfg(feature = "detailed_timers")]
         let trait_resolution_start = crate::timing::start_detailed_timer();
         let trait_environment = self.resolve_trait_definitions(sorted_headers, string_table)?;
-        self.resolve_imported_generic_parameter_bounds(&trait_environment)
+        self.resolve_dependencyed_generic_parameter_bounds(&trait_environment)
             .map_err(|error| self.error_messages(error, string_table))?;
         timer_log!(
             trait_resolution_start,
@@ -423,7 +421,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 trait_environment: &trait_environment,
                 receiver_methods: receiver_methods.as_ref(),
                 type_environment: &self.type_environment,
-                import_environment: &self.import_environment,
+                binding_environment: &self.binding_environment,
                 nominal_type_ids_by_path: &self.nominal_type_ids_by_path,
                 struct_source_by_path: &self.struct_source_by_path,
                 choice_source_by_path: &self.choice_source_by_path,
@@ -565,14 +563,17 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             &self.type_environment,
             &self.context.template_ir_store,
         )
-        .map_err(|error| {
-            self.diagnostic_messages(TemplateError::into_diagnostic(error), string_table)
+        .map_err(|error| match error {
+            TemplateError::Diagnostic(diagnostic) => {
+                self.diagnostic_messages(*diagnostic, string_table)
+            }
+            TemplateError::Infrastructure(error) => self.error_messages(*error, string_table),
         })?;
 
         Ok(AstModuleEnvironment {
             lookups: Rc::new(AstModuleLookups {
                 module_symbols: self.module_symbols,
-                import_environment: self.import_environment,
+                binding_environment: self.binding_environment,
                 warnings: self.warnings,
                 declaration_table: self.declaration_table,
                 imported_functions_by_local_path: self.projected_imported_functions_by_local_path,
@@ -881,5 +882,21 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             string_table,
         )
         .with_type_context_for_all_diagnostics(self.type_environment.clone())
+    }
+
+    /// Preserve the internal lane produced by AST parsers that materialise frozen token slices.
+    pub(crate) fn expression_error_messages(
+        &self,
+        error: ExpressionParseError,
+        string_table: &StringTable,
+    ) -> CompilerMessages {
+        match error {
+            ExpressionParseError::Diagnostic(diagnostic) => {
+                self.diagnostic_messages(*diagnostic, string_table)
+            }
+            ExpressionParseError::Infrastructure(error) => {
+                self.error_messages(*error, string_table)
+            }
+        }
     }
 }

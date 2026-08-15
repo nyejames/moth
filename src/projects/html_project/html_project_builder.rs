@@ -69,7 +69,7 @@ impl HtmlProjectBuilder {
 
     /// Constructs a builder that includes integration-test external packages.
     ///
-    /// WHAT: used by the integration test runner so test fixtures can import
+    /// WHAT: used by the integration test runner so test fixtures can bind
     ///       `@test/pkg-a` and `@test/pkg-b` symbols.
     pub fn for_integration_tests() -> Self {
         Self {

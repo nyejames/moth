@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::{
     CollectionExpressionType, Expression, MapLiteralEntry, MapLiteralExpressionType,
 };
@@ -37,10 +38,10 @@ use crate::compiler_frontend::value_mode::{ValueMode, ValueMode::MutableOwned};
 
 /// Stage-local result for collection and map literal parsing.
 ///
-/// WHY: `CompilerDiagnostic` is large; boxing at this boundary avoids
-///      `clippy::result_large_err` while keeping the expression-parser
-///      and statement-dispatch boundaries unchanged.
-type CollectionParseResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// WHY: collection entries delegate to the ordinary expression parser, whose retained-data
+///      failures must stay in the infrastructure lane instead of being rebuilt as source
+///      diagnostics at this syntax boundary.
+type CollectionParseResult<T> = Result<T, ExpressionParseError>;
 
 /// Entry point for parsing a `{...}` collection literal with homogeneous items.
 pub fn new_collection(
@@ -145,7 +146,8 @@ fn parse_collection_literal(
                 if awaiting_item {
                     return Err(Box::new(CompilerDiagnostic::missing_collection_item(
                         token_stream.current_location(),
-                    )));
+                    ))
+                    .into());
                 }
 
                 awaiting_item = true;
@@ -156,7 +158,8 @@ fn parse_collection_literal(
                 if !awaiting_item {
                     return Err(Box::new(CompilerDiagnostic::missing_collection_item(
                         token_stream.current_location(),
-                    )));
+                    ))
+                    .into());
                 }
 
                 let mut expression_type = match inferred_inner_type_id {
@@ -194,7 +197,7 @@ fn parse_collection_literal(
 
                 // A trailing `=` means the literal is mixing collection and map syntax.
                 if let Some(error) = mixed_collection_entry_error(token_stream) {
-                    return Err(Box::new(error));
+                    return Err(error.into());
                 }
 
                 // Get the inferred element type from the first item if no explicit type was given.
@@ -226,7 +229,8 @@ fn parse_collection_literal(
         return Err(Box::new(CompilerDiagnostic::missing_closing_delimiter(
             string_table.get_or_intern("}".to_owned()),
             token_stream.current_location(),
-        )));
+        ))
+        .into());
     }
 
     let Some(inner_type_id) = inferred_inner_type_id else {
@@ -235,12 +239,16 @@ fn parse_collection_literal(
                 return Err(Box::new(CompilerDiagnostic::invalid_collection_type(
                     InvalidCollectionTypeReason::ShorthandEmptyLiteralAmbiguous,
                     collection_location,
-                )));
+                ))
+                .into());
             }
             _ => {
-                return Err(Box::new(
-                    CompilerDiagnostic::empty_collection_type_ambiguity(collection_location),
-                ));
+                return Err(
+                    Box::new(CompilerDiagnostic::empty_collection_type_ambiguity(
+                        collection_location,
+                    ))
+                    .into(),
+                );
             }
         }
     };
@@ -254,7 +262,8 @@ fn parse_collection_literal(
                 length: items.len(),
             },
             collection_location,
-        )));
+        ))
+        .into());
     }
 
     let inner_type = inner_type_spelling.unwrap_or_else(|| {
@@ -317,7 +326,8 @@ fn record_known_map_key(
         return Err(Box::new(CompilerDiagnostic::invalid_map_literal(
             InvalidMapLiteralReason::DuplicateKnownKey,
             key.location.clone(),
-        )));
+        ))
+        .into());
     }
 
     Ok(())
@@ -347,7 +357,6 @@ fn parse_expression_until_curly_entry_delimiter(
         input,
         &[TokenKind::Assign, TokenKind::Comma, TokenKind::CloseCurly],
     )
-    .map_err(|error| Box::new(CompilerDiagnostic::from(error)))
 }
 
 fn mixed_collection_entry_error(token_stream: &FileTokens) -> Option<CompilerDiagnostic> {
@@ -370,13 +379,14 @@ fn consume_map_entry_separator(token_stream: &mut FileTokens) -> CollectionParse
         return Err(Box::new(CompilerDiagnostic::invalid_map_literal(
             InvalidMapLiteralReason::MixedCollectionMapEntries,
             token_stream.current_location(),
-        )));
+        ))
+        .into());
     }
 
     if token_stream.peek_next_token() == Some(&TokenKind::Assign)
         && let Some(error) = check_expression_common_mistake(token_stream, false)
     {
-        return Err(Box::new(error));
+        return Err(error.into());
     }
 
     token_stream.advance();
@@ -388,7 +398,8 @@ fn reject_missing_map_key_expression(token_stream: &FileTokens) -> CollectionPar
         return Err(Box::new(CompilerDiagnostic::invalid_map_literal(
             InvalidMapLiteralReason::MissingKeyExpression,
             token_stream.current_location(),
-        )));
+        ))
+        .into());
     }
 
     Ok(())
@@ -404,7 +415,8 @@ fn reject_missing_map_value_expression(token_stream: &mut FileTokens) -> Collect
             Err(Box::new(CompilerDiagnostic::invalid_map_literal(
                 InvalidMapLiteralReason::MissingValueExpression,
                 token_stream.current_location(),
-            )))
+            ))
+            .into())
         }
         _ => Ok(()),
     }
@@ -452,7 +464,8 @@ fn parse_map_literal(
                 if awaiting_entry {
                     return Err(Box::new(CompilerDiagnostic::missing_collection_item(
                         token_stream.current_location(),
-                    )));
+                    ))
+                    .into());
                 }
 
                 awaiting_entry = true;
@@ -463,7 +476,8 @@ fn parse_map_literal(
                 if !awaiting_entry {
                     return Err(Box::new(CompilerDiagnostic::missing_collection_item(
                         token_stream.current_location(),
-                    )));
+                    ))
+                    .into());
                 }
                 reject_missing_map_key_expression(token_stream)?;
 
@@ -515,8 +529,7 @@ fn parse_map_literal(
                     },
                     false,
                 );
-                let parsed_value = create_expression_with_trailing_newline_policy(input)
-                    .map_err(|error| Box::new(CompilerDiagnostic::from(error)))?;
+                let parsed_value = create_expression_with_trailing_newline_policy(input)?;
 
                 let coerced_key = coerce_expression_to_explicit_type_boundary(
                     parsed_key,
@@ -558,7 +571,8 @@ fn parse_map_literal(
         return Err(Box::new(CompilerDiagnostic::missing_closing_delimiter(
             string_table.get_or_intern("}".to_owned()),
             token_stream.current_location(),
-        )));
+        ))
+        .into());
     }
 
     let map_type_id = map_type_id.unwrap_or_else(|| {
@@ -603,9 +617,12 @@ fn parse_inferred_curly_literal(
     // Empty inferred `{}` keeps existing collection ambiguity behavior.
     if token_stream.current_token_kind() == &TokenKind::CloseCurly {
         token_stream.advance();
-        return Err(Box::new(
-            CompilerDiagnostic::empty_collection_type_ambiguity(literal_location),
-        ));
+        return Err(
+            Box::new(CompilerDiagnostic::empty_collection_type_ambiguity(
+                literal_location,
+            ))
+            .into(),
+        );
     }
     reject_missing_map_key_expression(token_stream)?;
 
@@ -646,8 +663,7 @@ fn parse_inferred_curly_literal(
                 },
                 false,
             );
-            let first_value = create_expression_with_trailing_newline_policy(input)
-                .map_err(|error| Box::new(CompilerDiagnostic::from(error)))?;
+            let first_value = create_expression_with_trailing_newline_policy(input)?;
 
             let key_type_id = first_expr.type_id;
             let value_type_id = first_value.type_id;
@@ -695,7 +711,8 @@ fn parse_inferred_curly_literal(
                         if awaiting_entry {
                             return Err(Box::new(CompilerDiagnostic::missing_collection_item(
                                 token_stream.current_location(),
-                            )));
+                            ))
+                            .into());
                         }
                         awaiting_entry = true;
                         token_stream.advance();
@@ -704,7 +721,8 @@ fn parse_inferred_curly_literal(
                         if !awaiting_entry {
                             return Err(Box::new(CompilerDiagnostic::missing_collection_item(
                                 token_stream.current_location(),
-                            )));
+                            ))
+                            .into());
                         }
                         reject_missing_map_key_expression(token_stream)?;
 
@@ -756,8 +774,7 @@ fn parse_inferred_curly_literal(
                             },
                             false,
                         );
-                        let parsed_value = create_expression_with_trailing_newline_policy(input)
-                            .map_err(|error| Box::new(CompilerDiagnostic::from(error)))?;
+                        let parsed_value = create_expression_with_trailing_newline_policy(input)?;
 
                         let coerced_key = coerce_expression_to_explicit_type_boundary(
                             parsed_key,
@@ -846,7 +863,8 @@ fn parse_inferred_curly_literal(
                         if awaiting_item {
                             return Err(Box::new(CompilerDiagnostic::missing_collection_item(
                                 token_stream.current_location(),
-                            )));
+                            ))
+                            .into());
                         }
                         awaiting_item = true;
                         token_stream.advance();
@@ -855,7 +873,8 @@ fn parse_inferred_curly_literal(
                         if !awaiting_item {
                             return Err(Box::new(CompilerDiagnostic::missing_collection_item(
                                 token_stream.current_location(),
-                            )));
+                            ))
+                            .into());
                         }
 
                         let mut expression_type = parse_expectation_for_type_id(
@@ -882,7 +901,7 @@ fn parse_inferred_curly_literal(
                         )?;
 
                         if let Some(error) = mixed_collection_entry_error(token_stream) {
-                            return Err(Box::new(error));
+                            return Err(error.into());
                         }
 
                         let coerced_item = coerce_expression_to_explicit_type_boundary(
@@ -921,7 +940,8 @@ fn parse_inferred_curly_literal(
             // Any other token after the first expression is invalid in both shapes.
             Err(Box::new(CompilerDiagnostic::missing_collection_item(
                 token_stream.current_location(),
-            )))
+            ))
+            .into())
         }
     }
 }

@@ -1,4 +1,4 @@
-import @./helpers {keep}
+@helpers keep
 
 maybe_name String? = keep("Ana")
 

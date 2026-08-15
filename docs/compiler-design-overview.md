@@ -88,17 +88,17 @@ Source preparation and provider binding are deliberately separate.
 
 - tokens or source-kind prepared payloads
 - declaration shells
-- import shells and aliases
+- dependency clause shells and aliases
 - structural provider references
 - local declaration-ordering hints
 - root-activity and fragment-placement metadata
 - source `#Import` contract shells
 - source locations, diagnostics and remap information
 
-`BoundModuleHeaders` is produced when the build system schedules the module after its required providers have compiled. The compiler binds retained import shells against immutable provider interfaces and produces:
+`BoundModuleHeaders` is produced when the build system schedules the module after its required providers have compiled. The compiler binds retained dependency clauses against immutable provider interfaces and produces:
 
-- stable imported declaration identities
-- imported canonical type and folded-value facts
+- stable bound declaration identities
+- bound canonical type and folded-value facts
 - final file-local visibility
 - source and binding namespace records
 - receiver-surface visibility
@@ -106,7 +106,7 @@ Source preparation and provider binding are deliberately separate.
 
 Binding does not retokenize source or reparse declaration syntax.
 
-Provider-created binding interfaces are available before source-module compilation and may be bound as soon as provider discovery has produced them. A source-module import cannot become a stable imported symbol binding until the source provider's public interface exists.
+Provider-created binding interfaces are available before source-module compilation and may be bound as soon as provider discovery has produced them. A source-module dependency cannot become a stable dependency symbol binding until the source provider's public interface exists.
 
 ### Module compilation outcomes
 
@@ -203,7 +203,7 @@ The project package facade compiles with project-facade visibility supplied by t
 
 ### Normal-root `start`
 
-A normal root's implicit `start` is compiler-synthesised, non-exported and non-importable.
+A normal root's implicit `start` is compiler-synthesised, non-exported and cannot be bound through a dependency clause.
 
 It is infallible as a function contract. It has no `Error!` return channel. Runtime failures that are not handled in source follow the applicable trap or invariant behaviour rather than becoming builder-defined error fragments.
 
@@ -217,7 +217,7 @@ Diagnostics are durable compiler data rather than a final formatting step.
 
 ### Diagnostic lanes
 
-- `CompilerDiagnostic` owns source, syntax, import, config, type, rule, borrow and target-contract failures.
+- `CompilerDiagnostic` owns source, syntax, dependency, config, type, rule, borrow and target-contract failures.
 - `CompilerError` owns impossible compiler states, transformation failures, filesystem failures and tooling or backend infrastructure failures.
 - `DiagnosticBag` owns stage-local accumulation.
 - `CompilerMessages` is used at build and rendering boundaries.
@@ -313,7 +313,7 @@ Cross-module interfaces use canonical type identities rather than donor-local `T
 - generic parameters inside exported generic templates
 - binding-backed external package types
 
-A consumer may intern compact local `TypeId` handles for imported canonical types. The local environment retains an origin map to canonical identity. Cross-module equality compares canonical identity, never rendered names or unrelated local handles.
+A consumer may intern compact local `TypeId` handles for dependency-bound canonical types. The local environment retains an origin map to canonical identity. Cross-module equality compares canonical identity, never rendered names or unrelated local handles.
 
 `DataType` is parse-only or diagnostic-only after semantic resolution. It must not drive executable AST, HIR or backend semantic decisions.
 
@@ -330,7 +330,7 @@ AST builds the local type environment. Early nominal registration creates identi
 
 Member queries expose borrowed field or variant views and direct lookup helpers. Later stages do not clone member lists for semantic lookup.
 
-AST body emission uses a narrow interner over `TypeEnvironment`. It may intern derived types and imported canonical types but cannot mutate completed nominal declarations.
+AST body emission uses a narrow interner over `TypeEnvironment`. It may intern derived types and dependency-bound canonical types but cannot mutate completed nominal declarations.
 
 External parameters with no frontend mapping use an explicit unknown-external state. They never use sentinel `TypeId` values.
 
@@ -374,7 +374,7 @@ Backend planning facts do not belong in this interface. Per-function calls, help
 
 Aliases affect source spelling. They do not replace semantic origin identity.
 
-Receiver methods remain attached to their receiver type's exported source surface. They are not independent free namespace entries and cannot be imported, aliased or re-exported separately.
+Receiver methods remain attached to their receiver type's exported source surface. They are not independent free namespace entries and cannot be bound, aliased or re-exported separately.
 
 ### Public-surface and package-export validation
 
@@ -421,7 +421,7 @@ A synthetic compile-time interface contains:
 - no HIR
 - no runtime body
 
-It enters visibility through the same imported binding boundary as other interfaces. AST consumes its values and provenance but does not own its bootstrap or namespace policy.
+It enters visibility through the same dependency binding boundary as other interfaces. AST consumes its values and provenance but does not own its bootstrap or namespace policy.
 
 ## Fingerprints and reuse facts
 
@@ -536,7 +536,7 @@ Frontend-owned directives are always present. Builder directives may extend the 
 - Moth template `.mtf` starts in an implicit template body while preserving original source locations
 - plain Markdown `.md` is prepared before tokenization and has no tokenizer entry mode
 
-The tokenizer does not resolve imports, types or declarations.
+The tokenizer does not resolve dependencies, types or declarations.
 
 ### Stage 2: header syntax and interface binding
 
@@ -548,9 +548,9 @@ Syntax preparation is the only phase that discovers module-wide top-level declar
 
 It owns:
 
-- import and public re-export syntax
+- dependency clause and public re-export syntax
 - root-role-aware `export:` parsing
-- import shells, grouped names and aliases
+- dependency clause shells, flat direct selections and aliases
 - declaration shells for constants, functions, structs, choices, aliases, traits and conformances
 - dormant normal-root start-body separation
 - compile-time fragment placement metadata
@@ -565,12 +565,12 @@ Syntax preparation does not type-check executable bodies, fold expressions or op
 
 #### Interface binding
 
-After required source providers have compiled, interface binding resolves retained import shells against immutable interfaces.
+After required source providers have compiled, interface binding resolves retained dependency clauses against immutable interfaces.
 
 It owns:
 
-- stable imported origin identities and export bindings
-- imported canonical types and folded values
+- stable bound origin identities and export bindings
+- bound canonical types and folded values
 - final file-local visibility
 - source namespace records
 - binding-backed package namespace records
@@ -587,10 +587,10 @@ Interface binding never copies provider declarations into the consumer. It never
 Header processing keeps three classes distinct:
 
 - Structural provider references belong to Stage 0 graph construction.
-- Imported symbol bindings belong to visibility and AST semantics.
+- Dependency symbol bindings belong to visibility and AST semantics.
 - Local declaration-ordering edges belong to Stage 3.
 
-An imported declaration is never a node in the consumer's local declaration graph.
+A dependency-bound declaration is never a node in the consumer's local declaration graph.
 
 Local ordering edges include same-module facts needed before AST can consume declarations linearly:
 
@@ -603,7 +603,7 @@ Local ordering edges include same-module facts needed before AST can consume dec
 - structurally visible local const-template control references
 - local trait requirement and conformance references where ordering requires them
 
-A reference to an imported declaration may support a structural provider edge and later become an imported symbol binding. It is not a local ordering edge.
+A reference to a dependency-bound declaration may support a structural provider edge and later become a dependency symbol binding. It is not a local ordering edge.
 
 Declaration-shell parsers are shared with AST body-local declaration parsing so equivalent syntax remains on one parser path.
 
@@ -615,11 +615,11 @@ Plain Markdown `.md` preparation renders raw Markdown to HTML and contributes th
 
 Later ordering and AST folding treat both as ordinary compile-time constants. There is no Moth-template-specific or Markdown-specific AST, HIR, borrow or backend path.
 
-A recognised source kind unsupported by the active builder is rejected with a typed import diagnostic. Resolution does not silently fall through to another extension candidate.
+A recognised source kind unsupported by the active builder is rejected with a typed dependency diagnostic. Resolution does not silently fall through to another extension candidate.
 
 #### Direct Moth template service
 
-The direct Moth template compiler service uses the same tokenizer, synthetic-header preparation, local declaration ordering and AST folding owners as integrated `.mtf` imports. It extracts the folded `content` constant and stops before HIR generation, borrow validation, target validation, backend lowering and output writing.
+The direct Moth template compiler service uses the same tokenizer, synthetic-header preparation, local declaration ordering and AST folding owners as integrated `.mtf` dependencies. It extracts the folded `content` constant and stops before HIR generation, borrow validation, target validation, backend lowering and output writing.
 
 This service is a narrow compiler entry point, not a second Moth template parser or compiler mode.
 
@@ -640,10 +640,10 @@ Stage 3 owns:
 It does not:
 
 - order project or package modules
-- copy imported declarations into the local graph
+- copy dependency-bound declarations into the local graph
 - inspect executable function or start-body references
 - order body-local declarations
-- rediscover imports
+- rediscover dependencies
 
 Same-file constants retain source-order semantics and same-file forward references are rejected. Cross-file constants in one module use header-provided local edges. Cross-module constants are already folded owned facts in provider interfaces.
 
@@ -665,7 +665,7 @@ AST consumes sorted declaration shells and bound visibility. It resolves declara
 AST owns:
 
 - module-local semantic declaration resolution
-- imported canonical type projection into local `TypeId` handles
+- dependency-bound canonical type projection into local `TypeId` handles
 - public-interface validation and canonical export projection
 - executable body parsing and type checking
 - body-local declarations
@@ -685,11 +685,11 @@ When accepted deferred `group` / `into` syntax is implemented, AST also owns par
 
 AST is defined by ownership and data flow rather than a fixed number of internal passes.
 
-#### Imports and visibility
+#### Dependencies and visibility
 
-AST consumes bound file visibility. It may validate semantic use of visible symbols but does not rebuild imports or discover top-level visibility.
+AST consumes bound file visibility. It may validate semantic use of visible symbols but does not rebuild dependencies or discover top-level visibility.
 
-All user-visible names use one collision policy. Same-file declarations, source imports, binding imports, aliases, prelude symbols and builtins cannot silently shadow one another.
+All user-visible names use one collision policy. Same-file declarations, source dependency clauses, binding dependency clauses, aliases, prelude symbols and builtins cannot silently shadow one another.
 
 If AST cannot resolve a top-level declaration by walking sorted declarations and bound visibility, the missing fact belongs in syntax preparation, interface binding, local ordering or the Stage 0 graph. It does not justify another discovery pass.
 
@@ -734,7 +734,7 @@ A source `#Import` declaration creates:
 
 - no runtime wrapper type
 - no HIR node category
-- no source import
+- no source dependency clause
 - no new visibility rule
 
 A module folds each ordinary constant and const template once. Exported folded facts are copied into the immutable interface as owned backend-neutral values. Consumers never parse or fold provider templates again.
@@ -947,7 +947,7 @@ Source calls use three explicit target classes:
 - stable cross-module function identity
 - stable binding-backed external function identity
 
-HIR stores no import aliases, package source spelling or backend runtime names. Borrow validation resolves source targets to exported access and effect summaries. Target validation and lowerers resolve executable targets through explicit graph and link-plan inputs.
+HIR stores no dependency aliases, package source spelling or backend runtime names. Borrow validation resolves source targets to exported access and effect summaries. Target validation and lowerers resolve executable targets through explicit graph and link-plan inputs.
 
 ### Stage 6: borrow validation
 
@@ -978,7 +978,7 @@ Public function interfaces export:
 
 Cross-module call transfer consumes these summaries. It never opens the callee's HIR as local control flow.
 
-Borrow validation resolves binding-backed function IDs through semantic package metadata to recover parameter access, mutation and return-alias contracts. It does not use source import syntax or backend runtime names.
+Borrow validation resolves binding-backed function IDs through semantic package metadata to recover parameter access, mutation and return-alias contracts. It does not use source dependency clause syntax or backend runtime names.
 
 Missing or inconsistent summaries are `CompilerError` invariant failures.
 
@@ -1077,7 +1077,7 @@ Binding-backed symbols carry a closed boundary classification such as WIT value-
 Backend lowerers do not:
 
 - load or parse source
-- rebuild imports or visibility
+- rebuild dependencies or visibility
 - infer generic arguments
 - reconstruct traits or conformance
 - fold constants or templates
@@ -1100,6 +1100,8 @@ Current locations are navigation aids rather than permanent architecture.
 - Frontend orchestration: `src/compiler_frontend/pipeline.rs`
 - Tokenization and numeric text: `src/compiler_frontend/tokenizer/`, `src/compiler_frontend/numeric_text/`
 - Header syntax, binding and declaration shells: `src/compiler_frontend/headers/`, `src/compiler_frontend/declaration_syntax/`
+- Path syntax tables and general path resolution: `src/compiler_frontend/paths/`
+- Dependency clause syntax, retained shells, target classification and interface binding: `src/compiler_frontend/headers/`, `src/compiler_frontend/headers/dependency_target.rs`
 - Local declaration ordering: `src/compiler_frontend/module_dependencies.rs`
 - Type identity, access, coercion, traits and builtins: `src/compiler_frontend/datatypes/`, `src/compiler_frontend/value_mode.rs`, `src/compiler_frontend/type_coercion/`, `src/compiler_frontend/traits/`, `src/compiler_frontend/builtins/`
 - Binding-backed interfaces: `src/compiler_frontend/external_packages/`

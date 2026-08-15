@@ -28,14 +28,14 @@ It also requires the accepted TIR cleanup result before adding resource nodes.
 ```text
 ACTIVE_PLAN: docs/roadmap/plans/path-values-and-resource-linking-plan.md
 PLAN_ADOPTION_BASELINE: bfaacd54227811f9e2b279d5a24e3df84dc381c2
-STATUS: queued - blocked by three prerequisites
+STATUS: queued - blocked by dependency-plan acceptance and the TIR prerequisite
 CURRENT_SLICE: Phase 0A - plan adoption and design correction
 PREREQUISITES:
-1. canonical-module-compilation-and-scoped-packages-plan.md Gate D
-2. dependency-clauses-and-path-syntax-plan.md completion
-3. tir-corrections-and-simplification-plan.md completion
+1. canonical-module-compilation-and-scoped-packages-plan.md Gate D - complete
+2. dependency-clauses-and-path-syntax-plan.md completion - implementation present, final acceptance pending
+3. tir-corrections-and-simplification-plan.md completion - pending
 BLOCKERS:
-- final retained path syntax owner does not exist yet
+- dependency-clause plan final acceptance is pending
 - TIR correction owners are not accepted yet
 NEXT_RESUME_ACTION: after prerequisites, refresh all owners and execute Phase 0B
 DEFERRED_FOLLOW_UP: resource-only dev fast path and watch-state optimisation
@@ -46,7 +46,7 @@ Keep this block concise. Git history is the implementation record.
 ## Required authorities
 
 - `AGENTS.md`
-- `docs/language-overview.md`
+- `docs/src/docs/codebase/language/overview.mtf`
 - `docs/compiler-design-overview.md`
 - `docs/build-system-design.md`
 - canonical language references under `docs/src/docs/`
@@ -76,7 +76,7 @@ A resource path:
 - has one explicit non-source extension on its final component
 - resolves to an existing regular file
 - resolves from the owning module root, not the physical source-file directory
-- is not grouped
+- cannot be followed by dependency selections
 - is not a directory
 - is not an external URL
 - does not use `@/`, `@./`, parent components or `@@`
@@ -162,7 +162,7 @@ Rules:
 
 - Path insertion creates a resource piece, not an eager URL string
 - const folding may produce a builder-deferred resource string
-- resource-bearing strings may be composed, stored in constants, exported, imported, passed and returned as ordinary String values
+- resource-bearing strings may be composed, stored in constants, exported, dependency-bound, passed and returned as ordinary String values
 - resource pieces survive until physical entry/package lowering
 - compile-time operations requiring final text reject unresolved placement
 - runtime operations occur after entry-specific resource URL lowering
@@ -247,6 +247,22 @@ A direct Path literal may address only a regular file inside the current module 
 - logical aliases to one canonical file remain distinct origins
 
 ## Dependency and emission liveness
+
+### Dependency-plan handoff
+
+This plan consumes the dependency plan's final retained facts without reopening source syntax:
+
+- `PathSyntaxTable` contains authored paths only and is owned once per prepared file
+- `RetainedDependencyClause` owns one `DependencyShellId`, the authored path and its flat
+  `DependencySelection` rows
+- `ResolvedDependencyClause` or the Stage 0 result owns the one resolved provider surface and its
+  stable provider identity
+- resource preparation never interprets dependency selection rows as resource paths
+- explicit-extension expression paths remain in the resource lane and are not top-level provider
+  clauses
+
+The resource plan does not use `PathSelectionNode`, `PathSelectionRange`, nested selection trees or
+selected-name identities for provider joins.
 
 ### Dependency liveness
 
@@ -524,7 +540,7 @@ Establish stable resource ownership and compile-time type legality before introd
 - add one recursive availability classifier and error reasons
 - reject Path at runtime receiving boundaries
 - classify explicit-extension expression paths during preparation
-- reject grouped resource expressions
+- reject dependency selections after resource paths
 - reject source extensions, missing extensions, directories and missing files
 - resolve from owning module root
 - enforce module/package boundaries and canonical containment
@@ -622,7 +638,7 @@ Do not merge 2A or 2B to the main accepted baseline before 2C deletes the old la
 ### Work
 
 - support allowed Path constants, records and collections
-- project imported stable refs into consumer-local ResourceId values
+- project dependency-bound stable refs into consumer-local ResourceId values
 - support exported Path constants
 - support exported public compile-time record shapes
 - support exported const records and collections
@@ -666,7 +682,7 @@ Tests cover resource Path in CSS, nested CSS templates, literal attribute select
 
 ### Work
 
-- rename source-provider APIs coherently where import terminology no longer applies
+- keep source-provider APIs aligned with the dependency and provider terminology established by the dependency-clause plan
 - pass stable provider-source resource origins into provider requests
 - include content fingerprint in provider semantic cache keys
 - keep canonical source paths IO-only
@@ -680,7 +696,7 @@ Tests cover resource Path in CSS, nested CSS templates, literal attribute select
 - keep transformed/generated output distinct
 - publish transactionally
 
-Tests cover grouped and namespace provider clauses, provider source not copied by default, explicit provider resource declarations, generated resources, unreachable symbol suppression and deterministic disagreement.
+Tests cover direct-selection and namespace provider clauses, provider source not copied by default, explicit provider resource declarations, generated resources, unreachable symbol suppression and deterministic disagreement.
 
 ## Phase 6 - exact global resource planning and completion
 

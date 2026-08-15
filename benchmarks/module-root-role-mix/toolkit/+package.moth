@@ -1,4 +1,4 @@
-import @parts {join_parts}
+@parts join_parts
 
 export:
     join_with |prefix String, suffix String| -> String:

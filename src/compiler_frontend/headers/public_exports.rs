@@ -1,20 +1,20 @@
-//! Public export and file-membership data for header imports.
+//! Public export and file-membership data for header dependencies.
 //!
 //! WHAT: derives source-backed package and module-root public export maps from parsed headers and strict
-//! `export:` block imports.
-//! WHY: import environment preparation needs a single header-owned view of which declarations are
+//! `export:` block dependencies.
+//! WHY: header binding environment preparation needs a single header-owned view of which declarations are
 //! exposed across module-root boundaries and which source files belong to each boundary.
 //!
 //! ## Export map construction
 //!
 //! Public exports come from two sources:
 //! 1. Public authored headers in the module-root file's `export:` block.
-//! 2. Public grouped-import records from that same strict `export:` block.
+//! 2. Public direct-selection dependency records from that same strict `export:` block.
 //!
-//! Because public imports may re-export symbols from other module roots, construction is
+//! Because public dependencies may re-export symbols from other module roots, construction is
 //! two-pass:
 //! - Pass 1 collects all public authored declarations for every root file.
-//! - Pass 2 resolves public imports against the completed authored export maps.
+//! - Pass 2 resolves public dependencies against the completed authored export maps.
 
 use crate::compiler_frontend::builtins::casts::traits::is_core_cast_trait_name;
 use crate::compiler_frontend::compiler_errors::{CompilerError, compiler_error_to_diagnostic};
@@ -23,19 +23,20 @@ use crate::compiler_frontend::compiler_messages::{
     ReservedNameOwner,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
-use crate::compiler_frontend::headers::import_environment::{
-    ExternalPackageSymbolLookup, ExternalPackageSymbolResolutionInput, ImportTargetResolutionInput,
-    ModuleBoundaryCheckInput, PublicExportLookupResult, PublicExportResolutionInput,
-    PublicExportSurfaceType, ResolvedImportTarget, SourcePackageBoundaryCheckInput,
-    check_module_boundary, check_source_package_boundary, resolve_external_package_symbol,
-    resolve_import_target, resolve_public_export_boundary,
+use crate::compiler_frontend::headers::binding_environment::{
+    DependencyTargetResolutionInput, ExternalPackageSymbolLookup,
+    ExternalPackageSymbolResolutionInput, ModuleBoundaryCheckInput, PublicExportLookupResult,
+    PublicExportResolutionInput, PublicExportSurfaceType, ResolvedDependencyTarget,
+    SourcePackageBoundaryCheckInput, check_module_boundary, check_source_package_boundary,
+    provider_public_surface_diagnostic, resolve_dependency_target, resolve_external_package_symbol,
+    resolve_public_export_boundary,
 };
 use crate::compiler_frontend::headers::module_symbols::{
     ModuleRootBoundary, ModuleSymbols, PublicExportEntry, PublicExportTarget,
 };
-use crate::compiler_frontend::headers::types::{Header, HeaderExportMode};
+use crate::compiler_frontend::headers::types::{DependencySelection, Header, HeaderExportMode};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
-use crate::compiler_frontend::public_interface::SourceProviderImportSet;
+use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
@@ -49,6 +50,23 @@ use std::path::Path;
 /// WHY: public export construction carries structured diagnostics through many successful
 ///      build steps without inlining the large diagnostic value at every return.
 type PublicExportDataResult<T> = Result<T, Box<CompilerDiagnostic>>;
+
+/// Context for resolving one public dependency selection.
+///
+/// WHAT: carries the completed module facts and selected-name identity through provider-backed or
+///       ordinary public-export resolution.
+/// WHY: public-export construction has one semantic owner for this resolution boundary; keeping
+///      its inputs named prevents the pass from growing a positional parameter list.
+struct PublicExportDependencyResolutionInput<'a, 'provider> {
+    module_symbols: &'a ModuleSymbols,
+    dependency: &'a crate::compiler_frontend::headers::types::RetainedDependencyClause,
+    selection: &'a DependencySelection,
+    selection_index: usize,
+    exporting_source: &'a InternedPath,
+    external_package_registry: &'a ExternalPackageRegistry,
+    source_provider_dependencies: &'a SourceProviderDependencySet<'provider>,
+    string_table: &'a mut StringTable,
+}
 
 /// Intern one filesystem-derived public-surface path without losing path components.
 ///
@@ -93,30 +111,34 @@ pub(super) fn build_public_exports(
     headers: &[Header],
     resolver: &ProjectPathResolver,
     external_package_registry: &ExternalPackageRegistry,
-    source_provider_imports: &SourceProviderImportSet<'_>,
+    source_provider_dependencies: &SourceProviderDependencySet<'_>,
     string_table: &mut StringTable,
 ) -> PublicExportDataResult<()> {
     // Pass 1: collect public authored declarations for all root files.
-    build_source_package_public_exports(module_symbols, headers, resolver, string_table)?;
-    build_module_root_public_exports_pass1(module_symbols, headers, resolver, string_table)?;
+    let source_package_locations =
+        build_source_package_public_exports(module_symbols, headers, resolver, string_table)?;
+    let module_root_locations =
+        build_module_root_public_exports_pass1(module_symbols, headers, resolver, string_table)?;
 
-    // Membership does not depend on import resolution.
+    // Membership does not depend on dependency resolution.
     build_source_package_membership(module_symbols, resolver, string_table)?;
     build_module_root_membership(module_symbols, resolver, string_table)?;
 
-    // Pass 2: resolve strict `export:` imports against the completed authored export maps.
-    build_source_package_public_imports(
+    // Pass 2: resolve strict `export:` dependencies against the completed authored export maps.
+    build_source_package_public_dependencies(
         module_symbols,
+        &source_package_locations,
         resolver,
         external_package_registry,
-        source_provider_imports,
+        source_provider_dependencies,
         string_table,
     )?;
-    build_module_root_public_imports(
+    build_module_root_public_dependencies(
         module_symbols,
+        &module_root_locations,
         resolver,
         external_package_registry,
-        source_provider_imports,
+        source_provider_dependencies,
         string_table,
     )?;
 
@@ -132,7 +154,8 @@ fn build_source_package_public_exports(
     headers: &[Header],
     resolver: &ProjectPathResolver,
     string_table: &mut StringTable,
-) -> PublicExportDataResult<()> {
+) -> PublicExportDataResult<FxHashMap<String, FxHashMap<StringId, SourceLocation>>> {
+    let mut export_locations = FxHashMap::default();
     for (prefix, root_file) in resolver.source_package_public_surface_files() {
         let root_file_logical = resolver
             .logical_path_for_canonical_file(root_file, string_table)
@@ -144,6 +167,7 @@ fn build_source_package_public_exports(
         )?;
 
         let mut collector = PublicExportCollector::default();
+        let mut root_locations = FxHashMap::default();
 
         module_symbols
             .file_package_membership
@@ -169,29 +193,31 @@ fn build_source_package_public_exports(
                 )?;
                 collector.insert(
                     export_name,
-                    PublicExportTarget::Source {
+                    PublicExportTarget::SourceDeclaration {
                         path: header.tokens.src_path.clone(),
-                        import_shell_id: None,
                     },
                     header.name_location.clone(),
                     string_table,
                 )?;
+                root_locations.insert(export_name, header.name_location.clone());
             }
         }
 
+        export_locations.insert(prefix.clone(), root_locations);
         module_symbols
             .source_package_public_exports
             .insert(prefix.clone(), collector.exports);
     }
 
-    Ok(())
+    Ok(export_locations)
 }
 
-fn build_source_package_public_imports(
+fn build_source_package_public_dependencies(
     module_symbols: &mut ModuleSymbols,
+    export_locations: &FxHashMap<String, FxHashMap<StringId, SourceLocation>>,
     resolver: &ProjectPathResolver,
     external_package_registry: &ExternalPackageRegistry,
-    source_provider_imports: &SourceProviderImportSet<'_>,
+    source_provider_dependencies: &SourceProviderDependencySet<'_>,
     string_table: &mut StringTable,
 ) -> PublicExportDataResult<()> {
     for (prefix, root_file) in resolver.source_package_public_surface_files() {
@@ -209,33 +235,51 @@ fn build_source_package_public_imports(
             .get(prefix)
             .cloned()
             .unwrap_or_default();
-        let mut collector = PublicExportCollector::from_existing(&current_exports);
+        let mut collector =
+            PublicExportCollector::from_existing(&current_exports, export_locations.get(prefix));
 
-        if let Some(imports) = module_symbols
-            .file_imports_by_source
+        if let Some(dependencies) = module_symbols
+            .file_dependency_clauses_by_source
             .get(&root_file_interned)
         {
-            for import in imports {
-                if import.export_mode != HeaderExportMode::Public {
+            for dependency in dependencies {
+                if dependency.export_mode != HeaderExportMode::Public {
                     continue;
                 }
 
-                let export_name = public_export_name(import)?;
-                let target = resolve_public_export_import_or_provider(
-                    module_symbols,
-                    import,
-                    &root_file_interned,
-                    external_package_registry,
-                    source_provider_imports,
-                    string_table,
-                )?;
+                let selections = module_symbols
+                    .selections_for_clause(&root_file_interned, dependency)
+                    .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
+                for (selection_index, selection) in selections.iter().enumerate() {
+                    let export_name = public_export_name(selection);
+                    let target = resolve_public_export_dependency_or_provider(
+                        PublicExportDependencyResolutionInput {
+                            module_symbols,
+                            dependency,
+                            selection,
+                            selection_index,
+                            exporting_source: &root_file_interned,
+                            external_package_registry,
+                            source_provider_dependencies,
+                            string_table,
+                        },
+                    )?;
 
-                reject_public_export_target_if_source_receiver_method(
-                    module_symbols,
-                    &target,
-                    import.location.clone(),
-                )?;
-                collector.insert(export_name, target, import.location.clone(), string_table)?;
+                    reject_public_export_target_if_source_receiver_method(
+                        module_symbols,
+                        &target,
+                        selection.source_location.clone(),
+                    )?;
+                    collector.insert(
+                        export_name,
+                        target,
+                        selection
+                            .local_alias()
+                            .map_or(&selection.source_location, |alias| &alias.location)
+                            .clone(),
+                        string_table,
+                    )?;
+                }
             }
         }
 
@@ -256,10 +300,12 @@ fn build_module_root_public_exports_pass1(
     headers: &[Header],
     resolver: &ProjectPathResolver,
     string_table: &mut StringTable,
-) -> PublicExportDataResult<()> {
+) -> PublicExportDataResult<FxHashMap<InternedPath, FxHashMap<StringId, SourceLocation>>> {
+    let mut export_locations = FxHashMap::default();
     let mut module_root_boundaries =
         build_module_root_boundaries(module_symbols, resolver, string_table)?;
-    module_root_boundaries.sort_by_key(|boundary| std::cmp::Reverse(boundary.import_prefix.len()));
+    module_root_boundaries
+        .sort_by_key(|boundary| std::cmp::Reverse(boundary.dependency_prefix.len()));
     module_symbols.module_root_boundaries = module_root_boundaries;
 
     for header in headers {
@@ -295,30 +341,34 @@ fn build_module_root_public_exports_pass1(
             )?;
             let exports = module_symbols
                 .module_root_public_exports
-                .entry(module_root_interned)
+                .entry(module_root_interned.clone())
                 .or_default();
             exports.insert(PublicExportEntry {
                 export_name,
-                target: PublicExportTarget::Source {
+                target: PublicExportTarget::SourceDeclaration {
                     path: header.tokens.src_path.clone(),
-                    import_shell_id: None,
                 },
             });
+            export_locations
+                .entry(module_root_interned)
+                .or_insert_with(FxHashMap::default)
+                .insert(export_name, header.name_location.clone());
         }
     }
 
-    Ok(())
+    Ok(export_locations)
 }
 
-fn build_module_root_public_imports(
+fn build_module_root_public_dependencies(
     module_symbols: &mut ModuleSymbols,
+    export_locations: &FxHashMap<InternedPath, FxHashMap<StringId, SourceLocation>>,
     resolver: &ProjectPathResolver,
     external_package_registry: &ExternalPackageRegistry,
-    source_provider_imports: &SourceProviderImportSet<'_>,
+    source_provider_dependencies: &SourceProviderDependencySet<'_>,
     string_table: &mut StringTable,
 ) -> PublicExportDataResult<()> {
     let root_sources: Vec<_> = module_symbols
-        .file_imports_by_source
+        .file_dependency_clauses_by_source
         .keys()
         .filter(|source_file| {
             module_symbols
@@ -354,34 +404,54 @@ fn build_module_root_public_imports(
             .get(&module_root_interned)
             .cloned()
             .unwrap_or_default();
-        let mut collector = PublicExportCollector::from_existing(&current_exports);
-        let imports = module_symbols
-            .file_imports_by_source
+        let mut collector = PublicExportCollector::from_existing(
+            &current_exports,
+            export_locations.get(&module_root_interned),
+        );
+        let dependencies = module_symbols
+            .file_dependency_clauses_by_source
             .get(&root_source)
-            .cloned()
-            .unwrap_or_default();
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
 
-        for import in imports {
-            if import.export_mode != HeaderExportMode::Public {
+        for dependency in dependencies {
+            if dependency.export_mode != HeaderExportMode::Public {
                 continue;
             }
 
-            let export_name = public_export_name(&import)?;
-            let target = resolve_public_export_import_or_provider(
-                module_symbols,
-                &import,
-                &root_source,
-                external_package_registry,
-                source_provider_imports,
-                string_table,
-            )?;
+            let selections = module_symbols
+                .selections_for_clause(&root_source, dependency)
+                .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
+            for (selection_index, selection) in selections.iter().enumerate() {
+                let export_name = public_export_name(selection);
+                let target = resolve_public_export_dependency_or_provider(
+                    PublicExportDependencyResolutionInput {
+                        module_symbols,
+                        dependency,
+                        selection,
+                        selection_index,
+                        exporting_source: &root_source,
+                        external_package_registry,
+                        source_provider_dependencies,
+                        string_table,
+                    },
+                )?;
 
-            reject_public_export_target_if_source_receiver_method(
-                module_symbols,
-                &target,
-                import.location.clone(),
-            )?;
-            collector.insert(export_name, target, import.location.clone(), string_table)?;
+                reject_public_export_target_if_source_receiver_method(
+                    module_symbols,
+                    &target,
+                    selection.source_location.clone(),
+                )?;
+                collector.insert(
+                    export_name,
+                    target,
+                    selection
+                        .local_alias()
+                        .map_or(&selection.source_location, |alias| &alias.location)
+                        .clone(),
+                    string_table,
+                )?;
+            }
         }
 
         module_symbols
@@ -392,27 +462,64 @@ fn build_module_root_public_imports(
     Ok(())
 }
 
-fn resolve_public_export_import_or_provider(
-    module_symbols: &ModuleSymbols,
-    import: &crate::compiler_frontend::headers::types::FileImport,
-    exporting_source: &InternedPath,
-    external_package_registry: &ExternalPackageRegistry,
-    source_provider_imports: &SourceProviderImportSet<'_>,
-    string_table: &mut StringTable,
+fn resolve_public_export_dependency_or_provider(
+    input: PublicExportDependencyResolutionInput<'_, '_>,
 ) -> PublicExportDataResult<PublicExportTarget> {
-    if source_provider_imports
-        .resolve(import.provider.import_shell_id)
-        .is_some()
+    let PublicExportDependencyResolutionInput {
+        module_symbols,
+        dependency,
+        selection,
+        selection_index,
+        exporting_source,
+        external_package_registry,
+        source_provider_dependencies,
+        string_table,
+    } = input;
+
+    if let Some(resolved_clause) =
+        source_provider_dependencies.resolve_clause(dependency.dependency.dependency_shell_id)
     {
-        return Ok(PublicExportTarget::Source {
-            path: import.provider.path.clone(),
-            import_shell_id: Some(import.provider.import_shell_id),
+        let provider_id = resolved_clause.provider;
+        let provider_name = string_table.resolve(selection.source_name);
+        let provider_view = source_provider_dependencies
+            .binding_view(provider_id)
+            .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
+        let diagnostic_path = dependency.dependency.path.append(selection.source_name);
+
+        if provider_view.exported_origin(provider_name).is_none()
+            && provider_view.binding_export(provider_name).is_none()
+        {
+            let interface = source_provider_dependencies
+                .interface(provider_id)
+                .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
+            return Err(Box::new(provider_public_surface_diagnostic(
+                &diagnostic_path,
+                interface,
+                selection.source_location.clone(),
+                string_table,
+            )));
+        }
+
+        return Ok(PublicExportTarget::ProviderSelection {
+            selection: dependency
+                .selection_id(
+                    module_symbols
+                        .dependency_selections_by_source
+                        .get(exporting_source)
+                        .map(Vec::as_slice)
+                        .unwrap_or(&[]),
+                    selection_index,
+                )
+                .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?,
+            source_name: selection.source_name,
+            diagnostic_path,
         });
     }
 
-    resolve_public_export_import(
+    resolve_public_export_dependency(
         module_symbols,
-        import,
+        dependency,
+        selection,
         exporting_source,
         external_package_registry,
         string_table,
@@ -424,14 +531,16 @@ fn reject_public_export_target_if_source_receiver_method(
     target: &PublicExportTarget,
     location: SourceLocation,
 ) -> PublicExportDataResult<()> {
-    let PublicExportTarget::Source {
-        path: method_path, ..
-    } = target
-    else {
-        return Ok(());
-    };
-
-    reject_source_receiver_method_export(module_symbols, method_path, location)
+    match target {
+        PublicExportTarget::SourceDeclaration { path } => {
+            reject_source_receiver_method_export(module_symbols, path, location)
+        }
+        // Provider selections are validated before their tagged target is retained. The later
+        // namespace consumer repeats the member check as an internal invariant at its binding
+        // boundary, where malformed retained state must still fail closed.
+        PublicExportTarget::ProviderSelection { .. } => Ok(()),
+        PublicExportTarget::External(_) => Ok(()),
+    }
 }
 
 fn reject_source_receiver_method_export(
@@ -450,42 +559,34 @@ fn reject_source_receiver_method_export(
 }
 
 // --------------------------
-//  Public import resolution
+//  Public dependency resolution
 // --------------------------
 
-/// Derive the public export name for a root-file import.
+/// Derive the public export name for a root-file dependency.
 ///
-/// WHAT: alias wins; otherwise use the imported symbol name.
-fn public_export_name(
-    import: &crate::compiler_frontend::headers::parse_file_headers::FileImport,
-) -> PublicExportDataResult<StringId> {
-    match import.alias {
-        Some(alias) => Ok(alias),
-        None => match import.provider.path.name() {
-            Some(name) => Ok(name),
-            None => Err(Box::new(CompilerDiagnostic::missing_import_target(
-                import.provider.path.clone(),
-                import.location.clone(),
-            ))),
-        },
-    }
+/// WHAT: a direct selection alias wins; otherwise the selected provider-surface name is exported.
+fn public_export_name(selection: &DependencySelection) -> StringId {
+    selection.local_name()
 }
 
-/// Resolve a public import to its concrete export target.
+/// Resolve a public dependency to its concrete export target.
 ///
 /// WHAT: tries external package resolution, then public-boundary resolution, then direct source
 ///       resolution.
-/// WHY: public imports in a root file re-export the resolved symbol through the module API.
-fn resolve_public_export_import(
+/// WHY: public dependencies in a root file re-export the resolved symbol through the module API.
+fn resolve_public_export_dependency(
     module_symbols: &ModuleSymbols,
-    import: &crate::compiler_frontend::headers::parse_file_headers::FileImport,
+    dependency: &crate::compiler_frontend::headers::parse_file_headers::RetainedDependencyClause,
+    selection: &DependencySelection,
     root_file: &InternedPath,
     external_package_registry: &ExternalPackageRegistry,
     string_table: &mut StringTable,
 ) -> PublicExportDataResult<PublicExportTarget> {
+    let selected_path = dependency.dependency.path.append(selection.source_name);
+
     // 1. Try external package resolution first.
     match resolve_external_package_symbol(ExternalPackageSymbolResolutionInput {
-        import_path: &import.provider.path,
+        dependency_path: &selected_path,
         external_package_registry,
         string_table,
     }) {
@@ -499,7 +600,7 @@ fn resolve_public_export_import(
             return Err(Box::new(CompilerDiagnostic::missing_package_symbol(
                 symbol_name,
                 package_path,
-                import.location.clone(),
+                selection.source_location.clone(),
             )));
         }
         ExternalPackageSymbolLookup::NoMatch => {}
@@ -507,8 +608,8 @@ fn resolve_public_export_import(
 
     // 2. Try public export boundary resolution.
     let public_boundary_input = PublicExportResolutionInput {
-        importer_file: root_file,
-        header_path: &import.provider.path,
+        consumer_file: root_file,
+        header_path: &selected_path,
         source_package_public_exports: &module_symbols.source_package_public_exports,
         file_package_membership: &module_symbols.file_package_membership,
         module_root_public_exports: &module_symbols.module_root_public_exports,
@@ -520,9 +621,18 @@ fn resolve_public_export_import(
     if let Some(public_boundary_result) = resolve_public_export_boundary(&public_boundary_input) {
         match public_boundary_result {
             PublicExportLookupResult::ExportedSource { path, .. } => {
-                return Ok(PublicExportTarget::Source {
-                    path,
-                    import_shell_id: None,
+                return Ok(PublicExportTarget::SourceDeclaration { path });
+            }
+            PublicExportLookupResult::ExportedProviderSelection {
+                selection,
+                source_name,
+                diagnostic_path,
+                ..
+            } => {
+                return Ok(PublicExportTarget::ProviderSelection {
+                    selection,
+                    source_name,
+                    diagnostic_path,
                 });
             }
             PublicExportLookupResult::ExportedExternal { symbol_id } => {
@@ -533,16 +643,16 @@ fn resolve_public_export_import(
                 public_surface_type,
             } => {
                 // The entry-root public surface has no public path prefix. While building that root's
-                // own public imports, root-relative same-module re-exports must still be allowed
-                // to fall through to direct source resolution. Normal importers keep receiving
-                // `NotExported` from `prepare_import_environment`.
+                // own public dependencies, root-relative same-module re-exports must still be allowed
+                // to fall through to direct source resolution. Normal consumers keep receiving
+                // `NotExported` from `prepare_binding_environment`.
                 if matches!(public_surface_type, PublicExportSurfaceType::ModuleRoot)
                     && public_surface_name.is_empty()
                 {
                     // Fall through to direct source resolution.
                 } else {
                     // The target public surface exists but does not export this symbol.
-                    // Preserve the same diagnostic that a normal importer would see.
+                    // Preserve the same diagnostic that a normal declaring_source would see.
                     let public_surface_name_id = string_table.intern(&public_surface_name);
                     let diagnostic_public_surface_type = match public_surface_type {
                         PublicExportSurfaceType::SourcePackage => {
@@ -552,10 +662,10 @@ fn resolve_public_export_import(
                     };
                     return Err(Box::new(
                         CompilerDiagnostic::not_exported_by_public_surface(
-                            import.provider.path.clone(),
+                            selected_path.clone(),
                             public_surface_name_id,
                             diagnostic_public_surface_type,
-                            import.location.clone(),
+                            selection.source_location.clone(),
                         ),
                     ));
                 }
@@ -567,46 +677,45 @@ fn resolve_public_export_import(
     }
 
     // 3. Direct source resolution.
-    let target = resolve_import_target(ImportTargetResolutionInput {
-        import_path: &import.provider.path,
-        location: &import.location,
+    let target = resolve_dependency_target(DependencyTargetResolutionInput {
+        dependency_path: &selected_path,
+        location: &selection.source_location,
         module_file_paths: &module_symbols.module_file_paths,
-        importable_symbol_paths: &module_symbols.importable_source_symbol_paths,
+        dependency_bindable_symbol_paths: &module_symbols.dependency_bindable_source_symbol_paths,
         external_package_registry,
         string_table,
     })?;
 
     match target {
-        ResolvedImportTarget::Source { symbol_path, .. } => {
+        ResolvedDependencyTarget::Source { symbol_path, .. } => {
             if let Some(target_file) = module_symbols
                 .canonical_source_by_symbol_path
                 .get(&symbol_path)
             {
                 check_source_package_boundary(SourcePackageBoundaryCheckInput {
-                    importer_file: root_file,
+                    consumer_file: root_file,
                     target_file,
-                    requested_path: &import.provider.path,
-                    location: import.location.clone(),
+                    requested_path: &selected_path,
+                    location: selection.source_location.clone(),
                     file_package_membership: &module_symbols.file_package_membership,
                     source_package_root_files: &module_symbols.source_package_root_files,
                     string_table,
                 })?;
                 check_module_boundary(ModuleBoundaryCheckInput {
-                    importer_file: root_file,
+                    consumer_file: root_file,
                     target_file,
                     symbol_path: &symbol_path,
-                    location: import.location.clone(),
+                    location: selection.source_location.clone(),
                     file_module_membership: &module_symbols.file_module_membership,
                     module_root_public_exports: &module_symbols.module_root_public_exports,
                 })?;
             }
 
-            Ok(PublicExportTarget::Source {
-                path: symbol_path,
-                import_shell_id: None,
-            })
+            Ok(PublicExportTarget::SourceDeclaration { path: symbol_path })
         }
-        ResolvedImportTarget::External { symbol_id } => Ok(PublicExportTarget::External(symbol_id)),
+        ResolvedDependencyTarget::External { symbol_id } => {
+            Ok(PublicExportTarget::External(symbol_id))
+        }
     }
 }
 
@@ -622,10 +731,19 @@ struct PublicExportCollector {
 }
 
 impl PublicExportCollector {
-    fn from_existing(exports: &FxHashSet<PublicExportEntry>) -> Self {
+    fn from_existing(
+        exports: &FxHashSet<PublicExportEntry>,
+        existing_locations: Option<&FxHashMap<StringId, SourceLocation>>,
+    ) -> Self {
         let mut seen_names = FxHashMap::default();
         for entry in exports {
-            seen_names.insert(entry.export_name, SourceLocation::default());
+            seen_names.insert(
+                entry.export_name,
+                existing_locations
+                    .and_then(|locations| locations.get(&entry.export_name))
+                    .cloned()
+                    .unwrap_or_default(),
+            );
         }
         Self {
             exports: exports.clone(),
@@ -649,9 +767,10 @@ impl PublicExportCollector {
             )));
         }
 
-        if self.seen_names.contains_key(&export_name) {
+        if let Some(first_location) = self.seen_names.get(&export_name) {
             return Err(Box::new(CompilerDiagnostic::duplicate_public_export(
                 export_name,
+                first_location.clone(),
                 location,
             )));
         }
@@ -748,7 +867,7 @@ fn build_module_root_boundaries(
                 string_table,
             )?;
             module_root_boundaries.push(ModuleRootBoundary {
-                import_prefix: prefix_interned,
+                dependency_prefix: prefix_interned,
                 module_root: root_interned,
                 root_file,
             });
@@ -757,3 +876,7 @@ fn build_module_root_boundaries(
 
     Ok(module_root_boundaries)
 }
+
+#[cfg(test)]
+#[path = "tests/public_exports_tests.rs"]
+mod tests;

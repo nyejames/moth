@@ -4,7 +4,9 @@
 //! WHY: const fragments are folded by AST but ordered by header parsing through runtime insertion
 //! indices, so this logic must stay in the header stage.
 
+use crate::compiler_frontend::compiler_errors::compiler_error_to_diagnostic;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::headers::ordering_hints::dependency_path_for_local_name;
 use crate::compiler_frontend::headers::types::{
     Header, HeaderBuildContext, HeaderExportMode, HeaderKind, LocalDeclarationOrderingHint,
 };
@@ -34,6 +36,7 @@ pub(super) fn create_top_level_const_template(
         "{TOP_LEVEL_CONST_TEMPLATE_NAME}{const_template_number}"
     ));
     let mut local_ordering_hints: HashSet<LocalDeclarationOrderingHint> = HashSet::new();
+    let mut selection_error = None;
 
     // Keep the full template token stream (including open/close) so AST template parsing
     // can treat const templates exactly like regular templates.
@@ -46,13 +49,22 @@ pub(super) fn create_top_level_const_template(
     crate::compiler_frontend::utilities::token_scan::consume_balanced_template_region(
         token_stream,
         |token, token_kind| {
-            if let TokenKind::Symbol(name_id) = token_kind
-                && let Some(path) = context
-                    .file_imports
-                    .iter()
-                    .find(|f| f.name() == Some(*name_id))
+            if selection_error.is_none()
+                && let TokenKind::Symbol(name_id) = token_kind
             {
-                local_ordering_hints.insert(LocalDeclarationOrderingHint::new(path.to_owned()));
+                match dependency_path_for_local_name(
+                    *name_id,
+                    context.file_dependency_clauses,
+                    context.dependency_selections,
+                    context.string_table,
+                ) {
+                    Ok(Some(path)) => {
+                        local_ordering_hints
+                            .insert(LocalDeclarationOrderingHint::provider_spelling(path));
+                    }
+                    Ok(None) => {}
+                    Err(error) => selection_error = Some(error),
+                }
             }
             body.push(token);
         },
@@ -63,6 +75,10 @@ pub(super) fn create_top_level_const_template(
             ))
         },
     )?;
+
+    if let Some(error) = selection_error {
+        return Err(Box::new(compiler_error_to_diagnostic(&error)));
+    }
 
     // Add an EOF sentinel so downstream parsers can safely terminate even if
     // expression parsing consumed to the end of this synthetic token stream.
@@ -79,8 +95,8 @@ pub(super) fn create_top_level_const_template(
         end_pos: token_stream.current_location().end_pos,
     };
 
-    let mut template_tokens = FileTokens::new_with_file_id(full_name, token_stream.file_id, body);
-    template_tokens.canonical_os_path = token_stream.canonical_os_path.clone();
+    let template_tokens =
+        FileTokens::new_substream(token_stream, full_name, token_stream.file_id, body);
 
     Ok(Header {
         kind: HeaderKind::ConstTemplate {

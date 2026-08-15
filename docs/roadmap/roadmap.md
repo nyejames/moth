@@ -11,11 +11,10 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 
 ## Active implementation work
 
-- [Dependency clauses and path syntax](./plans/dependency-clauses-and-path-syntax-plan.md)
+- [TIR corrections and simplification](./plans/tir-corrections-and-simplification-plan.md)
 
 ## Queued implementation chain
 
-- [TIR corrections and simplification](./plans/tir-corrections-and-simplification-plan.md)
 - [Path values and resource linking](./plans/path-values-and-resource-linking-plan.md)
 - [Growable collections infallability](./plans/collection-push-fallibility-split-plan.md)
 - [Anonymous const records](./plans/anonymous-const-records-plan.md)
@@ -100,7 +99,7 @@ performs semantic symbol resolution or syntax diagnostics.
 - persistent artefact serialisation and precompiled package caches
 - explicit output transformation pipeline syntax
 - cross-page browser chunk sharing beyond physical variant reuse
-- direct normal-sibling imports if real project evidence justifies them
+- direct normal-sibling dependencies if real project evidence justifies them
 - broader reactivity source design
 - additional target builders and capability surfaces
 - profiling-backed frontend optimisations and the deferred post-TIR template investigations linked above

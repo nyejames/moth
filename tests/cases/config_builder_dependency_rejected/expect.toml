@@ -1,0 +1,12 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0019"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0019"
+reason = "invalid_dependency_clause.dependency_clause_not_allowed"
+path = "input/config.moth"
+line = 1

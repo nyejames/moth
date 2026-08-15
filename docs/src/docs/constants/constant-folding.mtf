@@ -60,6 +60,6 @@ The compiler may discover private const facts for optimisation.
 Those facts do not:
 
 - change source semantics
-- create importable declarations
+- create dependency-bindable declarations
 - participate in header dependency sorting
 - turn a runtime binding into a source constant

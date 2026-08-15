@@ -1,8 +1,8 @@
-import @types/models {UserProfile}
-import @types/enums {Priority}
-import @core/constants {app_version, build_timestamp}
-import @utils/formatting {format_timestamp}
-import @widgets/badge {render_badge}
+@types/models UserProfile
+@types/enums Priority
+@core/constants app_version, build_timestamp
+@utils/formatting format_timestamp
+@widgets/badge render_badge
 
 render_about |profile UserProfile| -> String:
     return [:

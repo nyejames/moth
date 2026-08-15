@@ -1016,7 +1016,7 @@ label <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&
 <span class='moth-code-keyword'>if</span> ready<span class='moth-code-delimiter'>:</span>
     <span class='moth-code-comment'>-- Invalid: label is already visible.</span>
     label <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;inner&quot;</span>
-<span class='moth-code-delimiter'>;</span></code></pre><h3>Rules</h3><ul><li>A declaration can&#39;t reuse a value name that stays visible.</li><li>A declaration can&#39;t collide with a visible type, alias, import, builtin or reserved name.</li><li>Function parameters and loop bindings follow the same rule.</li><li>A nested child scope can&#39;t shadow a name from its parent scope.</li><li>Assignment to an existing mutable binding is not a redeclaration.</li><li>Separate scopes may reuse a name when neither declaration is visible from the other.</li></ul><pre style=""><code class='codeblock'><span class='moth-code-function'>first</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>:</span>
+<span class='moth-code-delimiter'>;</span></code></pre><h3>Rules</h3><ul><li>A declaration can&#39;t reuse a value name that stays visible.</li><li>A declaration can&#39;t collide with a visible type, alias, dependency binding, builtin or reserved name.</li><li>Function parameters and loop bindings follow the same rule.</li><li>A nested child scope can&#39;t shadow a name from its parent scope.</li><li>Assignment to an existing mutable binding is not a redeclaration.</li><li>Separate scopes may reuse a name when neither declaration is visible from the other.</li></ul><pre style=""><code class='codeblock'><span class='moth-code-function'>first</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>:</span>
     value <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span>
     <span class='moth-code-keyword'>return</span> value
 <span class='moth-code-delimiter'>;</span>
@@ -1024,7 +1024,7 @@ label <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&
 <span class='moth-code-function'>second</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>:</span>
     value <span class='moth-code-operator'>=</span> <span class='moth-code-number'>2</span>
     <span class='moth-code-keyword'>return</span> value
-<span class='moth-code-delimiter'>;</span></code></pre><p>Import, module public-surface and namespace collisions add more specific rules, but they build on the same no-shadowing principle.</p>
+<span class='moth-code-delimiter'>;</span></code></pre><p>Dependency, module public-surface and namespace collisions add more specific rules, but they build on the same no-shadowing principle.</p>
 </div>
 </fieldset></section>
 <section class="container"><h2>Related design</h2><p>See <a href="../codebase/memory-management">Memory management</a> for borrow validation, ownership analysis and backend lowering.</p></section>

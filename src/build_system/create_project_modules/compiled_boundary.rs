@@ -307,8 +307,8 @@ pub(crate) struct CompiledSourcePackage {
 }
 
 impl CompiledSourcePackage {
-    /// The `@`-stripped import spelling for this package boundary.
-    pub(crate) fn import_prefix(&self) -> &str {
+    /// The `@`-stripped package prefix for this boundary.
+    pub(crate) fn package_prefix(&self) -> &str {
         self.package_identity.name()
     }
 
@@ -334,7 +334,7 @@ impl CompiledSourcePackage {
             .ok_or_else(|| {
                 CompilerError::compiler_error(format!(
                     "Source package @{} root ModuleId {} is out of range for {} graph nodes",
-                    self.import_prefix(),
+                    self.package_prefix(),
                     root_index,
                     self.boundary.structure.nodes().len()
                 ))
@@ -342,7 +342,7 @@ impl CompiledSourcePackage {
         if node.stable_origin().package() != &self.package_identity {
             return Err(CompilerError::compiler_error(format!(
                 "Source package @{} root node belongs to package {:?}, not {:?}",
-                self.import_prefix(),
+                self.package_prefix(),
                 node.stable_origin().package(),
                 self.package_identity
             )));
@@ -350,7 +350,7 @@ impl CompiledSourcePackage {
         if node.role() != ModuleRootRole::Normal {
             return Err(CompilerError::compiler_error(format!(
                 "Source package @{} root module has role {:?}; packages require a normal entry-root module",
-                self.import_prefix(),
+                self.package_prefix(),
                 node.role()
             )));
         }
@@ -364,14 +364,14 @@ impl CompiledSourcePackage {
                     .ok_or_else(|| {
                         CompilerError::compiler_error(format!(
                             "Source package @{} root ModuleId {} holds a successful slot without a published interface",
-                            self.import_prefix(),
+                            self.package_prefix(),
                             root_index
                         ))
                     })?;
                 if &interface.module_origin != node.stable_origin() {
                     return Err(CompilerError::compiler_error(format!(
                         "Source package @{} root interface origin {:?} disagrees with its graph node origin {:?}",
-                        self.import_prefix(),
+                        self.package_prefix(),
                         interface.module_origin,
                         node.stable_origin()
                     )));
@@ -381,7 +381,7 @@ impl CompiledSourcePackage {
             ProviderSlot::Unavailable => {
                 return Err(CompilerError::compiler_error(format!(
                     "Source package @{} root ModuleId {} never reached a completed outcome",
-                    self.import_prefix(),
+                    self.package_prefix(),
                     root_index
                 )));
             }
@@ -403,7 +403,7 @@ impl CompiledSourcePackage {
             .ok_or_else(|| {
                 CompilerError::compiler_error(format!(
                     "Source package @{} completed without a successful facade interface",
-                    self.import_prefix()
+                    self.package_prefix()
                 ))
             })
     }
@@ -431,11 +431,11 @@ pub(crate) struct PackageMaterialisationLocation {
 
 /// One incrementally maintained registry of completed source-package boundaries.
 ///
-/// WHAT: stores completed packages contiguously, resolves import prefixes to dense
+/// WHAT: stores completed packages contiguously, resolves package prefixes to dense
 ///       [`PackageBoundaryId`] values, and records the package dependency graph (provider and
 ///       consumer edges) exactly once when each package publishes.
 /// WHY: every boundary compilation and module readiness check previously rebuilt prefix maps or
-///      filtered the full import vector per module; one registry keeps package indexing and
+///      filtered the full dependency vector per module; one registry keeps package indexing and
 ///      dependency adjacency in a single build-owned owner.
 /// MUST NOT: store project modules, merge package artefacts into one vector, or expose
 /// package-local dense handles as cross-boundary semantic identities.
@@ -485,7 +485,7 @@ impl CompletedSourcePackageRegistry {
         package: &CompiledSourcePackage,
         dependency_prefixes: &[String],
     ) -> Result<SourcePackagePublication, CompilerError> {
-        let prefix = package.import_prefix().to_owned();
+        let prefix = package.package_prefix().to_owned();
         if self.by_prefix.contains_key(prefix.as_str()) {
             return Err(CompilerError::compiler_error(format!(
                 "source package @{} completed more than once",
@@ -535,7 +535,7 @@ impl CompletedSourcePackageRegistry {
                 return Err(CompilerError::compiler_error(format!(
                     "Generated declaration identity {:?} was published by source packages @{} and @{}",
                     identity,
-                    self.package(existing.package_id)?.import_prefix(),
+                    self.package(existing.package_id)?.package_prefix(),
                     prefix
                 )));
             }
@@ -614,8 +614,8 @@ impl CompletedSourcePackageRegistry {
         Ok(package_id)
     }
 
-    pub(crate) fn by_prefix(&self, import_prefix: &str) -> Option<PackageBoundaryId> {
-        self.by_prefix.get(import_prefix).copied()
+    pub(crate) fn by_prefix(&self, package_prefix: &str) -> Option<PackageBoundaryId> {
+        self.by_prefix.get(package_prefix).copied()
     }
 
     pub(crate) fn package(
@@ -706,7 +706,7 @@ impl CompletedSourcePackageRegistry {
     ///       edges at later package IDs, proving the dense schedule published dependencies
     ///       before dependants.
     /// WHY: the registry records package dependency adjacency exactly once; this invariant
-    ///       check keeps the recorded graph usable without re-deriving it from import vectors.
+    ///       check keeps the recorded graph usable without re-deriving it from dependency vectors.
     pub(crate) fn validate_dependency_edges(&self) -> Result<(), CompilerError> {
         for package_id in 0..self.packages.len() {
             let package_id = PackageBoundaryId(package_id);
@@ -714,8 +714,8 @@ impl CompletedSourcePackageRegistry {
                 if provider_id.index() >= package_id.index() {
                     return Err(CompilerError::compiler_error(format!(
                         "source package @{} lists provider package {} that did not publish first",
-                        self.package(package_id)?.import_prefix(),
-                        self.package(*provider_id)?.import_prefix()
+                        self.package(package_id)?.package_prefix(),
+                        self.package(*provider_id)?.package_prefix()
                     )));
                 }
             }
@@ -723,8 +723,8 @@ impl CompletedSourcePackageRegistry {
                 if consumer_id.index() <= package_id.index() {
                     return Err(CompilerError::compiler_error(format!(
                         "source package @{} lists consumer package {} that published before it",
-                        self.package(package_id)?.import_prefix(),
-                        self.package(*consumer_id)?.import_prefix()
+                        self.package(package_id)?.package_prefix(),
+                        self.package(*consumer_id)?.package_prefix()
                     )));
                 }
             }
@@ -864,7 +864,7 @@ impl ProjectFrontendCompilation {
                     "Generated declaration identity {:?} is published by both project module {} and source package @{}",
                     identity,
                     location.artifact_id.index(),
-                    source_packages.package(*package_id)?.import_prefix()
+                    source_packages.package(*package_id)?.package_prefix()
                 )));
             }
         }

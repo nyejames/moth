@@ -1,0 +1,48 @@
+Dependency paths resolve declaration surfaces, not file bytes. Every source dependency clause resolves from the declaring file's owning module root, not the file's physical directory.
+
+### Path families
+
+- **Module-root-relative**: dependency clauses resolve from the declaring file's owning module root. Example: inside `src/internal/deep/renderer.moth`, `@accounts Account` resolves to `src/accounts.moth`, not `src/internal/deep/accounts.moth`.
+- **Child module**: reaching a child normal module ends filesystem traversal and exposes only its `export:` facade. Dependency clauses cannot bypass that facade with paths such as `@child/internal`.
+- **Support package**: scoped `+*.moth` support packages are depended on by package name. Consumers do not encode ancestor paths.
+- **Core binding-backed package**: `@core/math`, `@core/text` and current peers are registered by the builder.
+- **Builder source-backed package**: `@html` is a builder-provided source-backed package.
+- **Builder binding-backed package**: `@web/canvas` is a builder-owned runtime package.
+- **JavaScript file**: project-local annotated JavaScript files require `.js` and a builder external import provider. The `.js` extension is kept.
+
+### Resolution rules
+
+- `@./...` has no supported meaning.
+- `@/...` absolute-root paths are invalid.
+- Parent components and `..` are invalid.
+- Paths may traverse ordinary unrooted directories owned by the same module.
+- `.moth`, `.mtf` and `.md` source dependency paths are extensionless.
+- Direct `.js` dependency clauses keep the `.js` extension.
+- Scoped support packages are injected by package name, not physical ancestor paths.
+- Core and builder runtime packages use their registered package path.
+- Specific symbol bindings use flat direct selections. Direct symbol paths such as `@core/math/sin` remain invalid.
+- Direct dependency clauses on `+*.moth` support root files and `config.moth` are rejected.
+- `@@name` is invalid. The leading `@` starts a dependency path and is not part of the module name. Normal module-root filenames such as `@page.moth` are not depended on directly.
+- A bare explicit-extension clause requires `as` or at least one direct selection. An explicit-extension clause with no registered provider gets a targeted diagnostic.
+- A recognised source extension used with an explicit extension gets an extensionless-source diagnostic.
+- Moth template `.mtf` and plain Markdown `.md` content files both expose generated `content` constants. See @../moth-templates/#content-dependencies (Moth template content dependencies) and @../markdown/#markdown-dependencies (Markdown dependencies).
+- The bound public surface of a module root comes from its `export:` block. See @#module-visibility (Module visibility).
+
+### Same-module dependencies
+
+Files in the same module can bind ordinary sibling source files directly. Same-module dependency clauses bypass the public-surface boundary. See @#module-visibility (Module visibility).
+
+### Cross-module dependencies
+
+Dependency clauses that cross into another module boundary can only access what that module's `export:` block makes public. Cross-module dependency clauses cannot bypass the public API. See @#module-visibility (Module visibility).
+
+### Content-file dependencies
+
+Moth template and plain Markdown content files are bound with the same extensionless syntax. Their dependency shape is covered by the Moth template and Plain Markdown pages, not here.
+
+### Related concepts
+
+- For direct-selection and namespace dependency clauses see @#dependency-clauses (Direct-selection and namespace dependency clauses).
+- For visibility rules see @#module-visibility (Module visibility).
+- For project-local source-backed packages see @#project-local-packages (Project-local packages).
+- For package origin and backing see @#package-origins-and-backing (Package origins and backing).

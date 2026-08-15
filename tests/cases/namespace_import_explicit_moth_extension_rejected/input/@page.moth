@@ -1,3 +1,0 @@
-import @./helper.moth
-
-io.line([: [helper.greet()]])

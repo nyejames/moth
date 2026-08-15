@@ -1,4 +1,4 @@
-import @core/text {length, is_empty, contains, starts_with, ends_with}
+@core/text length, is_empty, contains, starts_with, ends_with
 
 text = "mothball"
 len = length("abc")

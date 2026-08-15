@@ -10,7 +10,7 @@ Keep the source language small, explicit and easy to inspect statically. Accept 
 
 Design-scope documents state this without apology. Constrained built-in mechanisms beat general metaprogramming. Static resolution beats runtime dynamism. Backend optimisations hide behind stable source semantics.
 
-The greeting project already crosses those lines. A template, a compile-time constant and an imported function share one pipeline. The language and the build system meet before any backend emits a byte.
+The greeting project already crosses those lines. A template, a compile-time constant and a dependency-bound function share one pipeline. The language and the build system meet before any backend emits a byte.
 
 ## Put complexity in the compiler
 

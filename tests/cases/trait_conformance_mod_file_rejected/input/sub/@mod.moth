@@ -1,7 +1,7 @@
-import @model { Label }
+@model Label
 
 export:
-    import @model { Label }
+    @model Label
 ;
 
 Label must DISPLAYABLE

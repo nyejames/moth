@@ -29,7 +29,7 @@ A Moth project is a directory tree with one strict config file, a source entry r
 
 Project-local source-backed packages are structural `+*.moth` support packages. A `+*.moth` file in a source directory marks that directory as a scoped support package root named by its containing directory.
 
-In the example above, `shared/+package.moth` creates the scoped `@shared` support package. It is visible to its owner normal module, normal sibling modules and their descendants. It is not imported from its own private implementation subtree or from another support package in the same scope.
+In the example above, `shared/+package.moth` creates the scoped `@shared` support package. It is visible to its owner normal module, normal sibling modules and their descendants. It is not dependency-bound from its own private implementation subtree or from another support package in the same scope.
 
 No folder gains package meaning without a `+*.moth` root. Ordinary directories do not automatically become packages.
 
@@ -54,7 +54,7 @@ owns their stale-output cleanup. Treat generated artefacts as output, not source
 
 ### Builder-neutral frontend versus builder-owned output
 
-The compiler frontend discovers modules, resolves imports, checks types, lowers code and validates borrowing. A project builder then decides how compiled modules become real output files. The current user-facing builder is the HTML project builder.
+The compiler frontend discovers modules, resolves dependencies, checks types, lowers code and validates borrowing. A project builder then decides how compiled modules become real output files. The current user-facing builder is the HTML project builder.
 
 This separation lets the same frontend feed other builders. The frontend does
 not decide which modules produce artefacts. The builder owns that decision.

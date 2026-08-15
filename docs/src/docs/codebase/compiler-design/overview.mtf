@@ -33,7 +33,7 @@ greet |name String| -> String:
 [codeblock, $code("moth"):
 -- @page.moth
 
-import @greeting { greet }
+@greeting greet
 
 visitor = "Priya"
 
@@ -103,7 +103,7 @@ Read in order. The path groups ideas by time of appearance, not by internal crat
 3. @./starting-a-build (03. Starting a build)
 4. @./project-graphs-and-modules (04. Project graphs and modules)
 5. @./tokenization (05. Tokenization)
-6. @./declarations-imports-and-ordering (06. Declarations, imports and ordering)
+6. @./declarations-dependencies-and-ordering (06. Declarations, dependencies and ordering)
 7. @./ast-semantics-and-types (07. AST semantics and types)
 8. @./compile-time-semantics (08. Compile-time semantics)
 9. @./templates-and-tir (09. Templates and TIR)

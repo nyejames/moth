@@ -1,4 +1,4 @@
-import @./sizes { capacity }
+@sizes capacity
 
 render_imported || -> String:
     items ~{capacity String} = {}

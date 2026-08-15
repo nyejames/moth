@@ -119,7 +119,7 @@ observable semantics for their topics.
 ### Aliases
 
 - `docs/src/docs/aliases/type-aliases.mtf`
-- `docs/src/docs/aliases/import-aliases.mtf`
+- `docs/src/docs/aliases/dependency-aliases.mtf`
 - `docs/src/docs/aliases/payload-capture-aliases.mtf`
 
 ### Generics
@@ -161,10 +161,10 @@ observable semantics for their topics.
 - `docs/src/docs/project-structure/entry-config.mtf`
 - `docs/src/docs/project-structure/project-package-facade.mtf`
 
-### Packages and imports
+### Packages and dependencies
 
-- `docs/src/docs/packages/import-paths.mtf`
-- `docs/src/docs/packages/grouped-and-namespace-imports.mtf`
+- `docs/src/docs/packages/dependency-paths.mtf`
+- `docs/src/docs/packages/dependency-clauses.mtf`
 - `docs/src/docs/packages/module-visibility.mtf`
 - `docs/src/docs/packages/public-reexports.mtf`
 - `docs/src/docs/packages/project-local-packages.mtf`
@@ -175,14 +175,14 @@ observable semantics for their topics.
 
 - `docs/src/docs/moth-templates/moth-template-files.mtf`
 - `docs/src/docs/moth-templates/implicit-markdown.mtf`
-- `docs/src/docs/moth-templates/content-imports.mtf`
+- `docs/src/docs/moth-templates/content-dependencies.mtf`
 - `docs/src/docs/moth-templates/template-scope.mtf`
 - `docs/src/docs/moth-templates/moth-template-limits.mtf`
 
 ### Plain Markdown
 
 - `docs/src/docs/markdown/markdown-files.mtf`
-- `docs/src/docs/markdown/markdown-imports.mtf`
+- `docs/src/docs/markdown/markdown-dependencies.mtf`
 - `docs/src/docs/markdown/rendering-contract.mtf`
 - `docs/src/docs/markdown/choosing-a-content-format.mtf`
 

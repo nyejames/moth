@@ -1,23 +1,22 @@
 use super::{
-    BorrowAccessKind, BorrowDiagnosticKind, CommonSyntaxMistakeReason,
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic, ConfigDiagnosticKind,
-    DeferredFeatureDiagnosticKind, DeferredFeatureReason, DiagnosticBag, DiagnosticCategory,
-    DiagnosticCompoundAssignmentOperator, DiagnosticKind, DiagnosticLabel, DiagnosticLabelMessage,
-    DiagnosticOperator, DiagnosticPayload, DiagnosticPlace, DiagnosticSeverity,
-    GenericApplicationErrorReason, ImportClauseKind, ImportDiagnosticKind,
+    BorrowAccessKind, BorrowDiagnosticKind, CompileTimeEvaluationErrorReason, CompilerDiagnostic,
+    ConfigDiagnosticKind, DeferredFeatureDiagnosticKind, DeferredFeatureReason,
+    DependencyClauseKind, DiagnosticBag, DiagnosticCategory, DiagnosticCompoundAssignmentOperator,
+    DiagnosticKind, DiagnosticLabel, DiagnosticLabelMessage, DiagnosticOperator, DiagnosticPayload,
+    DiagnosticPlace, DiagnosticSeverity, GenericApplicationErrorReason, ImportDiagnosticKind,
     IncompatibleChoiceComparisonReason, InfrastructureDiagnosticKind,
     InvalidAssignmentTargetReason, InvalidCallShapeReason, InvalidCastReason,
     InvalidChoiceVariantReason, InvalidCollectionTypeReason, InvalidConfigReason,
-    InvalidExpressionReason, InvalidFallibleHandlingReason, InvalidFallibleOperandReason,
-    InvalidFunctionSignatureReason, InvalidGenericParameterReason, InvalidImportClauseReason,
-    InvalidMapTypeReason, InvalidOutputFolderReason, InvalidReceiverCallReason,
-    InvalidSignatureMemberReason, InvalidStandaloneStatementReason, InvalidStatementPositionReason,
-    InvalidStringEscapeReason, InvalidTemplateDirectiveReason, InvalidTemplateStructureReason,
-    InvalidTraitKeywordUsageReason, InvalidTypeAnnotationReason, MissingWhitespace, NameNamespace,
-    NumberLiteralErrorReason, PathKind, ReceiverCallKind, RuleDiagnosticKind,
-    SymbolicSpacingConstruct, SymbolicSpacingError, SyntaxDiagnosticKind, TypeAnnotationContext,
-    TypeDiagnosticKind, TypeMismatchContext, UnsupportedBackendFeatureReason,
-    UnsupportedOperatorCategory, is_well_formed_reason_key,
+    InvalidDependencyClauseReason, InvalidExpressionReason, InvalidFallibleHandlingReason,
+    InvalidFallibleOperandReason, InvalidFunctionSignatureReason, InvalidGenericParameterReason,
+    InvalidImportPathReason, InvalidMapTypeReason, InvalidOutputFolderReason,
+    InvalidReceiverCallReason, InvalidSignatureMemberReason, InvalidStandaloneStatementReason,
+    InvalidStatementPositionReason, InvalidStringEscapeReason, InvalidTemplateDirectiveReason,
+    InvalidTemplateStructureReason, InvalidTraitKeywordUsageReason, InvalidTypeAnnotationReason,
+    MissingWhitespace, NameNamespace, NamespaceTypeValueMisuseKind, NumberLiteralErrorReason,
+    PathKind, ReceiverCallKind, RuleDiagnosticKind, SymbolicSpacingConstruct, SymbolicSpacingError,
+    SyntaxDiagnosticKind, TypeAnnotationContext, TypeDiagnosticKind, TypeMismatchContext,
+    UnsupportedBackendFeatureReason, UnsupportedOperatorCategory, is_well_formed_reason_key,
 };
 use crate::compiler_frontend::compiler_errors::{
     CompilerError, CompilerMessages, merge_stage_messages,
@@ -29,9 +28,10 @@ use crate::compiler_frontend::compiler_messages::source_location::{CharPosition,
 use crate::compiler_frontend::datatypes::definitions::StructTypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, builtin_type_ids};
+use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{PathTokenItem, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use std::collections::HashSet;
 use std::path::Path;
 
@@ -102,6 +102,12 @@ fn descriptor_codes_are_stable_and_non_empty() {
             DiagnosticSeverity::Error,
         ),
         (
+            DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidDependencyClause),
+            "MOTH-SYNTAX-0019",
+            "Invalid dependency clause",
+            DiagnosticSeverity::Error,
+        ),
+        (
             DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
             "MOTH-RULE-0001",
             "Unknown name",
@@ -122,7 +128,7 @@ fn descriptor_codes_are_stable_and_non_empty() {
         (
             DiagnosticKind::Import(ImportDiagnosticKind::MissingImportTarget),
             "MOTH-IMPORT-0005",
-            "Missing import target",
+            "Missing dependency target",
             DiagnosticSeverity::Error,
         ),
         (
@@ -665,15 +671,13 @@ fn remap_string_ids_updates_locations_payloads_labels_and_tokens() {
     let primary_location = location(main_path.clone());
     let first_location = location(import_path.clone());
 
+    // The path token now carries a dense handle into a file-owned path syntax table;
+    // the table remaps alongside the diagnostic bag exactly as `FileTokens` does.
+    let mut path_syntax = PathSyntaxTable::new();
+    let path_id = path_syntax.push(import_path.clone(), first_location.clone());
     let expected_token = CompilerDiagnostic::expected_token(
         TokenKind::Symbol(name),
-        Some(TokenKind::Path(vec![PathTokenItem {
-            path: import_path.clone(),
-            alias: Some(alias),
-            path_location: first_location.clone(),
-            alias_location: Some(primary_location.clone()),
-            from_grouped: true,
-        }])),
+        Some(TokenKind::Path(path_id)),
         primary_location.clone(),
     );
     let duplicate = CompilerDiagnostic::duplicate_declaration(
@@ -702,21 +706,26 @@ fn remap_string_ids_updates_locations_payloads_labels_and_tokens() {
     let mut merged_table = StringTable::new();
     let remap = merged_table.merge_from(&local_table);
     bag.remap_string_ids(&remap);
+    path_syntax.remap_string_ids(&remap);
 
     let diagnostics = bag.diagnostics();
     match &diagnostics[0].payload {
         DiagnosticPayload::ExpectedToken {
             expected,
-            found: Some(TokenKind::Path(items)),
+            found: Some(TokenKind::Path(id)),
         } => {
             assert!(matches!(expected, TokenKind::Symbol(_)));
-            let item = items
-                .first()
-                .expect("path token item should remain present");
-            assert_eq!(item.path.to_string(&merged_table), "lib.moth");
             assert_eq!(
-                item.alias.map(|id| merged_table.resolve(id)),
-                Some("AliasButton")
+                *id, path_id,
+                "path handles are dense indexes and must survive remap"
+            );
+            assert_eq!(
+                path_syntax
+                    .try_path(*id)
+                    .expect("valid path handle")
+                    .root
+                    .to_string(&merged_table),
+                "lib.moth"
             );
         }
         payload => panic!("unexpected expected-token payload: {payload:?}"),
@@ -767,15 +776,13 @@ fn remap_string_ids_updates_locations_payloads_labels_and_tokens() {
 }
 
 #[test]
-fn remap_string_ids_updates_missing_at_prefix_authored_path() {
+fn remap_string_ids_updates_legacy_dependency_replacement() {
     let mut local_table = StringTable::new();
     let source_path = InternedPath::from_single_str("main.moth", &mut local_table);
-    let authored_path = local_table.intern("vendor/drawing.js");
+    let replacement = local_table.intern("@vendor/drawing.js as drawing");
 
-    let diagnostic = CompilerDiagnostic::common_syntax_mistake(
-        CommonSyntaxMistakeReason::ImportPathMissingAtPrefix { authored_path },
-        location(source_path),
-    );
+    let diagnostic =
+        CompilerDiagnostic::legacy_dependency_clause(Some(replacement), location(source_path));
 
     let mut bag = DiagnosticBag::from_diagnostics(vec![diagnostic]);
 
@@ -784,16 +791,17 @@ fn remap_string_ids_updates_missing_at_prefix_authored_path() {
     bag.remap_string_ids(&remap);
 
     match &bag.diagnostics()[0].payload {
-        DiagnosticPayload::CommonSyntaxMistake {
-            reason: CommonSyntaxMistakeReason::ImportPathMissingAtPrefix { authored_path },
+        DiagnosticPayload::LegacyDependencyClause {
+            replacement: Some(replacement),
+            ..
         } => {
             assert_eq!(
-                merged_table.resolve(*authored_path),
-                "vendor/drawing.js",
-                "authored import path StringId must remain valid after table merge/remap"
+                merged_table.resolve(*replacement),
+                "@vendor/drawing.js as drawing",
+                "migration replacement StringId must remain valid after table merge/remap"
             );
         }
-        payload => panic!("unexpected missing-@ payload after remap: {payload:?}"),
+        payload => panic!("unexpected migration payload after remap: {payload:?}"),
     }
 }
 
@@ -1081,13 +1089,13 @@ fn syntax_and_choice_renderers_use_user_facing_messages_not_reason_debug_names()
             "WhitespaceMustBeQuoted",
         ),
         (
-            CompilerDiagnostic::invalid_import_clause(
-                ImportClauseKind::Alias,
-                InvalidImportClauseReason::AliasNotValidIdentifier,
+            CompilerDiagnostic::invalid_dependency_clause(
+                DependencyClauseKind::NamespaceAlias,
+                InvalidDependencyClauseReason::ExpectedAliasName,
                 location(source_path.clone()),
             ),
-            "Import alias must be a valid local binding name",
-            "AliasNotValidIdentifier",
+            "Expected alias name after `as`",
+            "ExpectedAliasName",
         ),
         (
             CompilerDiagnostic::invalid_choice_variant(
@@ -1609,6 +1617,120 @@ fn phase_1_2_renderers_keep_source_language_terminology() {
         assert!(
             rendered.contains(expected),
             "expected source-language diagnostic text '{expected}' in: {rendered}",
+        );
+    }
+}
+
+#[test]
+fn source_dependency_renderers_use_current_language_terminology() {
+    let mut string_table = StringTable::new();
+    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
+    let dependency_path = InternedPath::from_single_str("missing.moth", &mut string_table);
+    let namespace_name = string_table.intern("docs");
+    let alias_name = string_table.intern("readFile");
+    let symbol_name = string_table.intern("read_file");
+    let member_name = string_table.intern("member");
+    let mut diagnostics = vec![
+        CompilerDiagnostic::missing_import_target(
+            dependency_path.clone(),
+            location(source_path.clone()),
+        ),
+        CompilerDiagnostic::invalid_import_path(
+            dependency_path,
+            InvalidImportPathReason::ParentDirectorySegment,
+            location(source_path.clone()),
+        ),
+        CompilerDiagnostic::dependency_namespace_used_as_value(
+            namespace_name,
+            location(source_path.clone()),
+        ),
+        CompilerDiagnostic::nested_dependency_traversal(
+            namespace_name,
+            location(source_path.clone()),
+        ),
+        CompilerDiagnostic::dependency_alias_case_mismatch(
+            alias_name,
+            symbol_name,
+            location(source_path.clone()),
+        ),
+    ];
+
+    for (expected, found) in [
+        (
+            NamespaceTypeValueMisuseKind::Type,
+            NamespaceTypeValueMisuseKind::Value,
+        ),
+        (
+            NamespaceTypeValueMisuseKind::Value,
+            NamespaceTypeValueMisuseKind::Type,
+        ),
+        (
+            NamespaceTypeValueMisuseKind::Value,
+            NamespaceTypeValueMisuseKind::Namespace,
+        ),
+        (
+            NamespaceTypeValueMisuseKind::Type,
+            NamespaceTypeValueMisuseKind::Namespace,
+        ),
+        (
+            NamespaceTypeValueMisuseKind::Namespace,
+            NamespaceTypeValueMisuseKind::Value,
+        ),
+        (
+            NamespaceTypeValueMisuseKind::Namespace,
+            NamespaceTypeValueMisuseKind::Type,
+        ),
+    ] {
+        diagnostics.push(CompilerDiagnostic::namespace_type_value_misuse(
+            member_name,
+            expected,
+            found,
+            location(source_path.clone()),
+        ));
+    }
+
+    let render_context = DiagnosticRenderContext::new(&string_table);
+    let rendered_guidance = diagnostics
+        .iter()
+        .flat_map(|diagnostic| {
+            terminal::format_payload_guidance(&diagnostic.payload, render_context)
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let descriptor_titles = diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.kind.descriptor().title)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let rendered = format!("{descriptor_titles}\n{rendered_guidance}");
+
+    for expected in [
+        "Cannot resolve dependency",
+        "Dependency paths containing '..'",
+        "dependency namespace binding",
+        "Dependency namespace used as value",
+        "Nested dependency-namespace traversal",
+        "Dependency alias case mismatch",
+        "member of the dependency namespace",
+    ] {
+        assert!(
+            rendered.contains(expected),
+            "expected current dependency terminology '{expected}' in: {rendered}",
+        );
+    }
+
+    for stale in [
+        "Cannot resolve import",
+        "Import paths",
+        "Import alias",
+        "import namespace",
+        "import record",
+        "Import record",
+        "Nested import-record traversal",
+    ] {
+        assert!(
+            !rendered.contains(stale),
+            "source dependency renderer retained stale term '{stale}': {rendered}",
         );
     }
 }

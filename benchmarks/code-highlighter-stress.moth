@@ -6,12 +6,12 @@
 
 code_snippet #= [$code("moth"):
 -- module documentation
-import @core/io {print, line, debug}
-import @core/math {sin, cos, tan, PI, TAU, E}
-import @core/text {length, contains, prefix, suffix}
-import @web/canvas {Canvas, draw_rect, fill_circle, stroke_line}
-import @project {config, version, build_number}
-import @vendor/drawing.js {render_scene, apply_filter}
+@core/io print, line, debug
+@core/math sin, cos, tan, PI, TAU, E
+@core/text length, contains, prefix, suffix
+@web/canvas Canvas, draw_rect, fill_circle, stroke_line
+@project config, version, build_number
+@vendor/drawing.js render_scene, apply_filter
 
 -- nominal types
 Label = |
@@ -257,10 +257,10 @@ escape_block #= [$escape_html: <div>&</div>]
 fresh_child #= [$fresh]
 
 -- grouped imports and aliases
-import @core/io {print as log, line as write_line}
-import @core/collections {Map, map_from}
-import @core/time {Duration, Timestamp}
-import @core/random {random_float, random_int}
+@core/io print as log, line as write_line
+@core/collections Map, map_from
+@core/time Duration, Timestamp
+@core/random random_float, random_int
 
 -- module structure
 export:
@@ -537,10 +537,10 @@ count $= 0
 [$name]
 
 -- imports with paths and resources
-import @core/io {print}
-import @web/canvas {Canvas}
-import @project/config {theme}
-import @vendor/assets/logo.png
+@core/io print
+@web/canvas Canvas
+@project/config theme
+@vendor/assets/logo.png
 
 -- long plain identifier runs
 configuration_default_cache_size = 1024
@@ -983,12 +983,12 @@ list_template #= [: <ul>[$slot]</ul> ]
 item_template #= [: <li>[$slot]</li> ]
 
 -- import alias table
-import @core/io {print as p, line as l}
-import @core/math {sin as sine, cos as cosine}
-import @core/text {length as len, contains as has}
-import @core/collections {Map as Dict}
-import @core/time {Duration as Span}
-import @web/canvas {Canvas as Board}
+@core/io print as p, line as l
+@core/math sin as sine, cos as cosine
+@core/text length as len, contains as has
+@core/collections Map as Dict
+@core/time Duration as Span
+@web/canvas Canvas as Board
 
 -- namespace paths
 io.print
@@ -1470,13 +1470,13 @@ compose |a Maybe Int, b Maybe Int| -> Maybe Int:
 ;
 
 -- Example: import surface
-import @core/io {print, line, debug, warn, error, input}
-import @core/math {floor, ceil, round, abs, sqrt, pow}
-import @core/text {length, contains, prefix, suffix, trim}
-import @core/collections {Map, map_from, keys, values}
-import @core/random {random_float, random_int}
-import @core/time {Duration, Timestamp, now}
-import @web/canvas {Canvas, draw_rect, fill_circle, stroke_line, clear}
+@core/io print, line, debug, warn, error, input
+@core/math floor, ceil, round, abs, sqrt, pow
+@core/text length, contains, prefix, suffix, trim
+@core/collections Map, map_from, keys, values
+@core/random random_float, random_int
+@core/time Duration, Timestamp, now
+@web/canvas Canvas, draw_rect, fill_circle, stroke_line, clear
 
 -- Example: module exports
 export:

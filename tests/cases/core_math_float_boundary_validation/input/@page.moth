@@ -1,5 +1,5 @@
-import @core/math {sqrt, exp as exponential}
-import @core/math
+@core/math sqrt, exp as exponential
+@core/math
 
 finite_direct = sqrt(16.0)
 finite_namespace = math.sqrt(16.0)

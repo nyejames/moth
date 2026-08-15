@@ -3,7 +3,7 @@ Moth template files are intentionally small. These are the confirmed restriction
 ### Confirmed restrictions
 
 - **Implicit const-required evaluation**: the entire `.mtf` body must fold at compile time. There is no runtime path.
-- **No normal top-level declarations**: a `.mtf` file does not contain authored imports, functions, structs, choices, type aliases or trait declarations. Text that looks like a declaration is template body content, not a compiled declaration.
+- **No normal top-level declarations**: a `.mtf` file does not contain authored dependency clauses, functions, structs, choices, type aliases or trait declarations. Text that looks like a declaration is template body content, not a compiled declaration.
 - **No runtime bindings or calls**: runtime values are not visible. A reference to a runtime name is rejected with `MOTH-RULE-0034` or `MOTH-RULE-0053`.
 - **No fenced code blocks**: triple-backtick blocks are literal text in `$md`, not `<pre><code>`. Use `codeblock` helpers instead.
 - **No pipe tables**: Markdown pipe table syntax is literal text in `$md`, not `<table>`. Use structured lists or page-owned table components.
@@ -13,7 +13,7 @@ Moth template files are intentionally small. These are the confirmed restriction
 
 ### Differences from normal `.moth`
 
-- A `.moth` file can contain imports, declarations, runtime code and page fragments. A `.mtf` file cannot.
+- A `.moth` file can contain dependency clauses, declarations, runtime code and page fragments. A `.mtf` file cannot.
 - A `.moth` file has normal Moth source scope. A `.mtf` file has a restricted flat compile-time scope.
 - A `.moth` file can produce page fragments. A `.mtf` file produces one `content #String` constant.
 
@@ -30,7 +30,7 @@ Use a `.moth` template when:
 - runtime values or control flow are needed
 - full slot and wrapper composition is needed
 - the content is part of broader program logic
-- imports or declarations are needed in the same file
+- dependency clauses or declarations are needed in the same file
 
 ### Related concepts
 

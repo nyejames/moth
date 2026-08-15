@@ -71,7 +71,7 @@ fn parse_module_headers(
         prepared_syntax,
         &external_package_registry,
         &ExternalImportResolutionTable::default(),
-        &crate::compiler_frontend::public_interface::SourceProviderImportSet::default(),
+        &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
         options.project_path_resolver.as_ref(),
         &mut string_table,
     )
@@ -96,8 +96,8 @@ fn header_name(
 fn sorts_strict_top_level_dependencies_before_dependents_and_appends_start_last() {
     let (headers, mut string_table) = parse_module_headers(
         &[
-            ("src/a.moth", "import @b { Middle }\nTop #Middle = Middle\n"),
-            ("src/b.moth", "import @c { Thing }\nMiddle #Thing = Thing\n"),
+            ("src/a.moth", "@b Middle\nTop #Middle = Middle\n"),
+            ("src/b.moth", "@c Thing\nMiddle #Thing = Thing\n"),
             ("src/c.moth", "Thing #Int = 1\n"),
         ],
         "src/a.moth",
@@ -149,8 +149,8 @@ fn dependency_sort_preserves_root_activity_metadata() {
 fn reports_circular_dependencies() {
     let (headers, mut string_table) = parse_module_headers(
         &[
-            ("src/a.moth", "import @b { Middle }\nTop #Middle = Middle\n"),
-            ("src/b.moth", "import @a { Top }\nMiddle #Top = Top\n"),
+            ("src/a.moth", "@b Middle\nTop #Middle = Middle\n"),
+            ("src/b.moth", "@a Top\nMiddle #Top = Top\n"),
         ],
         "src/a.moth",
     );
@@ -190,7 +190,7 @@ fn constant_initializer_creates_dependency_sort_edge() {
         &[
             // Config's initializer references Value.
             // That reference creates a dependency edge from Config to Value.
-            ("src/a.moth", "import @b { Value }\nConfig #= Value\n"),
+            ("src/a.moth", "@b Value\nConfig #= Value\n"),
             ("src/b.moth", "Value #Int = 42\n"),
         ],
         "src/a.moth",
@@ -278,7 +278,7 @@ fn function_error_return_dependency_orders_error_type_before_function() {
         &[
             (
                 "src/app.moth",
-                "import @errors { AppError }\nparse|| -> Int, AppError!:\n    return 1\n;\n",
+                "@errors AppError\nparse|| -> Int, AppError!:\n    return 1\n;\n",
             ),
             ("src/errors.moth", "AppError = |message String|\n"),
         ],
@@ -310,7 +310,7 @@ fn capacity_reference_in_collection_type_orders_constant_before_user() {
         &[
             (
                 "src/a.moth",
-                "import @b { capacity }\nmake |items ~{capacity Int}| -> Int:\n    return 1\n;\n",
+                "@b capacity\nmake |items ~{capacity Int}| -> Int:\n    return 1\n;\n",
             ),
             ("src/b.moth", "capacity #Int = 64\n"),
         ],
@@ -366,7 +366,7 @@ fn capacity_reference_same_file_forward_reference_is_rejected() {
         prepared_syntax,
         &external_package_registry,
         &ExternalImportResolutionTable::default(),
-        &crate::compiler_frontend::public_interface::SourceProviderImportSet::default(),
+        &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
         options.project_path_resolver.as_ref(),
         &mut string_table,
     );
@@ -398,7 +398,7 @@ fn capacity_reference_in_function_signature_creates_dependency_edge() {
         &[
             (
                 "src/a.moth",
-                "import @b { size }\nmake |items ~{size Int}| -> Int:\n    return 1\n;\n",
+                "@b size\nmake |items ~{size Int}| -> Int:\n    return 1\n;\n",
             ),
             ("src/b.moth", "size #Int = 8\n"),
         ],
@@ -426,7 +426,7 @@ fn capacity_reference_in_function_signature_creates_dependency_edge() {
 fn capacity_reference_in_type_alias_creates_dependency_edge() {
     let (headers, mut string_table) = parse_module_headers(
         &[
-            ("src/a.moth", "import @b { limit }\nItems as {limit Int}\n"),
+            ("src/a.moth", "@b limit\nItems as {limit Int}\n"),
             ("src/b.moth", "limit #Int = 16\n"),
         ],
         "src/a.moth",
@@ -455,7 +455,7 @@ fn capacity_references_across_header_type_surfaces_create_dependency_edges() {
         &[
             (
                 "src/a.moth",
-                "import @b { limit }\n\
+                "@b limit\n\
                  Buffer = |\n\
                      items {limit Int},\n\
                  |\n\
@@ -494,7 +494,7 @@ fn trait_requirement_type_dependencies_order_required_type_before_trait() {
         &[
             (
                 "src/traits.moth",
-                "import @types { Message }\n\
+                "@types Message\n\
                  DISPLAYABLE must:\n\
                      display |This| -> Message\n\
                  ;\n",
@@ -527,7 +527,7 @@ fn trait_conformance_references_do_not_create_dependency_sort_edges() {
         &[
             (
                 "src/app.moth",
-                "import @traits { DISPLAYABLE }\n\
+                "@traits DISPLAYABLE\n\
                  Label = | text String |\n\
                  Label must DISPLAYABLE\n",
             ),
@@ -568,7 +568,7 @@ fn trait_incompatibility_references_do_not_create_dependency_sort_edges() {
         &[
             (
                 "src/app.moth",
-                "import @traits { SERIALIZABLE }\n\
+                "@traits SERIALIZABLE\n\
                  DISPLAYABLE must:\n\
                  ;\n\
                  DISPLAYABLE must not SERIALIZABLE\n",
@@ -622,7 +622,9 @@ fn source_package_public_export_dependency_edges_do_not_require_concrete_header_
         .expect("expected dependent header");
     dependent_header
         .local_ordering_hints
-        .insert(LocalDeclarationOrderingHint::new(public_export_path));
+        .insert(LocalDeclarationOrderingHint::provider_spelling(
+            public_export_path,
+        ));
 
     headers
         .module_symbols
@@ -631,9 +633,8 @@ fn source_package_public_export_dependency_edges_do_not_require_concrete_header_
         .or_default()
         .insert(PublicExportEntry {
             export_name: widget_name,
-            target: PublicExportTarget::Source {
+            target: PublicExportTarget::SourceDeclaration {
                 path: concrete_target,
-                import_shell_id: None,
             },
         });
 
@@ -655,15 +656,12 @@ fn source_package_public_export_dependency_edges_do_not_require_concrete_header_
 }
 
 #[test]
-fn external_package_import_type_hint_does_not_survive_binding_as_graph_participant() {
+fn external_package_dependency_type_hint_does_not_survive_binding_as_graph_participant() {
     // WHY: syntax preparation records the import spelling for every named type reference
     // uniformly, including virtual or provider imports. Binding must drop import-spelled hints
     // that resolve to external symbols so they never become Stage 3 graph participants.
     let (headers, mut string_table) = parse_module_headers(
-        &[(
-            "src/app.moth",
-            "import @core/io { print }\nwidget #print = \"x\"\n",
-        )],
+        &[("src/app.moth", "@core/io print\nwidget #print = \"x\"\n")],
         "src/app.moth",
     );
 

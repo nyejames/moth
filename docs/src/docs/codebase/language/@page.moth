@@ -1,4 +1,4 @@
-import @styles {navbar, section, theme_head}
+@styles navbar, section, theme_head
 
 page_title #= "Compiler-facing language reference"
 page_description #= "Canonical language references and related compiler design documentation."
@@ -56,7 +56,7 @@ page_head #= theme_head
     Projects and imported content:
 
     - @../../project-structure (Project structure)
-    - @../../packages (Packages and imports)
+    - @../../packages (Packages and dependencies)
     - @../../moth-templates (Moth template files)
     - @../../markdown (Plain Markdown)
 

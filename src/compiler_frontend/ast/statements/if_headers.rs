@@ -6,6 +6,7 @@
 //! detection without exposing full match-arm parsing outside `branching.rs`.
 
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
 use crate::compiler_frontend::ast::expressions::parse_expression::{
@@ -55,7 +56,7 @@ pub(crate) enum ParsedIfHeader {
 /// WHY: `CompilerDiagnostic` is large enough that returning it directly inside a
 /// `Result` triggers `clippy::result_large_err`. Boxing at this boundary keeps the
 /// four `if`-header owner functions uniform without changing diagnostic semantics.
-type IfHeaderResult<T> = Result<T, Box<CompilerDiagnostic>>;
+type IfHeaderResult<T> = Result<T, ExpressionParseError>;
 
 /// Parse the header after `if`, leaving the stream at the colon or body marker.
 pub(crate) fn parse_if_header(
@@ -80,12 +81,11 @@ pub(crate) fn parse_if_header(
     }
 
     if if_condition_is_missing(token_stream) {
-        return Err(Box::new(
-            CompilerDiagnostic::invalid_control_flow_statement(
-                InvalidControlFlowStatementReason::ExpectedConditionAfterIf,
-                token_stream.current_location(),
-            ),
-        ));
+        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+            InvalidControlFlowStatementReason::ExpectedConditionAfterIf,
+            token_stream.current_location(),
+        )
+        .into());
     }
 
     let condition_context = if_condition_parse_context(context, string_table);
@@ -98,8 +98,7 @@ pub(crate) fn parse_if_header(
         &ValueMode::ImmutableOwned,
         false,
         string_table,
-    )
-    .map_err(|error| Box::new(CompilerDiagnostic::from(error)))?;
+    )?;
 
     if token_stream.current_token_kind() == &TokenKind::Is {
         token_stream.advance();
@@ -174,8 +173,7 @@ fn parse_match_style_if_header(
         value_mode: &ValueMode::ImmutableOwned,
         string_table,
     });
-    let scrutinee = create_expression_until(input, &[TokenKind::Is])
-        .map_err(|error| Box::new(CompilerDiagnostic::from(error)))?;
+    let scrutinee = create_expression_until(input, &[TokenKind::Is])?;
     token_stream.advance(); // consume `is`
 
     Ok(ParsedIfHeader::MatchStyle { scrutinee })
@@ -228,18 +226,18 @@ fn parse_option_present_capture_if_header(
         value_mode: &ValueMode::ImmutableOwned,
         string_table,
     });
-    let scrutinee = create_expression_until(input, &[TokenKind::Is])
-        .map_err(|error| Box::new(CompilerDiagnostic::from(error)))?;
+    let scrutinee = create_expression_until(input, &[TokenKind::Is])?;
     token_stream.advance(); // consume `is`
 
     let type_environment = type_interner.environment();
     let Some(inner_type_id) = type_environment.option_inner_type(scrutinee.type_id) else {
-        return Err(Box::new(CompilerDiagnostic::invalid_match_pattern(
+        return Err(CompilerDiagnostic::invalid_match_pattern(
             InvalidMatchPatternReason::OptionPresentCaptureOnNonOptional,
             None,
             None,
             scrutinee.location.clone(),
-        )));
+        )
+        .into());
     };
 
     let pattern =
@@ -252,12 +250,13 @@ fn parse_option_present_capture_if_header(
         ..
     } = &pattern
     else {
-        return Err(Box::new(CompilerDiagnostic::invalid_match_pattern(
+        return Err(CompilerDiagnostic::invalid_match_pattern(
             InvalidMatchPatternReason::ExpectedBindingInOptionPresentCapture,
             None,
             None,
             pattern.location().clone(),
-        )));
+        )
+        .into());
     };
 
     let (then_context, pattern) = build_option_present_capture_scope_and_pattern(
@@ -305,12 +304,13 @@ pub(crate) fn build_option_present_capture_scope_and_pattern(
     let mut arm_scope = match_context.clone();
 
     if let Some(_existing) = arm_scope.get_reference(&capture_name) {
-        return Err(Box::new(CompilerDiagnostic::invalid_match_pattern(
+        return Err(CompilerDiagnostic::invalid_match_pattern(
             InvalidMatchPatternReason::CaptureBindingShadowsVariable,
             None,
             None,
             binding_location.clone(),
-        )));
+        )
+        .into());
     }
 
     let binding_name_str = string_table.resolve(capture_name).to_owned();

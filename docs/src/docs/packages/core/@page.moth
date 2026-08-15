@@ -1,5 +1,5 @@
-import @html {center}
-import @styles {navbar, section, language_theme_head, doc_pager}
+@html center
+@styles navbar, section, language_theme_head, doc_pager
 
 page_title #= "Core packages"
 page_description #= "Overview of Moth Core packages and their current HTML/JS support."
@@ -8,15 +8,15 @@ page_head #= language_theme_head
 #[navbar]
 
 #[section, $md:
-    @../../ (Documentation) / @../ (Packages and imports) / Core packages
+    @../../ (Documentation) / @../ (Packages and dependencies) / Core packages
 
     # Core packages
 
     Core packages provide typed capabilities owned by the compiler and selected
-    by the active builder. They use the same import syntax as source packages,
+    by the active builder. They use the same dependency syntax as source packages,
     but binding-backed implementations don't become files in your project.
 
-    Most Core packages require explicit imports. Unlike large standard-library
+    Most Core packages require explicit dependency clauses. Unlike large standard-library
     preludes, Moth exposes only a small always-available surface such as `io`.
 
     Builder and backend support can differ. The @../../progress (progress
@@ -36,7 +36,7 @@ page_head #= language_theme_head
 #[section:
     [doc_pager:
         [$insert("previous_path"):../]
-        [$insert("previous_title"):Packages and imports]
+        [$insert("previous_title"):Packages and dependencies]
         [$insert("next_path"):../../memory/]
         [$insert("next_title"):Memory and lifetimes]
     ]

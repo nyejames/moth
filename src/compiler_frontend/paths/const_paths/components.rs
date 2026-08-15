@@ -1,23 +1,19 @@
 //! Path component parsing and validation.
 //!
 //! WHAT: parses individual path components (bare and quoted) and validates them.
-//! WHY: ordinary paths and grouped entries share the same component grammar; keeping
-//!      component logic in one module avoids duplication and makes validation rules
-//!      easy to audit.
+//! WHY: one path token owns one component grammar; keeping component logic in one module avoids
+//!      duplication and makes validation rules easy to audit.
 
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, PathKind};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::lexer::{
-    consume_all_whitespace, consume_non_newline_whitespace,
-};
-use crate::compiler_frontend::tokenizer::tokens::TokenStream;
+use crate::compiler_frontend::tokenizer::tokens::{CharPosition, TokenStream};
 
-use super::{ParseComponentContext, PathComponents};
+use super::PathComponents;
 
 /// Boxed diagnostic result for the connected path-component family.
 ///
-/// Component parsing and validation feed boxed grouped and ordinary path helpers directly. The
-/// public path parser unboxes once when it returns the diagnostic to its tokenizer-facing caller.
+/// Component parsing and validation feed the public path parser, which unboxes once when it
+/// returns the diagnostic to its tokenizer-facing caller.
 type ComponentResult<T> = Result<T, Box<CompilerDiagnostic>>;
 
 /// WHAT: Parsed result of one path component, with its raw text and whether it was quoted.
@@ -26,20 +22,20 @@ type ComponentResult<T> = Result<T, Box<CompilerDiagnostic>>;
 pub(super) struct ParsedComponent {
     pub(super) value: String,
     pub(super) was_quoted: bool,
+    pub(super) end_position: CharPosition,
 }
 
 /// WHAT: Parses exactly one path component (bare or quoted) from the current stream position.
-/// WHY: Ordinary paths and grouped entries must share the same component grammar and escapes.
+/// WHY: ordinary paths use the one component grammar and escapes.
 pub(super) fn parse_component(
     stream: &mut TokenStream,
-    context: ParseComponentContext,
     string_table: &StringTable,
 ) -> ComponentResult<ParsedComponent> {
     if stream.peek() == Some(&'"') {
         return parse_quoted_component(stream, string_table);
     }
 
-    parse_bare_component(stream, context, string_table)
+    parse_bare_component(stream, string_table)
 }
 
 /// WHAT: Parses a quoted path component using path-literal escapes.
@@ -70,6 +66,7 @@ fn parse_quoted_component(
             return Ok(ParsedComponent {
                 value,
                 was_quoted: true,
+                end_position: stream.position,
             });
         }
 
@@ -104,19 +101,17 @@ fn parse_quoted_component(
     }
 }
 
-/// WHAT: Parses an unquoted path component and enforces quote-required whitespace rules.
-/// WHY: Bare components must remain unambiguous path tokens without internal whitespace.
+/// WHAT: Parses an unquoted path component and stops at whitespace or a structural boundary.
+/// WHY: Bare components remain unambiguous path tokens without internal whitespace, and the
+///      path token itself is terminated by unquoted whitespace.
 pub(super) fn parse_bare_component(
     stream: &mut TokenStream,
-    context: ParseComponentContext,
     _string_table: &StringTable,
 ) -> ComponentResult<ParsedComponent> {
     let mut value = String::new();
 
     while let Some(next) = stream.peek().copied() {
-        if next.is_whitespace()
-            || super::is_component_terminator(stream, context, next, value.is_empty())
-        {
+        if is_component_terminator(next) {
             break;
         }
 
@@ -131,48 +126,46 @@ pub(super) fn parse_bare_component(
         )));
     }
 
-    if stream
-        .peek()
-        .is_some_and(|character| character.is_whitespace())
-    {
-        match context {
-            ParseComponentContext::OrdinaryPath => {
-                consume_non_newline_whitespace(stream);
-            }
-            ParseComponentContext::GroupedEntry => {
-                consume_all_whitespace(stream);
-            }
-        }
-
-        if let Some(next) = stream.peek().copied()
-            && !super::is_component_terminator(stream, context, next, true)
-        {
-            // Allow the `as` keyword to follow a bare path component without quoting.
-            // WHAT: `import @path/symbol as alias` is valid syntax; `as` is a keyword.
-            // WHY: without this, the path tokenizer treats `as` as an unquoted multi-word
-            //      path component and emits a confusing error.
-            if matches!(context, ParseComponentContext::OrdinaryPath)
-                && next == 'a'
-                && super::peek_keyword_as(stream)
-            {
-                // Return the component normally; `parse_path_prefix` will stop at `as`.
-            } else {
-                return Err(Box::new(CompilerDiagnostic::invalid_path(
-                    PathKind::WhitespaceMustBeQuoted,
-                    stream.new_location(),
-                )));
-            }
-        }
-    }
+    let end_position = stream.position;
 
     Ok(ParsedComponent {
         value,
         was_quoted: false,
+        end_position,
     })
 }
 
+/// WHAT: Characters that end one bare component and/or the whole path token.
+/// WHY: separators continue the path; whitespace and structural delimiters end it so the
+///      consuming parser owns selections, operators and old brace syntax.
+fn is_component_terminator(character: char) -> bool {
+    if character.is_whitespace() || matches!(character, '/' | '\\') {
+        return true;
+    }
+
+    matches!(
+        character,
+        '[' | ']' | '{' | '}' | ',' | '(' | ')' | '<' | '>' | ':' | '"' | '|' | '?' | '*' | ';'
+    )
+}
+
+/// Returns whether a canonical component can be emitted without quotes and parsed back unchanged.
+///
+/// Migration diagnostics use this predicate because canonical path rows retain component values,
+/// not whether the author quoted them. Components that need quotes must not receive a lossy fix-it.
+pub(super) fn can_serialize_bare_component(component: &str) -> bool {
+    !component.is_empty()
+        && !component.starts_with('@')
+        && component
+            .chars()
+            .all(|character| !is_component_terminator(character))
+        && component
+            .chars()
+            .all(|character| is_valid_component_char(character, false))
+}
+
 /// WHAT: Validates and interns one parsed component.
-/// WHY: Keeps grouped and ordinary paths aligned on one validation boundary.
+/// WHY: keeps all paths aligned on one validation boundary.
 pub(super) fn push_validated_component(
     components: &mut PathComponents,
     parsed_component: ParsedComponent,
@@ -213,10 +206,10 @@ fn validate_path_component(
         )));
     }
 
-    // Reject a path component that starts with `@` after the import introducer was consumed.
-    // WHAT: the first `@` in `import @path` is the import-path introducer consumed by the lexer.
-    //      A second `@` starting any component (such as `@@pages` or `@helper/@home`) is not a
-    //      valid module name. Normal module-root filenames are cosmetic filesystem markers.
+    // Reject a path component that starts with `@` after the path introducer was consumed.
+    // WHAT: the leading `@` in `@path` is the path introducer consumed by the lexer. A second
+    //      `@` starting any component (such as `@@pages` or `@helper/@home`) is not a valid
+    //      module name. Normal module-root filenames are cosmetic filesystem markers.
     if !was_quoted && component.starts_with('@') {
         return Err(Box::new(CompilerDiagnostic::invalid_path(
             PathKind::LeadingAtInPathComponent,

@@ -29,4 +29,4 @@ Top-level constants follow ordinary module and public-surface visibility rules.
 Body-local constant declarations remain local to their scope.
 
 A top-level runtime binding without `#` belongs to entry-selected `start` code rather
-than the importable constant surface.
+than the dependency-bindable constant surface.

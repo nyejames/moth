@@ -2097,84 +2097,10 @@ fn doc_template_body_keeps_nested_templates_as_template_tokens() {
     }));
 }
 
-// ----------------------
-//  Missing `@` import prefix
-// ----------------------
-
-fn assert_import_path_missing_at_prefix(
-    diagnostic: &CompilerDiagnostic,
-    string_table: &StringTable,
-    expected_authored_path: &str,
-    expected_start_line: i32,
-    expected_start_column: i32,
-) {
-    assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Syntax(SyntaxDiagnosticKind::CommonSyntaxMistake)
-    );
-    assert_eq!(diagnostic.kind.code(), "MOTH-SYNTAX-0031");
-
-    match &diagnostic.payload {
-        DiagnosticPayload::CommonSyntaxMistake { reason } => match reason {
-            CommonSyntaxMistakeReason::ImportPathMissingAtPrefix { authored_path } => {
-                assert_eq!(
-                    string_table.resolve(*authored_path),
-                    expected_authored_path,
-                    "authored import path spelling mismatch"
-                );
-            }
-            other => panic!("expected ImportPathMissingAtPrefix, found {other:?}"),
-        },
-        payload => panic!("expected common syntax mistake payload, found {payload:?}"),
-    }
-
-    let start = diagnostic.primary_location.start_pos;
-    let end = diagnostic.primary_location.end_pos;
-    assert_eq!(start.line_number, expected_start_line);
-    assert_eq!(start.char_column, expected_start_column);
-    assert_eq!(end.line_number, expected_start_line);
-    assert_eq!(
-        end.char_column - start.char_column,
-        expected_authored_path.chars().count() as i32,
-        "missing-@ import path span should cover the complete authored path"
-    );
-}
-
-#[test]
-fn rejects_missing_at_prefix_paths_with_complete_spelling_and_span() {
-    let cases = [
-        ("import core\n", "core", 0, 7),
-        ("import as-path\n", "as-path", 0, 7),
-        ("import test/pkg-a\n", "test/pkg-a", 0, 7),
-        ("import ./utils\n", "./utils", 0, 7),
-        ("import ./drawing.js\n", "./drawing.js", 0, 7),
-        (
-            "import vendor/drawing.js as drawing\n",
-            "vendor/drawing.js",
-            0,
-            7,
-        ),
-        ("import components{card}\n", "components", 0, 7),
-        ("import\n./utils\n", "./utils", 1, 0),
-    ];
-
-    for (source, authored_path, start_line, start_column) in cases {
-        let (diagnostic, string_table) = tokenize_source_error(source);
-        assert_import_path_missing_at_prefix(
-            &diagnostic,
-            &string_table,
-            authored_path,
-            start_line,
-            start_column,
-        );
-    }
-}
-
 #[test]
 fn parent_relative_path_does_not_receive_missing_at_prefix_correction() {
-    // `../` is not supported with `@`, so the tokenizer must not suggest `@../`.
-    // The bare `import ../utils` tokenizes without a missing-`@` diagnostic; the
-    // existing import-path rejection owns the parent-relative mistake.
+    // `import` is an ordinary identifier and `../` is not supported with `@`, so the tokenizer
+    // must not fabricate a dependency path or suggest `@../`.
     let (file_tokens, _string_table) = tokenize_source("import ../utils\n");
     assert!(
         !file_tokens
@@ -2186,10 +2112,10 @@ fn parent_relative_path_does_not_receive_missing_at_prefix_correction() {
 }
 
 #[test]
-fn valid_at_prefixed_imports_and_operators_remain_unaffected() {
+fn valid_at_prefixed_paths_and_operators_remain_unaffected() {
     for source in [
-        "import @core/math\n",
-        "import @./utils\n",
+        "@core/math\n",
+        "@./utils\n",
         "value = a / b\n",
         "value = a // b\n",
         "-- comment\n",
@@ -2204,40 +2130,28 @@ fn valid_at_prefixed_imports_and_operators_remain_unaffected() {
         );
     }
 
-    let (at_core, string_table) = tokenize_source("import @core/math\n");
+    let (at_core, string_table) = tokenize_source("@core/math\n");
     assert!(
         at_core.tokens.iter().any(|token| matches!(
             &token.kind,
-            TokenKind::Path(items) if items.iter().any(|item| item
-                .path
-                .to_portable_string(&string_table) == "core/math")
+            TokenKind::Path(path_id) if at_core
+                .path_syntax
+                .try_path(*path_id).expect("valid path handle")
+                .root
+                .to_portable_string(&string_table) == "core/math"
         )),
-        "valid @-prefixed import should produce a path token"
+        "valid @-prefixed dependency should produce a path token"
     );
 }
 
 #[test]
-fn keyword_led_import_does_not_receive_missing_at_prefix_correction() {
-    // `as` directly after `import` is an alias with no path. Keep it on the import-clause path.
+fn ordinary_import_identifier_does_not_receive_path_correction() {
     let (file_tokens, _string_table) = tokenize_source("import as drawing\n");
     assert!(
         file_tokens
             .tokens
             .iter()
             .any(|token| matches!(token.kind, TokenKind::As)),
-        "keyword-led `import as ...` should tokenize `as` as the As keyword, not consume it as a missing-@ path"
+        "ordinary `import` followed by `as` should tokenize both words independently"
     );
-}
-
-#[test]
-fn missing_at_prefix_renders_exact_message_and_suggestion() {
-    let (diagnostic, string_table) = tokenize_source_error("import vendor/drawing.js as drawing\n");
-    let context = DiagnosticRenderContext::new(&string_table);
-    let guidance = format_payload_guidance(&diagnostic.payload, context);
-
-    assert_eq!(
-        guidance[0],
-        "Import paths must begin with `@`. Write `import @vendor/drawing.js`."
-    );
-    assert_eq!(guidance[1], "Suggestion: Insert `@` before the import path");
 }

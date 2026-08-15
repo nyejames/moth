@@ -1,5 +1,5 @@
-import @copy { admin_title }
-import @panel { render_admin_panel }
+@copy admin_title
+@panel render_admin_panel
 
 [:
     <main>

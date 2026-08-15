@@ -32,7 +32,7 @@ An alias target may be:
 - a fixed collection such as `{4 Int}`
 - a hashmap such as `{String = Int}`
 - a fully concrete generic instance such as `Box of String`
-- an imported type, imported type alias or external package type
+- a dependency-bound type, dependency-bound type alias or external package type
 
 Concrete generic aliases are supported. Parameterized aliases and partial generic application are outside the current language scope.
 
@@ -141,10 +141,10 @@ Aliases to scalar or otherwise non-constructible targets are not callable for th
 
 ### Visibility and module public surfaces
 
-Type aliases follow ordinary module visibility rules. A type alias declared in a source file is importable by other files in the same module. Cross-module visibility is controlled by the module root's explicit `export:` surface. The normal module-root filename itself has no semantic role. A public re-export may expose an imported alias under a chosen public name. That operation is not the same as an ordinary local file import alias.
+Type aliases follow ordinary module visibility rules. A type alias declared in a source file is dependency-bindable by other files in the same module. Cross-module visibility is controlled by the module root's explicit `export:` surface. The normal module-root filename itself has no semantic role. A public re-export may expose a dependency-bound alias under a chosen public name. That operation is not the same as an ordinary file-local dependency alias.
 
 ### Related concepts
 
 - For concrete generic application see @../generics (Generics).
-- For import aliasing see the next section.
+- For dependency aliasing see the next section.
 - For project visibility and module roots see @../project-structure (Project Structure) and @../packages (Packages).

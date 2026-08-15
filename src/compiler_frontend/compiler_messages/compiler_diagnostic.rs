@@ -7,23 +7,24 @@ use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::compiler_messages::{
     BorrowAccessKind, BorrowDiagnosticKind, CommonSyntaxMistakeReason, ConfigDiagnosticKind,
-    DeferredFeatureDiagnosticKind, DeferredFeatureReason, DiagnosticBag, DiagnosticIdentity,
-    DiagnosticKind, DiagnosticLabel, DiagnosticLabelMessage, DiagnosticOperator, DiagnosticPayload,
-    DiagnosticPlace, DiagnosticSeverity, GenericApplicationErrorReason, GenericInferenceSubject,
-    ImportClauseKind, ImportDiagnosticKind, ImportPublicSurfaceType,
-    IncompatibleChoiceComparisonReason, InvalidCastReason, InvalidChoiceVariantReason,
-    InvalidCollectionTypeReason, InvalidCompileTimePathReason, InvalidConfigReason,
-    InvalidExpressionReason, InvalidFallibleOperandReason, InvalidFunctionSignatureReason,
-    InvalidGenericParameterReason, InvalidImportClauseReason, InvalidImportPathReason,
-    InvalidLoopHeaderReason, InvalidMapLiteralReason, InvalidMapTypeReason, InvalidMatchArmReason,
-    InvalidMutableAccessReason, InvalidPageMetadataReason, InvalidSignatureMemberReason,
-    InvalidStandaloneStatementReason, InvalidStatementPositionReason, InvalidStringEscapeReason,
-    InvalidTemplateDirectiveReason, InvalidTemplateStructureReason, InvalidTraitConformanceReason,
+    DeferredFeatureDiagnosticKind, DeferredFeatureReason, DependencyClauseKind, DiagnosticBag,
+    DiagnosticIdentity, DiagnosticKind, DiagnosticLabel, DiagnosticLabelMessage,
+    DiagnosticOperator, DiagnosticPayload, DiagnosticPlace, DiagnosticSeverity,
+    GenericApplicationErrorReason, GenericInferenceSubject, ImportDiagnosticKind,
+    ImportPublicSurfaceType, IncompatibleChoiceComparisonReason, InvalidCastReason,
+    InvalidChoiceVariantReason, InvalidCollectionTypeReason, InvalidCompileTimePathReason,
+    InvalidConfigReason, InvalidDependencyClauseReason, InvalidExpressionReason,
+    InvalidFallibleOperandReason, InvalidFunctionSignatureReason, InvalidGenericParameterReason,
+    InvalidImportPathReason, InvalidLoopHeaderReason, InvalidMapLiteralReason,
+    InvalidMapTypeReason, InvalidMatchArmReason, InvalidMutableAccessReason,
+    InvalidPageMetadataReason, InvalidSignatureMemberReason, InvalidStandaloneStatementReason,
+    InvalidStatementPositionReason, InvalidStringEscapeReason, InvalidTemplateDirectiveReason,
+    InvalidTemplateStructureReason, InvalidTraitConformanceReason,
     InvalidTraitIncompatibilityReason, InvalidTraitKeywordUsageReason, InvalidTypeAnnotationReason,
-    NameNamespace, NamespaceTypeValueMisuseKind, NamingConvention, NumberLiteralErrorReason,
-    OperatorOperandPosition, PathKind, RangeOperandKind, RuleDiagnosticKind, SyntaxDiagnosticKind,
-    TypeAnnotationContext, TypeDiagnosticKind, TypeMismatchContext,
-    UnsupportedBackendFeatureReason, UnsupportedOperatorCategory,
+    LegacyDependencyClauseReason, NameNamespace, NamespaceTypeValueMisuseKind, NamingConvention,
+    NumberLiteralErrorReason, OperatorOperandPosition, PathKind, RangeOperandKind,
+    RuleDiagnosticKind, SyntaxDiagnosticKind, TypeAnnotationContext, TypeDiagnosticKind,
+    TypeMismatchContext, UnsupportedBackendFeatureReason, UnsupportedOperatorCategory,
 };
 use crate::compiler_frontend::datatypes::generic_bindings::BindingConflict;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -124,14 +125,6 @@ impl CompilerDiagnostic {
             DiagnosticKind::Import(ImportDiagnosticKind::MissingImportTarget),
             location,
             DiagnosticPayload::MissingImportTarget { path },
-        )
-    }
-
-    pub(crate) fn missing_import_target_no_path(location: SourceLocation) -> Self {
-        Self::new(
-            DiagnosticKind::Import(ImportDiagnosticKind::MissingImportTarget),
-            location,
-            DiagnosticPayload::None,
         )
     }
 
@@ -559,14 +552,14 @@ impl CompilerDiagnostic {
         )
     }
 
-    pub(crate) fn import_record_used_as_value(
+    pub(crate) fn dependency_namespace_used_as_value(
         record_name: StringId,
         location: SourceLocation,
     ) -> Self {
         Self::new(
-            DiagnosticKind::Rule(RuleDiagnosticKind::ImportRecordUsedAsValue),
+            DiagnosticKind::Rule(RuleDiagnosticKind::DependencyNamespaceUsedAsValue),
             location,
-            DiagnosticPayload::ImportRecordUsedAsValue { record_name },
+            DiagnosticPayload::DependencyNamespaceUsedAsValue { record_name },
         )
     }
 
@@ -581,11 +574,14 @@ impl CompilerDiagnostic {
         )
     }
 
-    pub(crate) fn nested_traversal(record_name: StringId, location: SourceLocation) -> Self {
+    pub(crate) fn nested_dependency_traversal(
+        record_name: StringId,
+        location: SourceLocation,
+    ) -> Self {
         Self::new(
-            DiagnosticKind::Rule(RuleDiagnosticKind::NestedTraversal),
+            DiagnosticKind::Rule(RuleDiagnosticKind::NestedDependencyTraversal),
             location,
-            DiagnosticPayload::NestedTraversal { record_name },
+            DiagnosticPayload::NestedDependencyTraversal { record_name },
         )
     }
 
@@ -761,16 +757,16 @@ impl CompilerDiagnostic {
         )
     }
 
-    pub(crate) fn import_alias_case_mismatch(
+    pub(crate) fn dependency_alias_case_mismatch(
         alias: StringId,
         symbol: StringId,
         location: SourceLocation,
     ) -> Self {
         Self::with_severity(
-            DiagnosticKind::Import(ImportDiagnosticKind::ImportAliasCaseMismatch),
+            DiagnosticKind::Import(ImportDiagnosticKind::DependencyAliasCaseMismatch),
             DiagnosticSeverity::Warning,
             location,
-            DiagnosticPayload::ImportAliasCaseMismatch { alias, symbol },
+            DiagnosticPayload::DependencyAliasCaseMismatch { alias, symbol },
         )
     }
 
@@ -875,17 +871,31 @@ impl CompilerDiagnostic {
         )
     }
 
-    pub(crate) fn invalid_import_clause(
-        clause_kind: ImportClauseKind,
-        reason: InvalidImportClauseReason,
+    pub(crate) fn invalid_dependency_clause(
+        clause_kind: DependencyClauseKind,
+        reason: InvalidDependencyClauseReason,
         location: SourceLocation,
     ) -> Self {
         Self::new(
-            DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidImportClause),
+            DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidDependencyClause),
             location,
-            DiagnosticPayload::InvalidImportClause {
+            DiagnosticPayload::InvalidDependencyClause {
                 clause_kind,
                 reason,
+            },
+        )
+    }
+
+    pub(crate) fn legacy_dependency_clause(
+        replacement: Option<StringId>,
+        location: SourceLocation,
+    ) -> Self {
+        Self::new(
+            DiagnosticKind::Syntax(SyntaxDiagnosticKind::LegacyDependencyClause),
+            location,
+            DiagnosticPayload::LegacyDependencyClause {
+                reason: LegacyDependencyClauseReason::ImportKeyword,
+                replacement,
             },
         )
     }
@@ -1305,12 +1315,23 @@ impl CompilerDiagnostic {
         )
     }
 
-    pub(crate) fn duplicate_public_export(name: StringId, location: SourceLocation) -> Self {
+    pub(crate) fn duplicate_public_export(
+        name: StringId,
+        first_location: SourceLocation,
+        location: SourceLocation,
+    ) -> Self {
         Self::new(
             DiagnosticKind::Rule(RuleDiagnosticKind::DuplicatePublicExport),
-            location,
-            DiagnosticPayload::DuplicatePublicExport { name },
+            location.clone(),
+            DiagnosticPayload::DuplicatePublicExport {
+                name,
+                first_location: first_location.clone(),
+            },
         )
+        .with_labels(vec![
+            DiagnosticLabel::primary(location),
+            DiagnosticLabel::secondary(first_location, None),
+        ])
     }
 
     pub(crate) fn duplicate_export_block(location: SourceLocation) -> Self {
@@ -1875,6 +1896,16 @@ impl CompilerDiagnostic {
         }
 
         self.payload.remap_string_ids(remap);
+    }
+
+    pub(crate) fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
+        self.primary_location.rebind_source_identity(logical_path);
+
+        for label in &mut self.labels {
+            label.rebind_source_identity(logical_path);
+        }
+
+        self.payload.rebind_source_identity(logical_path);
     }
 }
 

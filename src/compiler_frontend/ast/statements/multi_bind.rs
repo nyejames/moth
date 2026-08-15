@@ -15,6 +15,7 @@ use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{
     AstNode, Declaration, MultiBindTarget, MultiBindTargetKind, NodeKind,
 };
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::parse_expression::create_expression;
 use crate::compiler_frontend::ast::statements::value_production::try_parse_multi_bind_value_block;
@@ -44,16 +45,10 @@ use crate::compiler_frontend::utilities::token_scan::has_top_level_comma_before_
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::collections::HashSet;
 
-/// File-local boxed diagnostic result alias.
-///
-/// WHAT: every multi-bind parser, validation, RHS classification, and target-resolution helper
-/// in this module returns `Result<T, Box<CompilerDiagnostic>>` through this alias.
-/// WHY: `CompilerDiagnostic` is large enough to trigger `clippy::result_large_err` when stored
-/// directly in a `Result` variant. Boxing the error at the owner boundary keeps the `Result`
-/// envelope small without changing `DiagnosticBag`, `CompilerMessages`, or any shared error type.
-/// Already-boxed helpers (type resolution) flow through unchanged; still-plain external helpers
-/// (binding-target parsing, expression parsing) are adapted at their narrow call sites below.
-type MultiBindResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// Multi-bind is a closed receiver that may recursively parse value-producing bodies. Preserve
+/// those body's infrastructure failures until the AST emission boundary instead of reducing them
+/// to a diagnostic inside this statement-local helper.
+type MultiBindResult<T> = Result<T, ExpressionParseError>;
 
 struct ResolvedMultiBindTargets {
     targets: Vec<MultiBindTarget>,
@@ -118,14 +113,15 @@ pub(crate) fn parse_multi_bind_statement(
     let rhs_slots = extract_rhs_slot_types(&rhs_expression, type_interner.environment())?;
 
     if rhs_slots.len() != parsed_targets.len() {
-        return Err(Box::new(CompilerDiagnostic::invalid_multi_bind(
+        return Err(CompilerDiagnostic::invalid_multi_bind(
             InvalidMultiBindReason::ArityMismatch {
                 expected: parsed_targets.len(),
                 found: rhs_slots.len(),
             },
             None,
             rhs_expression.location.clone(),
-        )));
+        )
+        .into());
     }
 
     let resolved_targets = resolve_multi_bind_targets(
@@ -163,7 +159,7 @@ fn validate_multi_bind_target_identifiers(
         )?;
 
         if context.is_assignment_target_unavailable(target.name) {
-            return Err(Box::new(CompilerDiagnostic::invalid_assignment_target(
+            return Err(CompilerDiagnostic::invalid_assignment_target(
                 InvalidAssignmentTargetReason::UnavailableInCatchRecovery,
                 Some(target.name),
                 None,
@@ -171,7 +167,8 @@ fn validate_multi_bind_target_identifiers(
                 None,
                 None,
                 target.location.to_owned(),
-            )));
+            )
+            .into());
         }
 
         if context.get_reference(&target.name).is_none()
@@ -199,22 +196,28 @@ fn parse_target_list(
     let start_index = token_stream.index;
     let mut parsed_targets = Vec::new();
     let mut saw_comma = false;
+    let mut continuation_comma = None;
 
     loop {
         if token_stream.current_token_kind() == &TokenKind::This {
-            return Err(Box::new(CompilerDiagnostic::invalid_multi_bind_syntax(
+            return Err(CompilerDiagnostic::invalid_multi_bind_syntax(
                 InvalidMultiBindReason::ThisTargetReserved,
                 token_stream.current_location(),
-            )));
+            )
+            .into());
         }
 
         let TokenKind::Symbol(name) = token_stream.current_token_kind().to_owned() else {
-            return Err(Box::new(CompilerDiagnostic::invalid_multi_bind_syntax(
-                InvalidMultiBindReason::ExpectedTargetName,
-                token_stream.current_location(),
-            )));
+            return Err(CompilerDiagnostic::invalid_multi_bind_syntax(
+                if continuation_comma.is_some() {
+                    InvalidMultiBindReason::MissingTargetAfterComma
+                } else {
+                    InvalidMultiBindReason::ExpectedTargetName
+                },
+                continuation_comma.unwrap_or_else(|| token_stream.current_location()),
+            )
+            .into());
         };
-
         token_stream.advance();
         let target_syntax = parse_binding_target_syntax(name, token_stream, string_table)?;
         validate_target_mutability(&target_syntax, string_table)?;
@@ -223,33 +226,42 @@ fn parse_target_list(
         match token_stream.current_token_kind() {
             TokenKind::Comma => {
                 saw_comma = true;
+                let comma_location = token_stream.current_location();
+                continuation_comma = Some(comma_location.clone());
                 token_stream.advance();
+
+                while token_stream.current_token_kind() == &TokenKind::Newline {
+                    token_stream.advance();
+                }
 
                 if matches!(
                     token_stream.current_token_kind(),
-                    TokenKind::Comma | TokenKind::Assign | TokenKind::Newline | TokenKind::End
+                    TokenKind::Comma | TokenKind::Assign | TokenKind::End | TokenKind::Eof
                 ) {
-                    return Err(Box::new(CompilerDiagnostic::invalid_multi_bind_syntax(
+                    return Err(CompilerDiagnostic::invalid_multi_bind_syntax(
                         InvalidMultiBindReason::MissingTargetAfterComma,
-                        token_stream.current_location(),
-                    )));
+                        comma_location,
+                    )
+                    .into());
                 }
             }
 
             TokenKind::Assign => break,
 
             TokenKind::Newline | TokenKind::End | TokenKind::Eof => {
-                return Err(Box::new(CompilerDiagnostic::invalid_multi_bind_syntax(
+                return Err(CompilerDiagnostic::invalid_multi_bind_syntax(
                     InvalidMultiBindReason::MissingAssignmentOperator,
                     token_stream.current_location(),
-                )));
+                )
+                .into());
             }
 
             _ => {
-                return Err(Box::new(CompilerDiagnostic::invalid_multi_bind_syntax(
+                return Err(CompilerDiagnostic::invalid_multi_bind_syntax(
                     InvalidMultiBindReason::InvalidTokenAfterTarget,
                     token_stream.current_location(),
-                )));
+                )
+                .into());
             }
         }
     }
@@ -271,11 +283,12 @@ fn validate_target_mutability(
     if target_syntax.binding_mode.is_mutable()
         && target_syntax.type_annotation.eq(&ParsedTypeRef::Inferred)
     {
-        return Err(Box::new(CompilerDiagnostic::invalid_multi_bind(
+        return Err(CompilerDiagnostic::invalid_multi_bind(
             InvalidMultiBindReason::MutableTargetNeedsExplicitType,
             Some(target_syntax.name),
             target_syntax.location.clone(),
-        )));
+        )
+        .into());
     }
 
     Ok(())
@@ -289,11 +302,12 @@ fn validate_unique_target_names(
     let mut seen_target_names = HashSet::new();
     for target in parsed_targets {
         if !seen_target_names.insert(target.name) {
-            return Err(Box::new(CompilerDiagnostic::invalid_multi_bind(
+            return Err(CompilerDiagnostic::invalid_multi_bind(
                 InvalidMultiBindReason::DuplicateTarget,
                 Some(target.name),
                 target.location.clone(),
-            )));
+            )
+            .into());
         }
     }
 
@@ -311,10 +325,11 @@ fn parse_multi_bind_rhs_expression(
         token_stream.current_token_kind(),
         TokenKind::Newline | TokenKind::End | TokenKind::Eof
     ) {
-        return Err(Box::new(CompilerDiagnostic::invalid_multi_bind_syntax(
+        return Err(CompilerDiagnostic::invalid_multi_bind_syntax(
             InvalidMultiBindReason::MissingRightHandExpression,
             token_stream.current_location(),
-        )));
+        )
+        .into());
     }
 
     let mut inferred_rhs_type = ExpectedType::Infer;
@@ -326,14 +341,14 @@ fn parse_multi_bind_rhs_expression(
         &ValueMode::ImmutableOwned,
         false,
         string_table,
-    )
-    .map_err(|error| Box::new(CompilerDiagnostic::from(error)))?;
+    )?;
 
     if token_stream.current_token_kind() == &TokenKind::Comma {
-        return Err(Box::new(CompilerDiagnostic::invalid_multi_bind_syntax(
+        return Err(CompilerDiagnostic::invalid_multi_bind_syntax(
             InvalidMultiBindReason::MultipleRightHandExpressions,
             token_stream.current_location(),
-        )));
+        )
+        .into());
     }
 
     Ok(rhs_expression)
@@ -385,29 +400,32 @@ fn classify_multi_bind_rhs(
 
         ExpressionKind::ValueBlock { .. } => {
             let Some(tuple_fields) = type_environment.tuple_field_ids(expression.type_id) else {
-                return Err(Box::new(CompilerDiagnostic::invalid_multi_bind(
+                return Err(CompilerDiagnostic::invalid_multi_bind(
                     InvalidMultiBindReason::RhsNotMultiValue,
                     None,
                     expression.location.clone(),
-                )));
+                )
+                .into());
             };
 
             if tuple_fields.len() < 2 {
-                return Err(Box::new(CompilerDiagnostic::invalid_multi_bind(
+                return Err(CompilerDiagnostic::invalid_multi_bind(
                     InvalidMultiBindReason::RhsNotMultiValue,
                     None,
                     expression.location.clone(),
-                )));
+                )
+                .into());
             }
 
             Ok(())
         }
 
-        _ => Err(Box::new(CompilerDiagnostic::invalid_multi_bind(
+        _ => Err(CompilerDiagnostic::invalid_multi_bind(
             InvalidMultiBindReason::UnsupportedRhs,
             None,
             expression.location.clone(),
-        ))),
+        )
+        .into()),
     }
 }
 
@@ -419,11 +437,12 @@ fn extract_rhs_slot_types(
     classify_multi_bind_rhs(rhs_expression, type_environment)?;
 
     let Some(tuple_fields) = type_environment.tuple_field_ids(rhs_expression.type_id) else {
-        return Err(Box::new(CompilerDiagnostic::invalid_multi_bind(
+        return Err(CompilerDiagnostic::invalid_multi_bind(
             InvalidMultiBindReason::RhsNotMultiValue,
             None,
             rhs_expression.location.clone(),
-        )));
+        )
+        .into());
     };
 
     Ok(tuple_fields.to_vec())
@@ -524,39 +543,43 @@ fn resolve_existing_target(
     _type_environment: &TypeEnvironment,
 ) -> MultiBindResult<MultiBindTarget> {
     if target_syntax.binding_mode.is_mutable() {
-        return Err(Box::new(CompilerDiagnostic::invalid_multi_bind(
+        return Err(CompilerDiagnostic::invalid_multi_bind(
             InvalidMultiBindReason::ExistingTargetMutableMarker,
             Some(target_syntax.name),
             target_syntax.location.clone(),
-        )));
+        )
+        .into());
     }
 
     if !existing_declaration.value.value_mode.is_mutable() {
-        return Err(Box::new(CompilerDiagnostic::invalid_multi_bind(
+        return Err(CompilerDiagnostic::invalid_multi_bind(
             InvalidMultiBindReason::ExistingTargetImmutable,
             Some(target_syntax.name),
             target_syntax.location.clone(),
-        )));
+        )
+        .into());
     }
 
     if let Some(explicit_type_id) = explicit_type_id
         && *explicit_type_id != existing_declaration.value.type_id
     {
-        return Err(Box::new(CompilerDiagnostic::type_mismatch(
+        return Err(CompilerDiagnostic::type_mismatch(
             existing_declaration.value.type_id,
             *explicit_type_id,
             TypeMismatchContext::General,
             target_syntax.location.clone(),
-        )));
+        )
+        .into());
     }
 
     if existing_declaration.value.type_id != slot_type {
-        return Err(Box::new(CompilerDiagnostic::type_mismatch(
+        return Err(CompilerDiagnostic::type_mismatch(
             existing_declaration.value.type_id,
             slot_type,
             TypeMismatchContext::General,
             target_syntax.location.clone(),
-        )));
+        )
+        .into());
     }
 
     Ok(MultiBindTarget {
@@ -586,12 +609,13 @@ fn resolve_new_target_data_type(
     };
 
     if explicit_type_id != slot_type {
-        return Err(Box::new(CompilerDiagnostic::type_mismatch(
+        return Err(CompilerDiagnostic::type_mismatch(
             explicit_type_id,
             slot_type,
             TypeMismatchContext::General,
             target_syntax.location.clone(),
-        )));
+        )
+        .into());
     }
 
     // Return the explicit annotation's diagnostic spelling if available.

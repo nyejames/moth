@@ -1,4 +1,4 @@
-import @flags {show_banner}
+@flags show_banner
 
 #[if show_banner:
     Imported source const visible

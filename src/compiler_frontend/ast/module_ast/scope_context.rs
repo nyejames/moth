@@ -53,8 +53,8 @@ use crate::compiler_frontend::external_packages::{
     ExternalConstantDef, ExternalConstantId, ExternalFunctionDef, ExternalFunctionId,
     ExternalPackageRegistry, ExternalSymbolId, ExternalTypeDef, ExternalTypeId,
 };
-use crate::compiler_frontend::headers::import_environment::{
-    FileVisibility, HeaderImportEnvironment, SourceDeclarationTarget,
+use crate::compiler_frontend::headers::binding_environment::{
+    FileVisibility, HeaderBindingEnvironment, SourceDeclarationTarget,
 };
 use crate::compiler_frontend::headers::module_symbols::{
     GenericDeclarationMetadata, ModuleSymbols,
@@ -186,7 +186,7 @@ pub struct ScopeContext {
     pending_catch_assignment_targets: FxHashSet<StringId>,
 
     // Optional file-local visibility gate over declarations.
-    // When present, references must be in this set, which enforces import boundaries.
+    // When present, references must be in this set, which enforces dependency boundaries.
     // Kept directly on ScopeContext (not in ScopeShared) because add_var mutates it.
     pub visible_declaration_ids: Option<FxHashSet<InternedPath>>,
 
@@ -385,7 +385,7 @@ impl ScopeContext {
 
         let lookups = Rc::new(AstModuleLookups {
             module_symbols: ModuleSymbols::empty(),
-            import_environment: HeaderImportEnvironment::default(),
+            binding_environment: HeaderBindingEnvironment::default(),
             warnings: Vec::new(),
             declaration_table: top_level_declarations,
             imported_functions_by_local_path: FxHashMap::default(),
@@ -535,7 +535,7 @@ impl ScopeContext {
         increment_ast_counter(AstCounter::ScopeContextsCreated);
 
         // Body-local functions are not closures. They receive the completed
-        // top-level/import visibility through `shared`, but their local frame starts
+        // top-level/dependency visibility through `shared`, but their local frame starts
         // fresh with parameters only so outer locals cannot be captured implicitly.
         let child_frame_id = self
             .arena

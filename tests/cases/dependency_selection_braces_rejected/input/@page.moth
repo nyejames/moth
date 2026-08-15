@@ -1,0 +1,3 @@
+@docs { pages }
+
+io.line("unreachable")

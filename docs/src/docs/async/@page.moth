@@ -1,5 +1,5 @@
-import @html {center}
-import @styles {navbar, title, section, styled_table, header, data, codeblock, theme_head}
+@html center
+@styles navbar, title, section, styled_table, header, data, codeblock, theme_head
 
 page_title #= "Coroutines and Async in Moth"
 page_description #= "Design draft for structured async, coroutines, channels and explicit suspension in Moth."

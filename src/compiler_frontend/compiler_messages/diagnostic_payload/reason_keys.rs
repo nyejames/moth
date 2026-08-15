@@ -146,21 +146,32 @@ define_stable_reason_keys! {
     &GenericApplicationErrorReason::NestedApplication => "invalid_generic_application.nested_application",
     },
 
-    InvalidImportClauseReason => {
-    &InvalidImportClauseReason::MissingPath => "invalid_import_clause.missing_path",
-    &InvalidImportClauseReason::ExpectedPath => "invalid_import_clause.expected_path",
-    &InvalidImportClauseReason::MissingAlias => "invalid_import_clause.missing_alias",
-    &InvalidImportClauseReason::ExpectedAliasName => "invalid_import_clause.expected_alias_name",
-    &InvalidImportClauseReason::AliasNotValidIdentifier => "invalid_import_clause.alias_not_valid_identifier",
-    &InvalidImportClauseReason::AliasIsKeyword => "invalid_import_clause.alias_is_keyword",
-    &InvalidImportClauseReason::GroupedWithTrailingAlias => "invalid_import_clause.grouped_with_trailing_alias",
-    &InvalidImportClauseReason::PerEntryAndTrailingAlias => "invalid_import_clause.per_entry_and_trailing_alias",
-    &InvalidImportClauseReason::MultipleTrailingAliases => "invalid_import_clause.multiple_trailing_aliases",
-    &InvalidImportClauseReason::DoubleAliasInGroupedEntry => "invalid_import_clause.double_alias_in_grouped_entry",
+    InvalidDependencyClauseReason => {
+    &InvalidDependencyClauseReason::MissingPath => "invalid_dependency_clause.missing_path",
+    &InvalidDependencyClauseReason::ExpectedPath => "invalid_dependency_clause.expected_path",
+    &InvalidDependencyClauseReason::ExpectedSelectionName => "invalid_dependency_clause.expected_selection_name",
+    &InvalidDependencyClauseReason::MissingAlias => "invalid_dependency_clause.missing_alias",
+    &InvalidDependencyClauseReason::ExpectedAliasName => "invalid_dependency_clause.expected_alias_name",
+    &InvalidDependencyClauseReason::DuplicateSelectionName => "invalid_dependency_clause.duplicate_selection_name",
+    &InvalidDependencyClauseReason::DuplicateSelectionLocalName => "invalid_dependency_clause.duplicate_selection_local_name",
+    &InvalidDependencyClauseReason::LegacyBraceSelections => "invalid_dependency_clause.legacy_brace_selections",
+    &InvalidDependencyClauseReason::MissingSelectionAfterComma => "invalid_dependency_clause.missing_selection_after_comma",
+    &InvalidDependencyClauseReason::MissingCommaBetweenSelections => "invalid_dependency_clause.missing_comma_between_selections",
+    &InvalidDependencyClauseReason::NamespaceAliasWithSelections => "invalid_dependency_clause.namespace_alias_with_selections",
+    &InvalidDependencyClauseReason::InvalidSelectionDelimiter => "invalid_dependency_clause.invalid_selection_delimiter",
+    &InvalidDependencyClauseReason::DependencyClauseNotAllowed => "invalid_dependency_clause.dependency_clause_not_allowed",
+    &InvalidDependencyClauseReason::ProviderRequiresBinding => "invalid_dependency_clause.provider_requires_binding",
+    &InvalidDependencyClauseReason::ContinuationEnteredStatement => "invalid_dependency_clause.continuation_entered_statement",
+    },
+
+    LegacyDependencyClauseReason => {
+    &LegacyDependencyClauseReason::ImportKeyword => "legacy_dependency_clause.import_keyword",
     },
 
     InvalidImportPathReason => {
-    &InvalidImportPathReason::ParentDirectorySegment => "invalid_import_path.parent_directory_segment",
+        &InvalidImportPathReason::PublicRoot => "invalid_import_path.public_root",
+        &InvalidImportPathReason::CurrentDirectorySegment => "invalid_import_path.current_directory_segment",
+        &InvalidImportPathReason::ParentDirectorySegment => "invalid_import_path.parent_directory_segment",
     &InvalidImportPathReason::EscapesProjectRoot => "invalid_import_path.escapes_project_root",
     &InvalidImportPathReason::EscapesSourcePackageRoot => "invalid_import_path.escapes_source_package_root",
     &InvalidImportPathReason::CaseMismatch { .. } => "invalid_import_path.case_mismatch",
@@ -252,7 +263,6 @@ define_stable_reason_keys! {
     &InvalidTemplateStructureReason::ReactiveSubscriptionInConstTemplate => "invalid_template_structure.reactive_subscription_in_const_template",
     &InvalidTemplateStructureReason::ReactiveSubscriptionOutsideTemplate => "invalid_template_structure.reactive_subscription_outside_template",
     &InvalidTemplateStructureReason::EmptyPathInTemplateHead => "invalid_template_structure.empty_path_in_template_head",
-    &InvalidTemplateStructureReason::PathAliasInTemplateHead => "invalid_template_structure.path_alias_in_template_head",
     &InvalidTemplateStructureReason::IncompatibleHeadItem => "invalid_template_structure.incompatible_head_item",
     &InvalidTemplateStructureReason::HelperOutsideWrapperSlot => "invalid_template_structure.helper_outside_wrapper_slot",
     &InvalidTemplateStructureReason::RuntimeControlFlowUnresolvedSlot => "invalid_template_structure.runtime_control_flow_unresolved_slot",
@@ -774,7 +784,6 @@ define_stable_reason_keys! {
     &CommonSyntaxMistakeReason::InvalidSymbolicSpacing { .. } => "common_syntax_mistake.invalid_symbolic_spacing",
     &CommonSyntaxMistakeReason::InvalidUnaryNegationSpacing => "common_syntax_mistake.invalid_unary_negation_spacing",
     &CommonSyntaxMistakeReason::UnsupportedUnaryPlus => "common_syntax_mistake.unsupported_unary_plus",
-    &CommonSyntaxMistakeReason::ImportPathMissingAtPrefix { .. } => "common_syntax_mistake.import_path_missing_at_prefix",
     },
 
     InvalidGenericInstantiationReason => {

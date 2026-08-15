@@ -9,7 +9,9 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidStatementPositionReason, InvalidThisUsageReason, InvalidTraitKeywordUsageReason,
     InvalidTypeAnnotationReason, RuleDiagnosticKind, SyntaxDiagnosticKind, TypeAnnotationContext,
 };
-use crate::compiler_frontend::tests::parse_support::parse_single_file_ast_diagnostic;
+use crate::compiler_frontend::tests::parse_support::{
+    parse_single_file_ast, parse_single_file_ast_diagnostic,
+};
 
 struct InvalidMatchPatternCase {
     name: &'static str,
@@ -155,6 +157,28 @@ fn reports_multi_bind_malformed_comma_sequence() {
             target_name: None,
         }
     );
+}
+
+#[test]
+fn parses_multi_bind_targets_across_comma_continuation_newline() {
+    parse_single_file_ast("pair || -> Int, Int:\n    return 1, 2\n;\n\na,\n    b = pair()\n");
+}
+
+#[test]
+fn reports_multi_bind_trailing_comma_at_the_comma() {
+    let diagnostic = parse_single_file_ast_diagnostic(
+        "pair || -> Int, Int:\n    return 1, 2\n;\n\na,\n    = pair()\n",
+    );
+
+    assert_eq!(
+        diagnostic.payload,
+        DiagnosticPayload::InvalidMultiBind {
+            reason: InvalidMultiBindReason::MissingTargetAfterComma,
+            target_name: None,
+        }
+    );
+    assert_eq!(diagnostic.primary_location.start_pos.line_number, 4);
+    assert_eq!(diagnostic.primary_location.start_pos.char_column, 2);
 }
 
 #[test]

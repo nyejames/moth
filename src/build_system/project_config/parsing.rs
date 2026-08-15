@@ -5,7 +5,7 @@
 //! then hands the folded AST off to config validation.
 //! WHY: config uses normal Moth syntax, but bootstrap must finish before source-package discovery.
 //! Reusing tokenizer → headers → dependency sort → AST preserves constant folding and type
-//! checking without constructing a second import graph or package resolver.
+//! checking without constructing a second dependency graph or package resolver.
 use crate::build_system::create_project_modules::extract_source_code;
 use crate::build_system::project_config::ProjectConfigParseServices;
 use std::sync::Arc;
@@ -17,8 +17,8 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticBag, DiagnosticKind, InvalidConfigReason, RuleDiagnosticKind,
 };
 use crate::compiler_frontend::headers::parse_file_headers::{
-    FileFrontendPrepareOutput, Header, HeaderKind, HeaderParseOptions, bind_module_headers,
-    prepare_file_from_tokens, prepare_header_syntax,
+    FileFrontendPrepareFailure, FileFrontendPrepareOutput, Header, HeaderKind, HeaderParseOptions,
+    bind_module_headers, prepare_file_from_tokens, prepare_header_syntax,
 };
 use crate::compiler_frontend::module_dependencies::resolve_module_dependencies;
 use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
@@ -145,7 +145,7 @@ pub(super) fn parse_config_file(
             prepared,
             &services.frontend_surface.binding_packages,
             &ExternalImportResolutionTable::default(),
-            &crate::compiler_frontend::public_interface::SourceProviderImportSet::default(),
+            &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
             None,
             string_table,
         ),
@@ -206,7 +206,7 @@ pub(super) fn parse_config_file(
         AstBuildInput {
             headers: sorted.headers,
             module_symbols: sorted.module_symbols,
-            import_environment: sorted.import_environment,
+            binding_environment: sorted.binding_environment,
             top_level_const_fragments: sorted.top_level_const_fragments,
         },
         AstBuildContext {
@@ -248,7 +248,7 @@ pub(super) fn parse_config_file(
 
 /// Tokenize and header-parse the single authored config file.
 ///
-/// An import is rejected from the retained structural shell before interface binding can resolve
+/// A dependency clause is rejected from the retained structural shell before interface binding can resolve
 /// a package or filesystem target.
 fn prepare_config_file(
     file_path: &Path,
@@ -292,7 +292,7 @@ fn prepare_config_file(
         0,
     ) {
         Ok(output) => output,
-        Err(error) => {
+        Err(FileFrontendPrepareFailure::Diagnosed(error)) => {
             errors.extend(error.warnings);
             if is_duplicate_config_header_error(&error.diagnostic) {
                 errors.push(config_diagnostic(
@@ -305,13 +305,16 @@ fn prepare_config_file(
             }
             return Ok(None);
         }
+        Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
+            return Err(CompilerMessages::from_error(error, string_table.clone()));
+        }
     };
 
-    for file_import in &output.file_imports {
+    for dependency_clause in &output.file_dependency_clauses {
         errors.push(config_diagnostic(
             None,
             InvalidConfigReason::ConfigImportUnsupported,
-            file_import.location.clone(),
+            dependency_clause.location.clone(),
         ));
     }
     errors.extend(validate_authored_config_surface(&output.headers));
@@ -358,7 +361,7 @@ fn collect_authored_config_key_name_locations(
 /// templates are rejected before AST. Type aliases, structs, and choices are allowed as support
 /// declarations because they can be referenced by compile-time constant expressions. Trait
 /// surfaces are source-module metadata and are deliberately kept out of config.
-/// Imports are rejected from `FileFrontendPrepareOutput.file_imports` before this declaration
+/// Dependency clauses are rejected from `FileFrontendPrepareOutput.file_dependency_clauses` before this declaration
 /// validation. Start-body validation happens later through `validation.rs` and AST const facts.
 fn validate_authored_config_surface(headers: &[Header]) -> Vec<CompilerDiagnostic> {
     let mut errors = Vec::new();

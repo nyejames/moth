@@ -208,8 +208,8 @@ fn render_payload_message(
                 style_name
             )
         }
-        DiagnosticPayload::ImportAliasCaseMismatch { alias, symbol } => format!(
-            "Import alias '{}' case mismatch with symbol '{}'",
+        DiagnosticPayload::DependencyAliasCaseMismatch { alias, symbol } => format!(
+            "Dependency alias '{}' case mismatch with symbol '{}'",
             string_table.resolve(*alias),
             string_table.resolve(*symbol)
         ),
@@ -248,9 +248,16 @@ fn render_payload_message(
             }
         }
         DiagnosticPayload::InvalidPath { path_kind } => invalid_path_message(*path_kind).to_owned(),
-        DiagnosticPayload::InvalidImportClause { reason, .. } => {
-            invalid_import_clause_message(*reason).to_owned()
+        DiagnosticPayload::InvalidDependencyClause { reason, .. } => {
+            invalid_dependency_clause_message(*reason).to_owned()
         }
+        DiagnosticPayload::LegacyDependencyClause { replacement, .. } => match replacement {
+            Some(replacement) => format!(
+                "Source dependency clauses no longer use `import`. Write `{}`.",
+                string_table.resolve(*replacement)
+            ),
+            None => "Source dependency clauses no longer use `import`, and this clause has no automatic delimiter-free replacement. Choose either a namespace alias or direct flat selections beginning with `@`.".to_owned(),
+        },
         DiagnosticPayload::InvalidTypeAnnotation { reason, .. } => {
             invalid_type_annotation_message(reason, string_table)
         }
@@ -307,14 +314,14 @@ fn render_payload_message(
             expected,
             found,
         } => namespace_misuse_message(*name, *expected, *found, string_table),
-        DiagnosticPayload::ImportRecordUsedAsValue { record_name } => {
-            import_record_used_as_value_message(*record_name, string_table)
+        DiagnosticPayload::DependencyNamespaceUsedAsValue { record_name } => {
+            dependency_namespace_used_as_value_message(*record_name, string_table)
         }
         DiagnosticPayload::ConstRecordUsedAsValue { record_name } => {
             const_record_used_as_value_message(*record_name, string_table)
         }
-        DiagnosticPayload::NestedTraversal { record_name } => {
-            nested_traversal_message(*record_name, string_table)
+        DiagnosticPayload::NestedDependencyTraversal { record_name } => {
+            nested_dependency_traversal_message(*record_name, string_table)
         }
         DiagnosticPayload::NamespaceTypeValueMisuse {
             name,
@@ -368,7 +375,7 @@ fn render_payload_message(
         DiagnosticPayload::InvalidTraitKeywordUsage { reason } => {
             invalid_trait_keyword_usage_message(*reason).to_owned()
         }
-        DiagnosticPayload::DuplicatePublicExport { name } => format!(
+        DiagnosticPayload::DuplicatePublicExport { name, .. } => format!(
             "Duplicate public export '{}' in module public surface. Each exported name must be unique.",
             string_table.resolve(*name)
         ),
@@ -760,36 +767,36 @@ fn import_payload_message(payload: &DiagnosticPayload, string_table: &StringTabl
     match payload {
         DiagnosticPayload::MissingImportTarget { path } => {
             format!(
-                "Cannot resolve import '{}'.",
+                "Cannot resolve dependency '{}'.",
                 path.to_portable_string(string_table)
             )
         }
         DiagnosticPayload::AmbiguousImportTarget { path } => format!(
-            "Ambiguous import target '{}'. Use a more specific path.",
+            "Ambiguous dependency target '{}'. Use a more specific path.",
             path.to_portable_string(string_table)
         ),
         DiagnosticPayload::BareFileImport { path } => format!(
-            "Bare file imports are not supported; import an exported symbol from the file '{}'.",
+            "Bare file dependency clauses are not supported; select an exported symbol from the file '{}'.",
             path.to_portable_string(string_table)
         ),
         DiagnosticPayload::DirectSpecialFileImport { path } => {
             let special_file = special_file_name_from_path(path, string_table);
             let path_text = path.to_portable_string(string_table);
-            // Guide the author toward the support package directory import rather than the root filename.
+            // Guide the author toward the support package directory dependency rather than the root filename.
             let suggestion = support_root_import_suggestion(path, string_table);
             format!(
-                "Cannot import directly from '{special_file}' via '{path_text}'. Support root files are imported through their package directory, not by filename.{suggestion}"
+                "Cannot depend directly on '{special_file}' via '{path_text}'. Support roots are referenced through their package directory, not by filename.{suggestion}"
             )
         }
         DiagnosticPayload::ImportNameCollision { name, .. } => {
             format!(
-                "Import name collision: '{}' is already visible in this file.",
+                "Dependency binding name collision: '{}' is already visible in this file.",
                 string_table.resolve(*name)
             )
         }
         DiagnosticPayload::NotExportedBySourceFile { symbol_path } => {
             format!(
-                "Cannot import '{}' because it is not exported.",
+                "Cannot bind '{}' because it is not exported.",
                 symbol_path.to_portable_string(string_table)
             )
         }
@@ -803,30 +810,30 @@ fn import_payload_message(payload: &DiagnosticPayload, string_table: &StringTabl
             match public_surface_type {
                 crate::compiler_frontend::compiler_messages::ImportPublicSurfaceType::SourcePackage => {
                     format!(
-                        "Cannot import '{path_text}' from source-backed package '@{public_surface_name}' because it is not exported by the package public surface."
+                        "Cannot bind '{path_text}' from source-backed package '@{public_surface_name}' because it is not exported by the package public surface."
                     )
                 }
                 crate::compiler_frontend::compiler_messages::ImportPublicSurfaceType::ModuleRoot => {
                     format!(
-                        "Cannot import '{path_text}' from module '{public_surface_name}' because it is not exported by the module's public surface."
+                        "Cannot bind '{path_text}' from module '{public_surface_name}' because it is not exported by the module's public surface."
                     )
                 }
             }
         }
         DiagnosticPayload::MissingModuleRootPublicSurface { symbol_path } => format!(
-            "Cannot import '{}' because the target module has no public export surface. Import a concrete file from inside the same module, or add a module root file with an `export:` block to define the module's public import surface.",
+            "Cannot bind '{}' because the target module has no public export surface. Depend on a concrete file from inside the same module, or add a module root file with an `export:` block to define the module's public dependency surface.",
             symbol_path.to_portable_string(string_table)
         ),
         DiagnosticPayload::MissingPackageSymbol {
             symbol,
             package_path,
         } => format!(
-            "Cannot import '{}' from package '{}': symbol not found.",
+            "Cannot bind '{}' from package '{}': symbol not found.",
             string_table.resolve(*symbol),
             string_table.resolve(*package_path)
         ),
         DiagnosticPayload::CrossModuleImportNotExported { symbol_path } => format!(
-            "Cannot import '{}' because it is not exported by the target module's public surface.",
+            "Cannot bind '{}' because it is not exported by the target module's public surface.",
             symbol_path.to_portable_string(string_table)
         ),
         DiagnosticPayload::InvalidImportPath { path, reason } => {

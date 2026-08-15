@@ -1,2 +1,2 @@
-import @./drawing.js { root }
+@drawing.js root
 entry_root #= root

@@ -1,1 +1,1 @@
-import @helper { private_symbol }
+@helper private_symbol

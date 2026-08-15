@@ -37,7 +37,7 @@ impl SourceLocation {
     /// source locations.
     /// WHY: terminal/dev-server renderers now resolve all diagnostic paths through the shared
     /// string table instead of storing owned `PathBuf`s on errors or warnings.
-    /// Non-UTF-8 filesystem paths cannot enter the string table or import namespace. When the
+    /// Non-UTF-8 filesystem paths cannot enter the string table or dependency namespace. When the
     /// path has a non-UTF-8 component, this method interns a unique debug-escaped representation
     /// (`{:?}`) as a single component so the diagnostic can still reference the offending file
     /// without collapsing distinct filesystem names. This is diagnostic display, not compiler
@@ -55,6 +55,16 @@ impl SourceLocation {
 
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.scope.remap_string_ids(remap);
+    }
+
+    /// Rebind this span to the final logical source identity without changing its range.
+    ///
+    /// WHAT: replaces only the file scope after Stage 0 discovery has been reconciled with the
+    ///       deterministic module source table.
+    /// WHY: retained syntax may outlive traversal-local file identities; every retained location
+    ///      must use the same logical source scope as the final file-owned token streams.
+    pub fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
+        self.scope = logical_path.clone();
     }
 
     /// Remap the interned scope through one in-place, fallible string-ID walker.

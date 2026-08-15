@@ -12,6 +12,7 @@ use super::result_type::infer_block_if_result_type;
 use super::{ValueIfParseInput, emit_collected_warnings};
 use crate::compiler_frontend::ast::ContextKind;
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::statements::body_dispatch::parse_function_body_statements;
 use crate::compiler_frontend::ast::statements::value_production::completeness::analyze_branch_flow;
@@ -23,17 +24,8 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::tokenizer::tokens::{SourceLocation, TokenKind};
 
-/// File-local boxed diagnostic result alias.
-///
-/// WHAT: every local helper in this module returns `Result<T, Box<CompilerDiagnostic>>`
-/// through this alias.
-/// WHY: `CompilerDiagnostic` is large enough to trigger `clippy::result_large_err` when
-/// stored directly in a `Result` variant. Boxing the error at the owner boundary keeps
-/// the `Result` envelope small without changing `DiagnosticBag`, `CompilerMessages`, or
-/// any shared error type. The already-boxed statement dispatcher flows through unchanged;
-/// branch result-type inference is adapted at its narrow call site, then the caller in
-/// `receiver/mod.rs` unboxes once at the plain accumulation boundary.
-type BlockIfResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// Block value-if bodies recurse into the AST body parser and therefore preserve its two lanes.
+type BlockIfResult<T> = Result<T, ExpressionParseError>;
 
 /// Parses a block-form value-if after the condition has been parsed and `:` consumed.
 ///
@@ -72,12 +64,11 @@ pub(super) fn parse_block_value_if(input: ValueIfParseInput<'_, '_>) -> BlockIfR
     emit_collected_warnings(context, then_warnings);
 
     if token_stream.current_token_kind() != &TokenKind::Else {
-        return Err(Box::new(
-            CompilerDiagnostic::invalid_control_flow_statement(
-                InvalidControlFlowStatementReason::ValueIfMissingElse,
-                token_stream.current_location(),
-            ),
-        ));
+        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+            InvalidControlFlowStatementReason::ValueIfMissingElse,
+            token_stream.current_location(),
+        )
+        .into());
     }
     token_stream.advance(); // consume `else`
 
@@ -135,30 +126,27 @@ fn validate_value_if_branch_flow(
     let else_terminates = matches!(else_flow, BranchFlow::Terminates);
 
     if !then_produces && !then_terminates {
-        return Err(Box::new(
-            CompilerDiagnostic::invalid_control_flow_statement(
-                InvalidControlFlowStatementReason::ValueIfBranchFallsThrough,
-                location.clone(),
-            ),
-        ));
+        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+            InvalidControlFlowStatementReason::ValueIfBranchFallsThrough,
+            location.clone(),
+        )
+        .into());
     }
 
     if !else_produces && !else_terminates {
-        return Err(Box::new(
-            CompilerDiagnostic::invalid_control_flow_statement(
-                InvalidControlFlowStatementReason::ValueIfBranchFallsThrough,
-                location.clone(),
-            ),
-        ));
+        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+            InvalidControlFlowStatementReason::ValueIfBranchFallsThrough,
+            location.clone(),
+        )
+        .into());
     }
 
     if !then_produces && !else_produces {
-        return Err(Box::new(
-            CompilerDiagnostic::invalid_control_flow_statement(
-                InvalidControlFlowStatementReason::ValueIfNoProducingPath,
-                location.clone(),
-            ),
-        ));
+        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+            InvalidControlFlowStatementReason::ValueIfNoProducingPath,
+            location.clone(),
+        )
+        .into());
     }
 
     Ok(())

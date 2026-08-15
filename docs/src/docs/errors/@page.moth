@@ -1,58 +1,32 @@
-import @error-values {
-    content as error_values,
-}
+@error-values content as error_values
 
-import @error-values-basic {
-    content as error_values_basic,
-}
+@error-values-basic content as error_values_basic
 
-import @error-returns {
-    content as error_returns,
-}
+@error-returns content as error_returns
 
-import @error-returns-basic {
-    content as error_returns_basic,
-}
+@error-returns-basic content as error_returns_basic
 
-import @propagation {
-    content as propagation,
-}
+@propagation content as propagation
 
-import @propagation-basic {
-    content as propagation_basic,
-}
+@propagation-basic content as propagation_basic
 
-import @catch-and-recovery {
-    content as catch_and_recovery,
-}
+@catch-and-recovery content as catch_and_recovery
 
-import @catch-and-recovery-basic {
-    content as catch_and_recovery_basic,
-}
+@catch-and-recovery-basic content as catch_and_recovery_basic
 
-import @options {
-    content as options,
-}
+@options content as options
 
-import @options-basic {
-    content as options_basic,
-}
+@options-basic content as options_basic
 
-import @assertions {
-    content as assertions,
-}
+@assertions content as assertions
 
-import @assertions-basic {
-    content as assertions_basic,
-}
+@assertions-basic content as assertions_basic
 
-import @styles {
-    navbar,
+@styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager,
-}
+    doc_pager
 
 page_title #= "Errors, options and assertions"
 page_description #= "Recoverable errors, optional values, local recovery and assertions in Moth."

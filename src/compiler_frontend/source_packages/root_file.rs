@@ -1,6 +1,6 @@
 //! Module-root and project-config filename identity.
 //!
-//! WHAT: classifies canonical root/config filenames so Stage 0 discovery, header import
+//! WHAT: classifies canonical root/config filenames so Stage 0 discovery, header dependency
 //!      validation and diagnostic rendering share one filename policy.
 //! WHY: normal `@*.moth` roots, support `+*.moth` roots and the canonical `config.moth` are
 //!      the only special filenames the compiler recognises. Legacy `#*.moth` root-like
@@ -19,7 +19,7 @@ use std::path::PathBuf;
 /// unreadable roots never enter this successful view.
 ///
 /// Both maps use `BTreeMap` so that every public iteration surface preserves one canonical
-/// import-prefix order. Callers never observe `HashMap` iteration order from roots or root-file
+/// dependency-prefix order. Callers never observe `HashMap` iteration order from roots or root-file
 /// records.
 /// WHY: resolver construction must consume filesystem preparation rather than rediscovering
 ///     source-backed package roots or public surfaces.
@@ -108,54 +108,48 @@ pub(crate) fn file_name_is_legacy_hash_root_file(file_name: &str) -> bool {
     !root_name.is_empty()
 }
 
-/// Whether an import component identifies the canonical project config file.
-pub(crate) fn import_component_is_config_file(component: &str) -> bool {
+/// Whether a dependency component identifies the canonical project config file.
+pub(crate) fn dependency_component_is_config_file(component: &str) -> bool {
     component == "config" || file_name_is_config_file(component)
 }
 
-/// Whether an extensionless import component looks like a support root file reference.
+/// Whether an extensionless dependency component looks like a support root file reference.
 ///
-/// WHAT: detects when an author wrote `+name` or `+name.moth` as an import component, which
-/// would attempt to import a support root file directly rather than the support package facade.
-/// WHY: support packages are imported by their directory name, not by root filename. A helpful
-///      diagnostic guides the author to drop the `+` prefix and import the package path instead.
-pub(crate) fn import_component_is_support_root_file(component: &str) -> bool {
+/// WHAT: detects when an author wrote `+name` or `+name.moth` as a dependency component, which
+/// would attempt to dependency a support root file directly rather than the support package facade.
+/// WHY: support packages are bound by their directory name, not by root filename. A helpful
+///      diagnostic guides the author to drop the `+` prefix and dependency the package path instead.
+pub(crate) fn dependency_component_is_support_root_file(component: &str) -> bool {
     file_name_is_support_root_file(component)
         || (component.starts_with('+') && !component.contains('.') && component.len() > 1)
 }
 
-/// Whether a direct import's source component is the canonical project config file.
-pub(crate) fn import_path_references_config_file(
+/// Whether a dependency provider root's source component is the canonical project config file.
+pub(crate) fn dependency_path_references_config_file(
     path: &InternedPath,
-    from_grouped_import: bool,
     string_table: &StringTable,
 ) -> bool {
-    import_source_component(path, from_grouped_import, string_table)
-        .is_some_and(import_component_is_config_file)
+    dependency_source_component(path, string_table).is_some_and(dependency_component_is_config_file)
 }
 
-/// Whether a direct import's source component is a support-root file.
+/// Whether a dependency provider root's source component is a support-root file.
 ///
-/// WHAT: checks the source component (the directory-leaf for bare imports, or the
-/// second-to-last for grouped imports) to detect attempts to import a support root file
-/// by its filename rather than through the support package directory.
-pub(crate) fn import_path_references_support_root_file(
+/// WHAT: checks the provider root's final component to detect attempts to dependency a support root
+/// file by its filename rather than through the support package directory.
+pub(crate) fn dependency_path_references_support_root_file(
     path: &InternedPath,
-    from_grouped_import: bool,
     string_table: &StringTable,
 ) -> bool {
-    import_source_component(path, from_grouped_import, string_table)
-        .is_some_and(import_component_is_support_root_file)
+    dependency_source_component(path, string_table)
+        .is_some_and(dependency_component_is_support_root_file)
 }
 
-fn import_source_component<'a>(
+fn dependency_source_component<'a>(
     path: &'a InternedPath,
-    from_grouped_import: bool,
     string_table: &'a StringTable,
 ) -> Option<&'a str> {
-    let source_component_offset = if from_grouped_import { 2 } else { 1 };
     path.len()
-        .checked_sub(source_component_offset)
+        .checked_sub(1)
         .and_then(|index| path.as_components().get(index))
         .map(|component| string_table.resolve(*component))
 }

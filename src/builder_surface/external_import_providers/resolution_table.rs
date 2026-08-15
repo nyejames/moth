@@ -4,7 +4,7 @@
 //!       provider resolution result so header import preparation can turn provider-backed imports
 //!       into typed external symbols without re-parsing external files.
 //! WHY: Stage 0 resolves provider-backed imports during reachable-file discovery; the header stage
-//!      needs the same results to build namespace records and grouped import bindings.
+//!      needs the same results to build namespace records and direct-selection bindings.
 //!
 //! The table keeps three internal structures:
 //! - `entries`: primary lookup from `(source_file, import_prefix)` to `package_id`;
@@ -21,10 +21,10 @@ use std::collections::{HashMap, HashSet};
 /// Build-owned table that records which external packages were created for each provider-backed
 /// import prefix in each source file.
 ///
-/// WHAT: keyed by `(source_file_logical_path, import_prefix_portable_string)` so relative imports
-///       from different directories resolve to distinct canonical files and distinct packages.
-/// WHY: two files in different directories may both import `@./helper.js`, but they resolve to
-///      different canonical filesystem paths and therefore different provider-created packages.
+/// WHAT: keyed by `(source_file_logical_path, module-relative import prefix)` so files in distinct
+///       owning modules may resolve the same authored provider spelling to different packages.
+/// WHY: provider paths resolve from the importing file's owning module root. Keeping the source
+///      identity in the key prevents equal spellings in different modules from colliding.
 #[derive(Clone, Debug, Default)]
 pub struct ExternalImportResolutionTable {
     entries: HashMap<(String, String), ExternalPackageId>,

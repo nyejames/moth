@@ -1,4 +1,4 @@
-import @copy { title, body }
+@copy title, body
 
 [:
     <main>

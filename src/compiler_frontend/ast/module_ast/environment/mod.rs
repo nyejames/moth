@@ -1,6 +1,6 @@
 //! AST semantic environment construction.
 //!
-//! WHAT: resolves imports, aliases, nominal declarations, constants, signatures, and receiver
+//! WHAT: resolves dependencies, aliases, nominal declarations, constants, signatures and receiver
 //! methods into a stable declaration table before executable bodies are parsed.
 //! WHY: body emission should read one complete semantic environment instead of relying on
 //! partially valid accumulator fields.
@@ -8,6 +8,8 @@
 pub(in crate::compiler_frontend::ast) mod builder;
 pub(in crate::compiler_frontend::ast) mod constant_resolution;
 mod declaration_semantics;
+#[cfg(test)]
+mod declaration_semantics_tests;
 pub(in crate::compiler_frontend::ast) mod declaration_table;
 mod function_signatures;
 mod input;

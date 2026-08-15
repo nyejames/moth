@@ -83,7 +83,7 @@ impl ScopeContext {
     }
 
     // --------------------------
-    //  Visibility and import environment
+    //  Visibility and binding environment
     // --------------------------
 
     /// Restrict declaration resolution to the provided path set.
@@ -91,7 +91,7 @@ impl ScopeContext {
     /// WHAT: when present, only declarations whose paths are in this set are
     /// resolvable by name. When absent, any declaration in the module may be
     /// resolved.
-    /// WHY: file/start contexts set this to enforce import semantics and
+    /// WHY: file/start contexts set this to enforce dependency-binding semantics and
     /// prevent same-file references from bypassing the visibility system.
     pub fn with_visible_declarations(mut self, visible: FxHashSet<InternedPath>) -> ScopeContext {
         self.visible_declaration_ids = Some(visible);
@@ -165,7 +165,7 @@ impl ScopeContext {
     ///
     /// WHAT: copies all visibility maps from the prepared header environment.
     /// WHY: AST emission should consume header-built visibility directly instead of
-    /// reconstructing import bindings or manually setting each field.
+    /// reconstructing dependency bindings or manually setting each field.
     pub(crate) fn with_file_visibility(mut self, visibility: Rc<FileVisibility>) -> ScopeContext {
         self.visible_declaration_ids = Some(visibility.visible_declaration_paths.clone());
         Rc::make_mut(&mut self.shared).file_visibility = Some(visibility);

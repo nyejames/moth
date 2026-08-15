@@ -1,4 +1,4 @@
-`@core/time` separates elapsed time from wall-clock time. Import it when you need to measure durations or work with UTC timestamps.
+`@core/time` separates elapsed time from wall-clock time. Bind it when you need to measure durations or work with UTC timestamps.
 
 ### Three types of time
 
@@ -13,12 +13,7 @@ These types stay opaque. Pass them to the package functions. Do not construct th
 Use `TimeMark` for a monotonic measurement point. Use `Duration` for the elapsed amount.
 
 [codeblock, $code("moth"):
-    import @core/time {
-        TimeMark,
-        mark_now,
-        duration_between,
-        as_seconds,
-    }
+    @core/time TimeMark, mark_now, duration_between, as_seconds
 
     previous ~= mark_now()
 
@@ -36,12 +31,7 @@ This shape works for frame-delta style code without requiring a scheduler or ani
 Use `Timestamp` for real-world UTC instants that may be logged, stored or exchanged with external systems.
 
 [codeblock, $code("moth"):
-    import @core/time {
-        Timestamp,
-        timestamp_from_iso_string,
-        timestamp_from_unix_milliseconds,
-        to_iso_string,
-    }
+    @core/time Timestamp, timestamp_from_iso_string, timestamp_from_unix_milliseconds, to_iso_string
 
     parse_created || -> Timestamp, Error!:
         return timestamp_from_iso_string("1970-01-01T00:00:00.000Z")!

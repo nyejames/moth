@@ -120,7 +120,7 @@ pub(crate) fn invalid_type_annotation_message(
             "`This` must be used directly in trait requirements. Composed forms such as `This?`, `{This}`, and `This of T` are deferred.".to_string()
         }
         InvalidTypeAnnotationReason::AsNotValidHere => {
-            "`as` is not valid here. It is only supported in type aliases, import clauses, and choice payload patterns.".to_string()
+            "`as` is not valid here. It is only supported in type aliases, dependency clauses, and choice payload patterns.".to_string()
         }
         InvalidTypeAnnotationReason::UnexpectedColon => {
             "Unexpected ':' after declaration name. Moth does not support bare labeled blocks or `name: Type` declarations. Use `block:` for a scoped block, or write declarations as `name Type = value`.".to_string()
@@ -179,7 +179,7 @@ pub(crate) fn common_syntax_mistake_message(
             "`&` marks inclusive ranges in Moth. Borrowing is implicit; use `~` at call sites for mutation.".to_string()
         }
         CommonSyntaxMistakeReason::InvalidAsOperator => {
-            "`as` is not a cast operator. It is only valid in type aliases, import clauses, and choice payload patterns.".to_string()
+            "`as` is not a cast operator. It is only valid in type aliases, dependency clauses, and choice payload patterns.".to_string()
         }
         CommonSyntaxMistakeReason::StatementLineComment => {
             "`//` is integer division. Comments use `--`.".to_string()
@@ -207,7 +207,7 @@ pub(crate) fn common_syntax_mistake_message(
             "Parameters and struct fields are delimited with `|`, not `()`.".to_string()
         }
         CommonSyntaxMistakeReason::SignatureAsKeyword => {
-            "`as` is not valid here. It is only supported in type aliases, import clauses, and choice payload patterns.".to_string()
+            "`as` is not valid here. It is only supported in type aliases, dependency clauses, and choice payload patterns.".to_string()
         }
         CommonSyntaxMistakeReason::InvalidCompileTimeBindingSpacing => {
             "Invalid compile-time binding syntax. Use `name #= value` for inferred constants or `name #Type = value` for explicit constant types. For collection and option types, attach `#` to the first token of the type: `names #{String} = ...` or `value #String? = ...`.".to_string()
@@ -227,10 +227,6 @@ pub(crate) fn common_syntax_mistake_message(
         }
         CommonSyntaxMistakeReason::UnsupportedUnaryPlus => {
             "Unary plus is not supported in Moth.".to_string()
-        }
-        CommonSyntaxMistakeReason::ImportPathMissingAtPrefix { authored_path } => {
-            let authored_path = string_table.resolve(*authored_path);
-            format!("Import paths must begin with `@`. Write `import @{authored_path}`.")
         }
     }
 }
@@ -324,9 +320,6 @@ pub(crate) fn common_syntax_mistake_suggestion(reason: &CommonSyntaxMistakeReaso
         }
         CommonSyntaxMistakeReason::UnsupportedUnaryPlus => {
             "Remove the leading `+`; use the value directly".to_owned()
-        }
-        CommonSyntaxMistakeReason::ImportPathMissingAtPrefix { .. } => {
-            "Insert `@` before the import path".to_owned()
         }
     }
 }

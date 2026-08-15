@@ -93,7 +93,7 @@ To output literal template delimiters, use string insertion:
 
 ### Content helpers
 
-Content helpers such as `codeblock` work only where the builder environment provides them. Do not assume arbitrary normal source imports are available inside `.mtf`.
+Content helpers such as `codeblock` work only where the builder environment provides them. Do not assume arbitrary normal source dependencies are available inside `.mtf`.
 
 ### Related concepts
 

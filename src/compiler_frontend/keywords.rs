@@ -1,20 +1,20 @@
 //! Frontend keyword and identifier policy.
 //!
 //! WHAT: owns the exact keyword-to-token mapping used by lexing and the identifier
-//! validation helpers shared with path/import parsing. The same direct match also
+//! validation helpers shared with path and dependency parsing. The same direct match also
 //! supplies the neutral presentation classes consumed by the HTML code highlighter.
 //! WHY: keyword policy is user-visible and must not drift between the tokenizer,
-//! import alias validation, reserved-name diagnostics and code highlighting.
+//! dependency alias validation, reserved-name diagnostics and code highlighting.
 
 use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 
 /// Keywords that may not be shadowed by identifiers after case folding and
 /// stripping leading underscores.
-pub(crate) const RESERVED_KEYWORD_SHADOWS: [&str; 37] = [
-    "import", "export", "if", "return", "yield", "else", "block", "checked", "async", "cast", "as",
-    "copy", "type", "of", "must", "this", "catch", "then", "loop", "to", "by", "break", "continue",
-    "is", "not", "and", "or", "true", "false", "none", "fn", "float", "int", "string", "bool",
-    "char", "assert",
+pub(crate) const RESERVED_KEYWORD_SHADOWS: [&str; 36] = [
+    "export", "if", "return", "yield", "else", "block", "checked", "async", "cast", "as", "copy",
+    "type", "of", "must", "this", "catch", "then", "loop", "to", "by", "break", "continue", "is",
+    "not", "and", "or", "true", "false", "none", "fn", "float", "int", "string", "bool", "char",
+    "assert",
 ];
 
 /// Neutral presentation class for an exact Moth source word.
@@ -72,7 +72,6 @@ impl ClassifiedSourceWord {
 pub(crate) fn classify_source_word(text: &str) -> Option<ClassifiedSourceWord> {
     match text {
         // Module and declaration keywords.
-        "import" => Some(ClassifiedSourceWord::keyword(TokenKind::Import)),
         "export" => Some(ClassifiedSourceWord::keyword(TokenKind::Export)),
         "type" => Some(ClassifiedSourceWord::keyword(TokenKind::Type)),
         "of" => Some(ClassifiedSourceWord::keyword(TokenKind::Of)),
@@ -153,6 +152,7 @@ pub(crate) fn attached_bang_keyword_token_kind(text: &str) -> Option<TokenKind> 
 }
 
 /// True when `text` is an exact keyword spelling that lexes to a dedicated token.
+#[cfg(test)]
 pub(crate) fn is_keyword(text: &str) -> bool {
     keyword_token_kind(text).is_some()
 }

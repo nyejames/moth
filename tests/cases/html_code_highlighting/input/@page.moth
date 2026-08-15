@@ -1,4 +1,4 @@
-import @html { codeblock }
+@html codeblock
 
 -- The two code blocks below exercise the full shared role vocabulary through the
 -- compile-time HTML formatter. The Rust block proves non-Moth profiles consume
@@ -32,8 +32,8 @@ import @html { codeblock }
         ;
 
         -- directives and paths
-        import @core/io {print, line}
-        import @web/canvas {Canvas, draw_rect}
+        @core/io print, line
+        @web/canvas Canvas, draw_rect
         page #= $slot("title")
 
         -- operators and numbers

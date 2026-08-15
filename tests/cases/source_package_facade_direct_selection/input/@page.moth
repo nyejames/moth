@@ -1,0 +1,3 @@
+@helper greet, farewell
+
+[:[greet] [farewell]]

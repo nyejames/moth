@@ -5,6 +5,7 @@
 
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ExpressionKind, ReactiveSource, ReactiveSourceKind, ReactiveTemplateMetadata,
 };
@@ -31,17 +32,16 @@ use crate::compiler_frontend::declaration_syntax::signature_members::{
 use crate::compiler_frontend::declaration_syntax::type_syntax::parsed_ref_to_data_type;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{
+    FilePathSyntax, FileTokens, SourceLocation, Token, TokenKind,
+};
 use crate::compiler_frontend::type_coercion::parse_context::{
     cast_target_context_for_type_id, parse_expectation_for_type_id,
 };
 
-/// Stage-local result for function-signature parsing and return-slot helpers.
-///
-/// WHY: `CompilerDiagnostic` is large; boxing at this boundary avoids
-/// `clippy::result_large_err` while keeping every signature, member, return,
-/// and default-expression helper uniform.
-type SignatureResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// Signature parsing shares the AST error lane because default values materialise temporary
+/// streams from the frozen file-owned path table.
+type SignatureResult<T> = Result<T, ExpressionParseError>;
 
 /// Whether a return slot carries success-channel or error-channel values.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -112,6 +112,7 @@ impl FunctionSignature {
 
         function_signature_from_syntax_with_unresolved_types(
             &signature_syntax,
+            &token_stream.path_syntax,
             &signature_context,
             type_interner,
             string_table,
@@ -161,6 +162,7 @@ impl FunctionSignature {
 ///      to callers without re-parsing the token stream.
 pub(crate) fn function_signature_from_syntax_with_unresolved_types(
     syntax: &FunctionSignatureSyntax,
+    path_syntax: &FilePathSyntax,
     expression_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
@@ -170,6 +172,7 @@ pub(crate) fn function_signature_from_syntax_with_unresolved_types(
     for parameter in &syntax.parameters {
         let mut declaration = signature_member_to_declaration(
             parameter,
+            path_syntax,
             expression_context,
             type_interner,
             string_table,
@@ -206,6 +209,7 @@ pub(crate) fn function_signature_from_syntax_with_unresolved_types(
 
 pub(crate) fn signature_member_to_declaration(
     member: &SignatureMemberSyntax,
+    path_syntax: &FilePathSyntax,
     expression_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
@@ -224,7 +228,9 @@ pub(crate) fn signature_member_to_declaration(
             annotation.type_id.unwrap_or(builtin_type_ids::NONE),
             annotation.diagnostic_type,
         ),
-        Err(diagnostic) if should_fallback_signature_type(&diagnostic, fallback_policy) => {
+        Err(ExpressionParseError::Diagnostic(diagnostic))
+            if should_fallback_signature_type(&diagnostic, fallback_policy) =>
+        {
             // Signature parsing may encounter generic parameters that are not yet
             // resolvable in the current context. Early nominal-member shell parsing
             // may also see capacity constants before constants have been folded.
@@ -251,6 +257,7 @@ pub(crate) fn signature_member_to_declaration(
     } else {
         parse_signature_default_expression(
             member,
+            path_syntax,
             type_id,
             expression_context,
             type_interner,
@@ -319,13 +326,13 @@ fn resolve_signature_type_annotation(
         })
         .with_active_generic_type_context(expression_context.active_generic_type_context());
 
-    resolve_parsed_type_annotation(
+    Ok(resolve_parsed_type_annotation(
         type_annotation,
         location,
         &mut type_resolution_context,
         string_table,
         Some(expression_context),
-    )
+    )?)
 }
 
 fn should_fallback_signature_type(
@@ -351,6 +358,7 @@ fn should_fallback_signature_type(
 /// Parse the default-value expression for a single signature parameter.
 fn parse_signature_default_expression(
     member: &SignatureMemberSyntax,
+    path_syntax: &FilePathSyntax,
     type_id: TypeId,
     expression_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
@@ -362,7 +370,7 @@ fn parse_signature_default_expression(
     let mut expected_type = parse_expectation_for_type_id(type_id, type_interner.environment());
     let mut cast_target_context =
         cast_target_context_for_type_id(type_id, type_interner.environment(), string_table);
-    let mut expression_stream = token_stream_with_eof(&member.default_tokens)?;
+    let mut expression_stream = token_stream_with_eof(&member.default_tokens, path_syntax)?;
 
     let input = ExpressionParseInput::new(
         ExpressionParseResources {
@@ -382,16 +390,17 @@ fn parse_signature_default_expression(
         },
     );
     create_expression_with_trailing_newline_policy(input)
-        .map_err(|error| Box::new(CompilerDiagnostic::from(error)))
 }
 
 /// Wrap a raw token slice in a `FileTokens` stream terminated by EOF.
-fn token_stream_with_eof(tokens: &[Token]) -> SignatureResult<FileTokens> {
+fn token_stream_with_eof(
+    tokens: &[Token],
+    path_syntax: &FilePathSyntax,
+) -> SignatureResult<FileTokens> {
     let Some(first_token) = tokens.first() else {
-        return Err(Box::new(CompilerDiagnostic::unexpected_end_of_file(
-            None,
-            SourceLocation::default(),
-        )));
+        return Err(
+            CompilerDiagnostic::unexpected_end_of_file(None, SourceLocation::default()).into(),
+        );
     };
 
     let mut tokens_with_eof = tokens.to_vec();
@@ -403,7 +412,8 @@ fn token_stream_with_eof(tokens: &[Token]) -> SignatureResult<FileTokens> {
 
     tokens_with_eof.push(Token::new(TokenKind::Eof, eof_location));
 
-    Ok(FileTokens::new(src_path, tokens_with_eof))
+    FileTokens::new_from_slice(src_path, None, None, tokens_with_eof, path_syntax)
+        .map_err(ExpressionParseError::from)
 }
 
 /// Build a `ReturnSlot` from parsed syntax.
@@ -429,7 +439,9 @@ fn return_slot_from_syntax(
 
     let data_type = match resolved {
         Ok(annotation) => annotation.diagnostic_type,
-        Err(diagnostic) if should_fallback_signature_type(&diagnostic, fallback_policy) => {
+        Err(ExpressionParseError::Diagnostic(diagnostic))
+            if should_fallback_signature_type(&diagnostic, fallback_policy) =>
+        {
             // Generic return types may be resolved later once the function's
             // declaration-site generic parameter scope is active.
             parsed_ref_to_data_type(&return_slot.value.type_annotation)

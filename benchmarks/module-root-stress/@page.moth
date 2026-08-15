@@ -1,9 +1,9 @@
-import @core/constants {app_name, version}
-import @widgets/card {Card, render_card}
-import @widgets/badge {render_badge}
-import @util/formatting {format_label}
-import @pages/home {render_home}
-import @pages/about {render_about}
+@core/constants app_name, version
+@widgets/card Card, render_card
+@widgets/badge render_badge
+@util/formatting format_label
+@pages/home render_home
+@pages/about render_about
 
 page_title #= "Module Root Stress"
 

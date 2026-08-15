@@ -1,4 +1,4 @@
-import @sub { PUBLIC_DISPLAY, identity }
+@sub PUBLIC_DISPLAY, identity
 
 Label = |
     text String,

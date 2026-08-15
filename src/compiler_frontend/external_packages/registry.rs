@@ -57,10 +57,10 @@ struct ExternalSymbolReverseIdentity {
     symbol_path: ExternalSymbolPath,
 }
 
-/// Match between an import path and the longest registered external package prefix.
+/// Match between a dependency path and the longest registered external package prefix.
 ///
-/// WHAT: records the package that matched plus how many import-path components belong to it.
-/// WHY: grouped imports, namespace imports, and Stage 0 discovery all need the same
+/// WHAT: records the package that matched plus how many dependency-path components belong to it.
+/// WHY: dependency clauses, namespace bindings, and Stage 0 discovery all need the same
 ///      package-prefix rule before they decide how to handle any remaining symbol components.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ExternalPackagePathMatch {
@@ -72,7 +72,7 @@ pub(crate) struct ExternalPackagePathMatch {
 #[derive(Debug, Default)]
 pub struct ExternalPackageRegistry {
     packages: HashMap<ExternalPackageId, ExternalPackage>,
-    /// Path-to-ID index so package lookup by readable import path still works.
+    /// Path-to-ID index so package lookup by readable dependency path still works.
     package_id_by_path: HashMap<String, ExternalPackageId>,
     functions_by_id: HashMap<ExternalFunctionId, ExternalFunctionDef>,
     types_by_id: HashMap<ExternalTypeId, ExternalTypeDef>,
@@ -96,15 +96,15 @@ pub struct ExternalPackageRegistry {
     /// rejection mutation-free and keeps clone consistency in one place.
     type_reverse_identity_by_id: HashMap<ExternalTypeId, ExternalSymbolReverseIdentity>,
     constant_reverse_identity_by_id: HashMap<ExternalConstantId, ExternalSymbolReverseIdentity>,
-    /// Prelude symbols that are auto-imported into every module.
+    /// Prelude symbols that are implicitly bound into every module.
     /// Bare-name lookup is only valid for the prelude.
     prelude_symbols_by_name: HashMap<&'static str, ExternalSymbolId>,
     /// Prelude namespace aliases that expose an external package surface under a
-    /// bare name without an explicit import.
+    /// bare name without an explicit dependency clause.
     ///
     /// WHAT: maps the local alias name to the target external package path (e.g.
-    ///       `io` -> `@core/io`). The import environment resolves collisions with
-    ///       same-file declarations and explicit imports before injecting the record.
+    ///       `io` -> `@core/io`). The binding environment resolves collisions with
+    ///       same-file declarations and explicit dependencies before injecting the record.
     /// WHY: keeps the prelude namespace model in the registry alongside the
     ///      existing prelude symbol model, so header preparation owns both.
     prelude_namespace_aliases_by_name: HashMap<&'static str, &'static str>,
@@ -513,9 +513,9 @@ impl ExternalPackageRegistry {
     // Prelude
     // ------------------------------------------------------------------
 
-    /// Registers a prelude symbol that is auto-imported into every module.
+    /// Registers a prelude symbol that is implicitly bound into every module.
     // Kept covered by registry tests while the current builtin prelude only exposes namespace
-    // aliases; the import environment still owns both prelude-symbol and prelude-namespace paths.
+    // aliases; the binding environment still owns both prelude-symbol and prelude-namespace paths.
     #[allow(dead_code)]
     pub(crate) fn register_prelude_symbol(
         &mut self,
@@ -539,10 +539,10 @@ impl ExternalPackageRegistry {
     }
 
     /// Registers a prelude namespace alias that exposes an external package under a
-    /// bare name without an explicit import.
+    /// bare name without an explicit dependency clause.
     ///
     /// WHAT: adds `local_name` to every module's visible namespace records, backed by
-    ///       the same recursive external package record as `import @package`.
+    ///       the same recursive external package record as `@package`.
     /// WHY: keeps the registry as the single owner of prelude surface metadata.
     ///
     pub(crate) fn register_prelude_namespace_alias(
@@ -710,7 +710,7 @@ impl ExternalPackageRegistry {
     }
 
     // ------------------------------------------------------------------
-    // Package-scoped resolution (used by import binding)
+    // Package-scoped resolution (used by dependency binding)
     // ------------------------------------------------------------------
 
     /// Resolves a package path to its stable ID.
@@ -881,14 +881,14 @@ impl ExternalPackageRegistry {
         self.package_id_by_path.keys().map(String::as_str)
     }
 
-    /// Finds the longest registered external package prefix for an import path.
+    /// Finds the longest registered external package prefix for a dependency path.
     ///
-    /// WHAT: for an import such as `@core/math/sin`, checks `@core/math/sin`,
+    /// WHAT: for a dependency such as `@core/math/sin`, checks `@core/math/sin`,
     ///      then `@core/math`, then `@core` and returns the first registered package.
-    /// WHY: virtual packages share the same `@` syntax as source imports. Keeping the
-    ///      longest-prefix rule here prevents Stage 0, namespace imports, and grouped
-    ///      imports from reimplementing subtly different package matching.
-    pub(crate) fn longest_package_prefix_for_import(
+    /// WHY: virtual packages share the same `@` syntax as source dependencies. Keeping the
+    ///      longest-prefix rule here prevents Stage 0, namespace bindings, and direct-selection
+    ///      dependencies from reimplementing subtly different package matching.
+    pub(crate) fn longest_package_prefix_for_dependency(
         &self,
         import_path: &InternedPath,
         string_table: &StringTable,
@@ -988,29 +988,29 @@ impl ExternalPackageRegistry {
         self.resolve_package_type_by_path(package_identity.name(), path)
     }
 
-    /// Checks whether an import path should be treated as a virtual package import
-    /// rather than a file-system import.
+    /// Checks whether a dependency path should be treated as a virtual package dependency
+    /// rather than a filesystem dependency.
     ///
-    /// WHAT: tries progressively shorter prefixes of the import path against known packages.
-    /// WHY: file discovery must skip imports that target virtual packages so AST resolution
+    /// WHAT: tries progressively shorter prefixes of the dependency path against known packages.
+    /// WHY: file discovery must skip dependencies that target virtual packages so AST resolution
     ///      can handle them with proper error messages.
-    pub fn is_virtual_package_import(
+    pub fn is_virtual_package_dependency(
         &self,
         import_path: &InternedPath,
         string_table: &StringTable,
     ) -> bool {
-        self.longest_package_prefix_for_import(import_path, string_table)
+        self.longest_package_prefix_for_dependency(import_path, string_table)
             .is_some()
     }
 
-    /// Returns a known optional package path when an import targets a package this builder
+    /// Returns a known optional package path when a dependency targets a package this builder
     /// did not expose.
     ///
     /// WHAT: recognizes compiler-known optional core package prefixes before path resolution falls
-    /// back to filesystem imports.
+    /// back to filesystem dependencies.
     /// WHY: `@core/text` missing from a builder is a package-surface error, not a confusing
     /// missing source file.
-    pub fn unsupported_known_package_import(
+    pub fn unsupported_known_package_dependency(
         &self,
         import_path: &crate::compiler_frontend::symbols::interned_path::InternedPath,
         string_table: &crate::compiler_frontend::symbols::string_interning::StringTable,

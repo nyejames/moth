@@ -1,4 +1,4 @@
-import @./helpers {empty_values}
+@helpers empty_values
 
 numbers {Int} = empty_values()
 

@@ -1,4 +1,4 @@
-import @./helpers as helpers
+@helpers as helpers
 
 value = helpers.identity(42)
 [: [value] ]

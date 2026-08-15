@@ -85,9 +85,11 @@ RELEVANT_DOCS_THIS_SLICE:
 
 RELEVANT_CODE:
 - `src/build_system/create_project_modules/source_tree_index.rs`: current single deterministic entry-root traversal to extend with source-registration candidates
-- `src/build_system/create_project_modules/module_inventory.rs`: current module reachability scheduling and provider-free classify/retry path
-- `src/build_system/create_project_modules/reachable_file_discovery.rs`: current BFS, source cache/loading and module input assembly
-- `src/build_system/create_project_modules/import_scanning.rs`: current first tokenization pass that must be replaced by cached prepared-source structural facts
+- `src/build_system/create_project_modules/module_inventory.rs`: current module reachability scheduling and prepared-source inventory assembly
+- `src/build_system/create_project_modules/source_discovery.rs`: current retained-fact traversal, provider resolution and source-closure discovery
+- `src/build_system/create_project_modules/source_preparation.rs`: current single-pass source tokenization and retained dependency-clause preparation
+- `src/build_system/create_project_modules/prepared_source.rs`: current state-safe source-kind handoff into module preparation
+- `src/build_system/create_project_modules/source_loading.rs`: current source IO and byte-loading owner
 - `src/build_system/create_project_modules/compilation.rs`: canonical module ordering, local identity forks and module-result merging
 - `src/build_system/create_project_modules/frontend_orchestration.rs`: current source attachment, deterministic file-preparation merge and frontend stage ownership
 - `src/build_system/build.rs::InputFile`: current duplicate source-text/path carrier and mutable backend string-table handoff
@@ -223,8 +225,11 @@ fixtures and documentation, not the source/token/diagnostic owners listed below.
 
 Current pressure points:
 
-- Stage 0 import discovery tokenizes Moth files to collect paths, then module file preparation tokenizes and parses them again
-- provider-free classification can scan the same source before per-module reachability scans
+- Stage 0 synthetic discovery retains complete prepared-file output, while directory inputs retain
+  their single lexical token stream for later header preparation; these two state-safe variants
+  still need to converge on the planned build-lifetime `PreparedSource` store
+- temporary discovery identities are rebound into the retained module source table during final
+  aggregation
 - `InputFile` owns `String`, `PathBuf` and source kind, while `SourceFileTable` is rebuilt per module
 - `SourceLocation` owns `InternedPath` plus line/column start and end pairs
 - `InternedPath` owns `Vec<StringId>` and allocates on parent/append/join operations
@@ -253,12 +258,12 @@ This table is normative. Do not create a new subsystem when the listed current o
 | `StringTableForkSource` and `merge_delta_from` | preserve immutable-base forks and deterministic file/module merges; add a consuming frozen lookup form | no globally locked interner and no generic identity framework that obscures ownership |
 | `SourceTreeIndex`, source-package inventories and path resolution | remain the only filesystem discovery owners; extend their existing deterministic inventories to pre-register source identity without eagerly loading every file | a second filesystem traversal or source-discovery policy inside `SourceDatabase` |
 | `SourceFileTable` | absorb into the build-lifetime `SourceDatabase`; assign IDs once in Stage 0 | per-module file tables, fallback path reconstruction and `attach_source_files` |
-| `InputFile`, `ReachableSourceInventory::source_cache` and source-loading slots | replace with pre-registered source slots whose text allocation is populated once and then addressed by `SourceId`; module inputs become ordered `SourceId` sets | duplicate source strings, per-module input copies and another source cache |
+| `InputFile`, `PreparedSourceInput` and source-loading slots | replace with pre-registered source slots whose text allocation is populated once and then addressed by `SourceId`; module inputs become ordered `SourceId` sets | duplicate source strings, per-module input copies and another source cache |
 | `CompilerFrontend` | remain the explicit mutable module compiler owner; borrow build-owned source registration, style directives, path resolver and external registries while owning only module-local mutable string/path/diagnostic state | a parallel all-purpose `CompilationContextBuilder` and per-module clones of immutable build services |
 | `FrontendModuleBuildContext` | continue to own one module compilation's orchestration inputs and consume already-prepared source IDs | a generic worker/task framework |
 | `TokenStats`, `HeaderStats`, `FrontendArenaCapacityEstimate` | extend only with the layout metrics explicitly required by Phases 0, 3 and 7 | another token-statistics or capacity subsystem |
 | `FrontendCounter` and `xtask` benchmarks | add layout counters and reports here | ad hoc timers, counters or standalone benchmark runners in data modules |
-| `FileFrontendPrepareOutput` | evolve into one cached `PreparedSource` result per `SourceId`, consumed first by structural reachability and later by module aggregation | retokenization for import scanning and token stores copied into every header or declaration |
+| `FileFrontendPrepareOutput` | evolve into one cached `PreparedSource` result per `SourceId`, consumed first by structural reachability and later by module aggregation | retokenization for dependency scanning and token stores copied into every header or declaration |
 | `Header` | keep semantic shell facts but replace `tokens: FileTokens` with `TokenRange`; derive source from IDs/spans | repeated `source_file`, cursor state and token-vector ownership |
 | token classification matches | replace with one `TokenDescriptor` table generated/validated from `TokenTag` | separate spelling, precedence, continuation and diagnostic-name matches |
 | `numeric_text` | retain lexical/semantic numeric parsing; only move retained token data into a typed store | a second numeric parser in token storage |
@@ -495,7 +500,7 @@ keep the active slice's exact affected symbols in the context capsule.
 Inventory:
 
 - [ ] every `SourceLocation`, `CharPosition`, `FileId`, `SourceFileTable` and durable location field
-- [ ] every `InputFile` source-text/path ownership, source cache, source reread and import-scan retokenization
+- [ ] every `InputFile` source-text/path ownership, source cache, source reread and dependency-scan retokenization
 - [ ] every `InternedPath` field, clone, append, parent, join and remap path
 - [ ] every `Token`, `TokenKind`, `PathTokenItem`, `FileTokens`, token clone and retained token vector
 - [ ] every diagnostic kind, payload/reason/label-message variant, renderer, stable external code and `StringId`/string field containing compiler-generated prose rather than authored facts
@@ -513,7 +518,7 @@ Inventory:
 - [ ] include exact boundary buckets for every candidate `LocalSpan` split
 - [ ] add `benchmarks/data-layout-cases.txt` plus an alternate case-list option to the existing frontend benchmark engine and support an explicitly expected diagnosed outcome
 - [ ] reuse a hardened canonical input when it already exercises the required failure workload; otherwise add a benchmark-only diagnosed input under `benchmarks/` and keep correctness assertions in `tests/cases/`
-- [ ] record source, path/import, token, template, type/generic, warning-heavy and malformed-source workloads
+- [ ] record source, path/dependency, token, template, type/generic, warning-heavy and malformed-source workloads
 - [ ] ensure instrumentation is feature-gated or otherwise zero-cost in normal builds
 
 ### Slice 0E — Establish correctness and performance baseline
@@ -589,11 +594,14 @@ green before later layout work proceeds.
 - [ ] make tokenization emit `LocalSpan` and source-scoped diagnostics emit `SourceSpan`
 - [ ] replace transitional `FileTokens::file_id` and every header/source identity field with final `SourceId`; any remaining path fields are display/migration data only and disappear in Phase 3
 - [ ] finalize line starts and immutable token preparation at file-preparation completion, but keep the source-local extended-span builder mutable until the final span-producing stage
-- [ ] until Phase 3 deletes the duplicate import-scanner path, make it borrow the registered source snapshot and final `SourceId`, return structural edges only and never reread, clone or own source text
+- [x] preserve the dependency-clause plan's deletion of the duplicate scanner: Stage 0 consumes
+  retained prepared facts without rereading, cloning or owning a second source snapshot
+- [ ] move the current `source_preparation.rs` and `PreparedSourceInput` handoff onto final
+  `SourceId` records without adding another structural scan
 - [ ] make file workers return `SourcePreparationDelta` values keyed by final `SourceId`; each delta owns its `DiagnosticBag`, token/header preparation and span builder, and moves into module/build ownership by existing chunk/file order without shared mutation or SourceId remapping
 - [ ] make any diagnostic produced before that merge retain only exact final SourceId plus local span data owned by the same delta
 - [ ] migrate path-item and alias locations to source-local spans
-- [ ] migrate headers, imports, declaration shells, source contracts, fragments and source-kind adapters
+- [ ] migrate headers, dependency clauses, declaration shells, source contracts, fragments and source-kind adapters
 - [ ] remove source-location string-ID remapping from file-preparation outputs
 - [ ] preserve stable diagnostic codes, source ranges and ordering
 - [ ] add one owning-module test-only `TestSourceContext` that creates a source record/span builder for focused Rust tests; migrate repeated ad hoc path/location constructors to it without exposing a production convenience API
@@ -604,7 +612,7 @@ Each checked batch below is an independent accepted agent slice. Split a batch b
 before coding when it cannot reach focused green validation in one context. Do not accept a commit with
 a public boundary supporting both location models.
 
-- [ ] **1E1 — headers and ordering:** header/import/declaration-shell records, module symbols, dependency edges and sorted headers
+- [ ] **1E1 — headers and ordering:** header/dependency/declaration-shell records, module symbols, dependency edges and sorted headers
 - [ ] **1E2 — core AST:** declarations, types, expressions, statements, calls, assignments, generic inference/evidence and generated-function requests
 - [ ] **1E3 — templates:** template/TIR nodes, views, overlays, slots, control flow, formatting and runtime handoff metadata
 - [ ] **1E4 — backend-facing frontend:** HIR nodes, locals, places, statements, terminators, validators, borrow facts and target-contract validation
@@ -624,7 +632,7 @@ a public boundary supporting both location models.
 
 ### Slice group 1G — Remove immediate diagnostic bloat and recover green CI
 
-- [ ] **1G1 — remove duplicated source facts:** make the primary span canonical, keep only secondary labels in the transitional vector and remove payload/reason spans already represented by labels; cover generic inference, borrow conflicts, duplicate/shadow/import sites and assignment declarations first
+- [ ] **1G1 — remove duplicated source facts:** make the primary span canonical, keep only secondary labels in the transitional vector and remove payload/reason spans already represented by labels; cover generic inference, borrow conflicts, duplicate/shadow/dependency sites and assignment declarations first
 - [ ] **1G2 — remove infrastructure widening:** stop converting `CompilerError` into `DiagnosticPayload::InfrastructureError`, carry the legacy outer failure separately until Phase 5 and delete the infrastructure payload plus its cloned `String`/`HashMap`
 - [ ] **1G3 — enforce a non-throwaway size fix:** measure the transitional diagnostic; do not build a temporary old-payload cold-store system; when simplification is insufficient, pull forward only final schema/projection components retained by later phases
 - [ ] **1G4 — token projection gate:** if the predecessor still exceeds 128 bytes, pull forward only final `TokenTag`, `TokenDescriptor` and 8-byte `DiagnosticToken` foundations from Phase 3; do not create another wide or temporary diagnostic-token enum
@@ -698,7 +706,8 @@ scheduling system.
 Each checked batch is an independent accepted slice. Delete old fields and conversion helpers in the
 same batch.
 
-- [ ] **2C1 — tokenizer and imports:** tokenized paths, aliases, path groups, import shells and path diagnostics
+- [ ] **2C1 — tokenizer and dependencies:** tokenized path rows, clause-owned dependency aliases,
+  dependency-shell provider paths and path diagnostics
 - [ ] **2C2 — headers and graph facts:** header identities, dependency collections, exports, module symbols, path resolution and source/package identities
 - [ ] **2C3 — semantic types and interfaces:** parsed type paths, nominal/type lookup maps, traits, generic identities and public-surface facts; keep stable semantic origin IDs as the cross-package authority and remap or context-own every display `PathId` at interface binding
 - [ ] **2C4 — AST/TIR/HIR metadata:** declarations, scopes, constants, template metadata, HIR/link facts and build metadata
@@ -722,7 +731,7 @@ Complete the common phase close, plus:
 - [ ] audit no path identity is reconstructed from rendered text
 - [ ] audit no lock or `Arc` exists per path
 - [ ] review path APIs for explicit context and no hidden allocation
-- [ ] run path/import/module/type/diagnostic tests and serial/parallel determinism tests
+- [ ] run path/dependency/module/type/diagnostic tests and serial/parallel determinism tests
 - [ ] record path bytes, allocation/remap counts and timing
 
 ### Phase 2 exit criteria
@@ -767,7 +776,8 @@ Evaluate only these production candidates:
 ### Slice 3C — Add typed source-local cold stores
 
 - [ ] move numeric literal retained data into a numeric store while reusing `numeric_text` parsing
-- [ ] move path groups, items and aliases into typed path stores using `PathId` and `LocalSpan`
+- [ ] move canonical path rows into typed path stores using `PathId` and `LocalSpan`; keep
+  dependency aliases under their retained clause owner and migrate only their locations
 - [ ] encode symbol, string, bool and char payloads directly when they fit the token word
 - [ ] use checked `u32` indexes and typed capacity failures
 - [ ] add a direct single-path fast form only if measured aggregate evidence justifies it
@@ -785,8 +795,11 @@ Evaluate only these production candidates:
 ### Slice group 3E — Make prepared syntax source-owned
 
 - [ ] **3E1 — prepared-source store:** evolve `FileFrontendPrepareOutput` into one move-owned `PreparedSource` slot per selected `SourceId`; it owns the source token store and syntax preparation exactly once; Stage 0 may borrow structural facts, then the unique owning module/direct service takes the record without per-source `Arc` or cloning
-- [ ] **3E2 — structural reachability reuse:** make prepared import shells expose final local-source `SourceId` edges plus typed provider request records; Stage 0 traverses those facts without reading token stores or rendered path text; keep provider mutation/resolution on its serial owner after workers return structural references
-- [ ] **3E3 — remove duplicate preparation:** make module aggregation consume the same `PreparedSource` records; remove the provider-free classify/retry scan and the tokenizing import-scanner path rather than retaining a second tokenizer/parser/cache
+- [ ] **3E2 — structural reachability reuse:** make prepared dependency shells expose final local-source `SourceId` edges plus typed provider request records; Stage 0 traverses those facts without reading token stores or rendered path text; keep provider mutation/resolution on its serial owner after workers return structural references
+- [ ] **3E3 — consolidate retained preparation:** preserve the current exactly-once lexical and
+  preparation paths while moving both directory-token and synthetic-prepared variants into the
+  same build-lifetime `PreparedSource` store; module aggregation must consume those records without
+  adding another tokenizer, parser or cache
 - [ ] **3E4 — contiguous retained syntax:** add half-open `TokenRange { source, start, end }`, replace contiguous `Header::tokens` bodies with ranges, remove repeated `Header::source_file` and change function/template body capture to record boundaries instead of cloning tokens
 - [ ] **3E5 — segmented start-body syntax:** add `TokenSequenceId` into a source-local range-list store whose entries are 8-byte `{ start, end }` token-index pairs and whose owner stores `SourceId` once; expose one `TokenSequenceView` so contiguous and segmented bodies use the same `TokenCursor`; never add a copied start stream or parallel parser path
 - [ ] **3E6 — source-kind adapters:** represent non-tokenized adapter payloads directly, preserve plain Markdown's no-token path and keep declaration-shell parsing single-owner through token/sequence views
@@ -795,7 +808,9 @@ Evaluate only these production candidates:
 
 Each checked batch is independently accepted and must remove the old token API from its owner.
 
-- [ ] **3F1 — Stage 0 and header cursor:** structural reachability, provider-reference collection, header splitting, imports, declaration dispatch, dependency scans and source-kind preparation
+- [ ] **3F1 — Stage 0 and header cursor:** structural reachability, provider-reference collection,
+  header splitting, dependency clauses, declaration dispatch, retained dependency-fact reads and
+  source-kind preparation
 - [ ] **3F2 — declaration syntax:** signatures, declarations, types, structs, choices, traits and generic parameter parsers
 - [ ] **3F3 — AST core:** expression, statement, call, field, match, loop and assignment parsers
 - [ ] **3F4 — template parser:** template heads, TIR emission, slots, control flow and formatter-facing token reads
@@ -807,7 +822,7 @@ Each checked batch is independently accepted and must remove the old token API f
 - [ ] implement exact 8-byte `DiagnosticToken`
 - [ ] reuse `TokenTag` and descriptor spelling
 - [ ] preserve only the one ID/immediate needed for useful diagnostics
-- [ ] collapse grouped paths/numeric details when full retained data is unnecessary
+- [ ] collapse detailed path and numeric payloads when full retained data is unnecessary
 - [ ] prove diagnostics render after source token cold stores are dropped
 
 ### Slice 3H — Delete the old token architecture
@@ -816,7 +831,11 @@ Each checked batch is independently accepted and must remove the old token API f
 - [ ] delete clone-based `current_token()` and body-capture helpers
 - [ ] delete duplicate token spelling/classification matches
 - [ ] delete token string/path remapping that the new stores no longer require
-- [ ] delete the tokenizing `import_scanning` path, provider-free classification/retry scans, `ReachableSourceInventory::source_cache` and any second preparation path superseded by cached `PreparedSource` records
+- [x] delete the former tokenizing dependency-scanner path, provider-free classification/retry
+  scans and `ReachableSourceInventory::source_cache`; the dependency-clause plan replaced them with
+  `source_preparation.rs`, retained prepared facts and state-safe `PreparedSourceInput` variants
+- [ ] replace the transitional `PreparedSourceInput` variants only when the build-lifetime
+  `PreparedSource` store owns their data without reintroducing tokenization or preparation
 - [ ] update module docs, codebase index and style rules
 
 ### Phase 3 — Audit / style-guide review / validation
@@ -927,7 +946,7 @@ simplify the semantic facts and place related source sites in secondary labels.
 
 - [ ] **4G1 — token/lexical:** expected/unexpected tokens, delimiters, strings, numbers, characters, spacing and paths
 - [ ] **4G2 — template syntax:** tokenizer, structure, directive, slot and template-control diagnostics
-- [ ] **4G3 — imports/config/project:** imports, source kinds, packages, config, Stage 0 and project structure
+- [ ] **4G3 — dependencies/config/project:** dependencies, source kinds, packages, config, Stage 0 and project structure
 - [ ] **4G4 — names/declarations:** names, declarations, assignment, shadowing, warnings and deferred features
 - [ ] **4G5 — calls/data operations:** calls, returns, casts, fields, collections, maps and copy/access targets
 - [ ] **4G6 — choices/control flow:** choices, matches, loops, statements, fallible handling and non-token template semantics

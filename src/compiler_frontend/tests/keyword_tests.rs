@@ -8,7 +8,6 @@ use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 #[test]
 fn keyword_policy_maps_exact_tokenizer_spellings() {
     let exact_keywords = [
-        ("import", TokenKind::Import),
         ("export", TokenKind::Export),
         ("this", TokenKind::This),
         ("This", TokenKind::TraitThis),
@@ -29,9 +28,11 @@ fn keyword_policy_maps_exact_tokenizer_spellings() {
 
 #[test]
 fn keyword_policy_keeps_case_sensitive_non_keywords_as_identifiers() {
+    assert_eq!(keyword_token_kind("import"), None);
     assert_eq!(keyword_token_kind("Import"), None);
     assert_eq!(keyword_token_kind("Copy"), None);
 
+    assert!(is_valid_identifier("import"));
     assert!(is_valid_identifier("Import"));
     assert!(is_valid_identifier("_copy"));
 }
@@ -66,7 +67,6 @@ fn identifier_policy_matches_tokenizer_identifier_characters() {
 #[test]
 fn source_word_classifier_maps_keyword_words() {
     let keywords = [
-        ("import", TokenKind::Import),
         ("export", TokenKind::Export),
         ("if", TokenKind::If),
         ("return", TokenKind::Return),
@@ -100,6 +100,13 @@ fn source_word_classifier_maps_keyword_words() {
         assert_eq!(classified.token_kind, expected_kind);
         assert_eq!(keyword_token_kind(source), Some(expected_kind));
     }
+}
+
+#[test]
+fn import_is_an_ordinary_identifier() {
+    assert_eq!(classify_source_word("import"), None);
+    assert_eq!(keyword_shadow_match("import"), None);
+    assert_eq!(keyword_shadow_match("IMPORT"), None);
 }
 
 #[test]

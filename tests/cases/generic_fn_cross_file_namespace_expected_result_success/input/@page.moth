@@ -1,4 +1,4 @@
-import @./helpers as helpers
+@helpers as helpers
 
 values {Int} = helpers.empty_values()
 [: [values.length()] ]

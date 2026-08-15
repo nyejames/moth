@@ -1,3 +1,3 @@
-import @utils/person { Person as Human }
+@utils/person Person as Human
 
 p ~= Person()

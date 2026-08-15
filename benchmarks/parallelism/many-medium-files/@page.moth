@@ -1,10 +1,10 @@
-import @sections/alpha { render_alpha }
-import @sections/beta { render_beta }
-import @sections/gamma { render_gamma }
-import @sections/delta { render_delta }
-import @sections/epsilon { render_epsilon }
-import @sections/zeta { render_zeta }
-import @sections/eta { render_eta }
+@sections/alpha render_alpha
+@sections/beta render_beta
+@sections/gamma render_gamma
+@sections/delta render_delta
+@sections/epsilon render_epsilon
+@sections/zeta render_zeta
+@sections/eta render_eta
 
 [:
     <main>

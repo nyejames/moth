@@ -1,4 +1,4 @@
-import @core/time
+@core/time
 
 -- Catch invalid ISO string and recover to a fallback
 ts = time.timestamp_from_iso_string("not-a-date") catch:

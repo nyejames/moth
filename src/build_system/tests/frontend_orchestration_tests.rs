@@ -13,8 +13,9 @@ use crate::compiler_frontend::compiler_errors::SourceLocation;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticPayload};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    FileFrontendPrepareError, HeaderKind, HeaderParseOptions, PreparedHeaderSyntax,
-    bind_module_headers, prepare_header_syntax,
+    FileFrontendPrepareError, FileFrontendPrepareOutput, HeaderKind, HeaderParseOptions,
+    PreparedHeaderSyntax, bind_module_headers, parse_file_headers_with_table,
+    prepare_header_syntax,
 };
 use crate::compiler_frontend::paths::module_roots::{ModuleRootRecord, ModuleRootTable};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
@@ -25,8 +26,9 @@ use crate::compiler_frontend::semantic_identity::{
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::identity::SourceFileTable;
+use crate::compiler_frontend::symbols::identity::{FileId, SourceFileTable};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind, TokenizerEntryMode};
 use crate::compiler_frontend::{
     FrontendBuildProfile, FrontendFilePrepareContext, FrontendFilePrepareInput,
@@ -34,7 +36,7 @@ use crate::compiler_frontend::{
 };
 use crate::projects::settings::Config;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 fn moth_prepared_input(
@@ -274,13 +276,27 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
             .merge_delta_from(&local_string_table, base_len);
         match result {
             Ok(mut output) => {
-                output.remap_string_ids(&remap);
+                output
+                    .remap_string_ids(&remap)
+                    .expect("chunk-local output should remap into the module table");
+                output
+                    .freeze_path_syntax(&frontend.string_table)
+                    .expect("remapped output should pass the prepared-file invariant gate");
                 Ok(output)
             }
-            Err(mut error) => {
+            Err(
+                crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareFailure::Diagnosed(
+                    mut error,
+                ),
+            ) => {
                 error.remap_string_ids(&remap);
                 Err(error)
             }
+            Err(
+                crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareFailure::Infrastructure(
+                    error,
+                ),
+            ) => panic!("test preparation encountered infrastructure failure: {error:?}"),
         }
     };
 
@@ -313,7 +329,7 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
         prepared_syntax,
         &frontend.external_package_registry,
         &ExternalImportResolutionTable::default(),
-        &crate::compiler_frontend::public_interface::SourceProviderImportSet::default(),
+        &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
         options.project_path_resolver.as_ref(),
         &mut frontend.string_table,
     )
@@ -459,7 +475,7 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
     .expect("project path resolver should build");
 
     // Phase 1: preparation is provider-independent. The preparation context carries no external
-    // package registry, import resolution table or builder runtime packages — only style
+    // package registry, dependency resolution table or builder runtime packages — only style
     // directives and the project path resolver — so it can run before any provider interface
     // exists.
     let preparation_context = super::ModulePreparationContext {
@@ -516,15 +532,15 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
     // `FrontendModuleBuildContext` owns the provider interfaces, binds the retained
     // `PreparedHeaderSyntax`, then resolves dependencies, builds AST, lowers HIR and runs borrow
     // validation. It receives no `PreparedSourceInput`, source text or tokens.
-    let source_provider_imports = Default::default();
+    let source_provider_dependencies = Default::default();
     let compile_context = super::FrontendModuleBuildContext {
         config: &Config::new(temp_dir.path().to_path_buf()),
         build_profile: FrontendBuildProfile::Dev,
         project_path_resolver: Some(project_path_resolver),
         style_directives: &style_directives,
         external_packages: Arc::clone(&external_packages),
-        external_import_resolution_table: &resolution_table,
-        source_provider_imports: &source_provider_imports,
+        external_dependency_resolution_table: &resolution_table,
+        source_provider_dependencies: &source_provider_dependencies,
         source_provider_materialisations: &super::SourceProviderMaterialisationSet::default(),
         builder_runtime_packages: &[],
     };
@@ -671,15 +687,15 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
 
     let external_packages = Arc::new(ExternalPackageRegistry::new());
     let resolution_table = ExternalImportResolutionTable::default();
-    let source_provider_imports = Default::default();
+    let source_provider_dependencies = Default::default();
     let compile_context = super::FrontendModuleBuildContext {
         config: &Config::new(temp_dir.path().to_path_buf()),
         build_profile: FrontendBuildProfile::Dev,
         project_path_resolver: Some(project_path_resolver),
         style_directives: &style_directives,
         external_packages,
-        external_import_resolution_table: &resolution_table,
-        source_provider_imports: &source_provider_imports,
+        external_dependency_resolution_table: &resolution_table,
+        source_provider_dependencies: &source_provider_dependencies,
         source_provider_materialisations: &super::SourceProviderMaterialisationSet::default(),
         builder_runtime_packages: &[],
     };
@@ -1318,13 +1334,52 @@ fn chunked_file_preparation_preserves_warning_source_order() {
 fn dummy_prepared_file_result(file_index: usize) -> super::PreparedFileResult {
     super::PreparedFileResult {
         file_index,
-        result: Err(FileFrontendPrepareError {
-            warnings: Vec::new(),
-            diagnostic: Box::new(CompilerDiagnostic::unreachable_match_arm(
-                SourceLocation::default(),
-            )),
-        }),
+        string_domain: super::PreparedFileStringDomain::ChunkLocal,
+        result: Err(
+            crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareFailure::Diagnosed(
+                FileFrontendPrepareError {
+                    warnings: Vec::new(),
+                    diagnostic: Box::new(CompilerDiagnostic::unreachable_match_arm(
+                        SourceLocation::default(),
+                    )),
+                },
+            ),
+        ),
     }
+}
+
+fn parsed_prepared_output(
+    source_name: &str,
+    source_code: &str,
+    string_table: &mut StringTable,
+) -> FileFrontendPrepareOutput {
+    let source_path = PathBuf::from(source_name);
+    let source_identity =
+        crate::compiler_frontend::symbols::interned_path::InternedPath::try_from_filesystem_path(
+            &source_path,
+            string_table,
+        )
+        .expect("test source path should be UTF-8");
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut tokens = tokenize(
+        source_code,
+        &source_identity,
+        TokenizerEntryMode::SourceFile,
+        &style_directives,
+        string_table,
+        Some(FileId(0)),
+    )
+    .expect("test source should tokenize");
+
+    parse_file_headers_with_table(
+        &mut tokens,
+        Path::new(source_name),
+        &HeaderParseOptions::default(),
+        string_table,
+        0,
+        0,
+    )
+    .expect("test source should prepare")
 }
 
 /// Build a chunk with the given file range and one result per supplied file index.
@@ -1437,6 +1492,109 @@ fn merge_rejects_reversed_chunk_range() {
 }
 
 #[test]
+fn merge_skips_frozen_already_global_output_when_later_chunk_remap_is_non_identity() {
+    #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
+    use crate::compiler_frontend::instrumentation::{
+        capture_frontend_counters_for_test, log_frontend_counters, reset_frontend_counters,
+    };
+    #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
+    use crate::timing::start_benchmark_collection;
+
+    #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
+    let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
+    let _counter_capture = capture_frontend_counters_for_test();
+    #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
+    reset_frontend_counters();
+    #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
+    let timing_session = start_benchmark_collection(true).expect("timing session should start");
+
+    let mut string_table = StringTable::new();
+    let mut synthetic_output = parsed_prepared_output(
+        "synthetic.moth",
+        "io.line([: [@docs/synthetic.md]])\n",
+        &mut string_table,
+    );
+    synthetic_output
+        .freeze_path_syntax(&string_table)
+        .expect("synthetic output should freeze before chunk aggregation");
+
+    // Parallel chunks fork from one base. Merging the first chunk makes the second chunk's
+    // local string ID remap non-identity, exactly like a retained synthetic output sharing a
+    // chunk with a later prepared source.
+    let fork_source = string_table.fork_source();
+    let base_len = fork_source.base_len();
+    let (mut first_local_table, _) = fork_source.fork_for_module().into_parts();
+    let (mut second_local_table, _) = fork_source.fork_for_module().into_parts();
+    let first_output = parsed_prepared_output("first.moth", "", &mut first_local_table);
+    let second_output = parsed_prepared_output("second.moth", "", &mut second_local_table);
+
+    let first_chunk = super::FilePreparationChunk {
+        chunk_index: 0,
+        file_range: 0..1,
+        local_string_table: first_local_table,
+        results: vec![super::PreparedFileResult {
+            file_index: 0,
+            string_domain: super::PreparedFileStringDomain::ChunkLocal,
+            result: Ok(first_output),
+        }],
+    };
+    let second_chunk = super::FilePreparationChunk {
+        chunk_index: 1,
+        file_range: 1..3,
+        local_string_table: second_local_table,
+        results: vec![
+            super::PreparedFileResult {
+                file_index: 1,
+                string_domain: super::PreparedFileStringDomain::AlreadyGlobal,
+                result: Ok(synthetic_output),
+            },
+            super::PreparedFileResult {
+                file_index: 2,
+                string_domain: super::PreparedFileStringDomain::ChunkLocal,
+                result: Ok(second_output),
+            },
+        ],
+    };
+
+    let (headers, warnings) = super::ModulePreparationContext::merge_file_preparation_chunks(
+        &mut string_table,
+        vec![first_chunk, second_chunk],
+        3,
+        base_len,
+    )
+    .expect("already-global output must bypass the second non-identity payload remap");
+
+    assert_eq!(headers.headers.len(), 3);
+    assert!(warnings.is_empty());
+
+    #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
+    {
+        log_frontend_counters();
+        let observations = timing_session.finish();
+        let counter_value = |name: &str| {
+            observations
+                .counters
+                .iter()
+                .find(|counter| counter.name == name)
+                .map(|counter| counter.value)
+                .unwrap_or(-1.0)
+        };
+
+        assert_eq!(
+            counter_value("already_global_prepared_output_remap_skip_count"),
+            1.0
+        );
+        assert_eq!(counter_value("file_prepare_output_remap_calls"), 1.0);
+        assert_eq!(
+            counter_value("prepared_file_invariant_validation_count"),
+            3.0,
+            "the synthetic output should validate once before aggregation and each of the two chunk-local outputs once during merge"
+        );
+    }
+}
+
+#[test]
 fn resolve_and_validate_active_root_rejects_mismatched_expected_origin() {
     // The active root maps to stable origin A in the source-origin table, but the expected
     // active origin passed by the caller is distinct origin B. Preparation must reject this
@@ -1508,6 +1666,60 @@ fn resolve_and_validate_active_root_rejects_mismatched_expected_origin() {
         }
         _ => unreachable!("already matched InfrastructureError"),
     }
+}
+
+#[cfg(all(feature = "timers", feature = "benchmark_counters"))]
+#[test]
+fn serial_chunk_local_preparation_counts_each_selected_source_once() {
+    use crate::compiler_frontend::instrumentation::{
+        capture_frontend_counters_for_test, log_frontend_counters, reset_frontend_counters,
+    };
+    use crate::timing::start_benchmark_collection;
+
+    let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let _counter_capture = capture_frontend_counters_for_test();
+
+    reset_frontend_counters();
+    let timing_session = start_benchmark_collection(true).expect("timing session should start");
+
+    let file_sources = vec![
+        ("a.moth", "alpha #= 1\n"),
+        ("b.moth", "beta #= 2\n"),
+        ("c.moth", "gamma #= 3\n"),
+    ];
+    let mut fixture = frontend_preparation_fixture(&file_sources);
+    let selected_source_count = fixture.input_files.len() as f64;
+    let source_byte_count = source_byte_count(&fixture.input_files);
+    let input_files = std::mem::take(&mut fixture.input_files);
+
+    let preparation_context = super::ModulePreparationContext {
+        style_directives: &fixture.frontend.style_directives,
+        project_path_resolver: fixture.frontend.project_path_resolver.clone(),
+    };
+    preparation_context
+        .prepare_module_files(
+            &mut fixture.frontend.string_table,
+            &fixture.frontend.source_files,
+            input_files,
+            &fixture.entry_file_path,
+            ModuleRootRole::Normal,
+            source_byte_count,
+        )
+        .expect("serial preparation should succeed");
+
+    log_frontend_counters();
+    let observations = timing_session.finish();
+
+    assert_counter_value(
+        &observations.counters,
+        "file_preparation_pass_count",
+        selected_source_count,
+    );
+    assert_counter_value(
+        &observations.counters,
+        "prepared_file_count",
+        selected_source_count,
+    );
 }
 
 #[cfg(all(feature = "timers", feature = "benchmark_counters"))]

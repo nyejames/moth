@@ -1,42 +1,24 @@
-import @struct-declarations {
-    content as struct_declarations,
-}
+@struct-declarations content as struct_declarations
 
-import @struct-declarations-basic {
-    content as struct_declarations_basic,
-}
+@struct-declarations-basic content as struct_declarations_basic
 
-import @construction-and-fields {
-    content as construction_and_fields,
-}
+@construction-and-fields content as construction_and_fields
 
-import @construction-and-fields-basic {
-    content as construction_and_fields_basic,
-}
+@construction-and-fields-basic content as construction_and_fields_basic
 
-import @receiver-methods {
-    content as receiver_methods,
-}
+@receiver-methods content as receiver_methods
 
-import @receiver-methods-basic {
-    content as receiver_methods_basic,
-}
+@receiver-methods-basic content as receiver_methods_basic
 
-import @mutable-receivers {
-    content as mutable_receivers,
-}
+@mutable-receivers content as mutable_receivers
 
-import @mutable-receivers-basic {
-    content as mutable_receivers_basic,
-}
+@mutable-receivers-basic content as mutable_receivers_basic
 
-import @styles {
-    navbar,
+@styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager,
-}
+    doc_pager
 
 page_title #= "Structs"
 page_description #= "Nominal structs, construction, fields and receiver methods in Moth."

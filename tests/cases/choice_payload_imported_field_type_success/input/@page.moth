@@ -1,4 +1,4 @@
-import @types { Label }
+@types Label
 
 Response :: Err | message Label |, Success;
 

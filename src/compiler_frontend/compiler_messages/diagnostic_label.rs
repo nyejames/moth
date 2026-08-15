@@ -6,6 +6,7 @@
 
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -41,6 +42,10 @@ impl DiagnosticLabel {
         if let Some(message) = &mut self.message {
             message.remap_string_ids(remap);
         }
+    }
+
+    pub(crate) fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
+        self.location.rebind_source_identity(logical_path);
     }
 }
 

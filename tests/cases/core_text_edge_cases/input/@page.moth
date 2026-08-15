@@ -1,5 +1,5 @@
-import @core/text {length, is_empty, contains, starts_with, ends_with}
-import @core/text
+@core/text length, is_empty, contains, starts_with, ends_with
+@core/text
 
 len_empty = length("")
 len_ascii = length("abc")

@@ -1,4 +1,4 @@
-import @core/time { Duration, duration_from_seconds }
+@core/time Duration, duration_from_seconds
 
 DURATION_LABEL must:
     label |This| -> String

@@ -1,50 +1,28 @@
-import @bindings {
-    content as bindings,
-}
+@bindings content as bindings
 
-import @bindings-basic {
-    content as bindings_basic,
-}
+@bindings-basic content as bindings_basic
 
-import @mutable-bindings {
-    content as mutable_bindings,
-}
+@mutable-bindings content as mutable_bindings
 
-import @mutable-bindings-basic {
-    content as mutable_bindings_basic,
-}
+@mutable-bindings-basic content as mutable_bindings_basic
 
-import @shared-access {
-    content as shared_access,
-}
+@shared-access content as shared_access
 
-import @shared-access-basic {
-    content as shared_access_basic,
-}
+@shared-access-basic content as shared_access_basic
 
-import @explicit-copies {
-    content as explicit_copies,
-}
+@explicit-copies content as explicit_copies
 
-import @explicit-copies-basic {
-    content as explicit_copies_basic,
-}
+@explicit-copies-basic content as explicit_copies_basic
 
-import @shadowing {
-    content as shadowing,
-}
+@shadowing content as shadowing
 
-import @shadowing-basic {
-    content as shadowing_basic,
-}
+@shadowing-basic content as shadowing_basic
 
-import @styles {
-    navbar,
+@styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager,
-}
+    doc_pager
 
 page_title #= "Values and bindings"
 page_description #= "Bindings, mutability, shared access, explicit copies and shadowing in Moth."

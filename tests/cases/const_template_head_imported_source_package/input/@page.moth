@@ -1,4 +1,4 @@
-import @html {table}
+@html table
 
 styled_table #= [table, $html:
     <tr><td>[$slot]</td></tr>

@@ -1,4 +1,4 @@
-import @web/canvas
+@web/canvas
 
 run |id String| -> String, Error!:
     canvas_ref ~= canvas.get_canvas(id)!

@@ -49,15 +49,15 @@ Placement and cardinality:
 
 Block contents:
 - section records only
-- no imports, aliases, helper constants, support types or `#Import` declarations inside the block
+- no dependency clauses, aliases, helper constants, support types or `#Import` declarations inside the block
 - these live outside the block in the normal root file
 
 Visibility and folding:
 - the block uses the root file's ordinary compile-time visibility
-- it may reference imported constants, `@project`, same-file constants declared before the block, resolved source `#Import` constants, foldable local const-record types and selected-builder compile-time values through normal module imports
+- it may reference dependency-bound constants, `@project`, same-file constants declared before the block, resolved source `#Import` constants, foldable local const-record types and selected-builder compile-time values through normal module dependency clauses
 - same-file forward references remain invalid
 - header syntax records local dependencies
-- interface binding resolves imports normally
+- interface binding resolves dependency clauses normally
 - AST folds the block through the ordinary module semantic path
 
 What the block does not create:
@@ -73,7 +73,7 @@ Schema and activity:
 - the block is optional, and its active artefact-builder section is also optional so tooling-only metadata remains possible
 - every selected normal module captures, folds and validates its own block once as part of canonical module compilation
 - resolved entry metadata is stored in that module's canonical `ModuleCompilerMetadata`
-- importers never apply another module's entry metadata
+- consumers never apply another module's entry metadata
 - entry assembly activates entry metadata only for the selected module
 - only active artefact-builder settings contribute entry activity
 - entry metadata contributes to the root-activity fingerprint
@@ -119,7 +119,7 @@ Runtime title:
 
 - no isolated config compilation unit for entry blocks
 - no separate parser for entry config
-- no imports, helper declarations or `#Import` inside the block
+- no dependency clauses, helper declarations or `#Import` inside the block
 - no `project` section inside the block
 - no shared project or entry field scope
 - no multiple blocks per root
@@ -130,8 +130,8 @@ Runtime title:
 
 ## Risks and blockers
 
-- the block uses ordinary module visibility, so imports and contract declarations must live outside the block in the normal root file
-- current HTML pages may derive metadata from surrounding imports that need to move to allowed imports outside the block
+- the block uses ordinary module visibility, so dependency clauses and contract declarations must live outside the block in the normal root file
+- current HTML pages may derive metadata from surrounding dependency clauses that need to move to allowed clauses outside the block
 - `io.set_title` is host-capability-sensitive and must not assume every JavaScript target has a browser `document`
 - modules without `config:` must stay on a near-zero-overhead path
 
@@ -167,8 +167,8 @@ See `docs/build-system-design.md` "Entry-local config: blocks" placement rules.
 - Reject `config:` in normal non-root files, support roots, the project facade, inside `export:`, inside executable bodies and in `config.moth`.
 - Reject nested `config:` blocks.
 - Reject malformed or missing colon and unterminated forms.
-- Use one canonical normal-root parse path: every selected normal module captures its own optional block whether it later becomes an entry or is imported by another module.
-- Do not add active-root or imported-root parser modes. Importers never receive, suppress or activate another module's block payload.
+- Use one canonical normal-root parse path: every selected normal module captures its own optional block whether it later becomes an entry or is consumed by another module.
+- Do not add active-root or imported-root parser modes. Consumers never receive, suppress or activate another module's block payload.
 - Add block payload remapping for worker-local string tables.
 - Thread the optional block payload through the owning module's header aggregation without making it a declaration graph node.
 
@@ -178,8 +178,8 @@ Context: the block uses ordinary root-file visibility and is folded through the 
 
 See `docs/build-system-design.md` "Entry-local config: blocks" visibility rules.
 
-- Header syntax records local dependencies for the block (references to same-file earlier constants, `@project`, imported constants, resolved source `#Import` constants).
-- Interface binding resolves imports normally for the root file. The block benefits from the same bound visibility.
+- Header syntax records local dependencies for the block (references to same-file earlier constants, `@project`, dependency-bound constants, resolved source `#Import` constants).
+- Interface binding resolves dependency clauses normally for the root file. The block benefits from the same bound visibility.
 - AST folds the block once through the ordinary canonical module semantic path.
 - Same-file forward references remain invalid.
 - The block creates no ordinary module symbol, no HIR and no project-global value.
@@ -199,7 +199,7 @@ Context: entry config needs its own schema validation and must be stored as buil
 - Add empty or default representation for roots without a block.
 - Implement `StringId` and source-location remapping for the module payload.
 - Update root activity representation so non-empty entry config is available to builder artefact policy.
-- Confirm importers never apply another module's entry metadata.
+- Confirm consumers never apply another module's entry metadata.
 - Confirm every selected normal module processes its optional block through capture, folding and validation exactly once.
 
 ### Phase 5: Replace HTML reserved-constant scanning
@@ -265,7 +265,7 @@ Context: the refactor is not complete while old isolated config parsing, compati
 Context: documentation and scaffolding must teach the accepted entry config model.
 
 - Migrate every legacy HTML metadata declaration into the active `html` entry section (`page_title` to its `title` field, `page_head` to its `head` field, etc).
-- Move required imports outside the block in the normal root file.
+- Move required dependency clauses outside the block in the normal root file.
 - Update generated HTML project scaffolding.
 - Update integration manifest entries.
 - Keep focused migration-diagnostic fixtures for legacy names.
@@ -291,15 +291,15 @@ Cover:
 
 - one block at most in a normal root
 - block rejected in non-root files, support roots, `export:` and executable bodies
-- section records only, no imports or helpers inside
+- section records only, no dependency clauses or helpers inside
 - ordinary root-file visibility for the block
 - same-file earlier constants usable inside
-- imported constants and `@project` usable through normal visibility
+- dependency-bound constants and `@project` usable through normal visibility
 - no ordinary module symbol or HIR from the block
 - strict active entry schema validation
 - inactive section folding without schema validation
 - every selected normal module validates its block
-- imported modules do not apply entry metadata to importers
+- dependency modules do not apply entry metadata to consumers
 - entry metadata stored in module compiler metadata
 - HTML entry fields: title, description, language, favicon, body style, head
 - shared initial document metadata for JavaScript and mixed output
@@ -341,5 +341,5 @@ Before marking this plan complete, verify:
 - no separate parser for entry config remains
 - no reserved HIR page metadata scanner remains
 - entry metadata is stored in module compiler metadata, not HIR
-- imported modules do not apply entry metadata to importers
+- dependency modules do not apply entry metadata to consumers
 - `io.set_title` lowers only for targets that advertise browser document-title capability and every unsupported reachable call is rejected before lowering

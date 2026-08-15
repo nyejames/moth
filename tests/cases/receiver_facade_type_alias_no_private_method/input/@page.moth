@@ -1,4 +1,4 @@
-import @widget { PublicCounter, make_counter }
+@widget PublicCounter, make_counter
 
 value PublicCounter = make_counter()
 value.tick()

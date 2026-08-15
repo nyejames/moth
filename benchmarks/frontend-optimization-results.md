@@ -91,7 +91,7 @@ Useful volume counters from the final end-to-end docs check:
 - `source_byte_count`: `527551`
 - `token_count`: `41331`
 - `header_count`: `1640`
-- `import_count`: `850`
+- `dependency_clause_count`: `850`
 - `top_level_declaration_count`: `1365`
 - `template_count`: `4776`
 - `module_remap_string_ids_calls`: `31`

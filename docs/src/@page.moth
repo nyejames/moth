@@ -1,4 +1,4 @@
-import @styles {navbar, section, theme_head, highlight}
+@styles navbar, section, theme_head, highlight
 
 page_title #= "What is Moth?"
 page_description #= "Introduction to the Moth language and toolchain."
@@ -24,8 +24,7 @@ page_head #= theme_head
 ]
 
 export:
-    import @styles {
-        theme_css,
+    @styles theme_css,
         red,
         highlight,
         theme_head,
@@ -42,7 +41,6 @@ export:
         doc_level,
         doc_pager,
         doc_pager_previous,
-        doc_pager_next,
-    }
+        doc_pager_next
 ;
 

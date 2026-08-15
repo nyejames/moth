@@ -1,3 +1,3 @@
-import @missing/package { foo }
+@missing/package foo
 
 io.line("hello")

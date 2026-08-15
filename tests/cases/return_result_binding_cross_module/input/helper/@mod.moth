@@ -1,3 +1,3 @@
 export:
-    import @internal { Point, identity }
+    @internal Point, identity
 ;

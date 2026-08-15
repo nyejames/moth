@@ -9,6 +9,7 @@ use crate::compiler_frontend::ast::statements::if_headers::{ParsedIfHeader, pars
 use crate::compiler_frontend::ast::statements::loop_headers::{
     ParsedLoopHeader, parse_loop_header_tokens,
 };
+use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template_control_flow::{
     TemplateBodyParseMode, TemplateBranchSelector, TemplateControlFlowValidationMode,
     TemplateIfBodyParseInput, TemplateLoopBodyParseInput, TemplateLoopHeader,
@@ -24,12 +25,10 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
 use crate::compiler_frontend::utilities::token_scan::NestingDepth;
 
-/// Boxed diagnostic result for the connected control-flow-suffix family.
-///
-/// `if` / `loop` suffix parsing and their local helpers propagate diagnostics
-/// through one small boxed boundary, then unbox once at the genuine
-/// plain-diagnostic head-parser caller.
-type ControlFlowSuffixResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// Template head control flow joins ordinary expression parsing with template construction. It
+/// preserves both authored diagnostics and retained-data infrastructure failures until the
+/// template's owning construction boundary.
+type ControlFlowSuffixResult<T> = Result<T, TemplateError>;
 
 /// Parse a template `if` suffix after the `if` token has been seen.
 pub(crate) fn parse_if_suffix(
@@ -43,10 +42,11 @@ pub(crate) fn parse_if_suffix(
     token_stream.advance(); // consume `if`
 
     if next_meaningful_token_is_body_boundary(token_stream) {
-        return Err(Box::new(CompilerDiagnostic::invalid_template_structure(
+        return Err(CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::MissingTemplateIfCondition,
             location,
-        )));
+        )
+        .into());
     }
 
     let parsed_header = parse_if_header(token_stream, context, type_interner, string_table)?;
@@ -77,10 +77,11 @@ pub(crate) fn parse_if_suffix(
         }
 
         ParsedIfHeader::MatchStyle { scrutinee } => {
-            return Err(Box::new(CompilerDiagnostic::invalid_template_structure(
+            return Err(CompilerDiagnostic::invalid_template_structure(
                 InvalidTemplateStructureReason::TemplateMatchStyleControlFlowUnsupported,
                 scrutinee.location,
-            )));
+            )
+            .into());
         }
     };
 
@@ -113,25 +114,28 @@ pub(crate) fn parse_loop_suffix(
     token_stream.advance(); // consume `loop`
 
     if next_meaningful_token_is_body_boundary(token_stream) {
-        return Err(Box::new(CompilerDiagnostic::invalid_template_structure(
+        return Err(CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::MissingTemplateLoopHeader,
             location,
-        )));
+        )
+        .into());
     }
 
     let body_start_index = find_template_body_start(token_stream)?;
     let suffix_tokens = &token_stream.tokens[token_stream.index..body_start_index];
 
     if has_top_level_suffix_separator(suffix_tokens) {
-        return Err(Box::new(CompilerDiagnostic::invalid_template_structure(
+        return Err(CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::ControlFlowSuffixNotFinal,
             location,
-        )));
+        )
+        .into());
     }
 
     let mut warnings = Vec::new();
     let (parsed_header, body_context) = parse_loop_header_tokens(
         suffix_tokens,
+        &token_stream.path_syntax,
         context.new_child_control_flow(ContextKind::Loop, string_table),
         type_interner,
         &mut warnings,
@@ -197,14 +201,16 @@ fn next_meaningful_token_is_body_boundary(token_stream: &FileTokens) -> bool {
 fn ensure_suffix_ends_at_body_start(token_stream: &FileTokens) -> ControlFlowSuffixResult<()> {
     match token_stream.current_token_kind() {
         TokenKind::StartTemplateBody => Ok(()),
-        TokenKind::Comma => Err(Box::new(CompilerDiagnostic::invalid_template_structure(
+        TokenKind::Comma => Err(CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::ControlFlowSuffixNotFinal,
             token_stream.current_location(),
-        ))),
-        _ => Err(Box::new(CompilerDiagnostic::invalid_template_structure(
+        )
+        .into()),
+        _ => Err(CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::UnexpectedTokenAfterControlFlowSuffix,
             token_stream.current_location(),
-        ))),
+        )
+        .into()),
     }
 }
 
@@ -221,20 +227,22 @@ fn find_template_body_start(token_stream: &FileTokens) -> ControlFlowSuffixResul
         if nesting_depth.is_top_level()
             && matches!(token.kind, TokenKind::TemplateClose | TokenKind::Eof)
         {
-            return Err(Box::new(CompilerDiagnostic::invalid_template_structure(
+            return Err(CompilerDiagnostic::invalid_template_structure(
                 InvalidTemplateStructureReason::UnexpectedTokenAfterControlFlowSuffix,
                 token.location.clone(),
-            )));
+            )
+            .into());
         }
 
         nesting_depth.step(&token.kind);
         index += 1;
     }
 
-    Err(Box::new(CompilerDiagnostic::invalid_template_structure(
+    Err(CompilerDiagnostic::invalid_template_structure(
         InvalidTemplateStructureReason::UnexpectedTokenAfterControlFlowSuffix,
         token_stream.current_location(),
-    )))
+    )
+    .into())
 }
 
 fn has_top_level_suffix_separator(tokens: &[Token]) -> bool {

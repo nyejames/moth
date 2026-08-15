@@ -1,5 +1,5 @@
-import @core/constants {app_name}
-import @utils/formatting {format_label as label}
+@core/constants app_name
+@utils/formatting format_label as label
 
 render_header |title String| -> String:
     return [:

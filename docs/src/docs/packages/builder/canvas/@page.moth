@@ -1,18 +1,12 @@
-import @canvas-drawing {
-    content as canvas_advanced,
-}
+@canvas-drawing content as canvas_advanced
 
-import @canvas-drawing-basic {
-    content as canvas_basic,
-}
+@canvas-drawing-basic content as canvas_basic
 
-import @styles {
-    navbar,
+@styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager,
-}
+    doc_pager
 
 page_title #= "@web/canvas"
 page_description #= "2D canvas drawing as a builder binding-backed runtime package."

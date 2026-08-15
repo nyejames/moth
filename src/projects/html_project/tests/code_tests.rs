@@ -214,13 +214,17 @@ fn moth_highlighter_uses_compiler_word_classes() {
     );
 
     for word in [
-        "if", "import", "return", "assert", "async", "yield", "checked", "block",
+        "if", "return", "assert", "async", "yield", "checked", "block",
     ] {
         assert!(
             highlighted.contains(&format!("<span class='moth-code-keyword'>{word}</span>")),
             "expected keyword span for {word:?} in: {highlighted}"
         );
     }
+    assert!(
+        !highlighted.contains("<span class='moth-code-keyword'>import</span>"),
+        "import must remain an ordinary identifier: {highlighted}"
+    );
 
     for word in ["is", "not", "and", "or"] {
         assert!(
@@ -620,10 +624,10 @@ fn moth_highlighter_marks_directives_and_import_paths() {
         );
     }
 
-    let paths = highlight_code_html("import @core/io {print}", CodeLanguage::Moth);
+    let paths = highlight_code_html("@core/io print", CodeLanguage::Moth);
     assert!(
         paths.contains("<span class='moth-code-string'>@core/io</span>"),
-        "import path must use the string role, got: {paths}"
+        "dependency path must use the string role, got: {paths}"
     );
 
     let double_at = highlight_code_html("@@name", CodeLanguage::Moth);
@@ -632,6 +636,39 @@ fn moth_highlighter_marks_directives_and_import_paths() {
         "<span class='moth-code-operator'>@</span><span class='moth-code-operator'>@</span>name",
         "doubled @ must stay visible as two operator spans, got: {double_at}"
     );
+}
+
+#[test]
+fn moth_highlighter_marks_dependency_selections_and_aliases() {
+    let highlighted = highlight_code_html(
+        "@core/math sin as sine,\n    PI as pi\nimport = 1",
+        CodeLanguage::Moth,
+    );
+
+    assert!(highlighted.contains("<span class='moth-code-string'>@core/math</span>"));
+    for name in ["sin", "sine", "PI", "pi"] {
+        assert!(
+            highlighted.contains(&format!("<span class='moth-code-nominal'>{name}</span>")),
+            "dependency name {name:?} should use the nominal role: {highlighted}"
+        );
+    }
+    assert_eq!(
+        highlighted
+            .matches("<span class='moth-code-keyword'>as</span>")
+            .count(),
+        2
+    );
+    assert!(
+        !highlighted.contains("<span class='moth-code-keyword'>import</span>"),
+        "import must remain an ordinary identifier: {highlighted}"
+    );
+}
+
+#[test]
+fn moth_highlighter_keeps_expression_path_followers_plain() {
+    let highlighted = highlight_code_html("value = @core/math sin", CodeLanguage::Moth);
+    assert!(highlighted.contains("<span class='moth-code-string'>@core/math</span> sin"));
+    assert!(!highlighted.contains("moth-code-nominal'>sin"));
 }
 
 #[test]
@@ -791,11 +828,10 @@ fn moth_directive_and_path_emit_exactly_once() {
         "a path must emit exactly one span, got: {path}"
     );
 
-    let import = highlight_code_html("import @core/io", CodeLanguage::Moth);
+    let dependency = highlight_code_html("@core/io", CodeLanguage::Moth);
     assert_eq!(
-        import,
-        "<span class='moth-code-keyword'>import</span> <span class='moth-code-string'>@core/io</span>",
-        "import plus path must emit each token once, got: {import}"
+        dependency, "<span class='moth-code-string'>@core/io</span>",
+        "dependency path must emit exactly once, got: {dependency}"
     );
 }
 
@@ -807,7 +843,7 @@ fn highlighted_output_preserves_every_source_byte_exactly_once() {
         "-- comment <&>",
         "\"quoted <&>\" and 'single'",
         "$md($slot)",
-        "import @core/io {print, line}",
+        "@core/io print, line",
         "a //= b += c .. d :: e -> f => g",
         "return! cast! value",
         "Label must DISPLAY_TEXT",
@@ -1429,8 +1465,8 @@ fn moth_path_boundaries_are_unicode_aware() {
         "a path after a delimiter must highlight"
     );
     assert_eq!(
-        highlight_code_html("import @core/io", CodeLanguage::Moth),
-        "<span class='moth-code-keyword'>import</span> <span class='moth-code-string'>@core/io</span>",
+        highlight_code_html("@core/io", CodeLanguage::Moth),
+        "<span class='moth-code-string'>@core/io</span>",
         "a path after whitespace must highlight"
     );
 }

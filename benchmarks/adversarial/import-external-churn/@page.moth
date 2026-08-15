@@ -1,19 +1,17 @@
-import @data/constants { project_name, version, base_count }
-import @data/models { Metric, Status }
-import @utils/math { scaled_count, pi_value, hypotenuse }
-import @utils/text { prefix, has_marker, label_length }
-import @utils/random { random_index, random_score }
-import @utils/metrics { build_metric, format_metric, status_for }
-import @core/math { sqrt }
-import @core/text { length }
-import @core/random { random_int }
-import @./external-api.js {
-    create_handle,
+@data/constants project_name, version, base_count
+@data/models Metric, Status
+@utils/math scaled_count, pi_value, hypotenuse
+@utils/text prefix, has_marker, label_length
+@utils/random random_index, random_score
+@utils/metrics build_metric, format_metric, status_for
+@core/math sqrt
+@core/text length
+@core/random random_int
+@external-api.js create_handle,
     call_handle,
     handle_name,
     handle_label,
-    ApiHandle,
-}
+    ApiHandle
 
 page_title #= [: [project_name] v[version]]
 

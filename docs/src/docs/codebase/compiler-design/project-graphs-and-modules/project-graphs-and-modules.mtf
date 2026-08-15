@@ -1,6 +1,6 @@
 # Turning folders into a compiler graph
 
-A directory is a convenience for humans. It does not tell the compiler which files form one semantic unit, which root owns them or which module must compile before another can bind an import.
+A directory is a convenience for humans. It does not tell the compiler which files form one semantic unit, which root owns them or which module must compile before another can bind a dependency.
 
 Stage 0 answers those questions. It turns the greeting project's filesystem tree into a **canonical source graph**.
 
@@ -10,13 +10,13 @@ A **graph** here means nodes plus directed edges with meaning.
 
 **Nodes** include modules, packages and other compilation units the build system recognises.
 
-**Edges** record relationships: this module imports that provider, this package depends on that package.
+**Edges** record relationships: this module depends on that provider, this package depends on that package.
 
 A **provider** supplies a public interface. A **consumer** binds against that interface after the provider succeeds.
 
 In the running example, `@page.moth` consumes `@greeting`. The edge names a provider relationship. It does not copy `greet`'s body into the page module. Think of a graft point, not a clone.
 
-**Diagram placeholder:** Roots own files while imports create provider edges
+**Diagram placeholder:** Roots own files while dependencies create provider edges
 
 *Caption: running-example identities simplified.*
 *Question: what does a folder mean to the compiler once Stage 0 finishes?*
@@ -44,12 +44,12 @@ Stage 0 distinguishes sets that newcomers often collapse.
 
 **Check-only orphan units.** Files the tool may still parse for diagnostics even when they sit outside the semantic set for a build.
 
-Ownership does not inject disconnected declarations into a consumer. A file can be owned and still remain outside the semantic set for a given command. Import visibility and ownership are different axes.
+Ownership does not inject disconnected declarations into a consumer. A file can be owned and still remain outside the semantic set for a given command. Dependency visibility and ownership are different axes.
 
 **Diagram placeholder:** Owned files can remain outside the semantic source set
 
 *Caption: conceptual distinction.*
-*Question: why does ownership not imply import visibility?*
+*Question: why does ownership not imply binding visibility?*
 
 ## Provider-first scheduling
 
@@ -59,7 +59,7 @@ A module waits until every required provider interface exists. Binding-backed in
 
 One physical module compiles **once** per project or package compilation boundary. Entries later activate roots. They do not recompile the same module once per page.
 
-For the greeting project, `greeting.moth`'s module compiles and publishes an interface. Only then does `@page.moth` bind `import @greeting { greet }`.
+For the greeting project, `greeting.moth`'s module compiles and publishes an interface. Only then does `@page.moth` bind `@greeting greet`.
 
 **Diagram placeholder:** Providers finish before consumers bind
 
@@ -84,7 +84,7 @@ Determinism lets parallel compilation merge results in canonical order. Diagnost
 - illegal root topology or path collisions
 - unsupported source kinds for the active builder
 - missing providers
-- import cycles
+- dependency cycles
 - orphan source diagnostics
 - transitional entry-closure compilation while the canonical module plan still lands
 

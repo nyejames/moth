@@ -1,4 +1,4 @@
-import @html { canvas, Canvas, get_canvas }
+@html canvas, Canvas, get_canvas
 
 #[canvas:
   [$insert("id"):unused_canvas]

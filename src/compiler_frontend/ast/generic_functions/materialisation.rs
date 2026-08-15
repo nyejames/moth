@@ -60,8 +60,8 @@ use crate::compiler_frontend::folded_value::{
     FoldedValueGenericParameterResolver, PublicConstTemplate, PublicFoldedValue,
     convert_expression_to_folded_value,
 };
-use crate::compiler_frontend::headers::import_environment::{
-    FileVisibility, HeaderImportEnvironment, ImportedFunctionContract, NamespaceRecord,
+use crate::compiler_frontend::headers::binding_environment::{
+    FileVisibility, HeaderBindingEnvironment, ImportedFunctionContract, NamespaceRecord,
     NamespaceRecordSource, NamespaceTypeMember, NamespaceValueMember, SourceDeclarationTarget,
     SourceFunctionTarget,
 };
@@ -70,6 +70,7 @@ use crate::compiler_frontend::headers::module_symbols::{
 };
 use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
+use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallMutationEffect, PublicCallParameterAccess,
     PublicCallParameterSummary, PublicCallReactiveEffect, PublicCallSummary,
@@ -148,9 +149,26 @@ pub(crate) struct ModuleMaterialisationInput<'a> {
 /// a second exhaustive token-kind vocabulary.
 #[derive(Clone)]
 struct StableBodySyntax {
-    source_path: Box<[String]>,
+    /// Declaration-qualified stream path, such as `file/generic_function`.
+    ///
+    /// This path names the token stream's semantic declaration context. The owning source-file
+    /// identity deliberately remains on `GenericTemplateArtefact`, because token and path-row
+    /// locations are file-scoped rather than declaration-scoped.
+    declaration_path: Box<[String]>,
     pool: Box<[String]>,
     tokens: Box<[Token]>,
+    /// Canonical table vocabulary retained only for the path rows referenced by this body.
+    /// Its StringIds index `pool` until materialisation remaps the whole table in place.
+    path_syntax: PathSyntaxTable,
+}
+
+fn pool_remap(id: StringId, remap: &[StringId]) -> Result<StringId, CompilerError> {
+    let index = id.index() as usize;
+    remap.get(index).copied().ok_or_else(|| {
+        CompilerError::compiler_error(format!(
+            "frozen generic payload references out-of-range pool entry {index}"
+        ))
+    })
 }
 
 /// Incremental frozen string pool builder used while capturing one body syntax.
@@ -188,34 +206,60 @@ struct StableSourceLocation {
 }
 
 impl StableBodySyntax {
-    fn capture(tokens: &FileTokens, string_table: &StringTable) -> Self {
+    fn capture(
+        tokens: &FileTokens,
+        source_file: &InternedPath,
+        string_table: &StringTable,
+    ) -> Result<Self, CompilerError> {
+        if !tokens.src_path.starts_with(source_file) {
+            return Err(CompilerError::compiler_error(
+                "frozen generic body declaration path is outside its owning source file",
+            ));
+        }
+
+        let source_path_syntax = tokens.path_syntax_table()?;
+        source_path_syntax.validate_file_owned_locations(source_file)?;
+        source_path_syntax.validate_file_tokens(
+            &tokens.tokens,
+            source_file,
+            "generic body capture",
+        )?;
+
         let mut pool = FrozenStringPool::default();
-        let frozen_tokens = tokens
-            .tokens
-            .iter()
-            .map(|token| {
-                let mut frozen = token.clone();
-                // Clone each token once, then remap the clone in place through the frozen pool.
-                // The pool never fails to accept a donor spelling, so the walker is infallible.
-                frozen
-                    .try_remap_string_ids(&mut |id| {
-                        Ok::<StringId, std::convert::Infallible>(
-                            pool.index(string_table.resolve(id)),
-                        )
-                    })
-                    .expect("frozen string pooling is infallible");
-                frozen
-            })
-            .collect::<Vec<_>>();
-        Self {
-            source_path: stable_path(&tokens.src_path, string_table),
+        let mut frozen_tokens = tokens.tokens.clone();
+        let mut path_syntax =
+            source_path_syntax.capture_persistent_generic_subset(&mut frozen_tokens)?;
+
+        // The source stream owns the complete table. A persistent generic retains only the
+        // referenced canonical subset, then token and table payloads enter the same frozen pool.
+        for token in &mut frozen_tokens {
+            token.try_remap_string_ids(&mut |id| {
+                Ok::<StringId, CompilerError>(pool.index(string_table.resolve(id)))
+            })?;
+        }
+        path_syntax.try_remap_string_ids(&mut |id| {
+            Ok::<StringId, CompilerError>(pool.index(string_table.resolve(id)))
+        })?;
+
+        Ok(Self {
+            declaration_path: stable_path(&tokens.src_path, string_table),
             pool: pool.finish(),
             tokens: frozen_tokens.into_boxed_slice(),
-        }
+            path_syntax,
+        })
     }
 
-    fn materialise(&self, string_table: &mut StringTable) -> Result<FileTokens, CompilerError> {
-        let source_path = materialise_path(&self.source_path, string_table);
+    fn materialise(
+        &self,
+        source_file: &InternedPath,
+        string_table: &mut StringTable,
+    ) -> Result<FileTokens, CompilerError> {
+        let declaration_path = materialise_path(&self.declaration_path, string_table);
+        if !declaration_path.starts_with(source_file) {
+            return Err(CompilerError::compiler_error(
+                "frozen generic body declaration path is outside its materialised source file",
+            ));
+        }
         let remap = self
             .pool
             .iter()
@@ -234,7 +278,17 @@ impl StableBodySyntax {
             })?;
             tokens.push(materialised);
         }
-        Ok(FileTokens::new(source_path, tokens))
+        let mut path_syntax = self.path_syntax.clone();
+        path_syntax.try_remap_string_ids(&mut |id| pool_remap(id, &remap))?;
+        path_syntax.validate_file_owned_locations(source_file)?;
+        path_syntax.validate_file_tokens(&tokens, source_file, "frozen generic body")?;
+        Ok(FileTokens::new_frozen_with_identity(
+            declaration_path,
+            None,
+            None,
+            tokens,
+            path_syntax,
+        ))
     }
 }
 
@@ -840,9 +894,10 @@ impl ModuleMaterialisationContext {
                     end: crate::compiler_frontend::tokenizer::tokens::CharPosition::default(),
                 },
                 body: StableBodySyntax {
-                    source_path: Box::new([]),
+                    declaration_path: Box::new([]),
                     pool: Box::new([]),
                     tokens: Box::new([]),
+                    path_syntax: PathSyntaxTable::default(),
                 },
                 signature: StableFunctionSignature {
                     parameters: Box::new([]),
@@ -984,8 +1039,8 @@ impl GenericTemplateArtefact {
             crate::timing::TimingMetric::FrontendGeneratedAstTotal,
             timing_context
         );
-        let import_environment = self
-            .materialise_import_environment(
+        let binding_environment = self
+            .materialise_binding_environment(
                 context,
                 &source_file,
                 external_package_registry,
@@ -1014,7 +1069,7 @@ impl GenericTemplateArtefact {
             &[],
             AstEnvironmentInput {
                 module_symbols,
-                import_environment,
+                binding_environment,
             },
             string_table_ref,
         )?;
@@ -1097,14 +1152,14 @@ impl GenericTemplateArtefact {
         })
     }
 
-    fn materialise_import_environment(
+    fn materialise_binding_environment(
         &self,
         context: &ModuleMaterialisationContext,
         source_file: &InternedPath,
         external_package_registry: &ExternalPackageRegistry,
         string_table: &mut StringTable,
-    ) -> Result<HeaderImportEnvironment, CompilerError> {
-        let mut environment = HeaderImportEnvironment::default();
+    ) -> Result<HeaderBindingEnvironment, CompilerError> {
+        let mut environment = HeaderBindingEnvironment::default();
         environment.file_visibility_by_source.insert(
             source_file.clone(),
             self.visibility
@@ -1707,14 +1762,16 @@ impl GenericTemplateArtefact {
             } else {
                 None
             };
+            let source_file = materialise_path(&nested.source_file, string_table);
+            let body_tokens = nested.body.materialise(&source_file, string_table)?;
             let template = GenericFunctionTemplate {
                 function_path: nested_path.clone(),
-                source_file: materialise_path(&nested.source_file, string_table),
+                source_file,
                 declaration_identity: Some(nested.declaration_identity.clone()),
                 generic_parameter_owner: nested.generic_parameter_owner.clone(),
                 generic_parameter_list_id,
                 signature: signature.clone(),
-                body_tokens: Some(nested.body.materialise(string_table)?),
+                body_tokens: Some(body_tokens),
                 declaration_location: nested.declaration_location.materialise(string_table),
             };
             let lookups = Rc::make_mut(&mut environment.lookups);
@@ -2566,7 +2623,7 @@ impl StableFileVisibility {
                 .visible_receiver_methods
                 .entry(string_table.intern(&method.visible_name))
                 .or_default()
-                .push(crate::compiler_frontend::headers::import_environment::ReceiverMethodVisibility {
+                .push(crate::compiler_frontend::headers::binding_environment::ReceiverMethodVisibility {
                     target: method.target.materialise(local_path),
                     location: method.location.materialise(string_table),
                 });
@@ -2740,7 +2797,7 @@ pub(crate) struct ModuleMaterialisationPreparation {
     pub(crate) entry_dir: InternedPath,
     pub(crate) type_environment: TypeEnvironment,
     pub(crate) declaration_table: TopLevelDeclarationTable,
-    pub(crate) import_environment: HeaderImportEnvironment,
+    pub(crate) binding_environment: HeaderBindingEnvironment,
     pub(crate) imported_functions_by_local_path:
         FxHashMap<InternedPath, AstImportedFunctionContract>,
     pub(crate) imported_struct_definitions:
@@ -2909,7 +2966,7 @@ impl ModuleMaterialisationPreparation {
         }
 
         let mut declaration_closure = self
-            .import_environment
+            .binding_environment
             .imported_declarations_by_origin
             .values()
             .cloned()
@@ -2919,7 +2976,7 @@ impl ModuleMaterialisationPreparation {
         declaration_closure.dedup_by(|left, right| left.origin == right.origin);
 
         let mut evidence = self
-            .import_environment
+            .binding_environment
             .imported_evidence_by_identity
             .values()
             .cloned()
@@ -2994,7 +3051,11 @@ impl ModuleMaterialisationPreparation {
                 &template.declaration_location,
                 &self.string_table,
             ),
-            body: StableBodySyntax::capture(body_tokens, &self.string_table),
+            body: StableBodySyntax::capture(
+                body_tokens,
+                &template.source_file,
+                &self.string_table,
+            )?,
             signature,
             generic_parameters,
             visibility,
@@ -3077,7 +3138,7 @@ impl ModuleMaterialisationPreparation {
         let mut constants = Vec::new();
         for declaration in &self.module_constants {
             if self
-                .import_environment
+                .binding_environment
                 .imported_declarations_by_local_path
                 .contains_key(&declaration.id)
             {
@@ -3098,7 +3159,7 @@ impl ModuleMaterialisationPreparation {
             .iter()
             .filter(|(path, _)| {
                 !self
-                    .import_environment
+                    .binding_environment
                     .imported_declarations_by_local_path
                     .contains_key(*path)
             })
@@ -3322,12 +3383,12 @@ impl ModuleMaterialisationPreparation {
                 self.module_constants.iter().any(|declaration| {
                     declaration.id == **path
                         && !self
-                            .import_environment
+                            .binding_environment
                             .imported_declarations_by_local_path
                             .contains_key(*path)
                 }) || (self.resolved_type_aliases_by_path.contains_key(*path)
                     && !self
-                        .import_environment
+                        .binding_environment
                         .imported_declarations_by_local_path
                         .contains_key(*path))
             })
@@ -3417,7 +3478,7 @@ impl ModuleMaterialisationPreparation {
         parameters: &[StableGenericParameter],
         referenced_names: &mut FxHashSet<String>,
     ) -> Result<(), CompilerError> {
-        let visibility = self.import_environment.visibility_for(source_file)?;
+        let visibility = self.binding_environment.visibility_for(source_file)?;
 
         for parameter in parameters {
             for bound in &parameter.bounds {
@@ -3533,7 +3594,7 @@ impl ModuleMaterialisationPreparation {
         source_file: &InternedPath,
         referenced_names: &FxHashSet<String>,
     ) -> Result<StableFileVisibility, CompilerError> {
-        let visibility = self.import_environment.visibility_for(source_file)?;
+        let visibility = self.binding_environment.visibility_for(source_file)?;
         let capture_declarations = |bindings: &FxHashMap<StringId, SourceDeclarationTarget>| {
             bindings
                 .iter()
@@ -3659,7 +3720,7 @@ impl ModuleMaterialisationPreparation {
         source_file: &InternedPath,
         referenced_names: &FxHashSet<String>,
     ) -> Result<FxHashSet<InternedPath>, CompilerError> {
-        let visibility = self.import_environment.visibility_for(source_file)?;
+        let visibility = self.binding_environment.visibility_for(source_file)?;
         let mut selected = visibility
             .visible_source_names
             .iter()
@@ -3719,11 +3780,11 @@ impl ModuleMaterialisationPreparation {
         let mut bindings = Vec::new();
         for path in selected_paths {
             if let Some(origin) = self
-                .import_environment
+                .binding_environment
                 .imported_declarations_by_local_path
                 .get(path)
                 && self
-                    .import_environment
+                    .binding_environment
                     .imported_declarations_by_origin
                     .contains_key(origin)
             {
@@ -4482,7 +4543,7 @@ impl ModuleMaterialisationPreparation {
             return Ok(None);
         };
         let Some(record) = self
-            .import_environment
+            .binding_environment
             .imported_declarations_by_origin
             .get(&OriginDeclarationId::Type(origin.clone()))
         else {
@@ -4786,7 +4847,7 @@ impl ModuleMaterialisationPreparation {
             entry_dir,
             type_environment: type_environment.clone(),
             declaration_table: (*lookups.declaration_table).clone(),
-            import_environment: lookups.import_environment.clone(),
+            binding_environment: lookups.binding_environment.clone(),
             imported_functions_by_local_path: lookups.imported_functions_by_local_path.clone(),
             imported_struct_definitions: lookups.imported_struct_definitions.clone(),
             imported_choice_definitions: lookups.imported_choice_definitions.clone(),
@@ -4866,7 +4927,7 @@ impl ModuleMaterialisationPreparation {
 
         let lookups = AstModuleLookups {
             module_symbols: ModuleSymbols::empty(),
-            import_environment: self.import_environment.clone(),
+            binding_environment: self.binding_environment.clone(),
             warnings: Vec::new(),
             declaration_table: Rc::new(TopLevelDeclarationTable::new(declarations)),
             imported_functions_by_local_path: self.imported_functions_by_local_path.clone(),

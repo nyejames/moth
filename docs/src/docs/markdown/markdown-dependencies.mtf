@@ -1,0 +1,58 @@
+Plain Markdown content is bound with the same extensionless source dependency clause syntax as Moth and moth template source assets.
+
+### Dependency syntax
+
+[codeblock, $code("moth"):
+    @docs/intro
+
+    [: [intro.content] ]
+]
+
+A bare namespace clause exposes `content` as a field. A direct selection binds it directly:
+
+[codeblock, $code("moth"):
+    @docs/intro content as intro_html
+
+    [: [intro_html] ]
+]
+
+### Aliases
+
+Use `as` to give the bound content a local name. This is the standard form when multiple content files are depended on by the same page.
+
+### Insertion into templates and pages
+
+Insert the bound content into a template body. The caller decides where it appears. Bound content does not become a page fragment automatically.
+
+### Dependency paths and module visibility
+
+Content dependency clauses follow the same path resolution and module visibility rules as normal source dependency clauses. Both `@intro` and `@docs/intro` resolve from the declaring file's owning module root; the latter selects `docs/intro` below that root. `@./...` has no supported meaning. Cross-module dependency clauses require the module root's `export:` block to re-export the content.
+
+### No automatic page fragment
+
+Binding a `.md` file and inserting its content into a template does not create a page fragment. Only direct top-level templates in an entry-selected module root become page fragments.
+
+### Explicit extensions are rejected for source content
+
+[codeblock, $code("moth"):
+    @docs/intro.md content
+]
+
+This is rejected with `MOTH-IMPORT-0024`. Use `@docs/intro` without the `.md` extension.
+
+### Dependency tracking
+
+Bound content participates in normal dependency tracking. The `.md` file is compiled before the declaring file uses its `content` constant.
+
+### Distinction from asset dependencies
+
+`.md` content dependency clauses are not asset clauses. They produce a compile-time `content #String`
+constant, not a tracked asset path. Markdown links and images render literal `href` and `src`
+values. They are not tracked assets and are not rewritten. Use normal Moth asset paths when
+a file should participate in tracked-asset output.
+
+### Related concepts
+
+- For the rendering contract see @#rendering-contract (Rendering contract).
+- For choosing between formats see @#choosing-a-content-format (Choosing a content format).
+- For dependency path resolution see @../packages/#dependency-paths (Dependency paths).

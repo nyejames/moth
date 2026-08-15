@@ -34,7 +34,7 @@ use std::collections::HashSet;
 pub(crate) fn validate_const_required_template_control_flow(
     template: &Template,
     tir_store: &TemplateIrStore,
-) -> Result<PreparedTemplate, CompilerDiagnostic> {
+) -> Result<PreparedTemplate, TemplateError> {
     let reference = &template.tir_reference;
     let view = TirView::with_minimum_phase(
         tir_store,
@@ -43,11 +43,9 @@ pub(crate) fn validate_const_required_template_control_flow(
         TemplateTirPhase::Composed,
         reference.context,
     )
-    .map_err(TemplateError::from)
-    .map_err(TemplateError::into_diagnostic)?;
+    .map_err(TemplateError::from)?;
 
     prepare_tir_view(&view, TemplatePreparationMode::ConstRequired)
-        .map_err(TemplateError::into_diagnostic)
 }
 
 /// Rejects slot composition artifacts that would otherwise reach runtime

@@ -151,7 +151,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     ) -> Result<(), CompilerError> {
         let reachable_origins = self.reachable_imported_type_origins();
         let mut imported_nominals = self
-            .import_environment
+            .binding_environment
             .imported_declarations_by_origin
             .values()
             .filter_map(|record| match &record.origin {
@@ -238,7 +238,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         }
 
         for (local_path, origin) in self
-            .import_environment
+            .binding_environment
             .imported_declarations_by_local_path
             .clone()
         {
@@ -246,7 +246,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 continue;
             };
             let Some(record) = self
-                .import_environment
+                .binding_environment
                 .imported_declarations_by_origin
                 .get(&origin)
             else {
@@ -348,7 +348,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     fn reachable_imported_type_origins(&self) -> FxHashSet<OriginTypeId> {
         let mut reachable = FxHashSet::default();
         for evidence in self
-            .import_environment
+            .binding_environment
             .imported_evidence_by_identity
             .values()
         {
@@ -362,7 +362,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             );
         }
         for origin in self
-            .import_environment
+            .binding_environment
             .imported_declarations_by_local_path
             .values()
         {
@@ -370,7 +370,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 reachable.insert(type_origin.clone());
             }
             if let Some(record) = self
-                .import_environment
+                .binding_environment
                 .imported_declarations_by_origin
                 .get(origin)
             {
@@ -383,7 +383,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         while let Some(origin) = pending.get(next).cloned() {
             next += 1;
             let Some(record) = self
-                .import_environment
+                .binding_environment
                 .imported_declarations_by_origin
                 .get(&OriginDeclarationId::Type(origin))
             else {

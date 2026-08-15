@@ -1,6 +1,0 @@
-entry = "."
-
-[backends.html]
-mode = "success"
-warnings = "forbid"
-rendered_output_contains = ["choice_receiver_type_import_auto_imports_methods value=ready"]

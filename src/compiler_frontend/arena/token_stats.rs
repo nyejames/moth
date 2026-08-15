@@ -18,7 +18,6 @@ pub(crate) struct TokenStats {
     pub operators: usize,
     pub template_markers: usize,
     pub style_directives: usize,
-    pub imports: usize,
     pub hashes: usize,
     pub if_tokens: usize,
     pub loop_tokens: usize,
@@ -95,10 +94,6 @@ impl TokenStats {
                 self.style_directives += 1;
             }
 
-            TokenKind::Import => {
-                self.imports += 1;
-            }
-
             TokenKind::Hash => {
                 self.hashes += 1;
             }
@@ -150,7 +145,6 @@ impl TokenStats {
         self.operators += other.operators;
         self.template_markers += other.template_markers;
         self.style_directives += other.style_directives;
-        self.imports += other.imports;
         self.hashes += other.hashes;
         self.if_tokens += other.if_tokens;
         self.loop_tokens += other.loop_tokens;

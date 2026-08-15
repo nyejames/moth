@@ -1,4 +1,4 @@
-import @html {img}
+@html img
 
 card_image_css #= "object-fit: cover; border-radius: 999px; max-width: 64px;"
 

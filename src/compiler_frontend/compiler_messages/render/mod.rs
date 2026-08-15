@@ -36,8 +36,8 @@ use crate::compiler_frontend::compiler_messages::{
     BorrowAccessKind, DeferredFeatureReason, DiagnosticOperator, DiagnosticPlace,
     GenericApplicationErrorReason, IncompatibleChoiceComparisonReason, InvalidChoiceVariantReason,
     InvalidCollectionTypeReason, InvalidCompileTimePathReason, InvalidConfigReason,
-    InvalidExpressionReason, InvalidFallibleOperandReason, InvalidGenericParameterReason,
-    InvalidImportClauseReason, InvalidImportPathReason, InvalidMapLiteralReason,
+    InvalidDependencyClauseReason, InvalidExpressionReason, InvalidFallibleOperandReason,
+    InvalidGenericParameterReason, InvalidImportPathReason, InvalidMapLiteralReason,
     InvalidMapTypeReason, InvalidMutableAccessReason, InvalidOutputFolderReason,
     InvalidPackageFolderReason, InvalidPageMetadataReason, InvalidTemplateDirectiveReason,
     NameNamespace, NamespaceTypeValueMisuseKind, PathKind, RangeOperandKind,
@@ -49,7 +49,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::source_packages::root_file::{
-    import_component_is_config_file, import_component_is_support_root_file,
+    dependency_component_is_config_file, dependency_component_is_support_root_file,
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -378,7 +378,6 @@ fn namespace_name(namespace: NameNamespace) -> &'static str {
     match namespace {
         NameNamespace::Value => "value",
         NameNamespace::Type => "type",
-        NameNamespace::Import => "import",
         NameNamespace::Module => "module",
         NameNamespace::Field => "field",
         NameNamespace::Variant => "variant",
@@ -590,7 +589,7 @@ pub(crate) fn unsupported_builder_package_message(
     let package_path_str = string_table.resolve(package_path);
     format!(
         "Core package '{package_path_str}' is not supported by this builder. \
-         Use a builder that exposes this core package or remove the import."
+         Use a builder that exposes this core package or remove the dependency clause."
     )
 }
 
@@ -623,12 +622,12 @@ pub(crate) fn invalid_expression_message(reason: InvalidExpressionReason) -> Str
     }
 }
 
-/// Determine which special file name is referenced by an import path.
+/// Determine which special file name is referenced by a dependency path.
 ///
 /// WHAT: inspects path components to find a support-root or canonical config reference.
 /// WHY: the direct-special-file diagnostic covers support roots and config files, and
 /// renderers should name the specific file when possible so the author knows which file
-/// to avoid importing directly. Normal `@*.moth` root references are caught earlier by
+/// to avoid binding directly. Normal `@*.moth` root references are caught earlier by
 /// the path parser's `LeadingAtInPathComponent` rejection.
 pub(crate) fn special_file_name_from_path(
     path: &InternedPath,
@@ -637,7 +636,7 @@ pub(crate) fn special_file_name_from_path(
     // Support-root markers (`+`) are unambiguous even when an earlier folder shares a name.
     for component in path.as_components() {
         let segment = string_table.resolve(*component);
-        if import_component_is_support_root_file(segment) {
+        if dependency_component_is_support_root_file(segment) {
             let suffix = if segment.contains('.') { "" } else { ".moth" };
             return format!("{segment}{suffix}");
         }
@@ -645,7 +644,7 @@ pub(crate) fn special_file_name_from_path(
 
     for component in path.as_components() {
         let segment = string_table.resolve(*component);
-        if import_component_is_config_file(segment) {
+        if dependency_component_is_config_file(segment) {
             return "config.moth".to_owned();
         }
     }
@@ -661,13 +660,13 @@ fn named_value_or_default(
         .unwrap_or_else(|| fallback.to_string())
 }
 
-/// Build a human-facing suggestion for a direct support-root-file import.
+/// Build a human-facing suggestion for a direct support-root-file dependency.
 ///
-/// WHAT: inspects the import path and produces a hint that names the package directory the
-/// author should import instead of the support root file.
-/// WHY: the `+` prefix on support root filenames is cosmetic and does not appear in import
-///      paths. Authors who write `import @helper/+page { symbol }` should be told to use
-///      `import @helper { symbol }` instead.
+/// WHAT: inspects the dependency path and produces a hint that names the package directory the
+/// author should bind instead of the support root file.
+/// WHY: the `+` prefix on support root filenames is cosmetic and does not appear in dependency
+///      paths. Authors who write `@helper/+page symbol` should be told to use
+///      `@helper symbol` instead.
 pub(crate) fn support_root_import_suggestion(
     path: &InternedPath,
     string_table: &StringTable,
@@ -678,7 +677,7 @@ pub(crate) fn support_root_import_suggestion(
 
     for component in components {
         let segment = string_table.resolve(*component);
-        if import_component_is_support_root_file(segment) {
+        if dependency_component_is_support_root_file(segment) {
             found_root_component = true;
             continue;
         }
@@ -689,17 +688,11 @@ pub(crate) fn support_root_import_suggestion(
         return String::new();
     }
 
-    // Remove the trailing symbol name if this looks like a grouped import (last component
-    // is a symbol, not a directory).
-    if suggestion_path.len() > 1 {
-        suggestion_path.pop();
-    }
-
     let directory = suggestion_path.join("/");
     if directory.is_empty() {
-        " Import the support package directory instead of the root file.".to_owned()
+        " Bind the support package directory instead of the root file.".to_owned()
     } else {
-        format!(" Import the support package `@{directory}` instead of the root file.")
+        format!(" Bind the support package `@{directory}` instead of the root file.")
     }
 }
 

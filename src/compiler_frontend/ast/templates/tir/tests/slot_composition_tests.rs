@@ -31,6 +31,7 @@ use super::super::store::TemplateIrStore;
 use super::super::summary::TemplateIrSummary;
 use super::super::view::{TemplateTirPhase, TirView};
 use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::{
     SlotKey, Style, TemplateSegmentOrigin, TemplateType,
 };
@@ -38,9 +39,7 @@ use crate::compiler_frontend::ast::templates::template_control_flow::{
     TemplateBranchSelector, TemplateLoopControlKind, TemplateLoopHeader,
 };
 use crate::compiler_frontend::compiler_errors::ErrorType;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticPayload, InvalidTemplateSlotReason,
-};
+use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, InvalidTemplateSlotReason};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -214,10 +213,10 @@ fn build_wrapper_with_slots(store: &mut TemplateIrStore, keys: Vec<SlotKey>) -> 
     )
 }
 
-fn assert_invalid_template_slot_reason(
-    error: &CompilerDiagnostic,
-    expected: InvalidTemplateSlotReason,
-) {
+fn assert_invalid_template_slot_reason(error: &TemplateError, expected: InvalidTemplateSlotReason) {
+    let TemplateError::Diagnostic(error) = error else {
+        panic!("authored slot failure should remain a source diagnostic");
+    };
     match &error.payload {
         DiagnosticPayload::InvalidTemplateSlot { reason, .. } => {
             assert_eq!(*reason, expected);
@@ -226,21 +225,16 @@ fn assert_invalid_template_slot_reason(
     }
 }
 
-fn assert_internal_authority_error(error: &CompilerDiagnostic, expected_message: &str) {
-    let DiagnosticPayload::InfrastructureError {
-        msg, error_type, ..
-    } = &error.payload
-    else {
-        panic!(
-            "expected an infrastructure diagnostic, got {:?}",
-            error.payload
-        );
+fn assert_internal_authority_error(error: &TemplateError, expected_message: &str) {
+    let TemplateError::Infrastructure(error) = error else {
+        panic!("malformed composition authority should remain an infrastructure error");
     };
 
-    assert_eq!(*error_type, ErrorType::Compiler);
+    assert_eq!(error.error_type, ErrorType::Compiler);
     assert!(
-        msg.contains(expected_message),
-        "expected infrastructure message containing {expected_message:?}, got {msg:?}"
+        error.msg.contains(expected_message),
+        "expected infrastructure message containing {expected_message:?}, got {:?}",
+        error.msg
     );
 }
 
@@ -732,7 +726,9 @@ fn multiple_default_slots_produces_diagnostic() {
     let result = collect_tir_slot_schema(&store, template_id);
     let error = result.expect_err("two default slots should produce an error");
 
-    let diagnostic = Box::<CompilerDiagnostic>::from(error);
+    let super::super::slot_composition::SlotSchemaError::Diagnostic(diagnostic) = error else {
+        panic!("multiple authored default slots should remain a source diagnostic");
+    };
     match &diagnostic.payload {
         DiagnosticPayload::InvalidTemplateSlot {
             reason: InvalidTemplateSlotReason::MultipleDefaultSlots,
@@ -2087,6 +2083,28 @@ fn single_receiver_routes_head_and_body_fill_in_authored_order() {
         Some("body fill".to_owned()),
         "body-origin fill is routed through the body-children loop into the deepest active receiver"
     );
+}
+
+#[test]
+fn head_chain_missing_root_authority_remains_infrastructure_error() {
+    let string_table = StringTable::new();
+    let mut store = TemplateIrStore::new();
+    let missing_root = TemplateIrNodeId::new(99);
+    let template_id = store.push_template(TemplateIr::new(
+        missing_root,
+        Style::default(),
+        TemplateType::String,
+        TemplateIrSummary {
+            child_template_count: 1,
+            ..TemplateIrSummary::default()
+        },
+        empty_location(),
+    ));
+
+    let error = compose_tir_head_chain(&mut store, template_id, &string_table, false)
+        .expect_err("missing head-chain root authority must fail composition");
+
+    assert_internal_authority_error(&error, "root node ID was not present");
 }
 
 /// Nested head-origin receivers resolve bottom-up: the inner receiver resolves

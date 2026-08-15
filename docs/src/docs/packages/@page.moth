@@ -1,103 +1,73 @@
-import @import-paths {
-    content as import_paths,
-}
+@dependency-paths content as dependency_paths
 
-import @import-paths-basic {
-    content as import_paths_basic,
-}
+@dependency-paths-basic content as dependency_paths_basic
 
-import @grouped-and-namespace-imports {
-    content as grouped_and_namespace_imports,
-}
+@dependency-clauses content as dependency_clauses
 
-import @grouped-and-namespace-imports-basic {
-    content as grouped_and_namespace_imports_basic,
-}
+@dependency-clauses-basic content as dependency_clauses_basic
 
-import @module-visibility {
-    content as module_visibility,
-}
+@module-visibility content as module_visibility
 
-import @module-visibility-basic {
-    content as module_visibility_basic,
-}
+@module-visibility-basic content as module_visibility_basic
 
-import @public-reexports {
-    content as public_reexports,
-}
+@public-reexports content as public_reexports
 
-import @public-reexports-basic {
-    content as public_reexports_basic,
-}
+@public-reexports-basic content as public_reexports_basic
 
-import @project-local-packages {
-    content as project_local_packages,
-}
+@project-local-packages content as project_local_packages
 
-import @project-local-packages-basic {
-    content as project_local_packages_basic,
-}
+@project-local-packages-basic content as project_local_packages_basic
 
-import @package-origins-and-backing {
-    content as package_origins_and_backing,
-}
+@package-origins-and-backing content as package_origins_and_backing
 
-import @package-origins-and-backing-basic {
-    content as package_origins_and_backing_basic,
-}
+@package-origins-and-backing-basic content as package_origins_and_backing_basic
 
-import @external-binding-contracts {
-    content as external_binding_contracts,
-}
+@external-binding-contracts content as external_binding_contracts
 
-import @external-binding-contracts-basic {
-    content as external_binding_contracts_basic,
-}
+@external-binding-contracts-basic content as external_binding_contracts_basic
 
-import @styles {
-    navbar,
+@styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager,
-}
+    doc_pager
 
-page_title #= "Packages and imports"
-page_description #= "Import paths, module visibility, project-local packages and package origin and backing."
+page_title #= "Packages and dependencies"
+page_description #= "Dependency paths, module visibility, project-local packages and package origin and backing."
 page_head #= language_theme_head
 
 #[navbar]
 
 #[section, $md:
-    @../ (Documentation) / Packages and imports
+    @../ (Documentation) / Packages and dependencies
 
-    # Packages and imports
+    # Packages and dependencies
 
-    Imports make names visible, module roots define public boundaries and
+    Dependencies make names visible, module roots define public boundaries and
     packages provide stable named surfaces. Moth keeps those jobs separate.
 
     Unlike languages that expose any reachable filesystem path, Moth resolves
-    source imports from the owning module root and stops at each module facade.
+    source dependencies from the owning module root and stops at each module facade.
     Project-local support packages share code without opening private paths.
 ]
 
 #[section:
     [doc_level:
-        [$insert("key"):import-paths]
-        [$insert("title"):Import paths]
-        [$insert("advanced"):[import_paths]]
+        [$insert("key"):dependency-paths]
+        [$insert("title"):Dependency paths]
+        [$insert("advanced"):[dependency_paths]]
 
-        [import_paths_basic]
+        [dependency_paths_basic]
     ]
 ]
 
 #[section:
     [doc_level:
-        [$insert("key"):grouped-and-namespace-imports]
-        [$insert("title"):Grouped and namespace imports]
-        [$insert("advanced"):[grouped_and_namespace_imports]]
+        [$insert("key"):dependency-clauses]
+        [$insert("title"):Dependency clauses]
+        [$insert("advanced"):[dependency_clauses]]
 
-        [grouped_and_namespace_imports_basic]
+        [dependency_clauses_basic]
     ]
 ]
 

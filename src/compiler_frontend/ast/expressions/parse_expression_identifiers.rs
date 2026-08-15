@@ -298,7 +298,7 @@ pub(super) fn parse_identifier_or_call(
             });
         }
 
-        return Err(CompilerDiagnostic::import_record_used_as_value(
+        return Err(CompilerDiagnostic::dependency_namespace_used_as_value(
             identifier,
             token_stream.current_location(),
         )

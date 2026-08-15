@@ -15,7 +15,7 @@ use crate::compiler_frontend::ast::const_values::resolver::classify_template_fro
 use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticBag};
+use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::declaration_syntax::record_body::parse_record_body;
 use crate::compiler_frontend::declaration_syntax::signature_members::{
     SignatureMemberContext, SignatureMemberSyntax,
@@ -59,14 +59,12 @@ pub fn parse_struct_shell(
 /// references are unresolved and cannot be validated yet.
 ///
 /// Template constness is classified through the caller's effective view over the module TIR store.
-/// A TIR classification failure is itself a reportable diagnostic and is pushed into the bag
-/// instead of the generic non-constant message.
+/// A TIR classification failure preserves its typed infrastructure lane instead of being rendered
+/// into the generic non-constant source diagnostic.
 pub(crate) fn validate_struct_default_values(
     fields: &[Declaration],
     template_ir_store: &Rc<RefCell<TemplateIrStore>>,
-) -> Result<(), DiagnosticBag> {
-    let mut bag = DiagnosticBag::new();
-
+) -> Result<(), TemplateError> {
     for field in fields {
         if matches!(field.value.kind, ExpressionKind::NoValue) {
             continue;
@@ -79,25 +77,14 @@ pub(crate) fn validate_struct_default_values(
                     classify_template_from_effective_tir(template, template_ir_store)
                 });
 
-        let is_compile_time_constant = match classification {
-            Ok(kind) => kind.is_compile_time_value(),
-            Err(template_error) => {
-                // TIR classification failure is the actionable diagnostic for this
-                // field; report it instead of the generic non-constant message.
-                bag.push(TemplateError::into_diagnostic(template_error));
-                continue;
-            }
-        };
+        let is_compile_time_constant = classification?.is_compile_time_value();
 
         if !is_compile_time_constant {
-            bag.push(CompilerDiagnostic::invalid_struct_default_value(
+            return Err(CompilerDiagnostic::invalid_struct_default_value(
                 field.value.location.clone(),
-            ));
+            )
+            .into());
         }
-    }
-
-    if bag.has_errors() {
-        return Err(bag);
     }
 
     Ok(())

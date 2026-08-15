@@ -58,7 +58,7 @@ fn displayable_resolves_via_core_trait_id_for_name() {
     let resolved = trait_environment.core_trait_id_for_name(trait_ref.name, &string_table);
     assert!(
         resolved.is_some(),
-        "DISPLAYABLE must resolve without imports"
+        "DISPLAYABLE must resolve without dependency clauses"
     );
 }
 

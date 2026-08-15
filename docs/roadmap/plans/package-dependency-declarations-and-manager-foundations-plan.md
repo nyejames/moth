@@ -55,7 +55,7 @@ Do not infer activation from the presence of this file.
 
 - `docs/compiler-design-overview.md`
 - `docs/build-system-design.md`
-- `docs/language-overview.md`
+- `docs/src/docs/codebase/language/overview.mtf`
 - canonical package and project-configuration references
 - dependency-clause and path-syntax plan
 - progress matrix and roadmap
@@ -116,6 +116,16 @@ A file-local clause:
 - does not make transitive dependencies visible
 - preserves canonical package and declaration identities beneath local aliases
 
+The final source grammar uses one clause for one registered facade surface:
+
+```moth
+@acme/ui Button, theme
+@community/markdown as md
+```
+
+Direct selections are flat binding names inside the resolved surface. They do not acquire a
+package, select another provider or change package identity.
+
 ### Package aliases
 
 - canonical package identity and project-local root alias are separate facts
@@ -145,7 +155,7 @@ A dependency never sees the consuming project's `@project` or unqualified build 
 - the same canonical package may be declared once only
 - Core, Standard, Builder and project-local support packages are not declared through the external dependency surface
 - `@project`, project modules, relative paths and parent traversal are invalid package declarations
-- source imports never trigger implicit package acquisition
+- source dependencies never trigger implicit package acquisition
 - Stage 0 performs no undeclared filesystem probing
 - dependency compilation order is deterministic
 - package artefacts retain canonical identity beneath consumer-local aliases
@@ -231,7 +241,7 @@ It does not own:
 
 - source-file binding
 - config constant visibility
-- project source import discovery
+- project source dependency discovery
 - package acquisition policy
 - backend lowering
 - output placement

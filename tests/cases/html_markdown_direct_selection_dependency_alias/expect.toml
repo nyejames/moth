@@ -1,0 +1,15 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = ["html_markdown_direct_selection_dependency_alias aliased content", "Direct-selection alias"]
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html_wasm.artifact_assertions]]
+path = "page.js"
+kind = "js"
+must_contain = ["html_markdown_direct_selection_dependency_alias aliased content", "Direct-selection alias"]

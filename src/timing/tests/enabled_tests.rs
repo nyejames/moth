@@ -238,6 +238,7 @@ fn admitted_attribution_policy_survives_session_drain() {
     let pause = crate::timing::enabled::runtime::pause_record_admission_for_test();
 
     let recorder = std::thread::spawn(move || {
+        crate::timing::enabled::runtime::target_record_admission_pause_for_current_thread();
         crate::timing::record_pipeline_timing_attributed(
             TimingMetric::BoundaryInventory,
             std::time::Duration::from_millis(7),
@@ -301,6 +302,7 @@ fn attributed_duration_context_uses_admitted_session_policy() {
     let (context_sender, context_receiver) = std::sync::mpsc::channel();
 
     let recorder = std::thread::spawn(move || {
+        crate::timing::enabled::runtime::target_record_admission_pause_for_current_thread();
         record_attributed_duration!(
             TimingMetric::BoundaryInventory,
             std::time::Duration::from_millis(7),
@@ -400,6 +402,7 @@ fn admitted_human_prose_policy_survives_session_drain() {
     let pause = crate::timing::enabled::runtime::pause_record_admission_for_test();
 
     let recorder = std::thread::spawn(move || {
+        crate::timing::enabled::runtime::target_record_admission_pause_for_current_thread();
         let mut start = crate::timing::start_pipeline_timing(TimingMetric::FrontendPrepare);
         crate::timing::record_started_pipeline_timing_attributed(
             TimingMetric::FrontendPrepare,

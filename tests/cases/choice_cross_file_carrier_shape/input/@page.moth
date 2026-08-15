@@ -1,5 +1,5 @@
-import @choices { Traffic }
-import @choices { identity }
+@choices Traffic
+@choices identity
 
 initial Traffic = Traffic::Red
 next Traffic = identity(initial)

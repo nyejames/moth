@@ -1,5 +1,5 @@
-import @target-planning-and-validation {content as reference_content}
-import @styles {navbar, section, theme_head}
+@target-planning-and-validation content as reference_content
+@styles navbar, section, theme_head
 
 page_title #= "16. Target planning and validation"
 page_description #= "How Moth plans and validates mixed JavaScript and Wasm targets."

@@ -45,7 +45,7 @@
 //! (export-capable roots versus the active module root alone); this module's projection is
 //! narrower because imported-module-root headers belong to another module's component.
 
-use super::SourceProviderImportSet;
+use super::SourceProviderDependencySet;
 use super::model::{
     PublicBindingExport, PublicDiagnosticLocation, PublicExportDiagnosticProvenance,
 };
@@ -192,7 +192,7 @@ pub(crate) fn build_direct_export_seed(
     active_root_file_id: FileId,
     sorted_headers: &[Header],
     module_symbols: &ModuleSymbols,
-    source_provider_imports: &SourceProviderImportSet<'_>,
+    source_provider_dependencies: &SourceProviderDependencySet<'_>,
     external_registry: &ExternalPackageRegistry,
     string_table: &StringTable,
 ) -> Result<DirectExportSeed, CompilerError> {
@@ -204,7 +204,7 @@ pub(crate) fn build_direct_export_seed(
         &active_origin,
         sorted_headers,
         module_symbols,
-        source_provider_imports,
+        source_provider_dependencies,
         string_table,
     )?;
     let public_nominal_type_origins = index_public_nominal_type_origins(
@@ -217,7 +217,7 @@ pub(crate) fn build_direct_export_seed(
     let binding_exports = collect_binding_exports(
         &active_origin,
         module_symbols,
-        source_provider_imports,
+        source_provider_dependencies,
         external_registry,
         string_table,
     )?;
@@ -232,7 +232,7 @@ pub(crate) fn build_direct_export_seed(
 fn collect_binding_exports<'a>(
     module_origin: &StableModuleOriginIdentity,
     module_symbols: &ModuleSymbols,
-    source_provider_imports: &'a SourceProviderImportSet<'a>,
+    source_provider_dependencies: &'a SourceProviderDependencySet<'a>,
     external_registry: &ExternalPackageRegistry,
     string_table: &StringTable,
 ) -> Result<Vec<PublicBindingExport>, CompilerError> {
@@ -249,7 +249,7 @@ fn collect_binding_exports<'a>(
         .chain(module_symbols.source_package_public_exports.values())
         .flatten()
         .any(|entry| matches!(entry.target, PublicExportTarget::External(_)));
-    if !has_direct_binding_export && source_provider_imports.is_empty() {
+    if !has_direct_binding_export && source_provider_dependencies.is_empty() {
         return Ok(Vec::new());
     }
 
@@ -284,31 +284,29 @@ fn collect_binding_exports<'a>(
                         symbol_id
                     ))
                 })?,
-            PublicExportTarget::Source {
-                path: target_path,
-                import_shell_id: Some(import_shell_id),
+            PublicExportTarget::ProviderSelection {
+                selection: dependency_selection,
+                source_name: selected_name,
+                ..
             } => {
-                let Some(provider_id) =
-                    source_provider_imports.resolve_reexport(*import_shell_id)
-                else {
-                    continue;
-                };
-                let imported_name = target_path.name_str(string_table).ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
-                        "binding re-export construction: provider target {:?} has no imported name",
-                        target_path
-                    ))
-                })?;
-                let view = source_provider_imports.binding_view(provider_id)?;
-                let Some(binding) = view.binding_export(imported_name) else {
+                let provider_id = source_provider_dependencies
+                    .resolve_reexport(dependency_selection.shell)
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(format!(
+                            "binding re-export construction: provider selection {:?} has no resolved provider",
+                            dependency_selection
+                        ))
+                    })?;
+                let selected_name_text = string_table.resolve(*selected_name);
+                let view = source_provider_dependencies.binding_view(provider_id)?;
+                let Some(binding) = view.binding_export(selected_name_text) else {
+                    // Source-backed provider exports are projected by the ordinary re-export
+                    // path below; this collector owns only binding-backed public exports.
                     continue;
                 };
                 binding.target.clone()
             }
-            PublicExportTarget::Source {
-                import_shell_id: None,
-                ..
-            } => continue,
+            PublicExportTarget::SourceDeclaration { .. } => continue,
         };
 
         exports.push(PublicBindingExport {
@@ -695,7 +693,7 @@ fn collect_free_export_bindings(
     module_origin: &StableModuleOriginIdentity,
     sorted_headers: &[Header],
     module_symbols: &ModuleSymbols,
-    source_provider_imports: &SourceProviderImportSet<'_>,
+    source_provider_dependencies: &SourceProviderDependencySet<'_>,
     string_table: &StringTable,
 ) -> Result<(Vec<ExportBinding>, Vec<PublicExportDiagnosticProvenance>), CompilerError> {
     let mut export_bindings = Vec::new();
@@ -746,7 +744,7 @@ fn collect_free_export_bindings(
         module_origin,
         sorted_headers,
         module_symbols,
-        source_provider_imports,
+        source_provider_dependencies,
         string_table,
     )?;
 
@@ -797,7 +795,7 @@ fn portable_source_location(
 /// `source_package_public_exports` entries that target same-module source declarations.
 ///
 /// WHAT: iterates the header-built public export maps for the active module root and source
-///       packages. Each `PublicExportTarget::Source` entry whose target declaration path belongs
+///       packages. Each `PublicExportTarget::SourceDeclaration` entry whose target declaration path belongs
 ///       to the active module is resolved to an `ExportBinding` with the export name and the
 ///       declaration's stable origin. `External` targets are deferred to the binding-backed
 ///       re-export owner.
@@ -810,7 +808,7 @@ fn collect_reexport_bindings(
     module_origin: &StableModuleOriginIdentity,
     sorted_headers: &[Header],
     module_symbols: &ModuleSymbols,
-    source_provider_imports: &SourceProviderImportSet<'_>,
+    source_provider_dependencies: &SourceProviderDependencySet<'_>,
     string_table: &StringTable,
 ) -> Result<Vec<ReexportBinding>, CompilerError> {
     if module_symbols.file_module_membership.is_empty() {
@@ -832,7 +830,7 @@ fn collect_reexport_bindings(
         active_module_root,
         module_symbols,
         header_by_path: &header_by_path,
-        source_provider_imports,
+        source_provider_dependencies,
         string_table,
     };
 
@@ -857,7 +855,7 @@ struct ReexportBindingContext<'a> {
     active_module_root: &'a InternedPath,
     module_symbols: &'a ModuleSymbols,
     header_by_path: &'a FxHashMap<&'a InternedPath, &'a Header>,
-    source_provider_imports: &'a SourceProviderImportSet<'a>,
+    source_provider_dependencies: &'a SourceProviderDependencySet<'a>,
     string_table: &'a StringTable,
 }
 
@@ -933,37 +931,43 @@ fn collect_one_reexport_binding<'a>(
     entry: &PublicExportEntry,
     context: &ReexportBindingContext<'a>,
 ) -> Result<(), CompilerError> {
-    let PublicExportTarget::Source {
-        path: target_path,
-        import_shell_id,
-    } = &entry.target
-    else {
+    let (target_path, provider_selection) = match &entry.target {
+        PublicExportTarget::SourceDeclaration { path } => (path, None),
+        PublicExportTarget::ProviderSelection {
+            selection,
+            source_name,
+            diagnostic_path,
+        } => (diagnostic_path, Some((selection, source_name))),
         // External targets are deferred to the binding-backed re-export owner.
-        return Ok(());
+        PublicExportTarget::External(_) => return Ok(()),
     };
 
     // Cross-module re-exports resolve through the immutable provider interface selected by
     // Stage 0. The origin remains provider-owned while this module owns the public alias.
-    if let Some(import_shell_id) = import_shell_id
-        && let Some(provider_id) = context
-            .source_provider_imports
-            .resolve_reexport(*import_shell_id)
-    {
-        let provider_interface = context.source_provider_imports.interface(provider_id)?;
-        let imported_name = target_path.name_str(context.string_table).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "re-export binding construction: a provider target has no resolvable imported name (path: {:?})",
-                target_path
-            ))
-        })?;
-        let view = context.source_provider_imports.binding_view(provider_id)?;
-        let Some(provider_origin) = view.exported_origin(imported_name).cloned() else {
-            if view.binding_export(imported_name).is_some() {
+    if let Some((dependency_selection, selected_name)) = provider_selection {
+        let provider_id = context
+            .source_provider_dependencies
+            .resolve_reexport(dependency_selection.shell)
+            .ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "re-export binding construction: provider selection {:?} has no resolved provider",
+                    dependency_selection
+                ))
+            })?;
+        let provider_interface = context
+            .source_provider_dependencies
+            .interface(provider_id)?;
+        let selected_name_text = context.string_table.resolve(*selected_name);
+        let view = context
+            .source_provider_dependencies
+            .binding_view(provider_id)?;
+        let Some(provider_origin) = view.exported_origin(selected_name_text).cloned() else {
+            if view.binding_export(selected_name_text).is_some() {
                 return Ok(());
             }
             return Err(CompilerError::compiler_error(format!(
                 "re-export binding construction: completed provider interface {:?} has no public binding '{}' required by target {:?}",
-                provider_interface.module_origin, imported_name, target_path
+                provider_interface.module_origin, selected_name_text, target_path
             )));
         };
         let export_name = context.string_table.resolve(entry.export_name).to_owned();
@@ -973,7 +977,9 @@ fn collect_one_reexport_binding<'a>(
                 export_name,
                 provider_origin,
             ),
-            provenance: view.export_diagnostic_provenance(imported_name).cloned(),
+            provenance: view
+                .export_diagnostic_provenance(selected_name_text)
+                .cloned(),
         });
         return Ok(());
     }

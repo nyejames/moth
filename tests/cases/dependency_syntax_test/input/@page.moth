@@ -1,0 +1,7 @@
+-- Test import syntax and entry point execution
+@utils/math add
+@utils/string format_number
+
+result = add(5, 3)
+formatted = format_number(result)
+io.line([: Result: [formatted]])

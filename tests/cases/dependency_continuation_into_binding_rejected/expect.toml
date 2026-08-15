@@ -1,0 +1,24 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0019"]
+message_contains = [
+    "comma continued the dependency clause",
+    "next selected dependency name",
+]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0019"
+reason = "invalid_dependency_clause.continuation_entered_statement"
+path = "input/@page.moth"
+line = 2
+column = 2
+count = 1
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/@page.moth"
+line = 1
+column = 16

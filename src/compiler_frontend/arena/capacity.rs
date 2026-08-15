@@ -101,7 +101,7 @@ impl FrontendArenaCapacityEstimate {
             &mut capped_count,
         );
 
-        // Declarations: the sum of all top-level declaration-like headers plus imports.
+        // Declarations: all top-level declaration-like headers plus dependency clauses.
         // This seeds an arena for named top-level bindings.
         estimate.declarations = capped(
             header_stats
@@ -115,7 +115,7 @@ impl FrontendArenaCapacityEstimate {
                 .saturating_add(header_stats.trait_incompatibilities)
                 .saturating_add(header_stats.const_templates)
                 .saturating_add(header_stats.start_functions)
-                .saturating_add(header_stats.imports),
+                .saturating_add(header_stats.dependency_clauses),
             HARD_CAPACITY_CAP,
             &mut capped_count,
         );

@@ -1,4 +1,4 @@
-import @helper2 { sine, CIRCLE_RATIO, Span, make_span, span_seconds }
+@helper2 sine, CIRCLE_RATIO, Span, make_span, span_seconds
 
 span Span = make_span(2.5)
 seconds = span_seconds(span)

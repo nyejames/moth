@@ -1,14 +1,12 @@
 -- Basic HTML components and utility formatters for HTML project builds.
 -- Provided by the HTML project builder as a source-backed Builder package.
-import @web/canvas {
-    Canvas2d,
+@web/canvas Canvas2d,
     get_canvas as raw_get_canvas,
     context_2d as raw_context_2d,
     set_fill_style as raw_set_fill_style,
     fill_rect as raw_fill_rect,
     clear_rect as raw_clear_rect,
-    stroke_rect as raw_stroke_rect,
-}
+    stroke_rect as raw_stroke_rect
 
 set_fill_style |this ~Canvas, color String|:
     raw_set_fill_style(~this.context, color)

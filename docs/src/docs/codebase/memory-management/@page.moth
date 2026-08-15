@@ -1,4 +1,4 @@
-import @styles {navbar, section, theme_head, codeblock}
+@styles navbar, section, theme_head, codeblock
 
 page_title #= "Memory management"
 page_description #= "Reference semantics, borrow validation, lifetime regions, ownership and backend memory lowering."

@@ -1,0 +1,20 @@
+Direct-selection clauses bring multiple symbols. Namespace clauses bring a whole surface.
+
+### Two colliding render symbols
+
+[codeblock, $code("moth"):
+    @blog render as render_blog
+    @docs render as render_docs
+]
+
+Two modules both export `render`. Aliases keep them apart.
+
+### A namespace alias
+
+[codeblock, $code("moth"):
+    @core/math as math
+
+    result = math.sin(1.0)
+]
+
+`math` gives you field access to the whole math package.

@@ -3,7 +3,7 @@ Moth template files are the wrong tool when the job stops being content-shaped.
 ### Use `.moth` instead when
 
 - You need runtime values or control flow.
-- You need imports or declarations.
+- You need dependency clauses or declarations.
 - You need page fragments or slot composition.
 
 ### Use `.md` instead when

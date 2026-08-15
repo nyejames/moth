@@ -1,4 +1,4 @@
-import @choices { Response }
+@choices Response
 
 e = Response::Err("bad")
 

@@ -1,6 +1,6 @@
-import @components/card {Card}
-import @components/layout {render_page}
-import @data/copy {card_body, tagline}
+@components/card Card
+@components/layout render_page
+@data/copy card_body, tagline
 
 card = Card("Benchmark", card_body)
 

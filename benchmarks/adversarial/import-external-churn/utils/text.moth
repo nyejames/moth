@@ -1,5 +1,5 @@
-import @core/text { length, contains, starts_with, ends_with }
-import @data/constants { project_name }
+@core/text length, contains, starts_with, ends_with
+@data/constants project_name
 
 prefix |input String| -> String:
     return [: [project_name] / [input] ]

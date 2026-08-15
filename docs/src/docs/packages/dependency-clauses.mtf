@@ -1,0 +1,122 @@
+Direct-selection and namespace dependency clauses provide compact syntax for binding multiple symbols or a whole declaration surface.
+
+### Direct symbol dependencies
+
+[codeblock, $code("moth"):
+    @core/math sin, cos, PI
+
+    @components render as render_component, Button as UiButton, Card
+]
+
+Each direct selection binds one symbol into the file. `as` creates a file-local alias. One authored clause keeps one shell identity and resolves one provider surface. Selected names do not become independent provider clauses.
+
+### Direct-selection termination
+
+The path and the first direct selection must start on the same physical line. A comma explicitly
+continues the list across a following newline:
+
+[codeblock, $code("moth"):
+    @core/math sin, -- the comma keeps the clause open
+        cos
+]
+
+Without a comma, a newline ends the dependency clause:
+
+[codeblock, $code("moth"):
+    @core/math sin
+    next_value = build_value()
+]
+
+The comma always promises another selection, so a trailing comma is invalid:
+
+[codeblock, $code("moth"):
+    -- Error
+    @core/math sin, cos,
+]
+
+The same activation, comma-continuation and no-trailing-comma rules apply inside `export:`.
+
+### Namespace dependencies
+
+[codeblock, $code("moth"):
+    @core/math
+
+    angle = math.PI
+    result = math.sin(angle)
+]
+
+A bare namespace clause brings the whole surface as a field-access-only namespace. Use `math.sin(1.0)` for values and `math.PI` for constants, but do not pass the namespace record itself as a value.
+
+### Namespace alias
+
+[codeblock, $code("moth"):
+    @core/math as math
+
+    @vendor/drawing.js as drawing
+]
+
+A clause-level `as` gives the namespace a local name. This is the standard form for external package namespaces.
+
+### Entry aliases
+
+[codeblock, $code("moth"):
+    @core/math sin as sine, PI as pi
+]
+
+Each selected entry can have its own alias. A clause-level `as` is mutually exclusive with direct selections and renames the whole namespace.
+
+### Bindable symbol categories
+
+- functions
+- structs
+- choices
+- type aliases
+- traits
+- compile-time constants
+
+Runtime top-level bindings are not bindable. See @#module-visibility (Module visibility).
+
+### Namespaced access
+
+Source and module namespace clauses are shallow. External package namespaces can expose nested package-local symbols. Use field-access syntax on the namespace record, but do not pass the namespace itself as a first-class value. Source-authored receiver methods are called through receiver-call syntax rather than as namespace fields.
+
+### Dependency clauses are compile-time declarations
+
+Dependency clauses are not first-class runtime values. They exist at compile time to make names visible.
+Dependency bindings are file-local and visible throughout the file independent of clause position.
+
+### Direct-selection rules
+
+- Empty selection lists are unrepresentable.
+- A leading `@` inside a selection list is invalid.
+- Selections are flat identifiers and cannot contain child paths or nested selection syntax.
+- Duplicate selected names and duplicate local names are diagnosed.
+- A direct-selection clause binds selected declarations from the one resolved provider surface.
+- Clause-level `as` and direct selections are mutually exclusive.
+- An invalid inferred namespace stem requires `as`.
+- Receiver methods remain attached to their receiver types and cannot be selected separately.
+
+### Collision and no-shadowing policy
+
+- Ordinary dependency aliases are file-local.
+- A dependency alias cannot hide an existing visible name.
+- If `render` is already declared in the file, `@other render` is an error. Pick a different local name.
+- Leading-case mismatches warn. For example, binding a struct with a lowercase alias or a function with an uppercase alias triggers a warning.
+
+### Provider clauses
+
+Explicit-extension paths select a registered provider:
+
+[codeblock, $code("moth"):
+    @drawing.js draw
+    @drawing.js as drawing
+]
+
+A bare explicit-extension clause requires `as` or at least one same-line direct selection. An explicit-extension clause with no registered provider gets a targeted diagnostic.
+A namespace has one provider origin. Consumer-created mixed-origin namespace aggregation is outside scope.
+
+### Related concepts
+
+- For dependency alias rules see @../aliases/#dependency-aliases (Dependency aliases).
+- For dependency path resolution see @#dependency-paths (Dependency paths).
+- For visibility rules see @#module-visibility (Module visibility).

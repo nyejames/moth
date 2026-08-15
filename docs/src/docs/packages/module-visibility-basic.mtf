@@ -11,20 +11,20 @@ Declarations are private to their module. The export block makes them public.
 
 [codeblock, $code("moth"):
     -- src/components/@api.moth
-    import @utils {internal_value}
+    @utils internal_value
 
     export:
-        import @utils {internal_value}
+        @utils internal_value
     ;
 ]
 
-Same-module imports see everything. No export block needed.
+Same-module dependencies see everything. No export block needed.
 
 ### Other modules need the export block
 
 [codeblock, $code("moth"):
     -- src/@site.moth
-    import @components {internal_value}
+    @components internal_value
 ]
 
-Now the parent module can import `internal_value` through the `@components` public surface. It cannot bypass that surface with `@components/utils`.
+Now the parent module can bind `internal_value` through the `@components` public surface. It cannot bypass that surface with `@components/utils`.

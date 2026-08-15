@@ -4,7 +4,7 @@ Build inputs let config and source declare named primitive values that resolve b
 
 ### Direct project `#Import` fields
 
-A direct primitive or optional field of `project` may declare a build-input contract using `#Import of T`. Nested project fields cannot declare imports.
+A direct primitive or optional field of `project` may declare a build-input contract using `#Import of T`. Nested project fields cannot declare `#Import` contracts.
 
 Accepted imported-value types are `String`, `Int`, `Float`, `Bool`, `Char` and optional forms of those types.
 
@@ -17,7 +17,7 @@ Accepted imported-value types are `String`, `Int`, `Float`, `Bool`, `Char` and o
     |
 ]
 
-`#Import` is constant-source syntax. It isn't a source import or a wrapper type.
+`#Import` is constant-source syntax. It isn't a source dependency clause or a wrapper type.
 
 A direct project `#Import` value resolves in this order:
 
@@ -28,7 +28,7 @@ A direct project `#Import` value resolves in this order:
 
 Resolution happens during config compilation before Stage 0 applies fields such as `entry_root`.
 
-A fixed direct project field is not an import contract. When a same-name source `#Import` uses the same primitive type and optionality, the fixed field is its authoritative provider and blocks CLI override. Same-name source declarations must still agree on required or default state and the normalised default value.
+A fixed direct project field is not a `#Import` contract. When a same-name source `#Import` uses the same primitive type and optionality, the fixed field is its authoritative provider and blocks CLI override. Same-name source declarations must still agree on required or default state and the normalised default value.
 
 ### Source `#Import` contracts
 

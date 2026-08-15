@@ -8,16 +8,16 @@ implementation status.
 
 ### Using `@project`
 
-Import `@project` to read project fields like `version` or `entry_root` inside a
+Bind `@project` to read project fields like `version` or `entry_root` inside a
 module:
 
 [codeblock, $code("moth"):
-    import @project { version }
+    @project version
 
     footer #= [: v[version]]
 ]
 
-`@project` is never implicitly injected. Import it explicitly when you need it.
+`@project` is never implicitly injected. Bind it explicitly when you need it.
 
 ### Entry-local `config:` blocks
 

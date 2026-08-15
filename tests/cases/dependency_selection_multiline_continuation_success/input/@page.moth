@@ -1,0 +1,5 @@
+@core/math sin,
+    PI
+
+value = sin(PI / 2.0)
+io.line([:dependency-continuation [value]])

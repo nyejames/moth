@@ -2,7 +2,7 @@
 
 Compilation and activation are different verbs.
 
-A module can compile completely, including its dormant top-level work, and still do nothing at runtime until an **entry** selects it. The seed can be fully formed and still sleep. Imports do not secretly run initialisers because someone mentioned a name.
+A module can compile completely, including its dormant top-level work, and still do nothing at runtime until an **entry** selects it. The seed can be fully formed and still sleep. Dependencies do not secretly run initialisers because someone mentioned a name.
 
 ## Compile versus activate
 
@@ -11,7 +11,7 @@ Every normal root may carry dormant top-level runtime work and page fragments. T
 The compiler synthesises an implicit **`start`** for a normal root. Properties that matter:
 
 - non-exported
-- non-importable
+- non-bindable
 - infallible as a function contract (no `Error!` return channel)
 - owner of dormant top-level runtime work and runtime fragment string production in source order
 
@@ -19,7 +19,7 @@ Compilation never activates `start`. Entry assembly may activate it once after t
 
 Support roots and the project package facade have no implicit `start`.
 
-In the walkthrough, `@page.moth` owns dormant root work and a page fragment. `greeting.moth` remains an imported module. Importing `greet` does not run page-level statements from greeting's root, because greeting is not the activated entry root.
+In the walkthrough, `@page.moth` owns dormant root work and a page fragment. `greeting.moth` remains a dependency module. Binding `greet` does not run page-level statements from greeting's root, because greeting is not the activated entry root.
 
 **Diagram placeholder:** All modules compile before one selected root activates
 
@@ -29,7 +29,7 @@ In the walkthrough, `@page.moth` owns dormant root work and a page fragment. `gr
 **Diagram placeholder:** page root owns a dormant start selected by one entry
 
 *Caption: simplified root map.*
-*Question: why do imported roots stay dormant?*
+*Question: why do dependency roots stay dormant?*
 
 ## Page fragments and root order
 
@@ -39,7 +39,7 @@ Fragments split into useful kinds:
 - **runtime fragments** produced when `start` runs
 - ordering metadata that preserves source indexes
 
-Imported modules do not run their root work merely because a consumer imported a function. Activation is explicit and entry-scoped.
+Dependency modules do not run their root work merely because a consumer bound a function. Activation is explicit and entry-scoped.
 
 The paragraph in `@page.moth` enters through fragment metadata and, if needed, runtime production. It does not require the backend to re-read the `.moth` file.
 
@@ -100,11 +100,11 @@ Target capability failures wait for the next article even when they appear adjac
 
 ## Why Moth does it this way
 
-**Alternative:** activate imported module initialisers automatically, or parse only the active root and discover callees late.
+**Alternative:** activate dependency-module initialisers automatically, or parse only the active root and discover callees late.
 
 **Choice:** compile dormant work once, activate selected roots explicitly.
 
-**Benefit:** imports remain predictable and entry planning stays data-driven.
+**Benefit:** dependencies remain predictable and entry planning stays data-driven.
 
 **Cost:** the builder must carry explicit root and fragment metadata.
 

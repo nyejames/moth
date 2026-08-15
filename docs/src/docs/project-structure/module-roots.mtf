@@ -21,11 +21,11 @@ A source directory may contain at most one non-config `@*.moth` file. Two or mor
 
 `config.moth` is the project config file. It is not a module root, does not produce HIR and does not export declarations. `@config.moth` is a module root, not a config file. Only plain `config.moth` without `@` has config semantics.
 
-### Direct root-file imports are rejected
+### Direct root-file dependencies are rejected
 
-Normal module-root files have no direct import form. Import the directory's public module surface.
+Normal module-root files have no direct dependency form. Bind the directory's public module surface.
 
-The `@` in `@page.moth` is a filesystem marker identifying a normal module root. The `@` in `import @pages` is the source syntax that introduces an import path. These use the same symbol to visually connect module roots and import roots, but they are not concatenated. The module's import identity comes from its directory or registered package name. The cosmetic root filename is never an import name.
+The `@` in `@page.moth` is a filesystem marker identifying a normal module root. The `@` in `@pages` is the source syntax that introduces a dependency path. These use the same symbol to visually connect module roots and dependency roots, but they are not concatenated. The module's dependency identity comes from its directory or registered package name. The cosmetic root filename is never a dependency name.
 
 Given this structure:
 
@@ -40,28 +40,28 @@ Given this structure:
 Valid:
 
 [codeblock, $code("moth"):
-    import @pages
+    @pages
 ]
 
 Invalid:
 
 [codeblock, $code("moth"):
-    import @@pages
-    import @@page
+    @@pages
+    @@page
 ]
 
-Neither `@page.moth` nor `@site.moth` is imported directly. Do not add the root file's leading `@` to an import path.
+Neither `@page.moth` nor `@site.moth` is bound directly. Do not add the root file's leading `@` to a dependency path.
 
 ### Normal files belong to the surrounding module
 
-Files without `@` in the same directory as a root file are normal source files within that module. They contribute declarations that the module root can import and export. They do not execute top-level runtime code independently.
+Files without `@` in the same directory as a root file are normal source files within that module. They contribute declarations that the module root can bind and export. They do not execute top-level runtime code independently.
 
-### Active versus imported module roots
+### Active versus dependency module roots
 
-Every selected normal module is compiled into an immutable module artefact. Its top-level runtime work becomes a dormant compiler-synthesised `start`. When the builder selects that module as an entry, entry assembly activates `start` exactly once. Importing the module exposes only its public interface and never activates its root work.
+Every selected normal module is compiled into an immutable module artefact. Its top-level runtime work becomes a dormant compiler-synthesised `start`. When the builder selects that module as an entry, entry assembly activates `start` exactly once. Binding the module exposes only its public interface and never activates its root work.
 
 - **Entry-selected root**: the builder selects this module as an entry. Entry assembly activates its dormant `start` and its direct top-level templates become page fragments.
-- **Imported root**: its top-level runtime and page-fragment activity is inactive. Only the declarations selected by `export:` are visible through the module boundary.
+- **Dependency root**: its top-level runtime and page-fragment activity is inactive. Only the declarations selected by `export:` are visible through the module boundary.
 
 ### API-only roots
 
@@ -73,8 +73,8 @@ declarations but produces no builder artefact.
 
 - Rename the project config file to plain `config.moth`.
 - Keep one non-config `@*.moth` root per source directory. Merge old `@page.moth` and `@mod.moth` roles when they shared a directory.
-- Replace inline `export` declarations and imports with one strict `export:` block in the module root.
-- Import the module directory or package prefix. Do not import the normal module-root filename directly.
+- Replace inline `export` declarations and dependency clauses with one strict `export:` block in the module root.
+- Bind the module directory or package prefix. Do not bind the normal module-root filename directly.
 
 ### Related concepts
 

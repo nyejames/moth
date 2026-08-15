@@ -1,21 +1,15 @@
-`@core/time` separates elapsed time from wall-clock time. It belongs to the binding-backed Core package family with no prelude alias, so it requires an explicit import.
+`@core/time` separates elapsed time from wall-clock time. It belongs to the binding-backed Core package family with no prelude alias, so it requires an explicit dependency clause.
 
 `@core/time` carries Core origin with ExternalBinding backing. See @../../#package-origins-and-backing (Package origins and backing) for origin and backing rules.
 
-### Import roots
+### Dependency roots
 
-Import individual symbols or the whole namespace:
+Bind individual symbols or the whole namespace:
 
 [codeblock, $code("moth"):
-    import @core/time {
-        Duration,
-        TimeMark,
-        mark_now,
-        duration_between,
-        as_seconds,
-    }
+    @core/time Duration, TimeMark, mark_now, duration_between, as_seconds
 
-    import @core/time
+    @core/time
 
     previous = time.mark_now()
 ]
@@ -124,11 +118,7 @@ All three use the handle ABI. They carry no source-visible fields.
 `timestamp_from_iso_string` is the only fallible function. Invalid ISO strings return through `Error!`.
 
 [codeblock, $code("moth"):
-    import @core/time {
-        Timestamp,
-        timestamp_from_iso_string,
-        timestamp_from_unix_milliseconds,
-    }
+    @core/time Timestamp, timestamp_from_iso_string, timestamp_from_unix_milliseconds
 
     created = timestamp_from_iso_string("not-a-date") catch:
         then timestamp_from_unix_milliseconds(0.0)
@@ -239,7 +229,7 @@ HTML-Wasm lacks a Wasm lowering for these functions. See @../../../progress (pro
 
 ### Unsupported source forms
 
-- Direct symbol-path imports such as `import @core/time/mark_now` face rejection. Use grouped or namespace imports.
+- Direct symbol-path clauses such as `@core/time/mark_now` face rejection. Use direct selections or a namespace clause.
 - Named arguments are not supported. Binding-backed calls are positional-only.
 - Do not construct `Duration`, `TimeMark` or `Timestamp` with struct syntax.
 - Do not inspect opaque type fields directly.
@@ -252,4 +242,4 @@ Calendar date types, time zones, local-time conversion, locale-aware formatting,
 ### Related concepts
 
 - For package origin and backing see @../../#package-origins-and-backing (Package origins and backing).
-- For import path rules see @../../#import-paths (Import paths).
+- For dependency-path rules see @../../#dependency-paths (Dependency paths).

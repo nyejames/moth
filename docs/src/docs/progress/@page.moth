@@ -1,5 +1,5 @@
-import @html {center, span}
-import @styles {navbar, title, section, styled_table, header, data, codeblock, theme_head}
+@html center, span
+@styles navbar, title, section, styled_table, header, data, codeblock, theme_head
 
 page_title #= "Progress Matrix"
 page_description #= "Current implementation status, coverage and feature progress for the Moth compiler."
@@ -119,13 +119,13 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Supported]
             [: Broad entry-selected start, dependency-sort, normal-file top-level rejection, imported-root suppression, fragment-order, and API-only artifact-filtering coverage.]
             [: Frontend / HTML builder]
-            [: Selected normal modules compile dormant compiler-synthesised [$html:<code>start</code>] work. Entry assembly activates an entry-selected module's [$html:<code>start</code>] exactly once. Imported roots expose public interfaces without activating root work. API-only roots remain importable and emit no HTML page artefact. The implicit [$html:<code>start</code>] function is build-system-owned and not user-importable or callable.]
+            [: Selected normal modules compile dormant compiler-synthesised [$html:<code>start</code>] work. Entry assembly activates an entry-selected module's [$html:<code>start</code>] exactly once. Imported roots expose public interfaces without activating root work. API-only roots remain dependency-bindable and emit no HTML page artefact. The implicit [$html:<code>start</code>] function is build-system-owned and not user-bindable or callable.]
         ]
 
         [data:
             [: Structured diagnostics]
             [: Supported]
-            [: Broad import, config, project-structure, syntax, type, rule, borrow, backend-feature, and warning coverage plus targeted compiler-owned reason and primary/secondary source-remapping assertions.]
+            [: Broad dependency, config, project-structure, syntax, type, rule, borrow, backend-feature and warning coverage plus targeted compiler-owned reason and primary/secondary source-remapping assertions.]
             [: Frontend]
             [: User-facing failures use typed [$html:<code>CompilerDiagnostic</code>] payloads with stable codes and optional qualified reason keys. Integration expectations consume that identity and fixture-relative source locations without reconstructing payload taxonomy. Infrastructure and invariant failures use [$html:<code>CompilerError</code>]. Type diagnostics are [$html:<code>TypeId</code>]-first at semantic boundaries.]
         ]
@@ -175,23 +175,23 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Supported]
             [: Broad template parsing, directive, slot, const/runtime fragment, template control-flow, markdown inline-code, diagnostics, and JS/HTML integration coverage. Focused [$html:<code>$code</code>] formatter, escaping, lexical-role and HTML artifact coverage.]
             [: HTML / JS]
-            [: Main Alpha surface. Supported shapes include const and runtime templates, slots/inserts, [$html:<code>$children</code>] / [$html:<code>$fresh</code>] routing, markdown/code/raw/html/css/escape directives, template Bool and option branching, template loops, runtime slot applications, import namespace member access in template heads and const expansion guards. Post-TIR performance follow-ups remain accepted deferred implementation tracked below and in the roadmap. [$html:<code>$code("moth")</code>] uses compiler-owned current word classification, lexical token roles and shared code presentation classes, and performs no semantic symbol resolution. Stateful template-body-aware suppression stays a deferred roadmap follow-up.]
+            [: Main Alpha surface. Supported shapes include const and runtime templates, slots/inserts, [$html:<code>$children</code>] / [$html:<code>$fresh</code>] routing, markdown/code/raw/html/css/escape directives, template Bool and option branching, template loops, runtime slot applications, dependency namespace member access in template heads and const expansion guards. Post-TIR performance follow-ups remain accepted deferred implementation tracked below and in the roadmap. [$html:<code>$code("moth")</code>] uses compiler-owned current word classification, lexical token roles and shared code presentation classes, and performs no semantic symbol resolution. Stateful template-body-aware suppression stays a deferred roadmap follow-up.]
         ]
 
         [data:
             [: Moth template [$html:<code>.mtf</code>] content assets]
             [: Partial]
-            [: Targeted compiler-integrated import, synthetic content constant, markdown folding, module-root re-export, direct API, diagnostics, and integration coverage.]
+            [: Targeted compiler-integrated dependency binding, synthetic content constant, markdown folding, module-root re-export, direct API, diagnostics and integration coverage.]
             [: HTML builder / frontend]
-            [: [$html:<code>.mtf</code>] files are builder-supported source assets that synthesize one private compile-time [$html:<code>content #String</code>] constant from an implicit [$html:<code>$md</code>] template body. Nested templates with no explicit directive also default to [$html:<code>$md</code>], and any explicit nested directive overrides that default. They import extensionlessly into [$html:<code>.moth</code>], can be re-exported through a module root's [$html:<code>export:</code>] block, and must fully fold. Same-directory constants and builder constants remain visible when their names are unique. A collision reports both source locations where available, and neither source shadows the other.]
+            [: [$html:<code>.mtf</code>] files are builder-supported source assets that synthesize one private compile-time [$html:<code>content #String</code>] constant from an implicit [$html:<code>$md</code>] template body. Nested templates with no explicit directive also default to [$html:<code>$md</code>], and any explicit nested directive overrides that default. They bind extensionlessly into [$html:<code>.moth</code>], can be re-exported through a module root's [$html:<code>export:</code>] block, and must fully fold. Same-directory constants and builder constants remain visible when their names are unique. A collision reports both source locations where available, and neither source shadows the other.]
         ]
 
         [data:
             [: Plain Markdown [$html:<code>.md</code>] content assets]
             [: Supported]
-            [: Broad extensionless import, grouped alias, module-root re-export, parser options, raw HTML, literal links/images, collision, direct-extension, and module-root rejection coverage.]
+            [: Broad extensionless dependency, direct alias, module-root re-export, parser options, raw HTML, literal links/images, collision, direct-extension and module-root rejection coverage.]
             [: HTML builder / frontend]
-            [: [$html:<code>.md</code>] files are plain Markdown content assets that render to HTML at compile time and synthesize one private [$html:<code>content #String</code>] constant. They do not parse Moth imports, declarations, interpolation, templates, frontmatter, metadata, or same-directory module-root scope. Links/images render literally and are not tracked assets in V1.]
+            [: [$html:<code>.md</code>] files are plain Markdown content assets that render to HTML at compile time and synthesize one private [$html:<code>content #String</code>] constant. They do not parse Moth dependency clauses, declarations, interpolation, templates, frontmatter, metadata or same-directory module-root scope. Links/images render literally and are not tracked assets in V1.]
         ]
 
         [data:
@@ -199,7 +199,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Partial]
             [: Targeted moth template and Markdown source-kind registry, extensionless resolution, unsupported-kind diagnostics, source discovery, and tokenizer/preparation coverage.]
             [: Stage 0 / frontend]
-            [: Builders can declare non-[$html:<code>.moth</code>] source file kinds that participate in source import discovery and frontend preparation. The HTML builder implements moth template [$html:<code>.mtf</code>] and plain Markdown [$html:<code>.md</code>] content assets.]
+            [: Builders can declare non-[$html:<code>.moth</code>] source file kinds that participate in source dependency discovery and frontend preparation. The HTML builder implements moth template [$html:<code>.mtf</code>] and plain Markdown [$html:<code>.md</code>] content assets.]
         ]
 
         [data:
@@ -213,7 +213,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: Choices]
             [: Supported]
-            [: Broad declaration, constructor, import, return, assignment, match, payload, JS carrier-shape, and structural equality coverage.]
+            [: Broad declaration, constructor, dependency, return, assignment, match, payload, JS carrier-shape and structural equality coverage.]
             [: JS / HTML]
             [: Unit and record-payload variants are supported. Payload fields are immutable. Accepted incomplete work includes direct payload field access with narrowing, nested payload patterns and recursive choices.]
         ]
@@ -339,17 +339,17 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         ]
 
         [data:
-            [: Paths and imports]
+            [: Paths and dependency clauses]
             [: Supported]
-            [: Broad source import, namespace import, grouped import, binding-backed package, public-surface, module-boundary, collision and project-structure coverage.]
+            [: Broad source dependency, namespace, flat direct-selection, binding-backed package, public-surface, module-boundary, collision, continuation-diagnostic and legacy-import-migration coverage.]
             [: Frontend / HTML builder]
-            [: Source and module namespace records are shallow. External package namespace records support nested symbol paths such as [$html:<code>io.input.new</code>] and [$html:<code>io.input.Input</code>]. Direct symbol-path imports remain rejected. Cross-module and source-backed package access goes through the target root's [$html:<code>export:</code>] public surface.]
+            [: Source and module namespace records are shallow. External package namespace records support nested symbol paths such as [$html:<code>io.input.new</code>] and [$html:<code>io.input.Input</code>]. Direct symbol-path dependencies remain rejected. Cross-module and source-backed package access goes through the target root's [$html:<code>export:</code>] public surface.]
         ]
 
         [data:
             [: Binding-backed platform packages]
             [: Partial]
-            [: Broad package import, external constant, external signature, provider-created JS package, runtime asset/glue, core package, prelude, and backend validation coverage.]
+            [: Broad package dependency, external constant, external signature, provider-created JS package, runtime asset/glue, core package, prelude and backend validation coverage.]
             [: Frontend / JS]
             [: Rust-side and provider-created binding-backed packages expose free functions, opaque types and compile-time scalar constants. Project-local and builder-owned annotated [$html:<code>.js</code>] files can create JS-backed package surfaces. Binding-backed packages do not expose receiver methods. Unsupported reachable calls for an active backend fail before lowering.]
         ]
@@ -413,7 +413,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: Core IO package]
             [: Partial]
-            [: Console helpers, prelude/explicit namespace imports, old callable rejection, removed public IO, input metadata/type-checking, HTML-JS input helper emission, and backend unsupported-call diagnostics.]
+            [: Console helpers, prelude/explicit namespace dependencies, old callable rejection, removed public IO, input metadata/type-checking, HTML-JS input helper emission and backend unsupported-call diagnostics.]
             [: Frontend / JS / HTML-Wasm validation]
             [: [$html:<code>@core/io</code>] exposes [$html:<code>io.print</code>], [$html:<code>io.line</code>], [$html:<code>io.debug</code>], [$html:<code>io.warn</code>], [$html:<code>io.error</code>], and [$html:<code>io.input.*</code>]. The prelude injects [$html:<code>io</code>] as a compile-time namespace alias, not a runtime value. Deferred IO domains such as filesystem, network, timers, event queues, targeted input sources, and non-JS lowerings belong in the roadmap.]
         ]
@@ -421,9 +421,9 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: Core math package]
             [: Partial]
-            [: Targeted direct, grouped, aliased, namespace, const, arity, type, missing-symbol, non-imported access, finite-result boundary, and HTML-Wasm unsupported-path coverage.]
+            [: Targeted direct, aliased, namespace, const, arity, type, missing-symbol, unbound access, finite-result boundary and HTML-Wasm unsupported-path coverage.]
             [: JS / HTML-Wasm validation]
-            [: [$html:<code>@core/math</code>] exposes Float math functions and scalar constants. It is explicit-import only. HTML-JS routes every single-Float external result through the shared finite-result boundary, rejecting NaN and both infinities before ordinary Moth code observes them. HTML-Wasm has no lowering for this package.]
+            [: [$html:<code>@core/math</code>] exposes Float math functions and scalar constants. It requires an explicit dependency clause. HTML-JS routes every single-Float external result through the shared finite-result boundary, rejecting NaN and both infinities before ordinary Moth code observes them. HTML-Wasm has no lowering for this package.]
         ]
 
         [data:
@@ -437,7 +437,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: Core random package]
             [: Partial]
-            [: Targeted import, JS helper, runtime smoke, arity, type-error, and Wasm-unsupported coverage.]
+            [: Targeted dependency, JS helper, runtime smoke, arity, type-error and Wasm-unsupported coverage.]
             [: JS / HTML]
             [: [$html:<code>@core/random</code>] exposes random Float and inclusive random Int helpers. Seeded random and non-JS lowerings remain deferred.]
         ]
@@ -445,7 +445,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: Core time package]
             [: Partial]
-            [: Targeted import, grouped alias, namespace, helper, runtime smoke, fallible parse/catch, arity/type diagnostic, old-name rejection, opaque-field rejection, and backend validation coverage.]
+            [: Targeted dependency, direct alias, namespace, helper, runtime smoke, fallible parse/catch, arity/type diagnostic, old-name rejection, opaque-field rejection and backend validation coverage.]
             [: JS / HTML]
             [: [$html:<code>@core/time</code>] exposes opaque Duration, TimeMark, and Timestamp values plus the first JS-backed time helper slice. Calendar/time-zone APIs, timers, animation scheduling, and non-JS lowerings remain deferred.]
         ]
@@ -453,9 +453,9 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: Source-backed package roots]
             [: Partial]
-            [: Targeted AST-backed config loading, known-key and shape enforcement, self-contained config import rejection, generic package-root discovery, collision detection and public-surface enforcement coverage.]
+            [: Targeted AST-backed config loading, known-key and shape enforcement, self-contained config dependency rejection, generic package-root discovery, collision detection and public-surface enforcement coverage.]
             [: Frontend / HTML]
-            [: Source-backed packages and regular modules share module-root and visibility rules. [$html:<code>config.moth</code>] is compiled as one self-contained source before package discovery and rejects every import before path resolution.]
+            [: Source-backed packages and regular modules share module-root and visibility rules. [$html:<code>config.moth</code>] is compiled as one self-contained source before package discovery and rejects every dependency clause before path resolution.]
         ]
 
         [data:
@@ -469,7 +469,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: Project config model]
             [: Partial]
-            [: Targeted flat-config parsing, known-key validation, self-contained import rejection, and builder-section coverage.]
+            [: Targeted flat-config parsing, known-key validation, self-contained dependency-clause rejection and builder-section coverage.]
             [: Frontend / HTML]
             [: The current compiler supports the transitional flat config shape with parsing and validation implemented. Grouped [$html:<code>project</code>] and builder records are accepted deferred design. [$html:<code>#Import</code>], [$html:<code>@project</code>] and entry-local [$html:<code>config:</code>] remain separately queued. The transitional [$html:<code>package_folders</code>] field still parses for the queued Project Config migration, but canonical Stage 0 no longer consumes it for package discovery.]
         ]
@@ -477,7 +477,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: Project-local packages]
             [: Partial]
-            [: Targeted structural support-package roots, ignored legacy package-folder configuration, independently registered builder packages, import resolution, generic normal module-root, and public-surface coverage.]
+            [: Targeted structural support-package roots, ignored legacy package-folder configuration, independently registered builder packages, dependency resolution, generic normal module-root and public-surface coverage.]
             [: Frontend / HTML]
             [: Structural [$html:<code>+*.moth</code>] support packages and the optional project-root facade define the accepted project-local package model. Canonical Stage 0 ignores legacy config-driven [$html:<code>package_folders</code>] paths, including the historical default [$html:<code>lib/</code>]; the transitional config field remains only until the queued Project Config migration removes it. Independently registered Builder/Core source packages retain their own package boundaries. Each support package's containing directory supplies its name. Stage 0 requires exactly one direct [$html:<code>@*.moth</code>] or [$html:<code>+*.moth</code>] root with a non-empty cosmetic name. The filename after [$html:<code>@</code>] or [$html:<code>+</code>] has no semantic role and the root's strict [$html:<code>export:</code>] block defines its public surface.]
         ]
@@ -511,7 +511,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Supported]
             [: Broad same-file struct/choice receiver, aligned generic receiver, imported generic receiver, namespace receiver type, module-boundary exposure, nonlocal/builtin/external receiver rejection, duplicate, collision, and mutability coverage.]
             [: JS / HTML]
-            [: Source-authored receiver methods travel with receiver type visibility, including retained generic receiver templates across module and package boundaries. They are never grouped-imported, aliased, or exposed as namespace-record fields.]
+            [: Source-authored receiver methods travel with receiver type visibility, including retained generic receiver templates across module and package boundaries. They are never selected independently, aliased or exposed as namespace-record fields.]
         ]
 
         [data:
@@ -542,7 +542,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Reactive declarations and parameters]
             [: Partial]
             [: Frontend syntax, AST/HIR metadata, borrow invalidation facts, JS lowering, HTML-JS mounting, and unsupported sink/backend diagnostics.]
-            [: V1 supports [$html:<code>$Type</code>] / [$html:<code>$=</code>] local declarations and [$html:<code>$T</code>] parameters as source metadata, not wrapper [$html:<code>TypeId</code>]s. Reactive declarations are runtime-local and not importable/exportable top-level declarations.]
+            [: V1 supports [$html:<code>$Type</code>] / [$html:<code>$=</code>] local declarations and [$html:<code>$T</code>] parameters as source metadata, not wrapper [$html:<code>TypeId</code>]s. Reactive declarations are runtime-local and not dependency-bindable/exportable top-level declarations.]
         ]
 
         [data:
@@ -650,14 +650,14 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: `as` keyword domains]
             [: Supported]
             [: Targeted success and invalid-position diagnostics.]
-            [: [$html:<code>as</code>] is valid for type aliases, namespace/grouped import aliases, and choice payload capture renames. Other positions are rejected.]
+            [: [$html:<code>as</code>] is valid for type aliases, dependency namespace/direct-selection aliases, and choice payload capture renames. Other positions are rejected.]
         ]
 
         [data:
             [: Module-root export/re-export syntax]
             [: Supported]
-            [: Targeted authored export, grouped re-export, alias, source/external symbol, privacy, duplicate, placement, and strict-block rejection coverage.]
-            [: A module root's single strict [$html:<code>export:</code>] block exposes public authored declarations and grouped re-exports. Legacy inline [$html:<code>export</code>] forms, bare namespace exports, wildcard exports, function alias values, and automatic method re-export through type aliases are rejected.]
+            [: Targeted authored export, flat direct-selection re-export, alias, source/external symbol, privacy, duplicate, placement, and strict-block rejection coverage.]
+            [: A module root's single strict [$html:<code>export:</code>] block exposes public authored declarations and flat dependency re-exports. Legacy inline [$html:<code>export</code>] forms, bare namespace exports, wildcard exports, function alias values, and automatic method re-export through type aliases are rejected.]
         ]
 
         [data:
@@ -684,14 +684,14 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: Generic type infrastructure]
             [: Supported]
-            [: Broad TypeId, nominal instance, alias, constructor, import, HIR validation, trait-bound, and diagnostic coverage.]
+            [: Broad TypeId, nominal instance, alias, constructor, dependency, HIR validation, trait-bound and diagnostic coverage.]
             [: Generic structs, choices, concrete aliases, generic free functions, aligned generic receiver methods, and trait-bound validation use canonical [$html:<code>TypeId</code>] identity before HIR.]
         ]
 
         [data:
             [: Generic functions]
             [: Partial]
-            [: Broad declaration, body validation, inference, instantiation, module-boundary import, frozen provider semantic-closure defaults and namespaces, nested private receiver materialisation with forwarded receiver bounds and evidence, diagnostics, fallible return, and non-value-use coverage.]
+            [: Broad declaration, body validation, inference, instantiation, module-boundary dependency, frozen provider semantic-closure defaults and namespaces, nested private receiver materialisation with forwarded receiver bounds and evidence, diagnostics, fallible return and non-value-use coverage.]
             [: Generic free functions and aligned receiver templates infer from immediate call arguments and immediate expected result context only, then emit concrete instances before HIR. Explicit call-site type application is not part of the current inference-only rule.]
         ]
 

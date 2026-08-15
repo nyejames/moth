@@ -18,7 +18,7 @@ The facade:
 
 - never bypasses an `export:` boundary
 - isn't visible to internal project modules
-- cannot import `@project`
+- cannot depend on `@project`
 - cannot expose a semantic fact that depends on project-private context
 - rejects top-level runtime work and page fragments
 - has no implicit `start`

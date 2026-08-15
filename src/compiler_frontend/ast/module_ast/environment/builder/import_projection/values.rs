@@ -8,7 +8,7 @@ use super::*;
 /// explicit while allowing imported declarations and generated materialisation to share one
 /// folded-value inverse projection.
 /// WHY: a second recursive value converter would make defaults and constants diverge between
-/// provider imports and generated sidecars.
+/// provider dependencies and generated sidecars.
 pub(crate) trait FoldedValueMaterialiser {
     fn intern_canonical_type(
         &mut self,
@@ -50,13 +50,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         &mut self,
     ) -> Result<(), CompilerError> {
         let imported = self
-            .import_environment
+            .binding_environment
             .imported_declarations_by_local_path
             .clone();
 
         for (local_path, origin) in imported {
             let Some(record) = self
-                .import_environment
+                .binding_environment
                 .imported_declarations_by_origin
                 .get(&origin)
                 .cloned()
@@ -85,12 +85,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         string_table: &mut StringTable,
     ) -> Result<(), CompilerError> {
         let imported = self
-            .import_environment
+            .binding_environment
             .imported_declarations_by_local_path
             .clone();
         for (local_path, origin) in imported {
             let Some(record) = self
-                .import_environment
+                .binding_environment
                 .imported_declarations_by_origin
                 .get(&origin)
                 .cloned()

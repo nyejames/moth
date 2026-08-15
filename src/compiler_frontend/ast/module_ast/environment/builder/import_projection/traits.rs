@@ -23,14 +23,14 @@ use crate::compiler_frontend::traits::ids::{TraitEvidenceId, TraitRequirementId}
 
 impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     /// Projects every stable source trait in the retained provider closure before local trait
-    /// headers resolve references to those imports.
+    /// headers resolve references to those dependency bindings.
     pub(in crate::compiler_frontend::ast) fn project_imported_trait_declarations(
         &mut self,
         trait_environment: &mut TraitEnvironment,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerError> {
         let mut imported_traits = self
-            .import_environment
+            .binding_environment
             .imported_declarations_by_origin
             .iter()
             .filter_map(|(origin, record)| {
@@ -112,9 +112,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             }
         }
 
-        // Direct grouped imports and aliases are alternate paths to the same imported trait.
+        // Direct dependency bindings and aliases are alternate paths to the same imported trait.
         let mut visible_paths = self
-            .import_environment
+            .binding_environment
             .imported_declarations_by_local_path
             .iter()
             .filter_map(|(path, origin)| {
@@ -211,7 +211,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     }
 
     /// Patches imported nominal generic lists once imported and core trait IDs are available.
-    pub(in crate::compiler_frontend::ast) fn resolve_imported_generic_parameter_bounds(
+    pub(in crate::compiler_frontend::ast) fn resolve_dependencyed_generic_parameter_bounds(
         &mut self,
         trait_environment: &TraitEnvironment,
     ) -> Result<(), CompilerError> {
@@ -261,7 +261,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // Evidence is already keyed by canonical identity and agreement-checked when provider
         // semantics are imported; project it in deterministic identity order.
         let mut unique_evidence = self
-            .import_environment
+            .binding_environment
             .imported_evidence_by_identity
             .values()
             .cloned()

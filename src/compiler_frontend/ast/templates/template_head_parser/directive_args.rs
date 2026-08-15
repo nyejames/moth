@@ -21,6 +21,7 @@
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::parse_expression::create_expression;
+use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::SlotKey;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
@@ -33,8 +34,8 @@ use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
 
-/// Boxed diagnostic result shared by directive-argument parsing helpers.
-type DirectiveArgsResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// Typed result shared by directive-argument parsing helpers.
+type DirectiveArgsResult<T> = Result<T, TemplateError>;
 
 /// Returns true if the next token after the current directive is `(`.
 pub(crate) fn directive_has_arguments(token_stream: &FileTokens) -> bool {
@@ -56,11 +57,12 @@ pub(crate) fn reject_unexpected_directive_arguments(
     token_stream: &FileTokens,
 ) -> DirectiveArgsResult<()> {
     if directive_has_arguments(token_stream) {
-        return Err(Box::new(CompilerDiagnostic::invalid_template_directive(
+        return Err(CompilerDiagnostic::invalid_template_directive(
             Some(directive_name),
             InvalidTemplateDirectiveReason::UnexpectedArguments,
             token_stream.current_location(),
-        )));
+        )
+        .into());
     }
     Ok(())
 }
@@ -72,11 +74,12 @@ pub(crate) fn reject_empty_directive_parens(
     token_stream: &FileTokens,
 ) -> DirectiveArgsResult<()> {
     if token_stream.current_token_kind() == &TokenKind::CloseParenthesis {
-        return Err(Box::new(CompilerDiagnostic::invalid_template_directive(
+        return Err(CompilerDiagnostic::invalid_template_directive(
             Some(directive_name),
             InvalidTemplateDirectiveReason::EmptyArguments,
             token_stream.current_location(),
-        )));
+        )
+        .into());
     }
     Ok(())
 }
@@ -103,11 +106,12 @@ pub(crate) fn expect_directive_close_paren(token_stream: &FileTokens) -> Directi
     }
 
     let found = token_stream.current_token_kind().to_owned();
-    Err(Box::new(CompilerDiagnostic::expected_token(
+    Err(CompilerDiagnostic::expected_token(
         TokenKind::CloseParenthesis,
         Some(found),
         token_stream.current_location(),
-    )))
+    )
+    .into())
 }
 
 /// Parses a single compile-time expression inside already-opened directive
@@ -137,11 +141,12 @@ fn parse_single_expression_in_directive_parens(
 
     // Keep empty template-boundary arguments on the directive-specific diagnostic path.
     if ends_directive_argument_without_expression(token_stream.current_token_kind()) {
-        return Err(Box::new(CompilerDiagnostic::invalid_template_directive(
+        return Err(CompilerDiagnostic::invalid_template_directive(
             Some(directive_name),
             InvalidTemplateDirectiveReason::EmptyArguments,
             token_stream.current_location(),
-        )));
+        )
+        .into());
     }
 
     let mut inferred = ExpectedType::Infer;
@@ -154,13 +159,14 @@ fn parse_single_expression_in_directive_parens(
         false,
         string_table,
     )
-    .map_err(CompilerDiagnostic::from)?;
+    .map_err(TemplateError::from)?;
 
     if token_stream.current_token_kind() == &TokenKind::Comma {
-        return Err(Box::new(CompilerDiagnostic::unexpected_token(
+        return Err(CompilerDiagnostic::unexpected_token(
             TokenKind::Comma,
             token_stream.current_location(),
-        )));
+        )
+        .into());
     }
 
     expect_directive_close_paren(token_stream)?;
@@ -205,11 +211,12 @@ pub(crate) fn parse_required_parenthesized_expression(
     string_table: &mut StringTable,
 ) -> DirectiveArgsResult<Expression> {
     if !directive_has_arguments(token_stream) {
-        return Err(Box::new(CompilerDiagnostic::expected_token(
+        return Err(CompilerDiagnostic::expected_token(
             TokenKind::OpenParenthesis,
             Some(token_stream.current_token_kind().to_owned()),
             token_stream.current_location(),
-        )));
+        )
+        .into());
     }
 
     advance_into_directive_arguments(token_stream);
@@ -243,11 +250,12 @@ pub(crate) fn parse_optional_slot_target_argument(
         TokenKind::StringSliceLiteral(name) => SlotKey::Named(*name),
         TokenKind::NumericLiteral(token) => {
             if token.kind != NumericLiteralKind::WholeNumber {
-                return Err(Box::new(CompilerDiagnostic::invalid_template_directive(
+                return Err(CompilerDiagnostic::invalid_template_directive(
                     Some(directive_name),
                     InvalidTemplateDirectiveReason::InvalidSlotTarget,
                     token_stream.current_location(),
-                )));
+                )
+                .into());
             }
 
             let index = materialize_i32(token, string_table).map_err(|reason| {
@@ -259,28 +267,31 @@ pub(crate) fn parse_optional_slot_target_argument(
             })?;
 
             if index <= 0 {
-                return Err(Box::new(CompilerDiagnostic::invalid_template_directive(
+                return Err(CompilerDiagnostic::invalid_template_directive(
                     Some(directive_name),
                     InvalidTemplateDirectiveReason::InvalidSlotTarget,
                     token_stream.current_location(),
-                )));
+                )
+                .into());
             }
 
             SlotKey::Positional(index as usize)
         }
         TokenKind::CloseParenthesis => {
-            return Err(Box::new(CompilerDiagnostic::invalid_template_directive(
+            return Err(CompilerDiagnostic::invalid_template_directive(
                 Some(directive_name),
                 InvalidTemplateDirectiveReason::EmptyArguments,
                 token_stream.current_location(),
-            )));
+            )
+            .into());
         }
         _ => {
-            return Err(Box::new(CompilerDiagnostic::invalid_template_directive(
+            return Err(CompilerDiagnostic::invalid_template_directive(
                 Some(directive_name),
                 InvalidTemplateDirectiveReason::InvalidSlotTarget,
                 token_stream.current_location(),
-            )));
+            )
+            .into());
         }
     };
 
@@ -295,11 +306,12 @@ pub(crate) fn parse_required_slot_name_argument(
     token_stream: &mut FileTokens,
 ) -> DirectiveArgsResult<StringId> {
     if !directive_has_arguments(token_stream) {
-        return Err(Box::new(CompilerDiagnostic::expected_token(
+        return Err(CompilerDiagnostic::expected_token(
             TokenKind::OpenParenthesis,
             Some(token_stream.current_token_kind().to_owned()),
             token_stream.current_location(),
-        )));
+        )
+        .into());
     }
 
     advance_into_directive_arguments(token_stream);
@@ -307,25 +319,28 @@ pub(crate) fn parse_required_slot_name_argument(
     let slot_name = match token_stream.current_token_kind() {
         TokenKind::StringSliceLiteral(name) => *name,
         TokenKind::NumericLiteral(_) => {
-            return Err(Box::new(CompilerDiagnostic::invalid_template_directive(
+            return Err(CompilerDiagnostic::invalid_template_directive(
                 Some(directive_name),
                 InvalidTemplateDirectiveReason::InvalidInsertTarget,
                 token_stream.current_location(),
-            )));
+            )
+            .into());
         }
         TokenKind::CloseParenthesis => {
-            return Err(Box::new(CompilerDiagnostic::invalid_template_directive(
+            return Err(CompilerDiagnostic::invalid_template_directive(
                 Some(directive_name),
                 InvalidTemplateDirectiveReason::EmptyArguments,
                 token_stream.current_location(),
-            )));
+            )
+            .into());
         }
         _ => {
-            return Err(Box::new(CompilerDiagnostic::invalid_template_directive(
+            return Err(CompilerDiagnostic::invalid_template_directive(
                 Some(directive_name),
                 InvalidTemplateDirectiveReason::InvalidInsertTarget,
                 token_stream.current_location(),
-            )));
+            )
+            .into());
         }
     };
 

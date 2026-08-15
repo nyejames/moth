@@ -21,8 +21,10 @@ fn parse_template_diagnostic(source: &str) -> CompilerDiagnostic {
     let mut token_stream = template_tokens_from_source(source, &mut string_table);
     let context = new_constant_context(token_stream.src_path.clone());
 
-    *Template::new(&mut token_stream, &context, vec![], &mut string_table)
-        .expect_err("template source should fail to parse")
+    expect_template_diagnostic(
+        Template::new(&mut token_stream, &context, vec![], &mut string_table)
+            .expect_err("template source should fail to parse"),
+    )
 }
 
 /// Asserts that a diagnostic is an `InvalidTemplateStructure` with the given reason.

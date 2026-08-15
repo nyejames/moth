@@ -1,0 +1,12 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-IMPORT-0016"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-IMPORT-0016"
+reason = "invalid_import_path.public_root"
+path = "input/@page.moth"
+line = 1
+column = 2
+count = 1

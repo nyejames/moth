@@ -1,4 +1,4 @@
-import @models { Label }
+@models Label
 
 LABEL_TEXT must:
     text |This| -> String

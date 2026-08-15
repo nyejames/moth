@@ -1,10 +1,10 @@
 -- Complex multi-file module test with various features
-import @utils/logger { log }
-import @utils/logger { init_logger }
-import @utils/calculator { compute }
-import @utils/calculator { init_calculator }
-import @data/storage {save, load}
-import @data/storage { init_storage }
+@utils/logger log
+@utils/logger init_logger
+@utils/calculator compute
+@utils/calculator init_calculator
+@data/storage save, load
+@data/storage init_storage
 
 io.line("Starting complex module test")
 init_logger()

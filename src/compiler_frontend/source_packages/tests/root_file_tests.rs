@@ -1,8 +1,8 @@
 use super::root_file::{
-    PreparedSourcePackageRoots, file_name_is_config_file, file_name_is_legacy_hash_root_file,
-    file_name_is_module_root_file, file_name_is_normal_module_root_file,
-    file_name_is_support_root_file, import_component_is_support_root_file,
-    import_path_references_config_file, import_path_references_support_root_file,
+    PreparedSourcePackageRoots, dependency_component_is_support_root_file,
+    dependency_path_references_config_file, dependency_path_references_support_root_file,
+    file_name_is_config_file, file_name_is_legacy_hash_root_file, file_name_is_module_root_file,
+    file_name_is_normal_module_root_file, file_name_is_support_root_file,
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -37,68 +37,55 @@ fn classifies_legacy_hash_prefixed_moth_root_filenames() {
 }
 
 #[test]
-fn import_components_identify_support_roots() {
-    assert!(import_component_is_support_root_file("+pkg"));
-    assert!(import_component_is_support_root_file("+pkg.moth"));
-    assert!(!import_component_is_support_root_file("pkg"));
-    assert!(!import_component_is_support_root_file("+pkg.js"));
+fn dependency_components_identify_support_roots() {
+    assert!(dependency_component_is_support_root_file("+pkg"));
+    assert!(dependency_component_is_support_root_file("+pkg.moth"));
+    assert!(!dependency_component_is_support_root_file("pkg"));
+    assert!(!dependency_component_is_support_root_file("+pkg.js"));
 }
 
 #[test]
-fn config_import_classification_uses_the_source_component() {
+fn config_dependency_classification_uses_the_source_component() {
     let mut string_table = StringTable::new();
 
     let bare_config = path(&["config"], &mut string_table);
-    assert!(import_path_references_config_file(
+    assert!(dependency_path_references_config_file(
         &bare_config,
-        false,
-        &string_table
-    ));
-
-    let grouped_config = path(&["config", "project"], &mut string_table);
-    assert!(import_path_references_config_file(
-        &grouped_config,
-        true,
         &string_table
     ));
 
     let nested_config_folder = path(&["config", "settings"], &mut string_table);
-    assert!(!import_path_references_config_file(
+    assert!(!dependency_path_references_config_file(
         &nested_config_folder,
-        false,
         &string_table
     ));
 
-    let grouped_config_folder = path(&["config", "settings", "project"], &mut string_table);
-    assert!(!import_path_references_config_file(
-        &grouped_config_folder,
-        true,
+    let ordinary_config_folder = path(&["config", "settings", "project"], &mut string_table);
+    assert!(!dependency_path_references_config_file(
+        &ordinary_config_folder,
         &string_table
     ));
 }
 
 #[test]
-fn support_root_import_classification_uses_the_source_component() {
+fn support_root_dependency_classification_uses_the_source_component() {
     let mut string_table = StringTable::new();
 
     let bare_support_root = path(&["modules", "+pkg"], &mut string_table);
-    assert!(import_path_references_support_root_file(
+    assert!(dependency_path_references_support_root_file(
         &bare_support_root,
-        false,
         &string_table
     ));
 
-    let grouped_support_root = path(&["modules", "+pkg.moth", "symbol"], &mut string_table);
-    assert!(import_path_references_support_root_file(
-        &grouped_support_root,
-        true,
+    let ordinary_module = path(&["modules", "+pkg.moth", "symbol"], &mut string_table);
+    assert!(!dependency_path_references_support_root_file(
+        &ordinary_module,
         &string_table
     ));
 
     let ordinary_plus_extension = path(&["modules", "+pkg.js"], &mut string_table);
-    assert!(!import_path_references_support_root_file(
+    assert!(!dependency_path_references_support_root_file(
         &ordinary_plus_extension,
-        false,
         &string_table
     ));
 }

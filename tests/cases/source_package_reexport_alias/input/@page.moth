@@ -1,2 +1,2 @@
-import @helper { hello }
+@helper hello
 io.line([: [hello]])

@@ -50,7 +50,7 @@ use crate::compiler_frontend::hir::module::HirChoice;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 #[cfg(test)]
-use crate::compiler_frontend::paths::path_format::format_compile_time_paths;
+use crate::compiler_frontend::paths::path_format::format_compile_time_path;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::hir_log;
 use crate::return_hir_transformation_error;
@@ -186,12 +186,12 @@ impl<'a> HirBuilder<'a> {
             ),
 
             #[cfg(test)]
-            ExpressionKind::Path(compile_time_paths) => {
+            ExpressionKind::Path(compile_time_path) => {
                 // Compile-time path values lower to string literals in HIR.
                 // Formatting applies the origin prefix for root-based paths and trailing
                 // slash for directories through the shared path formatter.
-                let path_string = format_compile_time_paths(
-                    compile_time_paths,
+                let path_string = format_compile_time_path(
+                    compile_time_path,
                     &self.path_format_config,
                     self.string_table,
                 );

@@ -1,7 +1,0 @@
-entry = "."
-
-[backends.html]
-mode = "failure"
-warnings = "forbid"
-diagnostic_codes = ["MOTH-RULE-0041"]
-message_contains = ["Receiver methods are not imported, exported, or aliased independently"]

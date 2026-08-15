@@ -3,7 +3,7 @@
 //! WHAT: defines the backend-facing semantic IR, the lowering builder that converts typed AST into
 //! explicit blocks/regions/locals, and the internal validator that checks HIR invariants.
 //! WHY: HIR is the stable semantic boundary before borrow validation and backend lowering.
-//! Compile-time page fragments, template folding, import syntax, and source diagnostics should
+//! Compile-time page fragments, template folding, dependency syntax, and source diagnostics should
 //! already be resolved before values reach this stage.
 //!
 //! ## Boundary contract

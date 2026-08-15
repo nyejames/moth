@@ -4,7 +4,9 @@
 //! concrete `HeaderKind` payload.
 //! WHY: declaration-kind parsing is separate from per-file token walking and from dependency sorting.
 
-use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::compiler_errors::{
+    CompilerError, ErrorType, compiler_error_to_diagnostic,
+};
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidDeclarationReason};
 use crate::compiler_frontend::datatypes::generic_parameters::GenericParameterList;
 use crate::compiler_frontend::symbols::string_interning::StringId;
@@ -113,9 +115,8 @@ pub(super) fn create_header(
 
         let conformance_path =
             conformance_header_path(&full_name, &name_location, context.string_table);
-        let mut header_tokens =
-            FileTokens::new_with_file_id(conformance_path, token_stream.file_id, body);
-        header_tokens.canonical_os_path = token_stream.canonical_os_path.clone();
+        let header_tokens =
+            FileTokens::new_substream(token_stream, conformance_path, token_stream.file_id, body);
 
         return Ok(Header {
             kind,
@@ -191,7 +192,8 @@ pub(super) fn create_header(
                         context,
                         &mut local_ordering_hints,
                         &mut capacity_references,
-                    );
+                    )
+                    .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
                 }
                 for ret in &requirement.signature.returns {
                     collect_type_ordering_hints(
@@ -201,7 +203,8 @@ pub(super) fn create_header(
                         context,
                         &mut local_ordering_hints,
                         &mut capacity_references,
-                    );
+                    )
+                    .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
                 }
             }
 
@@ -232,9 +235,8 @@ pub(super) fn create_header(
             }
             _ => full_name,
         };
-        let mut header_tokens =
-            FileTokens::new_with_file_id(header_path, token_stream.file_id, body);
-        header_tokens.canonical_os_path = token_stream.canonical_os_path.clone();
+        let header_tokens =
+            FileTokens::new_substream(token_stream, header_path, token_stream.file_id, body);
 
         return Ok(Header {
             kind,
@@ -282,7 +284,8 @@ pub(super) fn create_header(
                     context,
                     &mut local_ordering_hints,
                     &mut capacity_references,
-                );
+                )
+                .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
             }
 
             for ret in &signature.returns {
@@ -293,7 +296,8 @@ pub(super) fn create_header(
                     context,
                     &mut local_ordering_hints,
                     &mut capacity_references,
-                );
+                )
+                .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
             }
 
             capture_function_body_tokens(token_stream, &mut body, context.string_table)?;
@@ -351,7 +355,8 @@ pub(super) fn create_header(
                         context,
                         &mut local_ordering_hints,
                         &mut capacity_references,
-                    );
+                    )
+                    .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
                 }
 
                 kind = HeaderKind::Struct {
@@ -426,7 +431,8 @@ pub(super) fn create_header(
                             context,
                             &mut local_ordering_hints,
                             &mut capacity_references,
-                        );
+                        )
+                        .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
                     }
                 }
             }
@@ -467,15 +473,23 @@ pub(super) fn create_header(
                 context.string_table,
             )?;
 
+            let mut selection_error = None;
             for_each_named_type_in_parsed_ref(&target, &mut |type_name| {
-                collect_named_type_ordering_hint(
-                    type_name,
-                    context.file_import_entries,
-                    context.source_file,
-                    context.string_table,
-                    &mut local_ordering_hints,
-                );
+                if selection_error.is_none() {
+                    selection_error = collect_named_type_ordering_hint(
+                        type_name,
+                        context.file_dependency_clauses,
+                        context.dependency_selections,
+                        context.source_file,
+                        context.string_table,
+                        &mut local_ordering_hints,
+                    )
+                    .err();
+                }
             });
+            if let Some(error) = selection_error {
+                return Err(Box::new(compiler_error_to_diagnostic(&error)));
+            }
             collect_capacity_references_in_parsed_ref(&target, &mut capacity_references);
 
             kind = HeaderKind::TypeAlias { target };
@@ -484,8 +498,8 @@ pub(super) fn create_header(
         _ => {}
     }
 
-    let mut header_tokens = FileTokens::new_with_file_id(full_name, token_stream.file_id, body);
-    header_tokens.canonical_os_path = token_stream.canonical_os_path.clone();
+    let header_tokens =
+        FileTokens::new_substream(token_stream, full_name, token_stream.file_id, body);
 
     Ok(Header {
         kind,
@@ -521,28 +535,15 @@ fn parse_optional_generic_parameters(
         return Ok(GenericParameterList::default());
     }
 
-    let forbidden_names = generic_parameter_forbidden_names(context);
+    // Dependency visibility is file-wide, so the complete retained clause set is not available
+    // until the header parser has finished walking this file. File-level preparation validates
+    // dependency-name collisions after all clauses and declaration shells are retained.
+    let forbidden_names = FxHashSet::default();
     parse_generic_parameter_list_after_type_keyword(
         token_stream,
         &forbidden_names,
         context.string_table,
     )
-}
-
-fn generic_parameter_forbidden_names(context: &HeaderBuildContext<'_>) -> FxHashSet<StringId> {
-    // WHAT: local names already claimed by retained import shells in this file.
-    // WHY: import aliases are retained syntax, so this collision is provider-independent and
-    // belongs in syntax preparation. Prelude type-symbol collisions are provider-dependent and
-    // are validated during header binding against the bound prelude visibility instead.
-    let mut forbidden_names = FxHashSet::default();
-
-    for import in context.file_import_entries {
-        if let Some(local_name) = import.alias.or_else(|| import.provider.path.name()) {
-            forbidden_names.insert(local_name);
-        }
-    }
-
-    forbidden_names
 }
 
 fn collect_type_ordering_hints(
@@ -552,9 +553,10 @@ fn collect_type_ordering_hints(
     context: &mut HeaderBuildContext<'_>,
     local_ordering_hints: &mut HashSet<LocalDeclarationOrderingHint>,
     capacity_references: &mut Vec<InitializerReference>,
-) {
+) -> Result<(), CompilerError> {
+    let mut selection_error = None;
     for_each_named_type_in_parsed_ref(type_ref, &mut |type_name| {
-        if generic_parameters.contains_name(type_name) {
+        if selection_error.is_some() || generic_parameters.contains_name(type_name) {
             return;
         }
 
@@ -562,15 +564,21 @@ fn collect_type_ordering_hints(
             return;
         }
 
-        collect_named_type_ordering_hint(
+        selection_error = collect_named_type_ordering_hint(
             type_name,
-            context.file_import_entries,
+            context.file_dependency_clauses,
+            context.dependency_selections,
             context.source_file,
             context.string_table,
             local_ordering_hints,
-        );
+        )
+        .err();
     });
+    if let Some(error) = selection_error {
+        return Err(error);
+    }
     collect_capacity_references_in_parsed_ref(type_ref, capacity_references);
+    Ok(())
 }
 
 // WHAT: collects all tokens that make up a function body (`:` … `;`) into `body`,
@@ -580,7 +588,7 @@ fn collect_type_ordering_hints(
 // contract explicit. The token stream must already be positioned on the first body token
 // (i.e. `FunctionSignature::new` has already consumed the signature).
 // Local declaration-ordering hints are derived from the signature only; body tokens are captured but
-// not scanned for imports — that is AST's responsibility at body-lowering time.
+// not scanned for dependency clauses — that is AST's responsibility at body-lowering time.
 fn capture_function_body_tokens(
     token_stream: &mut FileTokens,
     body: &mut Vec<crate::compiler_frontend::tokenizer::tokens::Token>,
@@ -660,7 +668,8 @@ fn create_constant_header_payload(
         context,
         local_ordering_hints,
         capacity_references,
-    );
+    )
+    .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
 
     Ok(declaration_syntax)
 }

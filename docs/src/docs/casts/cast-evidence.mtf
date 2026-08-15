@@ -40,7 +40,7 @@ It must provide the required receiver method and declare explicit conformance.
 
 ### Contract
 
-- Core cast traits resolve without imports.
+- Core cast traits resolve without dependency clauses.
 - They cannot be redeclared.
 - They cannot be imported, exported, aliased or shadowed.
 - They are static contracts, not ordinary value types.

@@ -1,5 +1,5 @@
-import @types { Point }
-import @extensions
+@types Point
+@extensions
 
 p = Point(1, 2)
 io.line([: [p.describe()]])

@@ -1,0 +1,11 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0019"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0019"
+reason = "invalid_dependency_clause.duplicate_selection_name"
+path = "input/@page.moth"
+line = 1
+count = 1

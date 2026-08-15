@@ -1,4 +1,4 @@
-import @core/time {Duration}
+@core/time Duration
 
 DURATION_MARKER must:
 ;

@@ -3,7 +3,7 @@
 //! WHAT: defines the canonical key and record shape for concrete generic function and receiver
 //! instances.
 //! WHY: call inference and emission deduplicate instances by source function path and canonical
-//! `TypeId` arguments, not by rendered names or local import aliases.
+//! `TypeId` arguments, not by rendered names or local dependency aliases.
 
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity;

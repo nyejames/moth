@@ -32,7 +32,7 @@ A conformance declaration states that a type implements one or more traits. Matc
 - Accepted user-authored targets are same-file structs, choices and aligned generic constructors.
 - Rejected targets include builtins, imported types, dependency package types, external opaque types and nominal types declared in another file.
 - Canonical evidence is reusable wherever both target type and trait are visible.
-- Conformance does not independently import receiver methods.
+- Conformance does not independently bind receiver methods.
 - Concrete values use ordinary visible receiver methods.
 - Specialise-by-concrete-instance conformance is outside scope.
 

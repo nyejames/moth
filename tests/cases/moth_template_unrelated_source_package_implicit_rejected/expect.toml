@@ -1,5 +1,5 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["MOTH-IMPORT-0005"]
-message_contains = ["docs/intro_content"]
+diagnostic_codes = ["MOTH-RULE-0034"]
+message_contains = ["helper_text"]

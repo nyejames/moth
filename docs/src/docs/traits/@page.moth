@@ -1,66 +1,36 @@
-import @trait-declarations {
-    content as trait_declarations,
-}
+@trait-declarations content as trait_declarations
 
-import @trait-declarations-basic {
-    content as trait_declarations_basic,
-}
+@trait-declarations-basic content as trait_declarations_basic
 
-import @trait-requirements {
-    content as trait_requirements,
-}
+@trait-requirements content as trait_requirements
 
-import @trait-requirements-basic {
-    content as trait_requirements_basic,
-}
+@trait-requirements-basic content as trait_requirements_basic
 
-import @conformance {
-    content as conformance,
-}
+@conformance content as conformance
 
-import @conformance-basic {
-    content as conformance_basic,
-}
+@conformance-basic content as conformance_basic
 
-import @generic-trait-bounds {
-    content as generic_trait_bounds,
-}
+@generic-trait-bounds content as generic_trait_bounds
 
-import @generic-trait-bounds-basic {
-    content as generic_trait_bounds_basic,
-}
+@generic-trait-bounds-basic content as generic_trait_bounds_basic
 
-import @trait-incompatibility {
-    content as trait_incompatibility,
-}
+@trait-incompatibility content as trait_incompatibility
 
-import @trait-incompatibility-basic {
-    content as trait_incompatibility_basic,
-}
+@trait-incompatibility-basic content as trait_incompatibility_basic
 
-import @core-cast-traits {
-    content as core_cast_traits,
-}
+@core-cast-traits content as core_cast_traits
 
-import @core-cast-traits-basic {
-    content as core_cast_traits_basic,
-}
+@core-cast-traits-basic content as core_cast_traits_basic
 
-import @trait-design-scope {
-    content as trait_design_scope,
-}
+@trait-design-scope content as trait_design_scope
 
-import @trait-design-scope-basic {
-    content as trait_design_scope_basic,
-}
+@trait-design-scope-basic content as trait_design_scope_basic
 
-import @styles {
-    navbar,
+@styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager,
-}
+    doc_pager
 
 page_title #= "Traits"
 page_description #= "Static trait contracts, explicit conformance and generic bounds in Moth."

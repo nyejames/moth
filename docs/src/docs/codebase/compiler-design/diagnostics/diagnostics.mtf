@@ -1,12 +1,12 @@
 # Compiler errors as structured data
 
-Suppose the page mistypes the import:
+Suppose the page mistypes the dependency selection:
 
 [codeblock, $code("moth"):
-import @greeting { great }
+@greeting great
 ]
 
-The failure is not "something went wrong." It is a precise event: an unknown imported symbol at a known location, in a known stage, with a stable code a tool can recognise.
+The failure is not "something went wrong." It is a precise event: an unknown dependency-bound symbol at a known location, in a known stage, with a stable code a tool can recognise.
 
 Moth treats diagnostics as **durable structured data**. Rendering into English is a later, separate act.
 

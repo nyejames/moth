@@ -1,0 +1,17 @@
+Dependencies make names visible. Every source dependency resolves from the binding file's owning module root, not the file's directory.
+
+### A module-root-relative dependency
+
+[codeblock, $code("moth"):
+    @card render_card
+]
+
+`@card` resolves to `card.moth` under the binding file's owning module root, regardless of how deep the binding file is inside the module.
+
+### A support package dependency
+
+[codeblock, $code("moth"):
+    @markdown render
+]
+
+`@markdown` resolves to a scoped `+*.moth` support package visible in the binding module's lexical scope.

@@ -1,7 +1,7 @@
 //! Stage 0 source-tree indexing for project and source-package boundaries.
 //!
 //! WHAT: performs one deterministic traversal per project or source-package boundary, preparing
-//! canonical module identities, source ownership and sibling import-name collision facts. Project
+//! canonical module identities, source ownership and sibling dependency-name collision facts. Project
 //! boundaries also own entry/package-prefix collisions and optional project-facade discovery;
 //! package boundaries own their required public normal-root validation. Each discovered root gets
 //! a deterministic `ModuleId`, explicit `ModuleRootRole` and boundary-relative logical module path.
@@ -272,7 +272,7 @@ pub(crate) enum SourceOwnership {
 /// WHAT: distinguishes files that feed tokenization, header preparation and semantic
 /// compilation from files whose extension is registered with an external import provider but is
 /// not a compiler `SourceFileKind`. Provider-owned records never pretend to be `.moth`, `.mtf`
-/// or `.md`; the provider extension is retained so the directory provider import path validates
+/// or `.md`; the provider extension is retained so the directory provider path validates
 /// the target from indexed facts rather than re-probing the filesystem.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum SourceClassification {
@@ -314,7 +314,7 @@ impl SourceRecord {
 
     /// The closed classification of this source record.
     ///
-    /// Consumed by the directory provider import path to validate that an authored provider
+    /// Consumed by the directory provider path to validate that an authored provider
     /// target is an explicit provider-owned input, not a compiler semantic file.
     pub(crate) fn classification(&self) -> &SourceClassification {
         &self.classification
@@ -324,7 +324,7 @@ impl SourceRecord {
     ///
     /// `Moth` is always supported. Other recognized kinds (`MothTemplate`, `PlainMarkdown`) are
     /// supported only when the builder registered the extension. The namespace checks this flag
-    /// to produce `UnsupportedSourceFileKind` diagnostics for recognized-but-unsupported imports
+    /// to produce `UnsupportedSourceFileKind` diagnostics for recognized but unsupported dependencies
     /// without a filesystem probe.
     pub(crate) fn supported(&self) -> bool {
         self.supported
@@ -336,8 +336,8 @@ impl SourceRecord {
 
     /// The ownership state of this source record.
     ///
-    /// Consumed by the directory provider import path to validate same-module ownership from
-    /// indexed facts rather than reconstructing the module boundary from the import path.
+    /// Consumed by the directory provider path to validate same-module ownership from
+    /// indexed facts rather than reconstructing the module boundary from the dependency path.
     pub(crate) fn ownership(&self) -> SourceOwnership {
         self.ownership
     }
@@ -362,7 +362,7 @@ struct ClassifiedSource {
 ///
 /// WHAT: groups the one record table with its ID-only owned and unrooted projections plus the
 /// entry-root-relative logical path and canonical path lookup maps that let the directory
-/// provider import path resolve an authored target to a `SourceId` without filesystem probing.
+/// provider path resolve an authored target to a `SourceId` without filesystem probing.
 /// WHY: the collections form one construction result and must enter `SourceTreeIndex` together
 /// without an opaque tuple or a second durable owner.
 struct SourceInventory {
@@ -386,9 +386,9 @@ struct SourceInventory {
 /// only `SourceId`s so no consumer duplicates source records.
 ///
 /// `logical_path_to_source_id` and `canonical_path_to_source_id` are the two non-probing lookup
-/// maps for the directory provider import path: the logical path map resolves an authored
+/// maps for the directory provider path: the logical path map resolves an authored
 /// provider target by its entry-root-relative portable spelling, and the canonical path map
-/// resolves an importer file to its owning record. Canonical paths remain IO handles; the maps
+/// resolves a consumer file to its owning record. Canonical paths remain IO handles; the maps
 /// never make them semantic identity.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SourceTreeIndex {
@@ -428,14 +428,14 @@ enum SourceTreeBoundaryKind<'a> {
         source_packages: &'a SourcePackageRegistry,
     },
     Package {
-        import_prefix: &'a str,
+        package_prefix: &'a str,
     },
 }
 
 impl SourceTreeIndex {
     /// Build the index with one deterministic traversal of the configured entry root.
     ///
-    /// The traversal also owns entry-root sibling `.moth` file/folder import-name collisions and
+    /// The traversal also owns entry-root sibling `.moth` file/folder dependency-name collisions and
     /// entry-root folder/source-backed package-prefix collisions, using the same sorted directory
     /// entries it already reads. Skipped directories neither contribute collision facts nor get
     /// recursively scanned.
@@ -512,7 +512,7 @@ impl SourceTreeIndex {
     pub(crate) fn discover_package(
         canonical_root: PathBuf,
         package_identity: StablePackageIdentity,
-        import_prefix: &str,
+        package_prefix: &str,
         source_file_kinds: &SourceFileKindRegistry,
         external_import_providers: &ExternalImportProviderRegistry,
         string_table: &mut StringTable,
@@ -521,7 +521,7 @@ impl SourceTreeIndex {
             entry_root: canonical_root,
             package_identity,
             skip_policy: SourceTreeSkipPolicy::default(),
-            kind: SourceTreeBoundaryKind::Package { import_prefix },
+            kind: SourceTreeBoundaryKind::Package { package_prefix },
         };
         Self::discover_for_boundary(
             boundary,
@@ -553,7 +553,7 @@ impl SourceTreeIndex {
         // One stable package identity shared by every node in this boundary's graph: normal
         // roots, support roots and, for project boundaries, the optional package facade. It is
         // derived from the configured project name (project boundary) or the registry's
-        // `PackageOrigin` plus import prefix (package boundary), never from an absolute path.
+        // `PackageOrigin` plus package prefix (package boundary), never from an absolute path.
         let mut stats = SourceTreeDiscoveryStats::default();
         let mut queue = VecDeque::from([entry_root.clone()]);
         let mut records = Vec::new();
@@ -589,7 +589,7 @@ impl SourceTreeIndex {
 
             let mut subdirectories = Vec::new();
             let mut source_files_by_stem: BTreeMap<String, String> = BTreeMap::new();
-            let mut importable_folder_names: BTreeSet<String> = BTreeSet::new();
+            let mut dependency_folder_names: BTreeSet<String> = BTreeSet::new();
             let mut directory_roots: Vec<DiscoveredDirectoryRoot> = Vec::new();
 
             for entry in entries {
@@ -609,7 +609,7 @@ impl SourceTreeIndex {
                                     string_table,
                                 )
                             })?;
-                        importable_folder_names.insert(folder_name.to_owned());
+                        dependency_folder_names.insert(folder_name.to_owned());
                         subdirectories.push(path);
                     }
                     continue;
@@ -742,11 +742,11 @@ impl SourceTreeIndex {
                 });
             }
 
-            // Check sibling source file/folder import-name collisions from the same sorted
-            // entries. Skipped folders are absent from importable_folder_names so they cannot
+            // Check sibling source file/folder dependency-name collisions from the same sorted
+            // entries. Skipped folders are absent from dependency_folder_names so they cannot
             // create false collisions.
             for (stem, file_name) in &source_files_by_stem {
-                if let Some(folder_name) = importable_folder_names
+                if let Some(folder_name) = dependency_folder_names
                     .iter()
                     .find(|folder_name| folder_name.eq_ignore_ascii_case(stem))
                 {
@@ -763,14 +763,14 @@ impl SourceTreeIndex {
             }
 
             // On the project root pass, reject entry-root folders whose names collide with
-            // registered source-backed package import prefixes. Package boundaries carry no
+            // registered source-backed package prefixes. Package boundaries carry no
             // prefix-collision packages, so this check is skipped for them.
             if let SourceTreeBoundaryKind::Project {
                 source_packages, ..
             } = kind
                 && directory == entry_root
             {
-                for folder_name in &importable_folder_names {
+                for folder_name in &dependency_folder_names {
                     if source_packages.has_prefix(folder_name) {
                         let colliding_folder = directory.join(folder_name);
                         return Err(project_structure_messages(
@@ -790,11 +790,11 @@ impl SourceTreeIndex {
             // directory (and all project-boundary directories) uses the shared one-root-per-
             // directory classification with its mixed/multiple-root diagnostic.
             let directory_root = match kind {
-                SourceTreeBoundaryKind::Package { import_prefix } if directory == entry_root => {
+                SourceTreeBoundaryKind::Package { package_prefix } if directory == entry_root => {
                     classify_package_root_directory(
                         &directory,
                         &mut directory_roots,
-                        import_prefix,
+                        package_prefix,
                         string_table,
                     )?
                 }
@@ -1035,7 +1035,7 @@ impl SourceTreeIndex {
     /// Resolve one `SourceId` by its entry-root-relative portable logical path.
     ///
     /// Focused index-invariant tests use this to verify deterministic logical lookup. Production
-    /// import resolution consumes the prebuilt module namespace instead.
+    /// dependency resolution consumes the prebuilt module namespace instead.
     #[cfg(test)]
     pub(crate) fn source_id_for_entry_root_relative_logical_path(
         &self,
@@ -1046,7 +1046,7 @@ impl SourceTreeIndex {
 
     /// Resolve one `SourceId` by its canonical physical path.
     ///
-    /// The directory namespace uses this to select the importing file's owning boundary-local
+    /// The directory namespace uses this to select the consuming file's owning boundary-local
     /// module. Returns `None` when no indexed record carries that canonical path.
     pub(crate) fn source_id_for_canonical_path(&self, canonical_path: &Path) -> Option<SourceId> {
         self.canonical_path_to_source_id
@@ -1216,7 +1216,7 @@ fn classify_directory_root(
 fn classify_package_root_directory(
     directory: &Path,
     directory_roots: &mut Vec<DiscoveredDirectoryRoot>,
-    import_prefix: &str,
+    package_prefix: &str,
     string_table: &mut StringTable,
 ) -> Result<Option<DiscoveredDirectoryRoot>, CompilerMessages> {
     let normal_roots = directory_roots
@@ -1228,7 +1228,7 @@ fn classify_package_root_directory(
         return Err(project_structure_messages(
             directory,
             InvalidConfigReason::SourcePackageMissingRoot {
-                prefix: string_table.intern(import_prefix),
+                prefix: string_table.intern(package_prefix),
                 root: path_id(directory, string_table),
             },
             string_table,
@@ -1248,7 +1248,7 @@ fn classify_package_root_directory(
         return Err(project_structure_messages(
             directory,
             InvalidConfigReason::SourcePackageMultipleRoots {
-                prefix: string_table.intern(import_prefix),
+                prefix: string_table.intern(package_prefix),
                 root: path_id(directory, string_table),
                 candidates,
             },
@@ -1289,7 +1289,7 @@ fn logical_module_path_from(
         })
 }
 
-/// Extract the import-name stem from a compiler-recognized source file name.
+/// Extract the dependency-name stem from a compiler-recognized source file name.
 ///
 /// The caller must have already validated `file_name` as UTF-8 so that extension and stem
 /// extraction can never silently skip a non-UTF-8 component.
@@ -1305,8 +1305,8 @@ fn source_stem_from_file_name(file_name: &str) -> Option<&str> {
 /// Returns `Some(kind)` for every recognized extension (`moth`, `mtf`, `md`) regardless of
 /// whether the project's `SourceFileKindRegistry` supports it. The discovery pass computes
 /// `supported` separately from `supports_recognized_extension` so the index can surface
-/// recognized-but-unsupported files for structured import diagnostics without a filesystem
-/// probe during import resolution.
+/// recognized-but-unsupported files for structured dependency diagnostics without a filesystem
+/// probe during dependency resolution.
 fn recognized_source_kind(file_name: &str) -> Option<SourceFileKind> {
     let extension = Path::new(file_name)
         .extension()

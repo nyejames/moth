@@ -62,7 +62,7 @@ Public function interfaces export summaries:
 - return aliasing
 - relevant reactive effects
 
-Cross-module call transfer consumes those summaries. Missing or inconsistent summaries are internal `CompilerError` failures. Binding-backed functions resolve through semantic package metadata, not through source import spelling.
+Cross-module call transfer consumes those summaries. Missing or inconsistent summaries are internal `CompilerError` failures. Binding-backed functions resolve through semantic package metadata, not through source dependency spelling.
 
 ## Future use and inferred moves
 

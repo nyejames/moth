@@ -432,8 +432,8 @@ impl BackendBuilder for MultiModuleDiagnosticBuilder {
 }
 
 mod build_cleanup_tests;
+mod build_dependency_tests;
 mod build_directive_tests;
-mod build_import_tests;
 mod build_infrastructure_tests;
 mod build_orchestration_tests;
 mod build_profile_tests;

@@ -15,7 +15,7 @@ use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordSta
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::{DataType, PathTypeKind};
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
-use crate::compiler_frontend::paths::compile_time_paths::CompileTimePaths;
+use crate::compiler_frontend::paths::compile_time_paths::CompileTimePath;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -42,17 +42,11 @@ impl Expression {
         .with_regular_division_provenance(contains_regular_division)
     }
 
-    pub fn path(compile_time_paths: CompileTimePaths, location: SourceLocation) -> Self {
-        // Derives the path type kind from the first resolved path so tests can
-        // construct the same AST shape produced by parser-side path handling.
-        let path_type_kind = compile_time_paths
-            .paths
-            .first()
-            .map(|path| PathTypeKind::from(path.kind.clone()))
-            .unwrap_or(PathTypeKind::File);
+    pub fn path(compile_time_path: CompileTimePath, location: SourceLocation) -> Self {
+        let path_type_kind = PathTypeKind::from(compile_time_path.kind.clone());
 
         Self::new(
-            ExpressionKind::Path(Box::new(compile_time_paths)),
+            ExpressionKind::Path(Box::new(compile_time_path)),
             location,
             builtin_type_ids::STRING,
             DataType::Path(path_type_kind),

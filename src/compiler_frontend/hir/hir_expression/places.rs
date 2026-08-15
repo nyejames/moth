@@ -567,7 +567,7 @@ impl<'a> HirBuilder<'a> {
         location: &SourceLocation,
     ) -> Result<crate::compiler_frontend::external_packages::CallTarget, CompilerError> {
         use crate::compiler_frontend::external_packages::CallTarget;
-        use crate::compiler_frontend::headers::import_environment::SourceFunctionTarget;
+        use crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget;
 
         if let Some(function_id) = self.functions_by_name.get(name).copied() {
             return Ok(CallTarget::Local(function_id));

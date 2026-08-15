@@ -2,19 +2,19 @@
 //!
 //! WHAT: parses and folds constant initializer expressions in header dependency order.
 //! WHY: headers are already sorted by the dependency stage; AST owns expression semantics.
-//! MUST NOT: rebuild import visibility.
+//! MUST NOT: rebuild dependency visibility.
 
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::module_ast::environment::TopLevelDeclarationTable;
 use crate::compiler_frontend::ast::module_ast::scope_context::{ContextKind, ScopeContext};
 use crate::compiler_frontend::ast::statements::declarations::resolve_declaration_syntax;
-use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::type_resolution::ResolvedTypeAnnotation;
-use crate::compiler_frontend::compiler_errors::{CompilerError, compiler_error_to_diagnostic};
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic,
 };
@@ -24,7 +24,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariant;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
-use crate::compiler_frontend::headers::import_environment::FileVisibility;
+use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationMetadata;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
@@ -68,7 +68,7 @@ pub(crate) struct ConstantHeaderParseContext<'a> {
 pub(crate) fn parse_constant_header_declaration(
     header: &Header,
     context: ConstantHeaderParseContext<'_>,
-) -> Result<Declaration, Box<CompilerDiagnostic>> {
+) -> Result<Declaration, ExpressionParseError> {
     // Destructure the context so each field can be moved into the builder
     // and resolver calls without borrow-checker conflicts.
     let ConstantHeaderParseContext {
@@ -98,7 +98,7 @@ pub(crate) fn parse_constant_header_declaration(
         let error = CompilerError::compiler_error(
             "Constant header resolver called for a non-constant header.",
         );
-        return Err(Box::new(compiler_error_to_diagnostic(&error)));
+        return Err(error.into());
     };
 
     // Derive the file scope from the canonical OS path when available,
@@ -125,7 +125,7 @@ pub(crate) fn parse_constant_header_declaration(
     .with_template_const_loop_iteration_limit(template_const_loop_iteration_limit)
     .with_rendered_path_usage_sink(rendered_path_usages)
     // Keep full module declarations for path identity, but gate every file-local lookup through
-    // the header-built visibility package so namespace imports and aliases behave exactly like
+    // the header-built visibility package so namespace bindings and aliases behave exactly like
     // they do in function/start body contexts.
     .with_file_visibility(Rc::new(file_visibility.clone()))
     // Type resolution support
@@ -147,6 +147,7 @@ pub(crate) fn parse_constant_header_declaration(
     let declaration_result = resolve_declaration_syntax(
         declaration.clone(),
         header.tokens.src_path.to_owned(),
+        &header.tokens.path_syntax,
         &mut scope_context,
         &mut type_interner,
         string_table,
@@ -163,14 +164,15 @@ pub(crate) fn parse_constant_header_declaration(
             classify_template_from_effective_tir(template, &scope_context.template_ir_store)
         })
         .map(|kind| kind.is_compile_time_value())
-        .map_err(|error| Box::new(TemplateError::into_diagnostic(error)))?;
+        .map_err(ExpressionParseError::from)?;
 
     if !initializer_is_compile_time_constant {
-        return Err(Box::new(CompilerDiagnostic::compile_time_evaluation_error(
+        return Err(CompilerDiagnostic::compile_time_evaluation_error(
             CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable,
             declaration.id.name(),
             header.name_location.clone(),
-        )));
+        )
+        .into());
     }
 
     Ok(declaration)

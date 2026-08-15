@@ -1,58 +1,32 @@
-import @template-basics {
-    content as template_basics,
-}
+@template-basics content as template_basics
 
-import @template-basics-basic {
-    content as template_basics_basic,
-}
+@template-basics-basic content as template_basics_basic
 
-import @template-directives {
-    content as template_directives,
-}
+@template-directives content as template_directives
 
-import @template-directives-basic {
-    content as template_directives_basic,
-}
+@template-directives-basic content as template_directives_basic
 
-import @template-slots {
-    content as template_slots,
-}
+@template-slots content as template_slots
 
-import @template-slots-basic {
-    content as template_slots_basic,
-}
+@template-slots-basic content as template_slots_basic
 
-import @child-wrappers {
-    content as child_wrappers,
-}
+@child-wrappers content as child_wrappers
 
-import @child-wrappers-basic {
-    content as child_wrappers_basic,
-}
+@child-wrappers-basic content as child_wrappers_basic
 
-import @template-control-flow {
-    content as template_control_flow,
-}
+@template-control-flow content as template_control_flow
 
-import @template-control-flow-basic {
-    content as template_control_flow_basic,
-}
+@template-control-flow-basic content as template_control_flow_basic
 
-import @markdown-formatting {
-    content as markdown_formatting,
-}
+@markdown-formatting content as markdown_formatting
 
-import @markdown-formatting-basic {
-    content as markdown_formatting_basic,
-}
+@markdown-formatting-basic content as markdown_formatting_basic
 
-import @styles {
-    navbar,
+@styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager,
-}
+    doc_pager
 
 page_title #= "Templates"
 page_description #= "Template strings, directives, slots, wrappers, control flow and Markdown in Moth."

@@ -10,6 +10,7 @@
 //!      allocation, attachment, and merge in one module makes the
 //!      route→materialize→contextualize→merge lifecycle explicit.
 
+use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::SlotKey;
 use crate::compiler_frontend::ast::templates::tir::ids::SlotOccurrenceId;
 use crate::compiler_frontend::ast::templates::tir::node::TirSlotPlaceholder;
@@ -20,7 +21,6 @@ use crate::compiler_frontend::ast::templates::tir::refs::{
     TemplateIrId, TemplateTirChildReference,
 };
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -29,8 +29,8 @@ use super::contributions::{RoutedTirSlotContributions, route_tir_slot_contributi
 use super::helpers::{SlotResolutionComposition, build_tir_fill_template, internal_compiler_error};
 use super::schema::collect_tir_slot_placeholders_in_order;
 
-/// Boxed diagnostic result for slot-resolution overlay construction and merging.
-type SlotCompositionResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// Typed result for slot-resolution overlay construction and merging.
+type SlotCompositionResult<T> = Result<T, TemplateError>;
 
 /// Test-only materialization of routed slot contributions into a store-owned
 /// `TirSlotResolutionOverlay` keyed by `SlotOccurrenceId`.
@@ -215,10 +215,10 @@ fn merge_slot_resolution_entries(
 ) -> SlotCompositionResult<()> {
     for (occurrence_id, resolution) in entries {
         if !seen_occurrences.insert(occurrence_id) {
-            return Err(Box::new(internal_compiler_error(&format!(
+            return Err(internal_compiler_error(&format!(
                 "TIR slot-overlay composition: duplicate slot occurrence {} while merging overlays.",
                 occurrence_id
-            ))));
+            )));
         }
 
         merged.push((occurrence_id, resolution));

@@ -213,7 +213,7 @@ impl ModuleIdentityTable {
     /// Derive the narrow frontend module-root lookup table from the normal roots.
     ///
     /// Only `Normal` roots enter the frontend table so support and facade records stay out of
-    /// import-resolution and header-role lookup in this slice. The frontend table preserves its
+    /// dependency-resolution and header-role lookup in this slice. The frontend table preserves its
     /// pre-slice shape and responsibility.
     pub(crate) fn derive_module_root_table(&self) -> ModuleRootTable {
         let normal_records = self

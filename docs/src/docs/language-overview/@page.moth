@@ -1,42 +1,24 @@
-import @blocks-and-statements {
-    content as blocks_and_statements,
-}
+@blocks-and-statements content as blocks_and_statements
 
-import @blocks-and-statements-basic {
-    content as blocks_and_statements_basic,
-}
+@blocks-and-statements-basic content as blocks_and_statements_basic
 
-import @comments-and-naming {
-    content as comments_and_naming,
-}
+@comments-and-naming content as comments_and_naming
 
-import @comments-and-naming-basic {
-    content as comments_and_naming_basic,
-}
+@comments-and-naming-basic content as comments_and_naming_basic
 
-import @core-values {
-    content as core_values,
-}
+@core-values content as core_values
 
-import @core-values-basic {
-    content as core_values_basic,
-}
+@core-values-basic content as core_values_basic
 
-import @strings-and-characters {
-    content as strings_and_characters,
-}
+@strings-and-characters content as strings_and_characters
 
-import @strings-and-characters-basic {
-    content as strings_and_characters_basic,
-}
+@strings-and-characters-basic content as strings_and_characters_basic
 
-import @styles {
-    navbar,
+@styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager,
-}
+    doc_pager
 
 page_title #= "Language basics"
 page_description #= "Blocks, comments, naming, core values, strings and characters in Moth."

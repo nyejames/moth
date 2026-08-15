@@ -39,7 +39,7 @@ The command chooses what kind of project this build is allowed to be. That choic
 
 `config.moth` is build-system-owned compile-time Moth source. It is **not** a module. It produces no HIR, no `start`, no runtime artefact and no package interface.
 
-Config operates on exactly one authored file identity. It rejects source imports before path resolution. It never builds a config package graph.
+Config operates on exactly one authored file identity. It rejects source dependencies before path resolution. It never builds a config package graph.
 
 The ordinary compiler owners still touch that one file:
 
@@ -55,7 +55,7 @@ Then config **stops**. No borrow checker. No backend.
 
 Allowed shape includes one required open `project` const record, private helper constants, builder and tooling section records, scalars, optional values, anonymous const records, collections of foldable values and templates represented by their folded strings.
 
-Rejected shape includes imports, runtime declarations, functions, traits, page fragments, `export:` and nested config files.
+Rejected shape includes dependency clauses, runtime declarations, functions, traits, page fragments, `export:` and nested config files.
 
 A short shape for the walkthrough project might look like:
 
@@ -89,11 +89,11 @@ Resolution order:
 3. the folded declaration default
 4. a structured missing-input diagnostic
 
-The folded `project` record becomes a specialised immutable **`ProjectGlobalsInterface`** under the reserved **`@project`** import root.
+The folded `project` record becomes a specialised immutable **`ProjectGlobalsInterface`** under the reserved **`@project`** dependency root.
 
 That interface carries stable field identities, folded backend-neutral values, source locations, field-level fingerprints and project-context provenance. It carries no AST, no HIR and no runtime body.
 
-Normal modules may import `@project` explicitly. Nothing injects it silently. Child modules, dependency aliases and packages cannot steal the `@project` root. Direct re-export of `@project` is forbidden.
+Normal modules may bind `@project` explicitly. Nothing injects it silently. Child modules, dependency aliases and packages cannot steal the `@project` root. Direct re-export of `@project` is forbidden.
 
 For the greeting walkthrough, record the values Stage 0 needs for entry discovery: project name, entry root and builder sections. Those folded facts bridge files on disk to a project the graph can name.
 
@@ -133,7 +133,7 @@ The compiler does not wander the filesystem inventing a project. The builder doe
 ## What can fail here
 
 - unknown command or unsupported builder capability
-- invalid config shape, forbidden config import or missing required input
+- invalid config shape, forbidden config dependency or missing required input
 - queued config syntax that still differs from accepted end-state shape
 
 When the walkthrough mentions config, label **current** versus **accepted** if the progress matrix still shows transitional forms.
@@ -153,7 +153,7 @@ When the walkthrough mentions config, label **current** versus **accepted** if t
 - **Accepted design:** one self-contained `config.moth` and a specialised `ProjectGlobalsInterface`.
 - **Current implementation:** label legacy flat config only where it changes the walkthrough.
 - **Queued work:** plans such as `import_values_anonymous_records_plan.md` and `entry-config-blocks-runtime-title-plan.md` still move pieces of the surface.
-- **Deferred or outside scope:** config imports and a general Moth build script system.
+- **Deferred or outside scope:** config dependencies and a general Moth build script system.
 
 ## Exit state
 

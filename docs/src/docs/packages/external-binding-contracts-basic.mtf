@@ -9,7 +9,7 @@ annotations. The annotations tell the compiler what Moth names and types to
 expose.
 
 [codeblock, $code("moth"):
-    import @vendor/drawing.js as drawing
+    @vendor/drawing.js as drawing
 ]
 
 JavaScript export names are runtime details. Moth names come from

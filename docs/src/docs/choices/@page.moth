@@ -1,42 +1,24 @@
-import @choice-declarations {
-    content as choice_declarations,
-}
+@choice-declarations content as choice_declarations
 
-import @choice-declarations-basic {
-    content as choice_declarations_basic,
-}
+@choice-declarations-basic content as choice_declarations_basic
 
-import @variant-construction {
-    content as variant_construction,
-}
+@variant-construction content as variant_construction
 
-import @variant-construction-basic {
-    content as variant_construction_basic,
-}
+@variant-construction-basic content as variant_construction_basic
 
-import @payload-patterns {
-    content as payload_patterns,
-}
+@payload-patterns content as payload_patterns
 
-import @payload-patterns-basic {
-    content as payload_patterns_basic,
-}
+@payload-patterns-basic content as payload_patterns_basic
 
-import @choice-equality {
-    content as choice_equality,
-}
+@choice-equality content as choice_equality
 
-import @choice-equality-basic {
-    content as choice_equality_basic,
-}
+@choice-equality-basic content as choice_equality_basic
 
-import @styles {
-    navbar,
+@styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager,
-}
+    doc_pager
 
 page_title #= "Choices"
 page_description #= "Choice declarations, variants, payload patterns and structural equality in Moth."

@@ -1,4 +1,4 @@
-import @provider { Maybe, make_result }
+@provider Maybe, make_result
 
 value = make_result(42)
 

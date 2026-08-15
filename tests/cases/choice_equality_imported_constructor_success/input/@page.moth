@@ -1,4 +1,4 @@
-import @choices { Response }
+@choices Response
 
 a Response = Response::Err("bad")
 b Response = Response::Err("bad")

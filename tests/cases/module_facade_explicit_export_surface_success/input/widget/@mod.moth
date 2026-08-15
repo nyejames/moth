@@ -1,4 +1,4 @@
-import @theme { accent }
+@theme accent
 
 [: imported-root-runtime-must-not-execute ]
 

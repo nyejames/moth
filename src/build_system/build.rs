@@ -403,7 +403,7 @@ impl ProjectCompilation {
                         {
                             return Err(CompilerError::compiler_error(format!(
                                 "Source package @{} contains duplicate generated function identity {identity:?}",
-                                source_packages.package(package_id)?.import_prefix()
+                                source_packages.package(package_id)?.package_prefix()
                             )));
                         }
                     }
@@ -442,7 +442,7 @@ impl ProjectCompilation {
         // Generated symbol names stay globally unique (one JS bundle may mix boundaries) while
         // lookup maps stay keyed by identity within one boundary. Names are assigned in stable
         // generated identity order inside each boundary, with the project boundary first and
-        // source packages in stable import-prefix order, so sidecar publication reordering can
+        // source packages in stable package-prefix order, so sidecar publication reordering can
         // never change a generated symbol.
         let mut generated_function_names =
             std::collections::HashMap::<GeneratedFunctionIdentity, String>::default();
@@ -473,7 +473,7 @@ impl ProjectCompilation {
             &mut generated_function_names,
             &mut next_generated_index,
         );
-        // Package name assignment sorts on the stable import prefix, never on registration
+        // Package name assignment sorts on the stable package prefix, never on registration
         // order, so reversing package publication order cannot change any boundary's symbols.
         let mut sorted_packages = package_generated_owners
             .keys()
@@ -481,7 +481,7 @@ impl ProjectCompilation {
             .map(|package_id| {
                 let prefix = source_packages
                     .package(package_id)?
-                    .import_prefix()
+                    .package_prefix()
                     .to_owned();
                 Ok((prefix, package_id))
             })

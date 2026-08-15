@@ -181,7 +181,7 @@ impl DiagnosticPayload {
                 *backend_name = remap.get(*backend_name);
             }
 
-            DiagnosticPayload::ImportAliasCaseMismatch { alias, symbol } => {
+            DiagnosticPayload::DependencyAliasCaseMismatch { alias, symbol } => {
                 *alias = remap.get(*alias);
                 *symbol = remap.get(*symbol);
             }
@@ -216,11 +216,17 @@ impl DiagnosticPayload {
                 }
             }
 
+            DiagnosticPayload::LegacyDependencyClause { replacement, .. } => {
+                if let Some(replacement) = replacement {
+                    *replacement = remap.get(*replacement);
+                }
+            }
+
             DiagnosticPayload::InvalidCharacter { .. }
             | DiagnosticPayload::InvalidStringEscape { .. }
             | DiagnosticPayload::InvalidGenericApplication { .. }
             | DiagnosticPayload::InvalidPath { .. }
-            | DiagnosticPayload::InvalidImportClause { .. }
+            | DiagnosticPayload::InvalidDependencyClause { .. }
             | DiagnosticPayload::InvalidCollectionType { .. }
             | DiagnosticPayload::InvalidGenericParameter { .. }
             | DiagnosticPayload::InvalidStructDefaultValue => {}
@@ -305,8 +311,12 @@ impl DiagnosticPayload {
             | DiagnosticPayload::InvalidReceiverDeclaration { .. }
             | DiagnosticPayload::InvalidCopyTarget { .. } => {}
 
-            DiagnosticPayload::DuplicatePublicExport { name } => {
+            DiagnosticPayload::DuplicatePublicExport {
+                name,
+                first_location,
+            } => {
                 *name = remap.get(*name);
+                first_location.remap_string_ids(remap);
             }
 
             DiagnosticPayload::PrivateTypeInExportedApi { exported_name, .. } => {
@@ -585,9 +595,9 @@ impl DiagnosticPayload {
                 *member_name = remap.get(*member_name);
             }
 
-            DiagnosticPayload::ImportRecordUsedAsValue { record_name }
+            DiagnosticPayload::DependencyNamespaceUsedAsValue { record_name }
             | DiagnosticPayload::ConstRecordUsedAsValue { record_name }
-            | DiagnosticPayload::NestedTraversal { record_name } => {
+            | DiagnosticPayload::NestedDependencyTraversal { record_name } => {
                 *record_name = remap.get(*record_name);
             }
             DiagnosticPayload::NamespaceTypeValueMisuse { name, .. } => {
@@ -677,6 +687,193 @@ impl DiagnosticPayload {
             }
         }
     }
+
+    /// Rebind every source location carried by a diagnostic payload to one final file scope.
+    ///
+    /// Most payloads carry semantic names only; the variants below retain a secondary authored
+    /// span that must follow the diagnostic's primary location through synthetic identity rebinding.
+    pub(crate) fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
+        match self {
+            DiagnosticPayload::DuplicateDeclaration { first_location, .. }
+            | DiagnosticPayload::ImportNameCollision {
+                previous_location: first_location,
+                ..
+            } => rebind_optional_location(first_location, logical_path),
+
+            DiagnosticPayload::ShadowedName { first_location, .. }
+            | DiagnosticPayload::DuplicatePublicExport { first_location, .. }
+            | DiagnosticPayload::DuplicateTraitRequirement { first_location, .. } => {
+                first_location.rebind_source_identity(logical_path)
+            }
+
+            DiagnosticPayload::DuplicateMothTemplateInputPath { first_location, .. } => {
+                first_location.rebind_source_identity(logical_path)
+            }
+
+            DiagnosticPayload::MultipleMutableBorrows {
+                existing_location, ..
+            }
+            | DiagnosticPayload::UseAfterPossibleMove {
+                move_location: existing_location,
+                ..
+            }
+            | DiagnosticPayload::MoveWhileBorrowed {
+                borrow_location: existing_location,
+                ..
+            }
+            | DiagnosticPayload::WholeObjectBorrowConflict {
+                part_location: existing_location,
+                ..
+            }
+            | DiagnosticPayload::InvalidMutableAccess {
+                conflicting_location: existing_location,
+                ..
+            } => rebind_optional_location(existing_location, logical_path),
+
+            DiagnosticPayload::SharedMutableConflict {
+                existing_location, ..
+            } => rebind_optional_location(existing_location, logical_path),
+
+            DiagnosticPayload::InvalidAssignmentTarget {
+                declaration_location,
+                ..
+            } => rebind_optional_location(declaration_location, logical_path),
+
+            DiagnosticPayload::InvalidGenericInstantiation { reason, .. } => {
+                reason.rebind_source_identity(logical_path);
+            }
+
+            DiagnosticPayload::None
+            | DiagnosticPayload::ExpectedToken { .. }
+            | DiagnosticPayload::UnexpectedToken { .. }
+            | DiagnosticPayload::UnexpectedTrailingComma
+            | DiagnosticPayload::UnescapedImplicitTemplateClose { .. }
+            | DiagnosticPayload::UnknownName { .. }
+            | DiagnosticPayload::TypeMismatch { .. }
+            | DiagnosticPayload::MissingImportTarget { .. }
+            | DiagnosticPayload::AmbiguousImportTarget { .. }
+            | DiagnosticPayload::BareFileImport { .. }
+            | DiagnosticPayload::DirectSpecialFileImport { .. }
+            | DiagnosticPayload::NotExportedBySourceFile { .. }
+            | DiagnosticPayload::NotExportedByPublicSurface { .. }
+            | DiagnosticPayload::MissingModuleRootPublicSurface { .. }
+            | DiagnosticPayload::MissingPackageSymbol { .. }
+            | DiagnosticPayload::CrossModuleImportNotExported { .. }
+            | DiagnosticPayload::InvalidImportPath { .. }
+            | DiagnosticPayload::DirectSymbolPathImport { .. }
+            | DiagnosticPayload::InvalidNamespaceDefaultName { .. }
+            | DiagnosticPayload::DuplicateImportSurfaceMember { .. }
+            | DiagnosticPayload::ExplicitMothExtension { .. }
+            | DiagnosticPayload::ExplicitSourceExtension { .. }
+            | DiagnosticPayload::UnsupportedSourceFileKind { .. }
+            | DiagnosticPayload::InvalidSourceFileEntry { .. }
+            | DiagnosticPayload::InvalidMothTemplateApiScopeItem { .. }
+            | DiagnosticPayload::UnsupportedExternalExtension { .. }
+            | DiagnosticPayload::InvalidExternalModule { .. }
+            | DiagnosticPayload::BorrowConflict { .. }
+            | DiagnosticPayload::UseOfUninitializedLocal { .. }
+            | DiagnosticPayload::InvalidConfig { .. }
+            | DiagnosticPayload::DeferredFeature { .. }
+            | DiagnosticPayload::UnsupportedExternalFunction { .. }
+            | DiagnosticPayload::UnusedName { .. }
+            | DiagnosticPayload::UnreachableMatchArm
+            | DiagnosticPayload::MothFilePathInTemplateOutput { .. }
+            | DiagnosticPayload::LargeTrackedAsset { .. }
+            | DiagnosticPayload::IdentifierNamingConvention { .. }
+            | DiagnosticPayload::DependencyAliasCaseMismatch { .. }
+            | DiagnosticPayload::MalformedTemplate { .. }
+            | DiagnosticPayload::InvalidCharacter { .. }
+            | DiagnosticPayload::InvalidStringEscape { .. }
+            | DiagnosticPayload::InvalidNumberLiteral { .. }
+            | DiagnosticPayload::InvalidStyleDirective { .. }
+            | DiagnosticPayload::MissingClosingDelimiter { .. }
+            | DiagnosticPayload::InvalidGenericApplication { .. }
+            | DiagnosticPayload::UnexpectedEndOfFile { .. }
+            | DiagnosticPayload::InvalidPath { .. }
+            | DiagnosticPayload::InvalidDependencyClause { .. }
+            | DiagnosticPayload::LegacyDependencyClause { .. }
+            | DiagnosticPayload::InvalidTypeAnnotation { .. }
+            | DiagnosticPayload::InvalidCollectionType { .. }
+            | DiagnosticPayload::InvalidMapType { .. }
+            | DiagnosticPayload::InvalidMapLiteral { .. }
+            | DiagnosticPayload::InvalidGenericParameter { .. }
+            | DiagnosticPayload::InvalidTemplateDirective { .. }
+            | DiagnosticPayload::InvalidTemplateStructure { .. }
+            | DiagnosticPayload::InvalidSignatureMember { .. }
+            | DiagnosticPayload::InvalidFunctionSignature { .. }
+            | DiagnosticPayload::InvalidChoiceVariant { .. }
+            | DiagnosticPayload::InvalidStructDefaultValue
+            | DiagnosticPayload::MissingDeclarationInitializer { .. }
+            | DiagnosticPayload::CircularDependency { .. }
+            | DiagnosticPayload::NamespaceMisuse { .. }
+            | DiagnosticPayload::ReservedNameCollision { .. }
+            | DiagnosticPayload::InvalidThisUsage { .. }
+            | DiagnosticPayload::InvalidReceiverDeclaration { .. }
+            | DiagnosticPayload::InvalidControlFlowStatement { .. }
+            | DiagnosticPayload::InvalidDeclaration { .. }
+            | DiagnosticPayload::InvalidMultiBind { .. }
+            | DiagnosticPayload::InvalidBuiltinCall { .. }
+            | DiagnosticPayload::InvalidCast { .. }
+            | DiagnosticPayload::InvalidReceiverCall { .. }
+            | DiagnosticPayload::InvalidCopyTarget { .. }
+            | DiagnosticPayload::InvalidFieldAccess { .. }
+            | DiagnosticPayload::InvalidMatchPattern { .. }
+            | DiagnosticPayload::NonExhaustiveMatch { .. }
+            | DiagnosticPayload::InvalidFallibleHandling { .. }
+            | DiagnosticPayload::InvalidTemplateSlot { .. }
+            | DiagnosticPayload::CompileTimeEvaluationError { .. }
+            | DiagnosticPayload::EmptyCollectionTypeAmbiguity
+            | DiagnosticPayload::UnsupportedOperatorTypes { .. }
+            | DiagnosticPayload::InvalidFallibleOperand { .. }
+            | DiagnosticPayload::IncompatibleChoiceComparison { .. }
+            | DiagnosticPayload::InvalidCallShape { .. }
+            | DiagnosticPayload::InvalidReturnShape { .. }
+            | DiagnosticPayload::InvalidRangeOperand { .. }
+            | DiagnosticPayload::UnsupportedBuilderPackage { .. }
+            | DiagnosticPayload::UnsupportedBackendFeature { .. }
+            | DiagnosticPayload::InvalidPageMetadata { .. }
+            | DiagnosticPayload::InvalidCompileTimePath { .. }
+            | DiagnosticPayload::DependencyNamespaceUsedAsValue { .. }
+            | DiagnosticPayload::ConstRecordUsedAsValue { .. }
+            | DiagnosticPayload::NestedDependencyTraversal { .. }
+            | DiagnosticPayload::NamespaceTypeValueMisuse { .. }
+            | DiagnosticPayload::UnknownTrait { .. }
+            | DiagnosticPayload::TraitPrivateSurfaceLeak { .. }
+            | DiagnosticPayload::GenericBoundPrivateSurfaceLeak { .. }
+            | DiagnosticPayload::UnsupportedTraitFeature { .. }
+            | DiagnosticPayload::InvalidTraitKeywordUsage { .. }
+            | DiagnosticPayload::PrivateTypeInExportedApi { .. }
+            | DiagnosticPayload::InvalidTraitConformance { .. }
+            | DiagnosticPayload::InvalidTraitIncompatibility { .. }
+            | DiagnosticPayload::TraitNameUsedAsType { .. }
+            | DiagnosticPayload::InvalidExpression { .. }
+            | DiagnosticPayload::MissingOperatorOperand { .. }
+            | DiagnosticPayload::InvalidStandaloneStatement { .. }
+            | DiagnosticPayload::ExpectedSymbolStatement
+            | DiagnosticPayload::MissingCollectionItem
+            | DiagnosticPayload::InvalidMatchArm { .. }
+            | DiagnosticPayload::InvalidLoopHeader { .. }
+            | DiagnosticPayload::InvalidStatementPosition { .. }
+            | DiagnosticPayload::CommonSyntaxMistake { .. }
+            | DiagnosticPayload::InfrastructureError { .. } => {}
+        }
+    }
+}
+
+impl InvalidGenericInstantiationReason {
+    fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
+        if let Self::ConflictingInference {
+            current_evidence_location,
+            previous_evidence_location,
+            ..
+        } = self
+        {
+            current_evidence_location.rebind_source_identity(logical_path);
+            if let Some(previous_evidence_location) = previous_evidence_location {
+                previous_evidence_location.rebind_source_identity(logical_path);
+            }
+        }
+    }
 }
 
 fn remap_path_import_payload(path: &mut InternedPath, remap: &StringIdRemap) {
@@ -745,5 +942,11 @@ fn remap_optional_place(place: &mut Option<DiagnosticPlace>, remap: &StringIdRem
 fn remap_optional_location(location: &mut Option<SourceLocation>, remap: &StringIdRemap) {
     if let Some(location) = location {
         location.remap_string_ids(remap);
+    }
+}
+
+fn rebind_optional_location(location: &mut Option<SourceLocation>, logical_path: &InternedPath) {
+    if let Some(location) = location {
+        location.rebind_source_identity(logical_path);
     }
 }

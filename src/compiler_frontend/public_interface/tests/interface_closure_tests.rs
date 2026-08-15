@@ -3,7 +3,7 @@
 //! WHAT: proves the transient interface view and declaration/evidence work queue close deep
 //! re-export chains exactly once, copy no unrelated provider facts, fail deterministically on
 //! disagreeing publishers and duplicate keys, and publish in an order independent of provider
-//! import order.
+//! dependency order.
 //! WHY: these hidden join invariants are not visible through end-to-end output.
 
 use super::super::model::{ConcreteCallSummaryRecord, PublicAliasSemantics, PublicFieldTypeSlot};
@@ -11,8 +11,8 @@ use super::super::{
     LocalPublicInterface, PublicDeclarationRecord, PublicDeclarationSemantics,
     PublicEvidenceOwnership, PublicEvidenceRecord, PublicEvidenceRequirementMapping,
     PublicFunctionCategory, PublicFunctionSemantics, PublicInterfaceDraft, PublicParameterTypeSlot,
-    PublicSemanticInterface, PublicStructSemantics, PublicTraitSemantics, SourceProviderImport,
-    SourceProviderImportSet,
+    PublicSemanticInterface, PublicStructSemantics, PublicTraitSemantics, SourceProviderDependency,
+    SourceProviderDependencySet,
 };
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalEvidenceIdentity, CanonicalTraitIdentity, CanonicalTypeIdentity,
@@ -27,7 +27,7 @@ use crate::compiler_frontend::semantic_identity::{
     ExportBinding, ModuleRootRole, OriginDeclarationId, OriginFunctionId, OriginTraitId,
     OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity, StablePackageIdentity,
 };
-use crate::compiler_frontend::symbols::identity::{FileId, ImportShellId};
+use crate::compiler_frontend::symbols::identity::{DependencyShellId, FileId};
 
 fn provider_origin(module_name: &str) -> StableModuleOriginIdentity {
     StableModuleOriginIdentity::from_portable_path(
@@ -174,14 +174,15 @@ fn close(
     bindings: Vec<ExportBinding>,
     providers: Vec<&PublicSemanticInterface>,
 ) -> Result<PublicSemanticInterface, CompilerError> {
-    let provider_imports = SourceProviderImportSet::new(
+    let provider_dependencies = SourceProviderDependencySet::new(
         providers
             .into_iter()
             .enumerate()
-            .map(|(index, interface)| SourceProviderImport {
-                kind: crate::compiler_frontend::public_interface::ProviderImportKind::Authored {
-                    shell_id: ImportShellId::new(FileId(0), index as u32),
-                },
+            .map(|(index, interface)| SourceProviderDependency {
+                kind:
+                    crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
+                        shell: DependencyShellId::new(FileId(0), index as u32),
+                    },
                 interface,
             })
             .collect(),
@@ -190,7 +191,7 @@ fn close(
 
     PublicSemanticInterface::close_from_local(
         local_interface(bindings),
-        &provider_imports,
+        &provider_dependencies,
         &ExternalPackageRegistry::default(),
     )
 }
@@ -399,7 +400,7 @@ fn unrelated_provider_facts_are_not_copied() {
 }
 
 #[test]
-fn closure_output_is_independent_of_provider_import_order() {
+fn closure_output_is_independent_of_provider_dependency_order() {
     let fixture = DeepReexportFixture::new();
     let first = close(
         fixture.facade_bindings(),
@@ -436,16 +437,16 @@ fn disagreeing_provider_declarations_fail_deterministically() {
         Vec::new(),
     );
 
-    let error = SourceProviderImportSet::new(vec![
-        SourceProviderImport {
-            kind: crate::compiler_frontend::public_interface::ProviderImportKind::Authored {
-                shell_id: ImportShellId::new(FileId(0), 0),
+    let error = SourceProviderDependencySet::new(vec![
+        SourceProviderDependency {
+            kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
+                shell: DependencyShellId::new(FileId(0), 0),
             },
             interface: &first,
         },
-        SourceProviderImport {
-            kind: crate::compiler_frontend::public_interface::ProviderImportKind::Authored {
-                shell_id: ImportShellId::new(FileId(0), 1),
+        SourceProviderDependency {
+            kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
+                shell: DependencyShellId::new(FileId(0), 1),
             },
             interface: &second,
         },
@@ -487,16 +488,16 @@ fn disagreeing_provider_summaries_fail_deterministically() {
         Vec::new(),
     );
 
-    let error = SourceProviderImportSet::new(vec![
-        SourceProviderImport {
-            kind: crate::compiler_frontend::public_interface::ProviderImportKind::Authored {
-                shell_id: ImportShellId::new(FileId(0), 0),
+    let error = SourceProviderDependencySet::new(vec![
+        SourceProviderDependency {
+            kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
+                shell: DependencyShellId::new(FileId(0), 0),
             },
             interface: &first,
         },
-        SourceProviderImport {
-            kind: crate::compiler_frontend::public_interface::ProviderImportKind::Authored {
-                shell_id: ImportShellId::new(FileId(0), 1),
+        SourceProviderDependency {
+            kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
+                shell: DependencyShellId::new(FileId(0), 1),
             },
             interface: &second,
         },
@@ -525,9 +526,9 @@ fn duplicate_keys_in_one_interface_fail_at_view_construction() {
         Vec::new(),
     );
 
-    let error = SourceProviderImportSet::new(vec![SourceProviderImport {
-        kind: crate::compiler_frontend::public_interface::ProviderImportKind::Authored {
-            shell_id: ImportShellId::new(FileId(0), 0),
+    let error = SourceProviderDependencySet::new(vec![SourceProviderDependency {
+        kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
+            shell: DependencyShellId::new(FileId(0), 0),
         },
         interface: &duplicate,
     }])

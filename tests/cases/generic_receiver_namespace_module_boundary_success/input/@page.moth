@@ -1,4 +1,4 @@
-import @provider as provider
+@provider as provider
 
 value = provider.make_box(42)
 

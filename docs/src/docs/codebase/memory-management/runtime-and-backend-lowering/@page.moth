@@ -1,5 +1,5 @@
-import @runtime-and-backend-lowering {content as reference_content}
-import @styles {navbar, section, theme_head}
+@runtime-and-backend-lowering content as reference_content
+@styles navbar, section, theme_head
 
 page_title #= "Runtime and backend memory lowering"
 page_description #= "How GC baseline and ownership-aware lowering meet backend targets."

@@ -1,5 +1,6 @@
 use super::*;
 use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
+use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::{
     CommentDirectiveKind, SlotKey, TemplateType,
 };
@@ -19,6 +20,15 @@ use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCac
 use std::sync::Arc;
 
 type DirectiveStyleTestResult<T> = Result<T, Box<CompilerDiagnostic>>;
+
+fn directive_diagnostic(error: TemplateError) -> Box<CompilerDiagnostic> {
+    match error {
+        TemplateError::Diagnostic(diagnostic) => diagnostic,
+        TemplateError::Infrastructure(error) => {
+            panic!("expected directive source diagnostic, got infrastructure failure: {error:?}")
+        }
+    }
+}
 
 fn directive_tokens(source: &str, string_table: &mut StringTable) -> FileTokens {
     let scope = InternedPath::from_single_str("main.moth/#const_template0", string_table);
@@ -82,6 +92,7 @@ fn parse_optional_parenthesized_expression_for_test(
         &mut type_interner,
         string_table,
     )
+    .map_err(directive_diagnostic)
 }
 
 fn parse_required_parenthesized_expression_for_test(
@@ -100,6 +111,7 @@ fn parse_required_parenthesized_expression_for_test(
         &mut type_interner,
         string_table,
     )
+    .map_err(directive_diagnostic)
 }
 
 // ------------------------------------------------------------------------
@@ -123,7 +135,7 @@ fn reject_arguments_fails_when_parens_present() {
     let result = reject_unexpected_directive_arguments(directive_name, &tokens);
     assert!(result.is_err());
     assert!(matches!(
-        result.unwrap_err().payload,
+        directive_diagnostic(result.unwrap_err()).payload,
         DiagnosticPayload::InvalidTemplateDirective {
             reason: crate::compiler_frontend::compiler_messages::InvalidTemplateDirectiveReason::UnexpectedArguments,
             ..
@@ -170,7 +182,7 @@ fn optional_slot_target_zero_errors() {
     let result = parse_optional_slot_target_argument(directive_name, &mut tokens, &string_table);
     assert!(result.is_err());
     assert!(matches!(
-        result.unwrap_err().payload,
+        directive_diagnostic(result.unwrap_err()).payload,
         DiagnosticPayload::InvalidTemplateDirective {
             reason: crate::compiler_frontend::compiler_messages::InvalidTemplateDirectiveReason::InvalidSlotTarget,
             ..
@@ -195,7 +207,7 @@ fn optional_slot_target_empty_parens_errors() {
     let result = parse_optional_slot_target_argument(directive_name, &mut tokens, &string_table);
     assert!(result.is_err());
     assert!(matches!(
-        result.unwrap_err().payload,
+        directive_diagnostic(result.unwrap_err()).payload,
         DiagnosticPayload::InvalidTemplateDirective {
             reason: crate::compiler_frontend::compiler_messages::InvalidTemplateDirectiveReason::EmptyArguments,
             ..
@@ -211,7 +223,7 @@ fn optional_slot_target_missing_close_paren_errors() {
     let result = parse_optional_slot_target_argument(directive_name, &mut tokens, &string_table);
     assert!(result.is_err());
     assert!(matches!(
-        result.unwrap_err().payload,
+        directive_diagnostic(result.unwrap_err()).payload,
         DiagnosticPayload::ExpectedToken {
             expected: TokenKind::CloseParenthesis,
             ..
@@ -231,7 +243,7 @@ fn required_slot_name_missing_parens_errors() {
     let result = parse_required_slot_name_argument(directive_name, &mut tokens);
     assert!(result.is_err());
     assert!(matches!(
-        result.unwrap_err().payload,
+        directive_diagnostic(result.unwrap_err()).payload,
         DiagnosticPayload::ExpectedToken {
             expected: TokenKind::OpenParenthesis,
             ..
@@ -256,7 +268,7 @@ fn required_slot_name_positional_rejected() {
     let result = parse_required_slot_name_argument(directive_name, &mut tokens);
     assert!(result.is_err());
     assert!(matches!(
-        result.unwrap_err().payload,
+        directive_diagnostic(result.unwrap_err()).payload,
         DiagnosticPayload::InvalidTemplateDirective {
             reason: crate::compiler_frontend::compiler_messages::InvalidTemplateDirectiveReason::InvalidInsertTarget,
             ..
@@ -272,7 +284,7 @@ fn required_slot_name_empty_parens_errors() {
     let result = parse_required_slot_name_argument(directive_name, &mut tokens);
     assert!(result.is_err());
     assert!(matches!(
-        result.unwrap_err().payload,
+        directive_diagnostic(result.unwrap_err()).payload,
         DiagnosticPayload::InvalidTemplateDirective {
             reason: crate::compiler_frontend::compiler_messages::InvalidTemplateDirectiveReason::EmptyArguments,
             ..

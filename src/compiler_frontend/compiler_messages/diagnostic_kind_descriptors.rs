@@ -127,9 +127,14 @@ fn syntax_descriptor(kind: SyntaxDiagnosticKind) -> DiagnosticDescriptor {
             "Invalid path",
             DiagnosticSeverity::Error,
         ),
-        SyntaxDiagnosticKind::InvalidImportClause => DiagnosticDescriptor::new(
+        SyntaxDiagnosticKind::InvalidDependencyClause => DiagnosticDescriptor::new(
             "MOTH-SYNTAX-0019",
-            "Invalid import clause",
+            "Invalid dependency clause",
+            DiagnosticSeverity::Error,
+        ),
+        SyntaxDiagnosticKind::LegacyDependencyClause => DiagnosticDescriptor::new(
+            "MOTH-SYNTAX-0035",
+            "Legacy dependency clause syntax",
             DiagnosticSeverity::Error,
         ),
         SyntaxDiagnosticKind::InvalidGenericParameter => DiagnosticDescriptor::new(
@@ -331,11 +336,6 @@ fn rule_descriptor(kind: RuleDiagnosticKind) -> DiagnosticDescriptor {
             "Missing declaration initializer",
             DiagnosticSeverity::Error,
         ),
-        RuleDiagnosticKind::MissingImportTarget => DiagnosticDescriptor::new(
-            "MOTH-RULE-0032",
-            "Missing import target",
-            DiagnosticSeverity::Error,
-        ),
         RuleDiagnosticKind::CircularDependency => DiagnosticDescriptor::new(
             "MOTH-RULE-0033",
             "Circular dependency",
@@ -497,9 +497,9 @@ fn rule_descriptor(kind: RuleDiagnosticKind) -> DiagnosticDescriptor {
             "Invalid compile-time path",
             DiagnosticSeverity::Error,
         ),
-        RuleDiagnosticKind::ImportRecordUsedAsValue => DiagnosticDescriptor::new(
+        RuleDiagnosticKind::DependencyNamespaceUsedAsValue => DiagnosticDescriptor::new(
             "MOTH-RULE-0065",
-            "Import record used as value",
+            "Dependency namespace used as value",
             DiagnosticSeverity::Error,
         ),
         RuleDiagnosticKind::ConstRecordUsedAsValue => DiagnosticDescriptor::new(
@@ -507,9 +507,9 @@ fn rule_descriptor(kind: RuleDiagnosticKind) -> DiagnosticDescriptor {
             "Const record used as value",
             DiagnosticSeverity::Error,
         ),
-        RuleDiagnosticKind::NestedTraversal => DiagnosticDescriptor::new(
+        RuleDiagnosticKind::NestedDependencyTraversal => DiagnosticDescriptor::new(
             "MOTH-RULE-0066",
-            "Nested import-record traversal",
+            "Nested dependency-namespace traversal",
             DiagnosticSeverity::Error,
         ),
         RuleDiagnosticKind::NamespaceTypeValueMisuse => DiagnosticDescriptor::new(
@@ -592,38 +592,38 @@ fn import_descriptor(kind: ImportDiagnosticKind) -> DiagnosticDescriptor {
     match kind {
         ImportDiagnosticKind::UnusedImport => DiagnosticDescriptor::new(
             "MOTH-IMPORT-0002",
-            "Unused import",
+            "Unused dependency binding",
             DiagnosticSeverity::Warning,
         ),
-        ImportDiagnosticKind::ImportAliasCaseMismatch => DiagnosticDescriptor::new(
+        ImportDiagnosticKind::DependencyAliasCaseMismatch => DiagnosticDescriptor::new(
             "MOTH-IMPORT-0003",
-            "Import alias case mismatch",
+            "Dependency alias case mismatch",
             DiagnosticSeverity::Warning,
         ),
 
         ImportDiagnosticKind::MissingImportTarget => DiagnosticDescriptor::new(
             "MOTH-IMPORT-0005",
-            "Missing import target",
+            "Missing dependency target",
             DiagnosticSeverity::Error,
         ),
         ImportDiagnosticKind::AmbiguousImportTarget => DiagnosticDescriptor::new(
             "MOTH-IMPORT-0006",
-            "Ambiguous import target",
+            "Ambiguous dependency target",
             DiagnosticSeverity::Error,
         ),
         ImportDiagnosticKind::BareFileImport => DiagnosticDescriptor::new(
             "MOTH-IMPORT-0007",
-            "Bare file import",
+            "Bare file dependency",
             DiagnosticSeverity::Error,
         ),
         ImportDiagnosticKind::DirectSpecialFileImport => DiagnosticDescriptor::new(
             "MOTH-IMPORT-0008",
-            "Direct special file import",
+            "Direct special-file dependency",
             DiagnosticSeverity::Error,
         ),
         ImportDiagnosticKind::ImportNameCollision => DiagnosticDescriptor::new(
             "MOTH-IMPORT-0009",
-            "Import name collision",
+            "Dependency binding name collision",
             DiagnosticSeverity::Error,
         ),
         ImportDiagnosticKind::NotExportedBySourceFile => DiagnosticDescriptor::new(
@@ -648,17 +648,17 @@ fn import_descriptor(kind: ImportDiagnosticKind) -> DiagnosticDescriptor {
         ),
         ImportDiagnosticKind::CrossModuleImportNotExported => DiagnosticDescriptor::new(
             "MOTH-IMPORT-0015",
-            "Cross-module import not exported",
+            "Cross-module dependency not exported",
             DiagnosticSeverity::Error,
         ),
         ImportDiagnosticKind::InvalidImportPath => DiagnosticDescriptor::new(
             "MOTH-IMPORT-0016",
-            "Invalid import path",
+            "Invalid dependency path",
             DiagnosticSeverity::Error,
         ),
         ImportDiagnosticKind::DirectSymbolPathImport => DiagnosticDescriptor::new(
             "MOTH-IMPORT-0017",
-            "Direct symbol-path import",
+            "Direct symbol dependency path",
             DiagnosticSeverity::Error,
         ),
         ImportDiagnosticKind::InvalidNamespaceDefaultName => DiagnosticDescriptor::new(
@@ -668,17 +668,17 @@ fn import_descriptor(kind: ImportDiagnosticKind) -> DiagnosticDescriptor {
         ),
         ImportDiagnosticKind::DuplicateImportSurfaceMember => DiagnosticDescriptor::new(
             "MOTH-IMPORT-0019",
-            "Duplicate import surface member",
+            "Duplicate dependency surface member",
             DiagnosticSeverity::Error,
         ),
         ImportDiagnosticKind::ExplicitMothExtension => DiagnosticDescriptor::new(
             "MOTH-IMPORT-0020",
-            "Explicit .moth extension in import",
+            "Explicit .moth extension in dependency",
             DiagnosticSeverity::Error,
         ),
         ImportDiagnosticKind::UnsupportedExternalExtension => DiagnosticDescriptor::new(
             "MOTH-IMPORT-0021",
-            "Unsupported external file extension in import",
+            "Unsupported external file dependency extension",
             DiagnosticSeverity::Error,
         ),
         ImportDiagnosticKind::InvalidExternalModule => DiagnosticDescriptor::new(
@@ -688,7 +688,7 @@ fn import_descriptor(kind: ImportDiagnosticKind) -> DiagnosticDescriptor {
         ),
         ImportDiagnosticKind::ExplicitSourceExtension => DiagnosticDescriptor::new(
             "MOTH-IMPORT-0024",
-            "Explicit source extension in import",
+            "Explicit source extension in dependency",
             DiagnosticSeverity::Error,
         ),
         ImportDiagnosticKind::UnsupportedSourceFileKind => DiagnosticDescriptor::new(

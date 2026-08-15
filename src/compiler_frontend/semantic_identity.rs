@@ -161,7 +161,7 @@ impl StablePackageIdentity {
     /// Stable identity for one source-package compilation boundary.
     ///
     /// WHAT: builds the package identity from the registry's `PackageOrigin` and the package's
-    /// import prefix. The import prefix is the portable `@`-stripped spelling (for example
+    /// package prefix. The package prefix is the portable `@`-stripped spelling (for example
     /// `"html"` or a project-local `"helper"`), so two packages with the same prefix but
     /// different origins remain distinct, and the same logical package resolves to the same
     /// identity across checkout roots.
@@ -169,16 +169,16 @@ impl StablePackageIdentity {
     /// `SourceId`/`ModuleId` values. The stable package identity is the only cross-boundary
     /// value those dense handles refer to, so it must be derivable from registry facts rather
     /// than the configured project name or an absolute path.
-    pub(crate) fn source_package(origin: PackageOrigin, import_prefix: &str) -> Self {
+    pub(crate) fn source_package(origin: PackageOrigin, package_prefix: &str) -> Self {
         Self {
             origin,
-            name: import_prefix.to_owned(),
+            name: package_prefix.to_owned(),
         }
     }
 
     /// Stable identity for one binding-backed package.
     ///
-    /// Binding packages retain their exact canonical import path, including the leading `@`,
+    /// Binding packages retain their exact canonical dependency path, including the leading `@`,
     /// because that path and the package origin together identify the builder-supplied semantic
     /// interface across independent registry constructions.
     pub(crate) fn binding(origin: PackageOrigin, canonical_package_path: &str) -> Self {
@@ -206,7 +206,7 @@ impl StablePackageIdentity {
 /// `Normal` roots (`@*.moth`) are entry candidates. `Support` roots (`+*.moth`) are scoped package
 /// roots that are never entry candidates. `ProjectPackageFacade` is the optional project-root
 /// `+*.moth` beside `config.moth`; Stage 0 assigns it from location rather than filename alone and
-/// it never participates in entry-root containment or import-resolution lookup.
+/// it never participates in entry-root containment or dependency-resolution lookup.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum ModuleRootRole {
     Normal,

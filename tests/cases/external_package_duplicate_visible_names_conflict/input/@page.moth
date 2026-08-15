@@ -1,4 +1,4 @@
-import @test/pkg-a { open }
-import @test/pkg-b { open }
+@test/pkg-a open
+@test/pkg-b open
 
 open("hello")

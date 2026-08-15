@@ -1,2 +1,2 @@
-import @test/pkg-a { PkgError }
+@test/pkg-a PkgError
 ExternalAlias as PkgError

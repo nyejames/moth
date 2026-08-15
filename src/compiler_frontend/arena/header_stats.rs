@@ -28,7 +28,7 @@ pub(crate) struct HeaderStats {
     pub trait_incompatibilities: usize,
     pub const_templates: usize,
     pub start_functions: usize,
-    pub imports: usize,
+    pub dependency_clauses: usize,
     pub generic_parameters: usize,
     pub signature_members: usize,
     pub choice_variants: usize,
@@ -38,8 +38,8 @@ pub(crate) struct HeaderStats {
 impl HeaderStats {
     /// Compute header statistics from the module-wide header list and symbol package.
     ///
-    /// WHAT: walks the already-aggregated headers once and supplements with import counts from
-    ///       the module symbol package.
+    /// WHAT: walks the already-aggregated headers once and supplements with dependency-clause
+    ///       counts from the module symbol package.
     /// WHY: header parsing has already done the expensive work; this is one cheap linear scan
     ///      that avoids rediscovering top-level declarations.
     pub(crate) fn from_headers_and_symbols(
@@ -52,8 +52,8 @@ impl HeaderStats {
             stats.accumulate(header);
         }
 
-        stats.imports = module_symbols
-            .file_imports_by_source
+        stats.dependency_clauses = module_symbols
+            .file_dependency_clauses_by_source
             .values()
             .map(Vec::len)
             .sum();

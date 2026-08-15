@@ -21,7 +21,7 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidFieldAccessReason, NamespaceTypeValueMisuseKind,
 };
-use crate::compiler_frontend::headers::import_environment::{
+use crate::compiler_frontend::headers::binding_environment::{
     NamespaceRecord, NamespaceRecordSource,
 };
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -30,7 +30,7 @@ use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 /// Input bundle for namespace access parsing.
 ///
 /// WHAT: carries everything needed to resolve a dotted path starting at a visible namespace
-/// import record.
+/// dependency namespace.
 /// WHY: avoids threading a long argument list through the identifier dispatch path.
 pub(super) struct NamespaceAccessInput<'a, 'env> {
     pub(super) token_stream: &'a mut FileTokens,
@@ -49,7 +49,7 @@ pub(super) struct NamespaceAccessInput<'a, 'env> {
 /// WHAT: walks `root.member.member...` while each intermediate member resolves to a child
 /// namespace, then dispatches the final value member to the existing source or external
 /// leaf parser.
-/// WHY: namespace records are the import stage's field-access-only view of imports; AST
+/// WHY: namespace records are the binding stage's field-access-only view of dependencies; AST
 /// must resolve the whole dotted path into ordinary declaration references or stable
 /// external IDs before producing HIR, so no runtime namespace value ever exists.
 /// BOUNDARY: source and module public-surface namespace records remain shallow, so any second dot
@@ -104,7 +104,11 @@ pub(super) fn parse_namespace_access(
                 NamespaceRecordSource::SourceFile(_)
             )
         {
-            return Err(CompilerDiagnostic::nested_traversal(root_name, member_location).into());
+            return Err(CompilerDiagnostic::nested_dependency_traversal(
+                root_name,
+                member_location,
+            )
+            .into());
         }
 
         match lookup {

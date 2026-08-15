@@ -1,37 +1,23 @@
-import @type-aliases {
-    content as type_aliases,
-}
+@type-aliases content as type_aliases
 
-import @type-aliases-basic {
-    content as type_aliases_basic,
-}
+@type-aliases-basic content as type_aliases_basic
 
-import @import-aliases {
-    content as import_aliases,
-}
+@dependency-aliases content as dependency_aliases
 
-import @import-aliases-basic {
-    content as import_aliases_basic,
-}
+@dependency-aliases-basic content as dependency_aliases_basic
 
-import @payload-capture-aliases {
-    content as payload_capture_aliases,
-}
+@payload-capture-aliases content as payload_capture_aliases
 
-import @payload-capture-aliases-basic {
-    content as payload_capture_aliases_basic,
-}
+@payload-capture-aliases-basic content as payload_capture_aliases_basic
 
-import @styles {
-    navbar,
+@styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager,
-}
+    doc_pager
 
 page_title #= "Aliases"
-page_description #= "Type aliases, import aliases and choice payload capture aliases in Moth."
+page_description #= "Type aliases, dependency aliases and choice payload capture aliases in Moth."
 page_head #= language_theme_head
 
 #[navbar]
@@ -41,7 +27,7 @@ page_head #= language_theme_head
 
     # Aliases
 
-    An alias gives an existing type, import or payload field a local name. It
+    An alias gives an existing type, dependency or payload field a local name. It
     doesn't create a value, conversion or new nominal type.
 
     Moth keeps `as` narrower than languages with broad renaming or casting
@@ -60,11 +46,11 @@ page_head #= language_theme_head
 
 #[section:
     [doc_level:
-        [$insert("key"):import-aliases]
-        [$insert("title"):Import aliases]
-        [$insert("advanced"):[import_aliases]]
+        [$insert("key"):dependency-aliases]
+        [$insert("title"):Dependency aliases]
+        [$insert("advanced"):[dependency_aliases]]
 
-        [import_aliases_basic]
+        [dependency_aliases_basic]
     ]
 ]
 

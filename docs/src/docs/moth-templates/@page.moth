@@ -1,50 +1,28 @@
-import @moth-template-files {
-    content as moth_template_files,
-}
+@moth-template-files content as moth_template_files
 
-import @moth-template-files-basic {
-    content as moth_template_files_basic,
-}
+@moth-template-files-basic content as moth_template_files_basic
 
-import @implicit-markdown {
-    content as implicit_markdown,
-}
+@implicit-markdown content as implicit_markdown
 
-import @implicit-markdown-basic {
-    content as implicit_markdown_basic,
-}
+@implicit-markdown-basic content as implicit_markdown_basic
 
-import @content-imports {
-    content as content_imports,
-}
+@content-dependencies content as content_dependencies
 
-import @content-imports-basic {
-    content as content_imports_basic,
-}
+@content-dependencies-basic content as content_dependencies_basic
 
-import @template-scope {
-    content as template_scope,
-}
+@template-scope content as template_scope
 
-import @template-scope-basic {
-    content as template_scope_basic,
-}
+@template-scope-basic content as template_scope_basic
 
-import @moth-template-limits {
-    content as moth_template_limits,
-}
+@moth-template-limits content as moth_template_limits
 
-import @moth-template-limits-basic {
-    content as moth_template_limits_basic,
-}
+@moth-template-limits-basic content as moth_template_limits_basic
 
-import @styles {
-    navbar,
+@styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager,
-}
+    doc_pager
 
 page_title #= "Moth template files"
 page_description #= "Moth-aware Markdown content files for HTML projects."
@@ -63,7 +41,7 @@ page_head #= language_theme_head
 
     The compiler exports the folded result as `content`. Use plain `.md` for
     portable Markdown and normal `.moth` when the file needs declarations,
-    imports or runtime work.
+    dependencies or runtime work.
 ]
 
 #[section:
@@ -88,11 +66,11 @@ page_head #= language_theme_head
 
 #[section:
     [doc_level:
-        [$insert("key"):content-imports]
-        [$insert("title"):Content imports]
-        [$insert("advanced"):[content_imports]]
+        [$insert("key"):content-dependencies]
+        [$insert("title"):Content dependencies]
+        [$insert("advanced"):[content_dependencies]]
 
-        [content_imports_basic]
+        [content_dependencies_basic]
     ]
 ]
 
@@ -119,7 +97,7 @@ page_head #= language_theme_head
 #[section:
     [doc_pager:
         [$insert("previous_path"):../packages/]
-        [$insert("previous_title"):Packages and imports]
+        [$insert("previous_title"):Packages and dependencies]
         [$insert("next_path"):../markdown/]
         [$insert("next_title"):Plain Markdown]
     ]

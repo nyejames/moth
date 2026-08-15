@@ -1,18 +1,12 @@
-import @time {
-    content as time_advanced,
-}
+@time content as time_advanced
 
-import @time-basic {
-    content as time_basic,
-}
+@time-basic content as time_basic
 
-import @styles {
-    navbar,
+@styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager,
-}
+    doc_pager
 
 page_title #= "Core time"
 page_description #= "Duration, TimeMark and Timestamp helpers in @core/time."

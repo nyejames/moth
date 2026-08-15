@@ -1,18 +1,12 @@
-import @random {
-    content as random_advanced,
-}
+@random content as random_advanced
 
-import @random-basic {
-    content as random_basic,
-}
+@random-basic content as random_basic
 
-import @styles {
-    navbar,
+@styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager,
-}
+    doc_pager
 
 page_title #= "Core random"
 page_description #= "Random number helpers in the Core package."
@@ -26,7 +20,7 @@ page_head #= language_theme_head
     # Core random
 
     `@core/random` provides bounded random `Float` and `Int` values. The package
-    keeps randomness explicit through imports rather than adding a global
+    keeps randomness explicit through dependency clauses rather than adding a global
     language primitive.
 ]
 
