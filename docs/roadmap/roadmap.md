@@ -15,6 +15,8 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 
 ## Queued implementation chain
 
+- [CFG timers fixes](./plans/command-timing-accounting-and-reporting-correction-plan.md)
+- [Constant folding optimisations](./plans/constant-folding-and-type-system-hot-path-optimization-plan.md)
 - [Path values and resource linking](./plans/path-values-and-resource-linking-plan.md)
 - [Growable collections infallability](./plans/collection-push-fallibility-split-plan.md)
 - [Anonymous const records](./plans/anonymous-const-records-plan.md)

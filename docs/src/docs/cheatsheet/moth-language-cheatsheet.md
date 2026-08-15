@@ -1,40 +1,61 @@
 # Moth language cheatsheet
 
-Moth is a small, statically typed language with first-class string templates, mandatory borrow and lifetime validation and a backend-neutral compiler frontend. This document is a compact end-state reference for writing Moth code. It describes source syntax and project structure, not compiler internals or implementation status.
+Moth is a small, statically typed language with first-class string templates, explicit mutable access and mandatory borrow and lifetime validation. This is a compact reference for humans and coding models writing Moth source.
 
-Detailed explanations and tutorials live on the [Moth documentation site](https://nyejames.github.io/moth/docs/).
+This document describes the **accepted end-state language surface**. The current Alpha compiler may not support every accepted feature yet. Use the [progress matrix](../progress/) to check implementation and target status.
+
+Status wording used here:
+
+- **Accepted deferred** means the source contract is accepted but implementation is absent, partial or target-limited.
+- **Design pending** means no final syntax or semantic contract exists. These areas are listed without speculative examples.
+
+Detailed explanations live throughout the [Moth documentation](../).
 
 ## Rules to internalise first
 
 - `:` opens a block. `;` closes it. Semicolons do not end statements.
-- Bindings are immutable unless the declaration uses `~`.
-- Existing values use shared read-only reference semantics by default. Binding a value to another name does not copy it.
-- `~place` requests exclusive mutable access. It is not a type, reference operator or move marker.
-- `copy place` makes an independent deep copy. Moth has no explicit move syntax or lifetime annotations.
-- `[]` creates strings and templates. `{}` creates collections or maps.
-- `!` is the typed error path. `?` is the option path. `assert(...)` is the only panic-like invariant failure.
-- `@path` binds a dependency surface. An explicit non-source extension in expression position creates a compile-time `Path` value.
+- Bindings are immutable unless declared with `~`.
+- Existing values use shared read-only access. Rebinding does not copy.
+- `~place` requests exclusive access for one operation. It is not a type, reference or move.
+- `copy place` creates independent storage. Moth has no explicit move or lifetime syntax.
+- `[]` creates strings/templates. `{}` creates collections/maps.
+- `!` is the typed error path. `?` is the option path. `assert` is for invariants.
+- `@path` starts dependencies and resource paths. Source dependencies omit extensions.
 - Names never shadow another visible name.
-- Moth has no general closures, function values, macros, exceptions, trait objects or operator overloading.
+- General closures, anonymous callables, generic function values, macros, exceptions, trait objects and operator overloading are outside scope.
+- Named monomorphic non-capturing function references remain design pending.
 
 ## Common invalid translations
 
 | Do not write | Write |
 |---|---|
+| `let name = value` | `name = value` |
+| `let mut count = 0` | `count ~= 0` |
+| `fn greet(...)` | `greet \|...\|` |
 | `import @core/math` | `@core/math` |
+| `pub name` | put the declaration inside the module root's `export:` block |
 | `left == right` | `left is right` |
 | `left != right` | `left is not right` |
 | `!ready`, `a && b`, `a || b` | `not ready`, `a and b`, `a or b` |
 | `{ ... }` for a code block | `: ... ;` |
 | `statement;` | `statement` |
 | `left + right` for strings | `[left, right]` |
-| `&value`, `&mut value`, `move value` | shared access, `~value`, or `copy value` |
+| `&value` | `value` |
+| `&mut value` | `~value` at an exclusive-access site |
+| `move value` | no source form, final-use transfer is inferred |
+| `value.clone()` | `copy value` when independent storage is required |
+| `match value` | `if value is:` |
+| `for item in items` | `loop items \|item\|:` |
+| `while ready` | `loop ready:` |
 | `_ => fallback` | `else => fallback` |
 | `items[index]` | `items.get(index)!` or `~items.set(index, value)!` |
+| `Option<T>` | `T?` |
+| `Result<T, E>` | success return slots plus a final `E!` slot |
+| tuple return values | multiple returns and a matching multi-bind |
 | `Box<String>` | `Box of String` |
-| an inline closure | a named function, trait pattern or reactive source/subscription |
+| an inline closure | a named function, static trait pattern or accepted reactive source/subscription pattern |
 
-## Blocks, comments and names
+## Blocks, comments, scope and names
 
 ```moth
 if ready:
@@ -44,14 +65,27 @@ else
 ;
 ```
 
-`--` starts a single-line comment in ordinary Moth code. Inside template and `.mtf` bodies, `--` is ordinary output text.
+`--` starts a single-line comment in ordinary Moth code. Inside template and `.mtf` bodies, `--` is output text. Use `$note` or `$todo` to discard template-authored content.
+
+A plain lexical block uses `block:`:
+
+```moth
+name = "Priya"
+
+block:
+    label = [: User: [name]]
+    io.line(label)
+;
+```
+
+`block:` creates a child lexical and control-flow scope. Bare labelled blocks are invalid.
 
 Naming conventions:
 
-- Types, structs, choices, aliases and generic parameters: `PascalCase`
-- Variables and functions: `regular_snake_case`
-- Traits: `ALL_CAPS`
-- No visible name may be redeclared while it remains in scope.
+- Types, structs, choices, aliases and generic parameters use `PascalCase`.
+- Variables and functions use `regular_snake_case`.
+- Traits use `ALL_CAPS`.
+- A visible name cannot be redeclared while it remains in scope.
 
 Symbolic binary operators and assignment require spaces on both sides:
 
@@ -77,15 +111,16 @@ message = [: Hello, [text].]
 
 Quoted text creates a read-only string slice. A template creates an owned string. Both use the semantic `String` type at typed boundaries. `Char` stores one Unicode scalar value.
 
-Quoted strings cannot continue across a physical newline and support only these escapes: `\\`, `\"`, `\n`, `\r` and `\t`. Backticks are not raw source strings. They delimit inline code inside `$md` content.
+Quoted strings cannot continue across a physical newline. They support only `\\`, `\"`, `\n`, `\r` and `\t`. Backticks are not raw source strings. In `$md` content, paired single backticks delimit inline code.
 
-`String + String` is invalid. Concatenate with a template:
+`String + String` is invalid. Concatenate and interpolate through templates:
 
 ```moth
 joined = [left, right]
+greeting = [: Hello [name]]
 ```
 
-String equality compares content with `is` and `is not`. Strings do not support ordering operators.
+String equality compares content with `is` and `is not`. Strings do not support ordering operators or in-place character mutation.
 
 ## Bindings, mutability and constants
 
@@ -101,67 +136,52 @@ site_name #= "Moth"        -- inferred compile-time constant
 version #Int = 1           -- typed compile-time constant
 ```
 
-Mutability belongs to a binding or access operation, not to type identity. `~{String}` means a mutable binding whose type is `{String}`. It is not a separate mutable collection type.
+Mutability belongs to a binding or access operation, not to type identity. `names ~{String}` declares a mutable binding whose semantic type is `{String}`.
 
 A constant:
 
-- must have an initialiser
-- cannot be mutable
-- may depend only on other compile-time values
-- may reference only earlier constants in the same file
-- must fully fold during compilation
+- has an initializer
+- is immutable
+- may depend only on visible compile-time values
+- must fully fold
+- cannot use a same-file forward reference
 
-`#` controls compile-time evaluation, not public visibility. Cross-module visibility comes only from `export:`.
+Visible dependency-bound constants are already folded and may be used. Cross-file constants in the same module follow the module's declaration dependency ordering. `#` controls compile-time evaluation, not visibility.
 
 ## Reference semantics, copying and ownership
 
-Existing values are shared by reference by default:
+Existing values use shared read-only access:
 
 ```moth
 items ~= {"Priya", "Rob"}
 shared_items = items
 
 count = shared_items.length()
-~items.push("Emmy") -- valid because shared_items is not used again
+~items.push("Emmy") -- valid: shared_items has no later use
 ```
 
-A shared alias is read-only. It blocks overlapping mutation only while it may still be used on that control-flow path. The compiler tracks this non-lexically.
+A later use of `shared_items` would keep the alias live and make the mutation invalid. Borrow lifetimes follow control flow.
 
-A mutable declaration made from an existing place creates a write-through exclusive alias. A mutable declaration made from a fresh expression creates an independent mutable slot:
+A mutable declaration from an existing place creates a write-through alias. One from a fresh expression creates an independent slot:
 
 ```moth
-items ~= {"Priya"}
 writer ~= items
-~writer.push("Rob") -- writes the same collection
+~writer.push("Rob")
 
-fresh ~= {"Emmy"}  -- independent fresh collection
+fresh ~= {"Emmy"}
 ```
 
-Putting an existing value into a struct, choice, collection, map or another aggregate keeps the same shared-reference rule unless the source is copied or transferred at a proven final use.
-
-Use `copy` for independent storage:
+Only `copy` creates independent storage from an existing place:
 
 ```moth
-independent = copy items
+independent ~= copy items
 ```
 
-`copy` accepts a visible binding, field projection or parenthesised place. It deep-copies the complete copyable value graph, preserves internal alias topology and shares no mutable allocation with the source. Non-copyable external resources are rejected.
+`copy` accepts a binding, field projection or parenthesised place. It deep-copies the copyable graph, preserves internal alias topology and shares no mutable allocation with the source. Fresh literals, templates, calls and computations are invalid `copy` operands.
 
-Moth has no source move operator. At a proven final use, the compiler may transfer destruction responsibility instead of borrowing. This is an optimisation and never changes source meaning. Failure to prove a transfer does not reject otherwise valid code.
+Moth has no move operator. The compiler may transfer destruction responsibility at proven final use without changing aliasing or source meaning. Each allocation still has one semantic lifetime owner, and retained references must point to the same or a longer-lived region. GC never bypasses these rules.
 
-The compiler always validates:
-
-- shared versus exclusive access
-- retained aliases and escapes
-- lifetime-region topology
-- result aliasing and freshness
-- destruction responsibility where ownership optimisation applies
-
-These checks apply even when a backend uses garbage collection. GC changes representation, not source legality. A function may return an alias or projection only when the referenced storage remains valid for every caller use. Otherwise return fresh storage or `copy` it. There are no source `&`, `&mut`, lifetime parameters, retain/release calls or weak references.
-
-### Declared memory groups
-
-Use a declared group when a set of allocations should share an explicit hard lifetime:
+### Declared memory groups - accepted deferred
 
 ```moth
 group request:
@@ -170,100 +190,100 @@ group request:
 ;
 ```
 
-`into group_name` appears on a declaration after access or type syntax and before `=`:
-
-```moth
-rows ~{Row} into scratch = {}
-```
-
-A group is not a value, type, allocator object or signature parameter. Values and aliases cannot outlive it. A child may retain a parent value, but a parent or sibling cannot retain a child value. Placement into an ancestor group is limited to straight-line nested `block:` or `group:` code that runs at most once. There is no expression-site placement, extraction or unrestricted group-to-group adoption.
-
+`into group_name` appears after access/type syntax and before `=`. A group is a hard local lifetime owner, not a value or type. Placement targets the current group or an ancestor. Parent/sibling storage cannot retain child-group values, and group-owned values cannot escape. V1 has no expression placement, extraction or unrestricted group transfer.
 
 ## Numbers and operators
 
-### Numeric types
+Current numeric types:
 
 - `Int`: signed 32-bit integer
-- `Float`: finite IEEE-754 `f64`. `NaN` and infinities are never valid Moth values
-- `Number` and `Number0`: arbitrary-precision integer with scale 0
-- `Number1` through `Number256`: fixed-scale arbitrary-precision decimals
-- `Byte`: unsigned `0..255` scalar for byte-oriented APIs. Ordinary arithmetic is not defined on `Byte`
+- `Float`: finite IEEE-754 `f64`. `NaN` and infinities are invalid
 
 ```moth
 count Int = 42
 ratio Float = 0.5
+```
+
+Whole literals naturally infer `Int`. Decimal literals infer `Float`. Exponents use lowercase `e`. Uppercase `E`, unary `+` and spaced negation such as `- count` are invalid.
+
+### Number and Byte - accepted deferred
+
+- `Number` and `Number0`: arbitrary-precision scale-zero integers
+- `Number1` through `Number256`: fixed-scale arbitrary-precision decimals
+- `Byte`: unsigned `0..255` scaffold. Broader runtime semantics remain unsettled
+
+```moth
 large Number = 1000000000000000000000
 price Number2 = 12.50
 byte Byte = 255
 ```
 
-Whole literals naturally infer `Int`. Decimal literals naturally infer `Float`. A receiving `NumberN` context materialises an exact fixed-scale value. Moth never silently rounds a literal, so `price Number2 = 1.239` is invalid.
+A receiving `NumberN` context requires an exact literal. `price Number2 = 1.239` is invalid rather than rounded.
 
-Exponents use lowercase `e`: `1e6`, `1e-6`, `1.0e+21`. Uppercase `E` and unary `+` are invalid. Negation must be attached: `-1`, `-count`, not `- count`.
+Arithmetic rules:
 
-### Arithmetic
-
-- `Int / Int -> Float`
-- `Int // Int -> Int`, truncating toward zero
-- Mixed `Int` and `Float` arithmetic produces `Float`
-- `NumberN` combines with the same `NumberN` scale or with `Int`
-- Different `Number` scales require an explicit cast
-- `NumberN` and `Float` do not mix implicitly
-- Positive-scale `NumberN` multiplication, division and exponentiation round half to even at the operation boundary
-- Scale-zero `Number` uses `//` and `%` for integer division and remainder. `/` is invalid at scale 0
-- Positive-scale `NumberN` uses `/` and `%`. `//` is invalid
+- `Int / Int -> Float`, while `Int // Int -> Int`
+- mixed `Int` and `Float` arithmetic produces `Float`
+- `NumberN` combines with the same scale or `Int`. Different scales need `cast`
+- `NumberN` and `Float` do not mix
+- positive-scale `NumberN` uses `/` and `%`. Scale zero uses `//` and `%`
 - `NumberN ^ Int` requires a non-negative exponent
+- positive-scale multiply, divide and exponentiation round half to even per operation
 - `^` is right-associative
 
-All numeric operations are checked. Overflow, divide-by-zero, invalid exponents, non-finite Float results and invalid fixed-scale operations fail. A statically known failure is a compile-time diagnostic. In a function whose final error slot is builtin `Error!`, supported checked failures enter that channel. Otherwise they trap as unrecoverable runtime failures.
+Numeric operations are checked. Statically known failure is a diagnostic. Supported runtime failure enters builtin `Error!` only when that is the function's final error slot. Otherwise it traps.
 
-Operator precedence, highest first: unary `not` and `-`, `^`, `* / // %`, `+ -`, comparisons, `and`, `or`.
-
-Equality and logic use words:
+Precedence: unary `not`/`-`, `^`, `* / // %`, `+ -`, comparisons, `and`, `or`.
 
 ```moth
 same = left is right
-different = left is not right
 ready = has_input and is_valid
-retry = timed_out or disconnected
 blocked = not ready
 ```
 
 ## Explicit casts
 
-`cast` converts to the builtin target supplied by the immediate typed receiving boundary:
+`cast` takes its target from the immediate typed receiving boundary:
 
 ```moth
-count Int = cast! text
+ratio Float = cast 3
 fallback Int = cast text catch then 0
 label String = cast value
+```
+
+Propagation needs a complete function context:
+
+```moth
+parse_count |text String| -> Int, Error!:
+    count Int = cast! text
+    return count
+;
 ```
 
 Forms:
 
 ```moth
-value Target = cast expression          -- proven infallible
-value Target = cast! expression         -- propagate cast failure
-value Target = cast expression catch:   -- recover locally
+value Target = cast expression
+value Target = cast! expression
+
+value Target = cast expression catch |err|:
     then fallback
 ;
 ```
 
 Rules:
 
-- Cast targets are compiler-owned builtins such as `Bool`, `Int`, `Float`, `NumberN`, `Char`, `String` and `Error`.
-- `cast!` requires a compatible `Error!` channel in the current function.
+- Plain `cast` requires infallible evidence.
+- `cast!` requires the enclosing function's final error slot to be builtin `Error!`.
 - `cast ... catch` handles only cast failure.
 - `cast! ... catch` is invalid.
 - Same-type casts are invalid.
 - Generic inference does not look through `cast`.
 - Scalar conversion constructors such as `Int(value)` and `String(value)` are invalid.
-- `NumberN` scale widening is exact and infallible. Scale narrowing is exact-or-fail and never rounds.
-- `Float` and `NumberN` lossy conversion uses named library helpers, not `cast`.
-- Numeric text casts consume the whole string. They reject surrounding whitespace, uppercase `E`, `NaN` and infinity spellings.
-- `NumberN -> String` uses canonical decimal text with no exponent, negative zero or redundant trailing fractional zeroes.
-- Same-file nominal types may provide compiler-owned cast evidence for supported builtin targets. For example, `CASTABLE_TO_STRING` expects `to_string |this Type| -> String`, while a fallible cast trait expects an `Error!` method. Users cannot create new cast target families.
-
+- `NumberN` scale widening is exact and infallible. Narrowing is exact-or-fail and never rounds.
+- `Float <-> NumberN` has no accepted helper name or lossy conversion policy yet. Do not invent one.
+- Numeric text casts consume the whole string and reject surrounding whitespace, uppercase `E`, `NaN` and infinity spellings.
+- Same-file nominal types may provide compiler-owned cast evidence for supported builtin targets. Users cannot create new cast target families.
 
 ## Functions and calls
 
@@ -276,29 +296,23 @@ message = greet("Priya")
 custom = greet(name = "Rob", punctuation = "?")
 ```
 
-- Parameters use `|...|`. A no-parameter function uses `||`.
-- Omit `->` when there is no success return value.
-- Defaults must fold at compile time.
-- Positional arguments must come before named arguments.
-- Each parameter may be supplied once.
-- Named arguments may skip earlier defaulted parameters.
-- Binding-backed and compiler builtin calls are positional unless their package contract says otherwise.
+Parameters use `|...|`. No parameters use `||`. Omit `->` when there are no success values. Defaults fold at compile time. Positional arguments precede named arguments, which may skip earlier defaults. Host functions and compiler-owned builtin members are positional-only.
 
-### Mutable parameters and calls
+Mutable parameters require `~place` for existing storage, but accept fresh rvalues plainly:
 
 ```moth
-append |items ~{String}, value String|:
-    ~items.push(value)
+increment |value ~Int|:
+    value += 1
 ;
 
-names ~{String} = {}
-append(~names, "Priya")
-append({"Rob"}, "Emmy") -- fresh rvalue needs no ~
+count ~= 1
+increment(~count)
+increment(1)
 ```
 
-An existing mutable place passed to a mutable parameter requires `~place`. A fresh literal, template, constructor call or computed result may fill the mutable slot without `~`. `~` is invalid on immutable places and fresh rvalues.
+Mutable receivers always require an existing mutable place.
 
-### Multiple returns
+Multiple returns are not tuples:
 
 ```moth
 pair || -> String, Int:
@@ -308,14 +322,11 @@ pair || -> String, Int:
 name, count = pair()
 ```
 
-Multiple returns are not tuple values. They may be received only by a matching multi-bind, return or value-producing block.
+Receive them through matching multi-bind, return or value-producing syntax. General closure/function-value systems are outside scope. Narrow named function references remain design pending.
 
-Moth functions are named declarations, not first-class values. There is no closure literal, callback value or generic higher-order function surface.
+## Options: `T?`, `none` and postfix `?`
 
-
-## Options
-
-`T?` is an optional value. `none` needs an optional receiving context.
+`T?` is an optional value. `none` needs an immediate optional receiving context.
 
 ```moth
 find_name |id String| -> String?:
@@ -327,7 +338,9 @@ find_name |id String| -> String?:
 ;
 ```
 
-A `T` value may be used where `T?` is expected. Postfix `?` unwraps a present value or returns `none` from the current optional function:
+A `T` value may be used where `T?` is expected. Optional values do not unwrap implicitly.
+
+Postfix `?` unwraps a present value or immediately returns `none`:
 
 ```moth
 load_label |id String| -> String?:
@@ -336,7 +349,9 @@ load_label |id String| -> String?:
 ;
 ```
 
-Inspect an option explicitly:
+Postfix `?` requires an enclosing function with exactly one compatible optional success return slot. It cannot be combined with `catch`.
+
+Inspect options explicitly:
 
 ```moth
 label = if maybe_name is |name| then name else "guest"
@@ -352,11 +367,11 @@ if maybe_name is:
 ;
 ```
 
-A complete option match needs an unguarded `none` arm and an unguarded present-value capture, or an `else =>` arm. Options support equality when their inner type does.
+An option match is exhaustive without `else =>` only when it contains both an unguarded `none` arm and an unguarded `|name|` present-value capture. Options support equality when their inner type supports equality.
 
-## Errors and recovery
+## Errors, propagation and recovery
 
-A fallible function marks one final return slot with `!`:
+A fallible function has one final `!` return slot:
 
 ```moth
 MissingName #Error = Error("Missing name", 404)
@@ -370,18 +385,7 @@ load_name |id String| -> String, Error!:
 ;
 ```
 
-`Error` is a reserved compiler-owned structured value. Its physical representation is opaque. Source code observes only:
-
-- `message String`
-- `code Int`, defaulting to `0`
-
-A constant `Error` construction declares a reusable static error descriptor. Runtime construction may include dynamic message content:
-
-```moth
-return! Error([: Unknown user [id]], 404)
-```
-
-Use normal success `return`, `return!` for the error path, postfix `!` to propagate and `catch` to recover:
+Builtin `Error` exposes `message String` and `code Int = 0`. A constant may store a reusable value. Runtime construction may use dynamic text.
 
 ```moth
 load_page |id String| -> String, Error!:
@@ -389,45 +393,26 @@ load_page |id String| -> String, Error!:
     return [: Hello [name]]
 ;
 
-name = load_name("Priya") catch then "guest"
-
 name = load_name(id) catch |err|:
     io.warn(err.message)
     then "guest"
 ;
 ```
 
-An error-only function may fall through successfully:
+`return!` returns failure, postfix `!` propagates and `catch` recovers. A multi-success handler produces matching arity:
 
 ```moth
-validate |ready Bool| -> Error!:
-    if not ready:
-        return! Error("not ready")
-    ;
+name, score = load_user(id) catch |err|:
+    io.warn(err.message)
+    then "guest", 0.0
 ;
 ```
 
-Custom error channels use ordinary nominal types:
+An error-only function may fall through successfully. Custom error slots use ordinary nominal types. Postfix `!` requires an exactly compatible caller error slot. Convert error types explicitly with `catch` and `return!`.
 
-```moth
-ValidationFailure = |
-    message String,
-|
+`Error!` is not a first-class `Result`. Define a choice for explicit result-like domain values.
 
-validate_name |name String| -> ValidationFailure!:
-    if name is "":
-        return! ValidationFailure("empty name")
-    ;
-;
-```
-
-Postfix `!` requires the caller's error type to match exactly. Convert between error types explicitly with `catch` and `return!`.
-
-`Error!` is not a first-class `Result` value. It cannot be stored or pattern-matched as a result carrier. Define a normal choice when the domain needs an explicit result-like value.
-
-### Assertions and panic behaviour
-
-Moth has no general `panic` or exception syntax. `assert` is the only invariant-failure surface:
+### Assertions
 
 ```moth
 assert(index < items.length())
@@ -435,12 +420,11 @@ assert(index < items.length(), "index must be in bounds")
 assert(false, "unimplemented path")
 ```
 
-`assert` is statement-only. Assertions are always checked in development and release builds. The optional message must be one quoted string literal. Failure is unrecoverable and cannot be caught or propagated as `Error!`. `assert(false)` is statically terminal. Expected failures belong in a typed error channel.
-
+`assert` is statement-only and always checked. Its optional message is one quoted literal. Failure is unrecoverable. `assert(false)` is statically terminal.
 
 ## `if`, matching and value-producing blocks
 
-### Statement `if`
+Statement `if`:
 
 ```moth
 if ready:
@@ -450,87 +434,101 @@ else
 ;
 ```
 
-Statement `if` is not required to be exhaustive. It has no statement-level `else if`. Nest another `if` when needed.
+There is no statement-level `else if`. Nest another `if`.
 
-### Full pattern match
+Full match:
 
 ```moth
 if value is:
     < 0 => io.line("negative")
     0 => io.line("zero")
-    <= 10 => io.line("small")
-    else => io.line("large")
+    else => io.line("positive")
 ;
 ```
 
-Patterns include literals, relational scalar patterns, choice variants, choice payload captures and option captures. Add a guard with `pattern if condition => body`.
+Patterns include literals, relational scalars, choice variants/payloads and option captures. Guards follow the pattern:
 
-Match arms have no trailing semicolons. `else =>` is the only catch-all. `_ =>` is invalid. A statement match may use a bodyless `else =>` as an explicit no-op. Choice matches must cover every variant or include `else =>`. Any guarded choice match needs `else =>`.
+```moth
+Response ::
+    Pending | retry_count Int, message String |,
+    Complete,
+;
 
-### Value-producing blocks
+response = Response::Pending(2, "offline")
 
-Compact form:
+if response is:
+    Pending(retry_count, message as pending_message) if retry_count > 0 =>
+        io.warn(pending_message)
+    Complete => io.line("done")
+    else =>
+;
+```
+
+Payload captures list every field in declaration order. `as` renames only the local binding. Arms have no colon or individual semicolon. `else =>` is the only catch-all, `_ =>` is invalid and guarded choice matches need `else =>`.
+
+Value-producing forms send values with `then`:
 
 ```moth
 label = if ready then "ready" else "waiting"
-name = if maybe_name is |value| then value else "guest"
-```
 
-Block form:
-
-```moth
-label = if ready:
-    then "ready"
-else
-    then "waiting"
-;
-```
-
-Full match:
-
-```moth
+status = "ready"
 label = if status is:
-    Ready => then "ready"
-    Failed(message) => then message
+    "ready" => then "ready"
+    "failed" => then "failed"
+    else => then "other"
 ;
 ```
 
-`then` sends values to the nearest active receiving declaration, assignment, multi-bind, return or enclosing `then`. Value-producing `if`, match and block-form `catch` are closed receiving constructs, not general expressions. Do not place them directly inside function arguments, operators, constructors, collection items or template interpolation.
-
-Every producing path must provide the receiver's value count and types.
-
+They work only at closed receiving declarations, assignments, multi-binds, returns or nested `then`. They are not general call, operator, constructor, collection or template expressions. Every producing path matches the receiver's arity and types.
 
 ## Loops
 
-Moth uses one loop keyword:
+Moth uses one `loop` keyword.
+
+Conditional loop:
 
 ```moth
-loop condition:
-    work()
+count ~= 0
+
+loop count < 3:
+    io.line([: [count]])
+    count += 1
+;
+```
+
+Collection loops may omit bindings or bind the item and optional zero-based index:
+
+```moth
+count ~= 0
+
+loop items:
+    count += 1
 ;
 
 loop items |item, index|:
     io.line([: [index]: [item]])
 ;
+```
 
-loop 0 to 10 by 2 |value|:
-    io.line([value])
+Collection loops capture the source and its length once before iteration. They operate on Moth collections, not a general iterable protocol. Maps are not collection-loop sources.
+
+Range loop:
+
+```moth
+loop 0 to 10 by 2 |value, index|:
+    io.line([: [index]: [value]])
 ;
 ```
 
-- `loop condition` repeats while a `Bool` is true.
-- `loop collection |item, index|` iterates values with an optional zero-based index.
-- `loop start to end by step |value, index|` iterates a range.
 - `to` excludes the end. `to &` includes it.
-- `loop to n` means `loop 0 to n`.
-- Direction follows the bounds. Descending ranges apply a negative direction automatically.
-- `by 0` is invalid. Float ranges should state `by` explicitly.
+- `loop to n` starts at `0`.
+- Direction follows the bounds. `by` supplies a positive magnitude.
+- A literal zero step is a diagnostic. A dynamic zero step fails before the first iteration.
+- Any range using `Float` requires an explicit `by`.
+- Start, end and explicit step expressions are evaluated once from left to right.
 - `break` and `continue` target the nearest ordinary loop.
 
-
 ## Structs and receiver methods
-
-Structs are nominal runtime types:
 
 ```moth
 Person = |
@@ -542,9 +540,9 @@ person ~= Person(name = "Priya", age = 30)
 person.age += 1
 ```
 
-Matching field shapes do not make two structs the same type, and structs do not gain automatic structural equality. Fields may have compile-time defaults. Constructors accept positional or named arguments under normal call rules.
+Structs are nominal. Matching fields do not imply the same type or structural equality. Fields may have compile-time defaults. Constructors use normal argument routing.
 
-A receiver method is a top-level function whose first parameter is named `this`:
+A receiver method is a top-level function whose first parameter is `this`:
 
 ```moth
 birthday |this ~Person|:
@@ -559,14 +557,23 @@ label |this Person| -> String:
 text = person.label()
 ```
 
-- `this T` is shared read-only access.
-- `this ~T` is mutable access.
-- A mutable receiver call requires `~place.method(...)`.
-- Source-authored receiver methods must live in the same file as their nominal struct or choice.
-- Methods cannot extend builtins, imports, dependency types, opaque host types or types from another file.
-- Methods remain attached to the receiver type. They are not imported or re-exported as separate functions.
+`this T` is shared. `this ~T` is mutable. Mutable receiver calls need `~place.method(...)`. Source methods live in the same file as their nominal struct or choice and cannot extend types owned elsewhere. Methods remain attached to the type and are not imported separately.
 
-### Runtime anonymous records
+Aligned generic receiver methods are supported:
+
+```moth
+Box type A = |
+    value A,
+|
+
+get type A |this Box of A| -> A:
+    return this.value
+;
+```
+
+Methods specialised to one concrete instance are invalid.
+
+### Runtime anonymous records - accepted deferred
 
 ```moth
 point = |
@@ -577,10 +584,7 @@ point = |
 x = point.x
 ```
 
-Each literal site creates a distinct hidden nominal type. Identical field shapes at two sites do not unify. Anonymous runtime records support local binding, field reads, shared access, mutation through a mutable place and `copy` through ordinary struct rules.
-
-They have no source-visible type name, constructor, methods or conformance. They cannot appear in signatures, returns, aliases, exported surfaces, struct or choice fields, collections, maps or generic arguments.
-
+Each literal site creates a distinct hidden nominal type. It supports local binding, fields, ordinary access and `copy`, but has no source-visible type name, constructor, methods or conformance. It cannot enter signatures, returns, aliases, public surfaces, named aggregate fields or trait evidence. The first implementation also rejects collection/map storage and generic arguments. Wider local storage is unsettled.
 
 ## Choices
 
@@ -597,7 +601,9 @@ ready = Status::Ready
 failed = Status::Failed(message = "offline", code = 503)
 ```
 
-Unit variants use `Choice::Variant`. Payload variants use constructor arguments. Payload fields are immutable and are read through pattern matching:
+Unit variants are values without `()`. Payload variants use constructor arguments. Payload fields have no defaults and are immutable.
+
+Pattern matching is the supported payload-access form:
 
 ```moth
 if status is:
@@ -607,55 +613,35 @@ if status is:
 ;
 ```
 
-Choice payload fields have no defaults and cannot be mutated. Payload capture names match declared field names unless renamed with `as`. Choice equality is available only when every payload type supports equality.
+Direct payload field access with narrowing, nested payload patterns and recursive choices are accepted deferred work, but their complete source contracts are not yet documented. Do not infer unrestricted `status.message` access or nested pattern syntax.
 
+Choice equality is available only when every possible payload type supports equality.
 
 ## Collections
 
-Collections are ordered, zero-indexed and homogeneous.
-
 ```moth
-names ~= {"Priya", "Rob"}  -- inferred {String}
-empty ~{Int} = {}            -- empty literal needs a type
-fixed ~{3 Int} = {10, 20}    -- exact capacity 3
+names ~= {"Priya", "Rob"}
+empty ~{Int} = {}
+fixed ~{3 Int} = {10, 20}
 
 capacity #Int = 4
 scratch ~{capacity String} = {}
-labels {capacity} = {"a", "b"} -- declaration-only capacity shorthand
+labels {capacity} = {"a", "b"}
 ```
 
-- `{T}` is a growable collection type.
-- `{N T}` is a fixed-capacity collection type. Capacity is part of type identity.
-- A fixed capacity is a positive literal or a bare visible `#Int` constant.
-- An empty fixed collection binding must be mutable. An immutable empty fixed binding is invalid.
-- A non-empty literal infers its element type. An empty literal needs an explicit receiving type.
-- `{T}`, `{4 T}` and `{8 T}` are incompatible types.
-- There is no indexing syntax or builtin collection equality.
-
-Operations:
+`{T}` is growable. `{N T}` has fixed capacity `N`, which is part of type identity. Capacity is a positive literal or bare visible `#Int` constant. Empty literals need a receiving type, and an empty fixed binding must be mutable. Collections have no indexing or builtin equality.
 
 ```moth
-~names.push("Emmy") -- growable push is infallible and returns no value
-
+~names.push("Emmy")
 first = names.get(0) catch then "guest"
-
 ~names.set(0, "Huw") catch:
     io.error("invalid index")
 ;
-
 removed = ~names.remove(1) catch then "guest"
 count = names.length()
 ```
 
-For a fixed collection, `push` is fallible only because capacity may be full:
-
-```moth
-~fixed.push(30) catch:
-    io.warn("fixed collection is full")
-;
-```
-
-`get` returns shared access to the item. `get`, `set`, fixed `push` and `remove` are fallible. `set` replaces an existing item, `push` appends and `remove` shifts later items down. `length()` reports the current logical length. Growable `push` and `length` are infallible. Growable allocation exhaustion is unrecoverable rather than an `Error!` result.
+Accepted end state: growable `push` and `length()` are infallible. `get`, `set`, fixed `push` and `remove` are fallible. Growable allocation exhaustion traps. Fixed `push` handles full capacity with `catch` or postfix `!`. The push split is accepted deferred until its plan lands.
 
 ## Hash maps
 
@@ -678,18 +664,20 @@ removed = ~scores.remove("Rob") catch then 0
 ```
 
 - `{Key = Value}` is a map type. `{key = value}` is a map literal.
-- Empty map literals need an explicit map type.
+- Empty maps need an explicit map type.
 - Maps preserve insertion order. Replacing a value does not move its entry.
 - Builtin keys are limited to `String`, `Int`, `Bool` and `Char`.
 - `get`, `set` and `remove` are fallible.
 - `contains`, read-only `length` and `clear` are infallible.
-- `get` returns shared access to the stored value. The map cannot be mutated while that alias remains live.
-- There are no map indexes, mutable entry APIs, fixed maps, map equality, builtin sets or user-defined hashers and key types.
-
+- `get` returns shared access to the stored value. The map cannot mutate while that alias remains live.
+- Maps have no indexing, mutable entry APIs, fixed-capacity form, equality, builtin sets or user-defined key/hash policy.
+- Maps are not collection-loop sources. Read-only map iteration remains a possible deferred follow-up with no syntax yet.
 
 ## Compile-time records and const templates
 
-An anonymous record in a compile-time receiving context is a field-access-only const record:
+### Anonymous const records - accepted deferred
+
+An anonymous record in a compile-time receiving context is a field-access-only const value:
 
 ```moth
 metadata #= |
@@ -702,9 +690,23 @@ metadata #= |
 channel #= metadata.channel
 ```
 
-Every field must fully fold. A fully folded named struct constant may also act as a const record. Const records can be nested and exported when their full value is public and representable. The complete record is not a runtime value: it cannot be passed, returned, stored in runtime data or used through methods.
+Every field must fully fold. Const records may nest and may be exported when every reachable field is representable in the public folded-value vocabulary. The complete record is not a runtime value: it cannot be passed, returned, stored in runtime data or used through receiver methods.
 
-A direct top-level const template uses `#[...]` and must fully fold:
+A fully folded named struct constant may also act as a data-only const record.
+
+### Const templates
+
+A constant may store a folded template string:
+
+```moth
+site_name #= "Moth"
+
+heading #= [$md:
+    # [site_name]
+]
+```
+
+A direct top-level const fragment uses `#[...]`:
 
 ```moth
 #[$md:
@@ -712,22 +714,52 @@ A direct top-level const template uses `#[...]` and must fully fold:
 ]
 ```
 
+The direct form is valid only as entry-selected top-level fragment syntax and must fully fold. It contributes page content but does not become runtime HIR.
+
+Const control flow keeps the same template shape:
+
+```moth
+#[if show_heading:
+    Visible
+[else]
+    Hidden
+]
+
+#[loop items |item|:
+    [item]
+]
+```
+
+Every required branch/body is validated. Const loops are subject to the project iteration limit.
+
 ## Type aliases
 
 Aliases are transparent compile-time names, not new nominal types:
 
 ```moth
+Box type A = |
+    value A,
+|
+
 UserId as Int
 Names as {String}
 MaybeName as String?
 StringBox as Box of String
 ```
 
-`UserId` and `Int` remain interchangeable. Construct a struct, choice or generic instance through its canonical nominal constructor, not through the alias name.
+`UserId` and `Int` remain interchangeable. An alias introduces no constructor. Construct a struct, choice or generic instance through its canonical nominal name.
+
+Use a wrapper struct when distinct identity matters:
+
+```moth
+UserId = |
+    value Int,
+|
+```
+
+A compact primitive-backed nominal wrapper or newtype syntax remains design pending. Do not invent one.
 
 ## Generics
-
-Generics are declared on top-level functions, structs and choices:
 
 ```moth
 identity type A |value A| -> A:
@@ -744,26 +776,21 @@ Maybe type A ::
 ;
 ```
 
-Concrete types use `of`:
-
-```moth
-box Box of String = Box("Moth")
-```
-
-Function type arguments are inferred from immediate arguments and, at a closed receiving site, the expected result type:
+Concrete types use `of`. Calls and constructors infer from immediate arguments and the immediate receiving type:
 
 ```moth
 empty type A || -> {A}:
     return {}
 ;
 
+box Box of String = Box("Moth")
 value = identity(42)
 items {Int} = empty()
 ```
 
-There is no explicit call-site type argument syntax. Generic inference does not use later mutation, later uses or distant outer call context. Add an ordinary type annotation when evidence is insufficient.
+There is no explicit call-site type syntax. Inference does not use later mutation, later uses or distant outer calls.
 
-Use a concrete alias to avoid nested `of` applications:
+Nested inline `of` is invalid. Name the inner type:
 
 ```moth
 Pair type A, B = |
@@ -775,7 +802,9 @@ StringIntPair as Pair of String, Int
 value Box of StringIntPair = Box(Pair("count", 3))
 ```
 
-Moth has no `where` clauses, generic receiver methods, parameterised aliases, partial type application, higher-kinded types, lifetime parameters or user const generics beyond fixed collection capacity.
+One inline application may appear as a collection element, such as `{Box of String}`.
+
+Unconstrained generic code may pass, return and store values, but cannot assume arithmetic, equality, fields, interpolation, IO or methods. Use trait bounds. Moth has no `where`, parameterised aliases, partial application, higher-kinded types, lifetime parameters or general const generics.
 
 ## Traits and conformance
 
@@ -797,14 +826,9 @@ display |this Label| -> String:
 Label must DISPLAY_TEXT
 ```
 
-- Trait requirement receivers use direct `This` or `~This`. Composed forms such as `This?` and `{This}` are invalid.
-- Concrete receiver methods use lowercase `this`.
-- Conformance is explicit. Matching method shapes alone do not conform.
-- User conformance belongs in the same file as the nominal target type.
-- A conformance declaration is bodyless and has no trailing semicolon.
-- Traits are not runtime value types.
+Requirement receivers use `This` or `~This`. A non-receiver `This` needs a name, such as `other This`. Concrete methods use lowercase `this`. Conformance is explicit, same-file and bodyless, with no semicolon. Traits are not value types.
 
-Generic bounds use `is`:
+Generic bounds use `is`. `and` adds bounds to one parameter:
 
 ```moth
 NAMED must:
@@ -816,65 +840,47 @@ render type Item is DISPLAY_TEXT and NAMED |item Item| -> String:
 ;
 ```
 
-Commas separate generic parameters. `and` adds bounds to one parameter. Bound calls resolve statically to concrete methods.
-
-Trait incompatibility metadata uses:
+Bound calls resolve statically to concrete methods.
 
 ```moth
+READABLE must:
+;
+
+WRITABLE must:
+;
+
 READABLE must not WRITABLE
 ```
 
-Use a choice for runtime heterogeneity. Moth has no trait objects, dynamic dispatch through trait values, default methods, associated items, inheritance, trait aliases, generic traits, blanket conformance or specialisation.
+This declares symmetric trait incompatibility. `Type must not TRAIT` is not negative conformance.
 
+Use choices for runtime heterogeneity. Moth has no trait objects, dynamic trait dispatch, default methods, associated items, inheritance, trait aliases, generic traits, blanket conformance or specialisation. Static non-method requirements and a broader builtin trait taxonomy remain accepted deferred work without final examples here.
 
 ## Templates
 
-A template is a first-class `String` value:
+Templates are `String` values:
 
 ```moth
-name = "Priya"
 message = [: Hello, [name].]
-```
-
-The head comes before `:`. The body continues until `]`:
-
-```moth
-[$md:
+content = [$md:
     # Hello [name]
 ]
 ```
 
-Templates capture surrounding values. Fully static templates fold to strings at compile time. Runtime templates lower to only the string construction and control flow they need.
+Static templates fold. Runtime templates lower only needed work. A direct top-level template in an entry-selected root is a page fragment. A bound/returned template is not.
 
-A direct top-level template in an entry-selected normal module root contributes a page fragment. A template assigned to a binding or returned from a function does not become a page fragment by itself.
-
-Literal `[` or `]` output can be inserted through a normal quoted string:
-
-```moth
-[: ["[literal]"]]
-```
-
-### Directives
-
-| Directive | Use |
+| Directive | Purpose |
 |---|---|
-| `$slot` | Declare a default, named or positional content slot |
-| `$insert(...)` | Contribute to a named slot |
-| `$children(...)` | Wrap each direct child |
-| `$fresh` | Skip the immediate parent's child wrapper |
-| `$md` | Apply Moth's small Markdown flavour |
-| `$raw` | Preserve authored whitespace |
-| `$literal` | Treat the body as literal text with no nested template syntax |
-| `$note`, `$todo` | Discard comment content |
-| `$doc` | Documentation template |
-| `$html` | HTML-builder raw HTML |
-| `$css` | HTML-builder CSS checking |
-| `$escape_html` | HTML escaping |
-| `$code("language")` | Code highlighting |
+| `$slot`, `$insert` | receive and contribute content |
+| `$children`, `$fresh` | wrap direct children or skip one |
+| `$md`, `$raw` | Markdown or preserved body text |
+| `$note`, `$todo`, `$doc` | comments/documentation |
+| `$html`, `$css`, `$escape_html` | HTML-builder formatting |
+| `$code("language")` | highlighted literal code |
 
-Frontend directives are always available. A selected builder may register more `$name` directives.
+`$literal` is accepted deferred by the resource plan but is not yet in the canonical directive page. Formatter directives do not flow into nested children. `.mtf` children default to `$md`.
 
-### Slots and child wrappers
+Slots and wrappers:
 
 ```moth
 card #= [:
@@ -888,36 +894,29 @@ card #= [:
 ]
 ```
 
-Slots may be default, named or positional. Missing slots render as empty strings. Repeated slots replay the same content.
+Positional slots receive loose head contributions:
 
 ```moth
-list #= [$children([:<li>[$slot]</li>]):
-    <ul>[$slot]</ul>
-]
-
-[list:
-    [: one]
-    [$fresh: [: two]]
-]
+image #= [: <img src="[$slot(1)]" alt="[$slot]">]
+[image, "logo.png": Moth logo]
 ```
 
-`$children(...)` affects direct children only. `$fresh` opts one child out of its immediate wrapper.
-
-### Template control flow
-
-`if` or `loop` may be the final head suffix:
+Missing slots render empty and repeated slots replay content. Child wrappers are explicit:
 
 ```moth
-[if show:
-    Visible
-]
+list #= [$children([:<li>[$slot]</li>]): <ul>[$slot]</ul>]
+[list: [: one] [$fresh: [: two]]]
+```
 
-[card, if show:
-    Visible inside card
-]
+`$children(...)` wraps direct children only. `$fresh` skips one immediate wrapper.
 
+Template control flow is the final head suffix:
+
+```moth
 [if maybe_name is |name|:
     Hello [name]
+[else if use_fallback]
+    Hello fallback
 [else]
     Hello guest
 ]
@@ -927,104 +926,56 @@ list #= [$children([:<li>[$slot]</li>]):
 ]
 ```
 
-Template loops support structural `[break]` and `[continue]`. A shared helper or wrapper around a loop applies once to the complete aggregate. Put per-item wrappers inside the loop body.
+Template `else if` is valid even though statement `else if` is not. Loops support structural `[break]` and `[continue]`. A loop-head wrapper wraps the aggregate once.
 
-### Moth Markdown
-
-`$md` supports headings, paragraphs, ordered and unordered lists, emphasis, links and paired single-backtick inline code. It is intentionally smaller than CommonMark and does not provide fenced code blocks or pipe tables.
-
-Moth Markdown links use:
-
-```text
-@./relative-page (label)
-@https://example.com (external label)
-```
-
-Use `$code("moth")` for highlighted code blocks.
-
+`$md` supports headings, paragraphs, lists, emphasis, links and single-backtick inline code. Links use `@./path (label)` or `@https://example.com (label)`. It has no fenced code blocks or pipe tables. Use `$code` for blocks.
 
 ## Reactivity
 
-Reactivity is a constrained source-and-subscription system for templates and UI sinks. It is not a closure or general function-value system.
-
-Declare stable reactive storage with `$Type` or `$=`:
+Reactivity V1 is a constrained source, subscription and live-template sink model, not a closure system.
 
 ```moth
 count $Int = 0
 ready $= false
 names ${String} = {"Priya"}
-```
 
-Assignment updates the same source and invalidates subscribers:
-
-```moth
 count = count + 1
 ~names.push("Rob")
 ```
 
-A plain template read is a snapshot. `$(source)` is a live read-only subscription:
+A plain capture is a snapshot. `$(source)` records a live read-only dependency:
 
 ```moth
 snapshot = [: Count: [count]]
-live = [: Count: [$(count)]]
+live_string = [: Count: [$(count)]]
 ```
 
-A subscription accepts exactly one bare reactive source identifier in a template head or capture position, not a field path, call or computed expression. It does not capture a mutable borrow or copy the value.
-
-Reactive parameters receive a read/subscription handle to an existing source. They do not grant mutation and cannot have defaults:
+The result remains `String`. Observable updates happen only at supported sinks. V1 supports a direct top-level HTML-JS runtime fragment:
 
 ```moth
-counter |count $Int| -> String:
+count $Int = 0
+[: Count: [$(count)]]
+```
+
+`io.line` and `assert` are not live sinks. HTML-Wasm is deferred.
+
+A subscription accepts one bare reactive source identifier, not a field path, call or expression. It is dependency metadata, not a mutable borrow or copy.
+
+```moth
+counter_view |count $Int| -> String:
     return [: Count: [$(count)]]
 ;
 ```
 
-Reactive syntax is storage and access metadata. `$Int` is not a wrapper type and semantic type identity remains `Int`.
+Reactive parameters preserve source identity for reads/subscriptions, grant no mutation and have no defaults. Passing a source to ordinary `T` takes a snapshot. `$T` is not a wrapper type.
 
-
-## Resource paths and `Path`
-
-An explicit non-source extension in expression position creates a compile-time `Path`:
-
-```moth
-logo #= @assets/logo.svg
-font #Path = @assets/fonts/site.woff2
-icons #{Path} = {@assets/add.svg, @assets/remove.svg}
-```
-
-A resource path:
-
-- resolves from the owning module root
-- names an existing regular file inside that module or package's owned tree
-- has an explicit non-source extension
-- cannot use `@/`, `@./`, `..` or `@@`
-- is not an external URL
-
-`Path` is compile-time-only. It can appear in constants, const records, compile-time collections and templates. It cannot appear in runtime bindings, function signatures, runtime aggregates, options, maps, generic applications, casts, comparisons or project config values. In a normal module's entry config, pass a resource-bearing template `String` when a builder field accepts a resource URL.
-
-Insert a path directly into a template. The builder keeps it structural until it knows the final output location:
-
-```moth
-logo #Path = @assets/logo.svg
-
-image #= [$html:
-    <img src="[logo]" alt="Moth">
-]
-```
-
-External, protocol-relative and site-root URLs are ordinary untracked strings:
-
-```moth
-external #= "https://example.com/logo.svg"
-cdn #= "//cdn.example.com/app.js"
-site_root #= "/favicon.svg"
-```
+Field/path and item subscriptions, expression tracking, derived values, events/actions/effects, `$bind(...)`, component messages, IO sinks, fine-grained DOM updates and keyed diffing remain design-incomplete.
 
 ## `.mtf` and `.md` content files
 
-A `.mtf` file is the body of an implicit compile-time `$md` template. It exposes exactly one constant, `content #String`.
+A `.mtf` file is the body of an implicit compile-time `$md` template. It exposes one generated constant, `content #String`.
 
-Bind it with an extensionless dependency clause:
+Bind it extensionlessly:
 
 ```moth
 @docs/intro content as intro_content
@@ -1034,7 +985,7 @@ page = [: [intro_content]]
 
 A `.mtf` file has no declarations, dependency clauses, frontmatter or runtime scope. It may use nested templates and a restricted compile-time scope supplied by its same-directory module root and the HTML builder.
 
-A plain `.md` file also exposes `content #String`, but it has no Moth scope, interpolation or templates. Its Markdown links and raw HTML remain literal.
+A plain `.md` file also exposes `content #String`, but has no Moth scope, interpolation or templates. It uses the HTML builder's CommonMark-compatible Markdown renderer with GFM extensions. Its links, images and raw HTML remain literal.
 
 Use:
 
@@ -1044,83 +995,84 @@ Use:
 
 ## Dependencies and aliases
 
-Moth uses dependency clauses directly. There is no `import` keyword.
-
-### Direct selections
+There is no `import` keyword.
 
 ```moth
 @core/math sin, cos, PI
-@components render as render_component, Button as UiButton, Card
+@components render as render_component, Button as UiButton
+
+@core/text as text
+@vendor/drawing.js as drawing
 ```
 
-Each selected declaration becomes a file-local name. `as` creates a local alias.
+Direct selections create file-local names. Entry-level `as` aliases one selection. Clause-level `as` aliases the whole namespace and cannot combine with selections.
 
-The path and first selected name must share a physical line. A comma explicitly continues onto the next line, and a trailing comma is invalid:
+The path and first selection share a physical line. A comma continues the clause. A trailing comma is invalid:
 
 ```moth
 @core/math sin,
     cos
 ```
 
-### Namespace dependency
+Source namespaces are shallow field-access-only compile-time bindings, not runtime values. Binding-backed packages may expose nested namespaces such as `io.input`.
+
+Path rules:
+
+- resolution starts at the declaring file's owning module root, not its directory
+- `.moth`, `.mtf` and `.md` dependencies omit the extension
+- provider files such as annotated `.js` keep it
+- `@./`, `@/`, parent traversal and `@@` are invalid
+- child modules and support packages stop traversal and expose only `export:`
+- `@core/math/sin` is invalid. Select `sin` after `@core/math`
+- one clause resolves one provider. Selections are flat names
+- source clauses bind registered roots and never acquire packages
+
+Aliases cannot shadow another visible name.
+
+## Resource paths and `Path` - accepted deferred
+
+An explicit non-source extension in expression position creates a compile-time `Path`:
 
 ```moth
-@core/math
-@vendor/drawing.js as drawing
-
-value = math.sin(math.PI)
-drawing.draw()
+logo #= @assets/logo.svg
+font #Path = @assets/fonts/site.woff2
+icons #{Path} = {@assets/add.svg, @assets/remove.svg}
 ```
 
-A source namespace is a shallow field-access-only namespace, not a first-class value. Binding-backed packages may expose nested package-local namespaces such as `io.input`.
+The path resolves from the owning module root to an existing regular file. It cannot use `@/`, `@./`, parent components or `@@`, and cannot be followed by selections. Source extensions such as `.moth`, `.mtf` and `.md` remain dependencies.
 
-A clause-level `as` aliases the whole namespace and cannot be combined with direct selections.
+V1 `Path` is compile-time-only. It may appear in constants, const records, compile-time collections, exports and templates. It is rejected in runtime bindings, signatures, runtime aggregates, options, choices, maps, generic applications, casts and comparisons.
 
-### Path rules
+```moth
+logo #Path = @assets/logo.svg
 
-- Source dependencies resolve from the declaring file's owning module root, not the file's physical directory.
-- `.moth`, `.mtf` and `.md` source paths omit the extension.
-- Provider files such as annotated `.js` keep their extension.
-- `@./`, `@/`, parent traversal and `@@` are invalid.
-- A path may traverse ordinary directories owned by the same module.
-- Reaching a child module or support package ends traversal and exposes only its `export:` surface.
-- Direct symbol paths such as `@core/math/sin` are invalid. Select `sin` after `@core/math`.
-- Source clauses bind already registered package roots. They never acquire an undeclared external package.
+image #= [$html:
+    <img src="[logo]" alt="Moth">
+]
+```
 
-Dependency aliases are file-local and cannot shadow another visible name.
+The builder keeps the resource structural until output placement. In `.mtf`, use nested Moth template syntax such as `[@images/ownership.webp]`. Plain Markdown paths stay text.
 
+External, protocol-relative and site-root URLs are ordinary untracked strings. Extensionless resource escapes, resource roots outside `entry_root` and any wider Path-containing type surface remain unsettled.
 
 ## Modules, exports and project-local packages
 
-A module is a directory-scoped compilation and visibility unit rooted by one `@*.moth` or `+*.moth` file. The suffix after the marker is cosmetic.
+A module is rooted by one directory-scoped `@*.moth` or `+*.moth`. The suffix is cosmetic.
 
 ```text
 project/
 ├── config.moth
-├── +package.moth              optional external project package facade
+├── +package.moth
 └── src/
-    ├── @site.moth             normal root for src/
-    ├── helpers.moth           ordinary file in the same module
-    ├── shared/
-    │   └── +package.moth      scoped @shared support package
-    └── pages/
-        ├── @page.moth         child normal module
-        └── article.moth
+    ├── @site.moth
+    ├── helpers.moth
+    ├── shared/+package.moth
+    └── pages/@page.moth
 ```
 
-### Normal modules
+A normal `@` root may contain declarations, one `export:`, entry `config:`, top-level runtime work and page fragments. Top-level work becomes dormant `start` code and runs once only when that module is selected as an entry. Depending on a module never runs it. `start` has no `Error!` slot, so top-level fallible work uses `catch`.
 
-- One `@*.moth` file marks a normal module root.
-- Ordinary files contain declarations only. Their declarations enter the module through dependency clauses.
-- A normal root may contain declarations, one `export:` block, entry-local `config:`, top-level runtime work and direct page fragments.
-- Top-level runtime work compiles into a dormant implicit `start`.
-- A builder-selected entry activates that `start` exactly once. The HTML route follows the module directory, not the cosmetic root filename.
-- The implicit `start` has no `Error!` channel, so top-level fallible work must recover with `catch`.
-- Depending on a module exposes its public interface and never runs its top-level work. A normal root with no builder activity remains API-only.
-
-### Public API
-
-`export:` is the only cross-module public marker and is valid only in a module root:
+`export:` is the only cross-module public marker:
 
 ```moth
 private_helper || -> String:
@@ -1138,34 +1090,30 @@ export:
 ;
 ```
 
-The block may contain public functions, structs, choices, aliases, traits, constants and explicit direct-selection re-exports. Items outside stay private. Public signatures, fields, aliases and bounds cannot expose private types or traits. Receiver methods become visible with their exported receiver type and are not exported separately.
+Items outside remain private. Public surfaces cannot expose private types, traits or evidence. Receiver methods become visible with their exported type.
 
-### Scoped support packages
+A source-tree `+*.moth` creates an API-only scoped support package named by its directory, such as `@shared`. It has no `start`, page fragment or route and is the mechanism for sharing declarations between normal siblings. Direct normal-sibling dependencies remain invalid unless a future design explicitly changes this.
 
-A `+*.moth` root inside the source tree creates an API-only package named by its directory, such as `@shared`. It is visible within the nearest ancestor normal module's subtree under the scoped package rules. It has no top-level runtime work, route or page fragments.
+A project-root `+*.moth` beside `config.moth` is the optional external package facade. It is API-only, not visible internally and cannot expose public or reachable dependence on private `@project` values.
 
-Use a support package for declarations shared by normal sibling modules. Direct normal-sibling module dependencies remain invalid.
-
-### Project package facade
-
-An optional project-root `+*.moth` beside `config.moth` creates the project's external package facade. It is API-only, can assemble public descendant surfaces and is not visible to the project's internal modules. Its public API and reachable implementation cannot depend on the project's private `@project` values.
-
-External project dependencies are registered by project dependency metadata before source graph construction. Only direct dependencies become source-visible. Transitive dependencies remain private to their package. A project-local root alias changes source spelling but not canonical package identity. The project-level declaration spelling belongs to the package manager and manifest contract. File-local code always binds the registered facade through normal `@package` clauses.
-
-## Project configuration
-
-`config.moth` is one self-contained compile-time file at the project root. It is not a module, cannot be depended on and produces no runtime code. `entry_root` is a relative source directory strictly below the project root.
+Registered external packages use ordinary file clauses:
 
 ```moth
-default_channel #= "alpha"
+@acme/ui Button, theme
+@community/markdown as markdown
+```
 
+Only direct dependencies are source-visible. Project-level declaration, version and alias syntax is design-gated. The old `import @package` proposal is invalid.
+
+## Project configuration - accepted deferred
+
+`config.moth` is one self-contained compile-time file, not a module:
+
+```moth
 project #= |
     name = "moth_docs",
     version #Import of String = "0.1.0",
     entry_root = "src",
-    metadata = |
-        channel = default_channel,
-    |,
 |
 
 html #= |
@@ -1174,105 +1122,48 @@ html #= |
 |
 ```
 
-Rules:
+The command selects the builder first. One `project` record is required. `project.name` gives stable identity. Earlier helper constants may feed later fields. Other top-level records are builder/tooling sections. Config has no runtime declarations, functions, named support types, dependencies, fragments or `export:`.
 
-- The command selects one artefact builder before config validation. `config.moth` does not select the builder.
-- One open `project` const record is required.
-- `project.name` is required and provides stable project identity.
-- Earlier private helper constants may be reused by later fields.
-- Other top-level const records are builder or tooling sections.
-- The active builder's project section is required, even when empty.
-- Project values may contain folded scalars, options, collections, templates-as-strings and nested anonymous const records.
-- Builder sections use backend-neutral folded values. Output settings belong to the builder section. Inactive sections still fold but are not schema-validated or retained.
-- Config has no runtime declarations, mutable bindings, functions, named support types, source dependency clauses, page fragments or `export:`.
-
-### Build inputs and `@project`
-
-A direct project field or top-level source declaration may define a typed build-input contract:
+Build inputs use primitive or optional types:
 
 ```moth
--- direct field inside project
-version #Import of String = "0.1.0"
-
--- module-wide source declaration
 api_url #Import of String = "http://localhost:8080"
 optional_label #Import of String? = none
 ```
 
-Accepted types are `String`, `Int`, `Float`, `Bool`, `Char` and their optional forms. A source default is one primitive literal or `none`, not a call, template, cast or constant reference.
+A source default is one literal or `none`, not a name, template, call, cast, operator, collection or record. Pass explicit values with `--input name=value`.
 
-Pass values on the command line:
-
-```bash
-moth build . --input api_url=https://example.com
-moth check . --input api_url=https://example.com
-moth dev . --input api_url=https://example.com
-```
-
-Project fields are exposed to source through the explicit immutable `@project` dependency:
+Project fields enter source through explicit `@project`:
 
 ```moth
 @project version
-
 label = [: Version [version]]
 ```
 
-`@project` is never injected implicitly and cannot be directly re-exported. Every dependency package has its own config, build inputs and private `@project`. Consuming-project inputs do not flow into it.
+`@project` is never implicit or directly re-exported. Each dependency has its own config and inputs.
 
-For source contracts, a compatible fixed project field wins, followed by a resolved project `#Import`, explicit command input, builder global and the shared default. Same-name source contracts must agree on type, optionality and default.
-
-### Entry-local config
-
-A normal module root may contain one root-local `config:` block:
+One entry `config:` block may appear only at a normal root's top level:
 
 ```moth
-@project version
-
 favicon_url #= [@assets/favicon.svg]
-
-extra_head #= [$html:
-    <meta name="generator" content="Moth [version]">
-]
 
 config:
     html #= |
         title = "Moth docs",
-        description = "Moth language documentation",
-        lang = "en",
         favicon = favicon_url,
-        head = extra_head,
     |
 ;
 ```
 
-The block:
+It contains section records, uses ordinary compile-time visibility and creates no symbol/runtime value. Dependencies, helpers, types and `#Import` declarations stay outside. Project and entry schemas do not merge.
 
-- is valid only at the top level of a normal root
-- contains section records only
-- uses ordinary compile-time visibility from dependencies, `@project`, earlier constants and resolved `#Import` values
-- cannot contain dependencies, helpers, types, `#Import` declarations or a `project` section
-- creates no source-visible symbol or runtime value
-- stores metadata only for that root's possible entry
+## Builders, targets and commands
 
-Project and entry schemas are separate. Entry settings never override or merge with project settings implicitly.
+One command selects one artefact builder, one profile and any tooling overlays. The compiler frontend remains backend-neutral. Builders provide config schemas, packages, directives, source kinds, entry policy, capabilities and output policy.
 
+The HTML builder turns selected normal roots into routes and documents. Mixed HTML output assigns reachable functions to JavaScript or Wasm automatically. Source has no target-selection annotations and target choice cannot change language semantics.
 
-## Builders, backends and outputs
-
-One command selects one project builder and any tooling overlays. The compiler frontend remains backend-neutral. Builders define:
-
-- project and entry config schemas
-- builder packages and template directives
-- supported external binding providers
-- entry and artefact policy
-- target capabilities
-- output names and layout
-
-The HTML builder turns selected normal module roots into routes and documents. It supplies the source-backed `@html` package plus browser-oriented binding packages such as `@web/canvas`.
-
-A mixed HTML build assigns reachable functions to JavaScript or Wasm automatically. `start`, DOM use and JavaScript-backed dependencies require JavaScript. Other supported functions may lower to Wasm. JavaScript may call generated Wasm wrappers. A Wasm-owned Moth function never calls a JavaScript-owned Moth function, so JavaScript requirements propagate back to callers. Moth source has no backend-selection annotations and source semantics do not change by target. `moth check` applies the same reachable target validation without writing artefacts.
-
-Common commands:
+`moth check` performs the same reachable target validation as a build without writing artefacts.
 
 ```bash
 moth new html my-site
@@ -1281,33 +1172,20 @@ moth check .
 moth build . --release
 ```
 
-Builders return output records. The build system validates output roots, writes files, tracks manifests and removes stale files owned by that builder and profile.
+Final builder-selection syntax and any Moth-native build-script system remain design pending.
 
 ## Core and external packages
 
-The prelude exposes `io` as the `@core/io` namespace:
+The prelude exposes `io` as `@core/io`. Console helpers accept exactly one `String`:
 
 ```moth
 io.line("Hello")
-io.warn([: User [name] is missing])
+io.line([: count = [count]])
 ```
 
-Console functions accept string-compatible content. Wrap non-string values in a template. `io.set_title(text)` changes a browser document title on builders that expose that capability and is rejected on unsupported targets.
+`io.set_title` is accepted deferred for document-capable JavaScript hosts.
 
-Core and builder packages use the same dependency syntax as source modules:
-
-```moth
-@core/math sin, PI
-@core/text as text
-@html
-@web/canvas as canvas
-```
-
-Common Core roots include `@core/io`, `@core/math`, `@core/text`, `@core/random`, `@core/time` and `@core/collections`.
-
-### Annotated JavaScript bindings
-
-The HTML builder can expose typed free functions from an annotated project-local `.js` file:
+Annotated project-local JavaScript exposes free functions and optional opaque types:
 
 ```js
 /**
@@ -1320,36 +1198,33 @@ export const emphasize = (text) => {
 
 ```moth
 @vendor/format.js emphasize
-
 label = emphasize("Moth")
 ```
 
-Use `@moth.opaque` only when signatures mention a foreign opaque handle type. Binding signatures are positional and non-generic, with zero or one success return plus an optional final `Error!` slot. Callbacks, async functions, options, collections, receiver forms and multiple success returns are outside this binding profile. External APIs expose free functions, constants and opaque types, not source receiver methods. Ordinary Moth values cross restricted host bindings by value. Host code cannot retain references into Moth storage. Observable opaque resources require an explicit close or teardown API.
+JavaScript constants, receiver methods, callbacks, async functions, options, collections, generics and multiple success returns are rejected. Host code receives ordinary Moth values by value and cannot retain references into Moth storage.
 
-General Wasm component dependencies use a value-only WIT profile: arguments cross as independent values and results return as independent Moth graphs. References, callbacks, resources, futures, streams, raw pointers and shared-memory views do not cross this boundary.
+WIT V1 is also value-only. Resources, callbacks, async, futures, streams, shared-memory views, raw pointers and returned/retained aliases remain deferred V1 gaps.
+
+## No stable syntax yet
+
+Do not infer forms for:
+
+- project dependency declarations, versions, lockfiles, registry/local/Git sources
+- named non-capturing function references or primitive-backed newtypes
+- async scopes, coroutines, channels or suspension
+- reactive paths, derived values, events/effects, `$bind` or component messages
+- direct choice payload access/narrowing or nested payload patterns
+- lossy `Float <-> NumberN`, Number formatting helpers or broader Byte APIs
+- group capacity, expression placement, extraction, adoption or group transfer
+- broader anonymous-record storage
+- final builder-selection or build-script syntax
+
+Roadmaps and design drafts do not create accepted syntax.
 
 ## Deliberate language limits
 
-These are design rules, not missing syntax to invent:
+Do not invent shadowing, macros, general closures/function values, exceptions, catchable panic, first-class public `Result`, operator overloading, trait objects/dynamic dispatch, associated items, broad conformance, reflection/type values, explicit reference/lifetime/move syntax, source RC, parameterised aliases, higher-kinded types, general const generics, cross-owner receiver extensions, wildcard dependencies/exports, extensible builtin maps, string `+` or `_` match arms.
 
-- No name shadowing
-- No general macros or AST metaprogramming
-- No closures, anonymous callable values, function values or higher-order polymorphism
-- No exceptions, catchable panic or first-class public `Result` values
-- No general `panic`. Use `Error!` for expected failure and `assert` for impossible invariants
-- No operator overloading or user-defined literals
-- No trait objects, runtime trait dispatch, inheritance, default methods, associated items or generic traits
-- No structural conformance, blanket conformance, specialisation or negative conformance
-- No reflection, runtime type IDs or compile-time type inspection
-- No explicit reference types, lifetime syntax, move syntax, source RC, weak references or finalisers
-- No parameterised type aliases, partial type application or higher-kinded types
-- No user const generics beyond fixed collection capacity
-- No receiver extensions for builtins, imports, dependency types or types from another file
-- No wildcard dependencies or exports
-- No user-defined builtin map keys, hashers, sets, indexing or mutable entry APIs
-- No string `+`
-- No `_` wildcard match arm
+Use choices for runtime heterogeneity, trait bounds for static reuse, `copy` for independent storage, typed error channels for expected failure and accepted reactive subscriptions for live template reads.
 
-When a pattern needs dynamic heterogeneous values, use a choice. When it needs static reusable behaviour, use a generic trait bound. When UI code would usually capture a closure, use reactive sources, reactive parameters and template subscriptions.
-
-Further detail: [language](https://nyejames.github.io/moth/docs/language-overview/), [memory](https://nyejames.github.io/moth/docs/memory/), [templates](https://nyejames.github.io/moth/docs/templates/), [projects](https://nyejames.github.io/moth/docs/project-structure/), [packages](https://nyejames.github.io/moth/docs/packages/) and [design scope](https://nyejames.github.io/moth/docs/design-scope/).
+Further detail: [language](../language-overview/), [memory](../memory/), [templates](../templates/), [projects](../project-structure/), [packages](../packages/), [progress](../progress/) and [design scope](../design-scope/).
