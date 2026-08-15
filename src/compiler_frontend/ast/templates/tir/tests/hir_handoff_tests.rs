@@ -1426,3 +1426,37 @@ fn missing_child_in_wrapper_propagates_schema_extraction_error() {
         error.msg
     );
 }
+
+/// Exact-view child cycles must fail before owned-handoff recursion.
+///
+/// This test is ignored until Phase 2C adds a cycle guard. Running it against
+/// the current materializer recurses until the process overflows.
+#[ignore = "Phase 0 reproduced: exact-view cycles stack-overflow during handoff; un-ignore in Phase 2C"]
+#[test]
+fn handoff_rejects_exact_view_child_cycle() {
+    let mut store = TemplateIrStore::new();
+    let template_id = TemplateIrId::new(store.template_count());
+    let child = TemplateTirChildReference::new(
+        template_id,
+        TemplateTirPhase::Composed,
+        TemplateViewContext::default(),
+    );
+    let child_node = child_template_node_id(&mut store, child);
+    let actual_id = finish_text_template(&mut store, child_node);
+    assert_eq!(actual_id, template_id);
+
+    let view = TirView::new(
+        &store,
+        template_id,
+        TemplateTirPhase::Composed,
+        TemplateViewContext::default(),
+    )
+    .expect("cyclic view should construct");
+
+    let error = handoff_for_view(view)
+        .expect_err("exact-view child cycles must fail before handoff recursion");
+    assert_eq!(
+        error.error_type,
+        crate::compiler_frontend::compiler_errors::ErrorType::Compiler
+    );
+}

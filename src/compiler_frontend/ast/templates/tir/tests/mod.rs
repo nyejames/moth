@@ -18,6 +18,7 @@ mod preparation_tests;
 mod render_unit_tests;
 mod slot_composition_tests;
 mod store_tests;
+mod subtree_copy_tests;
 mod summary_tests;
 mod validation_support;
 mod validation_tests;

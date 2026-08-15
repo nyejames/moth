@@ -1,0 +1,13 @@
+list #= [$children([:<span class="once">[$slot]</span>]):
+    [$slot]
+]
+
+show = true
+
+[:template_runtime_children_wrapper_applied_once
+    [list:
+        [if show:
+            child
+        ]
+    ]
+]

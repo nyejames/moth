@@ -1,29 +1,35 @@
 //! Focused unit tests for runtime slot-site node authority.
 //!
-//! WHAT: protects the TIR-authority invariants of `slot_key_for_node` and
-//!       `build_tir_wrapper_render_pieces` that integration output cannot
-//!       inspect: a missing node is an internal error, a present non-slot is
-//!       optional, and a same-store child template must exist before recursion.
-//! WHY: these are broken-TIR-authority paths, not user-facing behaviour, so they
-//!      belong beside the owner rather than in integration cases.
+//! WHAT: protects `slot_key_for_node` and `build_tir_wrapper_render_pieces`
+//!       invariants that integration output cannot inspect: missing nodes are
+//!       internal errors, present non-slots are optional, same-store child
+//!       templates must exist before recursion, and wrapper fill must reach
+//!       slots nested in branch and loop roots.
+//! WHY: authority failures and the control-flow injection hole are TIR-local
+//!      facts, not user-facing output.
 
 use super::{build_tir_wrapper_render_pieces, slot_key_for_node};
+use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::TemplateSegmentOrigin;
 use crate::compiler_frontend::ast::templates::template::{SlotKey, Style, TemplateType};
+use crate::compiler_frontend::ast::templates::template_control_flow::{
+    TemplateBranchSelector, TemplateLoopHeader,
+};
 use crate::compiler_frontend::ast::templates::template_slots::RuntimeSlotContributionSourceId;
 use crate::compiler_frontend::ast::templates::template_slots::TemplateSlotError;
 use crate::compiler_frontend::ast::templates::tir::refs::{
     TemplateTirChildReference, TemplateWrapperReference,
 };
 use crate::compiler_frontend::ast::templates::tir::{
-    TemplateIrBuilder, TemplateIrId, TemplateIrNodeId, TemplateIrNodeKind, TemplateIrStore,
-    TemplateIrSummary, TemplateSlotPlanId, TemplateSlotSiteRenderPiece, TemplateSlotSiteRenderPlan,
-    TemplateTirPhase, TemplateViewContext, TirCopyState,
+    TemplateIrBranch, TemplateIrBuilder, TemplateIrId, TemplateIrNodeId, TemplateIrNodeKind,
+    TemplateIrStore, TemplateIrSummary, TemplateSlotPlanId, TemplateSlotSiteRenderPiece,
+    TemplateSlotSiteRenderPlan, TemplateTirPhase, TemplateViewContext, TirCopyState,
 };
 use crate::compiler_frontend::compiler_errors::ErrorType;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
+use crate::compiler_frontend::value_mode::ValueMode;
 
 fn empty_location() -> SourceLocation {
     SourceLocation::default()
@@ -273,4 +279,92 @@ fn wrap_site_plan_applies_wrapper_set_innermost_to_outermost() {
     }
     assert_site_text_piece(&wrapped.pieces[3], &store, &string_table, "inner-after");
     assert_site_text_piece(&wrapped.pieces[4], &store, &string_table, "outer-after");
+}
+
+fn bool_expression(value: bool) -> Expression {
+    Expression::bool(value, empty_location(), ValueMode::ImmutableOwned)
+}
+
+fn contribution_plan() -> TemplateSlotSiteRenderPlan {
+    TemplateSlotSiteRenderPlan {
+        pieces: vec![TemplateSlotSiteRenderPiece::ContributionSource(
+            RuntimeSlotContributionSourceId(0),
+        )],
+    }
+}
+
+fn pieces_include_contribution(pieces: &[TemplateSlotSiteRenderPiece]) -> bool {
+    pieces.iter().any(|piece| {
+        matches!(
+            piece,
+            TemplateSlotSiteRenderPiece::ContributionSource(RuntimeSlotContributionSourceId(0))
+        )
+    })
+}
+
+/// A wrapper whose root is a branch containing the target slot must inject fill.
+#[ignore = "Phase 0 reproduced: branch-root wrappers copy the slot unresolved; un-ignore in Phase 2E"]
+#[test]
+fn wrapper_render_pieces_inject_slot_inside_branch() {
+    let mut store = TemplateIrStore::new();
+    let mut builder = TemplateIrBuilder::new(&mut store);
+    let slot_node = builder.push_slot_node(SlotKey::Default, empty_location());
+    let branch_root = builder.push_branch_chain_node(
+        vec![TemplateIrBranch::new(
+            TemplateBranchSelector::Bool(bool_expression(true)),
+            slot_node,
+            empty_location(),
+        )],
+        None,
+        empty_location(),
+    );
+
+    let mut copy_state = TirCopyState::new();
+    let inner_plan = contribution_plan();
+    let pieces = build_tir_wrapper_render_pieces(
+        branch_root,
+        &inner_plan,
+        SlotKey::Default,
+        &mut store,
+        &mut copy_state,
+    )
+    .expect("branch-contained wrapper slot should be injectable");
+
+    assert!(
+        pieces_include_contribution(&pieces),
+        "runtime wrapper fill must reach a slot inside a branch, got {pieces:?}"
+    );
+}
+
+/// A wrapper whose root is a loop containing the target slot must inject fill.
+#[ignore = "Phase 0 reproduced: loop-root wrappers copy the slot unresolved; un-ignore in Phase 2E"]
+#[test]
+fn wrapper_render_pieces_inject_slot_inside_loop() {
+    let mut store = TemplateIrStore::new();
+    let mut builder = TemplateIrBuilder::new(&mut store);
+    let slot_node = builder.push_slot_node(SlotKey::Default, empty_location());
+    let loop_root = builder.push_loop_node(
+        TemplateLoopHeader::Conditional {
+            condition: Box::new(bool_expression(true)),
+        },
+        slot_node,
+        None,
+        empty_location(),
+    );
+
+    let mut copy_state = TirCopyState::new();
+    let inner_plan = contribution_plan();
+    let pieces = build_tir_wrapper_render_pieces(
+        loop_root,
+        &inner_plan,
+        SlotKey::Default,
+        &mut store,
+        &mut copy_state,
+    )
+    .expect("loop-contained wrapper slot should be injectable");
+
+    assert!(
+        pieces_include_contribution(&pieces),
+        "runtime wrapper fill must reach a slot inside a loop, got {pieces:?}"
+    );
 }

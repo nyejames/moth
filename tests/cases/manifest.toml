@@ -5260,6 +5260,13 @@ contract = "language.templates.children_wrapper_when_output"
 role = "primary"
 
 [[case]]
+id = "template_runtime_children_wrapper_applied_once"
+path = "template_runtime_children_wrapper_applied_once"
+tags = ["integration","templates"]
+contract = "language.templates.children_wrapper_applied_once_on_runtime_if"
+role = "primary"
+
+[[case]]
 id = "template_runtime_branch_fallback_wrapped_output"
 path = "template_runtime_branch_fallback_wrapped_output"
 tags = ["integration","templates"]
@@ -5986,6 +5993,20 @@ path = "template_runtime_slot_children_fresh_control_flow"
 tags = ["integration","templates"]
 contract = "language.templates.runtime_slot_children_fresh_control_flow"
 role = "primary"
+
+[[case]]
+id = "template_runtime_wrapper_slot_inside_branch"
+path = "template_runtime_wrapper_slot_inside_branch"
+tags = ["integration","templates","diagnostics"]
+contract = "language.templates.runtime_control_flow_slot_rejected"
+role = "boundary"
+
+[[case]]
+id = "template_runtime_wrapper_slot_inside_loop"
+path = "template_runtime_wrapper_slot_inside_loop"
+tags = ["integration","templates","diagnostics"]
+contract = "language.templates.runtime_control_flow_slot_rejected"
+role = "boundary"
 
 [[case]]
 id = "template_runtime_slot_continue_inside_loop"

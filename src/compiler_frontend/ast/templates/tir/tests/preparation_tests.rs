@@ -28,6 +28,7 @@ use crate::compiler_frontend::ast::templates::tir::node::{TemplateIr, TemplateIr
 use crate::compiler_frontend::ast::templates::tir::refs::{
     TemplateTirChildReference, TemplateTirReference,
 };
+use crate::compiler_frontend::compiler_errors::ErrorType;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
@@ -513,6 +514,46 @@ fn preparation_classifies_nested_value_cycle_as_runtime() {
         PreparedTemplate::Runtime(runtime)
             if runtime.reason == RuntimeTemplateReason::ChildTemplateCycle
     ));
+}
+
+/// Exact-view child cycles are internal authority failures, not runtime values.
+#[ignore = "Phase 0 reproduced: exact-view child cycles classify as Runtime(ChildTemplateCycle); un-ignore in Phase 2C"]
+#[test]
+fn preparation_rejects_exact_child_cycle_as_internal_error() {
+    let mut store = TemplateIrStore::new();
+    let template_id = TemplateIrId::new(store.template_count());
+    let child = TemplateTirChildReference::new(
+        template_id,
+        TemplateTirPhase::Composed,
+        TemplateViewContext::default(),
+    );
+    let mut builder = TemplateIrBuilder::new(&mut store);
+    let child_node = builder.push_child_template_node_with_reference(child, empty_location());
+    let root = builder.push_sequence_node(vec![child_node], empty_location());
+    let actual_id = builder.finish_template(
+        root,
+        Style::default(),
+        TemplateType::String,
+        TemplateIrSummary::default(),
+        empty_location(),
+    );
+    assert_eq!(actual_id, template_id);
+    let view = TirView::new(
+        &store,
+        template_id,
+        TemplateTirPhase::Composed,
+        TemplateViewContext::default(),
+    )
+    .expect("cyclic view should construct");
+
+    let error = match prepare_tir_view(&view, TemplatePreparationMode::Value) {
+        Err(error) => error,
+        Ok(prepared) => panic!("exact-view child cycles must be CompilerError, got {prepared:?}"),
+    };
+    let TemplateError::Infrastructure(error) = error else {
+        panic!("exact-view child cycles must stay on the infrastructure lane, got {error:?}");
+    };
+    assert_eq!(error.error_type, ErrorType::Compiler);
 }
 
 #[test]

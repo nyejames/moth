@@ -55,6 +55,10 @@ fn ast_counters_record_stable_metrics_when_stdout_is_suppressed() {
     add_ast_counter(AstCounter::TirViewFoldWrapperContextPresent, 353);
     add_ast_counter(AstCounter::TirFoldCacheHits, 367);
     add_ast_counter(AstCounter::TirFoldCacheMisses, 373);
+    add_ast_counter(AstCounter::TirCopyPasses, 421);
+    add_ast_counter(AstCounter::TirSlotSchemaWalks, 431);
+    add_ast_counter(AstCounter::TirContributionRoutingCalls, 433);
+    add_ast_counter(AstCounter::TirOverlayLookups, 439);
     add_ast_counter(AstCounter::TirPreparationAttempts, 409);
     add_ast_counter(AstCounter::TirPreparationNodesVisited, 419);
 
@@ -173,6 +177,14 @@ fn ast_counters_record_stable_metrics_when_stdout_is_suppressed() {
     );
     assert_counter_value(&observations.counters, "ast_tir_fold_cache_hits", 367.0);
     assert_counter_value(&observations.counters, "ast_tir_fold_cache_misses", 373.0);
+    assert_counter_value(&observations.counters, "ast_tir_copy_passes", 421.0);
+    assert_counter_value(&observations.counters, "ast_tir_slot_schema_walks", 431.0);
+    assert_counter_value(
+        &observations.counters,
+        "ast_tir_contribution_routing_calls",
+        433.0,
+    );
+    assert_counter_value(&observations.counters, "ast_tir_overlay_lookups", 439.0);
     assert_counter_value(
         &observations.counters,
         "ast_tir_preparation_attempts",

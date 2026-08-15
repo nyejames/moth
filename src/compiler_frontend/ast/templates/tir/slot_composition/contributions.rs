@@ -17,6 +17,7 @@ use crate::compiler_frontend::ast::templates::tir::node::TemplateIrNodeKind;
 use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrId, TemplateIrNodeId, TemplateIrStore,
 };
+use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 
 use rustc_hash::FxHashMap;
@@ -114,6 +115,7 @@ pub(crate) fn route_tir_slot_contributions(
     fill_template_id: TemplateIrId,
     string_table: &StringTable,
 ) -> ContributionResult<RoutedTirSlotContributions> {
+    increment_ast_counter(AstCounter::TirContributionRoutingCalls);
     let schema = collect_tir_slot_schema(store, wrapper_template_id)?;
 
     if !schema.has_any_slots() {

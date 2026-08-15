@@ -22,6 +22,7 @@ use crate::compiler_frontend::ast::templates::tir::view::TemplateTirPhase;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 
 use crate::compiler_frontend::ast::templates::tir::copy_state::TirCopyState;
+use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 
 /// Copies a finalized TIR subtree into a fresh tree, applying an optional active
 /// slot-plan context to any unresolved `Slot` placeholders.
@@ -44,6 +45,7 @@ pub(crate) fn copy_tir_subtree_with_active_slot_plan(
     store: &mut TemplateIrStore,
     copy_state: &mut TirCopyState,
 ) -> Result<TemplateIrNodeId, TemplateError> {
+    increment_ast_counter(AstCounter::TirCopyPasses);
     copy_tir_node_with_active_slot_plan(source_node_id, active_slot_plan, store, copy_state, false)
 }
 

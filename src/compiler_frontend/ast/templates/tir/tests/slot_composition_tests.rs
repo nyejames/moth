@@ -17,8 +17,8 @@ use super::super::node::{
     TemplateIr, TemplateIrBranch, TemplateIrNode, TemplateIrNodeKind, TirSlotPlaceholder,
 };
 use super::super::overlays::{
-    TemplateViewContext, TirSlotResolutionKind, TirSlotResolutionOverlay,
-    TirSlotResolutionOverlayId,
+    TemplateViewContext, TirExpressionOverlay, TirSlotResolutionKind, TirSlotResolutionOverlay,
+    TirSlotResolutionOverlayId, TirWrapperContextOverlay,
 };
 use super::super::refs::TemplateTirChildReference;
 use super::super::slot_composition::{
@@ -27,7 +27,8 @@ use super::super::slot_composition::{
     materialize_tir_slot_resolution_overlay, route_tir_slot_contributions,
     view_context_from_slot_resolution_overlay, wrap_tir_node_in_wrappers,
 };
-use super::super::store::TemplateIrStore;
+use super::super::slot_plan::TemplateSlotPlan;
+use super::super::store::{TemplateIrStore, TemplateWrapperSet};
 use super::super::summary::TemplateIrSummary;
 use super::super::view::{TemplateTirPhase, TirView};
 use crate::compiler_frontend::ast::expressions::expression::Expression;
@@ -1714,6 +1715,109 @@ fn nested_child_template_clone_vs_reuse_by_slot_presence() {
     assert_eq!(
         unchanged_child_template_id, slot_less_child,
         "slot-less child should keep its original template ID"
+    );
+}
+
+/// Nested slot expansion must keep the child's complete view identity.
+#[ignore = "Phase 0 reproduced: expansion resets child phase/context and drops wrapper set and slot plan; un-ignore in Phase 2A"]
+#[test]
+fn nested_child_slot_expansion_preserves_phase_context_wrapper_set_and_slot_plan() {
+    let mut string_table = StringTable::new();
+    let name = string_table.intern("inner");
+    let mut store = TemplateIrStore::new();
+
+    let slot_bearing_child =
+        build_wrapper_with_slot_sequence(&mut store, vec![SlotKey::Named(name)]);
+    let wrapper_set_id = store.push_wrapper_set(TemplateWrapperSet { wrappers: vec![] });
+    let slot_plan_id = store.push_slot_plan(TemplateSlotPlan {
+        location: empty_location(),
+        contribution_sources: vec![],
+        slot_sites: vec![],
+    });
+    {
+        let child_template = store
+            .templates
+            .get_mut(slot_bearing_child.index())
+            .expect("slot-bearing child should exist");
+        child_template.conditional_child_wrapper_set = Some(wrapper_set_id);
+        child_template.runtime_slot_plan = Some(slot_plan_id);
+    }
+
+    let expression_overlay = store.allocate_expression_overlay(TirExpressionOverlay::default());
+    let slot_overlay = store.allocate_slot_resolution_overlay(TirSlotResolutionOverlay::default());
+    let wrapper_overlay =
+        store.allocate_wrapper_context_overlay(TirWrapperContextOverlay::default());
+    let source_context = TemplateViewContext {
+        expression_overlay: Some(expression_overlay),
+        slot_resolution: Some(slot_overlay),
+        wrapper_context: Some(wrapper_overlay),
+    };
+    let source_phase = TemplateTirPhase::Composed;
+
+    let parent_wrapper = {
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let child_ref = builder.push_child_template_node_with_reference(
+            TemplateTirChildReference::new(slot_bearing_child, source_phase, source_context),
+            empty_location(),
+        );
+        let root = builder.push_sequence_node(vec![child_ref], empty_location());
+        builder.finish_template(
+            root,
+            Style::default(),
+            TemplateType::String,
+            TemplateIrSummary::default(),
+            empty_location(),
+        )
+    };
+
+    let contribution = build_single_text_template(&mut store, &mut string_table, "inner text");
+    let contribution_node_id = template_root_node_id(contribution, &store);
+    let routed = RoutedTirSlotContributions {
+        schema: TirSlotSchema {
+            named_slots: [name].into_iter().collect(),
+            ..TirSlotSchema::default()
+        },
+        contributions: TirSlotContributions {
+            named_nodes: [(name, vec![contribution_node_id])].into_iter().collect(),
+            ..TirSlotContributions::default()
+        },
+    };
+
+    let expanded_root =
+        expand_tir_slot_placeholders(&mut store, parent_wrapper, &routed, &string_table)
+            .expect("expansion should succeed");
+    let parent_children = root_child_node_ids_for_node(expanded_root, &store);
+    assert_eq!(parent_children.len(), 1);
+
+    let expanded_reference = match &store
+        .get_node(parent_children[0])
+        .expect("expanded child node should exist")
+        .kind
+    {
+        TemplateIrNodeKind::ChildTemplate { reference, .. } => *reference,
+        other => panic!("expected ChildTemplate after expansion, found {other:?}"),
+    };
+    let expanded_template = store
+        .get_template(expanded_reference.root)
+        .expect("expanded child template should exist");
+
+    assert_eq!(
+        expanded_reference.phase, source_phase,
+        "derived child must keep the source phase"
+    );
+    assert_eq!(
+        expanded_reference.context, source_context,
+        "derived child must keep the complete source context"
+    );
+    assert_eq!(
+        expanded_template.conditional_child_wrapper_set,
+        Some(wrapper_set_id),
+        "derived child must keep the source wrapper set"
+    );
+    assert_eq!(
+        expanded_template.runtime_slot_plan,
+        Some(slot_plan_id),
+        "derived child must keep the source runtime slot plan"
     );
 }
 

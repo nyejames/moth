@@ -26,6 +26,7 @@ use crate::compiler_frontend::ast::templates::tir::{
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidTemplateSlotReason};
+use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
@@ -259,6 +260,7 @@ pub(crate) fn collect_tir_slot_schema(
     store: &TemplateIrStore,
     template_id: TemplateIrId,
 ) -> SlotSchemaCollectionResult<TirSlotSchema> {
+    increment_ast_counter(AstCounter::TirSlotSchemaWalks);
     let Some(template) = store.get_template(template_id) else {
         return Err(schema_infrastructure_error(
             "TIR slot schema extraction: template ID was not present in the store.",
@@ -399,6 +401,7 @@ pub(crate) fn collect_tir_slot_placeholders_in_order(
     store: &TemplateIrStore,
     root_node_id: TemplateIrNodeId,
 ) -> SlotSchemaResult<Vec<TirSlotPlaceholder>> {
+    increment_ast_counter(AstCounter::TirSlotSchemaWalks);
     let mut placeholders = Vec::new();
     collect_tir_slot_placeholders_from_node(store, root_node_id, &mut placeholders)?;
     Ok(placeholders)

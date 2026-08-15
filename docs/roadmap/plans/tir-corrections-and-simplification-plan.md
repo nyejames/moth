@@ -1,5 +1,21 @@
 # Moth TIR Deep Audit, Corrections and Simplification Plan
 
+## Current state
+
+```text
+WORK_ID: tir-corrections
+WORK_SOURCE: docs/roadmap/plans/tir-corrections-and-simplification-plan.md
+BASE_REVISION: c77dfa0f3f5decd98ce64682d65f8977973cfb06
+STATUS: active
+CURRENT_SCOPE: Phase 0 complete
+COMPLETED: Phase 0 tests and missing TIR counters; no production refactors
+NEXT_ACTION: begin Phase 1A style-guide comment policy
+VALIDATION: just validate passed (ci-clippy native/linux/windows; cargo test workspace 4259 pass + 6 ignored; tests 1845/1845; docs check clean; bench-ci preflight 60/60; timers-erasure clean)
+AUDITS: auditor pass 1 audit_clean for Phase 0
+BLOCKERS: none
+NOTES: wrapper-once already holds; copied sites, derived identity, cycle-as-CompilerError, and wrapper-slot injection reproduced and are ignored until Phase 2; user source with wrapper slots inside runtime control flow is rejected as MOTH-SYNTAX-0022
+```
+
 ## Audit scope
 
 This revision audits the completed TIR implementation on the current connected `nyejames/moth` default branch, including `src/compiler_frontend/ast/templates/tir/**`, template construction, slot planning, AST finalization, reactive-template metadata, the neutral AST-to-HIR handoff and the HIR template entry points. The review is governed by `docs/compiler-design-overview.md`, the canonical template references selected by `docs/src/docs/codebase/language/overview.mtf`, `docs/src/docs/codebase/style-guide/style-guide.mtf`, `docs/src/docs/codebase/style-guide/testing.mtf` and the profile-gated `docs/roadmap/plans/post-tir-template-parser-optimization-plan.md`. The architecture is fundamentally good: TIR is AST-local, exact views are established and HIR consumes neutral owned data. The remaining work is a substantial consolidation pass with several confirmed invariant defects, two probable user-visible slot/wrapper bugs, repeated semantic walks and migration-era scaffolding. This was a static source audit through the read-only GitHub connector, so findings marked **probable** must begin with a failing regression test before implementation.
@@ -558,6 +574,20 @@ Add tests and counters only. Do not refactor production code yet.
 **Ordering**
 
 This phase blocks every later semantic change. Probable findings that do not reproduce are downgraded and documented rather than "fixed" speculatively.
+
+**Phase 0 result**
+
+Reviewed at `c77dfa0f3f5decd98ce64682d65f8977973cfb06`.
+
+Existing AST counters already covered templates/nodes created, preparation visits, fold-cache hits/misses and handoff materializations. Phase 0 added `TirCopyPasses`, `TirSlotSchemaWalks`, `TirContributionRoutingCalls` and `TirOverlayLookups`.
+
+Regression outcomes:
+
+- Direct `$children` wrappers around a runtime `if` child wrap exactly once. Kept live as `template_runtime_children_wrapper_applied_once`.
+- Wrapper slots inside runtime branch/loop bodies are rejected today with `MOTH-SYNTAX-0022`. Live boundary cases record that diagnostic. The TIR transform still copies those roots without injecting fill; ignored unit tests own that hole for Phase 2E.
+- Copied branch/loop expression sites reuse source IDs. Ignored until Phase 2B.
+- Nested slot expansion resets phase/context and drops wrapper set and slot plan. Ignored until Phase 2A.
+- Exact-view child cycles classify as `Runtime(ChildTemplateCycle)`. Ignored until Phase 2C. Handoff has no cycle guard and is ignored because it would recurse.
 
 ### Phase 1: Tighten the comment and test-boundary standards
 

@@ -25,6 +25,7 @@ use crate::compiler_frontend::ast::templates::tir::ids::{
     ChildTemplateOccurrenceId, ExpressionSiteId, SlotOccurrenceId, TemplateIrId,
     TemplateWrapperSetId,
 };
+use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 
 // -------------------------
 //  Overlay dimension IDs
@@ -229,6 +230,7 @@ impl TirExpressionOverlay {
     /// WHY: `TirView` calls this to resolve effective expressions for a site;
     ///      keeping the lookup on the payload centralizes the scan logic.
     pub(crate) fn expression_for_site(&self, site_id: ExpressionSiteId) -> Option<&Expression> {
+        increment_ast_counter(AstCounter::TirOverlayLookups);
         self.overrides
             .iter()
             .find(|(id, _)| *id == site_id)
@@ -262,6 +264,7 @@ impl TirSlotResolutionOverlay {
         &self,
         occurrence_id: SlotOccurrenceId,
     ) -> Option<&TirSlotResolution> {
+        increment_ast_counter(AstCounter::TirOverlayLookups);
         self.resolutions
             .iter()
             .find(|(id, _)| *id == occurrence_id)
@@ -355,6 +358,7 @@ impl TirWrapperContextOverlay {
         &self,
         occurrence_id: ChildTemplateOccurrenceId,
     ) -> Option<&TirWrapperContext> {
+        increment_ast_counter(AstCounter::TirOverlayLookups);
         self.contexts
             .iter()
             .find(|(id, _)| *id == occurrence_id)

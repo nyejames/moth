@@ -1,0 +1,9 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains_exactly_once = [
+    "<span class=\"once\">child</span>",
+]
+rendered_output_not_contains = [
+    "<span class=\"once\"><span class=\"once\">",
+]

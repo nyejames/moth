@@ -126,6 +126,18 @@ pub(crate) enum AstCounter {
 
     /// Prepared exact-view fold cache lookups that missed and recomputed the fold.
     TirFoldCacheMisses,
+
+    /// Top-level TIR subtree copy entries used by runtime planning and composition.
+    TirCopyPasses,
+
+    /// Slot schema or ordered-placeholder walks over TIR trees.
+    TirSlotSchemaWalks,
+
+    /// Public slot-contribution routing entries.
+    TirContributionRoutingCalls,
+
+    /// Keyed lookups inside expression, slot-resolution, or wrapper-context overlays.
+    TirOverlayLookups,
 }
 #[cfg(feature = "benchmark_counters")]
 use crate::compiler_frontend::compiler_messages::compiler_dev_logging::log_benchmark_counter;
@@ -136,7 +148,7 @@ mod detailed {
     use super::log_benchmark_counter;
     use std::cell::RefCell;
 
-    const COUNTER_COUNT: usize = AstCounter::TirFoldCacheMisses as usize + 1;
+    const COUNTER_COUNT: usize = AstCounter::TirOverlayLookups as usize + 1;
 
     thread_local! {
         /// Per-thread AST counter store.
@@ -267,6 +279,10 @@ mod detailed {
             AstCounter::TirViewFoldWrapperContextPresent,
             AstCounter::TirFoldCacheHits,
             AstCounter::TirFoldCacheMisses,
+            AstCounter::TirCopyPasses,
+            AstCounter::TirSlotSchemaWalks,
+            AstCounter::TirContributionRoutingCalls,
+            AstCounter::TirOverlayLookups,
         ]
     }
 
@@ -364,6 +380,10 @@ mod detailed {
             AstCounter::TirViewFoldWrapperContextPresent => "TIR view fold wrapper-context present",
             AstCounter::TirFoldCacheHits => "TIR fold cache hits",
             AstCounter::TirFoldCacheMisses => "TIR fold cache misses",
+            AstCounter::TirCopyPasses => "TIR copy passes",
+            AstCounter::TirSlotSchemaWalks => "TIR slot schema walks",
+            AstCounter::TirContributionRoutingCalls => "TIR contribution routing calls",
+            AstCounter::TirOverlayLookups => "TIR overlay lookups",
         }
     }
 
@@ -477,6 +497,10 @@ mod detailed {
             }
             AstCounter::TirFoldCacheHits => "ast_tir_fold_cache_hits",
             AstCounter::TirFoldCacheMisses => "ast_tir_fold_cache_misses",
+            AstCounter::TirCopyPasses => "ast_tir_copy_passes",
+            AstCounter::TirSlotSchemaWalks => "ast_tir_slot_schema_walks",
+            AstCounter::TirContributionRoutingCalls => "ast_tir_contribution_routing_calls",
+            AstCounter::TirOverlayLookups => "ast_tir_overlay_lookups",
         }
     }
 
