@@ -16,6 +16,39 @@ page_head #= theme_head
 
     The source code for this whole website can be found on @https://github.com/nyejames/moth/tree/main/docs/src (Github).
 
+    ## A language that makes the project builder part of compilation
+
+    Most languages start with a general-purpose core, then leave web projects to template engines, bundlers and frameworks. 
+    Moth gives project builders a first-class compiler contract. 
+    
+    Its HTML builder already combines typed templates, Markdown and hot reload in one toolchain. 
+    Moth plans mixed JavaScript and WebAssembly output.
+    That contract keeps the compiler backend-neutral, so future project builders can replace the current one and the language can remain agnostic to the platform its targetting.
+
+    Templates are a powerful and unique workhorse feature. 
+    Moth treats them as typed values that compose, support Markdown and fold inside the compiler. 
+    Constant content collapses into a string before code generation while dynamic content keeps only the control flow it needs. 
+    No general template engine ships with the result.
+
+    Moth also bets on memory safety without source-level lifetime machinery. 
+    Borrow validation already catches access and aliasing bugs. 
+    Moth's lifetime analysis will check which values may outlive which owners, without lifetime annotations or move syntax. 
+    
+    Debug builds can keep GC and skip optional ownership optimisation while mandatory safety checks still run. 
+    Release builds can elide the GC entierly on targets that permit it. WebAssembly being the first target with this as a goal. 
+
+    Moth pairs that ambition with restraint. 
+    It leaves out closures, operator overloading, reflection and trait objects rather than accept hidden control flow or runtime machinery without a clear role. 
+
+    Reactivity follows the same direction. 
+    Moth aims to expose sources, dependencies and sinks to the compiler instead of burying UI updates inside callbacks. 
+    Project builders then get the facts for fine-grained updates, while reactive bindings and traits cover common callback patterns without a general closure system. 
+    Web pages provide the first proving ground, not the final boundary.
+
+    Moth targets developers who want a language with an opinion about what code should look like, not a catalogue of features. 
+    
+    This is all still in early-alpha and moving fast, but Moth will be shared more widely when the language can stand behind its promises.
+
     ## Documentation
     The @./docs (Alpha language docs) explains everything about the language, compiler and making Moth projects.
 
