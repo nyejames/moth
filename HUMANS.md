@@ -1,4 +1,8 @@
+<div align="center">
+
 # AI Policy
+
+</div>
 
 This document is about how AI is/should be used in this codebase, if its part of your workflow.
 
@@ -20,8 +24,13 @@ The [AGENTS](./AGENTS.md) file in this repo is an attempt to keep LLMs on track 
 
 
 </br>
+</br>
+<div align="center">
 
-## My personal experience using LLM tooling (a constant tidal wave of unfalsifiable opinions)
+# A personal note on using LLM tooling
+*or: a constant tidal wave of unfalsifiable opinions*
+
+</div>
 
 This is a solo hobby project so LLMs have become vital for keeping momentum going and allowing me to focus on design, documentation, architecture and planning implementations rather than writing most of the code myself.
 
@@ -48,19 +57,26 @@ If you're writing an implementation plan for an agent to follow, then get an LLM
 
 LLM reviewing, especially when an LLM is loaded up with all the documentation, is often very useful and a vital part of orchestrating agents to do useful work and cut down on how much you will need to notice when staring at that final diff. They can catch things you don't and even if they can be wrong. Having an unfeeling statistics machine's report can help bypass our ego. No shit-sandwich or pleasantries required to decorate feedback intended for another person.
 
-<img src="./docs/assets/tng.jpg" width="400px" alt="Q playing the trumpet in Star Trek"/>
-
-<br>
+<div align="center">
+    <img src="./docs/assets/tng.jpg" width="400px" border="3" alt="Q playing the trumpet in Star Trek"/>
+</br>
 
 A brilliant approach or great design insight always comes from you. Not from a looping text prediction engine.
 
+</div>
+</br>
+
 ---
 
-### A future with AI tooling
+<div align="center">
+
+## A future with AI tooling
+
+</div>
 
 I don't think skilled developers, or writers for that matter, are going anywhere.
 
-AI is proving so far to benefit a lot of people who struggle to communicate or execute on their ideas. They are now empowered to be able to describe their thoughts with more clarity than ever before. But they're also a trap for laziness when you could be focusing on developing your own unique voice or thinking for yourself.
+AI can benefit people who struggle to communicate or execute on their ideas. They are now empowered to be able to describe their thoughts with more clarity than ever before. But LLMs are also a trap for laziness when you could be focusing on developing your own unique voice or thinking for yourself.
 
 Maybe more people than ever will start to understand the difference between a technical demo and ambitious, polished software. Polish and good UX is the remaining 90% of drawing the owl. There are still no shortcuts.
 
@@ -76,7 +92,10 @@ Your own chaotic and slightly wrong thoughts can be exactly what makes your own 
 
 Its not beautiful. 
 
-<img src="./docs/assets/scampy_and_radio.jpg" width="400px" alt="Scampy and old radio"/>
+<div align="center">
+    <img src="./docs/assets/scampy_and_radio.jpg" width="500px" border="3" alt="Scampy and old radio"/>
+</div>
+<br>
 
 I am now much more fond of "obviously human" writing. This is an era where its increasingly apparent *shortcuts* are being taken in producing things with the verisimilitude of art.
 
@@ -90,7 +109,11 @@ Often, the things we connect with the most challenge our perspective or give us 
 
 ---
 
+<div align="center">
+
 ### The real clanker slop
+
+</div>
 
 Anyone who works on complex projects like these and uses LLMs should be acutely aware of how limited they are when it comes to understanding "big picture" design and architecture.
 
@@ -114,7 +137,11 @@ I'm sure I got an understated "You're right, it was an error to say this was too
 
 ---
 
-**Agent Bias**
+<div align="center">
+
+### Agent Bias
+
+</div>
 
 AI also reflects your own biases back at you. While there are biases baked into the powerful models, your own prompts create another issue.
 
@@ -124,13 +151,20 @@ One of the more powerful uses of these tools is sanity checking an idea or revie
 
 Its important to remember, you need to be able to let go of ideas or recognise bad design as much as you need to be able to push back on the agent when it gets things wrong or doesn't see the vision.
 
+<div align="center">
+
 Slop in -> slop out.
 
 Detailed well scoped tasks -> much better results.
 
----
+<img src="./docs/assets/moth-photo.webp" width="350px" border="3" radius="50%" alt="A photograph of a moth"/>
+</br>
 
-### How this applies to Moth
+<div align="center">
+
+## How this applies to Moth
+
+</div>
 
 Moth is designed to give detailed, fast feedback for producing reliable code. Good languages for the future should be easy to review and strict about how the code is structured. See [the design principles doc](./docs/src/docs/design-scope/design-principles.mtf) for more info about how this directly related to using LLMs.
 
