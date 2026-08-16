@@ -24,6 +24,7 @@ Read the selected heading through the next heading of the same or higher level. 
 - **Memory and value flow:** read `docs/src/docs/codebase/memory-management/overview.mtf`, use its task-reading guide and read the selected leaves. This includes access, copies, ownership, borrowing, lifetimes, allocation, GC, drops, reactivity retention, runtime handles and ABI work.
 - **Language syntax or user-visible semantics:** read `docs/src/docs/codebase/language/overview.mtf` and every relevant canonical unsuffixed reference it selects. Also read routed memory material when behaviour touches access, copies, borrows, lifetimes, groups or ownership. Read paired `-basic.mtf` files and `@page.moth` only for teaching, presentation or site structure.
 - **Tests:** read relevant sections of `docs/src/docs/codebase/style-guide/testing.mtf` before choosing, adding, changing or reviewing coverage. Read it in full for test infrastructure, suite policy, broad fixture cleanup or audits.
+- **Structured codebase audits and accepted audit fixes:** read `docs/roadmap/audit-guide.md`, the selected guide under `docs/roadmap/audit-kinds/`, the chosen scope in `docs/roadmap/audit-log.md`, `docs/roadmap/open-audit-findings.md` and the owning report when one exists. Audit runs are read-only. Implement accepted findings in a separate task and preserve every invariant and change lane named by the report.
 - **Final validation:** read `docs/src/docs/codebase/style-guide/validation.mtf` before selecting, running or reporting a final gate. It need not remain loaded during implementation.
 - **Architecture plans, cross-stage ownership changes, broad refactors and thorough reviews:** read every relevant authority in full, including adjacent handoff authorities, current status and active sequencing.
 
@@ -32,6 +33,7 @@ Before writing Moth code or changing tokenization, parsing, type checking, seman
 Use:
 - `docs/src/docs/progress/@page.moth` for current implementation status and coverage
 - `docs/roadmap/roadmap.md` for sequencing, active plans and genuinely deferred design
+- `docs/roadmap/audit-log.md` for registered audit scopes and freshness
 - `index.md` only as a file and module locator
 
 The public unsuffixed files under `docs/src/docs/design-scope/` own accepted deferred implementation, open questions and excluded language boundaries. The progress matrix tracks implementation of accepted design only.
@@ -75,7 +77,7 @@ Required workflow:
 4. Decide whether to extend, consolidate, replace or remove the existing path.
 5. Implement the smallest coherent slice without transitional duplication.
 6. Add or update tests when behaviour or a real internal invariant changed.
-7. Review progress and index update rules, run the correct final gate and perform the Final audit.
+7. Review progress, index and audit-freshness update rules, run the correct final gate and perform the Final audit.
 
 For multi-phase work, re-check ownership, duplication, stale paths and test gaps after each phase. Every non-trivial implementation plan must end with the Final audit. If the user changes accepted behaviour, treat that request as authoritative for the task and call out implementation conflicts.
 
@@ -97,6 +99,8 @@ Do not modify documentation unless the user explicitly requests it or approves i
 Exceptions:
 - Update the progress matrix when implementation status, rejection behaviour, backend coverage or test coverage changes. Do not edit it for a pure refactor or prose-only correction.
 - Update `index.md` when modules, files or folders move, are renamed or fundamentally change behaviour.
+- Structured audit tasks update their report, open-findings index and audit-log cell as required by `docs/roadmap/audit-guide.md`.
+- Implementation and verification tasks review affected audit-log cells and mark materially invalidated coverage stale. Only a complete audit may promote freshness.
 
 Report documentation made inaccurate by implementation as a separate follow-up. Do not edit generated files under `docs/release/**` directly. Rebuild them through the compiler.
 
@@ -124,5 +128,5 @@ Before reporting a non-trivial slice complete or reviewing changes, audit in thi
 5. Review local readability. Keep imports readable, group matches by meaning, space unrelated blocks and give complex code concise non-local WHAT/WHY comments. Remove stale comments and justify every lint suppression.
 6. Review diagnostics. Use the correct lane, preserve source context, avoid user-input panics and centralise repeated diagnostic construction.
 7. Review tests. Protect observable behaviour or real invariants, keep each test under the correct owner and remove redundant or implementation-shaped coverage.
-8. Review progress, index and documentation effects under their update rules.
+8. Review progress, index, audit freshness and documentation effects under their update rules.
 9. Confirm the correct validation path ran and report exactly what was and was not validated.
