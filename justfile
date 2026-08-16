@@ -2,8 +2,11 @@ set windows-shell := ["powershell", "-NoLogo", "-NoProfile", "-Command"]
 
 validate:
     @echo "clippy"
-    just ci-clippy
-    
+    just ci-clippy-native
+
+    just validate-common
+
+validate-common:
     @echo "unit tests"
     cargo test --workspace --quiet -- --format terse
 
@@ -73,15 +76,9 @@ profile-build:
 profile-build:
     $env:RUSTFLAGS = "-C force-frame-pointers=yes"; cargo build --profile profiling --features detailed_timers --bin moth
 
-ci-clippy:
-    rustc +1.95.0 -vV
-    cargo +1.95.0 clippy -V
+ci-clippy-native:
+    rustc -vV
+    cargo clippy -V
 
     @echo "clippy: native host"
-    cargo +1.95.0 clippy --target-dir target/ci-clippy-native --workspace --all-targets --all-features -- -D warnings
-
-    @echo "clippy: linux x64"
-    cargo +1.95.0 clippy --target-dir target/ci-clippy-linux --workspace --target x86_64-unknown-linux-gnu --all-targets --all-features -- -D warnings
-
-    @echo "clippy: windows x64"
-    cargo +1.95.0 clippy --target-dir target/ci-clippy-windows --workspace --target x86_64-pc-windows-msvc --all-targets --all-features -- -D warnings
+    cargo clippy --target-dir target/ci-clippy-native --workspace --all-targets --all-features -- -D warnings

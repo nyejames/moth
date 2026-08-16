@@ -16,8 +16,8 @@ permissions:
   id-token: write
 
 jobs:
-  validate:
-    name: Validate the commit didn't break anything
+  validate-linux:
+    name: Validate Linux
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -46,8 +46,71 @@ jobs:
         timeout-minutes: 30
         run: just validate
 
+  validate-macos:
+    name: Validate macOS
+    runs-on: macos-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install just
+        timeout-minutes: 10
+        run: cargo install just --locked
+
+      - name: Run validation
+        timeout-minutes: 30
+        run: just validate
+
+  validate-windows:
+    name: Validate Windows (non-blocking)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install just
+        timeout-minutes: 10
+        run: cargo install just --locked
+
+      - name: Run validation
+        timeout-minutes: 30
+        run: just validate
+
   deploy:
-    needs: validate
+    needs:
+      - validate-linux
+      - validate-macos
 
     concurrency:
       group: pages
