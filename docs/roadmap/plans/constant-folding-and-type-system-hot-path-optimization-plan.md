@@ -1,37 +1,48 @@
-# Constant Folding and Type-System Hot-Path Optimisation Plan
+# Constant Evaluation, Static Control-Flow Specialisation and Type-System Architecture Plan
 
 > **Repository path:**
 > `docs/roadmap/plans/constant-folding-and-type-system-hot-path-optimization-plan.md`
 >
 > **Implementation branch:**
-> `agent/constant-folding-type-system-optimization-plan`
+> `agent/constant-evaluation-static-if-type-system-plan`
 >
 > **Status:**
 > Ready for implementation after the command timing correction plan is accepted and this branch is
 > rebased onto it.
 >
 > **Planning snapshot:**
-> `main` at `c77dfa0f3f5decd98ce64682d65f8977973cfb06`.
+> `main` at `7a3649d2e35668d11b55746835ac1cb2a7c1bb07`.
 
 ## Purpose
 
-Reduce the dominant constant and type-resolution costs in the AST frontend by removing repeated
-context construction, copied semantic state, rich intermediate clones and redundant value
-representations.
+Build one compact, durable constant-evaluation and type-resolution architecture, remove the dominant
+constant and type-system hot-path costs and add Stage 4 static specialisation of ordinary `if`
+statements whose conditions are known compile-time `Bool` values.
 
-The final design must make the common path data-oriented without replacing Moth's existing semantic
-owners:
+This plan has two coupled outcomes:
+
+1. Replace repeated context construction, copied semantic state, rich intermediate clones and
+   redundant value representations with data-oriented module-owned stores and indexed views.
+2. Make compile-time evaluation reduce ordinary Bool control flow before HIR so later compiler
+   systems process only the executable branch selected for the configured build.
+
+The final design must improve the common path without replacing Moth's existing semantic owners:
 
 - Stage 3 remains the declaration-order authority
 - `TopLevelDeclarationTable` remains the indexed declaration owner
 - `TypeEnvironment` remains the canonical module-local type owner
 - `TypeId` remains the semantic type identity
 - TIR exact views and the TIR fold cache remain the template authority
+- `ConstValueStore` becomes the module-local folded-value authority
 - `PublicFoldedValue` remains the owned cross-module folded-value vocabulary
-- HIR receives final folded values and runtime operations, never TIR or unresolved type syntax
+- Stage 4 owns static Bool control-flow specialisation after full frontend validation
+- HIR receives final folded values and already-specialised executable control flow, never TIR,
+  unresolved type syntax or a statically decided `if`
 
-The work is an implementation optimisation. It must not change language semantics, accepted programs,
-diagnostic priority, deterministic ordering, public identities or emitted artefacts.
+Most phases are implementation optimisations and must preserve accepted programs, diagnostics,
+public identities and emitted artefacts. Phase 4C is the one deliberate semantic expansion: both
+branches remain frontend-valid source, but a compile-time-known Bool condition selects one branch
+before HIR, borrow validation, lifetime analysis, link facts, target validation and backend lowering.
 
 ---
 
@@ -42,11 +53,12 @@ ACTIVE_PLAN:
 
 CURRENT_SLICE:
 - Phase: prerequisite gate
-- Goal: rebase onto the accepted timing-schema v2 implementation and establish a reliable baseline
-- Non-goals: no optimisation change before the corrected metrics are available
+- Goal: rebase onto the accepted timing-schema v2 implementation, establish a reliable performance
+  baseline and freeze the current static-`if` behaviour before any representation change
+- Non-goals: no semantic control-flow change before the explicit Phase 4C gate
 
 LAST_GOOD_COMMIT:
-- `c77dfa0f3f5decd98ce64682d65f8977973cfb06`
+- `7a3649d2e35668d11b55746835ac1cb2a7c1bb07`
 
 PREREQUISITE:
 - `docs/roadmap/plans/command-timing-accounting-and-reporting-correction-plan.md`
@@ -57,6 +69,8 @@ RELEVANT_DOCS:
 - `AGENTS.md`
 - `docs/compiler-design-overview.md`
 - `docs/build-system-design.md`
+- `docs/src/docs/design-scope/design-principles.mtf`
+- `docs/roadmap/plans/imported-build-values-and-project-globals-plan.md`
 - `docs/roadmap/plans/frontend-arena-semantic-invariant-optimization-plan.md`
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 - `benchmarks/README.md`
@@ -70,24 +84,142 @@ RELEVANT_CODE:
 - `src/compiler_frontend/headers/types.rs`
 - `src/compiler_frontend/headers/binding_environment/`
 - `src/compiler_frontend/ast/module_ast/environment/`
+- `src/compiler_frontend/ast/module_ast/finalization/`
 - `src/compiler_frontend/ast/module_ast/scope_context/`
+- `src/compiler_frontend/ast/statements/branching.rs`
+- `src/compiler_frontend/ast/statements/terminality.rs`
+- `src/compiler_frontend/ast/statements/value_production/`
 - `src/compiler_frontend/ast/type_resolution/`
 - `src/compiler_frontend/ast/type_interner.rs`
 - `src/compiler_frontend/ast/const_eval/`
 - `src/compiler_frontend/ast/const_values/`
 - `src/compiler_frontend/ast/expressions/eval_expression/`
 - `src/compiler_frontend/ast/expressions/expression_rpn.rs`
-- `src/compiler_frontend/ast/module_ast/finalization/normalize_constants.rs`
+- `src/compiler_frontend/ast/generic_functions/`
 - `src/compiler_frontend/datatypes/environment.rs`
 - `src/compiler_frontend/datatypes/definitions.rs`
 - `src/compiler_frontend/type_coercion/compatibility.rs`
 - `src/compiler_frontend/folded_value.rs`
 - `src/compiler_frontend/hir/hir_statement/declarations.rs`
+- `src/compiler_frontend/hir/tests/hir_branch_lowering_tests.rs`
 - `src/compiler_frontend/instrumentation/`
 - `benchmarks/manifest.toml`
 
 NEXT_ACTION:
-- rebase after timing correction, then execute Phase 0 without changing semantics
+- rebase after timing correction, execute Phase 0 and preserve current semantics until the mandatory
+  Phase 4C review gate
+
+---
+
+## Accepted static control-flow contract
+
+### Ordinary `if` is the only source form
+
+Moth does not add a `#Config if` statement or a second conditional-compilation grammar. An ordinary
+`if` consumes an ordinary semantic `Bool` value:
+
+```moth
+enabled #= false
+
+if enabled:
+    perform_optional_work()
+;
+```
+
+The later build-config plan will rename the accepted build-input spelling from `#Import` to
+`#Config`. A configured Bool uses the same conditional path:
+
+```moth
+analytics #Config of Bool = false
+
+if analytics:
+    send_analytics()
+;
+```
+
+This plan does not implement `#Config`, CLI build-input parsing or project-global interfaces. It
+establishes the general static-`if` behaviour that the later build-config plan will consume without a
+config-specific AST node, branch pass or HIR operation.
+
+### Both branches remain valid source
+
+Static specialisation is not textual preprocessing and does not create an unparsed inactive language
+island.
+
+Before branch selection, both branches must complete the ordinary Stage 4 frontend work required by
+their source form, including:
+
+- token and structural syntax validity
+- name and visibility resolution
+- type checking and coercion
+- generic inference and evidence validation
+- cast and constant-expression validation
+- value-producing branch arity and receiving-type validation
+- source-level diagnostics and stable frontend warnings
+
+An unknown name or type error in the branch that will later be inactive remains a diagnostic. Static
+specialisation removes executable work, not source correctness requirements.
+
+### Specialisation happens before executable compiler systems
+
+After both branches are frontend-valid and the condition has a final folded value:
+
+- a known `true` condition selects the `then` branch
+- a known `false` condition selects the `else` branch, or an empty scoped result when no `else`
+  exists
+- an unknown/runtime condition remains an ordinary `if`
+
+The selected branch retains its authored lexical scope. Specialisation must not hoist branch-local
+bindings into the parent scope or flatten control-flow ownership merely because the runtime test is
+removed.
+
+The specialised active AST becomes the authority for:
+
+- function terminality
+- durable generated-function requests
+- executable effect, access and project-context summaries
+- HIR construction
+- borrow validation
+- lifetime-region and escape analysis
+- per-function link facts and reachability
+- target-contract validation
+- backend lowering and emitted runtime code
+
+The inactive branch contributes none of those downstream products. HIR must never receive an `if`
+whose condition is already a known compile-time Bool.
+
+### Stable source structure
+
+Compile-time values may specialise executable behaviour. They do not change source structure.
+
+`#Config` and ordinary compile-time Bool conditions must not control:
+
+- dependency clauses or provider graph edges
+- package resolution
+- source discovery or semantic source sets
+- declaration existence
+- exported declaration existence
+- receiver-method existence
+- trait or conformance existence
+- module or package facade topology
+
+This keeps Stage 0 graph construction, Stage 3 declaration order, declaration identity and module
+interfaces structurally stable across configured builds. Public semantic summaries and executable
+fingerprints may still change when the active body has different effects, calls or lifetime facts.
+
+### Platform-agnostic source boundary
+
+Moth source does not inspect compilation targets, operating systems, architectures, backend choice or
+runtime-platform identity. Platform integration belongs to project builders, builder packages,
+external packages and backend capability surfaces.
+
+The static-`if` system is for typed application and build configuration, not target-dependent source.
+Builders must not recreate target conditional compilation by supplying synthetic values such as
+`target_os`, `target_arch`, `is_wasm`, `is_javascript` or equivalent backend identity flags through
+the future `#Config` surface.
+
+A change to this boundary requires an explicit Moth design-philosophy review. It is not a deferred
+extension of this plan.
 
 ---
 
@@ -105,6 +237,16 @@ The legacy detailed channel prints synchronously and duplicates the constant tim
 are directional rather than a valid benchmark baseline. They are enough to prioritise constant setup
 and representation work. Phase 0 must replace them with schema-v2 measurements.
 
+The current implementation also shows the static-control-flow gap that Phase 4C must close:
+
+- AST branching parses both bodies and always creates `NodeKind::If` for an ordinary Bool condition
+- HIR branch tests currently lower even literal `true` and `false` conditions into runtime CFG
+  diamonds
+- function terminality intentionally does not evaluate conditions beyond structurally folded
+  `assert(false)`
+- generic requests and other durable side products need an ownership audit so a pruned branch cannot
+  keep downstream work alive
+
 The current code also exposes concrete structural costs independent of timing noise:
 
 | Current pattern | Cost or complexity |
@@ -121,12 +263,15 @@ The current code also exposes concrete structural costs independent of timing no
 | Scan `sorted_headers` repeatedly for each declaration kind | Repeated broad branching and poor locality as the language grows |
 | Clone fields, variants or signatures before read-only generic-bound validation | Copies semantic trees to satisfy local borrow structure |
 | Build and sort boxed generic substitution mappings per cache key | Repeats canonicalisation that can be owned once by the binding set |
+| Lower compile-time-known Bool conditions into ordinary HIR branches | Sends inactive executable work through every later compiler system and backend |
+| Validate terminality before static branch selection | Rejects functions whose specialised active body is provably terminal |
 
 ---
 
 ## Architectural invariants
 
 - Tokenization and declaration-shell parsing happen once.
+- Stage 0 provider graphs and semantic source sets do not depend on constant or `#Config` values.
 - Stage 3 dependency order is authoritative. AST must not add a constant fixpoint or rediscover
   declaration dependencies.
 - Every ordinary constant and const template folds once in its defining module.
@@ -135,12 +280,24 @@ The current code also exposes concrete structural costs independent of timing no
 - Donor-local `TypeId`, declaration IDs, value IDs and store IDs never cross module interfaces.
 - Constant folding preserves checked numeric failures, cast rules, finite-Float rules, template
   preparation rules and synthetic-interface provenance.
-- Type and fold errors retain current source locations, diagnostic families and priority.
+- Both branches of an ordinary `if` complete frontend syntax, name and type validation before a
+  compile-time-known Bool selects executable control flow.
+- Static specialisation preserves lexical scope and source identity.
+- Function terminality and every durable executable side product are computed from the specialised
+  active AST.
+- A pruned branch contributes no HIR, generated sidecar work, borrow/lifetime facts, link facts,
+  target requirements or backend code.
+- HIR does not become a second constant folder or type resolver and never receives a statically
+  decided `if`.
+- Type and fold errors retain current source locations, diagnostic families and priority. Phase 4C
+  intentionally removes only downstream diagnostics belonging exclusively to inactive executable
+  work.
 - TIR stays AST-local and is dropped before the completed AST leaves Stage 4.
-- HIR does not become a second constant folder or type resolver.
+- Platform and backend identity do not enter source-level constant conditions through compiler- or
+  builder-provided target flags.
 - Capacity estimates and caches affect performance only. A miss or underestimate cannot change
   correctness.
-- Parallelism, reuse and caching preserve deterministic identities and diagnostic order.
+- Parallelism, reuse and caching preserve deterministic identities, diagnostics and output order.
 
 ---
 
@@ -279,7 +436,46 @@ A full `ExprId` arena is evidence-gated. Implement it only if Phase 4 counters o
 move-only full `Expression` operands remain material. Do not introduce an arena to satisfy an
 architectural preference alone.
 
-### 7. Type resolution uses explicit views
+### 7. Static Bool control flow is specialised once in Stage 4
+
+Add one AST-finalisation owner for ordinary `if` specialisation after constant values and expression
+types are final, but before terminality and durable executable summaries are committed.
+
+The owner consumes the existing folded-value authority. It must not:
+
+- run a second evaluator
+- inspect source tokens again
+- identify `#Config` declarations specially
+- add a config-specific AST or HIR node
+- rebuild branch scopes or reparse branch bodies
+
+For statement `if`:
+
+- known `true` selects the authored `then` body in its existing lexical scope
+- known `false` selects the authored `else` body in its existing lexical scope
+- known `false` without `else` produces no executable statements while preserving valid source and
+  diagnostic identity
+- runtime/unknown conditions retain the ordinary `NodeKind::If`
+
+For value-producing `if`:
+
+- both branches first satisfy the normal receiving arity and type rules
+- a known condition selects the corresponding already-validated value block
+- the selected value enters normal expression/value lowering without a runtime branch or hidden
+  merge local
+
+Do not generalise this phase into match reduction, loop unrolling, cross-function constant
+propagation or a compile-time virtual machine.
+
+Durable generic requests and executable metadata must be published from, or filtered against, the
+specialised active AST. Type checking may validate a generic call in an inactive branch, but that
+branch must not cause concrete materialisation or generated sidecar work.
+
+Terminality runs after specialisation. A function may therefore become provably terminal when its
+only active configured branch returns, while a runtime condition retains the existing conservative
+all-path rule.
+
+### 8. Type resolution uses explicit views
 
 Split the broad optional `TypeResolutionContextInputs` shape into explicit data views:
 
@@ -296,7 +492,7 @@ construction, not represented by many unrelated `Option` fields.
 Successful resolution returns or carries `TypeId`. Diagnostic spelling is produced lazily at the
 error/render boundary. Do not cache rendered names as semantic facts.
 
-### 8. Improve `TypeEnvironment` in place
+### 9. Improve `TypeEnvironment` in place
 
 Do not replace `TypeEnvironment`. It already owns dense `TypeId` storage and canonical interning.
 Optimise its hot tables in place:
@@ -315,7 +511,7 @@ Optimise its hot tables in place:
 Every conversion requires size, lookup and benchmark evidence. Do not make a less readable table
 more compact when it is not hot.
 
-### 9. Canonical generic bindings are built once
+### 10. Canonical generic bindings are built once
 
 Give each immutable concrete generic binding set one canonical ordered pair representation and, if
 useful, a module-local `GenericBindingsId`. Substitution cache keys use that stable representation
@@ -324,7 +520,7 @@ instead of collecting and sorting an `FxHashMap` into a new boxed slice for each
 Reuse the current substitution cache and generic instance interning. Remove only repeated key
 construction and cloned member views.
 
-### 10. Nominal members keep one syntax shell
+### 11. Nominal members keep one syntax shell
 
 Keep one immutable parsed member shell per struct field or choice payload. Early nominal registration
 creates identity and generic metadata only.
@@ -337,7 +533,7 @@ field/variant definitions once.
 Do not rebuild complete `Declaration` and `ChoiceVariant` trees before and after constants. Defaults
 must similarly retain one syntax owner and one final folded value.
 
-### 11. The source/token layout plan owns token ranges
+### 12. The source/token layout plan owns token ranges
 
 The existing compiler source/token/diagnostic data-layout plan owns compact source identities, token
 stores and retained token ranges. This plan must not introduce competing `SpanId`, token-range or
@@ -351,9 +547,15 @@ changing this plan's semantic stores.
 
 ## Non-goals
 
+- no `#Config` parser, CLI input implementation or project-global interface in this plan
+- no `#Config if` syntax or second conditional-control-flow category
+- no conditional dependency clauses, declarations, exports, receiver methods, traits or conformances
+- no target, operating-system, architecture or backend introspection in source
+- no textual preprocessing or skipped syntax/name/type validation for inactive branches
 - no new language type or coercion rule
 - no general compile-time virtual machine
 - no arbitrary user-function execution during constant folding
+- no match reduction, loop unrolling or broad CFG partial evaluation
 - no parallel constant evaluation before dependency and diagnostic ordering are proven safe
 - no rewrite of TIR, Stage 3 or `TypeEnvironment` into competing frameworks
 - no compiler-wide unsafe packing
@@ -364,7 +566,7 @@ changing this plan's semantic stores.
 
 ---
 
-## Phase 0 - Correct baseline and scaling fixtures
+## Phase 0 - Correct baseline, semantic freeze and scaling fixtures
 
 Prerequisite: rebase onto the accepted timing-schema v2 implementation.
 
@@ -377,6 +579,18 @@ Prerequisite: rebase onto the accepted timing-schema v2 implementation.
       least 32, 128 and 512 dependency-ordered constants. Generate them deterministically if hand
       maintenance would be noisy.
 - [ ] Add a capacity-dependent nominal fixture that separates constant count from member count.
+- [ ] Add or freeze focused static-control-flow cases for:
+  - literal `true` and `false` statement `if`
+  - constant-backed Bool conditions
+  - `if` with and without `else`
+  - value-producing `if`
+  - scope preservation after branch selection
+  - terminality changed by a known condition
+  - a generic call owned only by the future inactive branch
+  - borrow, lifetime, link and target work owned only by the future inactive branch
+  - a runtime Bool condition that must continue to lower as CFG
+- [ ] Where the intended Phase 4C behaviour differs from the current compiler, add clearly named
+      ignored intended-contract tests rather than weakening current assertions early.
 - [ ] Record counters for:
   - constants resolved
   - constant sessions and `ScopeContext`s created
@@ -389,11 +603,15 @@ Prerequisite: rebase onto the accepted timing-schema v2 implementation.
   - module-constant normalisation nodes visited
   - public and HIR folded-value conversions
   - generic substitution key builds and sorted pairs
+  - static-Bool `if` candidates
+  - runtime `if` nodes reaching HIR
+  - generated requests attributed to branch-local call sites
 - [ ] Use `RAYON_NUM_THREADS=1` for local frontend attribution, then repeat the normal thread identity
       to ensure no scheduling regression.
 - [ ] Store concise evidence in `benchmarks/frontend-optimization-results.md`.
 
-Checkpoint: evidence only. No semantic representation change.
+Checkpoint: evidence and intended-contract tests only. No semantic representation or control-flow
+change.
 
 ## Phase 1 - Consolidate constant-resolution context
 
@@ -414,7 +632,7 @@ Expected deletion targets:
 - module-wide side-table clones created only for constant parsing
 - per-constant `TypeCompatibilityCache`
 
-Checkpoint: context consolidation with no value representation change.
+Checkpoint: context consolidation with no value representation or control-flow change.
 
 ## Phase 2 - Dense declaration and resolved-constant state
 
@@ -434,7 +652,7 @@ Scaling acceptance:
 - [ ] The `previous-constant IDs copied` counter reaches zero for module constants.
 - [ ] No new full declaration scan appears per constant.
 
-Checkpoint: dense IDs and state, still using current folded expression payloads.
+Checkpoint: dense IDs and state, still using current folded expression payloads and control flow.
 
 ## Phase 3 - Module-local folded-value authority
 
@@ -466,9 +684,10 @@ Checkpoint: dense IDs and state, still using current folded expression payloads.
 - [ ] Consolidate public and HIR conversion walkers around one borrowed store visitor where their
       output vocabularies differ.
 
-Checkpoint: one folded-value authority with all old conversion paths removed.
+Checkpoint: one folded-value authority with all old conversion paths removed. Control-flow behaviour
+remains unchanged until Phase 4C.
 
-## Phase 4 - Move-only typed postfix and folding
+## Phase 4 - Typed constant evaluation and static control-flow specialisation
 
 ### 4A: ownership cleanup
 
@@ -478,6 +697,8 @@ Checkpoint: one folded-value authority with all old conversion paths removed.
 - [ ] Return the sole folded operand by move.
 - [ ] Add focused tests proving no source or synthetic provenance is lost.
 - [ ] Drive full-expression clone counters to zero in ordinary arithmetic fold paths.
+
+Checkpoint: move-only ownership cleanup with byte-for-byte equivalent diagnostics and artefacts.
 
 ### 4B: typed-postfix builder
 
@@ -491,16 +712,60 @@ Checkpoint: one folded-value authority with all old conversion paths removed.
 - [ ] Make the fold evaluator produce `ConstValueId` directly.
 - [ ] Preserve reduced postfix only for runtime-dependent work.
 
-### 4C: evidence-gated operand handles
+Checkpoint: typed-postfix and folded-value authority with unchanged source semantics.
 
-- [ ] Profile remaining runtime postfix copies.
+### 4C: static Bool `if` specialisation
+
+This is the mandatory semantic review gate. Do not combine it with operand-arena work or another
+performance refactor.
+
+- [ ] Add one named Stage 4 specialisation owner after full branch frontend validation and final
+      constant values, before terminality, durable generated work and HIR.
+- [ ] Read a condition's known Bool from the existing typed folded-value authority. Add no second
+      evaluator or config-specific lookup.
+- [ ] Specialise statement `if` according to the accepted contract while preserving the selected
+      branch's lexical scope, source locations and statement order.
+- [ ] Specialise value-producing `if` only after both branches satisfy receiving arity and type
+      rules.
+- [ ] Leave runtime and unknown Bool conditions as ordinary `NodeKind::If` values.
+- [ ] Run terminality over the specialised active AST.
+- [ ] Ensure inactive branch calls do not publish generated-function requests or generated sidecar
+      work.
+- [ ] Ensure inactive branch code contributes no HIR, borrow facts, lifetime facts, executable
+      effects, link facts, target requirements or backend output.
+- [ ] Preserve syntax, name, visibility, type, generic-evidence, cast, const-evaluation and
+      value-production diagnostics from both authored branches.
+- [ ] Preserve stable declaration, type and function identities. Static specialisation changes
+      executable bodies and derived summaries, not source declaration identity.
+- [ ] Record branch-selection dependencies in implementation, effect/link and root fingerprints
+      through the existing fingerprint owners. Do not add a parallel static-if fingerprint.
+- [ ] Assert that HIR contains no branch terminator for a statically decided `if`.
+- [ ] Assert that a runtime Bool condition still produces the established HIR branch/merge shape.
+- [ ] Enable and complete the Phase 0 intended-contract tests.
+
+Review gate acceptance:
+
+- [ ] both authored branches remain frontend-valid source
+- [ ] selected branch scope is unchanged
+- [ ] terminality observes selected control flow
+- [ ] inactive durable generic requests are absent
+- [ ] all downstream compiler systems receive only active executable work
+- [ ] source graph, declarations, exports and package topology are unchanged
+- [ ] no platform/backend conditional mechanism has entered source
+
+Checkpoint: accepted static-control-flow semantics and focused end-to-end validation. Artefact changes
+are expected and must match the selected active branch exactly.
+
+### 4D: evidence-gated operand handles
+
+- [ ] Profile remaining runtime postfix copies after 4A through 4C.
 - [ ] Introduce compact operand handles only if they materially reduce time or retained memory.
 - [ ] If implemented, keep the arena module-local and move it into final AST ownership.
 - [ ] Delete `#[allow(clippy::large_enum_variant)]` only when the representation genuinely no longer
       needs it.
 
-Checkpoint each subphase independently. Do not combine the safe move-only change with an unmeasured
-arena migration.
+Checkpoint each subphase independently. Do not combine a measured operand representation change with
+the Phase 4C semantic gate.
 
 ## Phase 5 - Type-resolution context and lazy diagnostics
 
@@ -579,7 +844,8 @@ Checkpoint separately for structs and choices if either surface becomes broad.
       query methods where ownership remains clear.
 - [ ] Keep orchestration readable. Do not hide the phase order in a generic pass framework.
 
-Checkpoint: pass/index cleanup after the main constant and type wins are already measurable.
+Checkpoint: pass/index cleanup after the main constant, static-control-flow and type wins are already
+measurable.
 
 ## Phase 10 - Final audit and closeout
 
@@ -589,6 +855,8 @@ Run focused validation throughout. At final closeout run at minimum:
 cargo test --lib compiler_frontend::ast::const_eval
 cargo test --lib compiler_frontend::ast::const_values
 cargo test --lib compiler_frontend::ast::type_resolution
+cargo test --lib compiler_frontend::ast::statements::branching
+cargo test --lib compiler_frontend::ast::statements::terminality
 cargo test --lib compiler_frontend::datatypes
 cargo test --lib compiler_frontend::hir
 just bench-frontend-check
@@ -597,7 +865,7 @@ just bench-check
 just validate
 ```
 
-At each performance checkpoint:
+At each performance-only checkpoint:
 
 - [ ] run five independent benchmark invocations and compare medians
 - [ ] use the same timing schema, source fingerprint, measurement fingerprint and thread identity
@@ -605,6 +873,14 @@ At each performance checkpoint:
 - [ ] record counter and timing movement in `benchmarks/frontend-optimization-results.md`
 - [ ] treat an unexplained median regression above 5% as a blocker
 - [ ] require semantic/output equivalence before accepting a speed improvement
+
+At the Phase 4C semantic checkpoint:
+
+- [ ] compare output to the accepted static-control-flow contract rather than the old artefact bytes
+- [ ] record the intended HIR, generated-work, borrow/lifetime, link and target-validation deltas
+- [ ] prove runtime conditions retain the existing semantics
+- [ ] prove both authored branches retain frontend diagnostics
+- [ ] run focused integration cases for active and inactive downstream failures
 
 Final acceptance:
 
@@ -616,13 +892,27 @@ Final acceptance:
 - [ ] shunting yard remains the one precedence algorithm
 - [ ] rich RPN typing and fold clones are removed
 - [ ] successful type resolution is `TypeId`-first and diagnostic spelling is lazy
-- [ ] dense TypeEnvironment changes are evidence-backed and private
+- [ ] dense `TypeEnvironment` changes are evidence-backed and private
 - [ ] nominal members retain one syntax shell and build canonical members once
+- [ ] both static-`if` branches are frontend validated before selection
+- [ ] a statically decided `if` never reaches HIR
+- [ ] inactive branches produce no generated sidecars, borrow/lifetime facts, link facts, target
+      requirements or backend code
+- [ ] runtime Bool conditions preserve ordinary `if` behaviour
+- [ ] branch lexical scope and source identity remain intact
+- [ ] terminality consumes specialised active control flow
+- [ ] source graphs, declaration identities and structural public surfaces do not depend on
+      compile-time conditions
+- [ ] no platform/backend conditional source mechanism exists
 - [ ] old redundant APIs and representations are deleted without compatibility wrappers
-- [ ] all diagnostics, public identities and emitted artefacts remain stable
+- [ ] optimisation-only phases preserve diagnostics, public identities and emitted artefacts
+- [ ] Phase 4C changes executable artefacts and downstream diagnostics only where the inactive branch
+      is deliberately absent
 
-Do not update the progress matrix unless current language support changes. Update compiler design only
-if implementation reveals an accepted ownership boundary not already stated there.
+Phase 4C changes current language/compiler support. Its implementation closeout must update the
+compiler architecture, progress matrix and user-facing constant/control-flow documentation. The
+later build-config plan must integrate `#Config of Bool` through the same ordinary constant and `if`
+path without adding another specialisation owner.
 
 ---
 
@@ -637,9 +927,13 @@ if implementation reveals an accepted ownership boundary not already stated ther
 - `TypeCompatibilityCache`
 - binding-owned `FileVisibility`
 - scope-frame arenas for body-local declarations only
+- existing `NodeKind::If`, branch scopes and value-producing `if` validation
+- existing AST finalisation boundary, extended with one named static-control-flow owner
+- existing terminality validation, moved after specialisation
 - TIR store, exact views, preparation and fold cache
 - `PublicFoldedValue` for owned cross-module projection
 - existing HIR module-constant and const-fact consumers, migrated to IDs/store access
+- existing HIR branch lowering for runtime conditions only
 - current benchmark manifest, profiles, counters and five-run protocol
 
 ### Remove after migration
@@ -656,6 +950,9 @@ if implementation reveals an accepted ownership boundary not already stated ther
 - repeated generic substitution map sorting/boxing
 - duplicate nominal member shell reconstruction
 - repeated broad header scans made obsolete by declaration lanes
+- HIR `if` diamonds whose conditions are already known compile-time Bool values
+- inactive-branch generated requests and executable side products
+- pre-specialisation terminality assumptions
 
 ### Avoid
 
@@ -663,12 +960,22 @@ if implementation reveals an accepted ownership boundary not already stated ther
 - a second type environment
 - a generic compiler-pass framework
 - a new template fold cache
+- a `#Config`-specific branch representation
+- textual preprocessing or conditionally parsed source
+- conditional provider graph or declaration topology
+- platform/backend identity flags in source
+- general CFG partial evaluation disguised as static `if` folding
 - source-token or span designs parallel to the data-layout plan
 - speculative caches with incomplete semantic keys
 - unsafe packing before ordinary ownership and algorithmic waste is removed
 
 ## Completion contract
 
-The plan is complete only when the code has fewer semantic representations and fewer construction
-paths than it started with. A faster implementation that leaves the old constant trees, context
-builders or conversion walkers alive as compatibility layers does not satisfy this plan.
+The plan is complete only when the compiler has fewer semantic representations, fewer construction
+paths and one explicit Stage 4 boundary between fully validated source and specialised executable
+control flow.
+
+A faster implementation that leaves the old constant trees, context builders or conversion walkers
+alive as compatibility layers does not satisfy the plan. A static-`if` implementation that skips
+frontend validation, leaks platform policy into source, retains inactive downstream work or adds a
+parallel config-specific branch path also does not satisfy it.
