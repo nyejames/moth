@@ -24,6 +24,22 @@ This is a compiler-wide representation change, not a narrow Clippy patch. It mus
 causes of `clippy::result_large_err`, remove existing boxed-diagnostic workarounds and leave one clear
 extension model for future diagnostics and tooling.
 
+## Temporary validation bridge
+
+The current implementation retains a 192-byte `CompilerError` across many internal and
+infrastructure `Result` boundaries. Until the layout migration replaces that mixed representation,
+the library crate's `src/lib.rs` carries one documented crate-level `#[allow(clippy::result_large_err)]` for the
+192-byte `CompilerError`. The benchmark execution module at `xtask/src/benchmark_execution.rs`
+carries one documented module-level allowance for its 224-byte `BenchmarkCaseFailure`.
+Together, these temporary allowances keep Rust 1.95 native, Linux and Windows validation runnable.
+These are validation bridges only. They must not be narrowed into copied local allowances or
+treated as the target error model.
+
+The migration must remove these allowances after the `CompilerError` sites have been assigned to the
+compact diagnostic, infrastructure-failure or compiler-bug lanes and the benchmark failure record
+has received its own size fix rather than a lint exemption.
+The later migration gate and final validation gate must both prove that the allowances and large-error condition are gone.
+
 The implementation must converge on:
 
 - one deterministic build-lifetime source database
@@ -102,6 +118,8 @@ RELEVANT_CODE:
 - `src/compiler_frontend/headers/header_dispatch.rs::capture_function_body_tokens`: current token-cloning body capture
 - `src/compiler_frontend/compiler_messages/`: current diagnostic kinds, descriptors, payloads, labels, bags, messages and renderers
 - `src/compiler_frontend/compiler_messages/compiler_errors.rs`: current mixed error lane, table cloning and full type-context retention
+- `src/lib.rs`: temporary crate-level `result_large_err` allowance used only to keep interim validation runnable
+- `xtask/src/benchmark_execution.rs`: temporary module-level `result_large_err` allowance for the benchmark failure record
 - `src/compiler_frontend/datatypes/display.rs`: current type renderer to preserve as one shared formatting owner
 - `src/projects/html_project/html_project_builder.rs` and `BackendBuilder`: current target/project diagnostic production over a mutable `StringTable`
 - `src/projects/dev_server/build_loop.rs`: current compiler-message boundary, reusable executor and poisoned-lock recovery
@@ -536,7 +554,7 @@ Inventory:
 - [ ] confirm no compiler or language semantics changed
 - [ ] confirm every current owner appears in the migration ledger
 - [ ] confirm locked design decisions still match the refreshed repo
-- [ ] confirm no lint allowance, boxing workaround or new compatibility path was added
+- [ ] confirm no unrecorded lint allowance, boxing workaround or new compatibility path was added; the temporary pre-activation `result_large_err` bridge is recorded with its removal owner
 - [ ] confirm instrumentation reuses existing owners and has no normal-build cost
 - [ ] run the documentation-only gate for documentation-only commits
 - [ ] record the exact green or failing baseline without assuming the original `result_large_err` state still exists
@@ -637,6 +655,7 @@ a public boundary supporting both location models.
 - [ ] **1G3 — enforce a non-throwaway size fix:** measure the transitional diagnostic; do not build a temporary old-payload cold-store system; when simplification is insufficient, pull forward only final schema/projection components retained by later phases
 - [ ] **1G4 — token projection gate:** if the predecessor still exceeds 128 bytes, pull forward only final `TokenTag`, `TokenDescriptor` and 8-byte `DiagnosticToken` foundations from Phase 3; do not create another wide or temporary diagnostic-token enum
 - [ ] **1G5 — remove workarounds:** require `size_of::<CompilerDiagnostic>() <= 128`, delete every `Box<CompilerDiagnostic>` alias/conversion and remove style-guide advice recommending local boxing; run Rust 1.95 native/Linux/Windows Clippy and confirm `result_large_err` is gone
+- [ ] remove both temporary `result_large_err` allowances from `src/lib.rs` and `xtask/src/benchmark_execution.rs` rather than relocating either one
 
 ### Slice 1H — Delete the old location and source identity model
 
@@ -1251,7 +1270,7 @@ For each experiment:
 - [ ] delete migration modules, adapters, aliases and deprecated constructors
 - [ ] delete stale remap/clone helpers and obsolete counters
 - [ ] delete tests that protect only removed API shapes
-- [ ] confirm no lint allowance or boxed diagnostic boundary remains
+- [ ] confirm no `#[allow(clippy::result_large_err)]`, including the temporary allowances in `src/lib.rs` and `xtask/src/benchmark_execution.rs`, and no boxed diagnostic boundary remains
 - [ ] run ordinary dead-code/unused checks through Clippy
 
 ### Slice 7D — Converge authority and policy documentation
@@ -1282,7 +1301,7 @@ For each experiment:
 - [ ] confirm stable diagnostic codes, source spans and renderer identity across terminal/terse/dev server
 - [ ] confirm successful artifacts/goldens are unchanged except explicitly authorized output
 - [ ] run docs check and release build
-- [ ] run Rust 1.95 native/Linux/Windows Clippy with warnings denied
+- [ ] run Rust 1.95 native/Linux/Windows Clippy with warnings denied after removing the temporary `result_large_err` suppressions from `src/lib.rs` and `xtask/src/benchmark_execution.rs`, and confirm the large-error lint is absent without boxing the common diagnostic
 - [ ] run full `just validate`
 - [ ] run the complete five-run recorded benchmark protocol
 - [ ] compare against Phase 0 and each material phase

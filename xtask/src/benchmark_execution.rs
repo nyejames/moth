@@ -3,7 +3,13 @@
 //! WHAT: runs one CLI or in-process frontend case, validates its diagnostic and
 //! timing facts, and returns one common execution shape.
 //! WHY: preflight, measurement and profiling must agree on what counts as a
+
 //! successful benchmark run without reconstructing commands or diagnostics.
+// TEMPORARY VALIDATION BRIDGE: `BenchmarkCaseFailure` is currently a 224-byte benchmark
+// failure record, so Rust 1.95 Clippy reports `result_large_err` at the existing benchmark
+// execution `Result` boundaries. The data-layout plan's final workspace Clippy gate must remove
+// this allowance and fix the underlying failure representation.
+#![allow(clippy::result_large_err)]
 
 use std::fmt::{Display, Formatter};
 use std::path::{Path, PathBuf};
