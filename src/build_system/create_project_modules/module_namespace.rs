@@ -39,6 +39,7 @@ use crate::compiler_frontend::source_packages::root_file::{
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::utilities::basic::portable_path_text;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -976,7 +977,7 @@ fn portable_dependency_key(
 /// Strip the file extension from a portable forward-slash source path.
 fn extensionless_portable_path(relative_path: &str) -> String {
     let path = Path::new(relative_path);
-    path.with_extension("").to_string_lossy().replace('\\', "/")
+    portable_path_text(path.with_extension(""))
 }
 
 /// Check whether a namespace key is a sub-path of a cross-module entry, indicating a private

@@ -12,10 +12,10 @@ use super::types::{
 use super::{
     ArtifactAssertion, ArtifactKind, BackendId, ExpectationMode, GoldenMode,
     ParsedBackendExpectation, ParsedExpectationFile, WarningExpectation,
-    normalize_relative_path_text,
 };
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_messages::is_well_formed_reason_key;
+use crate::compiler_frontend::utilities::basic::portable_path_text;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -427,7 +427,7 @@ fn parse_diagnostic_assertions(
             code: assertion.code.clone(),
             occurrence,
             reason: assertion.reason.clone(),
-            path: assertion.path.as_deref().map(normalize_relative_path_text),
+            path: assertion.path.as_deref().map(portable_path_text),
             line: assertion.line,
             column: assertion.column,
             count: assertion.count,
@@ -520,7 +520,7 @@ fn parse_secondary_label_assertions(
 
         parsed_assertions.push(SecondaryLabelAssertion {
             occurrence,
-            path: assertion.path.as_deref().map(normalize_relative_path_text),
+            path: assertion.path.as_deref().map(portable_path_text),
             line: assertion.line,
             column: assertion.column,
         });
@@ -598,7 +598,7 @@ fn parse_artifact_assertions(
         validate_artifact_assertion_shape(path, &assertion_label, kind, assertion)?;
 
         parsed_assertions.push(ArtifactAssertion {
-            path: normalize_relative_path_text(&assertion.path),
+            path: portable_path_text(&assertion.path),
             kind,
             must_contain: assertion.must_contain.clone(),
             must_not_contain: assertion.must_not_contain.clone(),
@@ -1058,7 +1058,7 @@ fn parse_artifacts_must_not_exist(
                 context
             ));
         }
-        normalized.push(normalize_relative_path_text(raw_path));
+        normalized.push(portable_path_text(raw_path));
     }
 
     Ok(normalized)

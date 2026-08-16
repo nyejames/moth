@@ -16,6 +16,7 @@ use crate::compiler_frontend::compiler_messages::source_location::SourceLocation
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticLabelStyle, DiagnosticSeverity,
 };
+use crate::compiler_frontend::utilities::basic::portable_path_text;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -347,7 +348,7 @@ fn diagnostic_path_from_location(
     let resolved_source_file = resolve_source_file_path(&location.scope, &messages.string_table);
     let source_file = resolve_fixture_source_path(&resolved_source_file, fixture_root);
     let relative_path = relative_display_path_from_root(&source_file, fixture_root);
-    super::super::normalize_relative_path_text(&relative_path)
+    portable_path_text(&relative_path)
 }
 
 fn resolve_fixture_source_path(source_file: &Path, fixture_root: &Path) -> PathBuf {

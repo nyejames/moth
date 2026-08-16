@@ -12,16 +12,6 @@ use std::collections::BTreeMap;
 
 use super::{SEPARATOR_LINE_LENGTH, execution, fixture, reporting};
 
-/// Normalises a relative path string to forward slashes for cross-platform comparison.
-pub(crate) fn normalize_relative_path_text(path: &str) -> String {
-    path.replace('\\', "/")
-}
-
-/// Normalises a `Path` to a forward-slash string for cross-platform comparison.
-pub(crate) fn normalize_relative_path(path: &std::path::Path) -> String {
-    path.to_string_lossy().replace('\\', "/")
-}
-
 /// Runs or lists the selected cases from the `tests/cases` directory.
 pub(crate) fn run_all_test_cases(
     options: TestRunnerOptions,

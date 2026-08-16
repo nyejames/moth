@@ -41,6 +41,17 @@ pub fn normalize_path(path: &Path) -> PathBuf {
     path.to_path_buf()
 }
 
+/// Render a filesystem path as deterministic, platform-independent text.
+///
+/// WHAT: applies the existing filesystem-path normalisation, then renders separators as `/`.
+/// WHY: diagnostics, logical display text, and cross-platform assertions need stable text while
+///      filesystem reads and writes must continue to use the native `Path` representation.
+pub(crate) fn portable_path_text(path: impl AsRef<Path>) -> String {
+    normalize_path(path.as_ref())
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
 /// Character classification helpers shared by tokenizer and template formatting.
 ///
 /// WHAT: exposes source-level whitespace checks on `char`.

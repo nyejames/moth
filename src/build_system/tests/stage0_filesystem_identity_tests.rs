@@ -2866,12 +2866,7 @@ mod project_module_graph_tests {
             .module_ids()
             .find(|id| {
                 table.record(*id).role() == role
-                    && table
-                        .record(*id)
-                        .logical_module_path()
-                        .to_str()
-                        .map(|path| path == logical_path)
-                        .unwrap_or(false)
+                    && table.record(*id).stable_origin().logical_module_path() == logical_path
             })
             .unwrap_or_else(|| {
                 panic!("expected a {role:?} module with logical path {logical_path:?}")

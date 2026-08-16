@@ -15,6 +15,7 @@ use super::{
     WarningExpectation,
 };
 use crate::compiler_frontend::Flag;
+use crate::compiler_frontend::utilities::basic::portable_path_text;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -272,7 +273,7 @@ fn load_canonical_case_specs_at(
     )?;
     let manifest_relative_path = manifest_case
         .as_ref()
-        .map(|case| normalize_manifest_relative_path(&case.path))
+        .map(|case| portable_path_text(&case.path))
         .unwrap_or_else(|| {
             fixture_root
                 .file_name()
@@ -348,10 +349,6 @@ fn load_canonical_case_specs_at(
     }
 
     Ok(case_specs)
-}
-
-fn normalize_manifest_relative_path(path: &Path) -> String {
-    path.to_string_lossy().replace('\\', "/")
 }
 
 fn merge_flags(default_flags: Vec<Flag>, extra_flags: Vec<Flag>) -> Vec<Flag> {

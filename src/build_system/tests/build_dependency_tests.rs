@@ -4,7 +4,7 @@
 
 use super::*;
 use crate::build_system::build::{ProjectBuilder, build_project};
-use crate::compiler_frontend::utilities::basic::normalize_path;
+use crate::compiler_frontend::utilities::basic::{normalize_path, portable_path_text};
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use std::fs;
 
@@ -78,7 +78,7 @@ fn build_html_project_local_js_import_emits_generated_glue() {
         .output_files
         .iter()
         .find_map(|file| {
-            let path = file.relative_output_path().to_string_lossy();
+            let path = portable_path_text(file.relative_output_path());
             if !path.contains("_moth/js/glue/") {
                 return None;
             }
@@ -272,7 +272,7 @@ fn build_html_project_unreachable_provider_js_import_does_not_emit_runtime_artif
     assert!(
         !output_paths
             .iter()
-            .any(|path| path.to_string_lossy().contains("_moth/js/glue/")),
+            .any(|path| portable_path_text(path).contains("_moth/js/glue/")),
         "unreachable provider-created JS calls should not emit generated glue"
     );
     assert!(
@@ -343,13 +343,13 @@ fn build_html_project_unreachable_html_canvas_helper_dependency_does_not_emit_ru
     assert!(
         !output_paths
             .iter()
-            .any(|path| path.to_string_lossy().starts_with("_moth/js/canvas-")),
+            .any(|path| portable_path_text(path).starts_with("_moth/js/canvas-")),
         "unused @html canvas helper should not emit the built-in canvas asset"
     );
     assert!(
         !output_paths
             .iter()
-            .any(|path| path.to_string_lossy().contains("_moth/js/glue/")),
+            .any(|path| portable_path_text(path).contains("_moth/js/glue/")),
         "unused @html canvas helper should not emit generated glue"
     );
     assert!(
@@ -399,7 +399,7 @@ fn build_html_project_web_canvas_emits_builtin_js_asset_and_glue() {
         .output_files
         .iter()
         .find_map(|file| {
-            let path = file.relative_output_path().to_string_lossy();
+            let path = portable_path_text(file.relative_output_path());
             if !path.starts_with("_moth/js/canvas-") {
                 return None;
             }
@@ -420,7 +420,7 @@ fn build_html_project_web_canvas_emits_builtin_js_asset_and_glue() {
         .output_files
         .iter()
         .find_map(|file| {
-            let path = file.relative_output_path().to_string_lossy();
+            let path = portable_path_text(file.relative_output_path());
             if !path.contains("_moth/js/glue/") {
                 return None;
             }
@@ -502,7 +502,7 @@ fn build_html_project_html_canvas_helper_emits_builtin_js_asset_and_glue() {
         .output_files
         .iter()
         .find_map(|file| {
-            let path = file.relative_output_path().to_string_lossy();
+            let path = portable_path_text(file.relative_output_path());
             if !path.starts_with("_moth/js/canvas-") {
                 return None;
             }
@@ -520,7 +520,7 @@ fn build_html_project_html_canvas_helper_emits_builtin_js_asset_and_glue() {
         .output_files
         .iter()
         .find_map(|file| {
-            let path = file.relative_output_path().to_string_lossy();
+            let path = portable_path_text(file.relative_output_path());
             if !path.contains("_moth/js/glue/") {
                 return None;
             }

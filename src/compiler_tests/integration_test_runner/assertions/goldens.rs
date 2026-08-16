@@ -6,6 +6,7 @@
 use super::super::FailureKind;
 use super::super::types::{GoldenExpectation, GoldenFile, GoldenFileInventory, GoldenMode};
 use crate::build_system::build::{BuildResult, FileKind};
+use crate::compiler_frontend::utilities::basic::portable_path_text;
 use std::fs;
 use std::path::Path;
 
@@ -161,7 +162,7 @@ fn visit_golden_directory(
             )
         })?;
         files.push(GoldenFile {
-            relative_path: relative_path.to_string_lossy().replace('\\', "/"),
+            relative_path: portable_path_text(relative_path),
             absolute_path: path,
         });
     }
@@ -285,7 +286,7 @@ fn validate_expected_artifact_paths(
 
     let mut expected = expected_paths
         .iter()
-        .map(|path| super::super::normalize_relative_path_text(path))
+        .map(portable_path_text)
         .collect::<Vec<_>>();
     expected.sort();
 

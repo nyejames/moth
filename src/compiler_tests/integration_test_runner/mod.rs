@@ -20,7 +20,6 @@ mod types;
 mod tests;
 
 pub(crate) use runner::run_all_test_cases;
-pub(crate) use runner::{normalize_relative_path, normalize_relative_path_text};
 pub use types::IntegrationRunSummary;
 
 pub(crate) use types::{

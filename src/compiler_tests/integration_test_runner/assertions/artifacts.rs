@@ -5,10 +5,9 @@
 //! WHY: all output lookup belongs here so golden, rendered-output and Wasm checks inspect the
 //!      same normalized set of emitted artifacts.
 
-use super::super::{
-    ArtifactAssertion, ArtifactKind, normalize_relative_path, normalize_relative_path_text,
-};
+use super::super::{ArtifactAssertion, ArtifactKind};
 use crate::build_system::build::{BuildResult, FileKind, OutputFile};
+use crate::compiler_frontend::utilities::basic::portable_path_text;
 
 pub(super) fn validate_artifacts_must_not_exist(
     build_result: &BuildResult,
@@ -256,7 +255,7 @@ pub(super) fn collect_built_artifact_paths(build_result: &BuildResult) -> Vec<St
         .output_files
         .iter()
         .filter(|output| !matches!(output.file_kind(), FileKind::NotBuilt))
-        .map(|output| normalize_relative_path(output.relative_output_path()))
+        .map(|output| portable_path_text(output.relative_output_path()))
         .collect::<Vec<_>>();
     actual_paths.sort();
     actual_paths
@@ -266,11 +265,11 @@ pub(super) fn find_output_file<'a>(
     build_result: &'a BuildResult,
     relative_path: &str,
 ) -> Option<&'a OutputFile> {
-    let normalized_target = normalize_relative_path_text(relative_path);
+    let normalized_target = portable_path_text(relative_path);
 
     build_result.project.output_files.iter().find(|output| {
         !matches!(output.file_kind(), FileKind::NotBuilt)
-            && normalize_relative_path(output.relative_output_path()) == normalized_target
+            && portable_path_text(output.relative_output_path()) == normalized_target
     })
 }
 

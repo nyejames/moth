@@ -9,6 +9,7 @@ use crate::compiler_frontend::compiler_messages::render::{
     relative_display_path_from_root, render_payload, resolve_source_file_path,
 };
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticSeverity};
+use crate::compiler_frontend::utilities::basic::portable_path_text;
 #[cfg(test)]
 use std::path::Path;
 
@@ -42,7 +43,10 @@ fn render_source_frame(
     // Use a simple file:// link to the resolved source path. The terminal
     // renderer works fine with this; browser-hosted dev-server links are a
     // follow-up once a cross-environment open strategy is settled.
-    let file_href = format!("file://{}", escape_html(&resolved_path.to_string_lossy()));
+    let file_href = format!(
+        "file://{}",
+        escape_html(&portable_path_text(&resolved_path))
+    );
 
     // Read the source line for the source frame. Missing files are handled gracefully.
     let source_line_index = diagnostic.primary_location.start_pos.line_number.max(0) as usize;

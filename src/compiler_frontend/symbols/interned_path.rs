@@ -7,6 +7,7 @@
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
+use crate::compiler_frontend::utilities::basic::portable_path_text;
 use std::path::{Path, PathBuf};
 
 /// An efficient path representation using interned string components.
@@ -259,7 +260,7 @@ impl InternedPath {
     /// Render with forward slashes so string output is deterministic across OSes.
     /// This is the preferred renderer for compiler logic, snapshots, and tests.
     pub fn to_portable_string(&self, string_table: &StringTable) -> String {
-        self.to_native_string(string_table).replace('\\', "/")
+        portable_path_text(self.to_path_buf(string_table))
     }
 
     pub fn to_string(&self, string_table: &StringTable) -> String {

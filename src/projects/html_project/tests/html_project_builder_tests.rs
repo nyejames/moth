@@ -17,6 +17,7 @@ use crate::compiler_frontend::paths::compile_time_paths::{
     CompileTimePathBase, CompileTimePathKind,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::utilities::basic::portable_path_text;
 use crate::compiler_tests::test_support::temp_dir;
 use crate::projects::html_project::tests::test_support::{
     RenderedPathUsageInput, add_reachable_external_import, collect_output_paths,
@@ -333,7 +334,7 @@ fn js_runtime_asset_emitted_verbatim() {
 
     let js_paths: Vec<_> = collect_output_paths(&project.output_files)
         .into_iter()
-        .filter(|p| p.to_string_lossy().contains("_moth/js/"))
+        .filter(|p| portable_path_text(p).contains("_moth/js/"))
         .collect();
     assert_eq!(
         js_paths.len(),
@@ -398,7 +399,7 @@ fn js_runtime_asset_deduped_across_modules() {
 
     let js_count = collect_output_paths(&project.output_files)
         .iter()
-        .filter(|p| p.to_string_lossy().contains("_moth/js/"))
+        .filter(|p| portable_path_text(p).contains("_moth/js/"))
         .count();
     assert_eq!(
         js_count, 1,
@@ -457,7 +458,7 @@ fn js_runtime_assets_with_same_stem_get_distinct_output_paths() {
 
     let js_paths: Vec<_> = collect_output_paths(&project.output_files)
         .into_iter()
-        .filter(|p| p.to_string_lossy().contains("_moth/js/"))
+        .filter(|p| portable_path_text(p).contains("_moth/js/"))
         .collect();
     assert_eq!(
         js_paths.len(),
@@ -505,7 +506,7 @@ fn non_js_runtime_asset_is_ignored() {
 
     let has_js_assets = collect_output_paths(&project.output_files)
         .iter()
-        .any(|p| p.to_string_lossy().contains("_moth/js/"));
+        .any(|p| portable_path_text(p).contains("_moth/js/"));
     assert!(
         !has_js_assets,
         "non-JS runtime assets should not be emitted as JS"
@@ -984,7 +985,10 @@ fn build_backend_rejects_conflicting_tracked_asset_output_paths() {
     let InvalidConfigReason::TrackedAssetOutputConflict { output_path, .. } = reason else {
         panic!("expected tracked-asset output conflict config reason");
     };
-    assert_eq!(error.string_table.resolve(*output_path), "assets/logo.png");
+    assert_eq!(
+        portable_path_text(error.string_table.resolve(*output_path)),
+        "assets/logo.png"
+    );
 
     fs::remove_dir_all(&root).expect("should remove temp dir");
 }
