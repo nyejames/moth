@@ -122,6 +122,10 @@ Integration tests written in Moth are the default for user-visible language beha
 - Prefer realistic end-to-end snippets.
 - Tests should remain understandable without reading the implementation first.
 - Do not make exact internal layout contractual unless that layout is the invariant.
+- When tests compare or report paths, use the shared `portable_path_text` normalisation helper
+  instead of raw or native path strings. Keep `Path` or `PathBuf` values for filesystem
+  operations, converting to portable text only at assertion or display boundaries so tests
+  remain robust across platforms.
 
 ### Test ownership
 
