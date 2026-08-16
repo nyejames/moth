@@ -65,18 +65,23 @@ profile-symbolicated filter="terse":
 profile-case-symbolicated case filter="terse":
     cargo run --package xtask --bin xtask -- bench-profile --case {{case}} --filter {{filter}} --presymbolicate
 
+[unix]
 profile-build:
     RUSTFLAGS="-C force-frame-pointers=yes" cargo build --profile profiling --features detailed_timers --bin moth
+
+[windows]
+profile-build:
+    $env:RUSTFLAGS = "-C force-frame-pointers=yes"; cargo build --profile profiling --features detailed_timers --bin moth
 
 ci-clippy:
     rustc +1.95.0 -vV
     cargo +1.95.0 clippy -V
 
     @echo "clippy: native host"
-    CARGO_TARGET_DIR=target/ci-clippy-native cargo +1.95.0 clippy --workspace --all-targets --all-features -- -D warnings
+    cargo +1.95.0 clippy --target-dir target/ci-clippy-native --workspace --all-targets --all-features -- -D warnings
 
     @echo "clippy: linux x64"
-    CARGO_TARGET_DIR=target/ci-clippy-linux cargo +1.95.0 clippy --workspace --target x86_64-unknown-linux-gnu --all-targets --all-features -- -D warnings
+    cargo +1.95.0 clippy --target-dir target/ci-clippy-linux --workspace --target x86_64-unknown-linux-gnu --all-targets --all-features -- -D warnings
 
     @echo "clippy: windows x64"
-    CARGO_TARGET_DIR=target/ci-clippy-windows cargo +1.95.0 clippy --workspace --target x86_64-pc-windows-msvc --all-targets --all-features -- -D warnings
+    cargo +1.95.0 clippy --target-dir target/ci-clippy-windows --workspace --target x86_64-pc-windows-msvc --all-targets --all-features -- -D warnings
