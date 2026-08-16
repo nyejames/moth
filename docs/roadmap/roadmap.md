@@ -16,12 +16,12 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 ## Queued implementation chain
 
 - [CFG timers fixes](./plans/command-timing-accounting-and-reporting-correction-plan.md)
-- [Constant folding optimisations](./plans/constant-folding-and-type-system-hot-path-optimization-plan.md)
+- [Constant evaluation, static control-flow specialisation and type-system architecture](./plans/constant-folding-and-type-system-hot-path-optimization-plan.md)
 - [Path values and resource linking](./plans/path-values-and-resource-linking-plan.md)
 - [Growable collections infallability](./plans/collection-push-fallibility-split-plan.md)
 - [Anonymous const records](./plans/anonymous-const-records-plan.md)
 - [Project config and recursive schemas](./plans/project-config-and-recursive-schemas-plan.md)
-- [Imported build values and project globals](./plans/imported-build-values-and-project-globals-plan.md)
+- [Build configuration values and project globals](./plans/build-configuration-values-and-project-globals-plan.md)
 - [Diagnostics and tokens optimised memory layout plan](./plans/compiler-source-token-and-diagnostic-data-layout-plan.md)
 - Improve the `tmp/test_brackets.mtf` error example.
 - [Compiler diagnostics improvements](./plans/compiler-diagnostics-improvement-plan.md)
@@ -186,6 +186,7 @@ These surfaces are intentionally not roadmap items unless the language philosoph
 - First-class public `Result` values, exceptions, reflection and runtime type IDs, broad type-level programming, higher-kinded types, parameterized aliases, partial type application, and general macro systems.
 - User-defined cast targets, generic cast targets, external opaque cast targets, generic cast traits, and broad return-type-directed conversion.
 - General closures, anonymous function values, generic function values, and higher-order polymorphism. Reactivity is the constrained UI-oriented mechanism intended to cover many closure-heavy UI patterns without adding general function-value semantics.
+- Source-level target, OS, architecture or backend introspection; target-conditioned imports, declarations, exports and implementation branches; builders own target selection and platform-specific lowering, and `#Config` is not an escape hatch for target identity.
 
 ---
 

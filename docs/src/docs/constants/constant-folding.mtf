@@ -33,8 +33,7 @@ Same-file constant evaluation follows source order.
 
 A same-file forward reference is invalid.
 
-Cross-file constant dependencies are represented in the top-level dependency
-graph and evaluated in dependency order.
+Cross-file constant dependencies are represented in the top-level dependency graph and evaluated in dependency order.
 
 Circular constant dependencies are compilation errors.
 
@@ -50,8 +49,7 @@ Examples:
 - `Float -> String` uses Moth's stable formatter
 - compile-time and runtime template interpolation use the same Float formatting
 
-The compiler must not accept one result during folding and produce another at
-runtime.
+The compiler must not accept one result during folding and produce another at runtime.
 
 ### Advisory const facts
 
@@ -63,3 +61,11 @@ Those facts do not:
 - create dependency-bindable declarations
 - participate in header dependency sorting
 - turn a runtime binding into a source constant
+
+### Static Bool control flow
+
+An ordinary `if` condition may fold to a known `Bool`. Both branches first parse, resolve and type-check as normal source. Stage 4 then selects one branch, preserving the selected branch's lexical scope; inactive executable work does not reach HIR or later analysis. Runtime conditions remain runtime branches.
+
+This is not target conditional compilation. `#Config of Bool` will later feed the same general folded constant and ordinary-`if` mechanism. Advisory const facts do not create source constants or structural conditional compilation.
+
+Static Bool branch removal is accepted deferred until the constant-evaluation plan lands.

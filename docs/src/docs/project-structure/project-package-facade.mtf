@@ -53,7 +53,7 @@ A dependency package exposes its facade and immutable artefacts to consumers. Co
 
 No declaration exposed through a dependency package facade may directly or transitively depend on that dependency's private `@project`. Private declarations may use the dependency's own `@project` only when no external package export can reach or expose them.
 
-Imported build-value namespaces are scoped to one project or package compilation boundary. A consuming command's unqualified CLI or programmatic inputs don't implicitly satisfy a dependency's `#Import` contracts.
+Build-configuration namespaces are scoped to one project or package compilation boundary. A consuming command's unqualified CLI or programmatic inputs don't implicitly satisfy a dependency's `#Config` contracts.
 
 ### Related concepts
 

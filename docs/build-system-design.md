@@ -29,7 +29,7 @@ refactors or thorough reviews.
 | Task | Read in this document | Also read when affected |
 |---|---|---|
 | Command selection, builder capabilities or tooling overlays | `Selected command and capability surface`; `Command and tooling policies` | The compiler sections for any new semantic capability or validation root |
-| `config.moth`, project fields, `#Import`, `@project`, builder sections, entry config or bootstrap order | `Project bootstrap` and the exact relevant subsection | `docs/compiler-design-overview.md` > `Frontend stages > Stage 4: AST semantics > Constants, build inputs and const records` when compiler folding or handoff changes |
+| `config.moth`, project fields, `#Config`, `@project`, builder sections, entry config or bootstrap order | `Project bootstrap` and the exact relevant subsection | `docs/compiler-design-overview.md` > `Frontend stages > Stage 4: AST semantics > Constants, build configuration values and const records` when compiler folding or handoff changes |
 | Source discovery, ownership, semantic source sets, check-only units or source preparation | `Source indexing and source sets`; `Prepared-source orchestration` | `docs/compiler-design-overview.md` > `Compiler input and result boundary` and the relevant Stage 1 to Stage 3 section |
 | Module roots, dependency topology, support packages, project facades, namespaces or package classification | `Project and package topology` and the exact relevant subsection | The canonical unsuffixed project-structure and package language references |
 | Dependency, Core or Builder source package graphs | `Project and package topology > Dependency package graphs` or `Core and Builder source package graphs` | Compiler public-interface, provenance, fingerprint and generated-function sections |
@@ -55,6 +55,11 @@ refactors or thorough reviews.
 - Entry activation, package assembly and backend partitioning never trigger deferred source compilation.
 - Project builders consume compiled graphs and explicit link plans. They do not rediscover source structure.
 - The build system owns output validation, writing, manifests and stale cleanup.
+- Build configuration may specialise executable behaviour, but it cannot change source discovery, semantic source sets, dependency graphs, declaration or export existence, or package topology.
+- Source semantics remain target and platform agnostic.
+- Builders and backend capability metadata map stable source semantics to target-specific artefacts.
+- Builders must not expose target identity through `#Config`.
+- A statically decided Bool `if` is specialised by Stage 4 before HIR and downstream executable analysis.
 - Parallel scheduling, reuse and caching preserve deterministic identities, diagnostics and output order.
 
 ## Selected command and capability surface
@@ -86,6 +91,11 @@ The selected builder exposes a bootstrap capability surface before config compil
 - target-affinity and capability metadata
 
 Frontend-owned directives and compiler-owned builtins are added to this surface. A builder cannot replace them.
+
+Explicit command inputs are parsed into typed primitive values before config or source contracts are
+matched. Programmatic command APIs construct the same typed carrier. Builder-provided primitive globals
+must express stable semantic configuration; target or platform identity is not a valid builder-provided
+`#Config` global. Target intent remains build-system input and is not source-visible configuration.
 
 One artefact builder runs per `build` or `dev` invocation. Tooling overlays extend analysis and validation. They do not become competing artefact builders.
 
@@ -148,7 +158,7 @@ default_channel #= "alpha"
 
 project #= |
     name = "moth_docs",
-    version #Import of String = "0.1.0",
+    version #Config of String = "0.1.0",
     entry_root = "src",
     metadata = |
         channel = default_channel,
@@ -183,11 +193,11 @@ Project fields follow ordinary anonymous-record initializer rules. They do not g
 
 The completed `project` record must be available before a builder or tooling section references it.
 
-### Direct project `#Import` fields
+### Direct project `#Config` fields
 
-A direct primitive or optional field of `project` may declare a build-input contract.
+A direct primitive or optional field of `project` may declare a build-config contract.
 
-Accepted imported-value types are:
+Accepted build-configuration value types are:
 
 - `String`
 - `Int`
@@ -196,11 +206,12 @@ Accepted imported-value types are:
 - `Char`
 - optional forms of those types
 
-Nested project fields cannot declare `#Import`. Nested project fields do not provide unqualified source input values.
+Nested project fields cannot declare `#Config`. Nested project fields do not provide unqualified source input values.
 
-`#Import` is constant-source syntax rather than a source dependency clause or wrapper type.
+`#Config` is a compiler-owned qualifier on a compile-time declaration. It is not a type constructor,
+source dependency clause or wrapper type. The semantic type of `value #Config of T` is `T`.
 
-A direct project `#Import` value resolves in this order:
+A direct project `#Config` value resolves in this order:
 
 1. explicit CLI or programmatic build input
 2. builder-provided primitive global
@@ -211,7 +222,44 @@ Resolution happens during config compilation before Stage 0 applies fields such 
 
 Project defaults may use the ordinary allowed single-file config constant surface. Their final folded value becomes part of the project-wide contract.
 
-A fixed direct project field is not a `#Import` contract. When a same-name source `#Import` uses the same primitive type and optionality, the fixed field is its authoritative provider and blocks CLI override. Same-name source declarations must still agree with each other on required or default state and on the normalised default value.
+A fixed direct project field is not a `#Config` contract. When a same-name source `#Config` uses the same primitive type and optionality, the fixed field is its authoritative provider and blocks CLI override. Same-name source declarations must still agree with each other on required or default state and on the normalised default value.
+
+### Command build-input typing
+
+The command accepts repeated `--input name=value` arguments. The command parser types each value
+immediately, before any project or source contract is discovered:
+
+1. Split at the first `=` and preserve every later `=` in the value.
+2. Validate the input name as lower_snake_case.
+3. Infer exact lowercase `true` and `false` as `Bool`.
+4. Infer a complete valid signed Moth whole-number literal as `Int`.
+5. Infer a complete valid Moth decimal-point or exponent literal as `Float`.
+6. Infer a complete valid single-quoted Moth character literal as `Char`.
+7. Infer a complete valid double-quoted Moth string literal as `String`.
+8. Infer every other value, including empty text after `name=`, as `String`.
+
+If a value starts with a quote, it must be a complete valid quoted literal. A malformed quoted
+literal is a command-input diagnostic, not a String fallback. The shared `numeric_text` grammar and
+materialisation helpers own numeric validation; whole-number overflow and invalid or non-finite
+Float materialisation are rejected.
+
+Bare `none` is String text. Optional absence comes from omission and contract/default resolution. A
+concrete `T` input may satisfy a matching `T?` contract as a present value. No other coercion occurs;
+in particular, `Int` does not satisfy `Float`.
+
+Use explicit quotes to force an ambiguous String:
+
+```bash
+moth build . --input analytics=true
+moth build . --input retries=4
+moth build . --input ratio=0.75
+moth build . --input api_url=https://example.com
+moth build . --input 'label="true"'
+moth build . --input "separator=':'"
+```
+
+Programmatic command APIs construct the same typed carrier and do not define another conversion
+policy.
 
 ### `ProjectGlobalsInterface` and `@project`
 
@@ -249,9 +297,9 @@ Internal project modules may expose declarations derived from project values. Th
 
 Project field dependencies are recorded at field granularity. A field change invalidates only semantic, implementation, root or link facts that actually depend on it.
 
-### Source `#Import` contracts
+### Source `#Config` contracts
 
-Source `#Import` is intentionally narrow so every project-wide contract can be validated before module AST compilation.
+Source `#Config` is intentionally narrow so every project-wide contract can be validated before module AST compilation.
 
 A source declaration may use only the accepted primitive or optional types listed for project fields.
 
@@ -275,14 +323,14 @@ Source defaults cannot contain:
 - a field projection
 - a collection
 - a record
-- another imported value
+- another resolved build configuration value
 
 This restriction is deliberate. Stage 0 does not run a second general constant evaluator before AST.
 
 Header syntax preparation normalises each source contract into a small build-input shape:
 
 ```rust
-pub struct SourceBuildInputContract {
+pub struct SourceBuildConfigContract {
     pub name: BuildInputName,
     pub value_type: BuildInputType,
     pub required: bool,
@@ -307,17 +355,26 @@ Different defaults are conflicting contracts.
 The project-wide resolution order is:
 
 1. a compatible fixed direct project field, which is authoritative and cannot be overridden
-2. a resolved direct project `#Import` field
+2. a resolved direct project `#Config` field
 3. explicit CLI or programmatic input for a source-only contract
 4. a builder-provided primitive global
 5. the shared source default
 6. a missing-input diagnostic
 
-A direct project `#Import` contract and every same-name source contract must still agree before the resolved project value is supplied to source modules.
+A direct project `#Config` contract and every same-name source contract must still agree before the resolved project value is supplied to source modules.
 
 Unknown explicit inputs are diagnosed only after every selected source contract is known.
 
-The resolved value enters module AST as an ordinary folded constant. It creates no runtime wrapper or HIR category.
+The resolved value enters module AST as an ordinary folded constant. It creates no runtime wrapper,
+dependency symbol category, HIR node or new visibility rule.
+
+### Static Bool executable specialisation
+
+`#Config of Bool` uses ordinary `if`; no `#Config if` syntax exists. Both branches complete Stage 4
+frontend validation before a known Bool selects the executable branch. The selected branch keeps its
+lexical scope. Only active executable work reaches HIR and downstream generated-function, borrow,
+lifetime, link, target and backend systems. Static selection changes executable facts, not source
+structure or graph topology. See the compiler authority for the exact Stage 4 ownership contract.
 
 ### Builder and tooling sections
 
@@ -345,7 +402,7 @@ This permits one config file to contain future or inactive sections without load
 
 Duplicate section names are rejected. A section name cannot collide with another top-level constant.
 
-Builder and tooling sections cannot declare `#Import` fields. They consume already folded project values and use backend-neutral folded values rather than builder-specific nominal types.
+Builder and tooling section fields cannot declare `#Config`. They consume already folded project values and use backend-neutral folded values rather than builder-specific nominal types. This is a permanent ownership boundary.
 
 Project and entry schemas do not share fields. There is no `ProjectAndEntry` or equivalent shared-scope escape hatch. Project and entry settings do not implicitly inherit, merge or override one another.
 
@@ -368,14 +425,14 @@ Placement rules:
 
 The block contains section records only.
 
-Dependency clauses, aliases, helper constants, support types and source `#Import` declarations live outside the block in the normal root file.
+Dependency clauses, aliases, helper constants, support types and source `#Config` declarations live outside the block in the normal root file.
 
 The block uses the root file's ordinary compile-time visibility. It may reference:
 
 - dependency-bound constants
 - `@project`
 - same-file constants declared before the block
-- resolved source `#Import` constants
+- resolved source `#Config` constants
 - foldable local const-record types
 - selected-builder compile-time values available through normal module dependency clauses
 
@@ -403,15 +460,20 @@ The command and bootstrap flow is:
 
 ```text
 select command, artefact builder, build profile and tooling overlays
+-> parse explicit command inputs into typed primitive values
 -> construct compiler and builder bootstrap capability surface
 -> compile and validate config
+-> resolve direct project #Config values
 -> derive entry_root and @project
 -> build the canonical source index and provider graphs
--> resolve build-input contracts
+-> collect and resolve selected source #Config contracts
 -> compile dependency-ordered waves
    -> bind provider interfaces
    -> order local declarations
    -> run AST semantics
+      -> validate both ordinary-if branches
+      -> specialise known Bool control flow
+      -> commit active generated requests and executable summaries
    -> lower and validate HIR
    -> borrow-validate
    -> produce local lifetime constraints, lifetime facts and exported summaries
@@ -423,7 +485,11 @@ select command, artefact builder, build profile and tooling overlays
 -> lower backend artefacts
 ```
 
-Config compilation tokenizes and parses one self-contained `config.moth`, orders config declarations, resolves direct project `#Import` sources while AST folds config, and validates the completed project record and active project sections. Inactive config sections are folded during config compilation even though their schemas are not active. Project config creates no source dependency graph.
+Config compilation tokenizes and parses one self-contained `config.moth`, orders config declarations,
+resolves direct project `#Config` sources while AST folds config, and validates the completed project
+record and active project sections. Inactive config sections are folded during config compilation even
+though their schemas are not active. Project config creates no source dependency graph. Source `#Config`
+resolution happens only after the selected graph exists; it does not affect graph construction.
 
 ## Source indexing and source sets
 
@@ -504,13 +570,17 @@ Prepared syntax may contain:
 - dependency clause shells
 - structural provider references
 - local declaration-ordering hints
-- source `#Import` contract shells
+- source `#Config` contract shells
 - dormant root activity shells
 - compile-time fragment placement metadata
 - diagnostics and warnings
 - deterministic string-table deltas or remap information
 
 Stage 0 consumes structural provider references to finalise graphs. It does not bind source symbols itself.
+
+Retained source `#Config` contract shells do not create structural provider edges, dependency symbol
+bindings or topology changes. Their later resolved values are consumed only by ordinary module AST
+semantics.
 
 When a provider interface is available, the compiler's interface-binding phase resolves retained dependency clauses into stable dependency symbol bindings and final visibility. Binding does not reparse source.
 
@@ -808,7 +878,7 @@ Persistent or precompiled dependency artefacts may later replace source compilat
 
 Package declaration syntax, registries, remote fetching, version solving and lockfiles remain deferred.
 
-Imported build-value namespaces are scoped to one project or package compilation boundary. A consuming command's unqualified CLI or programmatic inputs do not implicitly satisfy a dependency's #Import contracts. 
+Build-configuration namespaces are scoped to one project or package compilation boundary. A consuming command's unqualified CLI or programmatic inputs do not implicitly satisfy a dependency's `#Config` contracts.
 
 A dependency resolves its contracts from its own config, defaults and compatible builder-provided globals. No implicit cross-boundary input lookup or same-name inheritance is allowed.
 
@@ -979,6 +1049,10 @@ The worklist continues until no generated function requests another instance.
 
 Each successful generated sidecar entry carries its own generated-local type context, HIR, borrow facts, lifetime facts and summaries, link facts and fingerprints. It does not mutate a base module artefact.
 
+Only requests committed from the Stage 4 specialised active AST enter the project or package
+worklist. Generic calls in an inactive static branch are frontend-validated but do not cause
+materialisation or generated sidecar work.
+
 Cross-package instances belong to the consuming compilation. Dependency base artefacts remain immutable.
 
 A diagnosed generated request blocks only entries or package exports that require it. The build system does not expose a partial generated artefact.
@@ -1082,6 +1156,11 @@ HIR carries runtime code only. Compile-time fragments and document structure liv
 Modules without HTML artefact activity remain available to the graph but produce no route, runtime glue or tracked assets.
 
 ### Mixed-target planning and validation
+
+Source contains no target-selection annotations and cannot query whether a function will become
+JavaScript or Wasm. `#Config` cannot carry target or backend identity. Automatic partitioning and
+capability rejection are builder/compiler services over platform-agnostic source; builder capability
+surfaces expose stable semantics rather than physical target names.
 
 The fixed sequence is:
 
@@ -1307,6 +1386,12 @@ Entries relink or regenerate when a linked input changes, including:
 - active entry settings
 - project-field dependencies
 - backend config that affects partitioning or output
+
+Config-value dependencies participate in the existing public-interface, implementation,
+dormant-root, runtime-dependency and compatibility fingerprints. Static branch selection does not
+create a separate fingerprint family. Changing a Bool configuration value may change active
+implementation, effect, link or root facts, but it does not change source graph or declaration
+identity. Dependency artefacts include their own configuration namespace and provenance.
 
 Documentation-only changes regenerate documentation or editor indexes without invalidating semantic consumers or executable instances.
 

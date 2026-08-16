@@ -12,3 +12,6 @@ The root module is the home page. Each nested directory gets its own route.
 ### API-only modules
 
 A module with only exports and no page activity produces no HTML. Not every `@*.moth` file becomes a page.
+
+Source stays target agnostic: the builder may choose JavaScript, Wasm or mixed output and exposes stable
+capabilities without revealing which physical target implements them.

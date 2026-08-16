@@ -9,7 +9,7 @@
 
     project #= |
         name = "moth_docs",
-        version #Import of String = "0.1.0",
+        version #Config of String = "0.1.0",
         entry_root = "src",
         metadata = |
             channel = default_channel,
@@ -33,16 +33,16 @@
 - Inactive sections are parsed and folded, then discarded.
 - Project and entry schemas are separate with no shared fields.
 - Project fields may contain folded scalar values, optionals, nested anonymous const records, collections and folded template strings.
-- Builder sections use backend-neutral folded values and cannot declare `#Import`.
+- Builder sections use backend-neutral folded values and cannot declare `#Config`.
 - Output settings are builder-owned.
 
-### Direct project #Import fields
+### Direct project `#Config` fields
 
-A direct primitive or optional field of `project` may declare a build-input contract using `#Import of T`. Nested project fields cannot declare `#Import` contracts.
+A direct primitive or optional field of `project` may declare a build-config contract using `#Config of T`. Nested project fields cannot declare `#Config` contracts. The semantic type remains `T`; direct project fields only may use the qualifier.
 
-Accepted imported-value types are `String`, `Int`, `Float`, `Bool`, `Char` and optional forms of those types.
+Accepted build-configuration value types are `String`, `Int`, `Float`, `Bool`, `Char` and optional forms of those types.
 
-See @https://github.com/nyejames/moth/blob/main/docs/build-system-design.md (Build system design) for the full `#Import` and `@project` contract.
+See @#build-inputs (Build configuration values) for the full source and CLI contract. See @https://github.com/nyejames/moth/blob/main/docs/build-system-design.md (Build system design) for the build-system authority and `@project` contract.
 
 ### Rejected in config
 

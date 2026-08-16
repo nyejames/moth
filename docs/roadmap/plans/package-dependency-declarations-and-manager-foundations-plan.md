@@ -47,13 +47,14 @@ Do not infer activation from the presence of this file.
 - canonical project/package graph and immutable artefact architecture
 - dependency-clause and path-syntax migration
 - grouped project config and recursive schema support
-- imported build values and project-boundary isolation
+- build configuration values and project-boundary isolation
 - stable package, module, public-interface and capability fingerprints
 - completed HTML mixed-target backend boundary where required by package compatibility policy
 
 ## Required authorities
 
 - `docs/compiler-design-overview.md`
+- `docs/roadmap/plans/build-configuration-values-and-project-globals-plan.md`
 - `docs/build-system-design.md`
 - `docs/src/docs/codebase/language/overview.mtf`
 - canonical package and project-configuration references
@@ -93,6 +94,8 @@ The accepted design review must choose one of:
 Do not resurrect the removed source `import` grammar under a config-only exception without explicit user review.
 
 ## Locked ownership decisions
+
+`#Config` declares a typed build value. It does not declare, acquire, alias or conditionally enable a package dependency.
 
 ### Project dependency declarations
 

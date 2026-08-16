@@ -1,8 +1,7 @@
 # Build configuration values and project globals implementation plan
 
-> The repository path retains the earlier imported-build-values filename until the repository-wide
-> authority and cross-reference migration is committed. The accepted source spelling in this plan is
-> `#Config`. The former `#Import` spelling is superseded and must not be implemented.
+The former `#Import` spelling is superseded and must not be implemented or retained through
+compatibility syntax.
 
 ## Purpose
 
@@ -17,10 +16,10 @@ conditional-compilation system.
 ## Current-state capsule
 
 ```text
-ACTIVE_PLAN: docs/roadmap/plans/imported-build-values-and-project-globals-plan.md
+ACTIVE_PLAN: docs/roadmap/plans/build-configuration-values-and-project-globals-plan.md
 STATUS: queued
 CURRENT_SLICE: Phase 0 - refresh CLI, config-field, header-contract and synthetic-interface owners
-REVIEW_BASELINE: 36188886ebbd3864986732d2c455413dda64091b
+REVIEW_BASELINE: 9ff5c3c48ce17d6633ef000b01a34824b7de0f49
 LAST_GOOD_COMMIT: none until the first implementation slice is accepted
 BRANCH: main
 IMPLEMENTATION_SCOPE: CLI, config folding, header syntax, Stage 0 contract barrier, synthetic project interface
@@ -418,7 +417,7 @@ source or changing a dependency's public package semantics.
 - Inventory CLI parsing, grouped config fields, canonical reserved-name policy, header syntax, Stage 0
   source graphs, static Bool specialisation, dev rebuild state and synthetic-interface provenance.
 - Confirm project config, recursive schemas and Stage 4 static Bool `if` specialisation are accepted.
-- Inventory every remaining planned `#Import` spelling and separate source-authority migration from
+- Inventory every remaining former build-configuration source spelling and separate source-authority migration from
   executable implementation work.
 - Run baseline validation.
 
@@ -535,7 +534,7 @@ Review gate: there is one static-control-flow owner and it has no knowledge of `
 
 - Rename the roadmap plan to `build-config-values-and-project-globals-plan.md` once all repository
   references can move atomically.
-- Replace accepted `#Import` source examples and wording with `#Config`.
+- Replace accepted former source examples and wording with `#Config`.
 - Add migration diagnostics only if current implemented syntax requires them when this plan lands.
 - Add integration cases for project, source, CLI inference, static-`if` integration and boundary
   isolation contracts.

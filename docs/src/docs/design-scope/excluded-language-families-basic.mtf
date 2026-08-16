@@ -26,6 +26,11 @@ Operators in Moth always do the same thing. You can't redefine `+` or
 You can't inspect types at runtime or write code that examines other code's
 structure. This keeps programs predictable and easy to read.
 
+### No platform-specific source branches
+
+Moth code does not ask whether it is compiling for an operating system, architecture, JavaScript or
+Wasm. Builders handle that choice.
+
 ### No explicit lifetime and ownership type system
 
 Moth keeps lifetime and ownership rules behind the compiler. Source code uses

@@ -78,9 +78,11 @@ html #= |
 *Caption: exact design boundary.*
 *Question: what does config produce that Stage 0 can consume?*
 
-## Build inputs and `@project`
+## Build configuration values and `@project`
 
-Direct primitive fields of `project` may declare a build-input contract with `#Import`. Accepted types stay narrow: `String`, `Int`, `Float`, `Bool`, `Char` and optional forms of those.
+Direct primitive fields of `project` may declare a build-config contract with `#Config of T`. The qualifier is compiler-owned and the semantic type remains `T`. Accepted types stay narrow: `String`, `Int`, `Float`, `Bool`, `Char` and optional forms of those.
+
+Command and programmatic inputs are typed immediately as concrete primitives before source contracts are checked. Exact `true` and `false` become `Bool`, complete whole numbers become `Int`, decimal or exponent forms become `Float`, quoted characters become `Char`, quoted strings become `String`, and every other value falls back to `String`. Explicit quoted strings force ambiguous text such as `"true"`; malformed quoted literals are diagnostics. Omitting an input is how optional absence resolves to `none`.
 
 Resolution order:
 
@@ -96,6 +98,9 @@ That interface carries stable field identities, folded backend-neutral values, s
 Normal modules may bind `@project` explicitly. Nothing injects it silently. Child modules, dependency aliases and packages cannot steal the `@project` root. Direct re-export of `@project` is forbidden.
 
 For the greeting walkthrough, record the values Stage 0 needs for entry discovery: project name, entry root and builder sections. Those folded facts bridge files on disk to a project the graph can name.
+
+Resolved source `#Config` values later become ordinary folded constants. They use ordinary `if` for
+static Bool specialisation; there is no `#Config if` and no config-specific HIR node.
 
 **Diagram placeholder:** Resolved project fields enter ordinary module compilation through an immutable interface
 
@@ -124,11 +129,12 @@ Draw the line early and keep it sharp.
 
     [td:
         [: Builder]
-        [: assembles successful artefacts into project-shaped outputs after compilation succeeds]
+        [: assembles successful artefacts into project-shaped outputs after compilation succeeds and maps stable source semantics to platform-specific artefacts]
     ]
 ]
 
 The compiler does not wander the filesystem inventing a project. The builder does not re-parse `@page.moth` to rediscover `greet`. Each stage trusts the previous owner's facts.
+The command/build system owns target intent; source does not observe physical target identity. Builders expose stable capabilities and choose the physical target and artefact form.
 
 ## What can fail here
 
@@ -152,7 +158,7 @@ When the walkthrough mentions config, label **current** versus **accepted** if t
 
 - **Accepted design:** one self-contained `config.moth` and a specialised `ProjectGlobalsInterface`.
 - **Current implementation:** label legacy flat config only where it changes the walkthrough.
-- **Queued work:** plans such as `import_values_anonymous_records_plan.md` and `entry-config-blocks-runtime-title-plan.md` still move pieces of the surface.
+- **Queued work:** `project-config-and-recursive-schemas-plan.md`, `build-configuration-values-and-project-globals-plan.md` and `entry-config-blocks-runtime-title-plan.md` own the direct split of this surface.
 - **Deferred or outside scope:** config dependencies and a general Moth build script system.
 
 ## Exit state

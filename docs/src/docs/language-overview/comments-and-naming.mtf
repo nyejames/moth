@@ -44,3 +44,20 @@ A visible name cannot be redeclared while it remains in scope.
 The complete no-shadowing contract is documented by
 @../bindings/#shadowing (Values and bindings). Dependency aliases and module API
 names have additional collision rules in the Packages documentation.
+
+### Reserved configuration names
+
+**Accepted deferred.** The `config` identifier family is compiler-reserved. Keyword-shadow matching
+is case-insensitive and strips leading underscores, so `config`, `Config`, `CONFIG`, `_config`,
+`_Config` and equivalent shadows cannot be user declarations. This reserves one vocabulary for
+`config.moth`, entry `config:` blocks and `#Config`.
+
+`import` is not a keyword. `Import` is an ordinary valid PascalCase user name:
+
+[codeblock, $code("moth"):
+    Import = |
+        source String,
+    |
+]
+
+Ordinary dependency clauses do not use an `import` keyword.

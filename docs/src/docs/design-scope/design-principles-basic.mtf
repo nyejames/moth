@@ -26,3 +26,9 @@ add a second way to do it.
 - the language keeps a small surface area
 - the compiler can resolve code statically
 - optimisations happen behind the scenes
+
+### Source stays platform-agnostic
+
+Authors write against Moth and builder-provided capabilities. The builder decides how those semantics
+become JavaScript, Wasm or another artefact; source does not test which target was selected. Build
+configuration is not target detection.

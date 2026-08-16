@@ -18,7 +18,23 @@ After checking and folding, it becomes a **backend-neutral compile-time value**.
 
 Constants are compile-time declarations and metadata, not runtime top-level statements. Const records may group fully folded struct or anonymous-record constants as field-access-only compile-time data. They are not runtime values to pass around.
 
-Imported build values and resolved source `#Import` primitives enter as ordinary folded constants. They create no runtime wrapper type and no special HIR node category.
+Resolved build configuration values and source `#Config` primitives enter as ordinary folded constants. They create no runtime wrapper type and no special HIR node category.
+
+## Static Bool control flow
+
+Stage 4 owns the boundary:
+
+[codeblock, $code("text"):
+fully checked authored AST
+-> constant evaluation
+-> known Bool branch selection
+-> active executable AST
+-> HIR
+]
+
+There is no config-specific branch node. Both branches are frontend-valid before selection, and only
+active generated requests and executable facts survive. HIR never redoes the decision, and Moth source
+has no platform-conditional source mechanism.
 
 **Diagram placeholder:** Authored string becomes a backend-neutral compile-time value
 
@@ -106,7 +122,7 @@ Do not re-teach diagnostic transport here. The semantic rejection is the point.
 
 - **Accepted design:** AST owns constants, generic inference, traits, casts and concrete requests.
 - **Current implementation:** label numeric and anonymous-record support from the progress matrix.
-- **Queued work:** `number_type_numeric_plan.md` and `import_values_anonymous_records_plan.md`.
+- **Queued work:** `number_type_numeric_plan.md`, `project-config-and-recursive-schemas-plan.md`, `build-configuration-values-and-project-globals-plan.md` and `entry-config-blocks-runtime-title-plan.md`.
 - **Deferred or outside scope:** trait objects and broad runtime reflection.
 
 ## Exit state

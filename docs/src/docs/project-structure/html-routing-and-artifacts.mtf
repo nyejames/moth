@@ -30,6 +30,10 @@ builder-neutral. The builder decides:
 - how output files are organised
 - whether to reject unsupported reachable features
 
+Source stays target agnostic. The HTML builder may choose JavaScript, Wasm or mixed output, but source
+cannot query or branch on that choice. Builder packages expose stable capabilities rather than target
+identity.
+
 ### Output folders
 
 The builder generates output folders and manages them through manifests.

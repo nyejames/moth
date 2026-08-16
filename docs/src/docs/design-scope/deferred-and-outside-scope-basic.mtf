@@ -16,6 +16,8 @@ nominal wrappers, but transparent aliases remain transparent either way.
 Some features conflict with Moth's design goals. The compiler rejects them, and
 the error message won't say "coming soon" because they aren't accepted work.
 
+Target-, OS-, architecture- and backend-specific source is outside scope, not deferred; builders own platform mapping.
+
 ### Why exclude features?
 
 Moth prefers:

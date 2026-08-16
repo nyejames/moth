@@ -24,5 +24,6 @@ Use block form when a branch needs more room:
 
 `then` provides the value for the surrounding assignment.
 
-Both branches must provide the value or leave the function through another
-valid path.
+Both branches must provide the value or leave the function through another valid path.
+
+When a condition is a known Bool, the same ordinary `if` can select one frontend-valid branch before HIR. Runtime conditions keep their normal behavior.

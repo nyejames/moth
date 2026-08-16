@@ -37,4 +37,4 @@ executable bodies. It creates no module symbols or runtime values.
 
 ### Related concepts
 
-- For build inputs see @#build-inputs (Build inputs).
+- For build configuration values see @#build-inputs (Build configuration values).

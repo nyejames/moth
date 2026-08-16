@@ -9,5 +9,14 @@ A constant can use another constant that is already available.
 
 It cannot use a runtime variable or call a runtime function.
 
-When a constant expression is invalid, the compiler reports it during the
-build instead of leaving the failure for runtime.
+When a constant expression is invalid, the compiler reports it during the build instead of leaving the failure for runtime.
+
+Static Bool `if` specialisation is accepted deferred until the constant-evaluation plan lands. It uses ordinary `if` syntax:
+
+[codeblock, $code("moth"):
+    enabled #Bool = false
+
+    if enabled:
+        perform_optional_work()
+    ;
+]

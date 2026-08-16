@@ -855,7 +855,7 @@ td {
  <td style="padding: 0.1em 0.5em; "> Partial</td>
  <td style="padding: 0.1em 0.5em; "> Targeted flat-config parsing, known-key validation, self-contained dependency-clause rejection and builder-section coverage.</td>
  <td style="padding: 0.1em 0.5em; "> Frontend / HTML</td>
- <td style="padding: 0.1em 0.5em; "> The current compiler supports the transitional flat config shape with parsing and validation implemented. Grouped <code>project</code> and builder records are accepted deferred design. <code>#Import</code>, <code>@project</code> and entry-local <code>config:</code> remain separately queued. The transitional <code>package_folders</code> field still parses for the queued Project Config migration, but canonical Stage 0 no longer consumes it for package discovery.</td>
+ <td style="padding: 0.1em 0.5em; "> The current compiler supports the transitional flat config shape with parsing and validation implemented. Grouped <code>project</code> and builder records are accepted deferred design. <code>#Config</code>, <code>@project</code> and entry-local <code>config:</code> remain separately queued. The transitional <code>package_folders</code> field still parses for the queued Project Config migration, but canonical Stage 0 no longer consumes it for package discovery.</td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">
@@ -1026,6 +1026,13 @@ td {
 
 
                 
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Static Bool <code>if</code> specialisation</td>
+ <td style="padding: 0.1em 0.5em; "> Deferred</td>
+ <td style="padding: 0.1em 0.5em; "> Current ordinary <code>if</code> parsing and HIR branch lowering are covered. The constant-evaluation plan owns intended-contract coverage for static branch removal.</td>
+ <td style="padding: 0.1em 0.5em; "> Both branches remain frontend-valid. A known Bool will select one branch before HIR. This uses ordinary <code>if</code>, not <code>#Config if</code>, and does not condition source structure.</td>
+        </tr>
 
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Post-TIR template performance follow-ups</td>

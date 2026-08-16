@@ -17,6 +17,20 @@ A statement `if` runs a block when its condition is `true`.
 - Statement `if` is non-exhaustive when no `else` is written.
 - A statement branch does not produce a value merely because its body contains expressions.
 
+### Compile-time-known conditions
+
+The ordinary `if` form is the only conditional source form; there is no new static-branch syntax. Both bodies are frontend-validated before a known `Bool` selects the executable body before HIR. The selected lexical scope remains intact, and inactive downstream compiler work is absent. An unknown `Bool` lowers normally.
+
+[codeblock, $code("moth"):
+    enabled #= false
+
+    if enabled:
+        perform_optional_work()
+    ;
+]
+
+`#Config of Bool` is another future source of the same folded value. Static Bool specialisation is accepted deferred until the constant-evaluation plan lands.
+
 ### No statement-level `else if`
 
 A same-line `else if` chain is not syntax.

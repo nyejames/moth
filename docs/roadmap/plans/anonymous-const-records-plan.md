@@ -24,7 +24,7 @@ Keep this block concise. Git history is the implementation record.
 - accepted canonical module and immutable public-interface architecture
 - stable source locations, semantic identities and folded-value ownership
 
-This plan must complete before grouped project config, imported build values and entry-local config blocks.
+This plan must complete before grouped project config, build configuration values and entry-local config blocks.
 
 ## Required authorities
 

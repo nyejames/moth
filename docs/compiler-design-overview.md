@@ -54,6 +54,11 @@ or thorough reviews.
 - Each semantic fact has one source owner. A later stage does not reconstruct the same fact from source or an earlier IR.
 - Module interfaces use stable semantic identities rather than donor-local indexes.
 - AST resolves constants, generic call inference, traits, casts and template semantics, then emits concrete generic requests. Generated functions are materialised, HIR-validated, borrow-validated and lifetime-analysed before backend handoff.
+- Stage 4 validates both branches of an ordinary `if` before static selection. A known compile-time Bool selects one branch before HIR, and the selected branch retains its lexical scope.
+- Terminality and durable generated requests are derived from the specialised active AST. An inactive static branch contributes no HIR or downstream executable facts.
+- HIR never receives an `if` whose condition is already a known compile-time Bool.
+- Build configuration cannot change Stage 0 graphs or declaration structure.
+- Source does not select or inspect physical targets.
 - TIR is AST-local. HIR receives folded strings or neutral owned runtime handoff data only.
 - HIR is the first backend-facing semantic IR. Borrow validation reads validated HIR and writes side tables without rewriting it.
 - Public semantic facts, executable state, backend-neutral link facts and compiler metadata are separate artefact lanes.
@@ -79,7 +84,7 @@ A canonical module compilation receives:
 - retained token and header-syntax preparation for every semantic source
 - graph-resolved provider identities and dependency-ordered provider interfaces
 - the namespace and capability surface selected for the project or package build
-- resolved build-input values and synthetic compile-time interfaces visible to the module
+- resolved build-configuration values and synthetic compile-time interfaces visible to the module
 - deterministic source identities and a diagnostic identity context
 
 Source preparation and provider binding are deliberately separate.
@@ -92,7 +97,7 @@ Source preparation and provider binding are deliberately separate.
 - structural provider references
 - local declaration-ordering hints
 - root-activity and fragment-placement metadata
-- source `#Import` contract shells
+- source `#Config` contract shells
 - source locations, diagnostics and remap information
 
 `BoundModuleHeaders` is produced when the build system schedules the module after its required providers have compiled. The compiler binds retained dependency clauses against immutable provider interfaces and produces:
@@ -447,6 +452,13 @@ It excludes private bodies, source locations, warnings, formatting-only metadata
 
 Covers executable body semantics and non-interface implementation facts that can change generated code. It includes private function bodies and bodies of exported functions when their public semantic facts remain unchanged.
 
+Generated requests and link facts come from active specialised executable control flow. Configuration
+dependencies use the existing fingerprint owners; they do not create a separate fingerprint family.
+Exported folded values or effect summaries may vary when they depend on configuration, with provenance
+retained, while structural public identity remains stable.
+Configuration conditions cannot create or remove declarations or exports. They may change active
+executable effects and derived link facts only.
+
 It excludes dormant root activity and generated sidecar bodies.
 
 ### Dormant root-activity fingerprint
@@ -489,7 +501,10 @@ A generated request is keyed by:
 - canonical concrete type identities
 - required evidence identities
 
-The declaring module owns and validates the immutable generic template. AST in a consumer emits requests. The build system deduplicates and schedules them. The compiler materialises each accepted request.
+The declaring module owns and validates the immutable generic template. AST in a consumer emits requests
+from the active specialised executable AST. Calls in inactive static branches may be frontend-validated
+but do not enter the generated-function worklist. The build system deduplicates and schedules requests.
+The compiler materialises each accepted request.
 
 Each generated function artefact owns:
 
@@ -557,11 +572,13 @@ It owns:
 - source-kind adapters that synthesise ordinary declarations
 - structural provider references
 - conservative local declaration-ordering hints
-- source `#Import` contract shells
+- source `#Config` contract shells
 
 Support roots and project package facades reject root runtime activity before executable HIR can be produced. Normal roots retain dormant start and fragment metadata.
 
 Syntax preparation does not type-check executable bodies, fold expressions or open source provider interfaces.
+
+`#Config` contract shells are not structural provider references and cannot affect Stage 0 edges.
 
 #### Interface binding
 
@@ -685,6 +702,20 @@ When accepted deferred `group` / `into` syntax is implemented, AST also owns par
 
 AST is defined by ownership and data flow rather than a fixed number of internal passes.
 
+The Stage 4 semantic sequence is:
+
+```text
+parse and type-check complete authored bodies
+-> fold constants and final compile-time expressions
+-> specialise known Bool `if`
+-> commit active generated requests and executable summaries
+-> validate terminality over active control flow
+-> hand the active AST to HIR
+```
+
+Both authored branches are frontend-valid before static selection. Inactive branches are not skipped
+during name, visibility, type, generic-evidence, cast or constant-expression validation.
+
 #### Dependencies and visibility
 
 AST consumes bound file visibility. It may validate semantic use of visible symbols but does not rebuild dependencies or discover top-level visibility.
@@ -722,15 +753,19 @@ AST owns receiving-context, arity and terminality diagnostics. Non-unit success 
 
 If HIR receives a non-unit function that can fall through, AST violated its contract and HIR reports an internal transformation error.
 
-#### Constants, build inputs and const records
+Both value-producing `if` branches must first satisfy normal completeness, receiving-arity and type
+rules. A known Bool then selects one validated branch, so no runtime branch or hidden merge value is
+needed. Runtime conditions retain the existing all-path rules.
+
+#### Constants, build configuration and const records
 
 Constants are compile-time declarations and metadata rather than runtime top-level statements.
 
 Header preparation owns local dependency discovery. AST owns semantic checking and folding.
 
-The build system resolves source `#Import` contracts before module AST compilation. Source defaults are deliberately restricted to self-contained primitive literals or `none`, as defined in `docs/build-system-design.md`. AST consumes the resolved primitive value and treats the declaration as an ordinary folded constant.
+The build system resolves source `#Config` contracts before module AST compilation. Source defaults are deliberately restricted to self-contained primitive literals or `none`, as defined in `docs/build-system-design.md`. AST consumes the resolved primitive value and treats the declaration as an ordinary folded constant.
 
-A source `#Import` declaration creates:
+A source `#Config` declaration creates:
 
 - no runtime wrapper type
 - no HIR node category
@@ -740,6 +775,23 @@ A source `#Import` declaration creates:
 A module folds each ordinary constant and const template once. Exported folded facts are copied into the immutable interface as owned backend-neutral values. Consumers never parse or fold provider templates again.
 
 Private inferred const facts are advisory optimisation metadata. They do not affect semantics, declaration ordering or visibility.
+
+#### Static Bool control-flow specialisation
+
+Static specialisation applies to ordinary statement and value-producing `if` forms and uses the normal
+folded Bool authority. It has no `#Config` special case and no config-specific branch node.
+
+- both branches are fully frontend-valid before selection
+- a known `true` selects the `then` branch
+- a known `false` selects the `else` branch or an empty scoped result when no `else` exists
+- the selected lexical scope is preserved
+- runtime or unknown conditions remain ordinary `if`
+- inactive calls do not publish generated requests
+- inactive code contributes no effect, project-context, link or target facts
+- no match folding, loop unrolling or general CFG partial evaluator is implied
+
+Terminality and durable executable summaries observe the specialised active AST. HIR receives no
+statically decided ordinary `if`; every `if` remaining in HIR has a runtime condition.
 
 Fully folded struct and anonymous-record constants may become const records. Const records are compile-time field-access-only groups. They are not runtime values and cannot be passed, returned, stored or used through runtime methods.
 
@@ -893,12 +945,18 @@ HIR does not:
 - reconstruct slot or render plans
 - carry TIR
 - carry compile-time page fragments
+- receive a statically decided ordinary `if`
+- evaluate `#Config`
+- choose target- or platform-specific source branches
 - solve generic arguments
 - decide trait conformance
 - carry runtime trait evidence
 - decide final runtime ownership
 - model exact lifetimes
 - assemble routes or project artefacts
+
+Every `if` remaining in HIR has a runtime condition. Static Bool branch selection is complete before
+HIR and is never redone by HIR or a backend.
 
 Plain binary operations remain valid for booleans and comparisons. Runtime template string construction lowers through explicit string append operations. Runtime scalar arithmetic and unary negation lower through explicit checked numeric statements. HIR validation rejects arithmetic that survives in the wrong representation.
 
@@ -1030,7 +1088,9 @@ Facts include:
 
 These facts are the compiler's linking authority. Module-wide summaries may exist as derived indexes but do not replace per-function facts.
 
-Reachability records syntactic function and CFG reachability. It does not fold constants, remove constant-condition branches, inspect borrow facts, decide target partitioning or perform tree shaking.
+Reachability operates on already-specialised HIR. It does not fold constants or choose branches itself;
+Stage 4 has already removed ordinary `if` branches selected by known Bool conditions. Reachability
+does not inspect borrow facts, decide target partitioning or perform tree shaking.
 
 Some target checks require semantic type inspection in addition to raw reachability. Those checks use the paired type environment rather than syntax guesses or backend-owned type reconstruction.
 
@@ -1050,6 +1110,10 @@ Target validation:
 - returns `CompilerError` only for inconsistent compiler or builder metadata
 
 Unsupported features in unreachable private functions do not fail validation.
+
+Unsupported target features in an inactive static branch do not fail target validation because that
+branch is absent from HIR and link facts. Frontend source errors in that branch were still diagnosed
+earlier. Target assignment remains build-owned and source-neutral.
 
 For mixed-target artefacts, validation receives the completed deterministic partition. It validates each function against its assigned target and verifies every permitted cross-target edge.
 
@@ -1085,6 +1149,7 @@ Backend lowerers do not:
 - rediscover project topology
 - choose command, entry or route policy
 - reconsider source legality, borrow facts or lifetime topology
+- reinterpret `#Config` or static branch selection
 - write final project outputs directly
 
 A lowerer may implement a language-owned HIR operation with a target-native instruction or runtime helper only when the result preserves the full Moth contract.

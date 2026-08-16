@@ -128,11 +128,22 @@ dynamic shared ownership stay outside the language. Internal backend RC remains
 allowed for already-legal topology. Diagnostics, common-owner groups, `copy`
 and builder lifecycle roots replace source-level RC.
 
-### Backend-specific semantics leaking into source
+### Target-conditional source and backend-specific semantics
 
-Backend-specific observable source semantics must not leak into the language.
-Source semantics stay backend-neutral. Backends receive validated topology and
-may not reconsider source legality.
+Moth excludes target, OS, architecture and backend identity from source semantics. In particular, the
+language has no:
+
+- `target_os`, `target_arch`, backend-name or target-name source queries
+- `is_wasm`, `is_javascript` or `is_browser` style build flags
+- target-conditioned imports
+- target-conditioned declarations and exports
+- target-conditioned receiver methods, traits or conformances
+- backend-dependent language legality or observable semantics
+- use of `#Config` to recreate these mechanisms
+
+The replacement is builder capability surfaces, target-contract validation, external/builder packages,
+and backend-owned lowering and artefact policy. Source can use a stable capability API without learning
+which backend implements it. Backends receive validated topology and may not reconsider source legality.
 
 ### Read next
 

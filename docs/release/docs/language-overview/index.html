@@ -810,7 +810,7 @@ score <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1
     <span class='moth-code-keyword'>return</span> score <span class='moth-code-operator'>*</span> <span class='moth-code-number'>2</span>
 <span class='moth-code-delimiter'>;</span></code></pre><p>Use <code>PascalCase</code> for named types:</p><pre style=""><code class='codeblock'><span class='moth-code-nominal'>PlayerScore</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
     value <span class='moth-code-type'>Int</span>,
-<span class='moth-code-delimiter'>|</span></code></pre><p>Clear names beat short names. <code>player_score</code> is easier to understand than <code>ps</code>, especially when the code grows.</p>
+<span class='moth-code-delimiter'>|</span></code></pre><p>Clear names beat short names. <code>player_score</code> is easier to understand than <code>ps</code>, especially when the code grows.</p><p><code>Config</code> and its keyword-shadow variants are reserved for build configuration. <code>Import</code> is an ordinary type name.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
@@ -823,7 +823,9 @@ retry_count <span class='moth-code-operator'>=</span> <span class='moth-code-num
 
 <span class='moth-code-nominal'>UserProfile</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
     display_name <span class='moth-code-type'>String</span>,
-<span class='moth-code-delimiter'>|</span></code></pre><h3>Name collisions</h3><p>A visible name cannot be redeclared while it remains in scope.</p><p>The complete no-shadowing contract is documented by <a href="../bindings/#shadowing">Values and bindings</a>. Dependency aliases and module API names have additional collision rules in the Packages documentation.</p>
+<span class='moth-code-delimiter'>|</span></code></pre><h3>Name collisions</h3><p>A visible name cannot be redeclared while it remains in scope.</p><p>The complete no-shadowing contract is documented by <a href="../bindings/#shadowing">Values and bindings</a>. Dependency aliases and module API names have additional collision rules in the Packages documentation.</p><h3>Reserved configuration names</h3><p><strong>Accepted deferred.</strong> The <code>config</code> identifier family is compiler-reserved. Keyword-shadow matching is case-insensitive and strips leading underscores, so <code>config</code>, <code>Config</code>, <code>CONFIG</code>, <code>_config</code>, <code>_Config</code> and equivalent shadows cannot be user declarations. This reserves one vocabulary for <code>config.moth</code>, entry <code>config:</code> blocks and <code>#Config</code>.</p><p><code>import</code> is not a keyword. <code>Import</code> is an ordinary valid PascalCase user name:</p><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Import</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
+    source <span class='moth-code-type'>String</span>,
+<span class='moth-code-delimiter'>|</span></code></pre><p>Ordinary dependency clauses do not use an <code>import</code> keyword.</p>
 </div>
 </fieldset></section>
 <section class="container"><fieldset class="doc-level">

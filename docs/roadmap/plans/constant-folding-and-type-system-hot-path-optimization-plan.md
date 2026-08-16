@@ -70,7 +70,7 @@ RELEVANT_DOCS:
 - `docs/compiler-design-overview.md`
 - `docs/build-system-design.md`
 - `docs/src/docs/design-scope/design-principles.mtf`
-- `docs/roadmap/plans/imported-build-values-and-project-globals-plan.md`
+- `docs/roadmap/plans/build-configuration-values-and-project-globals-plan.md`
 - `docs/roadmap/plans/frontend-arena-semantic-invariant-optimization-plan.md`
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 - `benchmarks/README.md`
@@ -126,8 +126,8 @@ if enabled:
 ;
 ```
 
-The later build-config plan will rename the accepted build-input spelling from `#Import` to
-`#Config`. A configured Bool uses the same conditional path:
+The queued build-configuration-values plan defines `#Config of T`. A configured Bool enters the
+same ordinary folded-constant and static-if path defined here:
 
 ```moth
 analytics #Config of Bool = false
@@ -138,8 +138,8 @@ if analytics:
 ```
 
 This plan does not implement `#Config`, CLI build-input parsing or project-global interfaces. It
-establishes the general static-`if` behaviour that the later build-config plan will consume without a
-config-specific AST node, branch pass or HIR operation.
+establishes the general static-`if` behaviour that the queued build-configuration-values plan will
+consume without a config-specific AST node, branch pass or HIR operation.
 
 ### Both branches remain valid source
 
@@ -911,7 +911,7 @@ Final acceptance:
 
 Phase 4C changes current language/compiler support. Its implementation closeout must update the
 compiler architecture, progress matrix and user-facing constant/control-flow documentation. The
-later build-config plan must integrate `#Config of Bool` through the same ordinary constant and `if`
+queued build-configuration-values plan must integrate `#Config of Bool` through the same ordinary constant and `if`
 path without adding another specialisation owner.
 
 ---

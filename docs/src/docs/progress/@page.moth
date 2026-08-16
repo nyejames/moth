@@ -471,7 +471,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Partial]
             [: Targeted flat-config parsing, known-key validation, self-contained dependency-clause rejection and builder-section coverage.]
             [: Frontend / HTML]
-            [: The current compiler supports the transitional flat config shape with parsing and validation implemented. Grouped [$html:<code>project</code>] and builder records are accepted deferred design. [$html:<code>#Import</code>], [$html:<code>@project</code>] and entry-local [$html:<code>config:</code>] remain separately queued. The transitional [$html:<code>package_folders</code>] field still parses for the queued Project Config migration, but canonical Stage 0 no longer consumes it for package discovery.]
+            [: The current compiler supports the transitional flat config shape with parsing and validation implemented. Grouped [$html:<code>project</code>] and builder records are accepted deferred design. [$html:<code>#Config</code>], [$html:<code>@project</code>] and entry-local [$html:<code>config:</code>] remain separately queued. The transitional [$html:<code>package_folders</code>] field still parses for the queued Project Config migration, but canonical Stage 0 no longer consumes it for package discovery.]
         ]
 
         [data:
@@ -617,6 +617,13 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
 
     [styled_table:
         [header: [: Surface] [: Status] [: Coverage / diagnostic direction] [: Notes] ]
+
+        [data:
+            [: Static Bool [$html:<code>if</code>] specialisation]
+            [: Deferred]
+            [: Current ordinary [$html:<code>if</code>] parsing and HIR branch lowering are covered. The constant-evaluation plan owns intended-contract coverage for static branch removal.]
+            [: Both branches remain frontend-valid. A known Bool will select one branch before HIR. This uses ordinary [$html:<code>if</code>], not [$html:<code>#Config if</code>], and does not condition source structure.]
+        ]
 
         [data:
             [: Post-TIR template performance follow-ups]

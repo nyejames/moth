@@ -24,7 +24,7 @@ Keep this block concise. Git history is the implementation record.
 - `docs/roadmap/plans/anonymous-const-records-plan.md`
 - command-selected builder capability surface
 
-This plan must complete before imported build values, `@project` and entry-local config blocks.
+This plan must complete before build configuration values, `@project` and entry-local config blocks.
 
 ## Required authorities
 
@@ -106,7 +106,7 @@ Requirements:
 ## Non-goals
 
 - no package dependency declarations
-- no `#Import` or CLI build-input implementation
+- no `#Config` or CLI build-input implementation
 - no `@project`
 - no entry-local `config:` blocks
 - no builder selection inside config
@@ -153,7 +153,7 @@ Review gate: verify no second config language or duplicate folded-value model ex
 - Require the selected builder's project section, even when empty.
 - Validate active sections through their registered schemas.
 - Fold but do not validate or retain inactive sections.
-- Reject `#Import` in builder/tooling sections until the imported-build-values plan adds its project-only surface.
+- Reject `#Config` in builder/tooling sections. The later build-configuration-values plan permits `#Config` only on direct project fields and module-wide source contracts.
 - Store typed folded section results rather than stringifying them into `Config.settings`.
 
 Review gate: audit active/inactive semantics and schema ownership before storage migration.

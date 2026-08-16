@@ -1,4 +1,4 @@
-**Accepted deferred design.** `@project`, source `#Import` and entry-local `config:` blocks are queued implementation work. This page defines the accepted final contract. The current compiler does not yet implement these surfaces. See @../progress (Progress) for current status.
+**Accepted deferred design.** `@project`, source `#Config` and entry-local `config:` blocks are queued implementation work. This page defines the accepted final contract. The current compiler does not yet implement these surfaces. See @../progress (Progress) for current status.
 
 Entry config covers `@project` and entry-local `config:` blocks. Both feed builder metadata and compile-time values into normal module roots.
 
@@ -44,14 +44,14 @@ Placement rules:
 - invalid inside executable bodies
 - invalid in `config.moth`
 
-The block contains section records only. Dependency clauses, aliases, helper constants, support types and source `#Import` declarations live outside the block in the normal root file.
+The block contains section records only. Dependency clauses, aliases, helper constants, support types and source `#Config` declarations live outside the block in the normal root file.
 
 The block uses the root file's ordinary compile-time visibility. It may reference:
 
 - dependency-bound constants
 - `@project`
 - same-file constants declared before the block
-- resolved source `#Import` constants
+- resolved source `#Config` constants
 - foldable local const-record types
 - selected-builder compile-time values available through normal module dependency clauses
 
@@ -67,6 +67,6 @@ Only active artefact-builder settings contribute entry activity.
 
 ### Related concepts
 
-- For build inputs see @#build-inputs (Build inputs).
+- For build configuration values see @#build-inputs (Build configuration values).
 - For module root rules see @#module-roots (Module roots).
 - For the full entry config contract see @https://github.com/nyejames/moth/blob/main/docs/build-system-design.md (Build system design).

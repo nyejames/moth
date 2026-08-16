@@ -22,6 +22,9 @@ Detailed explanations live throughout the [Moth documentation](../).
 - `!` is the typed error path. `?` is the option path. `assert` is for invariants.
 - `@path` starts dependencies and resource paths. Source dependencies omit extensions.
 - Names never shadow another visible name.
+- `#Config of T` declares an accepted-deferred typed build configuration constant.
+- A compile-time-known `Bool` can specialise an ordinary `if`; there is no `#Config if`.
+- Source cannot inspect OS, architecture, backend or target identity.
 - General closures, anonymous callables, generic function values, macros, exceptions, trait objects and operator overloading are outside scope.
 - Named monomorphic non-capturing function references remain design pending.
 
@@ -86,6 +89,9 @@ Naming conventions:
 - Variables and functions use `regular_snake_case`.
 - Traits use `ALL_CAPS`.
 - A visible name cannot be redeclared while it remains in scope.
+
+`Config` and its case-insensitive, leading-underscore keyword-shadow variants are reserved. `Import`
+is an ordinary valid user identifier; there is no `import` keyword.
 
 Symbolic binary operators and assignment require spaces on both sides:
 
@@ -431,6 +437,18 @@ if ready:
     io.line("ready")
 else
     io.line("waiting")
+;
+```
+
+A compile-time-known Bool can specialise this ordinary `if` after both branches are frontend-valid;
+the selected lexical scope remains intact and inactive executable work does not reach HIR. Runtime
+conditions remain runtime branches.
+
+```moth
+enabled #= false
+
+if enabled:
+    perform_optional_work()
 ;
 ```
 
@@ -1112,7 +1130,7 @@ Only direct dependencies are source-visible. Project-level declaration, version 
 ```moth
 project #= |
     name = "moth_docs",
-    version #Import of String = "0.1.0",
+    version #Config of String = "0.1.0",
     entry_root = "src",
 |
 
@@ -1124,14 +1142,25 @@ html #= |
 
 The command selects the builder first. One `project` record is required. `project.name` gives stable identity. Earlier helper constants may feed later fields. Other top-level records are builder/tooling sections. Config has no runtime declarations, functions, named support types, dependencies, fragments or `export:`.
 
-Build inputs use primitive or optional types:
+Build configuration values use primitive or optional types:
 
 ```moth
-api_url #Import of String = "http://localhost:8080"
-optional_label #Import of String? = none
+api_url #Config of String = "http://localhost:8080"
+optional_label #Config of String? = none
 ```
 
 A source default is one literal or `none`, not a name, template, call, cast, operator, collection or record. Pass explicit values with `--input name=value`.
+
+CLI inference is immediate: `true`/`false` -> `Bool`, a whole number -> `Int`, a decimal or exponent -> `Float`, `'c'` -> `Char`, a quoted literal -> `String`, and anything else -> `String`. Use an explicitly quoted String for `"true"` or `"42"`; omit an optional input to resolve to `none`. Contracts require exact types, except a present `T` may satisfy `T?`; no other coercion occurs.
+
+```bash
+moth build . --input analytics=true
+moth build . --input retries=4
+moth build . --input ratio=0.75
+moth build . --input api_url=https://example.com
+moth build . --input 'label="true"'
+moth build . --input "separator=':'"
+```
 
 Project fields enter source through explicit `@project`:
 
@@ -1155,13 +1184,13 @@ config:
 ;
 ```
 
-It contains section records, uses ordinary compile-time visibility and creates no symbol/runtime value. Dependencies, helpers, types and `#Import` declarations stay outside. Project and entry schemas do not merge.
+It contains section records, uses ordinary compile-time visibility and creates no symbol/runtime value. Dependencies, helpers, types and `#Config` declarations stay outside. Project and entry schemas do not merge.
 
 ## Builders, targets and commands
 
 One command selects one artefact builder, one profile and any tooling overlays. The compiler frontend remains backend-neutral. Builders provide config schemas, packages, directives, source kinds, entry policy, capabilities and output policy.
 
-The HTML builder turns selected normal roots into routes and documents. Mixed HTML output assigns reachable functions to JavaScript or Wasm automatically. Source has no target-selection annotations and target choice cannot change language semantics.
+The HTML builder turns selected normal roots into routes and documents. Mixed HTML output assigns reachable functions to JavaScript or Wasm automatically. Source has no target-selection annotations, platform/backend query values or target-conditioned source; the builder interprets stable semantics and selects physical targets.
 
 `moth check` performs the same reachable target validation as a build without writing artefacts.
 
@@ -1172,7 +1201,7 @@ moth check .
 moth build . --release
 ```
 
-Final builder-selection syntax and any Moth-native build-script system remain design pending.
+Final builder-selection syntax and any Moth-native build-script system remain design pending. Stable builder capabilities may be used without revealing target identity.
 
 ## Core and external packages
 
@@ -1224,6 +1253,9 @@ Roadmaps and design drafts do not create accepted syntax.
 ## Deliberate language limits
 
 Do not invent shadowing, macros, general closures/function values, exceptions, catchable panic, first-class public `Result`, operator overloading, trait objects/dynamic dispatch, associated items, broad conformance, reflection/type values, explicit reference/lifetime/move syntax, source RC, parameterised aliases, higher-kinded types, general const generics, cross-owner receiver extensions, wildcard dependencies/exports, extensible builtin maps, string `+` or `_` match arms.
+
+Outside scope also includes target/platform conditional compilation, conditionally present imports,
+declarations or exports, builder-provided target identity flags and backend-specific source legality.
 
 Use choices for runtime heterogeneity, trait bounds for static reuse, `copy` for independent storage, typed error channels for expected failure and accepted reactive subscriptions for live template reads.
 

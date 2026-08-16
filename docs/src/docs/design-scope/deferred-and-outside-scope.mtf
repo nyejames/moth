@@ -48,6 +48,9 @@ the progress matrix.
 
 The compiler rejects outside-scope forms with ordinary diagnostics.
 
+Target, OS, architecture and backend conditional source is outside scope rather than deferred.
+Builders own platform mapping.
+
 Outside-scope features aren't "not yet implemented." They're intentionally
 excluded because they would make the language broader, more implicit, more
 solver-heavy or harder to reason about.

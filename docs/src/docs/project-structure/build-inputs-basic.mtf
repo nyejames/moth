@@ -1,42 +1,39 @@
-Build inputs let you declare named values that resolve before the compiler
-processes your source modules. They feed settings like version strings and
-feature flags into ordinary compile-time constants.
+Build configuration values let a project or source module receive typed primitive values before its modules are compiled.
 
-**Accepted deferred syntax.** Build inputs are queued implementation work.
-The examples below show the accepted end-state contract, not current
-compiler support. See @../progress (Progress) for implementation status.
+**Accepted deferred syntax.** The examples show the accepted end-state contract. See @../progress (Progress) for current support.
 
-### A simple build input
+### `#Config` values
+
+A direct project field can use `#Config of String`:
 
 [codeblock, $code("moth"):
     project #= |
         name = "my_project",
-        version #Import of String = "0.1.0",
+        version #Config of String = "0.1.0",
         entry_root = "src",
     |
 ]
 
-The `#Import of String` part tells the build system that `version` can be
-overridden from the command line. When no override arrives, the default `"0.1.0"`
-applies.
-
-### Source-level build inputs
-
-Any source module can declare its own build input the same way:
+Source modules use the same spelling:
 
 [codeblock, $code("moth"):
-    api_url #Import of String = "https://api.example.com"
+    analytics #Config of Bool = false
+
+    if analytics:
+        send_analytics()
+    ;
 ]
 
-The build system validates every contract before module compilation. Same-name
-contracts must agree on type and default value.
+`#Config` values feed ordinary `if`; there is no `#Config if`.
 
-### Accepted types
+### Command examples
 
-Build inputs accept `String`, `Int`, `Float`, `Bool`, `Char` and optional forms
-of those types. Defaults must be plain literal values, not expressions or
-templates.
+[codeblock, $code("bash"):
+    moth build . --input enabled=true
+    moth build . --input retries=4
+    moth build . --input api_url=https://example.com
+]
 
-### Related concepts
+Bare `true` and `false` infer as `Bool`, whole numbers as `Int`, decimal values as `Float`, and other text falls back to `String`. Quote `"true"` when a String is intended. Omitted optional values can resolve to `none`.
 
-- For the config file see @#project-config (Project config).
+Build configuration cannot inspect operating-system, architecture, backend or target identity; builders handle platform mapping.

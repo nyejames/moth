@@ -23,7 +23,7 @@ IMPLEMENTATION_SCOPE: frontend header parsing, AST folding, module metadata, HTM
 - project config and `@project`
 - section-aware builder schemas
 - anonymous const records
-- source `#Import`
+- source `#Config`
 - immutable module artefact metadata lanes
 
 ## Required authority documents
@@ -34,7 +34,8 @@ IMPLEMENTATION_SCOPE: frontend header parsing, AST folding, module metadata, HTM
 - `docs/src/docs/codebase/style-guide/style-guide.mtf`, `testing.mtf` and `validation.mtf`
 - `docs/src/docs/progress/@page.moth` for current support
 - `docs/roadmap/plans/canonical-module-compilation-and-scoped-packages-plan.md` for the module graph
-- `docs/roadmap/plans/import_values_anonymous_records_plan.md` for config schemas and `@project`
+- `docs/roadmap/plans/project-config-and-recursive-schemas-plan.md` for config schemas
+- `docs/roadmap/plans/build-configuration-values-and-project-globals-plan.md` for build configuration values and `@project`
 
 ## Accepted entry config design
 
@@ -49,12 +50,12 @@ Placement and cardinality:
 
 Block contents:
 - section records only
-- no dependency clauses, aliases, helper constants, support types or `#Import` declarations inside the block
+- no dependency clauses, aliases, helper constants, support types or `#Config` declarations inside the block
 - these live outside the block in the normal root file
 
 Visibility and folding:
 - the block uses the root file's ordinary compile-time visibility
-- it may reference dependency-bound constants, `@project`, same-file constants declared before the block, resolved source `#Import` constants, foldable local const-record types and selected-builder compile-time values through normal module dependency clauses
+- it may reference dependency-bound constants, `@project`, same-file constants declared before the block, resolved source `#Config` constants, foldable local const-record types and selected-builder compile-time values through normal module dependency clauses
 - same-file forward references remain invalid
 - header syntax records local dependencies
 - interface binding resolves dependency clauses normally
@@ -119,7 +120,7 @@ Runtime title:
 
 - no isolated config compilation unit for entry blocks
 - no separate parser for entry config
-- no dependency clauses, helper declarations or `#Import` inside the block
+- no dependency clauses, helper declarations or `#Config` inside the block
 - no `project` section inside the block
 - no shared project or entry field scope
 - no multiple blocks per root
@@ -142,7 +143,7 @@ Each phase must leave one coherent path. Reference `docs/build-system-design.md`
 ### Phase 1: Refresh module-root, metadata, schema and HTML document owners
 
 Context: this plan depends on canonical modules, project config, `@project`, section-aware schemas,
-anonymous const records and source `#Import`. Its template boundary was reviewed against
+anonymous const records and source `#Config`. Its template boundary was reviewed against
 `1298da468`; refresh ordinary implementation anchors before code starts without adding a TIR-facing
 entry-config API.
 
@@ -178,7 +179,7 @@ Context: the block uses ordinary root-file visibility and is folded through the 
 
 See `docs/build-system-design.md` "Entry-local config: blocks" visibility rules.
 
-- Header syntax records local dependencies for the block (references to same-file earlier constants, `@project`, dependency-bound constants, resolved source `#Import` constants).
+- Header syntax records local dependencies for the block (references to same-file earlier constants, `@project`, dependency-bound constants, resolved source `#Config` constants).
 - Interface binding resolves dependency clauses normally for the root file. The block benefits from the same bound visibility.
 - AST folds the block once through the ordinary canonical module semantic path.
 - Same-file forward references remain invalid.

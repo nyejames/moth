@@ -10,8 +10,7 @@ The inline `then` and `else` form stays on one logical line.
 
 ### Inline option and choice predicates
 
-The inline form also supports option-present capture and choice-variant
-predicates:
+The inline form also supports option-present capture and choice-variant predicates:
 
 [codeblock, $code("moth"):
     label = if maybe_name is |name| then name else "guest"
@@ -30,8 +29,7 @@ predicates:
 
 `then` sends one or more values from the active branch to the receiver.
 
-The block form with `then` is supported at the same closed receiving sites as
-the inline form, including declarations, assignments, multi-bind and returns.
+The block form with `then` is supported at the same closed receiving sites as the inline form, including declarations, assignments, multi-bind and returns.
 
 ### Receiving sites
 
@@ -62,13 +60,18 @@ A value-producing block is invalid directly inside:
 - Every producing path must match the receiver's arity.
 - Produced values must be compatible with the receiver's types.
 
+### Compile-time-known conditions
+
+Both branches must satisfy normal completeness, receiving arity and type rules first. A known Bool then selects one validated branch, so no runtime branch or hidden merge value is needed. Runtime conditions retain the existing value-producing behavior.
+
 [codeblock, $code("moth"):
-    left, right = if swap:
-        then second, first
+    label = if enabled:
+        then "on"
     else
-        then first, second
+        then "off"
     ;
 ]
 
-Option-present and choice-predicate inline forms use the same receiving-site
-model and are covered by the pattern references.
+Static Bool specialisation is accepted deferred until the constant-evaluation plan lands.
+
+Option-present and choice-predicate inline forms use the same receiving-site model and are covered by the pattern references.

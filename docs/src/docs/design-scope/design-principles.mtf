@@ -52,7 +52,7 @@ source-language obligations.
 
     [td:
         [: Platform integration]
-        [: Builder packages, external packages and source-backed packages]
+        [: Builder packages, external packages and source-backed packages expose stable capability semantics. Project builders and backends resolve those semantics to platform-specific artefacts.]
     ]
 
     [td:
@@ -81,6 +81,17 @@ source-language obligations.
     ]
 ]
 
+### Platform-agnostic source and builder ownership
+
+Source expresses stable semantics rather than target identity. Source cannot inspect the OS,
+architecture, backend or target, and cannot condition imports, declarations, exports or bodies on
+target identity. `#Config` is for typed project/build configuration, not platform detection.
+
+Builders cannot expose target identity as pseudo-config values. A selected builder may expose stable
+capability APIs, and compiler target validation rejects unsupported reachable capability use. Project
+builders and backends choose the physical implementation and output form. This boundary is intentional
+outside-scope policy, not merely deferred syntax.
+
 ### Design review questions
 
 - Does this introduce a new source category when an existing mechanism is enough?
@@ -91,6 +102,7 @@ source-language obligations.
 - Does it expose optimisation mechanics?
 - Is it accepted but unimplemented, undecided or intentionally excluded?
 - Does it make code harder to inspect locally?
+- Does this let source observe or branch on a physical target, backend or runtime platform that should remain builder-owned?
 
 ### LLM-aware design
 

@@ -122,7 +122,7 @@ page_head #= language_theme_head
 #[section:
     [doc_level:
         [$insert("key"):build-inputs]
-        [$insert("title"):Build inputs]
+        [$insert("title"):Build configuration values]
         [$insert("advanced"):[build_inputs]]
 
         [build_inputs_basic]
