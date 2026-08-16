@@ -485,13 +485,10 @@ impl<'a> ExportScanner<'a> {
         self.skip_whitespace();
 
         let mut name = String::new();
-        if let Some(ch) = self.current_char_opt() {
-            if ch.is_alphabetic() || ch == '_' || ch == '$' {
-                name.push(ch);
-                self.advance_char();
-            } else {
-                return None;
-            }
+        let ch = self.current_char_opt()?;
+        if ch.is_alphabetic() || ch == '_' || ch == '$' {
+            name.push(ch);
+            self.advance_char();
         } else {
             return None;
         }

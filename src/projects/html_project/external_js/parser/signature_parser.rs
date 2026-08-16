@@ -396,13 +396,10 @@ impl SignatureScanner {
         self.skip_whitespace();
 
         let mut name = String::new();
-        if let Some(ch) = self.current_char_opt() {
-            if ch.is_alphabetic() || ch == '_' {
-                name.push(ch);
-                self.advance();
-            } else {
-                return None;
-            }
+        let ch = self.current_char_opt()?;
+        if ch.is_alphabetic() || ch == '_' {
+            name.push(ch);
+            self.advance();
         } else {
             return None;
         }
