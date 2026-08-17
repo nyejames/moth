@@ -21,7 +21,7 @@ pub(in crate::compiler_frontend::ast::templates) fn tir_contributions_need_runti
     contributions: &TirSlotContributions,
     string_table: &StringTable,
     store: &TemplateIrStore,
-) -> bool {
+) -> Result<bool, TemplateError> {
     for target in schema.ordered_slot_keys(string_table) {
         let nodes = contributions.nodes_for_slot(&target);
 
@@ -30,13 +30,13 @@ pub(in crate::compiler_frontend::ast::templates) fn tir_contributions_need_runti
         }
 
         for node_id in nodes {
-            if !tir_node_is_const_evaluable_value(store, *node_id, string_table) {
-                return true;
+            if !tir_node_is_const_evaluable_value(store, *node_id, string_table)? {
+                return Ok(true);
             }
         }
     }
 
-    false
+    Ok(false)
 }
 
 /// Builds contribution source drafts from TIR-native routed contributions.
@@ -72,7 +72,7 @@ pub(in crate::compiler_frontend::ast::templates) fn build_tir_native_contributio
                 copy_tir_subtree_with_active_slot_plan(*node_id, None, store, copy_state)?;
 
             let renders_wrapper_unconditionally =
-                tir_node_is_const_evaluable_value(store, render_root, string_table);
+                tir_node_is_const_evaluable_value(store, render_root, string_table)?;
 
             let shape = classify_tir_contribution_node(store, *node_id)?;
 

@@ -170,8 +170,7 @@ fn normalize_string_child_wrapper_reference(
         Style::default(),
         TemplateType::String,
         TemplateTirPhase::Parsed,
-        argument_location,
-    );
+    )?;
 
     Ok(TemplateWrapperReference::new(
         reference.root,

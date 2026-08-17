@@ -65,10 +65,11 @@ use crate::compiler_frontend::ast::templates::runtime_handoff::{
 };
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::tir::{
-    ExpressionSiteId, PreparedRuntime, TemplateIrStore, TemplateTirPhase, TemplateTirReference,
-    TemplateViewContext, TirExpressionOverlay, collect_effective_tir_expression_overlay_payloads,
+    ExpressionSiteId, RuntimeTemplateReason, TemplateHelperKind, TemplateIrStore,
+    TemplatePreparation, TemplatePreparationMode, TemplatePreparationOutcome, TemplateTirPhase,
+    TemplateTirReference, TirView, collect_effective_tir_expression_overlay_payloads,
     finalized_tir_view_for_template, owned_runtime_slot_handoff_for_prepared_view,
-    owned_runtime_template_handoff_for_prepared_view,
+    owned_runtime_template_handoff_for_prepared_view, replace_expression_overlay_entries,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
@@ -77,21 +78,15 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
-use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
-use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::RefCell;
-use std::collections::HashSet;
 use std::rc::Rc;
 
-struct TemplateNormalizationContext<'a, 'strings> {
-    source_file_scope: &'a InternedPath,
-    path_format_config: &'a PathStringFormatConfig,
-    project_path_resolver: &'a ProjectPathResolver,
+struct TemplateNormalizationContext<'strings> {
     template_const_loop_iteration_limit: usize,
     string_table: &'strings mut StringTable,
     template_ir_store: Rc<RefCell<TemplateIrStore>>,
@@ -108,25 +103,10 @@ impl AstFinalizer<'_, '_> {
     pub(super) fn normalize_ast_templates_for_hir(
         &self,
         ast: &mut [AstNode],
-        project_path_resolver: &ProjectPathResolver,
         string_table: &mut StringTable,
     ) -> Result<(), TemplateNormalizationError> {
-        let canonical_source_by_symbol_path = &self
-            .environment
-            .lookups
-            .module_symbols
-            .canonical_source_by_symbol_path;
-        let path_format_config = &self.context.path_format_config;
         for node in ast {
-            let source_file_scope = canonical_source_by_symbol_path
-                .get(&node.scope)
-                .unwrap_or(&node.location.scope)
-                .to_owned();
-
             let mut normalization_context = TemplateNormalizationContext {
-                source_file_scope: &source_file_scope,
-                path_format_config,
-                project_path_resolver,
                 template_const_loop_iteration_limit: self
                     .context
                     .template_const_loop_iteration_limit,
@@ -160,7 +140,6 @@ impl AstFinalizer<'_, '_> {
     pub(super) fn synchronize_normalized_public_defaults(
         &mut self,
         emitted_ast: &[AstNode],
-        project_path_resolver: &ProjectPathResolver,
         string_table: &mut StringTable,
     ) -> Result<ReceiverMethodCatalog, TemplateNormalizationError> {
         let EmittedDeclarationDefaults {
@@ -170,13 +149,7 @@ impl AstFinalizer<'_, '_> {
 
         let generic_function_templates_by_path =
             &self.environment.lookups.generic_function_templates_by_path;
-        let canonical_source_by_symbol_path = &self
-            .environment
-            .lookups
-            .module_symbols
-            .canonical_source_by_symbol_path;
         let type_environment = &self.environment.type_environment;
-        let path_format_config = &self.context.path_format_config;
         let template_const_loop_iteration_limit = self.context.template_const_loop_iteration_limit;
         let template_ir_store = Rc::clone(&self.context.template_ir_store);
 
@@ -218,12 +191,8 @@ impl AstFinalizer<'_, '_> {
                             ))
                             .into());
                         }
-                        let source_file = template.source_file.clone();
                         normalize_retained_signature_defaults(
                             signature,
-                            &source_file,
-                            project_path_resolver,
-                            path_format_config,
                             template_const_loop_iteration_limit,
                             &template_ir_store,
                             string_table,
@@ -267,20 +236,8 @@ impl AstFinalizer<'_, '_> {
                             ))
                             .into());
                         }
-                        let source_file = canonical_source_by_symbol_path
-                            .get(&root.path)
-                            .ok_or_else(|| {
-                                CompilerError::compiler_error(format!(
-                                    "public default synchronization: a generic struct root at {:?} has no canonical source metadata; every retained-only normalization requires exact source-file context",
-                                    root.path
-                                ))
-                            })?
-                            .to_owned();
                         normalize_retained_field_defaults(
                             fields,
-                            &source_file,
-                            project_path_resolver,
-                            path_format_config,
                             template_const_loop_iteration_limit,
                             &template_ir_store,
                             string_table,
@@ -334,20 +291,8 @@ impl AstFinalizer<'_, '_> {
                     ))
                     .into());
                 }
-                let source_file = generic_function_templates_by_path
-                    .get(function_path)
-                    .map(|template| template.source_file.clone())
-                    .ok_or_else(|| {
-                        CompilerError::compiler_error(format!(
-                            "public default synchronization: a generic receiver method at {:?} has no retained generic-template metadata; every generic function must carry its source file",
-                            function_path
-                        ))
-                    })?;
                 normalize_retained_signature_defaults(
                     &mut entry.signature,
-                    &source_file,
-                    project_path_resolver,
-                    path_format_config,
                     template_const_loop_iteration_limit,
                     &template_ir_store,
                     string_table,
@@ -393,23 +338,15 @@ impl AstFinalizer<'_, '_> {
 
 /// Normalize retained-only function signature parameter defaults through the existing helper.
 ///
-/// WHAT: creates a [`TemplateNormalizationContext`] with the exact source-file scope and folds
-/// each parameter default in place. Parameters with `NoValue` (no default) are no-ops. The
-/// caller resolves the exact source file: the generic template's retained source file for
-/// generic functions, never a fallback to the symbol path itself.
+/// WHAT: creates a [`TemplateNormalizationContext`] and folds each parameter default in place.
+/// Parameters with `NoValue` (no default) are no-ops.
 fn normalize_retained_signature_defaults(
     signature: &mut FunctionSignature,
-    source_file: &InternedPath,
-    project_path_resolver: &ProjectPathResolver,
-    path_format_config: &PathStringFormatConfig,
     template_const_loop_iteration_limit: usize,
     template_ir_store: &Rc<RefCell<TemplateIrStore>>,
     string_table: &mut StringTable,
 ) -> Result<(), TemplateNormalizationError> {
     let mut context = TemplateNormalizationContext {
-        source_file_scope: source_file,
-        path_format_config,
-        project_path_resolver,
         template_const_loop_iteration_limit,
         string_table,
         template_ir_store: Rc::clone(template_ir_store),
@@ -424,23 +361,15 @@ fn normalize_retained_signature_defaults(
 
 /// Normalize retained-only struct field defaults through the existing helper.
 ///
-/// WHAT: creates a [`TemplateNormalizationContext`] with the exact source-file scope and folds
-/// each field default in place. Fields with `NoValue` (no default) are no-ops. The caller
-/// resolves the exact source file from canonical source metadata, never a fallback to the
-/// symbol path itself.
+/// WHAT: creates a [`TemplateNormalizationContext`] and folds each field default in place.
+/// Fields with `NoValue` (no default) are no-ops.
 fn normalize_retained_field_defaults(
     fields: &mut [Declaration],
-    source_file: &InternedPath,
-    project_path_resolver: &ProjectPathResolver,
-    path_format_config: &PathStringFormatConfig,
     template_const_loop_iteration_limit: usize,
     template_ir_store: &Rc<RefCell<TemplateIrStore>>,
     string_table: &mut StringTable,
 ) -> Result<(), TemplateNormalizationError> {
     let mut context = TemplateNormalizationContext {
-        source_file_scope: source_file,
-        path_format_config,
-        project_path_resolver,
         template_const_loop_iteration_limit,
         string_table,
         template_ir_store: Rc::clone(template_ir_store),
@@ -711,7 +640,7 @@ fn secondary_metadata_matches_primary(
 /// providing a single entry point for recursive traversal.
 fn normalize_ast_node_templates(
     node: &mut AstNode,
-    context: &mut TemplateNormalizationContext<'_, '_>,
+    context: &mut TemplateNormalizationContext<'_>,
 ) -> Result<(), TemplateNormalizationError> {
     increment_ast_counter(AstCounter::TemplateNormalizationNodesVisited);
 
@@ -778,7 +707,7 @@ fn normalize_ast_node_templates(
 /// be handled together to avoid duplication.
 fn normalize_control_flow_templates(
     node: &mut AstNode,
-    context: &mut TemplateNormalizationContext<'_, '_>,
+    context: &mut TemplateNormalizationContext<'_>,
 ) -> Result<(), TemplateNormalizationError> {
     match &mut node.kind {
         NodeKind::If(condition, then_body, else_body) => {
@@ -874,7 +803,7 @@ fn normalize_control_flow_templates(
 /// be handled together to avoid duplication.
 fn normalize_declaration_templates(
     node: &mut AstNode,
-    context: &mut TemplateNormalizationContext<'_, '_>,
+    context: &mut TemplateNormalizationContext<'_>,
 ) -> Result<(), TemplateNormalizationError> {
     match &mut node.kind {
         NodeKind::VariableDeclaration(declaration) => {
@@ -905,7 +834,7 @@ fn normalize_declaration_templates(
 /// WHY: Fallible handlers can contain templates that must be normalized for HIR.
 fn normalize_fallible_handling_templates(
     handling: &mut FallibleHandling,
-    context: &mut TemplateNormalizationContext<'_, '_>,
+    context: &mut TemplateNormalizationContext<'_>,
     _helper_artifact_policy: HelperArtifactPolicy,
 ) -> Result<(), TemplateNormalizationError> {
     match handling {
@@ -922,7 +851,7 @@ enum HelperArtifactPolicy {
 
 fn normalize_nodes(
     nodes: &mut [AstNode],
-    context: &mut TemplateNormalizationContext<'_, '_>,
+    context: &mut TemplateNormalizationContext<'_>,
 ) -> Result<(), TemplateNormalizationError> {
     for node in nodes {
         normalize_ast_node_templates(node, context)?;
@@ -933,7 +862,7 @@ fn normalize_nodes(
 
 fn normalize_expressions(
     expressions: &mut [Expression],
-    context: &mut TemplateNormalizationContext<'_, '_>,
+    context: &mut TemplateNormalizationContext<'_>,
 ) -> Result<(), TemplateNormalizationError> {
     for expression in expressions {
         normalize_expression_templates(expression, context)?;
@@ -944,7 +873,7 @@ fn normalize_expressions(
 
 fn normalize_loop_bindings(
     bindings: &mut LoopBindings,
-    context: &mut TemplateNormalizationContext<'_, '_>,
+    context: &mut TemplateNormalizationContext<'_>,
 ) -> Result<(), TemplateNormalizationError> {
     if let Some(item_binding) = &mut bindings.item {
         normalize_expression_templates(&mut item_binding.value, context)?;
@@ -959,7 +888,7 @@ fn normalize_loop_bindings(
 
 fn normalize_call_argument_values(
     arguments: &mut [CallArgument],
-    context: &mut TemplateNormalizationContext<'_, '_>,
+    context: &mut TemplateNormalizationContext<'_>,
 ) -> Result<(), TemplateNormalizationError> {
     for argument in arguments {
         normalize_expression_templates(&mut argument.value, context)?;
@@ -1008,7 +937,7 @@ impl From<TemplateError> for TemplateNormalizationError {
 /// to recursively traverse the expression tree to normalize all templates.
 fn normalize_expression_templates(
     expression: &mut Expression,
-    context: &mut TemplateNormalizationContext<'_, '_>,
+    context: &mut TemplateNormalizationContext<'_>,
 ) -> Result<(), TemplateNormalizationError> {
     normalize_expression_templates_with_context(
         expression,
@@ -1030,7 +959,7 @@ fn normalize_place_expression_templates(
 
 fn normalize_expression_templates_with_context(
     expression: &mut Expression,
-    context: &mut TemplateNormalizationContext<'_, '_>,
+    context: &mut TemplateNormalizationContext<'_>,
     helper_artifact_policy: HelperArtifactPolicy,
 ) -> Result<(), TemplateNormalizationError> {
     let template_replacement = match &mut expression.kind {
@@ -1134,15 +1063,12 @@ fn normalize_expression_templates_with_context(
             let finalization = finalize_template_value(
                 template,
                 TemplateValueFinalizationInputs {
-                    source_file_scope: context.source_file_scope,
-                    path_format_config: context.path_format_config,
-                    project_path_resolver: context.project_path_resolver,
                     string_table: context.string_table,
                     template_const_loop_iteration_limit: context
                         .template_const_loop_iteration_limit,
                     template_ir_store: &context.template_ir_store,
                 },
-                crate::compiler_frontend::ast::templates::tir::TemplatePreparationMode::Value,
+                TemplatePreparationMode::Value,
             )?;
 
             match finalization {
@@ -1161,10 +1087,7 @@ fn normalize_expression_templates_with_context(
 
                 FinalizedTemplateValue::Helper(kind) => {
                     if helper_artifact_policy == HelperArtifactPolicy::RejectFinalHelperValue
-                        && matches!(
-                            kind,
-                            crate::compiler_frontend::ast::templates::tir::TemplateHelperKind::SlotInsert
-                        )
+                        && matches!(kind, TemplateHelperKind::SlotInsert)
                     {
                         return Err(CompilerDiagnostic::invalid_template_structure(
                             InvalidTemplateStructureReason::HelperOutsideWrapperSlot,
@@ -1341,7 +1264,7 @@ enum NormalizedTemplateExpression {
 
 fn reactive_template_metadata_from_current_store(
     template: &Template,
-    context: &TemplateNormalizationContext<'_, '_>,
+    context: &TemplateNormalizationContext<'_>,
 ) -> Result<Option<ReactiveTemplateMetadata>, CompilerError> {
     // Normalization has the module store, so it should refresh metadata from
     // the same finalized TIR roots that HIR handoff materialization consumes.
@@ -1396,7 +1319,7 @@ fn expression_reactive_template_metadata_from_store(
 ///   on AST template internals.
 fn normalize_template_for_hir(
     template: &mut Template,
-    context: &mut TemplateNormalizationContext<'_, '_>,
+    context: &mut TemplateNormalizationContext<'_>,
 ) -> Result<(), TemplateNormalizationError> {
     normalize_expression_overlays_for_template_reference(template, context)?;
 
@@ -1405,7 +1328,7 @@ fn normalize_template_for_hir(
 
 fn normalize_expression_overlays_for_template_reference(
     template: &mut Template,
-    context: &mut TemplateNormalizationContext<'_, '_>,
+    context: &mut TemplateNormalizationContext<'_>,
 ) -> Result<(), TemplateNormalizationError> {
     // Keep normalized payloads in the shared view context consumed
     // by the finalized effective view and runtime handoff materializer. This
@@ -1436,47 +1359,8 @@ fn normalize_expression_overlays_for_template_reference(
     }
 
     let mut store = context.template_ir_store.borrow_mut();
-    let normalized_site_ids = normalized_overrides
-        .iter()
-        .map(|(site_id, _)| *site_id)
-        .collect::<HashSet<_>>();
-
-    let mut retained_site_ids = HashSet::new();
-    let mut overrides = if let Some(existing_overlay_id) = reference.context.expression_overlay {
-        let existing_overlay = store
-            .expression_overlay(existing_overlay_id)
-            .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "expression overlay normalization referenced missing expression overlay {}",
-                    existing_overlay_id
-                ))
-            })?;
-        existing_overlay
-            .overrides
-            .iter()
-            .filter(|(site_id, _)| {
-                !normalized_site_ids.contains(site_id) && retained_site_ids.insert(*site_id)
-            })
-            .map(|(site_id, expression)| (*site_id, expression.clone()))
-            .collect()
-    } else {
-        Vec::new()
-    };
-    for (site_id, expression) in normalized_overrides {
-        if retained_site_ids.insert(site_id) {
-            overrides.push((site_id, expression));
-        }
-    }
-
-    let expression_overlay_id =
-        store.allocate_expression_overlay(TirExpressionOverlay { overrides });
-    let expression_context = TemplateViewContext {
-        expression_overlay: Some(expression_overlay_id),
-        slot_resolution: None,
-        wrapper_context: None,
-    };
-
-    template.tir_reference.context = reference.context.merge(expression_context);
+    template.tir_reference.context =
+        replace_expression_overlay_entries(&mut store, reference.context, normalized_overrides)?;
     if should_mark_finalized {
         template.tir_reference.phase = TemplateTirPhase::Finalized;
     }
@@ -1486,21 +1370,18 @@ fn normalize_expression_overlays_for_template_reference(
 
 fn collect_expression_overlay_payloads(
     reference: &TemplateTirReference,
-    context: &TemplateNormalizationContext<'_, '_>,
+    context: &TemplateNormalizationContext<'_>,
 ) -> Result<Vec<(ExpressionSiteId, Expression)>, TemplateNormalizationError> {
     let store = context.template_ir_store.borrow();
-    let expression_payloads = collect_effective_tir_expression_overlay_payloads(
-        &store,
-        reference.root,
-        reference.context,
-    )?;
+    let view = TirView::new(&store, reference.root, reference.phase, reference.context)?;
+    let expression_payloads = collect_effective_tir_expression_overlay_payloads(&view)?;
 
     Ok(expression_payloads)
 }
 
 fn normalize_runtime_slot_template_expression_for_hir(
     expression: &mut Expression,
-    context: &mut TemplateNormalizationContext<'_, '_>,
+    context: &mut TemplateNormalizationContext<'_>,
 ) -> Result<(), TemplateNormalizationError> {
     normalize_expression_templates_with_context(
         expression,
@@ -1512,8 +1393,8 @@ fn normalize_runtime_slot_template_expression_for_hir(
 /// Materializes the neutral AST-to-HIR payload from one prepared runtime view.
 fn materialize_runtime_template_handoff_for_hir(
     template: &Template,
-    context: &mut TemplateNormalizationContext<'_, '_>,
-    prepared: &PreparedRuntime,
+    context: &mut TemplateNormalizationContext<'_>,
+    prepared: &TemplatePreparation,
     reactive_template: Option<ReactiveTemplateMetadata>,
 ) -> Result<Option<NormalizedTemplateExpression>, TemplateNormalizationError> {
     let store_handle = Rc::clone(&context.template_ir_store);
@@ -1521,8 +1402,8 @@ fn materialize_runtime_template_handoff_for_hir(
     let view = finalized_tir_view_for_template(template, &store)?;
 
     if matches!(
-        prepared.reason,
-        crate::compiler_frontend::ast::templates::tir::RuntimeTemplateReason::SlotContribution
+        prepared.outcome,
+        TemplatePreparationOutcome::Runtime(RuntimeTemplateReason::SlotContribution,)
     ) {
         return Err(CompilerDiagnostic::invalid_template_slot(
             InvalidTemplateSlotReason::InsertOutsideParentSlot,
@@ -1551,44 +1432,25 @@ fn materialize_runtime_template_handoff_for_hir(
 
 fn normalize_runtime_slot_handoff_for_hir(
     handoff: &mut OwnedRuntimeSlotApplicationHandoff,
-    context: &mut TemplateNormalizationContext<'_, '_>,
+    context: &mut TemplateNormalizationContext<'_>,
 ) -> Result<(), TemplateNormalizationError> {
     runtime_handoff::walk_owned_runtime_slot_application_handoff_mut(handoff, &mut |event| {
-        normalize_owned_runtime_template_handoff_event_for_hir(event, context)
+        normalize_owned_runtime_template_node_for_hir(event, context)
     })
 }
 
 fn normalize_runtime_template_handoff_for_hir(
     handoff: &mut OwnedRuntimeTemplateHandoff,
-    context: &mut TemplateNormalizationContext<'_, '_>,
+    context: &mut TemplateNormalizationContext<'_>,
 ) -> Result<(), TemplateNormalizationError> {
     runtime_handoff::walk_owned_runtime_template_handoff_mut(handoff, &mut |event| {
-        normalize_owned_runtime_template_handoff_event_for_hir(event, context)
+        normalize_owned_runtime_template_node_for_hir(event, context)
     })
-}
-
-fn normalize_owned_runtime_template_handoff_event_for_hir(
-    event: runtime_handoff::OwnedRuntimeTemplateWalkMutEvent<'_>,
-    context: &mut TemplateNormalizationContext<'_, '_>,
-) -> Result<(), TemplateNormalizationError> {
-    match event {
-        runtime_handoff::OwnedRuntimeTemplateWalkMutEvent::Node(node) => {
-            normalize_owned_runtime_template_node_for_hir(node, context)?;
-        }
-
-        runtime_handoff::OwnedRuntimeTemplateWalkMutEvent::HandoffAfterBody(_handoff) => {
-            // `Style` no longer carries recursive wrapper templates, so there is
-            // nothing to normalize at the handoff boundary. Nested child templates
-            // are visited through `OwnedRuntimeTemplateNode::ChildTemplate` nodes.
-        }
-    }
-
-    Ok(())
 }
 
 fn normalize_owned_runtime_template_node_for_hir(
     node: &mut OwnedRuntimeTemplateNode,
-    context: &mut TemplateNormalizationContext<'_, '_>,
+    context: &mut TemplateNormalizationContext<'_>,
 ) -> Result<(), TemplateNormalizationError> {
     match node {
         OwnedRuntimeTemplateNode::DynamicExpression { expression, .. } => {
@@ -1604,6 +1466,7 @@ fn normalize_owned_runtime_template_node_for_hir(
         | OwnedRuntimeTemplateNode::AggregateOutput
         | OwnedRuntimeTemplateNode::LoopControl { .. }
         | OwnedRuntimeTemplateNode::RuntimeSlotSite { .. }
+        | OwnedRuntimeTemplateNode::RuntimeSlotContributionSource { .. }
         | OwnedRuntimeTemplateNode::Slot { .. } => {}
     }
 

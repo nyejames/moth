@@ -1,7 +1,8 @@
 //! TIR-native active-context subtree copying.
 //!
 //! WHAT: deep-copies finalized TIR subtrees into fresh trees while applying an
-//! optional active slot-plan context to unresolved `Slot` placeholders.
+//! optional active slot-plan context to unresolved `Slot` placeholders and
+//! rebasing retained view overlays to the copied identity domain.
 //!
 //! WHY: control-flow bodies and runtime slot wrapper roots must be copied
 //! without mutating the stored originals, while still honoring the active
@@ -9,20 +10,33 @@
 
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::tir::ids::{
-    TemplateIrId, TemplateIrNodeId, TemplateSlotPlanId,
+    ChildTemplateOccurrenceId, ExpressionSiteId, SlotOccurrenceId, TemplateIrId, TemplateIrNodeId,
+    TemplateSlotPlanId,
 };
 use crate::compiler_frontend::ast::templates::tir::node::{
-    TemplateIr, TemplateIrBranch, TemplateIrNode, TemplateIrNodeKind,
+    TemplateIrBranch, TemplateIrNode, TemplateIrNodeKind, TemplateLoopHeaderExpressionSites,
 };
-use crate::compiler_frontend::ast::templates::tir::overlays::TemplateViewContext;
-use crate::compiler_frontend::ast::templates::tir::refs::TemplateTirChildReference;
 use crate::compiler_frontend::ast::templates::tir::slot_plan::convert_runtime_slot_site;
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
-use crate::compiler_frontend::ast::templates::tir::view::TemplateTirPhase;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 
 use crate::compiler_frontend::ast::templates::tir::copy_state::TirCopyState;
+use crate::compiler_frontend::ast::templates::tir::overlays::{
+    TemplateViewContext, TirExpressionOverlay, TirExpressionOverlayId, TirSlotResolutionOverlay,
+    TirSlotResolutionOverlayId, TirWrapperContextOverlay, TirWrapperContextOverlayId,
+};
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
+use rustc_hash::FxHashMap;
+
+/// Maps every occurrence/site copied in one independent subtree pass. A copied
+/// child reference retains its contextual dimensions, so those dimensions must
+/// be rebuilt against the copied key space before the reference is published.
+#[derive(Default)]
+struct TirCopyIdentityRemap {
+    expression_sites: FxHashMap<ExpressionSiteId, ExpressionSiteId>,
+    slot_occurrences: FxHashMap<SlotOccurrenceId, SlotOccurrenceId>,
+    child_occurrences: FxHashMap<ChildTemplateOccurrenceId, ChildTemplateOccurrenceId>,
+}
 
 /// Copies a finalized TIR subtree into a fresh tree, applying an optional active
 /// slot-plan context to any unresolved `Slot` placeholders.
@@ -46,7 +60,14 @@ pub(crate) fn copy_tir_subtree_with_active_slot_plan(
     copy_state: &mut TirCopyState,
 ) -> Result<TemplateIrNodeId, TemplateError> {
     increment_ast_counter(AstCounter::TirCopyPasses);
-    copy_tir_node_with_active_slot_plan(source_node_id, active_slot_plan, store, copy_state, false)
+    let mut identity_remap = TirCopyIdentityRemap::default();
+    copy_tir_node_with_active_slot_plan(
+        source_node_id,
+        active_slot_plan,
+        store,
+        copy_state,
+        &mut identity_remap,
+    )
 }
 
 /// Recursively copies one TIR node, translating child-template references into
@@ -57,7 +78,7 @@ fn copy_tir_node_with_active_slot_plan(
     active_slot_plan: Option<TemplateSlotPlanId>,
     store: &mut TemplateIrStore,
     copy_state: &mut TirCopyState,
-    preserve_expression_site_ids: bool,
+    identity_remap: &mut TirCopyIdentityRemap,
 ) -> Result<TemplateIrNodeId, TemplateError> {
     let source_node = store.get_node(source_node_id).cloned().ok_or_else(|| {
         TemplateError::from(CompilerError::compiler_error(
@@ -73,7 +94,7 @@ fn copy_tir_node_with_active_slot_plan(
             byte_len,
             origin,
         } => {
-            copy_state.record_text_node(byte_len as usize);
+            copy_state.record_text_node(byte_len);
 
             let node_id = store.push_node(TemplateIrNode::new(
                 TemplateIrNodeKind::Text {
@@ -83,12 +104,8 @@ fn copy_tir_node_with_active_slot_plan(
                 },
                 location,
             ));
-            if let Some(Some(subscription)) = store
-                .node_reactive_subscriptions
-                .get(source_node_id.index())
-                .cloned()
-            {
-                store.set_node_reactive_subscription(node_id, subscription);
+            if let Some(subscription) = store.node_reactive_subscription(source_node_id)?.cloned() {
+                store.set_node_reactive_subscription(node_id, subscription)?;
             }
             Ok(node_id)
         }
@@ -101,11 +118,10 @@ fn copy_tir_node_with_active_slot_plan(
         } => {
             copy_state.record_dynamic_expression(reactive_subscription.is_some());
 
-            let copied_site_id = if preserve_expression_site_ids {
-                site_id
-            } else {
-                store.next_expression_site_id()
-            };
+            let copied_site_id = remap_expression_site_id(store);
+            identity_remap
+                .expression_sites
+                .insert(site_id, copied_site_id);
             let node_id = store.push_node(TemplateIrNode::new(
                 TemplateIrNodeKind::DynamicExpression {
                     expression,
@@ -134,7 +150,12 @@ fn copy_tir_node_with_active_slot_plan(
             }
 
             copy_state.record_slot();
-            placeholder.occurrence_id = store.next_slot_occurrence_id();
+            let source_occurrence_id = placeholder.occurrence_id;
+            let copied_occurrence_id = store.next_slot_occurrence_id();
+            identity_remap
+                .slot_occurrences
+                .insert(source_occurrence_id, copied_occurrence_id);
+            placeholder.occurrence_id = copied_occurrence_id;
             placeholder.location = location.clone();
             let node_id = store.push_node(TemplateIrNode::new(
                 TemplateIrNodeKind::Slot { placeholder },
@@ -153,25 +174,40 @@ fn copy_tir_node_with_active_slot_plan(
             Ok(node_id)
         }
 
-        TemplateIrNodeKind::ChildTemplate { reference, .. } => {
+        TemplateIrNodeKind::RuntimeSlotContributionSource { plan, source } => {
+            copy_state.record_runtime_slot_contribution_source();
+            let node_id = store.push_node(TemplateIrNode::new(
+                TemplateIrNodeKind::RuntimeSlotContributionSource { plan, source },
+                location,
+            ));
+            Ok(node_id)
+        }
+
+        TemplateIrNodeKind::ChildTemplate {
+            reference,
+            occurrence_id,
+        } => {
             let new_child_id = copy_tir_template_with_active_slot_plan(
                 reference.root,
                 active_slot_plan,
                 store,
                 copy_state,
+                identity_remap,
             )?;
             copy_state.record_child_template();
 
-            let occurrence_id = store.next_child_template_occurrence_id();
-            let reference = TemplateTirChildReference::new(
-                new_child_id,
-                TemplateTirPhase::Parsed,
-                TemplateViewContext::default(),
-            );
+            let reference_context = remap_view_context(store, reference.context, identity_remap)?;
+            let copied_occurrence_id = store.next_child_template_occurrence_id();
+            identity_remap
+                .child_occurrences
+                .insert(occurrence_id, copied_occurrence_id);
+            let reference = reference
+                .with_root(new_child_id)
+                .with_context(reference_context);
             let node_id = store.push_node(TemplateIrNode::new(
                 TemplateIrNodeKind::ChildTemplate {
                     reference,
-                    occurrence_id,
+                    occurrence_id: copied_occurrence_id,
                 },
                 location,
             ));
@@ -184,6 +220,7 @@ fn copy_tir_node_with_active_slot_plan(
                 active_slot_plan,
                 store,
                 copy_state,
+                identity_remap,
             )?;
             copy_state.record_insert_contribution();
 
@@ -206,7 +243,7 @@ fn copy_tir_node_with_active_slot_plan(
                         active_slot_plan,
                         store,
                         copy_state,
-                        preserve_expression_site_ids,
+                        identity_remap,
                     )
                 })
                 .collect::<Result<Vec<_>, _>>()?;
@@ -232,13 +269,19 @@ fn copy_tir_node_with_active_slot_plan(
                         active_slot_plan,
                         store,
                         copy_state,
-                        preserve_expression_site_ids,
+                        identity_remap,
                     )?;
 
-                    Ok(
-                        TemplateIrBranch::new(branch.selector, new_body, branch.location)
-                            .with_selector_site_id(branch.selector_site_id),
-                    )
+                    let copied_selector_site_id = remap_expression_site_id(store);
+                    identity_remap
+                        .expression_sites
+                        .insert(branch.selector_site_id, copied_selector_site_id);
+                    Ok(TemplateIrBranch::new(
+                        branch.selector,
+                        new_body,
+                        branch.location,
+                        copied_selector_site_id,
+                    ))
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             let new_fallback = fallback
@@ -248,7 +291,7 @@ fn copy_tir_node_with_active_slot_plan(
                         active_slot_plan,
                         store,
                         copy_state,
-                        preserve_expression_site_ids,
+                        identity_remap,
                     )
                 })
                 .transpose()?;
@@ -277,8 +320,10 @@ fn copy_tir_node_with_active_slot_plan(
                 active_slot_plan,
                 store,
                 copy_state,
-                preserve_expression_site_ids,
+                identity_remap,
             )?;
+            let header_sites =
+                remap_loop_header_expression_sites(store, header_sites, identity_remap);
             let new_aggregate_wrapper = aggregate_wrapper
                 .map(|wrapper_id| {
                     copy_tir_node_with_active_slot_plan(
@@ -286,7 +331,7 @@ fn copy_tir_node_with_active_slot_plan(
                         active_slot_plan,
                         store,
                         copy_state,
-                        preserve_expression_site_ids,
+                        identity_remap,
                     )
                 })
                 .transpose()?;
@@ -340,20 +385,24 @@ fn copy_tir_template_with_active_slot_plan(
     active_slot_plan: Option<TemplateSlotPlanId>,
     store: &mut TemplateIrStore,
     copy_state: &mut TirCopyState,
+    identity_remap: &mut TirCopyIdentityRemap,
 ) -> Result<TemplateIrId, TemplateError> {
-    let source_template = store
-        .get_template(source_template_id)
-        .cloned()
-        .ok_or_else(|| {
+    let (source_root, has_runtime_slot_plan) = {
+        let source_template = store.get_template(source_template_id).ok_or_else(|| {
             TemplateError::from(CompilerError::compiler_error(
                 "active-context TIR copy: source template ID was not present in the store.",
             ))
         })?;
+        (
+            source_template.root,
+            source_template.runtime_slot_plan.is_some(),
+        )
+    };
 
     // Runtime slot handoff templates already resolved their own placeholders.
     // Copy them under a suppressed active plan so the outer cursor does not leak
     // into the nested application.
-    let effective_active_slot_plan = if source_template.runtime_slot_plan.is_some() {
+    let effective_active_slot_plan = if has_runtime_slot_plan {
         None
     } else {
         active_slot_plan
@@ -363,26 +412,170 @@ fn copy_tir_template_with_active_slot_plan(
     child_state.runtime_slot_site_cursor = copy_state.runtime_slot_site_cursor.clone();
 
     let new_root = copy_tir_node_with_active_slot_plan(
-        source_template.root,
+        source_root,
         effective_active_slot_plan,
         store,
         &mut child_state,
-        false,
+        identity_remap,
     )?;
 
     // Propagate the cursor state for the active plan back to the parent copy.
     // The child template's own text/child/slot counts stay in its own summary.
     copy_state.runtime_slot_site_cursor = child_state.runtime_slot_site_cursor;
 
-    let mut new_template = TemplateIr::new(
+    Ok(store.push_structurally_derived_template(
+        source_template_id,
         new_root,
-        source_template.style,
-        source_template.kind,
-        child_state.summary,
-        source_template.location,
-    );
-    new_template.conditional_child_wrapper_set = source_template.conditional_child_wrapper_set;
-    new_template.runtime_slot_plan = source_template.runtime_slot_plan;
+        crate::compiler_frontend::ast::templates::tir::DerivedTemplateMetadata::preserve_source(),
+    )?)
+}
 
-    Ok(store.push_template(new_template))
+fn remap_expression_site_id(store: &mut TemplateIrStore) -> ExpressionSiteId {
+    store.next_expression_site_id()
+}
+
+fn remap_loop_header_expression_sites(
+    store: &mut TemplateIrStore,
+    header_sites: TemplateLoopHeaderExpressionSites,
+    identity_remap: &mut TirCopyIdentityRemap,
+) -> TemplateLoopHeaderExpressionSites {
+    match header_sites {
+        TemplateLoopHeaderExpressionSites::Conditional { condition } => {
+            let copied_condition = remap_expression_site_id(store);
+            identity_remap
+                .expression_sites
+                .insert(condition, copied_condition);
+            TemplateLoopHeaderExpressionSites::Conditional {
+                condition: copied_condition,
+            }
+        }
+        TemplateLoopHeaderExpressionSites::Range { start, end, step } => {
+            let copied_start = remap_expression_site_id(store);
+            let copied_end = remap_expression_site_id(store);
+            identity_remap.expression_sites.insert(start, copied_start);
+            identity_remap.expression_sites.insert(end, copied_end);
+            TemplateLoopHeaderExpressionSites::Range {
+                start: copied_start,
+                end: copied_end,
+                step: step.map(|source_step| {
+                    let copied_step = remap_expression_site_id(store);
+                    identity_remap
+                        .expression_sites
+                        .insert(source_step, copied_step);
+                    copied_step
+                }),
+            }
+        }
+        TemplateLoopHeaderExpressionSites::Collection { iterable } => {
+            let copied_iterable = remap_expression_site_id(store);
+            identity_remap
+                .expression_sites
+                .insert(iterable, copied_iterable);
+            TemplateLoopHeaderExpressionSites::Collection {
+                iterable: copied_iterable,
+            }
+        }
+    }
+}
+
+fn remap_view_context(
+    store: &mut TemplateIrStore,
+    context: TemplateViewContext,
+    identity_remap: &TirCopyIdentityRemap,
+) -> Result<TemplateViewContext, CompilerError> {
+    // Overlay dimensions stay present even when their copied subtree has no
+    // matching entries. Presence is part of the exact view identity.
+    let expression_overlay = context
+        .expression_overlay
+        .map(|overlay_id| remap_expression_overlay(store, overlay_id, identity_remap))
+        .transpose()?;
+    let slot_resolution = context
+        .slot_resolution
+        .map(|overlay_id| remap_slot_resolution_overlay(store, overlay_id, identity_remap))
+        .transpose()?;
+    let wrapper_context = context
+        .wrapper_context
+        .map(|overlay_id| remap_wrapper_context_overlay(store, overlay_id, identity_remap))
+        .transpose()?;
+
+    Ok(TemplateViewContext {
+        expression_overlay,
+        slot_resolution,
+        wrapper_context,
+    })
+}
+
+fn remap_expression_overlay(
+    store: &mut TemplateIrStore,
+    overlay_id: TirExpressionOverlayId,
+    identity_remap: &TirCopyIdentityRemap,
+) -> Result<TirExpressionOverlayId, CompilerError> {
+    let overrides = store
+        .expression_overlay(overlay_id)
+        .ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "active-context TIR copy: expression overlay {overlay_id} was not present in the store."
+            ))
+        })?
+        .overrides
+        .iter()
+        .filter_map(|(site_id, expression)| {
+            identity_remap
+                .expression_sites
+                .get(site_id)
+                .map(|copied_site_id| (*copied_site_id, expression.clone()))
+        })
+        .collect();
+
+    store.allocate_expression_overlay(TirExpressionOverlay { overrides })
+}
+
+fn remap_slot_resolution_overlay(
+    store: &mut TemplateIrStore,
+    overlay_id: TirSlotResolutionOverlayId,
+    identity_remap: &TirCopyIdentityRemap,
+) -> Result<TirSlotResolutionOverlayId, CompilerError> {
+    let resolutions = store
+        .slot_resolution_overlay(overlay_id)
+        .ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "active-context TIR copy: slot-resolution overlay {overlay_id} was not present in the store."
+            ))
+        })?
+        .resolutions
+        .iter()
+        .filter_map(|(occurrence_id, resolution)| {
+            identity_remap
+                .slot_occurrences
+                .get(occurrence_id)
+                .map(|copied_occurrence_id| (*copied_occurrence_id, resolution.clone()))
+        })
+        .collect();
+
+    store.allocate_slot_resolution_overlay(TirSlotResolutionOverlay { resolutions })
+}
+
+fn remap_wrapper_context_overlay(
+    store: &mut TemplateIrStore,
+    overlay_id: TirWrapperContextOverlayId,
+    identity_remap: &TirCopyIdentityRemap,
+) -> Result<TirWrapperContextOverlayId, CompilerError> {
+    let contexts = store
+        .wrapper_context_overlay(overlay_id)
+        .ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "active-context TIR copy: wrapper-context overlay {overlay_id} was not present in the store."
+            ))
+        })?
+        .contexts
+        .iter()
+        .filter_map(|(occurrence_id, context)| {
+            identity_remap
+                .child_occurrences
+                .get(occurrence_id)
+                .map(|copied_occurrence_id| (*copied_occurrence_id, context.clone()))
+        })
+        .collect();
+
+    store.allocate_wrapper_context_overlay(TirWrapperContextOverlay { contexts })
 }

@@ -12,15 +12,18 @@
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::templates::runtime_handoff::{
     OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeSlotContributionSource, OwnedRuntimeSlotSite,
-    OwnedRuntimeSlotSiteRenderPiece, OwnedRuntimeSlotSiteRenderPlan, OwnedRuntimeTemplateBody,
-    OwnedRuntimeTemplateBranch, OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
+    OwnedRuntimeTemplateBody, OwnedRuntimeTemplateBranch, OwnedRuntimeTemplateHandoff,
+    OwnedRuntimeTemplateNode,
 };
 use crate::compiler_frontend::ast::templates::template::SlotKey;
 use crate::compiler_frontend::ast::templates::template_control_flow::{
     TemplateBranchSelector, TemplateLoopHeader,
 };
-use crate::compiler_frontend::ast::templates::tir::preparation::PreparedRuntime;
+use crate::compiler_frontend::ast::templates::tir::preparation::{
+    TemplatePreparation, TemplatePreparationOutcome,
+};
 
+use crate::compiler_frontend::ast::templates::tir::collect_tir_slot_schema;
 use crate::compiler_frontend::ast::templates::tir::ids::{
     ChildTemplateOccurrenceId, ExpressionSiteId, SlotOccurrenceId, TemplateIrId, TemplateIrNodeId,
     TemplateSlotPlanId,
@@ -34,35 +37,35 @@ use crate::compiler_frontend::ast::templates::tir::overlays::{
 use crate::compiler_frontend::ast::templates::tir::refs::{
     TemplateTirChildReference, TemplateWrapperReference,
 };
-use crate::compiler_frontend::ast::templates::tir::slot_composition::collect_tir_slot_schema;
-use crate::compiler_frontend::ast::templates::tir::slot_plan::{
-    TemplateSlotPlan, TemplateSlotSiteRenderPiece,
-};
+use crate::compiler_frontend::ast::templates::tir::slot_plan::TemplateSlotPlan;
 use crate::compiler_frontend::ast::templates::tir::view::TirView;
+use crate::compiler_frontend::ast::templates::tir::view::TirViewIdentity;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
+use std::collections::HashSet;
+
 /// Materializes a prepared runtime slot application from its exact view.
 pub(crate) fn owned_runtime_slot_handoff_for_prepared_view(
-    prepared: &PreparedRuntime,
+    prepared: &TemplatePreparation,
     view: TirView<'_>,
 ) -> Result<Option<OwnedRuntimeSlotApplicationHandoff>, CompilerError> {
     validate_prepared_runtime(prepared, &view)?;
     let template_id = template_id_for_view(&view)?;
-    let mut materializer = RuntimeHandoffMaterializer::new_with_view(view);
-    materializer.owned_runtime_slot_handoff_for_template(template_id)
+    let mut materializer = RuntimeHandoffMaterializer::new();
+    materializer.owned_runtime_slot_handoff_for_template(&view, template_id)
 }
 
 /// Materializes an ordinary runtime template from its prepared exact view.
 pub(crate) fn owned_runtime_template_handoff_for_prepared_view(
-    prepared: &PreparedRuntime,
+    prepared: &TemplatePreparation,
     view: TirView<'_>,
 ) -> Result<OwnedRuntimeTemplateHandoff, CompilerError> {
     validate_prepared_runtime(prepared, &view)?;
     let template_id = template_id_for_view(&view)?;
-    let mut materializer = RuntimeHandoffMaterializer::new_with_view(view);
-    materializer.owned_runtime_template_handoff_for_template(template_id)
+    let mut materializer = RuntimeHandoffMaterializer::new();
+    materializer.owned_runtime_template_handoff_for_template(&view, template_id)
 }
 
 fn template_id_for_view(view: &TirView<'_>) -> Result<TemplateIrId, CompilerError> {
@@ -75,7 +78,7 @@ fn template_id_for_view(view: &TirView<'_>) -> Result<TemplateIrId, CompilerErro
 }
 
 fn validate_prepared_runtime(
-    prepared: &PreparedRuntime,
+    prepared: &TemplatePreparation,
     view: &TirView<'_>,
 ) -> Result<(), CompilerError> {
     if prepared.identity != view.identity() {
@@ -84,75 +87,92 @@ fn validate_prepared_runtime(
         ));
     }
 
+    if !matches!(prepared.outcome, TemplatePreparationOutcome::Runtime(_)) {
+        return Err(CompilerError::compiler_error(
+            "TIR runtime handoff received a non-runtime preparation outcome.",
+        ));
+    }
+
     Ok(())
 }
 
-struct RuntimeHandoffMaterializer<'store> {
-    /// Exact view for the structural root currently being materialized.
-    effective_view: TirView<'store>,
+struct RuntimeHandoffMaterializer {
+    active_views: HashSet<TirViewIdentity>,
 }
 
-impl<'store> RuntimeHandoffMaterializer<'store> {
-    fn new_with_view(view: TirView<'store>) -> Self {
+impl RuntimeHandoffMaterializer {
+    fn new() -> Self {
         Self {
-            effective_view: view,
+            active_views: HashSet::new(),
         }
-    }
-
-    /// Temporarily activates one exact view while materializing a nested root.
-    fn with_view<T>(
-        &mut self,
-        view: TirView<'store>,
-        build: impl FnOnce(&mut Self) -> Result<T, CompilerError>,
-    ) -> Result<T, CompilerError> {
-        let parent_view = std::mem::replace(&mut self.effective_view, view);
-        let result = build(self);
-        self.effective_view = parent_view;
-        result
-    }
-
-    fn current_view(&self) -> &TirView<'store> {
-        &self.effective_view
     }
 
     fn owned_runtime_slot_handoff_for_template(
         &mut self,
+        view: &TirView<'_>,
         id: TemplateIrId,
     ) -> Result<Option<OwnedRuntimeSlotApplicationHandoff>, CompilerError> {
-        let template = self.get_template(id)?;
+        let template = self.get_template(view, id)?;
         let root = template.root;
         let Some(slot_plan_id) = template.runtime_slot_plan else {
             return Ok(None);
         };
 
-        self.materialize_runtime_slot_application_by_parts(root, slot_plan_id, None)
+        self.materialize_runtime_slot_application_by_parts(view, root, slot_plan_id, None)
             .map(Some)
     }
 
     fn owned_runtime_template_handoff_for_template(
         &mut self,
+        view: &TirView<'_>,
         id: TemplateIrId,
     ) -> Result<OwnedRuntimeTemplateHandoff, CompilerError> {
-        self.materialize_template(id, None, None)
+        self.materialize_template(view, id, None, None)
     }
 
     fn materialize_template(
         &mut self,
+        view: &TirView<'_>,
         id: TemplateIrId,
         active_slot_plan: Option<TemplateSlotPlanId>,
         injection: Option<(&SlotKey, &OwnedRuntimeTemplateNode)>,
     ) -> Result<OwnedRuntimeTemplateHandoff, CompilerError> {
-        let template = self.get_template(id)?;
+        let identity = view.identity();
+        if !self.active_views.insert(identity) {
+            return Err(CompilerError::compiler_error(format!(
+                "TIR handoff: exact view {identity:?} re-entered while still active."
+            )));
+        }
+
+        let result = self.materialize_template_body(view, id, active_slot_plan, injection);
+        self.active_views.remove(&identity);
+        result
+    }
+
+    fn materialize_template_body(
+        &mut self,
+        view: &TirView<'_>,
+        id: TemplateIrId,
+        active_slot_plan: Option<TemplateSlotPlanId>,
+        injection: Option<(&SlotKey, &OwnedRuntimeTemplateNode)>,
+    ) -> Result<OwnedRuntimeTemplateHandoff, CompilerError> {
+        let template = self.get_template(view, id)?;
         let location = template.location.clone();
         let runtime_slot_plan = template.runtime_slot_plan;
         let root = template.root;
 
         let body = if let Some(slot_plan_id) = runtime_slot_plan {
             OwnedRuntimeTemplateBody::RuntimeSlotApplication(Box::new(
-                self.materialize_runtime_slot_application_by_parts(root, slot_plan_id, injection)?,
+                self.materialize_runtime_slot_application_by_parts(
+                    view,
+                    root,
+                    slot_plan_id,
+                    injection,
+                )?,
             ))
         } else {
             OwnedRuntimeTemplateBody::Render(self.materialize_node_with_injection(
+                view,
                 root,
                 active_slot_plan,
                 injection,
@@ -164,27 +184,33 @@ impl<'store> RuntimeHandoffMaterializer<'store> {
 
     fn materialize_runtime_slot_application_by_parts(
         &mut self,
+        view: &TirView<'_>,
         wrapper_root: TemplateIrNodeId,
         slot_plan_id: TemplateSlotPlanId,
         injection: Option<(&SlotKey, &OwnedRuntimeTemplateNode)>,
     ) -> Result<OwnedRuntimeSlotApplicationHandoff, CompilerError> {
-        let slot_plan = self.get_slot_plan(slot_plan_id)?.clone();
-        let wrapper =
-            self.materialize_node_with_injection(wrapper_root, Some(slot_plan_id), injection)?;
+        let slot_plan = self.get_slot_plan(view, slot_plan_id)?;
+        let wrapper = self.materialize_node_with_injection(
+            view,
+            wrapper_root,
+            Some(slot_plan_id),
+            injection,
+        )?;
         let contribution_sources =
-            self.materialize_contribution_sources(&slot_plan, slot_plan_id)?;
-        let slot_sites = self.materialize_slot_sites(&slot_plan, slot_plan_id)?;
+            self.materialize_contribution_sources(view, slot_plan, slot_plan_id)?;
+        let slot_sites = self.materialize_slot_sites(view, slot_plan, slot_plan_id)?;
 
         Ok(OwnedRuntimeSlotApplicationHandoff {
             wrapper,
             contribution_sources,
             slot_sites,
-            location: slot_plan.location,
+            location: slot_plan.location.clone(),
         })
     }
 
     fn materialize_contribution_sources(
         &mut self,
+        view: &TirView<'_>,
         slot_plan: &TemplateSlotPlan,
         slot_plan_id: TemplateSlotPlanId,
     ) -> Result<Vec<OwnedRuntimeSlotContributionSource>, CompilerError> {
@@ -193,7 +219,7 @@ impl<'store> RuntimeHandoffMaterializer<'store> {
         for source in &slot_plan.contribution_sources {
             sources.push(OwnedRuntimeSlotContributionSource {
                 source: source.source,
-                render_root: self.materialize_node(source.render_root, Some(slot_plan_id))?,
+                render_root: self.materialize_node(view, source.render_root, Some(slot_plan_id))?,
                 renders_wrapper_unconditionally: source.renders_wrapper_unconditionally,
                 location: source.location.clone(),
             });
@@ -204,30 +230,16 @@ impl<'store> RuntimeHandoffMaterializer<'store> {
 
     fn materialize_slot_sites(
         &mut self,
+        view: &TirView<'_>,
         slot_plan: &TemplateSlotPlan,
         slot_plan_id: TemplateSlotPlanId,
     ) -> Result<Vec<OwnedRuntimeSlotSite>, CompilerError> {
         let mut sites = Vec::with_capacity(slot_plan.slot_sites.len());
 
         for site in &slot_plan.slot_sites {
-            let mut pieces = Vec::with_capacity(site.render_plan.pieces.len());
-            for piece in &site.render_plan.pieces {
-                pieces.push(match piece {
-                    TemplateSlotSiteRenderPiece::Render(node_id) => {
-                        OwnedRuntimeSlotSiteRenderPiece::Render(
-                            self.materialize_node(*node_id, Some(slot_plan_id))?,
-                        )
-                    }
-
-                    TemplateSlotSiteRenderPiece::ContributionSource(source_id) => {
-                        OwnedRuntimeSlotSiteRenderPiece::ContributionSource(*source_id)
-                    }
-                });
-            }
-
             sites.push(OwnedRuntimeSlotSite {
                 site: site.site,
-                render_plan: OwnedRuntimeSlotSiteRenderPlan { pieces },
+                render_root: self.materialize_node(view, site.render_root, Some(slot_plan_id))?,
                 location: site.location.clone(),
             });
         }
@@ -237,10 +249,11 @@ impl<'store> RuntimeHandoffMaterializer<'store> {
 
     fn materialize_node(
         &mut self,
+        view: &TirView<'_>,
         id: TemplateIrNodeId,
         active_slot_plan: Option<TemplateSlotPlanId>,
     ) -> Result<OwnedRuntimeTemplateNode, CompilerError> {
-        self.materialize_node_with_injection(id, active_slot_plan, None)
+        self.materialize_node_with_injection(view, id, active_slot_plan, None)
     }
 
     /// Materializes one TIR node through the canonical handoff walker, with an
@@ -249,23 +262,25 @@ impl<'store> RuntimeHandoffMaterializer<'store> {
     /// WHAT: keeps ordinary node materialization and wrapper fill injection on
     ///       the same structural traversal, including branches, loops and
     ///       module-local child-template roots.
-    /// WHY: wrapper target selection is schema-owned, so the handoff walker must
+    /// WHY: wrapper target selection is layout-owned, so the handoff walker must
     ///      be able to replace every structural shape that schema discovery can
     ///      reach without creating a second, partial materializer.
     fn materialize_node_with_injection(
         &mut self,
+        view: &TirView<'_>,
         id: TemplateIrNodeId,
         active_slot_plan: Option<TemplateSlotPlanId>,
         injection: Option<(&SlotKey, &OwnedRuntimeTemplateNode)>,
     ) -> Result<OwnedRuntimeTemplateNode, CompilerError> {
-        let node = self.effective_node(id)?;
+        let node = self.effective_node(view, id)?;
 
-        let owned_node = match node.kind {
+        let owned_node = match &node.kind {
             TemplateIrNodeKind::Sequence { children } => {
                 let mut owned_children = Vec::with_capacity(children.len());
                 for child in children {
                     owned_children.push(self.materialize_node_with_injection(
-                        child,
+                        view,
+                        *child,
                         active_slot_plan,
                         injection,
                     )?);
@@ -278,17 +293,12 @@ impl<'store> RuntimeHandoffMaterializer<'store> {
 
             TemplateIrNodeKind::Text {
                 text,
-                byte_len,
+                byte_len: _,
                 origin: _,
             } => Ok(OwnedRuntimeTemplateNode::Text {
-                text,
-                byte_len,
-                reactive_subscription: self
-                    .current_view()
-                    .store()
-                    .node_reactive_subscription(id)
-                    .cloned(),
-                location: node.location,
+                text: *text,
+                reactive_subscription: view.store().node_reactive_subscription(id)?.cloned(),
+                location: node.location.clone(),
             }),
 
             TemplateIrNodeKind::DynamicExpression {
@@ -297,8 +307,12 @@ impl<'store> RuntimeHandoffMaterializer<'store> {
                 reactive_subscription,
                 site_id,
             } => Ok(OwnedRuntimeTemplateNode::DynamicExpression {
-                expression: Box::new(self.effective_expression(site_id, expression.as_ref())?),
-                reactive_subscription,
+                expression: Box::new(self.effective_expression(
+                    view,
+                    *site_id,
+                    expression.as_ref(),
+                )?),
+                reactive_subscription: reactive_subscription.clone(),
             }),
 
             TemplateIrNodeKind::ChildTemplate {
@@ -306,12 +320,17 @@ impl<'store> RuntimeHandoffMaterializer<'store> {
                 occurrence_id,
             } => {
                 let wrapper_context =
-                    self.effective_wrapper_context_for_occurrence(occurrence_id)?;
-                let child_handoff =
-                    self.materialize_child_template_node(&reference, active_slot_plan, injection)?;
+                    self.effective_wrapper_context_for_occurrence(view, *occurrence_id)?;
+                let child_handoff = self.materialize_child_template_node(
+                    view,
+                    reference,
+                    active_slot_plan,
+                    injection,
+                )?;
 
                 if let Some(context) = wrapper_context {
                     self.apply_wrapper_context_overlay_to_child_handoff(
+                        view,
                         &context,
                         child_handoff,
                         &node.location,
@@ -325,22 +344,27 @@ impl<'store> RuntimeHandoffMaterializer<'store> {
                 let mut owned_branches = Vec::with_capacity(branches.len());
                 for branch in branches {
                     let body = self.materialize_node_with_injection(
+                        view,
                         branch.body,
                         active_slot_plan,
                         injection,
                     )?;
 
                     owned_branches.push(OwnedRuntimeTemplateBranch {
-                        selector: self
-                            .effective_branch_selector(&branch.selector, branch.selector_site_id)?,
+                        selector: self.effective_branch_selector(
+                            view,
+                            &branch.selector,
+                            branch.selector_site_id,
+                        )?,
                         body,
-                        location: branch.location,
+                        location: branch.location.clone(),
                     });
                 }
 
                 let fallback = if let Some(fallback_id) = fallback {
                     Some(Box::new(self.materialize_node_with_injection(
-                        fallback_id,
+                        view,
+                        *fallback_id,
                         active_slot_plan,
                         injection,
                     )?))
@@ -351,7 +375,7 @@ impl<'store> RuntimeHandoffMaterializer<'store> {
                 Ok(OwnedRuntimeTemplateNode::BranchChain {
                     branches: owned_branches,
                     fallback,
-                    location: node.location,
+                    location: node.location.clone(),
                 })
             }
 
@@ -363,11 +387,12 @@ impl<'store> RuntimeHandoffMaterializer<'store> {
                 ..
             } => {
                 let body_node =
-                    self.materialize_node_with_injection(body, active_slot_plan, injection)?;
+                    self.materialize_node_with_injection(view, *body, active_slot_plan, injection)?;
 
                 let aggregate_wrapper = if let Some(wrapper_id) = aggregate_wrapper {
                     Some(Box::new(self.materialize_node_with_injection(
-                        wrapper_id,
+                        view,
+                        *wrapper_id,
                         active_slot_plan,
                         injection,
                     )?))
@@ -376,28 +401,61 @@ impl<'store> RuntimeHandoffMaterializer<'store> {
                 };
 
                 Ok(OwnedRuntimeTemplateNode::Loop {
-                    header: self.effective_loop_header(&header, header_sites)?,
+                    header: self.effective_loop_header(view, header, *header_sites)?,
                     body: Box::new(body_node),
                     aggregate_wrapper,
-                    location: node.location,
+                    location: node.location.clone(),
                 })
             }
 
             TemplateIrNodeKind::AggregateOutput => Ok(OwnedRuntimeTemplateNode::AggregateOutput),
 
             TemplateIrNodeKind::LoopControl { kind } => Ok(OwnedRuntimeTemplateNode::LoopControl {
-                kind,
-                location: node.location,
+                kind: *kind,
+                location: node.location.clone(),
             }),
 
             TemplateIrNodeKind::RuntimeSlotSite { plan, site } => {
-                if Some(plan) != active_slot_plan {
+                if Some(*plan) != active_slot_plan {
                     return Err(CompilerError::compiler_error(
                         "TIR HIR handoff materialization found a runtime slot site outside its owning slot application.",
                     ));
                 }
 
-                Ok(OwnedRuntimeTemplateNode::RuntimeSlotSite { site })
+                let slot_plan = self.get_slot_plan(view, *plan)?;
+                let Some(stored) = slot_plan.slot_sites.get(site.0) else {
+                    return Err(CompilerError::compiler_error(
+                        "TIR HIR handoff materialization found an out-of-range runtime slot site.",
+                    ));
+                };
+                if stored.site != *site {
+                    return Err(CompilerError::compiler_error(
+                        "TIR HIR handoff materialization found a slot site whose stored identity does not match its index.",
+                    ));
+                }
+
+                Ok(OwnedRuntimeTemplateNode::RuntimeSlotSite { site: *site })
+            }
+
+            TemplateIrNodeKind::RuntimeSlotContributionSource { plan, source } => {
+                if Some(*plan) != active_slot_plan {
+                    return Err(CompilerError::compiler_error(
+                        "TIR HIR handoff materialization found a runtime slot contribution marker outside its owning slot application.",
+                    ));
+                }
+                let slot_plan = self.get_slot_plan(view, *plan)?;
+                let Some(stored) = slot_plan.contribution_sources.get(source.0) else {
+                    return Err(CompilerError::compiler_error(
+                        "TIR HIR handoff materialization found an out-of-range runtime slot contribution source.",
+                    ));
+                };
+                if stored.source != *source {
+                    return Err(CompilerError::compiler_error(
+                        "TIR HIR handoff materialization found a contribution source whose stored identity does not match its index.",
+                    ));
+                }
+
+                Ok(OwnedRuntimeTemplateNode::RuntimeSlotContributionSource { source: *source })
             }
 
             TemplateIrNodeKind::Slot { placeholder } => {
@@ -408,26 +466,26 @@ impl<'store> RuntimeHandoffMaterializer<'store> {
                 }
 
                 if let Some(resolution) =
-                    self.effective_slot_resolution_for_occurrence(placeholder.occurrence_id)?
-                    && let TirSlotResolutionKind::Resolved { sources } = resolution.kind
+                    self.effective_slot_resolution_for_occurrence(view, placeholder.occurrence_id)?
+                    && let TirSlotResolutionKind::Resolved { sources } = &resolution.kind
                 {
                     return self.materialize_resolved_slot_sources(
-                        &sources,
+                        view,
+                        sources,
                         &node.location,
                         active_slot_plan,
                     );
                 }
 
                 Ok(OwnedRuntimeTemplateNode::Slot {
-                    location: node.location,
+                    location: node.location.clone(),
                 })
             }
 
             TemplateIrNodeKind::InsertContribution { template } => {
-                let helper_view = self.current_view().structural_helper(template)?;
-                let helper_handoff = self.with_view(helper_view, |materializer| {
-                    materializer.materialize_template(template, active_slot_plan, None)
-                })?;
+                let helper_view = view.structural_helper(*template)?;
+                let helper_handoff =
+                    self.materialize_template(&helper_view, *template, active_slot_plan, None)?;
                 Ok(OwnedRuntimeTemplateNode::ChildTemplate {
                     template: Box::new(helper_handoff),
                 })
@@ -438,24 +496,36 @@ impl<'store> RuntimeHandoffMaterializer<'store> {
         Ok(owned_node)
     }
 
-    fn get_template(&self, id: TemplateIrId) -> Result<&TemplateIr, CompilerError> {
-        self.current_view().store().get_template(id).ok_or_else(|| {
+    fn get_template<'a>(
+        &self,
+        view: &TirView<'a>,
+        id: TemplateIrId,
+    ) -> Result<&'a TemplateIr, CompilerError> {
+        view.store().get_template(id).ok_or_else(|| {
             CompilerError::compiler_error(
                 "TIR HIR handoff materialization referenced a missing template.",
             )
         })
     }
 
-    fn get_node(&self, id: TemplateIrNodeId) -> Result<&TemplateIrNode, CompilerError> {
-        self.current_view().store().get_node(id).ok_or_else(|| {
+    fn get_node<'a>(
+        &self,
+        view: &TirView<'a>,
+        id: TemplateIrNodeId,
+    ) -> Result<&'a TemplateIrNode, CompilerError> {
+        view.store().get_node(id).ok_or_else(|| {
             CompilerError::compiler_error(
                 "TIR HIR handoff materialization referenced a missing node.",
             )
         })
     }
 
-    fn effective_node(&self, id: TemplateIrNodeId) -> Result<TemplateIrNode, CompilerError> {
-        self.get_node(id).cloned()
+    fn effective_node<'a>(
+        &self,
+        view: &TirView<'a>,
+        id: TemplateIrNodeId,
+    ) -> Result<&'a TemplateIrNode, CompilerError> {
+        self.get_node(view, id)
     }
 
     /// Resolves the effective expression for a site from the current exact view.
@@ -464,22 +534,21 @@ impl<'store> RuntimeHandoffMaterializer<'store> {
     ///       to the structural expression when the site has no override.
     fn effective_expression(
         &self,
+        view: &TirView<'_>,
         site_id: ExpressionSiteId,
         fallback: &Expression,
     ) -> Result<Expression, CompilerError> {
         Ok(self
-            .effective_expression_for_site(site_id)?
+            .effective_expression_for_site(view, site_id)?
             .unwrap_or_else(|| fallback.clone()))
     }
 
     fn effective_expression_for_site(
         &self,
+        view: &TirView<'_>,
         site_id: ExpressionSiteId,
     ) -> Result<Option<Expression>, CompilerError> {
-        Ok(self
-            .current_view()
-            .effective_expression_for_site(site_id)?
-            .cloned())
+        Ok(view.effective_expression_for_site(site_id)?.cloned())
     }
 
     /// Resolves the effective wrapper context for a child-template occurrence,
@@ -495,12 +564,10 @@ impl<'store> RuntimeHandoffMaterializer<'store> {
     ///      wrappers and `$fresh` suppression without mutating the structural root.
     fn effective_wrapper_context_for_occurrence(
         &self,
+        view: &TirView<'_>,
         occurrence_id: ChildTemplateOccurrenceId,
     ) -> Result<Option<TirWrapperContext>, CompilerError> {
-        Ok(self
-            .current_view()
-            .effective_wrapper_context(occurrence_id)?
-            .cloned())
+        Ok(view.effective_wrapper_context(occurrence_id)?.cloned())
     }
 
     /// Resolves the effective slot resolution for a slot occurrence,
@@ -518,20 +585,19 @@ impl<'store> RuntimeHandoffMaterializer<'store> {
     ///      `Slot` node as a no-output placeholder.
     fn effective_slot_resolution_for_occurrence(
         &self,
+        view: &TirView<'_>,
         occurrence_id: SlotOccurrenceId,
     ) -> Result<Option<super::overlays::TirSlotResolution>, CompilerError> {
-        Ok(self
-            .current_view()
-            .effective_slot_resolution(occurrence_id)?
-            .cloned())
+        Ok(view.effective_slot_resolution(occurrence_id)?.cloned())
     }
 
     fn effective_branch_selector(
         &self,
+        view: &TirView<'_>,
         selector: &TemplateBranchSelector,
         site_id: ExpressionSiteId,
     ) -> Result<TemplateBranchSelector, CompilerError> {
-        let Some(expression) = self.effective_expression_for_site(site_id)? else {
+        let Some(expression) = self.effective_expression_for_site(view, site_id)? else {
             return Ok(selector.clone());
         };
 
@@ -548,6 +614,7 @@ impl<'store> RuntimeHandoffMaterializer<'store> {
 
     fn effective_loop_header(
         &self,
+        view: &TirView<'_>,
         header: &TemplateLoopHeader,
         header_sites: TemplateLoopHeaderExpressionSites,
     ) -> Result<TemplateLoopHeader, CompilerError> {
@@ -557,7 +624,7 @@ impl<'store> RuntimeHandoffMaterializer<'store> {
                 TemplateLoopHeaderExpressionSites::Conditional { condition: site_id },
             ) => TemplateLoopHeader::Conditional {
                 condition: Box::new(
-                    self.effective_expression_for_site(site_id)?
+                    self.effective_expression_for_site(view, site_id)?
                         .unwrap_or_else(|| condition.as_ref().clone()),
                 ),
             },
@@ -567,16 +634,26 @@ impl<'store> RuntimeHandoffMaterializer<'store> {
                 TemplateLoopHeaderExpressionSites::Range { start, end, step },
             ) => {
                 let mut range = range.as_ref().clone();
-                if let Some(expression) = self.effective_expression_for_site(start)? {
+                if let Some(expression) = self.effective_expression_for_site(view, start)? {
                     range.start = expression;
                 }
-                if let Some(expression) = self.effective_expression_for_site(end)? {
+                if let Some(expression) = self.effective_expression_for_site(view, end)? {
                     range.end = expression;
                 }
-                if let Some(step_site_id) = step
-                    && let Some(expression) = self.effective_expression_for_site(step_site_id)?
-                {
-                    range.step = Some(expression);
+                match (&range.step, step) {
+                    (None, None) => {}
+                    (Some(_), Some(step_site_id)) => {
+                        if let Some(expression) =
+                            self.effective_expression_for_site(view, step_site_id)?
+                        {
+                            range.step = Some(expression);
+                        }
+                    }
+                    _ => {
+                        return Err(CompilerError::compiler_error(
+                            "TIR HIR handoff materialization found a loop range header/site step shape mismatch.",
+                        ));
+                    }
                 }
 
                 TemplateLoopHeader::Range {
@@ -591,23 +668,28 @@ impl<'store> RuntimeHandoffMaterializer<'store> {
             ) => TemplateLoopHeader::Collection {
                 bindings: bindings.clone(),
                 iterable: Box::new(
-                    self.effective_expression_for_site(site_id)?
+                    self.effective_expression_for_site(view, site_id)?
                         .unwrap_or_else(|| iterable.as_ref().clone()),
                 ),
             },
 
-            _ => header.clone(),
+            _ => {
+                return Err(CompilerError::compiler_error(
+                    "TIR HIR handoff materialization found a loop header shape mismatch.",
+                ));
+            }
         })
     }
 
     /// Materializes a `ChildTemplate` node into an owned runtime handoff node.
     fn materialize_child_template_node(
         &mut self,
+        view: &TirView<'_>,
         reference: &TemplateTirChildReference,
         active_slot_plan: Option<TemplateSlotPlanId>,
         injection: Option<(&SlotKey, &OwnedRuntimeTemplateNode)>,
     ) -> Result<OwnedRuntimeTemplateNode, CompilerError> {
-        let child_view = self.current_view().structural_child(*reference)?;
+        let child_view = view.structural_child(*reference)?;
         self.materialize_child_template_node_with_view(
             reference.root,
             child_view,
@@ -619,13 +701,12 @@ impl<'store> RuntimeHandoffMaterializer<'store> {
     fn materialize_child_template_node_with_view(
         &mut self,
         template_id: TemplateIrId,
-        child_view: TirView<'store>,
+        child_view: TirView<'_>,
         active_slot_plan: Option<TemplateSlotPlanId>,
         injection: Option<(&SlotKey, &OwnedRuntimeTemplateNode)>,
     ) -> Result<OwnedRuntimeTemplateNode, CompilerError> {
-        let handoff = self.with_view(child_view, |materializer| {
-            materializer.materialize_template(template_id, active_slot_plan, injection)
-        });
+        let handoff =
+            self.materialize_template(&child_view, template_id, active_slot_plan, injection);
 
         Ok(OwnedRuntimeTemplateNode::ChildTemplate {
             template: Box::new(handoff?),
@@ -642,6 +723,7 @@ impl<'store> RuntimeHandoffMaterializer<'store> {
     ///      without inventing new node kinds.
     fn materialize_resolved_slot_sources(
         &mut self,
+        view: &TirView<'_>,
         sources: &[TemplateIrId],
         location: &SourceLocation,
         active_slot_plan: Option<TemplateSlotPlanId>,
@@ -653,12 +735,12 @@ impl<'store> RuntimeHandoffMaterializer<'store> {
         }
 
         if sources.len() == 1 {
-            return self.materialize_resolved_slot_source(&sources[0], active_slot_plan);
+            return self.materialize_resolved_slot_source(view, &sources[0], active_slot_plan);
         }
 
         let mut children = Vec::with_capacity(sources.len());
         for source in sources {
-            children.push(self.materialize_resolved_slot_source(source, active_slot_plan)?);
+            children.push(self.materialize_resolved_slot_source(view, source, active_slot_plan)?);
         }
 
         Ok(OwnedRuntimeTemplateNode::Sequence { children })
@@ -673,10 +755,11 @@ impl<'store> RuntimeHandoffMaterializer<'store> {
     ///      synthetic child reference would apply the structural transition twice.
     fn materialize_resolved_slot_source(
         &mut self,
+        view: &TirView<'_>,
         source: &TemplateIrId,
         active_slot_plan: Option<TemplateSlotPlanId>,
     ) -> Result<OwnedRuntimeTemplateNode, CompilerError> {
-        let source_view = self.current_view().resolved_slot_source(*source)?;
+        let source_view = view.resolved_slot_source(*source)?;
         self.materialize_child_template_node_with_view(*source, source_view, active_slot_plan, None)
     }
 
@@ -689,9 +772,10 @@ impl<'store> RuntimeHandoffMaterializer<'store> {
     ///       `ConditionalWrapper` node so HIR can use its existing emitted-output
     ///       guard without seeing TIR overlay state.
     /// WHY: this is the runtime-handoff analogue of
-    ///      `apply_wrapper_context_overlay_to_child_emission` in `fold.rs`.
+    ///      `apply_wrapper_context_overlay_to_child_emission` in `fold/wrappers.rs`.
     fn apply_wrapper_context_overlay_to_child_handoff(
         &mut self,
+        view: &TirView<'_>,
         context: &TirWrapperContext,
         child_handoff: OwnedRuntimeTemplateNode,
         child_location: &SourceLocation,
@@ -704,8 +788,7 @@ impl<'store> RuntimeHandoffMaterializer<'store> {
             return Ok(child_handoff);
         };
 
-        let wrapper_set = self
-            .current_view()
+        let wrapper_set = view
             .store()
             .get_wrapper_set(wrapper_set_ref)
             .ok_or_else(|| {
@@ -714,15 +797,17 @@ impl<'store> RuntimeHandoffMaterializer<'store> {
                 )
             })?;
 
-        let wrapper_references: Vec<TemplateWrapperReference> = wrapper_set.wrappers.clone();
-
         match context.application_mode {
-            TirWrapperApplicationMode::Always => self
-                .apply_wrapper_templates_around_child_handoff(&wrapper_references, child_handoff),
+            TirWrapperApplicationMode::Always => self.apply_wrapper_templates_around_child_handoff(
+                view,
+                &wrapper_set.wrappers,
+                child_handoff,
+            ),
 
             TirWrapperApplicationMode::IfChildEmits => self
                 .apply_conditional_wrapper_templates_around_child_handoff(
-                    &wrapper_references,
+                    view,
+                    &wrapper_set.wrappers,
                     child_handoff,
                     child_location,
                 ),
@@ -740,13 +825,17 @@ impl<'store> RuntimeHandoffMaterializer<'store> {
     ///      the structural `wrap_tir_node_in_wrappers` order.
     fn apply_wrapper_templates_around_child_handoff(
         &mut self,
+        view: &TirView<'_>,
         wrapper_references: &[TemplateWrapperReference],
         child_handoff: OwnedRuntimeTemplateNode,
     ) -> Result<OwnedRuntimeTemplateNode, CompilerError> {
         let mut current = child_handoff;
         for wrapper_reference in wrapper_references.iter() {
-            current = self
-                .apply_single_wrapper_template_around_child_handoff(*wrapper_reference, current)?;
+            current = self.apply_single_wrapper_template_around_child_handoff(
+                view,
+                *wrapper_reference,
+                current,
+            )?;
         }
         Ok(current)
     }
@@ -764,6 +853,7 @@ impl<'store> RuntimeHandoffMaterializer<'store> {
     ///      final layer around the marker.
     fn apply_conditional_wrapper_templates_around_child_handoff(
         &mut self,
+        view: &TirView<'_>,
         wrapper_references: &[TemplateWrapperReference],
         child_handoff: OwnedRuntimeTemplateNode,
         child_location: &SourceLocation,
@@ -774,8 +864,11 @@ impl<'store> RuntimeHandoffMaterializer<'store> {
 
         let mut wrapper = OwnedRuntimeTemplateNode::AggregateOutput;
         for wrapper_reference in wrapper_references.iter() {
-            wrapper = self
-                .apply_single_wrapper_template_around_child_handoff(*wrapper_reference, wrapper)?;
+            wrapper = self.apply_single_wrapper_template_around_child_handoff(
+                view,
+                *wrapper_reference,
+                wrapper,
+            )?;
         }
 
         Ok(OwnedRuntimeTemplateNode::ConditionalWrapper {
@@ -793,18 +886,20 @@ impl<'store> RuntimeHandoffMaterializer<'store> {
     ///      preserving wrapper materialization semantics.
     fn materialize_wrapper_with_child(
         materializer: &mut RuntimeHandoffMaterializer,
+        view: &TirView<'_>,
         wrapper_root: TemplateIrNodeId,
         fill_target_key: Option<SlotKey>,
         child_handoff: OwnedRuntimeTemplateNode,
     ) -> Result<OwnedRuntimeTemplateNode, CompilerError> {
         match fill_target_key {
             Some(fill_target_key) => materializer.materialize_node_with_injection(
+                view,
                 wrapper_root,
                 None,
                 Some((&fill_target_key, &child_handoff)),
             ),
             None => {
-                let wrapper_content = materializer.materialize_node(wrapper_root, None)?;
+                let wrapper_content = materializer.materialize_node(view, wrapper_root, None)?;
                 Ok(OwnedRuntimeTemplateNode::Sequence {
                     children: vec![wrapper_content, child_handoff],
                 })
@@ -824,10 +919,11 @@ impl<'store> RuntimeHandoffMaterializer<'store> {
     ///      without exposing TIR identity across the HIR boundary.
     fn apply_single_wrapper_template_around_child_handoff(
         &mut self,
+        view: &TirView<'_>,
         wrapper_reference: TemplateWrapperReference,
         child_handoff: OwnedRuntimeTemplateNode,
     ) -> Result<OwnedRuntimeTemplateNode, CompilerError> {
-        let wrapper_store = self.current_view().store();
+        let wrapper_store = view.store();
 
         let (wrapper_root, has_runtime_slot_plan) = wrapper_store
             .get_template(wrapper_reference.root)
@@ -845,29 +941,28 @@ impl<'store> RuntimeHandoffMaterializer<'store> {
             ));
         }
 
-        let schema = collect_tir_slot_schema(wrapper_store, wrapper_reference.root)
-            .map_err(CompilerError::from)?;
+        let schema = collect_tir_slot_schema(wrapper_store, wrapper_reference.root)?;
         let fill_target_key = schema.loose_fill_target_key();
 
-        let wrapper_view = self.current_view().wrapper(wrapper_reference)?;
-        self.with_view(wrapper_view, |materializer| {
-            Self::materialize_wrapper_with_child(
-                materializer,
-                wrapper_root,
-                fill_target_key,
-                child_handoff,
-            )
-        })
+        let wrapper_view = view.wrapper(wrapper_reference)?;
+        Self::materialize_wrapper_with_child(
+            self,
+            &wrapper_view,
+            wrapper_root,
+            fill_target_key,
+            child_handoff,
+        )
     }
 
-    fn get_slot_plan(&self, id: TemplateSlotPlanId) -> Result<&TemplateSlotPlan, CompilerError> {
-        self.current_view()
-            .store()
-            .get_slot_plan(id)
-            .ok_or_else(|| {
-                CompilerError::compiler_error(
-                    "TIR HIR handoff materialization referenced a missing slot plan.",
-                )
-            })
+    fn get_slot_plan<'a>(
+        &self,
+        view: &TirView<'a>,
+        id: TemplateSlotPlanId,
+    ) -> Result<&'a TemplateSlotPlan, CompilerError> {
+        view.store().get_slot_plan(id).ok_or_else(|| {
+            CompilerError::compiler_error(
+                "TIR HIR handoff materialization referenced a missing slot plan.",
+            )
+        })
     }
 }

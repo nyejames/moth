@@ -32,7 +32,9 @@ use crate::compiler_frontend::ast::templates::template::{
 use crate::compiler_frontend::ast::templates::template_control_flow::{
     TemplateBranchSelector, TemplateLoopControlKind, TemplateLoopHeader,
 };
-use crate::compiler_frontend::ast::templates::template_slots::RuntimeSlotSiteId;
+use crate::compiler_frontend::ast::templates::template_slots::{
+    RuntimeSlotContributionSourceId, RuntimeSlotSiteId,
+};
 use crate::compiler_frontend::ast::templates::tir::ids::{
     ChildTemplateOccurrenceId, ExpressionSiteId, SlotOccurrenceId, TemplateIrId, TemplateIrNodeId,
     TemplateSlotPlanId, TemplateWrapperSetId,
@@ -173,13 +175,8 @@ pub(crate) enum TemplateIrNodeKind {
         /// Interned text content.
         text: StringId,
 
-        /// Byte length of the original text segment.
-        ///
-        /// WHAT: records the UTF-8 byte length of the source text that was
-        /// interned, used by formatting and span calculations.
-        /// WHY: the interned string loses original byte-length information, but
-        /// downstream formatting decisions need the original segment size.
-        byte_len: u32,
+        /// UTF-8 byte length of this interned text segment.
+        byte_len: usize,
 
         /// Origin classification for diagnostics and formatting.
         origin: TemplateSegmentOrigin,
@@ -302,6 +299,19 @@ pub(crate) enum TemplateIrNodeKind {
         /// Site identity within the runtime slot plan.
         site: RuntimeSlotSiteId,
     },
+
+    /// Planned runtime contribution spliced into a copied wrapper tree.
+    ///
+    /// WHAT: marks the position where a runtime slot-site plan should emit an
+    /// already-routed contribution source. Every marker is qualified with the
+    /// slot plan that owns the source ID.
+    /// WHY: nested plans may reuse the same local source index. Preparation
+    /// proves the marker belongs to the active plan before handoff strips the
+    /// AST-local plan identity.
+    RuntimeSlotContributionSource {
+        plan: TemplateSlotPlanId,
+        source: RuntimeSlotContributionSourceId,
+    },
 }
 
 // -------------------------
@@ -353,23 +363,6 @@ pub(crate) struct TirSlotPlaceholder {
 }
 
 impl TirSlotPlaceholder {
-    /// Creates a slot placeholder with no wrapper context.
-    #[cfg(test)]
-    pub(crate) fn new(
-        key: SlotKey,
-        occurrence_id: SlotOccurrenceId,
-        location: SourceLocation,
-    ) -> Self {
-        Self {
-            key,
-            occurrence_id,
-            location,
-            applied_child_wrapper_set: None,
-            child_wrapper_set: None,
-            skip_parent_child_wrappers: false,
-        }
-    }
-
     /// Creates a slot placeholder with TIR-owned wrapper-set context.
     pub(crate) fn with_wrapper_sets(
         key: SlotKey,
@@ -464,33 +457,18 @@ pub(crate) struct TemplateIrBranch {
 }
 
 impl TemplateIrBranch {
-    /// Creates one branch inside a `BranchChain` node.
-    ///
-    /// The `selector_site_id` is initialized to a placeholder and overwritten
-    /// by the TIR builder when the branch is pushed, or set explicitly via
-    /// `with_selector_site_id` by direct-push construction paths.
     pub(crate) fn new(
         selector: TemplateBranchSelector,
         body: TemplateIrNodeId,
         location: SourceLocation,
+        selector_site_id: ExpressionSiteId,
     ) -> Self {
         Self {
             selector,
             body,
             location,
-            selector_site_id: ExpressionSiteId::new(0),
+            selector_site_id,
         }
-    }
-
-    /// Sets the branch selector's expression-site ID, returning the updated branch.
-    ///
-    /// WHAT: used by direct-push construction paths (render-unit construction,
-    /// slot expansion) that allocate or preserve a site ID outside the builder.
-    /// WHY: keeps site-ID assignment in one clear place per construction path
-    /// without changing the `new` signature used by the parser-facing builder.
-    pub(crate) fn with_selector_site_id(mut self, site_id: ExpressionSiteId) -> Self {
-        self.selector_site_id = site_id;
-        self
     }
 
     /// Returns the condition expression for this branch.

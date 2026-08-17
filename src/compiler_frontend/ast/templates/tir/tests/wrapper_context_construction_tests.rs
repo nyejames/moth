@@ -4,8 +4,10 @@ use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::templates::template::{
     SlotKey, Style, TemplateSegmentOrigin, TemplateType,
 };
-use crate::compiler_frontend::ast::templates::template_control_flow::TemplateBranchSelector;
-use crate::compiler_frontend::ast::templates::tir::builder::TemplateIrBuilder;
+use crate::compiler_frontend::ast::templates::template_control_flow::{
+    TemplateBranchSelector, TemplateLoopHeader,
+};
+use crate::compiler_frontend::ast::templates::tir::TemplateIrBuilder;
 use crate::compiler_frontend::ast::templates::tir::ids::TemplateIrId;
 use crate::compiler_frontend::ast::templates::tir::node::TemplateIrBranch;
 use crate::compiler_frontend::ast::templates::tir::overlays::{
@@ -23,7 +25,7 @@ use crate::compiler_frontend::value_mode::ValueMode;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use super::attach_wrapper_context_overlay;
+use super::super::attach_wrapper_context_overlay;
 
 fn location() -> SourceLocation {
     SourceLocation::default()
@@ -38,7 +40,7 @@ fn text_template(
     let mut builder = TemplateIrBuilder::new(store);
     let text_node = builder.push_text_node(
         strings.intern(text),
-        text.len() as u32,
+        text.len(),
         TemplateSegmentOrigin::Body,
         location(),
     );
@@ -68,6 +70,7 @@ fn control_flow_template(store: &mut TemplateIrStore, strings: &mut StringTable)
         )),
         body,
         location(),
+        builder.store.next_expression_site_id(),
     );
     let root = builder.push_branch_chain_node(vec![branch], None, location());
     builder.finish_template(
@@ -112,6 +115,75 @@ fn wrapper_template(
         wrapper_id,
         TemplateTirPhase::Finalized,
         TemplateViewContext::default(),
+    )
+}
+
+fn parent_with_branch_body_child(
+    store: &mut TemplateIrStore,
+    child: TemplateIrId,
+    context: TemplateViewContext,
+) -> TemplateIrId {
+    let mut builder = TemplateIrBuilder::new(store);
+    let child_node = builder.push_child_template_node_with_reference(
+        TemplateTirChildReference::new(child, TemplateTirPhase::Composed, context),
+        location(),
+    );
+    let body = builder.push_sequence_node(vec![child_node], location());
+    let branch = TemplateIrBranch::new(
+        TemplateBranchSelector::Bool(Expression::bool(
+            true,
+            location(),
+            ValueMode::ImmutableOwned,
+        )),
+        body,
+        location(),
+        builder.store.next_expression_site_id(),
+    );
+    let root = builder.push_branch_chain_node(vec![branch], None, location());
+    builder.finish_template(
+        root,
+        Style::default(),
+        TemplateType::String,
+        TemplateIrSummary {
+            has_control_flow: true,
+            ..TemplateIrSummary::empty()
+        },
+        location(),
+    )
+}
+
+fn parent_with_loop_body_child(
+    store: &mut TemplateIrStore,
+    child: TemplateIrId,
+    context: TemplateViewContext,
+) -> TemplateIrId {
+    let mut builder = TemplateIrBuilder::new(store);
+    let child_node = builder.push_child_template_node_with_reference(
+        TemplateTirChildReference::new(child, TemplateTirPhase::Composed, context),
+        location(),
+    );
+    let body = builder.push_sequence_node(vec![child_node], location());
+    let root = builder.push_loop_node(
+        TemplateLoopHeader::Conditional {
+            condition: Box::new(Expression::bool(
+                true,
+                location(),
+                ValueMode::ImmutableOwned,
+            )),
+        },
+        body,
+        None,
+        location(),
+    );
+    builder.finish_template(
+        root,
+        Style::default(),
+        TemplateType::String,
+        TemplateIrSummary {
+            has_control_flow: true,
+            ..TemplateIrSummary::empty()
+        },
+        location(),
     )
 }
 
@@ -217,6 +289,70 @@ fn control_flow_child_uses_if_child_emits_wrapper_mode() {
 }
 
 #[test]
+fn overlay_records_direct_child_inside_branch_body() {
+    let store = Rc::new(RefCell::new(TemplateIrStore::new()));
+    let mut strings = StringTable::new();
+    let empty = TemplateViewContext::default();
+    let (parent, wrapper) = {
+        let mut store = store.borrow_mut();
+        let child = text_template(&mut store, &mut strings, "child", Style::default());
+        let parent = parent_with_branch_body_child(&mut store, child, empty);
+        (parent, wrapper_template(&mut store, &mut strings))
+    };
+    let mut parent_reference = reference(parent, empty);
+
+    attach_wrapper_context_overlay(&mut parent_reference, &[wrapper], &store)
+        .expect("branch-body child should receive an inherited context");
+
+    let store = store.borrow();
+    let overlay = store
+        .wrapper_context_overlay(
+            parent_reference
+                .context
+                .wrapper_context
+                .expect("wrapper context should exist"),
+        )
+        .expect("wrapper context payload should exist");
+    assert_eq!(overlay.contexts.len(), 1);
+    let (_, context) = &overlay.contexts[0];
+    assert!(!context.skip_parent_child_wrappers);
+    assert!(context.inherited_wrapper_set.is_some());
+    assert_eq!(context.application_mode, TirWrapperApplicationMode::Always);
+}
+
+#[test]
+fn overlay_records_direct_child_inside_loop_body() {
+    let store = Rc::new(RefCell::new(TemplateIrStore::new()));
+    let mut strings = StringTable::new();
+    let empty = TemplateViewContext::default();
+    let (parent, wrapper) = {
+        let mut store = store.borrow_mut();
+        let child = text_template(&mut store, &mut strings, "child", Style::default());
+        let parent = parent_with_loop_body_child(&mut store, child, empty);
+        (parent, wrapper_template(&mut store, &mut strings))
+    };
+    let mut parent_reference = reference(parent, empty);
+
+    attach_wrapper_context_overlay(&mut parent_reference, &[wrapper], &store)
+        .expect("loop-body child should receive an inherited context");
+
+    let store = store.borrow();
+    let overlay = store
+        .wrapper_context_overlay(
+            parent_reference
+                .context
+                .wrapper_context
+                .expect("wrapper context should exist"),
+        )
+        .expect("wrapper context payload should exist");
+    assert_eq!(overlay.contexts.len(), 1);
+    let (_, context) = &overlay.contexts[0];
+    assert!(!context.skip_parent_child_wrappers);
+    assert!(context.inherited_wrapper_set.is_some());
+    assert_eq!(context.application_mode, TirWrapperApplicationMode::Always);
+}
+
+#[test]
 fn missing_parent_template_is_an_internal_error() {
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let empty = TemplateViewContext::default();
@@ -276,12 +412,12 @@ fn missing_current_overlay_is_rejected_before_allocation() {
         ..TemplateViewContext::default()
     };
     let mut reference = reference(parent, missing);
-    let wrapper_count = store.borrow().wrapper_sets.len();
+    let wrapper_count = store.borrow().wrapper_set_count();
 
     let error = attach_wrapper_context_overlay(&mut reference, &[wrapper], &store)
         .expect_err("missing current overlay should be rejected");
     assert!(error.msg.contains("expression overlay"));
-    assert_eq!(store.borrow().wrapper_sets.len(), wrapper_count);
+    assert_eq!(store.borrow().wrapper_set_count(), wrapper_count);
 }
 
 #[test]
@@ -301,7 +437,7 @@ fn missing_child_overlay_is_rejected_before_allocation() {
         let parent = parent_with_child(&mut store, child, missing);
         (parent, wrapper_template(&mut store, &mut strings))
     };
-    let wrapper_count = store.borrow().wrapper_sets.len();
+    let wrapper_count = store.borrow().wrapper_set_count();
     let mut parent_reference = reference(parent, empty);
 
     let error = attach_wrapper_context_overlay(&mut parent_reference, &[wrapper], &store)
@@ -312,7 +448,7 @@ fn missing_child_overlay_is_rejected_before_allocation() {
         "error must report the missing child overlay: {error:?}"
     );
     assert_eq!(
-        store.borrow().wrapper_sets.len(),
+        store.borrow().wrapper_set_count(),
         wrapper_count,
         "failed child resolution must not allocate a wrapper set"
     );

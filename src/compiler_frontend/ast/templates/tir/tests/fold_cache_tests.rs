@@ -14,9 +14,9 @@ use crate::compiler_frontend::ast::templates::template_control_flow::{
     TemplateBranchSelector, TemplateFoldBinding,
 };
 use crate::compiler_frontend::ast::templates::template_folding::{
-    TemplateEmission, TemplateFoldContext, TemplateFoldResult,
+    TemplateEmission, TemplateFoldResult, TirFoldContext,
 };
-use crate::compiler_frontend::ast::templates::tir::builder::TemplateIrBuilder;
+use crate::compiler_frontend::ast::templates::tir::TemplateIrBuilder;
 use crate::compiler_frontend::ast::templates::tir::fold::fold_prepared_template;
 use crate::compiler_frontend::ast::templates::tir::fold_cache::{TirFoldCache, TirFoldCacheKey};
 use crate::compiler_frontend::ast::templates::tir::ids::{
@@ -29,6 +29,7 @@ use crate::compiler_frontend::ast::templates::tir::overlays::{
     TemplateViewContext, TirExpressionOverlay, TirExpressionOverlayId, TirSlotResolution,
     TirSlotResolutionOverlay,
 };
+use crate::compiler_frontend::ast::templates::tir::preparation::TemplatePreparationFacts;
 use crate::compiler_frontend::ast::templates::tir::refs::{
     TemplateTirChildReference, TemplateTirReference,
 };
@@ -38,7 +39,7 @@ use crate::compiler_frontend::ast::templates::tir::view::{
     TemplateTirPhase, TirView, TirViewIdentity,
 };
 use crate::compiler_frontend::ast::templates::tir::{
-    PreparedTemplate, TemplatePreparationMode, prepare_tir_view,
+    TemplatePreparation, TemplatePreparationMode, TemplatePreparationOutcome, prepare_tir_view,
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -108,8 +109,16 @@ fn cache_lookup_miss_then_hit_and_overwrite() {
     let key = sample_key();
 
     assert!(cache.get(&key).is_none());
-    let first = TemplateFoldResult::new(TemplateEmission::Output(first_id), Default::default());
-    let second = TemplateFoldResult::new(TemplateEmission::Output(second_id), Default::default());
+    let first = TemplateFoldResult::with_projection(
+        TemplateEmission::Output(first_id),
+        Default::default(),
+        None,
+    );
+    let second = TemplateFoldResult::with_projection(
+        TemplateEmission::Output(second_id),
+        Default::default(),
+        None,
+    );
     assert_eq!(cache.insert(key, first.clone()), None);
     assert_eq!(cache.insert(key, second.clone()), Some(first));
     assert_eq!(cache.get(&key), Some(&second));
@@ -127,7 +136,7 @@ fn build_text_fixture(string_table: &mut StringTable, text: &str) -> TextFixture
     let mut builder = TemplateIrBuilder::new(&mut store);
     let text_node = builder.push_text_node(
         text_id,
-        text.len() as u32,
+        text.len(),
         TemplateSegmentOrigin::Body,
         empty_location(),
     );
@@ -148,24 +157,9 @@ fn build_text_fixture(string_table: &mut StringTable, text: &str) -> TextFixture
     }
 }
 
-fn fold_context<'a>(string_table: &'a mut StringTable) -> TemplateFoldContext<'a> {
-    let project_path_resolver = Box::leak(Box::new(
-        crate::compiler_frontend::paths::path_resolution::ProjectPathResolver::new(
-            std::env::temp_dir(),
-            std::env::temp_dir(),
-            crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots::empty(
-            ),
-            &crate::builder_surface::SourceFileKindRegistry::default(),
-        )
-        .expect("test path resolver should be valid"),
-    ));
-    TemplateFoldContext {
+fn fold_context<'a>(string_table: &'a mut StringTable) -> TirFoldContext<'a> {
+    TirFoldContext {
         string_table,
-        project_path_resolver,
-        path_format_config: Box::leak(Box::new(
-            crate::compiler_frontend::paths::path_format::PathStringFormatConfig::default(),
-        )),
-        source_file_scope: Box::leak(Box::new(InternedPath::new())),
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         bindings: vec![],
         fold_cache: TirFoldCache::new(),
@@ -174,19 +168,16 @@ fn fold_context<'a>(string_table: &'a mut StringTable) -> TemplateFoldContext<'a
 
 fn fold_prepared_view(
     view: &TirView<'_>,
-    context: &mut TemplateFoldContext<'_>,
+    context: &mut TirFoldContext<'_>,
 ) -> Result<TemplateEmission, TemplateError> {
-    let prepared = match prepare_tir_view(view, TemplatePreparationMode::Value)? {
-        PreparedTemplate::Foldable(prepared) => prepared,
-        PreparedTemplate::Runtime(_) | PreparedTemplate::Helper(_) => {
-            panic!("test view expected to be foldable")
-        }
-    };
+    let prepared = prepare_tir_view(view, TemplatePreparationMode::Value)?;
+    assert!(matches!(
+        prepared.outcome,
+        TemplatePreparationOutcome::Foldable
+    ));
     // This convenience helper exposes only text; the cache provenance invariant has its own test.
-    let TemplateFoldResult {
-        emission,
-        provenance: _,
-    } = fold_prepared_template(&prepared, view.clone(), context)?;
+    let TemplateFoldResult { emission, .. } =
+        fold_prepared_template(&prepared, view.clone(), context)?;
     Ok(emission)
 }
 
@@ -250,21 +241,8 @@ fn fold_view_caches_empty_binding_results_but_not_active_bindings() {
 
     // Active bindings are never cached.
     let path = InternedPath::from_single_str("value", &mut string_table);
-    let resolver = crate::compiler_frontend::paths::path_resolution::ProjectPathResolver::new(
-        std::env::temp_dir(),
-        std::env::temp_dir(),
-        crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots::empty(),
-        &crate::builder_surface::SourceFileKindRegistry::default(),
-    )
-    .expect("test path resolver should be valid");
-    let path_format =
-        crate::compiler_frontend::paths::path_format::PathStringFormatConfig::default();
-    let source_scope = InternedPath::new();
-    let mut active_context = TemplateFoldContext {
+    let mut active_context = TirFoldContext {
         string_table: &mut string_table,
-        project_path_resolver: &resolver,
-        path_format_config: &path_format,
-        source_file_scope: &source_scope,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         bindings: vec![TemplateFoldBinding {
             path,
@@ -317,30 +295,15 @@ fn prepared_view_rejects_identity_mismatch() {
         fixture.context,
     )
     .expect("alternate view should construct");
-    let preparation = match prepare_tir_view(&original_view, TemplatePreparationMode::Value)
-        .expect("preparation should succeed")
-    {
-        PreparedTemplate::Foldable(preparation) => preparation,
-        PreparedTemplate::Runtime(_) | PreparedTemplate::Helper(_) => {
-            panic!("text fixture should be foldable")
-        }
-    };
+    let preparation = prepare_tir_view(&original_view, TemplatePreparationMode::Value)
+        .expect("preparation should succeed");
+    assert!(matches!(
+        preparation.outcome,
+        TemplatePreparationOutcome::Foldable
+    ));
 
-    let resolver = crate::compiler_frontend::paths::path_resolution::ProjectPathResolver::new(
-        std::env::temp_dir(),
-        std::env::temp_dir(),
-        crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots::empty(),
-        &crate::builder_surface::SourceFileKindRegistry::default(),
-    )
-    .expect("test path resolver should be valid");
-    let path_format =
-        crate::compiler_frontend::paths::path_format::PathStringFormatConfig::default();
-    let source_scope = InternedPath::new();
-    let mut context = TemplateFoldContext {
+    let mut context = TirFoldContext {
         string_table: &mut string_table,
-        project_path_resolver: &resolver,
-        path_format_config: &path_format,
-        source_file_scope: &source_scope,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         bindings: vec![],
         fold_cache: TirFoldCache::new(),
@@ -364,7 +327,7 @@ fn foldable_preparation_accepts_simple_text() {
     let preparation = prepare_tir_view(&view, TemplatePreparationMode::Value)
         .expect("simple text should have a valid preparation");
     assert!(
-        matches!(preparation, PreparedTemplate::Foldable(_)),
+        matches!(preparation.outcome, TemplatePreparationOutcome::Foldable),
         "text-only view should produce a foldable result"
     );
 }
@@ -396,12 +359,14 @@ fn fold_view_slot_overlay_resolves_filled_and_missing_to_empty() {
     );
 
     // A resolved slot overlay folds the fill template into the wrapper output.
-    let resolved_overlay_id = store.allocate_slot_resolution_overlay(TirSlotResolutionOverlay {
-        resolutions: vec![(
-            SlotOccurrenceId::new(0),
-            TirSlotResolution::resolved(SlotKey::Default, vec![fill_template_id]),
-        )],
-    });
+    let resolved_overlay_id = store
+        .allocate_slot_resolution_overlay(TirSlotResolutionOverlay {
+            resolutions: vec![(
+                SlotOccurrenceId::new(0),
+                TirSlotResolution::resolved(SlotKey::Default, vec![fill_template_id]),
+            )],
+        })
+        .expect("test overlay allocation");
     let resolved_context = TemplateViewContext {
         expression_overlay: None,
         slot_resolution: Some(resolved_overlay_id),
@@ -424,8 +389,9 @@ fn fold_view_slot_overlay_resolves_filled_and_missing_to_empty() {
     );
 
     // An unresolved slot overlay folds to structural no-output.
-    let missing_overlay_id =
-        store.allocate_slot_resolution_overlay(TirSlotResolutionOverlay::default());
+    let missing_overlay_id = store
+        .allocate_slot_resolution_overlay(TirSlotResolutionOverlay::default())
+        .expect("test overlay allocation");
     let missing_context = TemplateViewContext {
         expression_overlay: None,
         slot_resolution: Some(missing_overlay_id),
@@ -489,7 +455,7 @@ fn text_template(
     let mut builder = TemplateIrBuilder::new(store);
     let node = builder.push_text_node(
         text_id,
-        text.len() as u32,
+        text.len(),
         TemplateSegmentOrigin::Body,
         empty_location(),
     );
@@ -513,9 +479,21 @@ fn fold_prepared_template_rejects_parsed_phase_without_caching() {
         .expect("view should construct");
     let mut context = fold_context(&mut string_table);
 
-    let prepared = crate::compiler_frontend::ast::templates::tir::preparation::PreparedFold {
+    let prepared = TemplatePreparation {
         identity: view.identity(),
-        value_kind: crate::compiler_frontend::ast::templates::template::TemplateConstValueKind::RenderableString,
+        facts: TemplatePreparationFacts {
+            is_const_evaluable_shape: true,
+            has_unresolved_slot_occurrences: false,
+            has_resolved_slot_sources: false,
+            has_escaped_insert_helpers: false,
+            wrapper_foldable: true,
+            has_runtime_slot_plan: false,
+            has_runtime_slot_sites: false,
+            has_reactive_dependence: false,
+            final_value_kind:
+                crate::compiler_frontend::ast::templates::template::TemplateConstValueKind::RenderableString,
+        },
+        outcome: TemplatePreparationOutcome::Foldable,
     };
     let error = fold_prepared_template(&prepared, view, &mut context)
         .expect_err("a Parsed view must not fold or be cached");
@@ -546,6 +524,7 @@ fn prepared_fold_rejects_missing_node_in_untaken_branch() {
         )),
         body,
         empty_location(),
+        store.next_expression_site_id(),
     );
     let missing_body = TemplateIrNodeId::new(999);
     let untaken_branch = TemplateIrBranch::new(
@@ -556,6 +535,7 @@ fn prepared_fold_rejects_missing_node_in_untaken_branch() {
         )),
         missing_body,
         empty_location(),
+        store.next_expression_site_id(),
     );
     let root = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::BranchChain {
@@ -700,16 +680,18 @@ fn prepared_fold_preserves_root_expression_overlay_through_nested_children() {
     let first_text = string_table.intern("first-root-overlay");
     let second_text = string_table.intern("second-root-overlay");
     let first_context = {
-        let overlay_id = store.allocate_expression_overlay(TirExpressionOverlay {
-            overrides: vec![(
-                leaf_site_id,
-                Box::new(Expression::string_slice(
-                    first_text,
-                    empty_location(),
-                    ValueMode::ImmutableOwned,
-                )),
-            )],
-        });
+        let overlay_id = store
+            .allocate_expression_overlay(TirExpressionOverlay {
+                overrides: vec![(
+                    leaf_site_id,
+                    Box::new(Expression::string_slice(
+                        first_text,
+                        empty_location(),
+                        ValueMode::ImmutableOwned,
+                    )),
+                )],
+            })
+            .expect("test overlay allocation");
         TemplateViewContext {
             expression_overlay: Some(overlay_id),
             slot_resolution: None,
@@ -717,16 +699,18 @@ fn prepared_fold_preserves_root_expression_overlay_through_nested_children() {
         }
     };
     let second_context = {
-        let overlay_id = store.allocate_expression_overlay(TirExpressionOverlay {
-            overrides: vec![(
-                leaf_site_id,
-                Box::new(Expression::string_slice(
-                    second_text,
-                    empty_location(),
-                    ValueMode::ImmutableOwned,
-                )),
-            )],
-        });
+        let overlay_id = store
+            .allocate_expression_overlay(TirExpressionOverlay {
+                overrides: vec![(
+                    leaf_site_id,
+                    Box::new(Expression::string_slice(
+                        second_text,
+                        empty_location(),
+                        ValueMode::ImmutableOwned,
+                    )),
+                )],
+            })
+            .expect("test overlay allocation");
         TemplateViewContext {
             expression_overlay: Some(overlay_id),
             slot_resolution: None,
@@ -799,17 +783,19 @@ fn prepared_fold_cache_hit_reuses_effective_expression_provenance() {
         };
         (template_id, *site_id)
     };
-    let overlay_id = store.allocate_expression_overlay(TirExpressionOverlay {
-        overrides: vec![(
-            site_id,
-            Box::new(
-                Expression::string_slice(text, empty_location(), ValueMode::ImmutableOwned)
-                    .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
-                        member.clone(),
-                    )),
-            ),
-        )],
-    });
+    let overlay_id = store
+        .allocate_expression_overlay(TirExpressionOverlay {
+            overrides: vec![(
+                site_id,
+                Box::new(
+                    Expression::string_slice(text, empty_location(), ValueMode::ImmutableOwned)
+                        .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
+                            member.clone(),
+                        )),
+                ),
+            )],
+        })
+        .expect("test overlay allocation");
     let view = TirView::new(
         &store,
         template_id,
@@ -820,14 +806,12 @@ fn prepared_fold_cache_hit_reuses_effective_expression_provenance() {
         },
     )
     .expect("effective view should construct");
-    let prepared = match prepare_tir_view(&view, TemplatePreparationMode::Value)
-        .expect("view should prepare")
-    {
-        PreparedTemplate::Foldable(prepared) => prepared,
-        PreparedTemplate::Runtime(_) | PreparedTemplate::Helper(_) => {
-            panic!("effective expression fixture should be foldable")
-        }
-    };
+    let prepared =
+        prepare_tir_view(&view, TemplatePreparationMode::Value).expect("view should prepare");
+    assert!(matches!(
+        prepared.outcome,
+        TemplatePreparationOutcome::Foldable
+    ));
     let mut context = fold_context(&mut string_table);
     let first = fold_prepared_template(&prepared, view.clone(), &mut context)
         .expect("first exact fold should succeed");
@@ -857,7 +841,7 @@ fn prepared_fold_below_composed_child_ignores_unconsumed_overlay_identity() {
         let child_node = store.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::Text {
                 text: child_text,
-                byte_len: "parsed child".len() as u32,
+                byte_len: "parsed child".len(),
                 origin: TemplateSegmentOrigin::Body,
             },
             empty_location(),
@@ -915,65 +899,13 @@ fn prepared_fold_below_composed_child_ignores_unconsumed_overlay_identity() {
 //  Deferred fold-authority and attribution invariants
 // -------------------------
 //
-// These tests pin cache-boundary authority validation, runtime-plan authority
-// validation, malformed nested-template authority, direct sequence-node cycle
-// rejection, and finalization attribution counters on the one-store fold path.
-
-#[test]
-fn prepared_fold_cache_hit_still_validates_malformed_authority() {
-    let mut string_table = StringTable::new();
-    let mut fixture = build_text_fixture(&mut string_table, "cached authority");
-    let mut fold_context = fold_context(&mut string_table);
-
-    {
-        let view = TirView::new(
-            &fixture.store,
-            fixture.template_id,
-            TemplateTirPhase::Composed,
-            fixture.context,
-        )
-        .expect("view should construct");
-        let prepared = match prepare_tir_view(&view, TemplatePreparationMode::Value)
-            .expect("preparation should succeed")
-        {
-            PreparedTemplate::Foldable(prepared) => prepared,
-            PreparedTemplate::Runtime(_) | PreparedTemplate::Helper(_) => {
-                panic!("text fixture should be foldable")
-            }
-        };
-        fold_prepared_template(&prepared, view.clone(), &mut fold_context)
-            .expect("first fold should populate cache");
-
-        // Keep the completed proof so the second call exercises the cache
-        // boundary against the now-malformed store.
-        fixture.store.nodes.clear();
-        let view = TirView::new(
-            &fixture.store,
-            fixture.template_id,
-            TemplateTirPhase::Composed,
-            fixture.context,
-        )
-        .expect("view should still construct after clearing nodes");
-        let error = fold_prepared_template(&prepared, view, &mut fold_context)
-            .expect_err("cache hits must not hide malformed current-store authority");
-        let TemplateError::Infrastructure(error) = error else {
-            panic!("missing cached node should remain on the infrastructure lane");
-        };
-        assert!(
-            error.msg.contains("TIR fold: node"),
-            "expected a stable cache-boundary authority error, got: {}",
-            error.msg
-        );
-    }
-}
-
 #[test]
 fn prepared_runtime_plan_validates_plan_authority_before_handoff() {
     let mut string_table = StringTable::new();
     let mut fixture = build_text_fixture(&mut string_table, "runtime plan");
     let missing_slot_plan_id = TemplateSlotPlanId::new(999);
-    fixture.store.templates[fixture.template_id.index()].runtime_slot_plan =
-        Some(missing_slot_plan_id);
+    super::super::store::MalformedTirStore::new(&mut fixture.store)
+        .set_runtime_slot_plan(fixture.template_id, Some(missing_slot_plan_id));
 
     let view = TirView::new(
         &fixture.store,
@@ -1042,22 +974,8 @@ fn fold_dynamic_ast_template_with_missing_root_authority() -> TemplateError {
         context,
     )
     .expect("outer view should construct");
-    let mut fold_context = TemplateFoldContext {
+    let mut fold_context = TirFoldContext {
         string_table: &mut string_table,
-        project_path_resolver: Box::leak(Box::new(
-            crate::compiler_frontend::paths::path_resolution::ProjectPathResolver::new(
-                std::env::temp_dir(),
-                std::env::temp_dir(),
-                crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots::empty(
-                ),
-                &crate::builder_surface::SourceFileKindRegistry::default(),
-            )
-            .expect("test path resolver should be valid"),
-        )),
-        path_format_config: Box::leak(Box::new(
-            crate::compiler_frontend::paths::path_format::PathStringFormatConfig::default(),
-        )),
-        source_file_scope: Box::leak(Box::new(InternedPath::new())),
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         bindings: vec![],
         fold_cache: TirFoldCache::new(),

@@ -327,8 +327,8 @@ fn owned_runtime_template_node_guarantees_output(
             .iter()
             .any(|child| owned_runtime_template_node_guarantees_output(child, string_table)),
 
-        OwnedRuntimeTemplateNode::Text { text, byte_len, .. } => {
-            *byte_len > 0 && !string_table.resolve(*text).trim().is_empty()
+        OwnedRuntimeTemplateNode::Text { text, .. } => {
+            !string_table.resolve(*text).trim().is_empty()
         }
 
         OwnedRuntimeTemplateNode::AggregateOutput => true,
@@ -354,6 +354,7 @@ fn owned_runtime_template_node_guarantees_output(
         | OwnedRuntimeTemplateNode::LoopControl { .. } => false,
 
         OwnedRuntimeTemplateNode::RuntimeSlotSite { .. }
+        | OwnedRuntimeTemplateNode::RuntimeSlotContributionSource { .. }
         | OwnedRuntimeTemplateNode::Slot { .. } => false,
     }
 }

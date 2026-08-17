@@ -13,12 +13,11 @@ use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::Style;
 use crate::compiler_frontend::ast::templates::tir::{
-    ControlFlowBodyKind, TemplateConstructionContext, TemplateIr, TemplateIrBranch,
-    TemplateIrNodeId, TemplateIrNodeKind, TemplateTirPhase, TemplateTirReference,
-    TemplateWrapperReference, apply_inherited_child_wrappers_to_body_root,
-    build_branch_body_candidate_from_tir_nodes, compose_tir_head_chain, format_tir_body_root,
-    head_prefix_tir_nodes, prepare_loop_aggregate_wrapper, replace_control_flow_body_tir_root,
-    replace_loop_aggregate_wrapper_tir_root, run_tir_formatter_with_warnings, sequence_children,
+    ControlFlowBodyKind, DerivedTemplateMetadata, TemplateConstructionContext, TemplateIrNodeId,
+    TemplateIrNodeKind, TemplateTirPhase, TemplateTirReference,
+    build_branch_body_candidate_root_from_tir_nodes, compose_tir_head_chain_from_root,
+    format_tir_body_root, head_prefix_tir_nodes, prepare_loop_aggregate_wrapper,
+    run_tir_formatter_with_warnings, sequence_children,
     trim_whitespace_before_loop_control_boundary,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
@@ -47,16 +46,6 @@ pub(in crate::compiler_frontend::ast::templates) fn install_formatted_tir_refere
         return Ok(());
     }
 
-    let store = context.template_ir_store.borrow();
-
-    let original_template = store.get_template(reference.root).cloned().ok_or_else(|| {
-        CompilerError::compiler_error(
-            "Template TIR reference pointed at a missing module-local TIR template.",
-        )
-    })?;
-
-    drop(store);
-
     let mut store = context.template_ir_store.borrow_mut();
     let formatter_result = run_tir_formatter_with_warnings(
         &mut store,
@@ -67,13 +56,11 @@ pub(in crate::compiler_frontend::ast::templates) fn install_formatted_tir_refere
         context,
         string_table,
     )?;
-    let formatted_template_id = store.push_template(TemplateIr::new(
+    let formatted_template_id = store.push_structurally_derived_template(
+        reference.root,
         formatter_result.root,
-        original_template.style,
-        original_template.kind,
-        original_template.summary,
-        original_template.location,
-    ));
+        DerivedTemplateMetadata::preserve_source(),
+    )?;
 
     *tir_reference = TemplateTirReference {
         root: formatted_template_id,
@@ -87,7 +74,6 @@ pub(in crate::compiler_frontend::ast::templates) fn install_formatted_tir_refere
 struct TirBodyRootInput<'a> {
     root_children: &'a [TemplateIrNodeId],
     style: &'a Style,
-    child_wrappers: &'a [TemplateWrapperReference],
     body_root: TemplateIrNodeId,
     body_kind: ControlFlowBodyKind,
     control_flow_node_id: TemplateIrNodeId,
@@ -97,9 +83,10 @@ struct TirBodyRootInput<'a> {
 /// nodes plus the parsed body root.
 ///
 /// WHAT: reuses the owning template's parser-emitted head-prefix TIR nodes,
-///       formats the parsed body root, applies inherited wrappers, builds a
-///       temporary template combining head prefix and body, and composes it so
-///       head-chain wrappers apply to the body.
+///       formats the parsed body root, builds a candidate root node combining
+///       head prefix and body, and composes it so head-chain wrappers apply to
+///       the body. Inherited `$children(..)` wrappers stay on the wrapper-context
+///       overlay attached after composition.
 /// WHY: with control-flow bodies emitted directly into TIR, body-root
 ///      preparation reuses the parser-emitted body sequence and the owning
 ///      template's head-prefix nodes. The prepared root is installed directly
@@ -114,7 +101,6 @@ fn prepare_branch_body_tir_root(
     let TirBodyRootInput {
         root_children,
         style,
-        child_wrappers,
         body_root,
         body_kind,
         control_flow_node_id,
@@ -129,52 +115,37 @@ fn prepare_branch_body_tir_root(
         head_prefix_tir_nodes(&store, root_children).map_err(TemplateError::from)?
     };
 
-    // The body is already a parser-emitted TIR sequence node. Formatting,
-    // wrapper application, and head-chain composition operate on this root
-    // directly without reconstructing a second template representation.
+    // The body is already a parser-emitted TIR sequence node. Formatting and
+    // head-chain composition operate on this root directly without reconstructing
+    // a second template representation.
 
-    // Format the body root before inherited wrappers and head-chain composition
-    // so the final body tree carries formatted text while wrappers remain opaque
-    // anchors. The store borrow is released around this call because the TIR
-    // formatter mutates the shared module store through `TirView`.
+    // Format the body root before head-chain composition so the final body tree
+    // carries formatted text. The store borrow is released around this call
+    // because the TIR formatter mutates the shared module store through `TirView`.
     let body_root = format_tir_body_root(body_root, style, context, string_table)?;
 
     let mut store = context.template_ir_store.borrow_mut();
-    let body_root = apply_inherited_child_wrappers_to_body_root(
-        body_root,
-        child_wrappers,
-        &mut store,
-        string_table,
-    )?;
-
     let body_children = sequence_children(&store, body_root).map_err(TemplateError::from)?;
 
-    // Build a temporary template combining the head-prefix nodes with the body
+    // Build a candidate root node combining the head-prefix nodes with the body
     // children, then compose so head-chain wrappers apply to the body.
-    let candidate_id =
-        build_branch_body_candidate_from_tir_nodes(&head_prefix_nodes, &body_children, &mut store)?;
-    let composed_root = compose_tir_head_chain(&mut store, candidate_id, string_table, true)?;
+    let candidate_root = build_branch_body_candidate_root_from_tir_nodes(
+        &head_prefix_nodes,
+        &body_children,
+        &mut store,
+    )?;
+    let composed_root =
+        compose_tir_head_chain_from_root(&mut store, candidate_root, string_table, true)?;
 
-    replace_control_flow_body_tir_root(&mut store, control_flow_node_id, body_kind, composed_root)
+    store
+        .replace_control_flow_body(control_flow_node_id, body_kind, composed_root)
         .map_err(TemplateError::from)
 }
 
-/// Applies inherited `$children(..)` wrapper templates to direct child-template
-/// occurrences in a control-flow body root.
-///
-/// WHAT: TIR-native equivalent of `apply_inherited_child_templates_to_atoms` for
-///       body-only TIR roots. Walks the top-level children of the body sequence,
-///       skipping `$fresh` children and not recursing into grandchildren.
-///       Non-control-flow direct children are wrapped through
-///       `wrap_tir_node_in_wrappers`; control-flow direct children receive the
-///       inherited wrappers through a derived wrapper template whose
-///       `conditional_child_wrapper_set` carries the inherited wrappers.
-/// WHY: lets `prepare_branch_body_tir_root` keep inherited
-///      `$children(...)` wrapper handling inside the TIR owner.
+/// Shared inputs for preparing one branch, fallback or loop body.
 struct ControlFlowBodyPreparationContext<'a> {
     construction_context: &'a TemplateConstructionContext,
     style: &'a Style,
-    child_wrappers: &'a [TemplateWrapperReference],
     context: &'a ScopeContext,
     string_table: &'a mut StringTable,
 }
@@ -184,11 +155,11 @@ struct ControlFlowBodyPreparationContext<'a> {
 /// WHAT: reads the parsed body root node ID from the owning TIR control-flow
 ///       node, derives the prepared TIR root from parser-emitted head-prefix
 ///       nodes plus that body root, formats it via the TIR-native formatter,
-///       then applies inherited wrappers and head-chain composition. The
-///       prepared root is installed directly onto the TIR control-flow node.
+///       then applies head-chain composition. The prepared root is installed
+///       directly onto the TIR control-flow node.
 /// WHY: branch and fallback bodies share the same head-prefix + body shape, so
-///      one preparation owner keeps TIR formatting, wrapper application, and
-///      root installation in sync without duplicating the flow per arm.
+///      one preparation owner keeps TIR formatting and root installation in
+///      sync without duplicating the flow per arm.
 fn prepare_branch_or_fallback_body(
     ctx: ControlFlowBodyPreparationContext<'_>,
     control_flow_node_id: TemplateIrNodeId,
@@ -198,20 +169,18 @@ fn prepare_branch_or_fallback_body(
     let ControlFlowBodyPreparationContext {
         construction_context,
         style,
-        child_wrappers,
         context,
         string_table,
     } = ctx;
 
     // Collect parser-emitted root children before the mutable store borrow so
     // the TIR-derived path can reuse module-local head-prefix nodes.
-    let root_children = construction_context.builder().root_children().to_vec();
+    let root_children = construction_context.root_children().to_vec();
 
     prepare_branch_body_tir_root(
         TirBodyRootInput {
             root_children: &root_children,
             style,
-            child_wrappers,
             body_root,
             body_kind,
             control_flow_node_id,
@@ -224,9 +193,9 @@ fn prepare_branch_or_fallback_body(
 /// Prepares a loop body TIR root from the parsed body root.
 ///
 /// WHAT: formats the parsed TIR body root, trims whitespace-only text nodes
-///       before any top-level loop-control marker, applies inherited
-///       `$children(..)` wrappers to direct child-template occurrences natively
-///       in TIR, and installs the result as the loop's body root.
+///       before any top-level loop-control marker, and installs the result as
+///       the loop's body root. Inherited `$children(..)` wrappers stay on the
+///       wrapper-context overlay attached after composition.
 /// WHY: loop bodies do not carry the owning template's shared head prefix (that
 ///      wraps the aggregate output), so they can skip head-chain composition.
 ///      Loop-control boundary whitespace trimming is applied as a TIR-local
@@ -237,14 +206,13 @@ fn prepare_branch_or_fallback_body(
 fn prepare_loop_body_tir_root(
     control_flow_node_id: TemplateIrNodeId,
     style: &Style,
-    child_wrappers: &[TemplateWrapperReference],
     body_root: TemplateIrNodeId,
     context: &ScopeContext,
     string_table: &mut StringTable,
 ) -> Result<(), TemplateError> {
-    // The loop body is already a parser-emitted TIR sequence node; formatting,
-    // loop-control boundary trimming, and wrapper application operate on it
-    // directly without reconstructing a second template representation.
+    // The loop body is already a parser-emitted TIR sequence node; formatting
+    // and loop-control boundary trimming operate on it directly without
+    // reconstructing a second template representation.
 
     // Release the store borrow around the TIR formatter call; the formatter
     // authority mutates the shared module store through `TirView`.
@@ -255,30 +223,22 @@ fn prepare_loop_body_tir_root(
         trim_whitespace_before_loop_control_boundary(body_root, &mut store, string_table)
             .map_err(TemplateError::from)?;
 
-    let body_root = apply_inherited_child_wrappers_to_body_root(
-        body_root,
-        child_wrappers,
-        &mut store,
-        string_table,
-    )?;
-
-    replace_control_flow_body_tir_root(
-        &mut store,
-        control_flow_node_id,
-        ControlFlowBodyKind::LoopBody,
-        body_root,
-    )
-    .map_err(TemplateError::from)
+    store
+        .replace_control_flow_body(
+            control_flow_node_id,
+            ControlFlowBodyKind::LoopBody,
+            body_root,
+        )
+        .map_err(TemplateError::from)
 }
 
 /// Prepares a template `loop` body.
 ///
-/// WHAT: reads the parsed body root node ID from the owning TIR `Loop` node,
-///       formats that root via the TIR-native formatter, then applies inherited
-///       wrappers. Loop bodies intentionally skip head-prefix composition
-///       because the owning head wraps the aggregate output once, not each
-///       iteration. Loop-control boundary whitespace trimming is applied as a
-///       TIR-local transform.
+/// WHAT: reads the parsed body root node ID from the owning TIR `Loop` node and
+///       formats that root via the TIR-native formatter. Loop bodies
+///       intentionally skip head-prefix composition because the owning head
+///       wraps the aggregate output once, not each iteration. Loop-control
+///       boundary whitespace trimming is applied as a TIR-local transform.
 /// WHY: the loop body root owns loop-control boundary whitespace trimming and
 ///      formatting natively in TIR.
 fn prepare_loop_body(
@@ -288,7 +248,6 @@ fn prepare_loop_body(
 ) -> Result<(), TemplateError> {
     let ControlFlowBodyPreparationContext {
         style,
-        child_wrappers,
         context,
         string_table,
         ..
@@ -297,7 +256,6 @@ fn prepare_loop_body(
     prepare_loop_body_tir_root(
         control_flow_node_id,
         style,
-        child_wrappers,
         body_root,
         context,
         string_table,
@@ -313,12 +271,10 @@ fn prepare_loop_body(
 ///
 /// After each body is formatted, this installs the prepared body root directly
 /// onto the owning parser TIR control-flow node. The control-flow node and its
-/// body node IDs are read from the TIR store through the parser builder state,
-/// not from a durable AST carrier.
+/// body node IDs are read from the construction context and TIR store, not from
+/// a durable AST carrier.
 pub(in crate::compiler_frontend::ast::templates) struct ControlFlowRenderUnitRequest<'a> {
     pub(in crate::compiler_frontend::ast::templates) style: &'a Style,
-    pub(in crate::compiler_frontend::ast::templates) child_wrappers:
-        &'a [TemplateWrapperReference],
     pub(in crate::compiler_frontend::ast::templates) context: &'a ScopeContext,
     pub(in crate::compiler_frontend::ast::templates) string_table: &'a mut StringTable,
 }
@@ -329,60 +285,61 @@ pub(in crate::compiler_frontend::ast::templates) fn prepare_control_flow_render_
 ) -> Result<(), TemplateError> {
     let ControlFlowRenderUnitRequest {
         style,
-        child_wrappers,
         context,
         string_table,
     } = request;
 
-    // Locate the owning TIR control-flow node through the parser builder state.
+    // Locate the owning TIR control-flow node through the construction context.
     // The body parser already constructed the BranchChain/Loop node and its
     // body node IDs in the TIR store; render-unit preparation reads and
     // updates them directly.
-    let control_flow_node_id = {
-        let store = context.template_ir_store.borrow();
-        construction_context
-            .builder()
-            .control_flow_node_id(&store)
-            .ok_or_else(|| {
-                CompilerError::compiler_error(
-                    "prepare_control_flow_render_units called on template without a TIR control-flow node",
-                )
-            })?
-    };
+    let control_flow_node_id = construction_context.control_flow_node_id().ok_or_else(|| {
+        CompilerError::compiler_error(
+            "prepare_control_flow_render_units called on template without a TIR control-flow node",
+        )
+    })?;
 
-    let kind = {
+    // Extract only the body node IDs needed for preparation. The RefCell
+    // borrow must end before the mutable store operations below, so the
+    // IDs are copied rather than holding a borrowed reference to the kind.
+    let (branch_bodies, fallback_body, loop_body) = {
         let store = context.template_ir_store.borrow();
         let node = store.get_node(control_flow_node_id).ok_or_else(|| {
             CompilerError::compiler_error(
                 "Control-flow node disappeared from the TIR store during render-unit preparation.",
             )
         })?;
-        node.kind.clone()
+        match &node.kind {
+            TemplateIrNodeKind::BranchChain { branches, fallback } => {
+                let bodies: Vec<_> = branches.iter().map(|b| b.body).collect();
+                (Some(bodies), *fallback, None)
+            }
+            TemplateIrNodeKind::Loop { body, .. } => (None, None, Some(*body)),
+            _ => (None, None, None),
+        }
     };
 
-    match kind {
-        TemplateIrNodeKind::BranchChain { branches, fallback } => {
+    match (branch_bodies, fallback_body, loop_body) {
+        (Some(branch_bodies), fallback, _) => {
             prepare_branch_chain_render_units(
                 control_flow_node_id,
-                &branches,
+                &branch_bodies,
                 fallback,
                 ControlFlowBodyPreparationContext {
                     construction_context,
                     style,
-                    child_wrappers,
                     context,
                     string_table,
                 },
             )?;
         }
 
-        TemplateIrNodeKind::Loop { body, .. } => {
+        (_, _, Some(body)) => {
             prepare_loop_render_units(
                 control_flow_node_id,
                 body,
                 construction_context,
                 style,
-                child_wrappers,
                 context,
                 string_table,
             )?;
@@ -408,29 +365,27 @@ pub(in crate::compiler_frontend::ast::templates) fn prepare_control_flow_render_
 ///       without holding a borrow across the mutable phase.
 fn prepare_branch_chain_render_units(
     control_flow_node_id: TemplateIrNodeId,
-    branches: &[TemplateIrBranch],
+    branch_bodies: &[TemplateIrNodeId],
     fallback: Option<TemplateIrNodeId>,
     ctx: ControlFlowBodyPreparationContext<'_>,
 ) -> Result<(), TemplateError> {
     let ControlFlowBodyPreparationContext {
         construction_context,
         style,
-        child_wrappers,
         context,
         string_table,
     } = ctx;
 
-    for (index, branch) in branches.iter().enumerate() {
+    for (index, &body) in branch_bodies.iter().enumerate() {
         prepare_branch_or_fallback_body(
             ControlFlowBodyPreparationContext {
                 construction_context,
                 style,
-                child_wrappers,
                 context,
                 string_table: &mut *string_table,
             },
             control_flow_node_id,
-            branch.body,
+            body,
             ControlFlowBodyKind::Branch { index },
         )?;
     }
@@ -440,7 +395,6 @@ fn prepare_branch_chain_render_units(
             ControlFlowBodyPreparationContext {
                 construction_context,
                 style,
-                child_wrappers,
                 context,
                 string_table: &mut *string_table,
             },
@@ -465,7 +419,6 @@ fn prepare_loop_render_units(
     body: TemplateIrNodeId,
     construction_context: &mut TemplateConstructionContext,
     style: &Style,
-    child_wrappers: &[TemplateWrapperReference],
     context: &ScopeContext,
     string_table: &mut StringTable,
 ) -> Result<(), TemplateError> {
@@ -477,7 +430,6 @@ fn prepare_loop_render_units(
         ControlFlowBodyPreparationContext {
             construction_context,
             style,
-            child_wrappers,
             context,
             string_table,
         },
@@ -488,7 +440,7 @@ fn prepare_loop_render_units(
     // Collect the parser-emitted root children before the mutable store
     // borrow so the aggregate wrapper can reuse existing module-local TIR
     // head-prefix nodes instead of rebuilding from content atoms.
-    let root_children = construction_context.builder().root_children().to_vec();
+    let root_children = construction_context.root_children().to_vec();
 
     let mut template_ir_store = context.template_ir_store.borrow_mut();
     let aggregate_wrapper =
@@ -496,11 +448,8 @@ fn prepare_loop_render_units(
 
     // Install the composed TIR aggregate-wrapper subtree onto the owning
     // `Loop` node.
-    replace_loop_aggregate_wrapper_tir_root(
-        &mut template_ir_store,
-        control_flow_node_id,
-        aggregate_wrapper.tir_root,
-    )?;
+    template_ir_store
+        .replace_loop_aggregate_wrapper(control_flow_node_id, aggregate_wrapper.tir_root)?;
 
     Ok(())
 }

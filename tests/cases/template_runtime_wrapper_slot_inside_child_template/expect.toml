@@ -1,0 +1,10 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains_exactly_once = [
+    "class=\"nested-slot\"",
+    "hello",
+]
+rendered_output_not_contains = [
+    "class=\"nested-slot\"><span",
+]

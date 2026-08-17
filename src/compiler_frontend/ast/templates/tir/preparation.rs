@@ -4,14 +4,12 @@
 
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::templates::error::TemplateError;
-use crate::compiler_frontend::ast::templates::template::{
-    SlotKey, TemplateConstValueKind, TemplateType,
-};
+use crate::compiler_frontend::ast::templates::template::{TemplateConstValueKind, TemplateType};
 use crate::compiler_frontend::ast::templates::template_control_flow::{
     TemplateBranchSelector, TemplateLoopHeader, collect_option_capture_binding_path,
     loop_body_const_evaluation_bindings,
 };
-use crate::compiler_frontend::ast::templates::tir::classification::{
+use crate::compiler_frontend::ast::templates::tir::expression_constness::{
     classify_expression_const_evaluable_with_nested_template, effective_branch_selector_for_view,
     effective_loop_header_for_view,
 };
@@ -23,8 +21,7 @@ use crate::compiler_frontend::ast::templates::tir::overlays::{
     TemplateViewContext, TirSlotResolutionKind,
 };
 use crate::compiler_frontend::ast::templates::tir::refs::TemplateTirReference;
-use crate::compiler_frontend::ast::templates::tir::slot_composition::collect_tir_slot_schema;
-use crate::compiler_frontend::ast::templates::tir::slot_plan::TemplateSlotSiteRenderPiece;
+
 use crate::compiler_frontend::ast::templates::tir::view::{
     TemplateTirPhase, TirView, TirViewIdentity,
 };
@@ -38,7 +35,6 @@ use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 use std::collections::HashSet;
 
-type PreparationTemplateKey = (TemplateIrId, TirViewIdentity);
 type PreparationNodeKey = (TemplateIrNodeId, TirViewIdentity);
 type PreparationSlotPlanKey = (TemplateSlotPlanId, TirViewIdentity);
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -52,7 +48,6 @@ pub(crate) enum RuntimeTemplateReason {
     SlotContribution,
     RuntimeSlotSite,
     AggregateOutput,
-    ChildTemplateCycle,
     RuntimeExpression,
 }
 
@@ -69,27 +64,54 @@ pub(crate) enum TemplatePreparationMode {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct PreparedFold {
-    pub(crate) identity: TirViewIdentity,
-    pub(crate) value_kind: TemplateConstValueKind,
+pub(crate) struct TemplatePreparationFacts {
+    pub(crate) is_const_evaluable_shape: bool,
+    pub(crate) has_unresolved_slot_occurrences: bool,
+    pub(crate) has_resolved_slot_sources: bool,
+    pub(crate) has_escaped_insert_helpers: bool,
+    pub(crate) wrapper_foldable: bool,
+    pub(crate) has_runtime_slot_plan: bool,
+    pub(crate) has_runtime_slot_sites: bool,
+    pub(crate) has_reactive_dependence: bool,
+    pub(crate) final_value_kind: TemplateConstValueKind,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct PreparedRuntime {
-    pub(crate) identity: TirViewIdentity,
-    pub(crate) reason: RuntimeTemplateReason,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum PreparedTemplate {
-    Foldable(PreparedFold),
-    Runtime(PreparedRuntime),
+pub(crate) enum TemplatePreparationOutcome {
+    Foldable,
+    Runtime(RuntimeTemplateReason),
     Helper(TemplateHelperKind),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct TemplatePreparation {
+    pub(crate) identity: TirViewIdentity,
+    pub(crate) facts: TemplatePreparationFacts,
+    pub(crate) outcome: TemplatePreparationOutcome,
+}
+
+/// Refreshes a parser-owned generic template kind from complete preparation facts.
+pub(crate) fn refresh_kind_from_preparation(
+    kind: &mut TemplateType,
+    facts: &TemplatePreparationFacts,
+) {
+    if matches!(
+        *kind,
+        TemplateType::SlotInsert(_) | TemplateType::SlotDefinition(_) | TemplateType::Comment(_)
+    ) {
+        return;
+    }
+
+    *kind = if facts.is_const_evaluable_shape && !facts.has_escaped_insert_helpers {
+        TemplateType::String
+    } else {
+        TemplateType::StringFunction
+    };
 }
 
 /// Mutable state for the one exhaustive preparation traversal.
 struct PreparationWalk {
-    visiting_templates: HashSet<PreparationTemplateKey>,
+    visiting_templates: HashSet<TirViewIdentity>,
     visiting_nodes: HashSet<PreparationNodeKey>,
     visiting_slot_plans: HashSet<PreparationSlotPlanKey>,
     runtime_reason: Option<RuntimeTemplateReason>,
@@ -103,6 +125,9 @@ struct PreparationFacts {
     has_resolved_slot_sources: bool,
     has_slot_insertions: bool,
     wrapper_foldable: bool,
+    has_runtime_slot_plan: bool,
+    has_runtime_slot_sites: bool,
+    has_reactive_dependence: bool,
 }
 
 struct WrapperSetFacts {
@@ -118,6 +143,9 @@ impl Default for PreparationFacts {
             has_resolved_slot_sources: false,
             has_slot_insertions: false,
             wrapper_foldable: true,
+            has_runtime_slot_plan: false,
+            has_runtime_slot_sites: false,
+            has_reactive_dependence: false,
         }
     }
 }
@@ -126,15 +154,15 @@ impl Default for PreparationFacts {
 struct PreparationTraversalRole {
     virtual_wrapper: bool,
     in_aggregate_wrapper: bool,
-    fill_target_key: Option<SlotKey>,
+    active_slot_plan: Option<TemplateSlotPlanId>,
 }
 
 impl PreparationTraversalRole {
-    fn virtual_wrapper(in_aggregate_wrapper: bool, fill_target_key: Option<SlotKey>) -> Self {
+    fn virtual_wrapper(in_aggregate_wrapper: bool) -> Self {
         Self {
             virtual_wrapper: true,
             in_aggregate_wrapper,
-            fill_target_key,
+            active_slot_plan: None,
         }
     }
 }
@@ -153,6 +181,9 @@ impl PreparationFacts {
         self.has_resolved_slot_sources |= other.has_resolved_slot_sources;
         self.has_slot_insertions |= other.has_slot_insertions;
         self.wrapper_foldable &= other.wrapper_foldable;
+        self.has_runtime_slot_plan |= other.has_runtime_slot_plan;
+        self.has_runtime_slot_sites |= other.has_runtime_slot_sites;
+        self.has_reactive_dependence |= other.has_reactive_dependence;
     }
 }
 
@@ -198,7 +229,7 @@ impl PreparationWalk {
 pub(crate) fn prepare_tir_view(
     view: &TirView<'_>,
     mode: TemplatePreparationMode,
-) -> Result<PreparedTemplate, TemplateError> {
+) -> Result<TemplatePreparation, TemplateError> {
     if !view.phase().is_at_least(TemplateTirPhase::Composed) {
         return Err(CompilerError::compiler_error(format!(
             "TIR preparation requires Composed-or-later TIR, but root {} is at phase {}.",
@@ -246,38 +277,47 @@ pub(crate) fn prepare_tir_view(
         TemplateConstValueKind::RenderableString
     };
 
-    match const_value_kind {
+    let outcome = match const_value_kind {
         TemplateConstValueKind::LoopControlSignal => {
-            Ok(PreparedTemplate::Helper(TemplateHelperKind::LoopControl))
+            TemplatePreparationOutcome::Helper(TemplateHelperKind::LoopControl)
         }
         TemplateConstValueKind::SlotInsertHelper => {
-            Ok(PreparedTemplate::Helper(TemplateHelperKind::SlotInsert))
+            TemplatePreparationOutcome::Helper(TemplateHelperKind::SlotInsert)
         }
         TemplateConstValueKind::RenderableString | TemplateConstValueKind::WrapperTemplate => {
             if let Some(reason) = walk.runtime_reason
                 && !matches!(reason, RuntimeTemplateReason::SlotResolution)
             {
-                return Ok(PreparedTemplate::Runtime(PreparedRuntime {
-                    identity: view.identity(),
-                    reason,
-                }));
+                TemplatePreparationOutcome::Runtime(reason)
+            } else {
+                TemplatePreparationOutcome::Foldable
             }
-
-            Ok(PreparedTemplate::Foldable(PreparedFold {
-                identity: view.identity(),
-                value_kind: const_value_kind,
-            }))
         }
-        TemplateConstValueKind::NonConst => Ok(PreparedTemplate::Runtime(PreparedRuntime {
-            identity: view.identity(),
-            reason: if facts.has_slot_insertions {
+        TemplateConstValueKind::NonConst => {
+            TemplatePreparationOutcome::Runtime(if facts.has_slot_insertions {
                 RuntimeTemplateReason::SlotContribution
             } else {
                 walk.runtime_reason
                     .unwrap_or(RuntimeTemplateReason::RuntimeExpression)
-            },
-        })),
-    }
+            })
+        }
+    };
+
+    Ok(TemplatePreparation {
+        identity: view.identity(),
+        facts: TemplatePreparationFacts {
+            is_const_evaluable_shape: facts.const_evaluable,
+            has_unresolved_slot_occurrences: facts.has_unresolved_slots,
+            has_resolved_slot_sources: facts.has_resolved_slot_sources,
+            has_escaped_insert_helpers: facts.has_slot_insertions,
+            wrapper_foldable: facts.wrapper_foldable,
+            has_runtime_slot_plan: facts.has_runtime_slot_plan,
+            has_runtime_slot_sites: facts.has_runtime_slot_sites,
+            has_reactive_dependence: facts.has_reactive_dependence,
+            final_value_kind: const_value_kind,
+        },
+        outcome,
+    })
 }
 
 impl PreparationWalk {
@@ -288,11 +328,12 @@ impl PreparationWalk {
         loop_binding_paths: &[InternedPath],
         role: PreparationTraversalRole,
     ) -> Result<PreparationFacts, TemplateError> {
-        let traversal_key = (template_id, view.identity());
+        let traversal_key = view.identity();
         if !self.visiting_templates.insert(traversal_key) {
-            let mut facts = PreparationFacts::default();
-            self.record_role_runtime(&mut facts, &role, RuntimeTemplateReason::ChildTemplateCycle);
-            return Ok(facts);
+            return Err(CompilerError::compiler_error(format!(
+                "TIR preparation: exact view {traversal_key:?} re-entered while still active."
+            ))
+            .into());
         }
         let result = (|| {
             let mut wrapper_foldable = true;
@@ -325,14 +366,23 @@ impl PreparationWalk {
                     }
                 }
             }
-            if let Some(slot_plan_id) = runtime_slot_plan {
-                self.walk_slot_plan(slot_plan_id, view, &role)?;
+            let mut node_role = role.clone();
+            let runtime_slot_plan_facts = if let Some(slot_plan_id) = runtime_slot_plan {
+                node_role.active_slot_plan = Some(slot_plan_id);
+                let facts = self.walk_slot_plan(slot_plan_id, view, &node_role)?;
                 wrapper_foldable = false;
+
                 if !role.virtual_wrapper {
                     self.record_runtime(RuntimeTemplateReason::RuntimeSlotPlan);
                 }
-            }
-            let mut facts = self.walk_node(root, view, loop_binding_paths, &role)?;
+
+                facts
+            } else {
+                PreparationFacts::const_value()
+            };
+            let mut facts = self.walk_node(root, view, loop_binding_paths, &node_role)?;
+            facts.merge(runtime_slot_plan_facts);
+            facts.has_runtime_slot_plan |= runtime_slot_plan.is_some();
 
             if matches!(
                 kind,
@@ -495,10 +545,6 @@ impl PreparationWalk {
                         }
                     }
                     let slot_resolution_missing = view.slot_resolution_overlay()?.is_none();
-                    let fill_target_matches = role
-                        .fill_target_key
-                        .as_ref()
-                        .is_some_and(|key| placeholder.key == *key);
                     if role.virtual_wrapper
                         && (role.in_aggregate_wrapper
                             || slot_placeholder_has_wrapper_context(placeholder))
@@ -509,20 +555,6 @@ impl PreparationWalk {
                             RuntimeTemplateReason::SlotWrapperApplication,
                         );
                     } else if !role.virtual_wrapper && slot_resolution_missing {
-                        self.record_role_runtime(
-                            &mut facts,
-                            role,
-                            RuntimeTemplateReason::SlotResolution,
-                        );
-                    }
-                    if role.virtual_wrapper
-                        && !fill_target_matches
-                        && !role.in_aggregate_wrapper
-                        && !slot_resolution_missing
-                        && let Some(resolution) =
-                            view.effective_slot_resolution(placeholder.occurrence_id)?
-                        && resolution.is_unresolved()
-                    {
                         self.record_role_runtime(
                             &mut facts,
                             role,
@@ -652,8 +684,20 @@ impl PreparationWalk {
                     }
                     Ok(facts)
                 }
-                TemplateIrNodeKind::RuntimeSlotSite { plan, .. } => {
-                    self.walk_slot_plan(*plan, view, role)?;
+                TemplateIrNodeKind::RuntimeSlotSite { plan, site } => {
+                    self.validate_runtime_slot_site(*plan, *site, view, role)?;
+                    let mut facts = self.walk_slot_plan(*plan, view, role)?;
+                    facts.const_evaluable = false;
+                    facts.has_runtime_slot_sites = true;
+                    self.record_role_runtime(
+                        &mut facts,
+                        role,
+                        RuntimeTemplateReason::RuntimeSlotSite,
+                    );
+                    Ok(facts)
+                }
+                TemplateIrNodeKind::RuntimeSlotContributionSource { plan, source } => {
+                    self.validate_contribution_source_marker(*plan, *source, view, role)?;
                     let mut facts = PreparationFacts::default();
                     self.record_role_runtime(
                         &mut facts,
@@ -674,6 +718,7 @@ impl PreparationWalk {
                     let mut facts =
                         self.walk_expression(view, effective_expression, loop_binding_paths, role)?;
                     if reactive_subscription.is_some() {
+                        facts.has_reactive_dependence = true;
                         self.record_role_runtime(
                             &mut facts,
                             role,
@@ -684,8 +729,11 @@ impl PreparationWalk {
                 }
 
                 TemplateIrNodeKind::Text { .. } => {
-                    if store.node_reactive_subscription(node_id).is_some() {
-                        let mut facts = PreparationFacts::default();
+                    if store.node_reactive_subscription(node_id)?.is_some() {
+                        let mut facts = PreparationFacts {
+                            has_reactive_dependence: true,
+                            ..PreparationFacts::default()
+                        };
                         self.record_role_runtime(
                             &mut facts,
                             role,
@@ -734,43 +782,126 @@ impl PreparationWalk {
         slot_plan_id: TemplateSlotPlanId,
         view: &TirView<'_>,
         role: &PreparationTraversalRole,
-    ) -> Result<(), TemplateError> {
+    ) -> Result<PreparationFacts, TemplateError> {
         let store = view.store();
         let traversal_key = (slot_plan_id, view.identity());
         if !self.visiting_slot_plans.insert(traversal_key) {
-            return Ok(());
+            return Ok(PreparationFacts::const_value());
         }
         let result = (|| {
             let slot_plan = store
                 .get_slot_plan(slot_plan_id)
                 .ok_or_else(|| missing_slot_plan_error(slot_plan_id))?;
 
-            for source in &slot_plan.contribution_sources {
-                self.walk_node(source.render_root, view, &[], role)?;
-            }
-            for site in &slot_plan.slot_sites {
-                for piece in &site.render_plan.pieces {
-                    match piece {
-                        TemplateSlotSiteRenderPiece::Render(node_id) => {
-                            self.walk_node(*node_id, view, &[], role)?;
-                        }
-                        TemplateSlotSiteRenderPiece::ContributionSource(source_id) => {
-                            if slot_plan.contribution_sources.get(source_id.0).is_none() {
-                                return Err(CompilerError::compiler_error(format!(
-                                    "TIR preparation: slot site {} references missing contribution source {}.",
-                                    site.site.0, source_id.0
-                                ))
-                                .into());
-                            }
-                        }
-                    }
+            for (index, source) in slot_plan.contribution_sources.iter().enumerate() {
+                if source.source.0 != index {
+                    return Err(CompilerError::compiler_error(format!(
+                        "TIR preparation: contribution source {} in plan {} does not match its index {}.",
+                        source.source.0, slot_plan_id, index
+                    ))
+                    .into());
                 }
             }
-            Ok(())
+            for (index, site) in slot_plan.slot_sites.iter().enumerate() {
+                if site.site.0 != index {
+                    return Err(CompilerError::compiler_error(format!(
+                        "TIR preparation: slot site {} in plan {} does not match its index {}.",
+                        site.site.0, slot_plan_id, index
+                    ))
+                    .into());
+                }
+            }
+
+            let mut plan_role = role.clone();
+            plan_role.active_slot_plan = Some(slot_plan_id);
+            let mut facts = PreparationFacts::const_value();
+            for source in &slot_plan.contribution_sources {
+                facts.merge(self.walk_node(source.render_root, view, &[], &plan_role)?);
+            }
+            for site in &slot_plan.slot_sites {
+                facts.merge(self.walk_node(site.render_root, view, &[], &plan_role)?);
+            }
+            Ok(facts)
         })();
 
         self.visiting_slot_plans.remove(&traversal_key);
         result
+    }
+
+    fn validate_contribution_source_marker(
+        &self,
+        plan: TemplateSlotPlanId,
+        source: crate::compiler_frontend::ast::templates::template_slots::RuntimeSlotContributionSourceId,
+        view: &TirView<'_>,
+        role: &PreparationTraversalRole,
+    ) -> Result<(), CompilerError> {
+        let Some(active_plan) = role.active_slot_plan else {
+            return Err(CompilerError::compiler_error(
+                "TIR preparation: runtime slot contribution marker appeared outside its owning plan.",
+            ));
+        };
+        if plan != active_plan {
+            return Err(CompilerError::compiler_error(format!(
+                "TIR preparation: runtime slot contribution marker plan {} differs from the active plan {}.",
+                plan, active_plan
+            )));
+        }
+        let slot_plan = view
+            .store()
+            .get_slot_plan(active_plan)
+            .ok_or_else(|| missing_slot_plan_error(active_plan))?;
+        let Some(stored) = slot_plan.contribution_sources.get(source.0) else {
+            return Err(CompilerError::compiler_error(format!(
+                "TIR preparation: runtime slot contribution source {} is outside plan {}.",
+                source.0, active_plan
+            )));
+        };
+        if stored.source != source {
+            return Err(CompilerError::compiler_error(format!(
+                "TIR preparation: contribution source {} in plan {} does not match its stored identity {}.",
+                source.0, active_plan, stored.source.0
+            )));
+        }
+        Ok(())
+    }
+
+    fn validate_runtime_slot_site(
+        &self,
+        plan: TemplateSlotPlanId,
+        site: crate::compiler_frontend::ast::templates::template_slots::RuntimeSlotSiteId,
+        view: &TirView<'_>,
+        role: &PreparationTraversalRole,
+    ) -> Result<(), CompilerError> {
+        let Some(active_plan) = role.active_slot_plan else {
+            return Err(CompilerError::compiler_error(
+                "TIR preparation: runtime slot site appeared outside its owning plan.",
+            ));
+        };
+        if plan != active_plan {
+            return Err(CompilerError::compiler_error(format!(
+                "TIR preparation: runtime slot site plan {} differs from the active plan {}.",
+                plan, active_plan
+            )));
+        }
+
+        let slot_plan = view
+            .store()
+            .get_slot_plan(active_plan)
+            .ok_or_else(|| missing_slot_plan_error(active_plan))?;
+        let Some(stored) = slot_plan.slot_sites.get(site.0) else {
+            return Err(CompilerError::compiler_error(format!(
+                "TIR preparation: runtime slot site {} is outside plan {}.",
+                site.0, active_plan
+            )));
+        };
+        if stored.site != site {
+            return Err(CompilerError::compiler_error(format!(
+                "TIR preparation: slot site {} in plan {} does not match its stored identity {}.",
+                site.0, active_plan, stored.site.0
+            )));
+        }
+
+        Ok(())
     }
 
     fn walk_wrapper_set(
@@ -779,8 +910,8 @@ impl PreparationWalk {
         view: &TirView<'_>,
         in_aggregate_wrapper: bool,
     ) -> Result<WrapperSetFacts, TemplateError> {
-        let store = view.store();
-        let wrapper_set = store
+        let wrapper_set = view
+            .store()
             .get_wrapper_set(wrapper_set_id)
             .ok_or_else(|| missing_wrapper_set_error(wrapper_set_id))?;
         let mut facts = WrapperSetFacts {
@@ -789,22 +920,15 @@ impl PreparationWalk {
         };
         for wrapper in &wrapper_set.wrappers {
             let wrapper_view = view.wrapper(*wrapper)?;
-            let schema = collect_tir_slot_schema(store, wrapper.root).map_err(|error| {
-                CompilerError::compiler_error(format!(
-                    "TIR preparation: wrapper slot schema could not be resolved: {error:?}"
-                ))
-            })?;
             let wrapper_facts = self.walk_template(
                 wrapper.root,
                 &wrapper_view,
                 &[],
-                PreparationTraversalRole::virtual_wrapper(
-                    in_aggregate_wrapper,
-                    schema.loose_fill_target_key(),
-                ),
+                PreparationTraversalRole::virtual_wrapper(in_aggregate_wrapper),
             )?;
             facts.contains_slot_insert |= wrapper_facts.has_slot_insertions
-                || store
+                || view
+                    .store()
                     .get_template(wrapper.root)
                     .is_some_and(|template| matches!(template.kind, TemplateType::SlotInsert(_)));
             if !wrapper_facts.wrapper_foldable {

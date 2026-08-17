@@ -38,7 +38,7 @@ use crate::compiler_frontend::ast::module_ast::environment::{
     AstModuleLookups, DeclarationSemanticKind, DeclarationSemanticTable, TopLevelDeclarationTable,
 };
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
-use crate::compiler_frontend::ast::templates::template_folding::TemplateFoldContext;
+use crate::compiler_frontend::ast::templates::template_folding::TirFoldContext;
 use crate::compiler_frontend::ast::templates::tir::{TemplateIrStore, TirFoldCache};
 use crate::compiler_frontend::ast::type_resolution::ResolvedTypeAnnotation;
 use crate::compiler_frontend::compiler_errors::CompilerError;

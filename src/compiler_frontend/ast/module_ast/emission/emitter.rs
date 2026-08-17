@@ -38,7 +38,7 @@ use crate::compiler_frontend::ast::templates::template_folding::{
     TemplateEmission, TemplateFoldResult,
 };
 use crate::compiler_frontend::ast::templates::tir::{
-    PreparedTemplate, TemplateTirPhase, TirView, fold_prepared_template,
+    TemplatePreparationOutcome, TemplateTirPhase, TirView, fold_prepared_template,
 };
 use crate::compiler_frontend::ast::templates::top_level_templates::FoldedConstTemplateResult;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
@@ -1170,47 +1170,38 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             reference.context,
         )
         .map_err(|error| self.error_messages(error, string_table))?;
-        let prepared = match preparation {
-            PreparedTemplate::Foldable(prepared) => prepared,
-            PreparedTemplate::Helper(_) => {
-                return Err(self.diagnostic_messages(
-                    CompilerDiagnostic::invalid_template_structure(
-                        InvalidTemplateStructureReason::HelperInConstTemplate,
-                        template.location,
-                    ),
-                    string_table,
-                ));
-            }
-            PreparedTemplate::Runtime(_) => {
-                return Err(self.diagnostic_messages(
-                    CompilerDiagnostic::invalid_template_structure(
-                        InvalidTemplateStructureReason::NonFoldableConstTemplate,
-                        template.location,
-                    ),
-                    string_table,
-                ));
-            }
-        };
-        let mut fold_context = match context
-            .new_template_fold_context(string_table, "top-level const template folding")
-        {
-            Ok(ctx) => ctx,
-            Err(error) => {
-                return Err(self.error_messages(error, string_table));
-            }
-        };
+        if !matches!(preparation.outcome, TemplatePreparationOutcome::Foldable) {
+            return Err(self.diagnostic_messages(
+                match preparation.outcome {
+                    TemplatePreparationOutcome::Helper(_) => {
+                        CompilerDiagnostic::invalid_template_structure(
+                            InvalidTemplateStructureReason::HelperInConstTemplate,
+                            template.location,
+                        )
+                    }
+                    TemplatePreparationOutcome::Runtime(_) => {
+                        CompilerDiagnostic::invalid_template_structure(
+                            InvalidTemplateStructureReason::NonFoldableConstTemplate,
+                            template.location,
+                        )
+                    }
+                    TemplatePreparationOutcome::Foldable => unreachable!(),
+                },
+                string_table,
+            ));
+        }
+        let prepared = preparation;
+        let mut fold_context = context.new_tir_fold_context(string_table);
         // Top-level const fragments are builder-facing rendered text metadata; no semantic or
         // fingerprint consumer owns provenance at this boundary in the current milestone.
-        let TemplateFoldResult {
-            emission,
-            provenance: _,
-        } = match fold_prepared_template(&prepared, view, &mut fold_context) {
-            Ok(result) => result,
-            Err(error) => {
-                drop(fold_context);
-                return Err(self.template_error_messages(error, string_table));
-            }
-        };
+        let TemplateFoldResult { emission, .. } =
+            match fold_prepared_template(&prepared, view, &mut fold_context) {
+                Ok(result) => result,
+                Err(error) => {
+                    drop(fold_context);
+                    return Err(self.template_error_messages(error, string_table));
+                }
+            };
         let value = match emission {
             TemplateEmission::Output(value) => value,
             TemplateEmission::NoOutput => fold_context.string_table.intern(""),

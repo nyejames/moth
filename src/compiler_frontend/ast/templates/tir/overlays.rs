@@ -9,12 +9,13 @@
 //!
 //! ## Payload coverage
 //!
-//! Expression and slot-resolution payloads are production surfaces. They carry
-//! occurrence-keyed entries by `ExpressionSiteId` and `SlotOccurrenceId`.
+//! Expression and wrapper-context payloads are production surfaces. The
+//! slot-resolution dimension remains part of the canonical exact-view contract
+//! even though no current production path allocates it.
 //! Wrapper-context overlays carry inherited `$children(..)` wrapper sets and
 //! `$fresh` suppression state for individual child-template occurrences. They
-//! are read by the view-native classification and fold paths so finalization
-//! can apply inherited wrappers without mutating shared child-template nodes.
+//! are read by exact-view consumers so finalization can apply inherited wrappers
+//! without mutating shared child-template nodes.
 
 use std::fmt;
 use std::num::NonZeroU32;
@@ -41,6 +42,10 @@ macro_rules! compact_overlay_id {
         pub(crate) struct $name(NonZeroU32);
 
         impl $name {
+            #[allow(
+                dead_code,
+                reason = "the exact-view contract retains dimensions without requiring a current production allocator"
+            )]
             pub(crate) fn new(index: usize) -> Self {
                 let index = u32::try_from(index).expect(concat!(
                     $label,
@@ -69,32 +74,13 @@ macro_rules! compact_overlay_id {
     };
 }
 
-// Stable index for an expression overlay entry in `TemplateIrStore`.
-//
-// WHAT: identifies a store-owned expression override applied at
-// dynamic-expression nodes. The concrete payload carries expression overrides
-// keyed by `ExpressionSiteId`.
-// WHY: expression overrides are one of the three overlay dimensions; a typed
-// ID keeps the reference distinct from slot and wrapper overlays and lets the
-// store own expression-overlay storage centrally.
+// Store index for expression overrides.
 compact_overlay_id!(TirExpressionOverlayId, "expression overlay");
 
-// Stable index for a slot resolution overlay entry in `TemplateIrStore`.
-//
-// WHAT: identifies a store-owned slot resolution applied at slot occurrence
-// boundaries. The concrete payload carries slot resolutions keyed by
-// `SlotOccurrenceId`.
-// WHY: slot resolution is one of the three overlay dimensions; a typed ID keeps
-// the reference distinct from expression and wrapper overlays.
+// Store index for slot-resolution overrides.
 compact_overlay_id!(TirSlotResolutionOverlayId, "slot resolution overlay");
 
-// Stable index for a wrapper context overlay entry in `TemplateIrStore`.
-//
-// WHAT: identifies a store-owned wrapper context applied at child-template
-// occurrence boundaries. The concrete payload carries inherited wrapper,
-// `$fresh`, and output-guard context keyed by child occurrence.
-// WHY: wrapper context is one of the three overlay dimensions; a typed ID
-// keeps the reference distinct from expression and slot overlays.
+// Store index for inherited-wrapper context.
 compact_overlay_id!(TirWrapperContextOverlayId, "wrapper context overlay");
 
 // -------------------------
@@ -104,7 +90,7 @@ compact_overlay_id!(TirWrapperContextOverlayId, "wrapper context overlay");
 /// Effective content state for one slot occurrence.
 ///
 /// WHAT: distinguishes slots that are resolved to one or more contribution
-///       templates from slots that are known missing or still unresolved.
+///       templates from slots that are known missing.
 /// WHY: missing slots render as empty output, while unresolved slots remain
 ///      structural work for later phases. Keeping those states explicit avoids
 ///      treating "no contribution templates" as an ambiguous magic value.
@@ -118,10 +104,6 @@ pub(crate) enum TirSlotResolutionKind {
 
     /// The slot was routed and intentionally receives no content.
     Missing,
-
-    /// The slot occurrence has not been routed by this overlay yet.
-    #[cfg(test)]
-    Unresolved,
 }
 
 /// One slot-resolution overlay entry for a slot occurrence.
@@ -141,7 +123,11 @@ pub(crate) struct TirSlotResolution {
 }
 
 impl TirSlotResolution {
-    /// Creates a resolved slot entry with one or more contribution sources.
+    /// Creates a resolved slot entry.
+    #[allow(
+        dead_code,
+        reason = "the exact-view contract retains slot-resolution payloads without a current production allocator"
+    )]
     pub(crate) fn resolved(key: SlotKey, sources: Vec<TemplateIrId>) -> Self {
         Self {
             key,
@@ -149,7 +135,11 @@ impl TirSlotResolution {
         }
     }
 
-    /// Creates an entry for a slot that intentionally renders empty.
+    /// Creates a missing slot entry.
+    #[allow(
+        dead_code,
+        reason = "the exact-view contract retains slot-resolution payloads without a current production allocator"
+    )]
     pub(crate) fn missing(key: SlotKey) -> Self {
         Self {
             key,
@@ -157,39 +147,11 @@ impl TirSlotResolution {
         }
     }
 
-    /// Creates an entry for a slot that remains structurally unresolved.
-    #[cfg(test)]
-    pub(crate) fn unresolved(key: SlotKey) -> Self {
-        Self {
-            key,
-            kind: TirSlotResolutionKind::Unresolved,
-        }
-    }
-
-    /// Returns the contribution source refs for a resolved slot.
-    ///
-    /// Missing and test-only unresolved slots have no contribution sources.
+    /// Returns contribution sources, or an empty slice for a missing slot.
     pub(crate) fn sources(&self) -> &[TemplateIrId] {
         match &self.kind {
             TirSlotResolutionKind::Resolved { sources } => sources,
             TirSlotResolutionKind::Missing => &[],
-            #[cfg(test)]
-            TirSlotResolutionKind::Unresolved => &[],
-        }
-    }
-
-    /// Returns true when this occurrence has not been routed yet.
-    ///
-    /// The `Unresolved` variant is only constructed in focused tests today; in
-    /// production builds the state is unreachable, so this always returns false.
-    pub(crate) fn is_unresolved(&self) -> bool {
-        #[cfg(test)]
-        {
-            matches!(self.kind, TirSlotResolutionKind::Unresolved)
-        }
-        #[cfg(not(test))]
-        {
-            false
         }
     }
 }
@@ -253,13 +215,7 @@ pub(crate) struct TirSlotResolutionOverlay {
 }
 
 impl TirSlotResolutionOverlay {
-    /// Looks up the slot resolution for an occurrence, if one exists.
-    ///
-    /// WHAT: linear scan of the resolution list. Returns the resolution
-    ///       reference when the occurrence has a resolution, or `None` when it
-    ///       does not.
-    /// WHY: `TirView` calls this to resolve effective slot content for an
-    ///      occurrence; keeping the lookup on the payload centralizes the scan.
+    /// Looks up a resolution by slot occurrence.
     pub(crate) fn resolution_for_occurrence(
         &self,
         occurrence_id: SlotOccurrenceId,
@@ -323,23 +279,6 @@ pub(crate) struct TirWrapperContext {
     pub(crate) application_mode: TirWrapperApplicationMode,
 }
 
-#[cfg(test)]
-impl TirWrapperContext {
-    /// Creates wrapper context with no inherited wrappers or special mode.
-    pub(crate) fn empty() -> Self {
-        Self::default()
-    }
-
-    /// Creates wrapper context for a child occurrence with inherited wrappers.
-    pub(crate) fn inherited(wrapper_set: TemplateWrapperSetId) -> Self {
-        Self {
-            inherited_wrapper_set: Some(wrapper_set),
-            skip_parent_child_wrappers: false,
-            application_mode: TirWrapperApplicationMode::Always,
-        }
-    }
-}
-
 /// Store-owned wrapper context overlay payload.
 ///
 /// WHAT: carries wrapper context keyed by `ChildTemplateOccurrenceId`.
@@ -353,7 +292,7 @@ pub(crate) struct TirWrapperContextOverlay {
 }
 
 impl TirWrapperContextOverlay {
-    /// Looks up wrapper context for a child occurrence, if one exists.
+    /// Looks up inherited-wrapper context by child occurrence.
     pub(crate) fn context_for_occurrence(
         &self,
         occurrence_id: ChildTemplateOccurrenceId,

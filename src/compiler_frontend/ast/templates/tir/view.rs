@@ -34,7 +34,6 @@
 //! ([`TirView::expression_overlay`], [`TirView::slot_resolution_overlay`],
 //! [`TirView::wrapper_context_overlay`]) resolve which overlays are in play.
 //! Occurrence-keyed lookups ([`TirView::effective_expression_for_site`],
-//! [`TirView::effective_expression_for_node`],
 //! [`TirView::effective_slot_resolution`], and
 //! [`TirView::effective_wrapper_context`]) resolve an effective value for a
 //! specific site or occurrence by reading the current view context. When no
@@ -55,12 +54,8 @@ use super::ids::ChildTemplateOccurrenceId;
 use super::ids::{ExpressionSiteId, SlotOccurrenceId, TemplateIrId, TemplateIrNodeId};
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::templates::template::Template;
-#[cfg(test)]
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
-use super::node::{TemplateIr, TemplateIrNode};
-#[cfg(test)]
-use super::node::{TemplateIrNodeKind, TemplateLoopHeaderExpressionSites};
+use super::node::{TemplateIr, TemplateIrNode, TirSlotPlaceholder};
 
 use super::overlays::{
     TemplateViewContext, TirExpressionOverlay, TirSlotResolution, TirSlotResolutionOverlay,
@@ -99,16 +94,27 @@ pub(crate) enum TemplateTirPhase {
 }
 
 impl TemplateTirPhase {
-    /// Returns `true` when this phase is at or beyond `minimum`.
-    ///
-    /// WHAT: a named readability helper for the minimum-phase check used by
-    ///       [`TirView::with_minimum_phase`] and by consumers that want to
-    ///       short-circuit work below their required phase.
-    /// WHY: `phase.is_at_least(TemplateTirPhase::Composed)` reads more clearly
-    ///      at call sites than `phase >= TemplateTirPhase::Composed` while
-    ///      preserving the same ordering semantics.
+    /// Returns whether this phase reaches `minimum`.
     pub(crate) fn is_at_least(self, minimum: TemplateTirPhase) -> bool {
         self >= minimum
+    }
+}
+
+pub(super) fn structural_transition_context(
+    parent_context: TemplateViewContext,
+    reference_phase: TemplateTirPhase,
+    referenced_context: TemplateViewContext,
+) -> TemplateViewContext {
+    TemplateViewContext {
+        expression_overlay: parent_context.expression_overlay,
+        slot_resolution: reference_phase
+            .is_at_least(TemplateTirPhase::Composed)
+            .then_some(referenced_context.slot_resolution)
+            .flatten(),
+        wrapper_context: reference_phase
+            .is_at_least(TemplateTirPhase::Composed)
+            .then_some(referenced_context.wrapper_context)
+            .flatten(),
     }
 }
 
@@ -338,20 +344,7 @@ impl<'a> TirView<'a> {
         referenced_context: TemplateViewContext,
         owner: &str,
     ) -> Result<TirView<'a>, CompilerError> {
-        let context = TemplateViewContext {
-            // Structural descendants read the current complete root overlay.
-            // Referenced expression overlays belong to independently owned
-            // nested values, not to structural child or wrapper transitions.
-            expression_overlay: self.context().expression_overlay,
-            slot_resolution: phase
-                .is_at_least(TemplateTirPhase::Composed)
-                .then_some(referenced_context.slot_resolution)
-                .flatten(),
-            wrapper_context: phase
-                .is_at_least(TemplateTirPhase::Composed)
-                .then_some(referenced_context.wrapper_context)
-                .flatten(),
-        };
+        let context = structural_transition_context(self.context(), phase, referenced_context);
         self.transition(root, phase, context, owner)
     }
 
@@ -384,42 +377,40 @@ impl<'a> TirView<'a> {
     //  Narrow read accessors
     // -------------------------
 
-    /// Returns the module-local root ID this view was built over.
+    /// Returns the structural root ID.
     pub(crate) fn root_ref(&self) -> TemplateIrId {
         self.identity.root
     }
 
-    /// Returns the pipeline phase carried by this view.
+    /// Returns the view phase.
     pub(crate) fn phase(&self) -> TemplateTirPhase {
         self.identity.phase
     }
 
-    /// Returns the exact value context carried by this view.
+    /// Returns the value-carried overlay context.
     pub(crate) fn context(&self) -> TemplateViewContext {
         self.identity.context
     }
 
-    /// Returns the exact identity that determines every effective view read.
+    /// Returns the exact identity for effective reads and cache keys.
     pub(crate) fn identity(&self) -> TirViewIdentity {
         self.identity
     }
 
-    /// Borrows the module-local store that owns this view's structural root.
-    ///
-    /// WHAT: gives view consumers read-only access to the one module store
-    ///       backing this view without reopening a borrow or cloning the store.
-    /// WHY: const-required validation pairs child views with their owning
-    ///      store while following module-local references. Keeping that
-    ///      lookup on `TirView` preserves root and overlay identity at the boundary.
+    /// Borrows the store that owns this view.
     pub(crate) fn store(&self) -> &'a TemplateIrStore {
         self.store
     }
 
-    /// Returns an immutable borrow of the root template entry.
-    ///
-    /// WHAT: resolves the module-local `TemplateIrId` into the underlying
-    ///       `TemplateIr` through the store.  Returns `CompilerError` if the
-    ///       root is no longer resolvable (an internal invariant violation).
+    /// Looks up a slot placeholder by occurrence.
+    pub(crate) fn slot_placeholder(
+        &self,
+        occurrence: SlotOccurrenceId,
+    ) -> Option<&'a TirSlotPlaceholder> {
+        self.store.slot_placeholder(occurrence)
+    }
+
+    /// Resolves the root template or reports broken store authority.
     pub(crate) fn root_template(&self) -> Result<&'a TemplateIr, CompilerError> {
         self.store.get_template(self.identity.root).ok_or_else(|| {
             CompilerError::compiler_error(format!(
@@ -427,22 +418,6 @@ impl<'a> TirView<'a> {
                 self.identity.root
             ))
         })
-    }
-
-    /// Returns an immutable borrow of the root node for focused view tests.
-    ///
-    /// WHAT: resolves the root template, reads its `root` node ID, and looks up
-    ///       that node through the store.
-    /// WHY: focused tests use this to verify view-level root traversal without
-    ///      reopening raw store access in production callers.
-    #[cfg(test)]
-    pub(crate) fn root_node(&self) -> Result<&'a TemplateIrNode, CompilerError> {
-        let root_node_id = {
-            let template = self.root_template()?;
-            template.root
-        };
-
-        self.effective_node(root_node_id)
     }
 
     /// Returns an immutable borrow of the effective node at `node_ref`.
@@ -479,13 +454,7 @@ impl<'a> TirView<'a> {
     // Occurrence-keyed lookups on top of these entries are provided by the
     // methods in the "Occurrence-keyed overlay lookups" section below.
 
-    /// Returns the expression overlay entry, if the view context has one.
-    ///
-    /// WHAT: resolves the `expression_overlay` dimension of the view context
-    ///       into the store-owned `TirExpressionOverlay` entry.
-    /// WHY: consumers that inspect expression overrides read them through the
-    ///      view rather than reaching into the store directly.  The concrete
-    ///      payload carries expression overrides keyed by `ExpressionSiteId`.
+    /// Resolves the expression overlay named by this view.
     pub(crate) fn expression_overlay(
         &self,
     ) -> Result<Option<&'a TirExpressionOverlay>, CompilerError> {
@@ -503,13 +472,7 @@ impl<'a> TirView<'a> {
         Ok(Some(overlay))
     }
 
-    /// Returns the slot resolution overlay entry, if the view context has one.
-    ///
-    /// WHAT: resolves the `slot_resolution` dimension of the view context into the
-    ///       store-owned `TirSlotResolutionOverlay` entry.
-    /// WHY: consumers that inspect slot resolution read it through the view
-    ///      rather than reaching into the store directly.  The concrete
-    ///      payload carries slot resolutions keyed by `SlotOccurrenceId`.
+    /// Resolves the slot-resolution overlay named by this view.
     pub(crate) fn slot_resolution_overlay(
         &self,
     ) -> Result<Option<&'a TirSlotResolutionOverlay>, CompilerError> {
@@ -530,13 +493,7 @@ impl<'a> TirView<'a> {
         Ok(Some(overlay))
     }
 
-    /// Returns the wrapper context overlay entry, if the view context has one.
-    ///
-    /// WHAT: resolves the `wrapper_context` dimension of the view context into the
-    ///       store-owned `TirWrapperContextOverlay` entry.
-    /// WHY: view-native folding consults wrapper-context overlays at
-    ///      child-template occurrence boundaries instead of mutating the child
-    ///      template's structural wrapper set.
+    /// Resolves the wrapper-context overlay named by this view.
     pub(crate) fn wrapper_context_overlay(
         &self,
     ) -> Result<Option<&'a TirWrapperContextOverlay>, CompilerError> {
@@ -577,32 +534,6 @@ impl<'a> TirView<'a> {
         };
 
         Ok(overlay.expression_for_site(site_id))
-    }
-
-    /// Returns the override expression for a `DynamicExpression` node in tests.
-    ///
-    /// WHAT: reads the structural node at `node_ref`, extracts its
-    ///       `ExpressionSiteId`, then delegates to
-    ///       [`TirView::effective_expression_for_site`]. Returns `Ok(None)` when
-    ///       the node is not a `DynamicExpression` or no overlay override exists
-    ///       for its site.
-    /// WHY: tests use this convenience to prove node-keyed overlay lookup
-    ///      delegates to the production site-keyed accessor without keeping an
-    ///      unused production method compiled.
-    #[cfg(test)]
-    pub(crate) fn effective_expression_for_node(
-        &self,
-        node_ref: TemplateIrNodeId,
-    ) -> Result<Option<&'a Expression>, CompilerError> {
-        let site_id = {
-            let node = self.effective_node(node_ref)?;
-            match &node.kind {
-                TemplateIrNodeKind::DynamicExpression { site_id, .. } => *site_id,
-                _ => return Ok(None),
-            }
-        };
-
-        self.effective_expression_for_site(site_id)
     }
 
     /// Returns the effective slot resolution for a `SlotOccurrenceId`, if the
@@ -646,163 +577,6 @@ impl<'a> TirView<'a> {
 
         Ok(overlay.context_for_occurrence(occurrence_id))
     }
-
-    // -------------------------
-    //  Source-location recovery
-    // -------------------------
-    //
-    // These helpers traverse the structural root and its inline structural
-    // descendants to recover a `SourceLocation` from a slot occurrence,
-    // child-template occurrence, or expression site. They do not cross into
-    // referenced child templates or insert-contribution templates: a caller
-    // that needs a location inside a child root should construct the appropriate
-    // named transition view for that child. Not crossing avoids ambiguity when separate template
-    // roots reuse numeric occurrence/site IDs.
-
-    /// Returns a slot occurrence source location for focused view tests.
-    ///
-    /// WHAT: traverses the structural root and its inline descendants, returning
-    ///       the `TemplateIrNode::location` of the `Slot` whose `occurrence_id`
-    ///       matches. Returns `Ok(None)` when no matching slot is found in this
-    ///       view's structural root.
-    /// WHY: source-location recovery is useful view behavior to preserve in
-    ///      tests, but no production diagnostic currently consumes this helper.
-    #[cfg(test)]
-    pub(crate) fn source_location_for_slot_occurrence(
-        &self,
-        occurrence_id: SlotOccurrenceId,
-    ) -> Result<Option<SourceLocation>, CompilerError> {
-        let root_node_ref = self.root_node_ref()?;
-        self.find_location_in_subtree(root_node_ref, &|kind, location| match kind {
-            TemplateIrNodeKind::Slot { placeholder }
-                if placeholder.occurrence_id == occurrence_id =>
-            {
-                Some(location.clone())
-            }
-            _ => None,
-        })
-    }
-
-    /// Returns a child-template occurrence source location for focused view tests.
-    ///
-    /// WHAT: traverses the structural root and its inline descendants, returning
-    ///       the `TemplateIrNode::location` of the `ChildTemplate` whose
-    ///       `occurrence_id` matches. Returns `Ok(None)` when no matching
-    ///       child-template occurrence is found in this view's structural root.
-    /// WHY: focused tests preserve the intended view-owned lookup path without
-    ///      compiling an unused production accessor.
-    #[cfg(test)]
-    pub(crate) fn source_location_for_child_template_occurrence(
-        &self,
-        occurrence_id: ChildTemplateOccurrenceId,
-    ) -> Result<Option<SourceLocation>, CompilerError> {
-        let root_node_ref = self.root_node_ref()?;
-        self.find_location_in_subtree(root_node_ref, &|kind, location| match kind {
-            TemplateIrNodeKind::ChildTemplate {
-                occurrence_id: child_id,
-                ..
-            } if *child_id == occurrence_id => Some(location.clone()),
-            _ => None,
-        })
-    }
-
-    /// Returns an expression-site source location for focused view tests.
-    ///
-    /// WHAT: traverses the structural root and its inline descendants, returning
-    ///       a source location when the requested `ExpressionSiteId` matches:
-    ///       - a `DynamicExpression` node's `site_id` (returns the node location);
-    ///       - a `BranchChain` branch's `selector_site_id` (returns the branch
-    ///         location stored on `TemplateIrBranch`);
-    ///       - a `Loop` header expression site (returns the `Loop` node location).
-    ///       Returns `Ok(None)` when no matching expression site is found in
-    ///       this view's structural root.
-    /// WHY: focused tests preserve the intended view-owned lookup path.
-    ///      Branch-selector and loop-header sites share the same key space as
-    ///      dynamic-expression sites, so one lookup helper covers all three.
-    #[cfg(test)]
-    pub(crate) fn source_location_for_expression_site(
-        &self,
-        site_id: ExpressionSiteId,
-    ) -> Result<Option<SourceLocation>, CompilerError> {
-        let root_node_ref = self.root_node_ref()?;
-        self.find_location_in_subtree(root_node_ref, &|kind, location| match kind {
-            TemplateIrNodeKind::DynamicExpression {
-                site_id: expr_site_id,
-                ..
-            } if *expr_site_id == site_id => Some(location.clone()),
-
-            TemplateIrNodeKind::BranchChain { branches, .. } => branches
-                .iter()
-                .find(|branch| branch.selector_site_id == site_id)
-                .map(|branch| branch.location.clone()),
-
-            TemplateIrNodeKind::Loop { header_sites, .. }
-                if expression_site_in_header(header_sites, site_id) =>
-            {
-                Some(location.clone())
-            }
-
-            _ => None,
-        })
-    }
-
-    // -------------------------
-    //  Private traversal helpers
-    // -------------------------
-
-    /// Resolves the module-local root node ID for test-only traversal helpers.
-    ///
-    /// WHAT: reads the root template entry, extracts its root `TemplateIrNodeId`,
-    ///       and returns that `TemplateIrNodeId` for `effective_node` lookups.
-    /// WHY: the test-only source-location helpers start their traversal from
-    ///      the root node, so the root-node-ID extraction stays in one place.
-    #[cfg(test)]
-    fn root_node_ref(&self) -> Result<TemplateIrNodeId, CompilerError> {
-        let root_node_id = {
-            let template = self.root_template()?;
-            template.root
-        };
-        Ok(root_node_id)
-    }
-
-    /// Recursively searches `node_ref` and its inline structural descendants for a
-    /// node where `matches` returns a `SourceLocation`.
-    ///
-    /// WHAT: borrows the node through `effective_node`, applies `matches` to its
-    ///       kind and location, then recurses into structural children only. The
-    ///       `Ref` is dropped before recursing so the store's `RefCell` is not
-    ///       held across recursive calls.
-    /// WHY: the three source-location helpers share the same traversal shape but
-    ///       differ only in which node kind and which ID field they match on.
-    ///       Extracting the traversal here removes real duplication without
-    ///       introducing a broad visitor — the closure is local to this slice and
-    ///       does not cross into referenced child templates or insert-contribution
-    ///       templates.
-    #[cfg(test)]
-    fn find_location_in_subtree(
-        &self,
-        node_ref: TemplateIrNodeId,
-        matches: &impl Fn(&TemplateIrNodeKind, &SourceLocation) -> Option<SourceLocation>,
-    ) -> Result<Option<SourceLocation>, CompilerError> {
-        let (found, children) = {
-            let node = self.effective_node(node_ref)?;
-            let found = matches(&node.kind, &node.location);
-            let children = child_node_ids(&node.kind);
-            (found, children)
-        };
-
-        if let Some(location) = found {
-            return Ok(Some(location));
-        }
-
-        for child_node_id in children {
-            if let Some(location) = self.find_location_in_subtree(child_node_id, matches)? {
-                return Ok(Some(location));
-            }
-        }
-
-        Ok(None)
-    }
 }
 
 pub(crate) fn validate_context(
@@ -835,82 +609,4 @@ pub(crate) fn validate_context(
     }
 
     Ok(())
-}
-
-// -------------------------
-//  Private free helpers
-// -------------------------
-
-/// Returns the structural child node IDs stored on a node's payload.
-///
-/// WHAT: extracts the `TemplateIrNodeId` values that the source-location
-///       traversal should descend into. Only `Sequence`, `BranchChain`, and
-///       `Loop` carry structural children; all other variants are leaves or
-///       reference separate template roots that the traversal deliberately does
-///       not cross into.
-/// WHY: keeping this extraction in one place avoids duplicating the
-///      "which children are structural descendants?" match across each
-///      source-location helper while making it explicit that referenced child
-///      templates and insert-contribution templates are not visited.
-#[cfg(test)]
-fn child_node_ids(kind: &TemplateIrNodeKind) -> Vec<TemplateIrNodeId> {
-    match kind {
-        TemplateIrNodeKind::Sequence { children } => children.clone(),
-
-        TemplateIrNodeKind::BranchChain { branches, fallback } => {
-            let mut ids: Vec<TemplateIrNodeId> =
-                branches.iter().map(|branch| branch.body).collect();
-            if let Some(fallback) = fallback {
-                ids.push(*fallback);
-            }
-            ids
-        }
-
-        TemplateIrNodeKind::Loop {
-            body,
-            aggregate_wrapper,
-            ..
-        } => {
-            let mut ids = vec![*body];
-            if let Some(aggregate) = aggregate_wrapper {
-                ids.push(*aggregate);
-            }
-            ids
-        }
-
-        // Leaf nodes and cross-root references do not contribute structural
-        // children for traversal.
-        TemplateIrNodeKind::Text { .. }
-        | TemplateIrNodeKind::DynamicExpression { .. }
-        | TemplateIrNodeKind::ChildTemplate { .. }
-        | TemplateIrNodeKind::Slot { .. }
-        | TemplateIrNodeKind::InsertContribution { .. }
-        | TemplateIrNodeKind::AggregateOutput
-        | TemplateIrNodeKind::LoopControl { .. }
-        | TemplateIrNodeKind::RuntimeSlotSite { .. } => Vec::new(),
-    }
-}
-
-/// Returns `true` when `site_id` matches any expression site in a loop header.
-///
-/// WHAT: checks the `TemplateLoopHeaderExpressionSites` carried by a `Loop`
-///       node — the condition site for `while`, start/end/optional-step sites
-///       for range loops, and the iterable site for collection loops.
-/// WHY: the loop-header sites share the same `ExpressionSiteId` key space as
-///      dynamic-expression and branch-selector sites, so the expression-site
-///      location helper needs one focused predicate to test header membership.
-#[cfg(test)]
-fn expression_site_in_header(
-    header_sites: &TemplateLoopHeaderExpressionSites,
-    site_id: ExpressionSiteId,
-) -> bool {
-    match header_sites {
-        TemplateLoopHeaderExpressionSites::Conditional { condition } => *condition == site_id,
-
-        TemplateLoopHeaderExpressionSites::Range { start, end, step } => {
-            *start == site_id || *end == site_id || *step == Some(site_id)
-        }
-
-        TemplateLoopHeaderExpressionSites::Collection { iterable } => *iterable == site_id,
-    }
 }

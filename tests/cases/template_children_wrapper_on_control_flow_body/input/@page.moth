@@ -1,0 +1,19 @@
+[:template_children_wrapper_on_control_flow_body
+    [:if:]
+    [$children([:<b>[$slot]</b>]), if true:
+        [:A]
+        [:B]
+    ]
+    [:loop:]
+    [$children([:<i>[$slot]</i>]), loop 0 to 2 |n|:
+        [n]
+    ]
+    [:fresh:]
+    [$children([:<u>[$slot]</u>]), if true:
+        [$fresh: [:Y]]
+    ]
+    [:skip:]
+    [$children([:<s>[$slot]</s>]), if true:
+        [if false: Z]
+    ]
+]

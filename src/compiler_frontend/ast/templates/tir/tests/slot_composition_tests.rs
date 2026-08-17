@@ -1,36 +1,27 @@
-//! Tests for TIR-native slot schema extraction, contribution routing, and
-//! placeholder expansion.
+//! Tests for TIR slot routing, expansion and head-chain composition.
 //!
-//! WHAT: exercises `collect_tir_slot_schema`, `route_tir_slot_contributions`,
-//!       and `expand_tir_slot_placeholders` over a variety of TIR tree shapes
-//!       (sequences, nested child templates, branch chains, loops) and verifies
-//!       the query methods on `TirSlotSchema` and `TirSlotContributions`.
-//! WHY: slot composition depends on discovering declared slot targets
-//!      directly from TIR nodes, routing fill content into the right buckets,
-//!      and expanding placeholders from TIR nodes; these tests pin that
-//!      behavior in isolation.
+//! Schema and occurrence facts are owned by `slot_layout`. These tests pin
+//! routing buckets, placeholder expansion and composed child identity.
 
-use super::super::builder::TemplateIrBuilder;
-use super::super::ids::SlotOccurrenceId;
 use super::super::ids::{TemplateIrId, TemplateIrNodeId, TemplateWrapperSetId};
 use super::super::node::{
     TemplateIr, TemplateIrBranch, TemplateIrNode, TemplateIrNodeKind, TirSlotPlaceholder,
 };
 use super::super::overlays::{
-    TemplateViewContext, TirExpressionOverlay, TirSlotResolutionKind, TirSlotResolutionOverlay,
-    TirSlotResolutionOverlayId, TirWrapperContextOverlay,
+    TemplateViewContext, TirExpressionOverlay, TirSlotResolutionOverlay, TirWrapperContextOverlay,
 };
-use super::super::refs::TemplateTirChildReference;
-use super::super::slot_composition::{
-    RoutedTirSlotContributions, TirSlotContributions, TirSlotSchema, collect_tir_slot_schema,
-    compose_tir_head_chain, compose_tir_head_chain_with_overlays, expand_tir_slot_placeholders,
-    materialize_tir_slot_resolution_overlay, route_tir_slot_contributions,
-    view_context_from_slot_resolution_overlay, wrap_tir_node_in_wrappers,
-};
+use super::super::refs::{TemplateTirChildReference, TemplateWrapperReference};
+use super::super::slot_composition::contributions::route_tir_slot_contributions;
+use super::super::slot_composition::{TirSlotContributions, compose_tir_head_chain};
+use super::super::slot_layout::{TirSlotSchema, collect_tir_slot_layout, collect_tir_slot_schema};
 use super::super::slot_plan::TemplateSlotPlan;
 use super::super::store::{TemplateIrStore, TemplateWrapperSet};
-use super::super::summary::TemplateIrSummary;
+use super::super::summary::{TemplateIrSummary, summarize_existing_root};
 use super::super::view::{TemplateTirPhase, TirView};
+use super::builder::TemplateIrBuilder;
+use super::support::{
+    expand_tir_slot_placeholders, wrap_tir_node_in_wrapper_references, wrap_tir_node_in_wrappers,
+};
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::{
@@ -44,23 +35,14 @@ use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, InvalidTemp
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
-use std::cell::RefCell;
-use std::rc::Rc;
 
 fn empty_location() -> SourceLocation {
     SourceLocation::default()
 }
 
-/// Builds a summary that records the given number of slot placeholders.
-///
-/// WHAT: composition uses `TemplateIrSummary::slot_count` as a cheap guard to
-///       decide whether a child template is a wrapper receiver. Tests that
-///       build wrapper templates by hand must supply a summary with accurate
-///       slot metadata, otherwise the receiver fast path will skip them.
 fn slot_summary(slot_count: u32) -> TemplateIrSummary {
     TemplateIrSummary {
         slot_count,
-        has_slots: slot_count > 0,
         ..TemplateIrSummary::default()
     }
 }
@@ -87,7 +69,7 @@ fn build_slot_insert_template(
     string_table: &mut StringTable,
 ) -> TemplateIrId {
     let text_id = string_table.intern("insert");
-    let byte_len = u32::try_from(string_table.resolve(text_id).len()).unwrap_or(u32::MAX);
+    let byte_len = string_table.resolve(text_id).len();
 
     let mut builder = TemplateIrBuilder::new(store);
     let root = builder.push_text_node(
@@ -113,7 +95,7 @@ fn build_text_node(
     origin: TemplateSegmentOrigin,
 ) -> TemplateIrNodeId {
     let text_id = string_table.intern(text);
-    let byte_len = u32::try_from(string_table.resolve(text_id).len()).unwrap_or(u32::MAX);
+    let byte_len = string_table.resolve(text_id).len();
 
     let mut builder = TemplateIrBuilder::new(store);
     builder.push_text_node(text_id, byte_len, origin, empty_location())
@@ -124,7 +106,7 @@ fn build_child_template_node(
     string_table: &mut StringTable,
 ) -> TemplateIrNodeId {
     let text_id = string_table.intern("child");
-    let byte_len = u32::try_from(string_table.resolve(text_id).len()).unwrap_or(u32::MAX);
+    let byte_len = string_table.resolve(text_id).len();
 
     let mut builder = TemplateIrBuilder::new(store);
     let root = builder.push_text_node(
@@ -202,14 +184,14 @@ fn build_wrapper_with_slots(store: &mut TemplateIrStore, keys: Vec<SlotKey>) -> 
         .map(|key| builder.push_slot_node(key, empty_location()))
         .collect();
 
-    let slot_count = slot_nodes.len() as u32;
+    let slot_count = slot_nodes.len();
     let root = builder.push_sequence_node(slot_nodes, empty_location());
 
     builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
-        slot_summary(slot_count),
+        slot_summary(u32::try_from(slot_count).unwrap_or(u32::MAX)),
         empty_location(),
     )
 }
@@ -324,14 +306,14 @@ fn build_wrapper_with_slot_sequence(
         .map(|key| builder.push_slot_node(key, empty_location()))
         .collect();
 
-    let slot_count = slot_nodes.len() as u32;
+    let slot_count = slot_nodes.len();
     let root = builder.push_sequence_node(slot_nodes, empty_location());
 
     builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
-        slot_summary(slot_count),
+        slot_summary(u32::try_from(slot_count).unwrap_or(u32::MAX)),
         empty_location(),
     )
 }
@@ -360,8 +342,7 @@ fn build_text_slot_text_wrapper_with_markers(
     let mut builder = TemplateIrBuilder::new(store);
 
     let before_text_id = string_table.intern(before);
-    let before_text_len =
-        u32::try_from(string_table.resolve(before_text_id).len()).unwrap_or(u32::MAX);
+    let before_text_len = string_table.resolve(before_text_id).len();
     let before_text = builder.push_text_node(
         before_text_id,
         before_text_len,
@@ -372,8 +353,7 @@ fn build_text_slot_text_wrapper_with_markers(
     let slot_node = builder.push_slot_node(key, empty_location());
 
     let after_text_id = string_table.intern(after);
-    let after_text_len =
-        u32::try_from(string_table.resolve(after_text_id).len()).unwrap_or(u32::MAX);
+    let after_text_len = string_table.resolve(after_text_id).len();
     let after_text = builder.push_text_node(
         after_text_id,
         after_text_len,
@@ -401,7 +381,7 @@ fn build_single_text_template(
 ) -> TemplateIrId {
     let mut builder = TemplateIrBuilder::new(store);
     let text_id = string_table.intern(text);
-    let text_len = u32::try_from(string_table.resolve(text_id).len()).unwrap_or(u32::MAX);
+    let text_len = string_table.resolve(text_id).len();
     let root = builder.push_text_node(
         text_id,
         text_len,
@@ -571,6 +551,7 @@ fn schema_from_branch_chain_containing_slot() {
         TemplateBranchSelector::Bool(bool_expression(true)),
         branch_body_slot,
         empty_location(),
+        builder.store.next_expression_site_id(),
     );
     let branch_chain = builder.push_branch_chain_node(vec![branch], None, empty_location());
     let template_id = builder.finish_template(
@@ -636,11 +617,13 @@ fn loose_fill_target_prefers_later_positional_slot_across_branches() {
             TemplateBranchSelector::Bool(bool_expression(true)),
             default_slot,
             empty_location(),
+            builder.store.next_expression_site_id(),
         ),
         TemplateIrBranch::new(
             TemplateBranchSelector::Bool(bool_expression(false)),
             positional_slot,
             empty_location(),
+            builder.store.next_expression_site_id(),
         ),
     ];
     let root = builder.push_branch_chain_node(branches, None, empty_location());
@@ -709,7 +692,7 @@ fn loose_fill_target_prefers_aggregate_positional_slot_after_loop_body_default()
 }
 
 #[test]
-fn multiple_default_slots_produces_diagnostic() {
+fn repeated_default_slots_are_valid_replay_sites() {
     let mut store = TemplateIrStore::new();
     let mut builder = TemplateIrBuilder::new(&mut store);
 
@@ -724,19 +707,23 @@ fn multiple_default_slots_produces_diagnostic() {
         empty_location(),
     );
 
-    let result = collect_tir_slot_schema(&store, template_id);
-    let error = result.expect_err("two default slots should produce an error");
+    let schema =
+        collect_tir_slot_schema(&store, template_id).expect("repeated default slots are valid");
+    assert!(schema.has_default_slot);
+    assert_eq!(
+        schema.ordered_slot_keys(&StringTable::new()),
+        vec![SlotKey::Default]
+    );
 
-    let super::super::slot_composition::SlotSchemaError::Diagnostic(diagnostic) = error else {
-        panic!("multiple authored default slots should remain a source diagnostic");
-    };
-    match &diagnostic.payload {
-        DiagnosticPayload::InvalidTemplateSlot {
-            reason: InvalidTemplateSlotReason::MultipleDefaultSlots,
-            ..
-        } => {}
-        other => panic!("expected MultipleDefaultSlots diagnostic, got {other:?}"),
-    }
+    let placeholders = collect_tir_slot_layout(&store, template_id)
+        .expect("placeholder layout should list every occurrence")
+        .placeholders;
+    assert_eq!(placeholders.len(), 2);
+    assert!(
+        placeholders
+            .iter()
+            .all(|placeholder| placeholder.key == SlotKey::Default)
+    );
 }
 
 #[test]
@@ -821,7 +808,7 @@ fn skipped_node_kinds_do_not_contribute_to_schema() {
 
     let mut builder = TemplateIrBuilder::new(&mut store);
 
-    let text_len = u32::try_from(string_table.resolve(text_id).len()).unwrap_or(u32::MAX);
+    let text_len = string_table.resolve(text_id).len();
     let text_node = builder.push_text_node(
         text_id,
         text_len,
@@ -887,27 +874,39 @@ fn route_explicit_insert_to_each_target_slot_key() {
 
         let insert_body_node = template_root_node_id(insert_template, &store);
         assert_eq!(
-            routed.contributions.nodes_for_slot(&SlotKey::Named(name)),
+            routed.nodes_for_slot(&SlotKey::Named(name)),
             &[insert_body_node]
         );
         assert!(
-            routed
-                .contributions
-                .nodes_for_slot(&SlotKey::Default)
-                .is_empty(),
+            routed.nodes_for_slot(&SlotKey::Default).is_empty(),
             "named insert must not spill into the default bucket"
         );
         assert!(
-            routed
-                .contributions
-                .nodes_for_slot(&SlotKey::Positional(0))
-                .is_empty(),
+            routed.nodes_for_slot(&SlotKey::Positional(0)).is_empty(),
             "named insert must not spill into a positional bucket"
         );
-        assert_eq!(routed.schema.named_slots, [name].into_iter().collect());
-        assert!(routed.schema.positional_slots.is_empty());
-        assert!(!routed.schema.accepts_target(&SlotKey::Default));
-        assert!(!routed.schema.has_default_slot);
+        assert_eq!(
+            collect_tir_slot_schema(&store, wrapper)
+                .expect("wrapper schema")
+                .named_slots,
+            [name].into_iter().collect()
+        );
+        assert!(
+            collect_tir_slot_schema(&store, wrapper)
+                .expect("wrapper schema")
+                .positional_slots
+                .is_empty()
+        );
+        assert!(
+            !collect_tir_slot_schema(&store, wrapper)
+                .expect("wrapper schema")
+                .accepts_target(&SlotKey::Default)
+        );
+        assert!(
+            !collect_tir_slot_schema(&store, wrapper)
+                .expect("wrapper schema")
+                .has_default_slot
+        );
     }
 
     // Default target: the body node fills the default bucket and leaves the
@@ -927,20 +926,34 @@ fn route_explicit_insert_to_each_target_slot_key() {
 
         let insert_body_node = template_root_node_id(insert_template, &store);
         assert_eq!(
-            routed.contributions.nodes_for_slot(&SlotKey::Default),
+            routed.nodes_for_slot(&SlotKey::Default),
             &[insert_body_node]
         );
         assert!(
-            routed.contributions.named_nodes.is_empty(),
+            routed.named_nodes.is_empty(),
             "default insert must not spill into a named bucket"
         );
         assert!(
-            routed.contributions.positional_nodes.is_empty(),
+            routed.positional_nodes.is_empty(),
             "default insert must not spill into a positional bucket"
         );
-        assert!(routed.schema.has_default_slot);
-        assert!(routed.schema.named_slots.is_empty());
-        assert!(routed.schema.positional_slots.is_empty());
+        assert!(
+            collect_tir_slot_schema(&store, wrapper)
+                .expect("wrapper schema")
+                .has_default_slot
+        );
+        assert!(
+            collect_tir_slot_schema(&store, wrapper)
+                .expect("wrapper schema")
+                .named_slots
+                .is_empty()
+        );
+        assert!(
+            collect_tir_slot_schema(&store, wrapper)
+                .expect("wrapper schema")
+                .positional_slots
+                .is_empty()
+        );
     }
 
     // Positional target: the body node fills positional slot 0 and leaves the
@@ -961,19 +974,30 @@ fn route_explicit_insert_to_each_target_slot_key() {
 
         let insert_body_node = template_root_node_id(insert_template, &store);
         assert_eq!(
-            routed.contributions.nodes_for_slot(&SlotKey::Positional(0)),
+            routed.nodes_for_slot(&SlotKey::Positional(0)),
             &[insert_body_node]
         );
         assert!(
-            routed
-                .contributions
-                .nodes_for_slot(&SlotKey::Default)
-                .is_empty(),
+            routed.nodes_for_slot(&SlotKey::Default).is_empty(),
             "positional insert must not spill into the default bucket"
         );
-        assert!(!routed.schema.has_default_slot);
-        assert!(routed.schema.named_slots.is_empty());
-        assert_eq!(routed.schema.positional_slots, [0].into_iter().collect());
+        assert!(
+            !collect_tir_slot_schema(&store, wrapper)
+                .expect("wrapper schema")
+                .has_default_slot
+        );
+        assert!(
+            collect_tir_slot_schema(&store, wrapper)
+                .expect("wrapper schema")
+                .named_slots
+                .is_empty()
+        );
+        assert_eq!(
+            collect_tir_slot_schema(&store, wrapper)
+                .expect("wrapper schema")
+                .positional_slots,
+            [0].into_iter().collect()
+        );
     }
 }
 
@@ -1051,23 +1075,29 @@ fn route_loose_content_to_positional_slots() {
     // order. The default and named buckets stay empty because the wrapper
     // declares only positional slots.
     assert_eq!(
-        routed.contributions.nodes_for_slot(&SlotKey::Positional(0)),
+        routed.nodes_for_slot(&SlotKey::Positional(0)),
         &[first_child]
     );
     assert_eq!(
-        routed.contributions.nodes_for_slot(&SlotKey::Positional(1)),
+        routed.nodes_for_slot(&SlotKey::Positional(1)),
         &[second_child]
     );
     assert!(
-        routed
-            .contributions
-            .nodes_for_slot(&SlotKey::Default)
-            .is_empty(),
+        routed.nodes_for_slot(&SlotKey::Default).is_empty(),
         "a positional-only wrapper has no default bucket"
     );
-    assert!(routed.contributions.named_nodes.is_empty());
-    assert!(!routed.schema.has_default_slot);
-    assert_eq!(routed.schema.positional_slots, [0, 1].into_iter().collect());
+    assert!(routed.named_nodes.is_empty());
+    assert!(
+        !collect_tir_slot_schema(&store, wrapper)
+            .expect("wrapper schema")
+            .has_default_slot
+    );
+    assert_eq!(
+        collect_tir_slot_schema(&store, wrapper)
+            .expect("wrapper schema")
+            .positional_slots,
+        [0, 1].into_iter().collect()
+    );
 }
 
 #[test]
@@ -1099,16 +1129,25 @@ fn route_loose_content_to_default_slot_after_positional_exhaustion() {
     // Positional slots fill first in authored order; once they are exhausted
     // the remaining chunks flow into the default slot, preserving order.
     assert_eq!(
-        routed.contributions.nodes_for_slot(&SlotKey::Positional(0)),
+        routed.nodes_for_slot(&SlotKey::Positional(0)),
         &[leading_text]
     );
     assert_eq!(
-        routed.contributions.nodes_for_slot(&SlotKey::Default),
+        routed.nodes_for_slot(&SlotKey::Default),
         &[child, trailing_text]
     );
-    assert!(routed.contributions.named_nodes.is_empty());
-    assert!(routed.schema.has_default_slot);
-    assert_eq!(routed.schema.positional_slots, [0].into_iter().collect());
+    assert!(routed.named_nodes.is_empty());
+    assert!(
+        collect_tir_slot_schema(&store, wrapper)
+            .expect("wrapper schema")
+            .has_default_slot
+    );
+    assert_eq!(
+        collect_tir_slot_schema(&store, wrapper)
+            .expect("wrapper schema")
+            .positional_slots,
+        [0].into_iter().collect()
+    );
 }
 
 #[test]
@@ -1141,18 +1180,32 @@ fn route_loose_whitespace_after_head_fill_to_next_child_contribution() {
     // body whitespace separator is carried with the next body contribution and
     // never absorbed as trailing positional content.
     assert_eq!(
-        routed.contributions.nodes_for_slot(&SlotKey::Positional(0)),
+        routed.nodes_for_slot(&SlotKey::Positional(0)),
         &[head_fill],
         "whitespace after a head contribution must not become trailing positional content"
     );
     assert_eq!(
-        routed.contributions.nodes_for_slot(&SlotKey::Default),
+        routed.nodes_for_slot(&SlotKey::Default),
         &[separator, child],
         "the separator before the body child belongs to the body contribution"
     );
-    assert!(routed.schema.has_default_slot);
-    assert!(routed.schema.named_slots.is_empty());
-    assert_eq!(routed.schema.positional_slots, [0].into_iter().collect());
+    assert!(
+        collect_tir_slot_schema(&store, wrapper)
+            .expect("wrapper schema")
+            .has_default_slot
+    );
+    assert!(
+        collect_tir_slot_schema(&store, wrapper)
+            .expect("wrapper schema")
+            .named_slots
+            .is_empty()
+    );
+    assert_eq!(
+        collect_tir_slot_schema(&store, wrapper)
+            .expect("wrapper schema")
+            .positional_slots,
+        [0].into_iter().collect()
+    );
 }
 
 #[test]
@@ -1176,17 +1229,23 @@ fn route_loose_content_to_default_slot_only() {
 
     // With only a default slot, every authored loose chunk flows straight into
     // the default bucket in authored order.
-    assert_eq!(
-        routed.contributions.nodes_for_slot(&SlotKey::Default),
-        &[text, child]
-    );
+    assert_eq!(routed.nodes_for_slot(&SlotKey::Default), &[text, child]);
     assert!(
-        routed.contributions.positional_nodes.is_empty(),
+        routed.positional_nodes.is_empty(),
         "a default-only wrapper has no positional buckets"
     );
-    assert!(routed.contributions.named_nodes.is_empty());
-    assert!(routed.schema.has_default_slot);
-    assert!(routed.schema.positional_slots.is_empty());
+    assert!(routed.named_nodes.is_empty());
+    assert!(
+        collect_tir_slot_schema(&store, wrapper)
+            .expect("wrapper schema")
+            .has_default_slot
+    );
+    assert!(
+        collect_tir_slot_schema(&store, wrapper)
+            .expect("wrapper schema")
+            .positional_slots
+            .is_empty()
+    );
 }
 
 #[test]
@@ -1277,26 +1336,34 @@ fn named_only_slots_discard_loose_whitespace_around_insert_contributions() {
     // insert and routes only the insert body, without needing a default slot.
     let insert_body_node = template_root_node_id(insert_template, &store);
     assert_eq!(
-        routed.contributions.nodes_for_slot(&SlotKey::Named(name)),
+        routed.nodes_for_slot(&SlotKey::Named(name)),
         &[insert_body_node]
     );
     assert!(
-        routed
-            .contributions
-            .nodes_for_slot(&SlotKey::Default)
-            .is_empty(),
+        routed.nodes_for_slot(&SlotKey::Default).is_empty(),
         "the discarded whitespace must not create a default bucket"
     );
     assert!(
-        routed
-            .contributions
-            .nodes_for_slot(&SlotKey::Positional(0))
-            .is_empty(),
+        routed.nodes_for_slot(&SlotKey::Positional(0)).is_empty(),
         "the discarded whitespace must not create a positional bucket"
     );
-    assert!(!routed.schema.has_default_slot);
-    assert_eq!(routed.schema.named_slots, [name].into_iter().collect());
-    assert!(routed.schema.positional_slots.is_empty());
+    assert!(
+        !collect_tir_slot_schema(&store, wrapper)
+            .expect("wrapper schema")
+            .has_default_slot
+    );
+    assert_eq!(
+        collect_tir_slot_schema(&store, wrapper)
+            .expect("wrapper schema")
+            .named_slots,
+        [name].into_iter().collect()
+    );
+    assert!(
+        collect_tir_slot_schema(&store, wrapper)
+            .expect("wrapper schema")
+            .positional_slots
+            .is_empty()
+    );
 }
 
 #[test]
@@ -1334,17 +1401,26 @@ fn empty_fill_template_with_slots_wrapper_routes_to_empty_contributions() {
 
     // An empty fill against a default-slot wrapper discovers the slot schema
     // and routes nothing into every bucket.
-    assert!(routed.schema.has_default_slot);
-    assert!(routed.schema.named_slots.is_empty());
-    assert!(routed.schema.positional_slots.is_empty());
     assert!(
-        routed
-            .contributions
-            .nodes_for_slot(&SlotKey::Default)
+        collect_tir_slot_schema(&store, wrapper)
+            .expect("wrapper schema")
+            .has_default_slot
+    );
+    assert!(
+        collect_tir_slot_schema(&store, wrapper)
+            .expect("wrapper schema")
+            .named_slots
             .is_empty()
     );
-    assert!(routed.contributions.named_nodes.is_empty());
-    assert!(routed.contributions.positional_nodes.is_empty());
+    assert!(
+        collect_tir_slot_schema(&store, wrapper)
+            .expect("wrapper schema")
+            .positional_slots
+            .is_empty()
+    );
+    assert!(routed.nodes_for_slot(&SlotKey::Default).is_empty());
+    assert!(routed.named_nodes.is_empty());
+    assert!(routed.positional_nodes.is_empty());
 }
 
 #[test]
@@ -1378,20 +1454,34 @@ fn mixed_explicit_inserts_and_loose_content_are_bucketed() {
 
     let insert_body_node = template_root_node_id(insert_template, &store);
     assert_eq!(
-        routed.contributions.nodes_for_slot(&SlotKey::Named(name)),
+        routed.nodes_for_slot(&SlotKey::Named(name)),
         &[insert_body_node]
     );
     assert_eq!(
-        routed.contributions.nodes_for_slot(&SlotKey::Default),
+        routed.nodes_for_slot(&SlotKey::Default),
         &[loose_text, loose_child]
     );
     assert!(
-        routed.contributions.positional_nodes.is_empty(),
+        routed.positional_nodes.is_empty(),
         "a named+default wrapper has no positional buckets"
     );
-    assert!(routed.schema.has_default_slot);
-    assert_eq!(routed.schema.named_slots, [name].into_iter().collect());
-    assert!(routed.schema.positional_slots.is_empty());
+    assert!(
+        collect_tir_slot_schema(&store, wrapper)
+            .expect("wrapper schema")
+            .has_default_slot
+    );
+    assert_eq!(
+        collect_tir_slot_schema(&store, wrapper)
+            .expect("wrapper schema")
+            .named_slots,
+        [name].into_iter().collect()
+    );
+    assert!(
+        collect_tir_slot_schema(&store, wrapper)
+            .expect("wrapper schema")
+            .positional_slots
+            .is_empty()
+    );
 }
 
 // -------------------------
@@ -1422,17 +1512,10 @@ fn expand_routes_each_slot_key_branch_to_its_contribution() {
     let named_node = template_root_node_id(named_contribution, &store);
     let positional_node = template_root_node_id(positional_contribution, &store);
 
-    let routed = RoutedTirSlotContributions {
-        schema: TirSlotSchema {
-            has_default_slot: true,
-            named_slots: [name].into_iter().collect(),
-            positional_slots: [0].into_iter().collect(),
-        },
-        contributions: TirSlotContributions {
-            default_nodes: vec![default_node],
-            named_nodes: [(name, vec![named_node])].into_iter().collect(),
-            positional_nodes: [(0, vec![positional_node])].into_iter().collect(),
-        },
+    let routed = TirSlotContributions {
+        default_nodes: vec![default_node],
+        named_nodes: [(name, vec![named_node])].into_iter().collect(),
+        positional_nodes: [(0, vec![positional_node])].into_iter().collect(),
     };
 
     let expanded_root = expand_tir_slot_placeholders(&mut store, wrapper, &routed, &string_table)
@@ -1454,13 +1537,7 @@ fn missing_slot_renders_as_empty() {
 
     let wrapper = build_wrapper_with_slot_sequence(&mut store, vec![SlotKey::Named(name)]);
 
-    let routed = RoutedTirSlotContributions {
-        schema: TirSlotSchema {
-            named_slots: [name].into_iter().collect(),
-            ..TirSlotSchema::default()
-        },
-        contributions: TirSlotContributions::default(),
-    };
+    let routed = TirSlotContributions::default();
 
     let expanded_root = expand_tir_slot_placeholders(&mut store, wrapper, &routed, &string_table)
         .expect("expansion should succeed");
@@ -1507,15 +1584,9 @@ fn expansion_missing_wrapper_set_produces_internal_error() {
     };
     let child_template = build_single_text_template(&mut store, &mut string_table, "child");
     let child_node = build_child_template_node_for_template(&mut store, child_template);
-    let routed = RoutedTirSlotContributions {
-        schema: TirSlotSchema {
-            has_default_slot: true,
-            ..TirSlotSchema::default()
-        },
-        contributions: TirSlotContributions {
-            default_nodes: vec![child_node],
-            ..TirSlotContributions::default()
-        },
+    let routed = TirSlotContributions {
+        default_nodes: vec![child_node],
+        ..TirSlotContributions::default()
     };
 
     let error = expand_tir_slot_placeholders(&mut store, wrapper, &routed, &string_table)
@@ -1551,7 +1622,7 @@ fn expansion_missing_conditional_wrapper_set_produces_internal_error() {
         let mut builder = TemplateIrBuilder::new(&mut store);
         let body = builder.push_text_node(
             string_table.intern("branch"),
-            "branch".len() as u32,
+            "branch".len(),
             TemplateSegmentOrigin::Body,
             empty_location(),
         );
@@ -1559,18 +1630,13 @@ fn expansion_missing_conditional_wrapper_set_produces_internal_error() {
             TemplateBranchSelector::Bool(bool_expression(true)),
             body,
             empty_location(),
+            builder.store.next_expression_site_id(),
         );
         builder.push_branch_chain_node(vec![branch], None, empty_location())
     };
-    let routed = RoutedTirSlotContributions {
-        schema: TirSlotSchema {
-            has_default_slot: true,
-            ..TirSlotSchema::default()
-        },
-        contributions: TirSlotContributions {
-            default_nodes: vec![branch_node],
-            ..TirSlotContributions::default()
-        },
+    let routed = TirSlotContributions {
+        default_nodes: vec![branch_node],
+        ..TirSlotContributions::default()
     };
 
     let error = expand_tir_slot_placeholders(&mut store, wrapper, &routed, &string_table)
@@ -1589,15 +1655,9 @@ fn repeated_slot_replays_same_contributions() {
     let contribution = build_single_text_template(&mut store, &mut string_table, "shared");
     let contribution_node_id = template_root_node_id(contribution, &store);
 
-    let routed = RoutedTirSlotContributions {
-        schema: TirSlotSchema {
-            has_default_slot: true,
-            ..TirSlotSchema::default()
-        },
-        contributions: TirSlotContributions {
-            default_nodes: vec![contribution_node_id],
-            ..TirSlotContributions::default()
-        },
+    let routed = TirSlotContributions {
+        default_nodes: vec![contribution_node_id],
+        ..TirSlotContributions::default()
     };
 
     let expanded_root = expand_tir_slot_placeholders(&mut store, wrapper, &routed, &string_table)
@@ -1648,15 +1708,9 @@ fn nested_child_template_clone_vs_reuse_by_slot_presence() {
     let contribution = build_single_text_template(&mut store, &mut string_table, "inner text");
     let contribution_node_id = template_root_node_id(contribution, &store);
 
-    let routed = RoutedTirSlotContributions {
-        schema: TirSlotSchema {
-            named_slots: [name].into_iter().collect(),
-            ..TirSlotSchema::default()
-        },
-        contributions: TirSlotContributions {
-            named_nodes: [(name, vec![contribution_node_id])].into_iter().collect(),
-            ..TirSlotContributions::default()
-        },
+    let routed = TirSlotContributions {
+        named_nodes: [(name, vec![contribution_node_id])].into_iter().collect(),
+        ..TirSlotContributions::default()
     };
 
     let expanded_root =
@@ -1719,7 +1773,6 @@ fn nested_child_template_clone_vs_reuse_by_slot_presence() {
 }
 
 /// Nested slot expansion must keep the child's complete view identity.
-#[ignore = "Phase 0 reproduced: expansion resets child phase/context and drops wrapper set and slot plan; un-ignore in Phase 2A"]
 #[test]
 fn nested_child_slot_expansion_preserves_phase_context_wrapper_set_and_slot_plan() {
     let mut string_table = StringTable::new();
@@ -1736,17 +1789,21 @@ fn nested_child_slot_expansion_preserves_phase_context_wrapper_set_and_slot_plan
     });
     {
         let child_template = store
-            .templates
-            .get_mut(slot_bearing_child.index())
+            .template_mut(slot_bearing_child)
             .expect("slot-bearing child should exist");
         child_template.conditional_child_wrapper_set = Some(wrapper_set_id);
         child_template.runtime_slot_plan = Some(slot_plan_id);
     }
 
-    let expression_overlay = store.allocate_expression_overlay(TirExpressionOverlay::default());
-    let slot_overlay = store.allocate_slot_resolution_overlay(TirSlotResolutionOverlay::default());
-    let wrapper_overlay =
-        store.allocate_wrapper_context_overlay(TirWrapperContextOverlay::default());
+    let expression_overlay = store
+        .allocate_expression_overlay(TirExpressionOverlay::default())
+        .expect("test overlay allocation");
+    let slot_overlay = store
+        .allocate_slot_resolution_overlay(TirSlotResolutionOverlay::default())
+        .expect("test overlay allocation");
+    let wrapper_overlay = store
+        .allocate_wrapper_context_overlay(TirWrapperContextOverlay::default())
+        .expect("test overlay allocation");
     let source_context = TemplateViewContext {
         expression_overlay: Some(expression_overlay),
         slot_resolution: Some(slot_overlay),
@@ -1772,15 +1829,9 @@ fn nested_child_slot_expansion_preserves_phase_context_wrapper_set_and_slot_plan
 
     let contribution = build_single_text_template(&mut store, &mut string_table, "inner text");
     let contribution_node_id = template_root_node_id(contribution, &store);
-    let routed = RoutedTirSlotContributions {
-        schema: TirSlotSchema {
-            named_slots: [name].into_iter().collect(),
-            ..TirSlotSchema::default()
-        },
-        contributions: TirSlotContributions {
-            named_nodes: [(name, vec![contribution_node_id])].into_iter().collect(),
-            ..TirSlotContributions::default()
-        },
+    let routed = TirSlotContributions {
+        named_nodes: [(name, vec![contribution_node_id])].into_iter().collect(),
+        ..TirSlotContributions::default()
     };
 
     let expanded_root =
@@ -1822,6 +1873,145 @@ fn nested_child_slot_expansion_preserves_phase_context_wrapper_set_and_slot_plan
 }
 
 #[test]
+fn wrapper_application_preserves_only_authorised_structural_context() {
+    let mut string_table = StringTable::new();
+    let mut store = TemplateIrStore::new();
+    let wrapper = build_wrapper_with_slot_sequence(&mut store, vec![SlotKey::Default]);
+    let child = build_single_text_template(&mut store, &mut string_table, "child");
+    let child_node = build_child_template_node_for_template(&mut store, child);
+    let expression_overlay = store
+        .allocate_expression_overlay(TirExpressionOverlay::default())
+        .expect("expression overlay");
+    let slot_overlay = store
+        .allocate_slot_resolution_overlay(TirSlotResolutionOverlay::default())
+        .expect("slot overlay");
+    let wrapper_overlay = store
+        .allocate_wrapper_context_overlay(TirWrapperContextOverlay::default())
+        .expect("wrapper overlay");
+    let context = TemplateViewContext {
+        expression_overlay: Some(expression_overlay),
+        slot_resolution: Some(slot_overlay),
+        wrapper_context: Some(wrapper_overlay),
+    };
+
+    let parsed_reference =
+        TemplateWrapperReference::new(wrapper, TemplateTirPhase::Parsed, context);
+    let parsed_result = wrap_tir_node_in_wrapper_references(
+        &mut store,
+        child_node,
+        &[parsed_reference],
+        &string_table,
+    )
+    .expect("parsed wrapper should compose");
+    let parsed_child_reference = expect_child_template_reference(parsed_result, &store);
+    assert_eq!(parsed_child_reference.phase, TemplateTirPhase::Composed);
+    assert_eq!(parsed_child_reference.context.expression_overlay, None);
+    assert_eq!(parsed_child_reference.context.slot_resolution, None);
+    assert_eq!(parsed_child_reference.context.wrapper_context, None);
+    let parsed_view = TirView::new(
+        &store,
+        parsed_child_reference.root,
+        parsed_child_reference.phase,
+        parsed_child_reference.context,
+    )
+    .expect("parsed application should create an exact view");
+    assert!(
+        parsed_view
+            .slot_resolution_overlay()
+            .expect("slot overlay lookup")
+            .is_none()
+    );
+    assert!(
+        parsed_view
+            .wrapper_context_overlay()
+            .expect("wrapper overlay lookup")
+            .is_none()
+    );
+
+    let composed_reference = TemplateWrapperReference::new(
+        wrapper,
+        TemplateTirPhase::Composed,
+        TemplateViewContext {
+            expression_overlay: Some(expression_overlay),
+            slot_resolution: Some(slot_overlay),
+            wrapper_context: Some(wrapper_overlay),
+        },
+    );
+    let composed_result = wrap_tir_node_in_wrapper_references(
+        &mut store,
+        child_node,
+        &[composed_reference],
+        &string_table,
+    )
+    .expect("composed wrapper should compose");
+    let composed_child_reference = expect_child_template_reference(composed_result, &store);
+    assert_eq!(composed_child_reference.phase, TemplateTirPhase::Composed);
+    assert_eq!(composed_child_reference.context.expression_overlay, None);
+    assert_eq!(composed_child_reference.context.slot_resolution, None);
+    assert_eq!(
+        composed_child_reference.context.wrapper_context,
+        Some(wrapper_overlay)
+    );
+}
+
+#[test]
+fn slotless_wrapper_application_preserves_complete_reference_identity() {
+    let mut string_table = StringTable::new();
+    let mut store = TemplateIrStore::new();
+    let wrapper = build_single_text_template(&mut store, &mut string_table, "prefix");
+    let child = build_single_text_template(&mut store, &mut string_table, "child");
+    let child_node = build_child_template_node_for_template(&mut store, child);
+    let expression_overlay = store
+        .allocate_expression_overlay(TirExpressionOverlay::default())
+        .expect("expression overlay");
+    let slot_overlay = store
+        .allocate_slot_resolution_overlay(TirSlotResolutionOverlay::default())
+        .expect("slot overlay");
+    let wrapper_overlay = store
+        .allocate_wrapper_context_overlay(TirWrapperContextOverlay::default())
+        .expect("wrapper overlay");
+    let reference = TemplateWrapperReference::new(
+        wrapper,
+        TemplateTirPhase::Parsed,
+        TemplateViewContext {
+            expression_overlay: Some(expression_overlay),
+            slot_resolution: Some(slot_overlay),
+            wrapper_context: Some(wrapper_overlay),
+        },
+    );
+
+    let wrapped =
+        wrap_tir_node_in_wrapper_references(&mut store, child_node, &[reference], &string_table)
+            .expect("slotless wrapper should apply");
+    let derived_reference = expect_child_template_reference(wrapped, &store);
+    assert_ne!(derived_reference.root, wrapper);
+    assert_eq!(derived_reference.phase, reference.phase);
+    assert_eq!(derived_reference.context, reference.context);
+    let view = TirView::new(
+        &store,
+        derived_reference.root,
+        derived_reference.phase,
+        derived_reference.context,
+    )
+    .expect("slotless application should create an exact view");
+    assert!(
+        view.expression_overlay()
+            .expect("expression overlay lookup")
+            .is_some()
+    );
+    assert!(
+        view.slot_resolution_overlay()
+            .expect("slot overlay lookup")
+            .is_some()
+    );
+    assert!(
+        view.wrapper_context_overlay()
+            .expect("wrapper overlay lookup")
+            .is_some()
+    );
+}
+
+#[test]
 fn branch_chain_with_slots_in_body_is_expanded() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
@@ -1837,6 +2027,7 @@ fn branch_chain_with_slots_in_body_is_expanded() {
         TemplateBranchSelector::Bool(bool_expression(true)),
         body_slot,
         empty_location(),
+        store.next_expression_site_id(),
     );
 
     let mut builder = TemplateIrBuilder::new(&mut store);
@@ -1851,15 +2042,9 @@ fn branch_chain_with_slots_in_body_is_expanded() {
 
     let contribution = build_single_text_template(&mut store, &mut string_table, "branch body");
 
-    let routed = RoutedTirSlotContributions {
-        schema: TirSlotSchema {
-            has_default_slot: true,
-            ..TirSlotSchema::default()
-        },
-        contributions: TirSlotContributions {
-            default_nodes: vec![template_root_node_id(contribution, &store)],
-            ..TirSlotContributions::default()
-        },
+    let routed = TirSlotContributions {
+        default_nodes: vec![template_root_node_id(contribution, &store)],
+        ..TirSlotContributions::default()
     };
 
     let expanded_root = expand_tir_slot_placeholders(&mut store, wrapper, &routed, &string_table)
@@ -1918,15 +2103,9 @@ fn loop_with_slots_in_body_is_expanded() {
 
     let contribution = build_single_text_template(&mut store, &mut string_table, "iteration");
 
-    let routed = RoutedTirSlotContributions {
-        schema: TirSlotSchema {
-            has_default_slot: true,
-            ..TirSlotSchema::default()
-        },
-        contributions: TirSlotContributions {
-            default_nodes: vec![template_root_node_id(contribution, &store)],
-            ..TirSlotContributions::default()
-        },
+    let routed = TirSlotContributions {
+        default_nodes: vec![template_root_node_id(contribution, &store)],
+        ..TirSlotContributions::default()
     };
 
     let expanded_root = expand_tir_slot_placeholders(&mut store, wrapper, &routed, &string_table)
@@ -1968,10 +2147,7 @@ fn no_slots_in_wrapper_returns_original_root() {
         .expect("wrapper should exist")
         .root;
 
-    let routed = RoutedTirSlotContributions {
-        schema: TirSlotSchema::default(),
-        contributions: TirSlotContributions::default(),
-    };
+    let routed = TirSlotContributions::default();
 
     let expanded_root = expand_tir_slot_placeholders(&mut store, wrapper, &routed, &string_table)
         .expect("expansion should succeed");
@@ -1988,7 +2164,7 @@ fn expand_preserves_non_slot_nodes() {
     let mut store = TemplateIrStore::new();
 
     let text_id = string_table.intern("literal");
-    let text_len = u32::try_from(string_table.resolve(text_id).len()).unwrap_or(u32::MAX);
+    let text_len = string_table.resolve(text_id).len();
 
     let text_node = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Text {
@@ -2073,15 +2249,9 @@ fn expand_preserves_non_slot_nodes() {
     let contribution = build_single_text_template(&mut store, &mut string_table, "only slot");
     let contribution_node = template_root_node_id(contribution, &store);
 
-    let routed = RoutedTirSlotContributions {
-        schema: TirSlotSchema {
-            has_default_slot: true,
-            ..TirSlotSchema::default()
-        },
-        contributions: TirSlotContributions {
-            default_nodes: vec![contribution_node],
-            ..TirSlotContributions::default()
-        },
+    let routed = TirSlotContributions {
+        default_nodes: vec![contribution_node],
+        ..TirSlotContributions::default()
     };
 
     let expanded_root = expand_tir_slot_placeholders(&mut store, wrapper, &routed, &string_table)
@@ -2187,6 +2357,78 @@ fn single_receiver_routes_head_and_body_fill_in_authored_order() {
         Some("body fill".to_owned()),
         "body-origin fill is routed through the body-children loop into the deepest active receiver"
     );
+}
+
+#[cfg(feature = "benchmark_counters")]
+#[test]
+fn head_chain_receiver_collects_one_slot_layout() {
+    use crate::compiler_frontend::instrumentation::{
+        AstCounter, reset_ast_counters, test_read_ast_counter,
+    };
+
+    let mut string_table = StringTable::new();
+    let mut store = TemplateIrStore::new();
+    let wrapper = build_wrapper_with_slot_sequence(&mut store, vec![SlotKey::Default]);
+    let wrapper_node = build_child_template_node_for_template(&mut store, wrapper);
+    let fill = build_text_node(
+        &mut store,
+        &mut string_table,
+        "fill",
+        TemplateSegmentOrigin::Body,
+    );
+    let template_id = build_template_with_children(&mut store, vec![wrapper_node, fill]);
+
+    reset_ast_counters();
+    compose_tir_head_chain(&mut store, template_id, &string_table, false)
+        .expect("head-chain composition should succeed");
+
+    assert_eq!(
+        test_read_ast_counter(AstCounter::TirSlotSchemaWalks),
+        1,
+        "one receiver should collect its slot layout once"
+    );
+}
+
+#[test]
+fn composed_wrapper_published_summary_matches_the_expanded_tree() {
+    let mut string_table = StringTable::new();
+    let mut store = TemplateIrStore::new();
+
+    let wrapper = build_text_slot_text_wrapper(&mut store, &mut string_table, SlotKey::Default);
+    let wrapper_node = build_child_template_node_for_template(&mut store, wrapper);
+    let fill = build_text_node(
+        &mut store,
+        &mut string_table,
+        "fill body",
+        TemplateSegmentOrigin::Body,
+    );
+    let template_id = build_template_with_children(&mut store, vec![wrapper_node, fill]);
+
+    let composed_root = compose_tir_head_chain(&mut store, template_id, &string_table, false)
+        .expect("composition should succeed");
+    let composed_children = root_child_node_ids_for_node(composed_root, &store);
+    let resolved_wrapper_id = expect_child_template_id(composed_children[0], &store);
+    let published = store
+        .get_template(resolved_wrapper_id)
+        .expect("composed wrapper exists");
+    let recomputed =
+        summarize_existing_root(&store, published.root).expect("composed wrapper root is finite");
+
+    assert_eq!(
+        published.summary.text_byte_count,
+        recomputed.text_byte_count
+    );
+    assert_eq!(
+        published.summary.text_node_count,
+        recomputed.text_node_count
+    );
+    assert_eq!(published.summary.max_depth, recomputed.max_depth);
+    assert_eq!(published.summary.slot_count, 0);
+    assert!(
+        published.summary.text_byte_count >= "fill body".len(),
+        "composed wrapper summary must include contributed fill text"
+    );
+    assert!(published.summary.max_depth >= 1);
 }
 
 #[test]
@@ -2484,10 +2726,17 @@ fn compose_preserves_non_receiver_head_child_templates() {
 
 /// Asserts that a node is a `ChildTemplate` reference and returns the template ID.
 fn expect_child_template_id(node_id: TemplateIrNodeId, store: &TemplateIrStore) -> TemplateIrId {
+    expect_child_template_reference(node_id, store).root
+}
+
+fn expect_child_template_reference(
+    node_id: TemplateIrNodeId,
+    store: &TemplateIrStore,
+) -> TemplateTirChildReference {
     let node = store.get_node(node_id).expect("node should exist");
 
     match &node.kind {
-        TemplateIrNodeKind::ChildTemplate { reference, .. } => reference.root,
+        TemplateIrNodeKind::ChildTemplate { reference, .. } => *reference,
         other => panic!("expected ChildTemplate node, found {other:?}"),
     }
 }
@@ -2536,13 +2785,11 @@ fn root_child_kinds_for_node(
 // -------------------------
 //  Per-Child Wrapper Composition
 // -------------------------
-// These tests exercise `wrap_tir_node_in_wrappers`, the real per-child wrapper
-// path shared with production body-root application. They pin the three
-// distinct wrapper-expansion shapes: slot-bearing wrapper expansion, slot-less
-// wrapper prepend, and multi-wrapper nesting/order. Direct-child filtering
-// (slot-bearing receivers, control-flow children and `$fresh` suppression) is
-// owned by `body_root_wrapper_tests.rs` through
-// `apply_inherited_child_wrappers_to_body_root`.
+// These tests exercise `wrap_tir_node_in_wrappers`, the owned wrapper-tree
+// builder used by slot expansion. They pin the three distinct wrapper-expansion
+// shapes: slot-bearing wrapper expansion, slot-less wrapper prepend, and
+// multi-wrapper nesting/order. Direct-child inherited wrappers are owned by
+// wrapper-context overlays.
 
 #[test]
 fn wrap_direct_child_in_single_wrapper_with_default_slot() {
@@ -2573,6 +2820,46 @@ fn wrap_direct_child_in_single_wrapper_with_default_slot() {
         template_root_text(resolved_child_id, &store, &string_table),
         Some("child".to_owned())
     );
+}
+
+#[test]
+fn shared_child_dag_replays_one_application_at_each_structural_occurrence() {
+    let mut string_table = StringTable::new();
+    let mut store = TemplateIrStore::new();
+
+    let slot_wrapper = build_wrapper_with_slot_sequence(&mut store, vec![SlotKey::Default]);
+    let first_slot_wrapper_node = build_child_template_node_for_template(&mut store, slot_wrapper);
+    let second_slot_wrapper_node = build_child_template_node_for_template(&mut store, slot_wrapper);
+    let shared_child_wrapper = build_template_with_children(
+        &mut store,
+        vec![first_slot_wrapper_node, second_slot_wrapper_node],
+    );
+    let contribution = build_single_text_template(&mut store, &mut string_table, "shared");
+    let contribution_node = build_child_template_node_for_template(&mut store, contribution);
+
+    let wrapped = wrap_tir_node_in_wrapper_references(
+        &mut store,
+        contribution_node,
+        &[TemplateWrapperReference::new(
+            shared_child_wrapper,
+            TemplateTirPhase::Parsed,
+            TemplateViewContext::default(),
+        )],
+        &string_table,
+    )
+    .expect("shared child DAG application should succeed");
+    let applied_reference = expect_child_template_reference(wrapped, &store);
+    assert_eq!(applied_reference.context.slot_resolution, None);
+    let applied_children = root_child_node_ids(applied_reference.root, &store);
+    assert_eq!(applied_children.len(), 2);
+    for child_id in applied_children {
+        let child_reference = expect_child_template_reference(child_id, &store);
+        assert_eq!(
+            root_child_node_ids(child_reference.root, &store),
+            vec![contribution_node],
+            "one routed contribution must replay at every shared structural occurrence"
+        );
+    }
 }
 
 #[test]
@@ -2672,484 +2959,24 @@ fn wrap_direct_child_in_multiple_wrappers() {
     );
 }
 
-fn materialize_default_slot_overlay(
-    store: &mut TemplateIrStore,
-    string_table: &mut StringTable,
-    slot_count: usize,
-) -> (
-    TemplateIrId,
-    TemplateIrNodeId,
-    super::super::overlays::TirSlotResolutionOverlayId,
-) {
-    let wrapper = build_wrapper_with_slot_sequence(store, vec![SlotKey::Default; slot_count]);
-    let contribution = build_single_text_template(store, string_table, "filled");
-    let contribution_node = template_root_node_id(contribution, store);
-    let fill = build_fill_template(store, vec![contribution_node]);
-    let routed = route_tir_slot_contributions(store, wrapper, fill, string_table)
-        .expect("default slot contribution should route");
-    let wrapper_reference = TemplateTirChildReference::new(
-        wrapper,
-        TemplateTirPhase::Composed,
-        TemplateViewContext::default(),
-    );
-    let overlay_id = materialize_tir_slot_resolution_overlay(store, wrapper_reference, &routed)
-        .expect("slot resolution overlay should materialize");
-    (wrapper, contribution_node, overlay_id)
-}
-
-fn slot_resolution_overlay(
-    store: &TemplateIrStore,
-    overlay_id: super::super::overlays::TirSlotResolutionOverlayId,
-) -> &TirSlotResolutionOverlay {
-    store
-        .slot_resolution_overlay(overlay_id)
-        .expect("slot resolution overlay should exist")
-}
-
 #[test]
-fn slot_resolution_overlay_uses_direct_template_ids() {
-    let mut store = TemplateIrStore::new();
+fn head_chain_returns_the_original_root_when_no_receiver_exists() {
     let mut string_table = StringTable::new();
-    let (wrapper, contribution_node, overlay_id) =
-        materialize_default_slot_overlay(&mut store, &mut string_table, 1);
-    let overlay = slot_resolution_overlay(&store, overlay_id);
-
-    assert_eq!(overlay.resolutions.len(), 1);
-    let (occurrence_id, resolution) = &overlay.resolutions[0];
-    assert_eq!(*occurrence_id, SlotOccurrenceId::new(0));
-    assert_eq!(resolution.key, SlotKey::Default);
-    let TirSlotResolutionKind::Resolved { sources } = &resolution.kind else {
-        panic!("default slot should resolve to one source template");
-    };
-    assert_eq!(sources.len(), 1);
-    let source = sources[0];
-    assert_eq!(
-        root_child_node_ids(source, &store),
-        vec![contribution_node],
-        "the store-owned source template should contain the routed contribution node"
-    );
-    assert!(store.get_template(wrapper).is_some());
-}
-
-#[test]
-fn missing_slot_resolution_is_explicit() {
     let mut store = TemplateIrStore::new();
-    let mut builder = TemplateIrBuilder::new(&mut store);
-    let slot = builder.push_slot_node(SlotKey::Default, empty_location());
-    let wrapper = builder.finish_template(
-        slot,
-        Style::default(),
-        TemplateType::String,
-        slot_summary(1),
-        empty_location(),
-    );
-    let routed = RoutedTirSlotContributions {
-        schema: TirSlotSchema::default(),
-        contributions: TirSlotContributions::default(),
-    };
-    let overlay_id = materialize_tir_slot_resolution_overlay(
-        &mut store,
-        TemplateTirChildReference::new(
-            wrapper,
-            TemplateTirPhase::Composed,
-            TemplateViewContext::default(),
-        ),
-        &routed,
-    )
-    .expect("missing slot resolution should materialize");
-    let overlay = slot_resolution_overlay(&store, overlay_id);
-    assert_eq!(overlay.resolutions.len(), 1);
-    let (occurrence_id, resolution) = &overlay.resolutions[0];
-    assert_eq!(*occurrence_id, SlotOccurrenceId::new(0));
-    assert_eq!(resolution.key, SlotKey::Default);
-    assert!(matches!(resolution.kind, TirSlotResolutionKind::Missing));
-    assert!(resolution.sources().is_empty());
-}
-
-// -------------------------
-//  Slot Resolution Overlay Materialization Coverage
-// -------------------------
-//
-// The default and missing cases are pinned above. These tests cover named,
-// positional, and repeated overlay materialization, plus the `TirView`
-// slot-resolution lookup boundary for the store-owned slot-resolution
-// overlay path.
-
-/// Materializes a slot-resolution overlay for a wrapper with the given slot
-/// keys and fill contribution nodes, returning the wrapper and overlay IDs.
-fn materialize_slot_resolution_overlay(
-    store: &mut TemplateIrStore,
-    string_table: &mut StringTable,
-    slot_keys: Vec<SlotKey>,
-    fill_nodes: Vec<TemplateIrNodeId>,
-) -> (TemplateIrId, TirSlotResolutionOverlayId) {
-    let wrapper = build_wrapper_with_slot_sequence(store, slot_keys);
-    let fill = build_fill_template(store, fill_nodes);
-    let routed = route_tir_slot_contributions(store, wrapper, fill, string_table)
-        .expect("slot contribution routing should succeed");
-    let wrapper_reference = TemplateTirChildReference::new(
-        wrapper,
-        TemplateTirPhase::Composed,
-        TemplateViewContext::default(),
-    );
-    let overlay_id = materialize_tir_slot_resolution_overlay(store, wrapper_reference, &routed)
-        .expect("slot resolution overlay should materialize");
-    (wrapper, overlay_id)
-}
-
-#[test]
-fn overlay_materializes_named_slot_resolution() {
-    let mut string_table = StringTable::new();
-    let title = string_table.intern("title");
-    let mut store = TemplateIrStore::new();
-
-    let insert_template =
-        build_slot_insert_template(&mut store, SlotKey::Named(title), &mut string_table);
-    let insert_content_node = template_root_node_id(insert_template, &store);
-    let mut builder = TemplateIrBuilder::new(&mut store);
-    let insert_node = builder.push_insert_contribution_node(insert_template, empty_location());
-
-    let (_, overlay_id) = materialize_slot_resolution_overlay(
+    let body_text = build_text_node(
         &mut store,
         &mut string_table,
-        vec![SlotKey::Named(title)],
-        vec![insert_node],
+        "body",
+        TemplateSegmentOrigin::Body,
     );
-    let overlay = slot_resolution_overlay(&store, overlay_id);
+    let template_id = build_template_with_children(&mut store, vec![body_text]);
+    let original_root = store.get_template(template_id).expect("template").root;
 
-    assert_eq!(overlay.resolutions.len(), 1, "one named slot occurrence");
-    let (occurrence_id, resolution) = &overlay.resolutions[0];
-    assert_eq!(*occurrence_id, SlotOccurrenceId::new(0));
-    assert_eq!(resolution.key, SlotKey::Named(title));
-    assert!(
-        matches!(resolution.kind, TirSlotResolutionKind::Resolved { .. }),
-        "named slot should resolve to a source list"
-    );
-    assert_eq!(
-        resolution.sources().len(),
-        1,
-        "named slot should have one source"
-    );
-    assert_eq!(
-        root_child_node_ids(resolution.sources()[0], &store),
-        vec![insert_content_node],
-        "the store-owned source template should contain the insert helper's body content"
-    );
-}
-
-#[test]
-fn overlay_materializes_positional_slot_resolution() {
-    let mut string_table = StringTable::new();
-    let mut store = TemplateIrStore::new();
-
-    let contribution = build_single_text_template(&mut store, &mut string_table, "first");
-    let contribution_node = template_root_node_id(contribution, &store);
-
-    let (_, overlay_id) = materialize_slot_resolution_overlay(
-        &mut store,
-        &mut string_table,
-        vec![SlotKey::Positional(0)],
-        vec![contribution_node],
-    );
-    let overlay = slot_resolution_overlay(&store, overlay_id);
+    let composed_root = compose_tir_head_chain(&mut store, template_id, &string_table, false)
+        .expect("head-chain composition should succeed");
 
     assert_eq!(
-        overlay.resolutions.len(),
-        1,
-        "one positional slot occurrence"
-    );
-    let (occurrence_id, resolution) = &overlay.resolutions[0];
-    assert_eq!(*occurrence_id, SlotOccurrenceId::new(0));
-    assert_eq!(resolution.key, SlotKey::Positional(0));
-    assert!(
-        matches!(resolution.kind, TirSlotResolutionKind::Resolved { .. }),
-        "positional slot should resolve to a source list"
-    );
-    assert_eq!(
-        resolution.sources().len(),
-        1,
-        "positional slot should have one source"
-    );
-    assert_eq!(
-        root_child_node_ids(resolution.sources()[0], &store),
-        vec![contribution_node],
-        "the store-owned source template should contain the routed contribution node"
-    );
-}
-
-#[test]
-fn overlay_materializes_repeated_slot_sharing_source_list() {
-    let mut string_table = StringTable::new();
-    let title = string_table.intern("title");
-    let mut store = TemplateIrStore::new();
-
-    // Two occurrences of the same named slot in one wrapper. Named/positional
-    // slots are idempotent in the schema, so repeated occurrences are valid;
-    // only a second default slot is rejected.
-    let insert_template =
-        build_slot_insert_template(&mut store, SlotKey::Named(title), &mut string_table);
-    let insert_content_node = template_root_node_id(insert_template, &store);
-    let mut builder = TemplateIrBuilder::new(&mut store);
-    let insert_node = builder.push_insert_contribution_node(insert_template, empty_location());
-
-    let (_, overlay_id) = materialize_slot_resolution_overlay(
-        &mut store,
-        &mut string_table,
-        vec![SlotKey::Named(title), SlotKey::Named(title)],
-        vec![insert_node],
-    );
-    let overlay = slot_resolution_overlay(&store, overlay_id);
-    assert_eq!(overlay.resolutions.len(), 2, "two named slot occurrences");
-
-    let (first_occurrence, first_resolution) = &overlay.resolutions[0];
-    let (second_occurrence, second_resolution) = &overlay.resolutions[1];
-    assert_eq!(*first_occurrence, SlotOccurrenceId::new(0));
-    assert_eq!(*second_occurrence, SlotOccurrenceId::new(1));
-    assert_eq!(
-        first_resolution.key,
-        SlotKey::Named(title),
-        "first occurrence should carry the named slot key"
-    );
-    assert_eq!(
-        second_resolution.key,
-        SlotKey::Named(title),
-        "second occurrence should carry the same named slot key"
-    );
-    assert!(
-        matches!(
-            first_resolution.kind,
-            TirSlotResolutionKind::Resolved { .. }
-        ),
-        "first occurrence should resolve to a source list"
-    );
-    assert!(
-        matches!(
-            second_resolution.kind,
-            TirSlotResolutionKind::Resolved { .. }
-        ),
-        "second occurrence should resolve to a source list"
-    );
-
-    assert_eq!(first_resolution.sources().len(), 1);
-    assert_eq!(second_resolution.sources().len(), 1);
-
-    let first_source = first_resolution.sources()[0];
-    let second_source = second_resolution.sources()[0];
-    assert_eq!(
-        first_source, second_source,
-        "repeated slot occurrences should share the same replayable source template"
-    );
-    assert_eq!(
-        root_child_node_ids(first_source, &store),
-        vec![insert_content_node],
-        "the shared source template should contain the insert helper's body content"
-    );
-}
-
-#[test]
-fn attach_view_context_carries_slot_resolution() {
-    let mut string_table = StringTable::new();
-    let mut store = TemplateIrStore::new();
-
-    let (wrapper, contribution_node, overlay_id) =
-        materialize_default_slot_overlay(&mut store, &mut string_table, 1);
-    let context = view_context_from_slot_resolution_overlay(overlay_id);
-    assert!(
-        context.slot_resolution.is_some(),
-        "view context should carry the slot-resolution dimension"
-    );
-    assert!(
-        context.expression_overlay.is_none(),
-        "view context should not carry an expression-overlay dimension"
-    );
-    assert!(
-        context.wrapper_context.is_none(),
-        "view context should not carry a wrapper-context dimension"
-    );
-    let view = TirView::new(&store, wrapper, TemplateTirPhase::Composed, context)
-        .expect("view should construct with the attached view context");
-
-    let occurrence_id = SlotOccurrenceId::new(0);
-    let resolution = view
-        .effective_slot_resolution(occurrence_id)
-        .expect("slot resolution lookup should succeed")
-        .expect("resolution should be present for the default slot occurrence");
-    assert_eq!(
-        resolution.key,
-        SlotKey::Default,
-        "view should observe the default slot resolution"
-    );
-    assert!(
-        matches!(resolution.kind, TirSlotResolutionKind::Resolved { .. }),
-        "view should observe a resolved slot through the overlay path"
-    );
-    assert_eq!(resolution.sources().len(), 1);
-    assert_eq!(
-        root_child_node_ids(resolution.sources()[0], &store),
-        vec![contribution_node],
-        "the view should resolve the same store-owned contribution source"
-    );
-}
-
-// -------------------------
-//  Head-Chain Composition With Overlay Threading
-// -------------------------
-//
-// `compose_tir_head_chain_with_overlays` is the production stage-boundary owner
-// returning a `ComposedTirRoot`: the structurally composed root plus an optional
-// slot-resolution view context. These tests protect the two distinct boundary
-// contracts that no other owner covers:
-//   * a single slot-bearing wrapper produces a new composed root whose resolved
-//     wrapper splices the exact fill, and a slot-resolution overlay whose single
-//     occurrence/key/kind/source match that fill, with only the slot-resolution
-//     context dimension set;
-//   * a template with no slot-bearing wrapper returns the original root and a
-//     `None` slot context (the production fast path).
-// The structural expansion itself is owned by the head-chain structural tests
-// above and by `expand_preserves_non_slot_nodes`; the wrapper effective-view
-// identity is owned by the `TirView` read authority and view-transition rules,
-// so neither is re-asserted here.
-
-#[test]
-fn head_chain_with_overlays_threads_slot_overlay_for_single_receiver() {
-    let mut string_table = StringTable::new();
-    let store = Rc::new(RefCell::new(TemplateIrStore::new()));
-
-    let (template_id, head_fill) = {
-        let mut store = store.borrow_mut();
-        let wrapper = build_wrapper_with_slot_sequence(&mut store, vec![SlotKey::Default]);
-        let wrapper_node = build_child_template_node_for_template(&mut store, wrapper);
-        let head_fill = build_text_node(
-            &mut store,
-            &mut string_table,
-            "head fill",
-            TemplateSegmentOrigin::Head,
-        );
-        let template_id = build_template_with_children(&mut store, vec![wrapper_node, head_fill]);
-        (template_id, head_fill)
-    };
-
-    let original_root = template_root_node_id(template_id, &store.borrow());
-
-    let composed = compose_tir_head_chain_with_overlays(&store, template_id, &string_table, false)
-        .expect("store-level head-chain composition should succeed");
-
-    // --- Structural half of `ComposedTirRoot` ---
-    // Composition replaces the original root with a new sequence whose only
-    // child is the resolved wrapper, and the wrapper's default slot splices the
-    // exact head-fill node identity and content.
-    assert_ne!(
-        composed.root, original_root,
-        "composition should produce a new root"
-    );
-
-    let store = store.borrow();
-    let composed_children = root_child_node_ids_for_node(composed.root, &store);
-    assert_eq!(
-        composed_children.len(),
-        1,
-        "composed root should contain only the resolved wrapper"
-    );
-
-    let resolved_wrapper_template_id = expect_child_template_id(composed_children[0], &store);
-    let resolved_wrapper_children = root_child_node_ids(resolved_wrapper_template_id, &store);
-    assert_eq!(
-        resolved_wrapper_children,
-        vec![head_fill],
-        "the resolved wrapper's default slot should splice the exact head-fill node"
-    );
-    assert_eq!(
-        text_node_text(head_fill, &store, &string_table),
-        Some("head fill".to_owned()),
-        "the spliced fill content should be the authored head text"
-    );
-
-    // --- Overlay half of `ComposedTirRoot` ---
-    // The slot-resolution context carries exactly one default-slot resolution
-    // whose source template holds the same fill content. Only the
-    // slot-resolution dimension is set; expression and wrapper-context are absent.
-    let context = composed
-        .slot_context
-        .expect("one slot-bearing wrapper should produce a non-empty view context");
-
-    assert!(
-        context.slot_resolution.is_some(),
-        "context should carry a slot-resolution overlay"
-    );
-    assert!(
-        context.expression_overlay.is_none(),
-        "no expression overlay dimension should be set"
-    );
-    assert!(
-        context.wrapper_context.is_none(),
-        "no wrapper-context overlay dimension should be set"
-    );
-
-    let overlay_id = context
-        .slot_resolution
-        .expect("slot-resolution overlay id should be present");
-    let overlay = slot_resolution_overlay(&store, overlay_id);
-    assert_eq!(
-        overlay.resolutions.len(),
-        1,
-        "one default slot occurrence should be resolved"
-    );
-
-    let (occurrence_id, resolution) = &overlay.resolutions[0];
-    assert_eq!(
-        *occurrence_id,
-        SlotOccurrenceId::new(0),
-        "the single slot occurrence should keep its document-order ID"
-    );
-    assert_eq!(
-        resolution.key,
-        SlotKey::Default,
-        "the resolved slot key should be the declared default"
-    );
-    let TirSlotResolutionKind::Resolved { sources } = &resolution.kind else {
-        panic!("the default slot should resolve to a source list");
-    };
-    assert_eq!(
-        sources.len(),
-        1,
-        "the default slot should resolve to one source template"
-    );
-    assert_eq!(
-        root_child_node_ids(sources[0], &store),
-        vec![head_fill],
-        "the overlay source template should hold the exact head-fill node"
-    );
-}
-
-#[test]
-fn head_chain_with_overlays_returns_none_when_no_slots_resolved() {
-    let mut string_table = StringTable::new();
-    let store = Rc::new(RefCell::new(TemplateIrStore::new()));
-
-    let template_id = {
-        let mut store = store.borrow_mut();
-        // A template with only body text and no receivers: composition returns
-        // the original root and no overlay.
-        let body_text = build_text_node(
-            &mut store,
-            &mut string_table,
-            "body",
-            TemplateSegmentOrigin::Body,
-        );
-        build_template_with_children(&mut store, vec![body_text])
-    };
-
-    let original_root = template_root_node_id(template_id, &store.borrow());
-
-    let composed = compose_tir_head_chain_with_overlays(&store, template_id, &string_table, false)
-        .expect("store-level head-chain composition should succeed");
-
-    assert_eq!(
-        composed.root, original_root,
+        composed_root, original_root,
         "template with no receivers should return the original root"
-    );
-    assert!(
-        composed.slot_context.is_none(),
-        "no slot-bearing wrapper should produce no view context"
     );
 }

@@ -49,7 +49,7 @@ impl SlotKey {
 // -------------------------
 
 /// Category of comment directive within a template.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CommentDirectiveKind {
     Note,
     Todo,

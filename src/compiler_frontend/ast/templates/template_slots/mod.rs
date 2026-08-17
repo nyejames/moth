@@ -12,14 +12,12 @@
 //  Submodules
 // -------------------------
 
-mod error;
 mod runtime_plan;
 
 // -------------------------
 //  Re-exports
 // -------------------------
 
-pub(in crate::compiler_frontend::ast::templates) use error::TemplateSlotError;
 pub(crate) use runtime_plan::{RuntimeSlotContributionSourceId, RuntimeSlotSiteId};
 pub(in crate::compiler_frontend::ast::templates) use runtime_plan::{
     materialize_tir_native_runtime_slot_plan, tir_contributions_need_runtime,

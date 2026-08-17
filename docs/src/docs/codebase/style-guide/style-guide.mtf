@@ -101,15 +101,19 @@ Prefer this:
 
 ### Comments as reading landmarks
 
-**Comments must explain non-local intent, not restate the code.** Write for programmers reading the codebase for the first time so they can understand local code without first reading distant owners.
+**Comments must explain non-local intent, not restate the code.** Write for programmers reading the codebase for the first time so they can understand local code without first reading distant owners. Stay comment-positive: keep the comments that carry ownership, invariants and failure context, and drop the ones that only narrate syntax.
 
-- Add a concise WHAT/WHY doc comment at the top of every new file. State what the file owns, important exclusions and how it fits the wider module or compiler.
-- Add intent comments to important structs and complex functions, methods or blocks, not small helpers or self-describing code.
-- Explain wider ownership, downstream consumers, non-obvious ordering or control flow, invariants, failure conditions, fallbacks, phase joins, subtle fixes and project-specific or widely shared behaviour.
-- Use terse comments to mark stage boundaries, control-flow joins, intentional no-op branches, why a diagnostic belongs at this stage and the reason a helper exists.
-- Keep comments aligned with the current design when code moves or behaviour changes. Remove stale comments.
+File-level docs are the primary place for subsystem role, ownership, exclusions and detailed WHAT/WHY context. A reader should learn the architecture from the file header and `mod.rs` map, then use item comments only where local code is not enough.
 
-Be comment-positive, but not noisy. Comments should be grammatical and readable. Do not narrate syntax, repeat a descriptive name or paraphrase a clear signature.
+Detailed item comments belong on complex functions, stage joins, ordering constraints, invariants, unusual diagnostics and non-obvious data flow. Tiny accessors, constructors, fields, forwarding methods and obvious private helpers need no comment, or at most one short sentence.
+
+WHAT/WHY headings are optional landmarks, not a required template. Use them when they make a non-local contract easier to find. Do not add them to every item.
+
+Keep comments aligned with the current design. Migration history belongs in Git. Do not justify obsolete adapters, compatibility wrappers or deleted owners in comments.
+
+Test-only implementation belongs with tests. Production files must not grow test-only constructors, mutators, semantic variants or convenience lookups just to support fixtures.
+
+Be grammatical and readable. Do not narrate syntax, repeat a descriptive name or paraphrase a clear signature.
 
 [codeblock, $code("rust"):
     // Register same-file declarations before dependencies so aliases cannot shadow local names.

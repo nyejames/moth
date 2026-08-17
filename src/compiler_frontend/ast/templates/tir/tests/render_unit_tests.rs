@@ -19,7 +19,8 @@ use crate::compiler_frontend::ast::templates::tir::refs::{
     TemplateTirChildReference, TemplateTirReference,
 };
 use crate::compiler_frontend::ast::templates::tir::render_unit::{
-    build_aggregate_wrapper_candidate_from_tir_nodes, build_branch_body_candidate_from_tir_nodes,
+    build_aggregate_wrapper_candidate_root_from_tir_nodes,
+    build_branch_body_candidate_root_from_tir_nodes,
 };
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
 use crate::compiler_frontend::ast::templates::tir::summary::TemplateIrSummary;
@@ -44,7 +45,7 @@ fn push_text_node(
     store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Text {
             text: text_id,
-            byte_len: text.len() as u32,
+            byte_len: text.len(),
             origin: TemplateSegmentOrigin::Body,
         },
         empty_location(),
@@ -65,12 +66,12 @@ fn push_template_entry(
     ))
 }
 
-fn candidate_children(store: &TemplateIrStore, template_id: TemplateIrId) -> Vec<TemplateIrNodeId> {
-    let template = store
-        .get_template(template_id)
-        .expect("candidate template should exist");
+fn candidate_root_children(
+    store: &TemplateIrStore,
+    root_node: TemplateIrNodeId,
+) -> Vec<TemplateIrNodeId> {
     let TemplateIrNodeKind::Sequence { children } = &store
-        .get_node(template.root)
+        .get_node(root_node)
         .expect("candidate root should exist")
         .kind
     else {
@@ -179,10 +180,10 @@ fn wrapper_candidates_reuse_parser_structural_child_template() {
     ));
     let body_node = push_text_node(&mut store, &mut string_table, "body");
 
-    let aggregate_template_id =
-        build_aggregate_wrapper_candidate_from_tir_nodes(&[parser_child_node], &mut store)
+    let aggregate_root =
+        build_aggregate_wrapper_candidate_root_from_tir_nodes(&[parser_child_node], &mut store)
             .expect("aggregate candidate should reuse parser structural child");
-    let aggregate_children = candidate_children(&store, aggregate_template_id);
+    let aggregate_children = candidate_root_children(&store, aggregate_root);
     assert_eq!(aggregate_children[0], parser_child_node);
     assert!(matches!(
         store.get_node(aggregate_children[0]).expect("aggregate child should exist").kind,
@@ -203,10 +204,13 @@ fn wrapper_candidates_reuse_parser_structural_child_template() {
         TemplateIrNodeKind::AggregateOutput
     ));
 
-    let branch_template_id =
-        build_branch_body_candidate_from_tir_nodes(&[parser_child_node], &[body_node], &mut store)
-            .expect("branch candidate should reuse parser structural child");
-    let branch_children = candidate_children(&store, branch_template_id);
+    let branch_root = build_branch_body_candidate_root_from_tir_nodes(
+        &[parser_child_node],
+        &[body_node],
+        &mut store,
+    )
+    .expect("branch candidate should reuse parser structural child");
+    let branch_children = candidate_root_children(&store, branch_root);
     assert_eq!(branch_children, vec![parser_child_node, body_node]);
 }
 

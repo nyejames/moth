@@ -18,7 +18,6 @@ use crate::compiler_frontend::ast::expressions::expression_rpn::{
     ExpressionRpn, ExpressionRpnItem,
 };
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
-use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template::{
     SlotKey, Style, TemplateSegmentOrigin, TemplateType,
@@ -28,18 +27,15 @@ use crate::compiler_frontend::ast::templates::template_control_flow::{
     build_range_iteration_bindings,
 };
 use crate::compiler_frontend::ast::templates::template_folding::{
-    FoldResolvedExpression, TemplateFoldContext, loop_body_not_const_error,
-    resolve_fold_bindings_in_expression, selected_option_capture_payload_with_provenance,
+    FoldResolvedExpression, TirFoldContext, resolve_fold_bindings_in_expression,
+    selected_option_capture_payload_with_provenance,
 };
 use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrBuilder, TemplateIrStore, TemplateIrSummary, TemplateTirPhase, TemplateTirReference,
     TemplateViewContext, TirFoldCache,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
-use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
@@ -61,32 +57,6 @@ fn test_location(line: i32) -> SourceLocation {
             char_column: 120,
         },
     }
-}
-
-fn test_project_path_resolver() -> ProjectPathResolver {
-    let cwd = std::env::temp_dir();
-    ProjectPathResolver::new(
-        cwd.clone(),
-        cwd,
-        crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots::empty(),
-        &crate::builder_surface::SourceFileKindRegistry::default(),
-    )
-    .expect("test path resolver should be valid")
-}
-
-#[test]
-fn const_loop_body_folding_preserves_infrastructure_failure() {
-    let error = loop_body_not_const_error(
-        TemplateError::Infrastructure(Box::new(CompilerError::compiler_error(
-            "missing const loop body authority",
-        ))),
-        &test_location(1),
-    );
-
-    let TemplateError::Infrastructure(error) = error else {
-        panic!("const loop folding must not rewrite infrastructure as a source diagnostic");
-    };
-    assert_eq!(error.msg, "missing const loop body authority");
 }
 
 #[test]
@@ -137,14 +107,8 @@ fn const_loop_iteration_bindings_preserve_source_provenance() {
 #[test]
 fn bool_condition_with_no_bindings_returns_borrowed() {
     let mut string_table = StringTable::new();
-    let resolver = test_project_path_resolver();
-    let path_format = PathStringFormatConfig::default();
-    let source_scope = InternedPath::new();
-    let mut fold_context = TemplateFoldContext {
+    let mut fold_context = TirFoldContext {
         string_table: &mut string_table,
-        project_path_resolver: &resolver,
-        path_format_config: &path_format,
-        source_file_scope: &source_scope,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         bindings: vec![],
         fold_cache: TirFoldCache::new(),
@@ -164,14 +128,8 @@ fn bool_condition_with_no_bindings_returns_borrowed() {
 fn string_slice_with_no_bindings_returns_borrowed() {
     let mut string_table = StringTable::new();
     let text_id = string_table.intern("hello");
-    let resolver = test_project_path_resolver();
-    let path_format = PathStringFormatConfig::default();
-    let source_scope = InternedPath::new();
-    let mut fold_context = TemplateFoldContext {
+    let mut fold_context = TirFoldContext {
         string_table: &mut string_table,
-        project_path_resolver: &resolver,
-        path_format_config: &path_format,
-        source_file_scope: &source_scope,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         bindings: vec![],
         fold_cache: TirFoldCache::new(),
@@ -202,10 +160,6 @@ fn bool_condition_binding_substitution_returns_owned() {
         value: binding_value,
     }];
 
-    let resolver = test_project_path_resolver();
-    let path_format = PathStringFormatConfig::default();
-    let source_scope = InternedPath::new();
-
     let condition = Expression::reference(
         path,
         DataType::Bool,
@@ -213,11 +167,8 @@ fn bool_condition_binding_substitution_returns_owned() {
         ValueMode::ImmutableOwned,
     );
 
-    let mut fold_context = TemplateFoldContext {
+    let mut fold_context = TirFoldContext {
         string_table: &mut string_table,
-        project_path_resolver: &resolver,
-        path_format_config: &path_format,
-        source_file_scope: &source_scope,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         bindings,
         fold_cache: TirFoldCache::new(),
@@ -259,10 +210,6 @@ fn option_present_capture_substitution_returns_owned() {
         value: option_value,
     }];
 
-    let resolver = test_project_path_resolver();
-    let path_format = PathStringFormatConfig::default();
-    let source_scope = InternedPath::new();
-
     let scrutinee = Expression::reference(
         path,
         DataType::StringSlice,
@@ -270,11 +217,8 @@ fn option_present_capture_substitution_returns_owned() {
         ValueMode::ImmutableOwned,
     );
 
-    let mut fold_context = TemplateFoldContext {
+    let mut fold_context = TirFoldContext {
         string_table: &mut string_table,
-        project_path_resolver: &resolver,
-        path_format_config: &path_format,
-        source_file_scope: &source_scope,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         bindings,
         fold_cache: TirFoldCache::new(),
@@ -346,15 +290,9 @@ fn option_capture_scalar_payload_uses_ordinary_const_rules() {
         binding_location: test_location(1),
     };
 
-    let resolver = test_project_path_resolver();
-    let path_format = PathStringFormatConfig::default();
-    let source_scope = InternedPath::new();
     let store = TemplateIrStore::new();
-    let mut fold_context = TemplateFoldContext {
+    let mut fold_context = TirFoldContext {
         string_table: &mut string_table,
-        project_path_resolver: &resolver,
-        path_format_config: &path_format,
-        source_file_scope: &source_scope,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         bindings: vec![TemplateFoldBinding {
             path: option_path,
@@ -410,14 +348,8 @@ fn assert_store_backed_option_capture(
         binding_location: test_location(1),
     };
 
-    let resolver = test_project_path_resolver();
-    let path_format = PathStringFormatConfig::default();
-    let source_scope = InternedPath::new();
-    let mut fold_context = TemplateFoldContext {
+    let mut fold_context = TirFoldContext {
         string_table,
-        project_path_resolver: &resolver,
-        path_format_config: &path_format,
-        source_file_scope: &source_scope,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         bindings: vec![TemplateFoldBinding {
             path: option_path,
@@ -457,14 +389,8 @@ fn coerced_expression_with_no_bindings_returns_borrowed() {
     );
     let coerced = Expression::coerced(inner, builtin_type_ids::STRING);
 
-    let resolver = test_project_path_resolver();
-    let path_format = PathStringFormatConfig::default();
-    let source_scope = InternedPath::new();
-    let mut fold_context = TemplateFoldContext {
+    let mut fold_context = TirFoldContext {
         string_table: &mut string_table,
-        project_path_resolver: &resolver,
-        path_format_config: &path_format,
-        source_file_scope: &source_scope,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         bindings: vec![],
         fold_cache: TirFoldCache::new(),
@@ -516,14 +442,8 @@ fn coerced_template_with_no_bindings_returns_inner_template_borrow() {
 
     // The no-substitution path does not semantically read the template, so it
     // must not depend on store classification.
-    let resolver = test_project_path_resolver();
-    let path_format = PathStringFormatConfig::default();
-    let source_scope = InternedPath::new();
-    let mut fold_context = TemplateFoldContext {
+    let mut fold_context = TirFoldContext {
         string_table: &mut string_table,
-        project_path_resolver: &resolver,
-        path_format_config: &path_format,
-        source_file_scope: &source_scope,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         bindings: vec![],
         fold_cache: TirFoldCache::new(),
@@ -551,14 +471,8 @@ fn coerced_template_with_no_bindings_returns_inner_template_borrow() {
 #[test]
 fn rpn_with_no_substitutable_operands_returns_borrowed() {
     let mut string_table = StringTable::new();
-    let resolver = test_project_path_resolver();
-    let path_format = PathStringFormatConfig::default();
-    let source_scope = InternedPath::new();
-    let mut fold_context = TemplateFoldContext {
+    let mut fold_context = TirFoldContext {
         string_table: &mut string_table,
-        project_path_resolver: &resolver,
-        path_format_config: &path_format,
-        source_file_scope: &source_scope,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         bindings: vec![],
         fold_cache: TirFoldCache::new(),
@@ -609,10 +523,6 @@ fn rpn_with_bound_reference_operand_returns_owned() {
         value: binding_value,
     }];
 
-    let resolver = test_project_path_resolver();
-    let path_format = PathStringFormatConfig::default();
-    let source_scope = InternedPath::new();
-
     let rpn = ExpressionRpn {
         items: vec![
             ExpressionRpnItem::Operand(Expression::reference(
@@ -639,11 +549,8 @@ fn rpn_with_bound_reference_operand_returns_owned() {
         ValueMode::ImmutableOwned,
     );
 
-    let mut fold_context = TemplateFoldContext {
+    let mut fold_context = TirFoldContext {
         string_table: &mut string_table,
-        project_path_resolver: &resolver,
-        path_format_config: &path_format,
-        source_file_scope: &source_scope,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         bindings,
         fold_cache: TirFoldCache::new(),

@@ -12,9 +12,9 @@
 //!
 //! ## Production authority
 //!
-//! Linear templates format directly from TIR. Control-flow body roots are
-//! also formatted natively in TIR through this adapter. No intermediate
-//! content-to-TIR conversion step remains in the production render-unit path.
+//! Linear templates and control-flow body roots format directly from TIR through
+//! this adapter. Node-root formatting avoids scratch `TemplateIr` entries, and
+//! no intermediate content-to-TIR conversion remains in the render-unit path.
 
 use crate::compiler_frontend::ast::templates::formatter_contract::{
     FormatterAnchorId, FormatterInput, FormatterInputPiece, FormatterOpaqueKind,
@@ -27,20 +27,18 @@ use crate::compiler_frontend::ast::templates::template::{
     BodyWhitespacePolicy, ReactiveSubscription, Style, TemplateSegmentOrigin,
 };
 use crate::compiler_frontend::ast::templates::tir::ids::{TemplateIrId, TemplateIrNodeId};
-use crate::compiler_frontend::ast::templates::tir::node::{
-    TemplateIr, TemplateIrNode, TemplateIrNodeKind,
-};
+use crate::compiler_frontend::ast::templates::tir::node::{TemplateIrNode, TemplateIrNodeKind};
 use crate::compiler_frontend::ast::templates::tir::overlays::TemplateViewContext;
 use crate::compiler_frontend::ast::templates::tir::refs::TemplateTirChildReference;
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
 use crate::compiler_frontend::ast::templates::tir::view::{
-    TemplateTirPhase, TirView, TirViewIdentity,
+    TemplateTirPhase, TirView, TirViewIdentity, structural_transition_context,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 // -------------------------
 //  Public result type
@@ -50,8 +48,8 @@ use std::collections::HashSet;
 ///
 /// WHAT: carries the new root node ID for the formatted tree and any formatter
 /// warnings.
-/// WHY: callers replace the original template root with `root` and forward
-/// warnings to the appropriate diagnostic context.
+/// WHY: callers either publish a derived template version or install the root at
+/// an explicit parser/control-flow mutation boundary before forwarding warnings.
 pub(crate) struct TirFormatterResult {
     pub root: TemplateIrNodeId,
     pub warnings: Vec<CompilerDiagnostic>,
@@ -66,29 +64,59 @@ pub(crate) struct TirFormatterResult {
 ///      mutation owner must be explicit at this adapter boundary.
 struct FormatterStore<'store> {
     store: &'store mut TemplateIrStore,
-    root: TemplateIrId,
+    /// Owning published template ID, or `None` for a node-root formatter that
+    /// has no published template (control-flow body roots). When `None`,
+    /// `effective_node` reads the store directly and `structural_child_view`
+    /// creates child views without a parent view transition.
+    root: Option<TemplateIrId>,
+    root_node_id: TemplateIrNodeId,
+    head_node_count: usize,
     phase: TemplateTirPhase,
     context: TemplateViewContext,
 }
 
 impl FormatterStore<'_> {
     fn view(&self) -> Result<TirView<'_>, CompilerError> {
-        TirView::new(&*self.store, self.root, self.phase, self.context)
+        let root = self.root.ok_or_else(|| {
+            CompilerError::compiler_error(
+                "TIR formatter view: no owning template for a node-root formatter store.",
+            )
+        })?;
+        TirView::new(&*self.store, root, self.phase, self.context)
     }
 
-    fn root_template(&self) -> Result<TemplateIr, CompilerError> {
-        self.view()?.root_template().cloned()
+    fn effective_node(&self, node_id: TemplateIrNodeId) -> Result<&TemplateIrNode, CompilerError> {
+        self.store.get_node(node_id).ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "TIR formatter view: node {} does not exist in the store",
+                node_id
+            ))
+        })
     }
 
-    fn effective_node(&self, node_id: TemplateIrNodeId) -> Result<TemplateIrNode, CompilerError> {
-        self.view()?.effective_node(node_id).cloned()
+    fn structural_child_view(
+        &self,
+        reference: TemplateTirChildReference,
+    ) -> Result<TirView<'_>, CompilerError> {
+        // For a published-template formatter, use the view's structural_child
+        // transition to carry the current expression overlay. For a node-root
+        // formatter (no owning template), create the child view directly with
+        // the node-root's context, which is default for body roots.
+        match self.root {
+            Some(_) => self.view()?.structural_child(reference),
+            None => {
+                let context =
+                    structural_transition_context(self.context, reference.phase, reference.context);
+                TirView::new(&*self.store, reference.root, reference.phase, context)
+            }
+        }
     }
 
     fn node_reactive_subscription(
         &self,
         node_id: TemplateIrNodeId,
-    ) -> Option<ReactiveSubscription> {
-        self.store.node_reactive_subscription(node_id).cloned()
+    ) -> Result<Option<ReactiveSubscription>, CompilerError> {
+        Ok(self.store.node_reactive_subscription(node_id)?.cloned())
     }
 
     fn push_node(
@@ -99,7 +127,8 @@ impl FormatterStore<'_> {
         let node_id = self.store.push_node(node);
         if let Some(subscription) = reactive_subscription {
             self.store
-                .set_node_reactive_subscription(node_id, subscription);
+                .set_node_reactive_subscription(node_id, subscription)
+                .expect("a just-pushed node must accept a reactive subscription");
         }
         node_id
     }
@@ -125,18 +154,66 @@ pub(crate) fn format_tir_template(
     style: &Style,
     string_table: &mut StringTable,
 ) -> Result<TirFormatterResult, CompilerMessages> {
+    let (root_node_id, head_node_count) = {
+        let template = store.get_template(root).ok_or_else(|| {
+            compiler_error_messages(
+                CompilerError::compiler_error(format!(
+                    "TIR formatter view lost referenced template {}.",
+                    root
+                )),
+                string_table,
+            )
+        })?;
+        (template.root, template.summary.head_node_count as usize)
+    };
+
     let mut formatter_store = FormatterStore {
         store,
-        root,
+        root: Some(root),
+        root_node_id,
+        head_node_count,
         phase,
         context,
     };
-    let root_node_id = {
-        let template = formatter_store
-            .root_template()
-            .map_err(|error| compiler_error_messages(error, string_table))?;
-        template.root
+
+    format_tir_formatter_store(&mut formatter_store, style, string_table)
+}
+
+/// Formats a TIR body node root without pushing a scratch `TemplateIr`.
+///
+/// WHAT: runs the same formatter pipeline as `format_tir_template` directly on
+///       a node root, with zero head-prefix nodes. The body root is not a
+///       published template, so no durable `TemplateIr` entry is created.
+/// WHY: control-flow body roots are parser-emitted TIR nodes, not template
+///      identities. Formatting them directly avoids scratch templates that
+///      would remain in the durable store without a referencing identity.
+pub(crate) fn format_tir_body_node_root(
+    store: &mut TemplateIrStore,
+    owning_template: Option<TemplateIrId>,
+    body_root: TemplateIrNodeId,
+    phase: TemplateTirPhase,
+    context: TemplateViewContext,
+    style: &Style,
+    string_table: &mut StringTable,
+) -> Result<TirFormatterResult, CompilerMessages> {
+    let mut formatter_store = FormatterStore {
+        store,
+        root: owning_template,
+        root_node_id: body_root,
+        head_node_count: 0,
+        phase,
+        context,
     };
+
+    format_tir_formatter_store(&mut formatter_store, style, string_table)
+}
+
+fn format_tir_formatter_store(
+    formatter_store: &mut FormatterStore<'_>,
+    style: &Style,
+    string_table: &mut StringTable,
+) -> Result<TirFormatterResult, CompilerMessages> {
+    let root_node_id = formatter_store.root_node_id;
 
     let formatter = style.formatter.as_ref();
 
@@ -168,7 +245,7 @@ pub(crate) fn format_tir_template(
 
     let root_node_ref = root_node_id;
     let result = format_tir_node(
-        &mut formatter_store,
+        formatter_store,
         root_node_ref,
         pre_format_passes,
         post_format_passes,
@@ -179,15 +256,15 @@ pub(crate) fn format_tir_template(
     // Child templates are opaque to the parent formatter, but they still need
     // their own formatter applied before folding. Recursively format every
     // reachable child template so the fold path sees formatted bodies.
-    // This root-keyed set is mutation deduplication only: format each shared
+    // This root-keyed map is mutation deduplication only: format each shared
     // stored root once. It is not semantic cycle identity; named TirView
     // transitions still determine every recursive view below.
-    let mut visited = HashSet::new();
+    let mut formatted_templates = HashMap::new();
     let formatted_root_ref = result.root;
     format_child_templates_in_subtree(
-        &mut formatter_store,
+        &mut *formatter_store,
         formatted_root_ref,
-        &mut visited,
+        &mut formatted_templates,
         string_table,
     )?;
 
@@ -200,9 +277,8 @@ pub(crate) fn format_tir_template(
 /// WHAT: carries only the IDs and references needed to continue recursion or
 ///       format a referenced child template, without cloning the entire
 ///       `TemplateIrNode`.
-/// WHY: the `TirView` `RefCell` borrow must end before recursive calls that may
-///      mutate the store. Extracting cheap facts while the node is borrowed and
-///      acting after the borrow ends avoids whole-node clones.
+/// WHY: recursive formatting may append to the store. Extracting the IDs and
+///      scalar facts first keeps the read borrow short.
 enum FormatterChildFact {
     ChildTemplate {
         reference: TemplateTirChildReference,
@@ -216,9 +292,7 @@ enum FormatterChildFact {
         body: TemplateIrNodeId,
         aggregate_wrapper: Option<TemplateIrNodeId>,
     },
-    InsertContribution {
-        template: TemplateIrId,
-    },
+    InsertContribution,
     Other,
 }
 
@@ -242,11 +316,7 @@ fn extract_formatter_child_fact(kind: &TemplateIrNodeKind) -> FormatterChildFact
             body: *body,
             aggregate_wrapper: *aggregate_wrapper,
         },
-        TemplateIrNodeKind::InsertContribution { template } => {
-            FormatterChildFact::InsertContribution {
-                template: *template,
-            }
-        }
+        TemplateIrNodeKind::InsertContribution { .. } => FormatterChildFact::InsertContribution,
         _ => FormatterChildFact::Other,
     }
 }
@@ -254,15 +324,15 @@ fn extract_formatter_child_fact(kind: &TemplateIrNodeKind) -> FormatterChildFact
 /// Recursively formats child templates reachable from a TIR subtree.
 ///
 /// WHAT: walks the formatted tree under `node_id` and calls `format_tir_template`
-///       on every `ChildTemplate` reference that has not already been visited.
+///       on every `ChildTemplate` reference that has not already been formatted.
 /// WHY: parent formatters treat children as opaque anchors, so the parent's own
 ///      formatting pass does not format nested children. This pass ensures each
 ///      child template is formatted independently before folding. The root-only
-///      visited set deduplicates shared mutations, not semantic view traversal.
+///      version map deduplicates shared mutations, not semantic view traversal.
 fn format_child_templates_in_subtree(
     formatter_store: &mut FormatterStore<'_>,
     node_ref: TemplateIrNodeId,
-    visited: &mut HashSet<TemplateIrId>,
+    formatted_templates: &mut HashMap<TemplateIrId, TemplateIrId>,
     string_table: &mut StringTable,
 ) -> Result<(), CompilerMessages> {
     let fact = {
@@ -275,17 +345,31 @@ fn format_child_templates_in_subtree(
     match fact {
         FormatterChildFact::ChildTemplate { reference } => {
             let child_identity = formatter_store
-                .view()
-                .and_then(|view| view.structural_child(reference))
+                .structural_child_view(reference)
                 .map(|view| view.identity())
                 .map_err(|error| compiler_error_messages(error, string_table))?;
-            if visited.insert(child_identity.root) {
-                format_referenced_child_template(
+            let formatted_id = if let Some(formatted_id) =
+                formatted_templates.get(&child_identity.root).copied()
+            {
+                formatted_id
+            } else {
+                // Reserve the identity before descending so shared references
+                // within this subtree are not formatted more than once.
+                formatted_templates.insert(child_identity.root, child_identity.root);
+                let formatted_id = format_referenced_child_template(
                     formatter_store,
                     child_identity,
-                    false,
                     string_table,
-                )?;
+                )?
+                .unwrap_or(child_identity.root);
+                formatted_templates.insert(child_identity.root, formatted_id);
+                formatted_id
+            };
+            if formatted_id != child_identity.root {
+                formatter_store
+                    .store
+                    .replace_child_template_reference(node_ref, formatted_id)
+                    .map_err(|error| compiler_error_messages(error, string_table))?;
             }
         }
 
@@ -295,7 +379,7 @@ fn format_child_templates_in_subtree(
                 format_child_templates_in_subtree(
                     formatter_store,
                     child_ref,
-                    visited,
+                    formatted_templates,
                     string_table,
                 )?;
             }
@@ -310,7 +394,7 @@ fn format_child_templates_in_subtree(
                 format_child_templates_in_subtree(
                     formatter_store,
                     branch_ref,
-                    visited,
+                    formatted_templates,
                     string_table,
                 )?;
             }
@@ -320,7 +404,7 @@ fn format_child_templates_in_subtree(
                 format_child_templates_in_subtree(
                     formatter_store,
                     fallback_ref,
-                    visited,
+                    formatted_templates,
                     string_table,
                 )?;
             }
@@ -331,37 +415,27 @@ fn format_child_templates_in_subtree(
             aggregate_wrapper,
         } => {
             let body_ref = body;
-            format_child_templates_in_subtree(formatter_store, body_ref, visited, string_table)?;
+            format_child_templates_in_subtree(
+                formatter_store,
+                body_ref,
+                formatted_templates,
+                string_table,
+            )?;
 
             if let Some(aggregate_id) = aggregate_wrapper {
                 let aggregate_ref = aggregate_id;
                 format_child_templates_in_subtree(
                     formatter_store,
                     aggregate_ref,
-                    visited,
+                    formatted_templates,
                     string_table,
                 )?;
             }
         }
 
-        FormatterChildFact::InsertContribution { template } => {
-            let helper_identity = formatter_store
-                .view()
-                .and_then(|view| view.structural_helper(template))
-                .map(|view| view.identity())
-                .map_err(|error| compiler_error_messages(error, string_table))?;
-            if visited.insert(helper_identity.root) {
-                // InsertContribution roots are installed by parser composition
-                // after their standalone formatter pass. The structural helper
-                // transition preserves the parent view for reads, while this
-                // storage fact prevents a second formatter mutation.
-                format_referenced_child_template(
-                    formatter_store,
-                    helper_identity,
-                    true,
-                    string_table,
-                )?;
-            }
+        FormatterChildFact::InsertContribution => {
+            // Parser composition formats insert helpers before installing their
+            // contribution nodes, so this traversal must not format them again.
         }
 
         _ => {}
@@ -370,19 +444,18 @@ fn format_child_templates_in_subtree(
     Ok(())
 }
 
-/// Formats a single child/insert template referenced by ID and updates its
-/// root in the store.
+/// Formats a single child/insert template and publishes a derived template version.
 ///
 /// WHAT: looks up the referenced template, formats it with its own style, and
-///       writes the formatted root back into the store.
+///       returns a new template ID for the formatted root.
 /// WHY: both `ChildTemplate` and `InsertContribution` nodes reference nested
-///      templates that need independent formatting before folding.
+///      templates that need independent formatting before folding. A derived
+///      template version keeps the published source record immutable.
 fn format_referenced_child_template(
     formatter_store: &mut FormatterStore<'_>,
     identity: TirViewIdentity,
-    already_formatted: bool,
     string_table: &mut StringTable,
-) -> Result<(), CompilerMessages> {
+) -> Result<Option<TemplateIrId>, CompilerMessages> {
     let template_ref = identity.root;
     let phase = identity.phase;
     let context = identity.context;
@@ -405,11 +478,11 @@ fn format_referenced_child_template(
     // A child template whose reference phase has already reached Formatted
     // carries a formatted root and must not be re-formatted. Re-formatting
     // would double-escape output such as markdown paragraphs.
-    let already_formatted = already_formatted
-        || (style.formatter.is_some() && phase.is_at_least(TemplateTirPhase::Formatted));
+    let already_formatted =
+        style.formatter.is_some() && phase.is_at_least(TemplateTirPhase::Formatted);
 
     if already_formatted {
-        return Ok(());
+        return Ok(None);
     }
 
     let result = format_tir_template(
@@ -421,22 +494,17 @@ fn format_referenced_child_template(
         string_table,
     )?;
 
-    let Some(template) = formatter_store
+    let formatted_template_id = formatter_store
         .store
-        .templates
-        .get_mut(template_ref.index())
-    else {
-        return Err(compiler_error_messages(
-            CompilerError::compiler_error(format!(
-                "TIR formatter view lost referenced child template {} during writeback.",
-                template_ref
-            )),
-            string_table,
-        ));
-    };
-    template.root = result.root;
+        .push_structurally_derived_template(
+            template_ref,
+            result.root,
+            crate::compiler_frontend::ast::templates::tir::DerivedTemplateMetadata::preserve_source(
+            ),
+        )
+        .map_err(|error| compiler_error_messages(error, string_table))?;
 
-    Ok(())
+    Ok(Some(formatted_template_id))
 }
 
 // -------------------------
@@ -447,9 +515,8 @@ fn format_referenced_child_template(
 ///
 /// WHAT: carries only the children IDs and source location needed to format a
 ///       single node, without cloning the entire `TemplateIrNode`.
-/// WHY: the `TirView` `RefCell` borrow must end before formatting calls that
-///      may mutate the store. Extracting cheap facts while the node is borrowed
-///      and acting after the borrow ends avoids whole-node clones.
+/// WHY: formatting may append to the store after the node facts are extracted,
+///      so this boundary keeps reads and writes in separate steps.
 enum FormatterNodeFact {
     Sequence {
         children: Vec<TemplateIrNodeId>,
@@ -495,7 +562,7 @@ fn format_tir_node(
         let node = formatter_store
             .effective_node(node_ref)
             .map_err(|error| compiler_error_messages(error, string_table))?;
-        extract_formatter_node_fact(&node)
+        extract_formatter_node_fact(node)
     };
 
     match fact {
@@ -505,15 +572,10 @@ fn format_tir_node(
             // root (for example a nested body run) has no head prefix, so its
             // head count is zero. The root-template lookup is required internal
             // authority: a missing root is a compiler bug, not a silent skip.
-            let head_node_count = {
-                let root_template = formatter_store
-                    .root_template()
-                    .map_err(|error| compiler_error_messages(error, string_table))?;
-                if root_template.root == node_ref {
-                    root_template.summary.head_node_count as usize
-                } else {
-                    0
-                }
+            let head_node_count = if node_ref == formatter_store.root_node_id {
+                formatter_store.head_node_count
+            } else {
+                0
             };
 
             format_tir_sequence(
@@ -573,9 +635,7 @@ fn format_tir_node(
 
 /// Cheap eligibility facts for a child node during sequence formatting.
 ///
-/// WHAT: carries only the two boolean facts needed for run-membership decisions,
-///       extracted while the node is borrowed so the `TemplateIrNodeKind` clone
-///       is avoided.
+/// WHAT: carries only the two boolean facts needed for run-membership decisions.
 struct ChildRunEligibility {
     is_child_template: bool,
     is_body_eligible: bool,
@@ -733,7 +793,7 @@ fn child_template_is_head_expression_insert_in_tir(
     formatter_store: &FormatterStore<'_>,
     reference: &TemplateTirChildReference,
 ) -> Result<bool, CompilerError> {
-    let child_view = formatter_store.view()?.structural_child(*reference)?;
+    let child_view = formatter_store.structural_child_view(*reference)?;
     let child_template = child_view.root_template()?;
     let root_node_ref = child_template.root;
     let root_node = child_view.effective_node(root_node_ref)?;
@@ -830,7 +890,9 @@ fn process_formatter_run(
         match &node.kind {
             TemplateIrNodeKind::Text { text, .. } => {
                 if run_reactive_subscription.is_none() {
-                    run_reactive_subscription = formatter_store.node_reactive_subscription(node_id);
+                    run_reactive_subscription = formatter_store
+                        .node_reactive_subscription(node_id)
+                        .map_err(|error| compiler_error_messages(error, string_table))?;
                 }
 
                 input_pieces.push(FormatterInputPiece::Text(FormatterTextPiece {
@@ -932,7 +994,7 @@ fn output_to_tir_nodes(
                     TemplateIrNode::new(
                         TemplateIrNodeKind::Text {
                             text: text_id,
-                            byte_len: byte_len as u32,
+                            byte_len,
                             origin: TemplateSegmentOrigin::Body,
                         },
                         representative_location.clone(),

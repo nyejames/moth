@@ -11,16 +11,15 @@ use super::template_helpers::make_fold_context;
 use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
 use crate::compiler_frontend::ast::templates::template::{SlotKey, TemplateType};
 use crate::compiler_frontend::ast::templates::tir::{
-    FoldedConstTemplatePiece, PreparedTemplate, SlotOccurrenceId, TemplateIrNodeKind,
-    TemplatePreparationMode, TemplateTirPhase, TirView, TirViewIdentity,
-    fold_prepared_const_template_pattern, prepare_tir_view,
+    FoldedConstTemplatePiece, SlotOccurrenceId, TemplateHelperKind, TemplatePreparation,
+    TemplatePreparationMode, TemplatePreparationOutcome, TemplateTirPhase, TirView,
+    TirViewIdentity, fold_prepared_const_template_pattern, prepare_tir_view,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::folded_value::{
     PublicConstTemplate, PublicConstTemplateKind, PublicConstTemplatePiece,
     PublicConstTemplateSlot, PublicTemplateSlotKey,
 };
-use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -38,7 +37,6 @@ pub(super) struct ProjectedConstTemplates {
 impl AstFinalizer<'_, '_> {
     pub(super) fn project_const_templates(
         &self,
-        project_path_resolver: &ProjectPathResolver,
         string_table: &mut StringTable,
     ) -> Result<ProjectedConstTemplates, TemplateNormalizationError> {
         let mut by_name = FxHashMap::default();
@@ -46,12 +44,8 @@ impl AstFinalizer<'_, '_> {
         let store = self.context.template_ir_store.borrow();
 
         for declaration in &self.environment.lookups.module_constants {
-            let Some(projected) = self.project_template_expression(
-                declaration,
-                &store,
-                project_path_resolver,
-                string_table,
-            )?
+            let Some(projected) =
+                self.project_template_expression(declaration, &store, string_table)?
             else {
                 continue;
             };
@@ -75,12 +69,8 @@ impl AstFinalizer<'_, '_> {
             .values()
         {
             for parameter in &signature.signature.parameters {
-                let Some(projected) = self.project_template_expression(
-                    parameter,
-                    &store,
-                    project_path_resolver,
-                    string_table,
-                )?
+                let Some(projected) =
+                    self.project_template_expression(parameter, &store, string_table)?
                 else {
                     continue;
                 };
@@ -94,12 +84,8 @@ impl AstFinalizer<'_, '_> {
             .values()
         {
             for field in fields {
-                let Some(projected) = self.project_template_expression(
-                    field,
-                    &store,
-                    project_path_resolver,
-                    string_table,
-                )?
+                let Some(projected) =
+                    self.project_template_expression(field, &store, string_table)?
                 else {
                     continue;
                 };
@@ -114,7 +100,6 @@ impl AstFinalizer<'_, '_> {
         &self,
         declaration: &crate::compiler_frontend::ast::ast_nodes::Declaration,
         store: &crate::compiler_frontend::ast::templates::tir::TemplateIrStore,
-        project_path_resolver: &ProjectPathResolver,
         string_table: &mut StringTable,
     ) -> Result<Option<PublicConstTemplate>, TemplateNormalizationError> {
         let ExpressionKind::Template(template) = &declaration.value.kind else {
@@ -129,28 +114,16 @@ impl AstFinalizer<'_, '_> {
             reference.context,
         )?;
         let prepared = prepare_tir_view(&view, TemplatePreparationMode::ConstRequired)?;
-        let publish = matches!(prepared, PreparedTemplate::Foldable(_))
+        let publish = matches!(prepared.outcome, TemplatePreparationOutcome::Foldable)
             || matches!(
-                prepared,
-                PreparedTemplate::Helper(
-                    crate::compiler_frontend::ast::templates::tir::TemplateHelperKind::SlotInsert
-                )
+                prepared.outcome,
+                TemplatePreparationOutcome::Helper(TemplateHelperKind::SlotInsert)
             );
         if !publish {
             return Ok(None);
         }
 
-        let source_file_scope = self
-            .environment
-            .lookups
-            .module_symbols
-            .canonical_source_by_symbol_path
-            .get(&declaration.id)
-            .unwrap_or(&declaration.value.location.scope);
         let mut fold_context = make_fold_context(
-            source_file_scope,
-            &self.context.path_format_config,
-            project_path_resolver,
             string_table,
             self.context.template_const_loop_iteration_limit,
         );
@@ -183,8 +156,10 @@ impl AstFinalizer<'_, '_> {
 
 fn project_const_template_view(
     view: TirView<'_>,
-    prepared: PreparedTemplate,
-    fold_context: &mut crate::compiler_frontend::ast::templates::template_folding::TemplateFoldContext<'_>,
+    prepared: TemplatePreparation,
+    fold_context: &mut crate::compiler_frontend::ast::templates::template_folding::TirFoldContext<
+        '_,
+    >,
     visiting: &mut FxHashSet<TirViewIdentity>,
 ) -> Result<PublicConstTemplate, TemplateNormalizationError> {
     if !visiting.insert(view.identity()) {
@@ -233,24 +208,16 @@ fn project_const_template_view(
 fn project_slot(
     view: &TirView<'_>,
     occurrence: SlotOccurrenceId,
-    fold_context: &mut crate::compiler_frontend::ast::templates::template_folding::TemplateFoldContext<'_>,
+    fold_context: &mut crate::compiler_frontend::ast::templates::template_folding::TirFoldContext<
+        '_,
+    >,
     visiting: &mut FxHashSet<TirViewIdentity>,
 ) -> Result<PublicConstTemplateSlot, TemplateNormalizationError> {
-    let placeholder = view
-        .store()
-        .nodes
-        .iter()
-        .find_map(|node| match &node.kind {
-            TemplateIrNodeKind::Slot { placeholder } if placeholder.occurrence_id == occurrence => {
-                Some(placeholder)
-            }
-            _ => None,
-        })
-        .ok_or_else(|| {
-            CompilerError::compiler_error(
-                "Public const-template fold returned a slot occurrence absent from its TIR store.",
-            )
-        })?;
+    let placeholder = view.slot_placeholder(occurrence).ok_or_else(|| {
+        CompilerError::compiler_error(
+            "Public const-template fold returned a slot occurrence absent from its TIR store.",
+        )
+    })?;
 
     Ok(PublicConstTemplateSlot {
         key: project_slot_key(&placeholder.key, fold_context.string_table),
@@ -273,7 +240,9 @@ fn project_slot(
 fn project_wrapper_set(
     parent_view: &TirView<'_>,
     wrapper_set_id: Option<crate::compiler_frontend::ast::templates::tir::TemplateWrapperSetId>,
-    fold_context: &mut crate::compiler_frontend::ast::templates::template_folding::TemplateFoldContext<'_>,
+    fold_context: &mut crate::compiler_frontend::ast::templates::template_folding::TirFoldContext<
+        '_,
+    >,
     visiting: &mut FxHashSet<TirViewIdentity>,
 ) -> Result<Vec<PublicConstTemplate>, TemplateNormalizationError> {
     let Some(wrapper_set_id) = wrapper_set_id else {

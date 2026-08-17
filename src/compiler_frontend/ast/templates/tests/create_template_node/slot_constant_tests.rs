@@ -1,7 +1,7 @@
 use super::*;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::const_values::resolver::{
-    classify_template_effective_tir, classify_template_from_effective_tir,
+    classify_template_from_effective_tir, prepare_template_tir_facts,
 };
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
@@ -57,9 +57,9 @@ fn slot_wrappers_remain_compile_time_templates_until_filled() {
         TemplateType::String
     ));
     assert!(
-        classify_template_effective_tir(&template, &context.template_ir_store)
+        prepare_template_tir_facts(&template, &context.template_ir_store)
             .expect("wrapper classification should succeed")
-            .has_unresolved_slots,
+            .has_unresolved_slot_occurrences,
         "wrapper template should have unresolved slots"
     );
     let expression = Expression::template(template, ValueMode::ImmutableOwned);
@@ -127,9 +127,9 @@ fn wrapper_templates_with_runtime_references_are_not_compile_time_constants() {
         TemplateType::StringFunction
     ));
     assert!(
-        classify_template_effective_tir(&template, &context.template_ir_store)
+        prepare_template_tir_facts(&template, &context.template_ir_store)
             .expect("runtime wrapper classification should succeed")
-            .has_unresolved_slots,
+            .has_unresolved_slot_occurrences,
         "runtime wrapper template should have unresolved slots"
     );
     let expression = Expression::template(template, ValueMode::ImmutableOwned);
@@ -259,9 +259,9 @@ fn assert_slot_is_tir_only_and_const(source: &str, slot_name: &str) {
         .expect("template with slot should parse");
 
     assert!(
-        classify_template_effective_tir(&template, &context.template_ir_store)
+        prepare_template_tir_facts(&template, &context.template_ir_store)
             .expect("slot classification should succeed")
-            .has_unresolved_slots,
+            .has_unresolved_slot_occurrences,
         "{slot_name} slot should be detected from TIR"
     );
 

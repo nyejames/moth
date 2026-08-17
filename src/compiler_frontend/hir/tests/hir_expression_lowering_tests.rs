@@ -161,18 +161,14 @@ fn expressions_to_owned_render_node(
 
 fn expression_to_owned_node(
     expression: &Expression,
-    string_table: &StringTable,
+    _string_table: &StringTable,
 ) -> OwnedRuntimeTemplateNode {
     match &expression.kind {
-        ExpressionKind::StringSlice(text) => {
-            let byte_len = string_table.resolve(*text).len() as u32;
-            OwnedRuntimeTemplateNode::Text {
-                text: *text,
-                byte_len,
-                reactive_subscription: None,
-                location: expression.location.to_owned(),
-            }
-        }
+        ExpressionKind::StringSlice(text) => OwnedRuntimeTemplateNode::Text {
+            text: *text,
+            reactive_subscription: None,
+            location: expression.location.to_owned(),
+        },
         _ => OwnedRuntimeTemplateNode::DynamicExpression {
             expression: Box::new(expression.clone()),
             reactive_subscription: None,
@@ -187,24 +183,19 @@ fn expression_to_owned_node(
 fn text_aggregate_wrapper_node(
     prefix: StringId,
     suffix: StringId,
-    string_table: &StringTable,
+    _string_table: &StringTable,
     location: &SourceLocation,
 ) -> OwnedRuntimeTemplateNode {
-    let prefix_len = string_table.resolve(prefix).len() as u32;
-    let suffix_len = string_table.resolve(suffix).len() as u32;
-
     OwnedRuntimeTemplateNode::Sequence {
         children: vec![
             OwnedRuntimeTemplateNode::Text {
                 text: prefix,
-                byte_len: prefix_len,
                 reactive_subscription: None,
                 location: location.to_owned(),
             },
             OwnedRuntimeTemplateNode::AggregateOutput,
             OwnedRuntimeTemplateNode::Text {
                 text: suffix,
-                byte_len: suffix_len,
                 reactive_subscription: None,
                 location: location.to_owned(),
             },
@@ -416,7 +407,6 @@ fn runtime_template_slot_placeholder_materializes_as_no_output_owned_node() {
             children: vec![
                 OwnedRuntimeTemplateNode::Text {
                     text: before,
-                    byte_len: 7,
                     reactive_subscription: None,
                     location: location.clone(),
                 },
@@ -425,7 +415,6 @@ fn runtime_template_slot_placeholder_materializes_as_no_output_owned_node() {
                 },
                 OwnedRuntimeTemplateNode::Text {
                     text: after,
-                    byte_len: 5,
                     reactive_subscription: None,
                     location: location.clone(),
                 },

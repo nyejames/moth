@@ -16,26 +16,30 @@ use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordSta
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::styles::markdown::markdown_formatter;
 use crate::compiler_frontend::ast::templates::template::{
-    Style, TemplateSegmentOrigin, TemplateType,
+    SlotKey, Style, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_control_flow::{
     TemplateBranchSelector, TemplateLoopControlKind, TemplateLoopHeader,
 };
 use crate::compiler_frontend::ast::templates::template_folding::{
-    TemplateEmission, TemplateFoldContext, TemplateFoldResult,
+    TemplateEmission, TemplateFoldResult, TirFoldContext,
 };
-use crate::compiler_frontend::ast::templates::tir::builder::TemplateIrBuilder;
-use crate::compiler_frontend::ast::templates::tir::fold::fold_prepared_template;
+use crate::compiler_frontend::ast::templates::tir::TemplateIrBuilder;
+use crate::compiler_frontend::ast::templates::tir::fold::{
+    fold_prepared_const_template_pattern, fold_prepared_template,
+};
 use crate::compiler_frontend::ast::templates::tir::fold_cache::{TirFoldCache, TirFoldCacheKey};
 use crate::compiler_frontend::ast::templates::tir::node::{
     TemplateIrBranch, TemplateIrNode, TemplateIrNodeKind,
 };
 use crate::compiler_frontend::ast::templates::tir::overlays::TemplateViewContext;
+use crate::compiler_frontend::ast::templates::tir::refs::TemplateTirChildReference;
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
 use crate::compiler_frontend::ast::templates::tir::summary::TemplateIrSummary;
 use crate::compiler_frontend::ast::templates::tir::view::{TemplateTirPhase, TirView};
 use crate::compiler_frontend::ast::templates::tir::{
-    PreparedTemplate, RuntimeTemplateReason, TemplatePreparationMode, prepare_tir_view,
+    FoldedConstTemplatePiece, RuntimeTemplateReason, TemplatePreparationMode,
+    TemplatePreparationOutcome, prepare_tir_view,
 };
 use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeTemplateNode,
@@ -43,8 +47,6 @@ use crate::compiler_frontend::ast::templates::{
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
-use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
@@ -61,29 +63,11 @@ fn empty_location() -> SourceLocation {
     SourceLocation::default()
 }
 
-fn test_project_path_resolver() -> ProjectPathResolver {
-    let cwd = std::env::temp_dir();
-    ProjectPathResolver::new(
-        cwd.clone(),
-        cwd,
-        crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots::empty(),
-        &crate::builder_surface::SourceFileKindRegistry::default(),
-    )
-    .expect("test path resolver should be valid")
-}
-
-fn build_test_fold_context<'a>(
-    string_table: &'a mut StringTable,
-    resolver: &'a ProjectPathResolver,
-    path_format: &'a PathStringFormatConfig,
-    source_scope: &'a InternedPath,
-) -> TemplateFoldContext<'a> {
-    TemplateFoldContext {
+fn build_test_fold_context<'a>(string_table: &'a mut StringTable) -> TirFoldContext<'a> {
+    TirFoldContext {
         string_table,
-        project_path_resolver: resolver,
-        path_format_config: path_format,
-        source_file_scope: source_scope,
-        template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        template_const_loop_iteration_limit:
+            crate::projects::settings::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         bindings: vec![],
         fold_cache: TirFoldCache::new(),
     }
@@ -146,31 +130,484 @@ fn fold_final_view_fixture(
     string_table: &mut StringTable,
     phase: TemplateTirPhase,
 ) -> Result<TemplateEmission, TemplateError> {
-    let resolver = test_project_path_resolver();
-    let path_format = PathStringFormatConfig::default();
-    let source_scope = InternedPath::new();
-
     let store = fixture.store.borrow();
     let view = TirView::new(&store, fixture.template_id, phase, fixture.context)
         .expect("test view should construct");
 
-    let mut fold_context =
-        build_test_fold_context(string_table, &resolver, &path_format, &source_scope);
+    let mut fold_context = build_test_fold_context(string_table);
 
-    let prepared = match prepare_tir_view(&view, TemplatePreparationMode::Value)? {
-        PreparedTemplate::Foldable(prepared) => prepared,
-        PreparedTemplate::Runtime(_) | PreparedTemplate::Helper(_) => {
-            return Err(TemplateError::Infrastructure(Box::new(
-                CompilerError::compiler_error("test view was not foldable"),
-            )));
-        }
-    };
+    let prepared = prepare_tir_view(&view, TemplatePreparationMode::Value)?;
+    if !matches!(prepared.outcome, TemplatePreparationOutcome::Foldable) {
+        return Err(TemplateError::Infrastructure(Box::new(
+            CompilerError::compiler_error("test view was not foldable"),
+        )));
+    }
     // Existing final-view text assertions do not own semantic provenance.
-    let TemplateFoldResult {
-        emission,
-        provenance: _,
-    } = fold_prepared_template(&prepared, view, &mut fold_context)?;
+    let TemplateFoldResult { emission, .. } =
+        fold_prepared_template(&prepared, view, &mut fold_context)?;
     Ok(emission)
+}
+
+fn project_pattern_for_template(
+    store: &TemplateIrStore,
+    template_id: crate::compiler_frontend::ast::templates::tir::ids::TemplateIrId,
+    string_table: &mut StringTable,
+) -> Result<Vec<FoldedConstTemplatePiece>, TemplateError> {
+    let view = TirView::with_minimum_phase(
+        store,
+        template_id,
+        TemplateTirPhase::Composed,
+        TemplateTirPhase::Composed,
+        TemplateViewContext::default(),
+    )?;
+    let prepared = prepare_tir_view(&view, TemplatePreparationMode::ConstRequired)?;
+    let mut fold_context = build_test_fold_context(string_table);
+    Ok(fold_prepared_const_template_pattern(prepared, view, &mut fold_context)?.pieces)
+}
+
+#[test]
+fn const_template_projection_preserves_structured_slot_order() -> Result<(), TemplateError> {
+    let mut string_table = StringTable::new();
+    let mut store = TemplateIrStore::new();
+    let before = string_table.intern("before");
+    let after = string_table.intern("after");
+    let location = empty_location();
+
+    let (template_id, occurrence_id) = {
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let before_node = builder.push_text_node(
+            before,
+            "before".len(),
+            TemplateSegmentOrigin::Body,
+            location.clone(),
+        );
+        let slot_node = builder.push_slot_node(SlotKey::Default, location.clone());
+        let after_node = builder.push_text_node(
+            after,
+            "after".len(),
+            TemplateSegmentOrigin::Body,
+            location.clone(),
+        );
+        let root =
+            builder.push_sequence_node(vec![before_node, slot_node, after_node], location.clone());
+        let template_id = builder.finish_template(
+            root,
+            Style::default(),
+            TemplateType::SlotInsert(SlotKey::Default),
+            TemplateIrSummary::default(),
+            location,
+        );
+        let occurrence_id = match store.get_node(slot_node).expect("slot node should exist") {
+            TemplateIrNode {
+                kind: TemplateIrNodeKind::Slot { placeholder },
+                ..
+            } => placeholder.occurrence_id,
+            _ => panic!("expected a slot node"),
+        };
+        (template_id, occurrence_id)
+    };
+
+    let view = TirView::with_minimum_phase(
+        &store,
+        template_id,
+        TemplateTirPhase::Composed,
+        TemplateTirPhase::Composed,
+        TemplateViewContext::default(),
+    )
+    .expect("slot-insert view should construct");
+    let prepared = prepare_tir_view(&view, TemplatePreparationMode::ConstRequired)?;
+    let mut fold_context = build_test_fold_context(&mut string_table);
+
+    let pattern = fold_prepared_const_template_pattern(prepared, view, &mut fold_context)?;
+    assert_eq!(
+        pattern.pieces,
+        vec![
+            FoldedConstTemplatePiece::Text("before".to_owned()),
+            FoldedConstTemplatePiece::Slot(occurrence_id),
+            FoldedConstTemplatePiece::Text("after".to_owned()),
+        ]
+    );
+
+    Ok(())
+}
+
+#[test]
+fn const_template_projection_preserves_nested_child_slot_order() -> Result<(), TemplateError> {
+    let mut string_table = StringTable::new();
+    let mut store = TemplateIrStore::new();
+    let location = empty_location();
+    let before = string_table.intern("before");
+    let after = string_table.intern("after");
+
+    let (child_template_id, child_occurrence) = {
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let before_node = builder.push_text_node(
+            before,
+            "before".len(),
+            TemplateSegmentOrigin::Body,
+            location.clone(),
+        );
+        let slot_node = builder.push_slot_node(SlotKey::Default, location.clone());
+        let after_node = builder.push_text_node(
+            after,
+            "after".len(),
+            TemplateSegmentOrigin::Body,
+            location.clone(),
+        );
+        let root =
+            builder.push_sequence_node(vec![before_node, slot_node, after_node], location.clone());
+        let template_id = builder.finish_template(
+            root,
+            Style::default(),
+            TemplateType::String,
+            TemplateIrSummary::default(),
+            location.clone(),
+        );
+        let occurrence = match &store.get_node(slot_node).expect("child slot exists").kind {
+            TemplateIrNodeKind::Slot { placeholder } => placeholder.occurrence_id,
+            other => panic!("expected child slot, got {other:?}"),
+        };
+        (template_id, occurrence)
+    };
+
+    let parent_template_id = {
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let child_node = builder.push_child_template_node_with_reference(
+            TemplateTirChildReference::new(
+                child_template_id,
+                TemplateTirPhase::Composed,
+                TemplateViewContext::default(),
+            ),
+            location.clone(),
+        );
+        let root = builder.push_sequence_node(vec![child_node], location.clone());
+        builder.finish_template(
+            root,
+            Style::default(),
+            TemplateType::SlotInsert(SlotKey::Default),
+            TemplateIrSummary::default(),
+            location,
+        )
+    };
+
+    assert_eq!(
+        project_pattern_for_template(&store, parent_template_id, &mut string_table)?,
+        vec![
+            FoldedConstTemplatePiece::Text("before".to_owned()),
+            FoldedConstTemplatePiece::Slot(child_occurrence),
+            FoldedConstTemplatePiece::Text("after".to_owned()),
+        ]
+    );
+
+    Ok(())
+}
+
+#[test]
+fn const_template_projection_preserves_selected_branch_and_fallback_slots()
+-> Result<(), TemplateError> {
+    let mut string_table = StringTable::new();
+    let mut store = TemplateIrStore::new();
+    let location = empty_location();
+
+    let build_branch_template = |store: &mut TemplateIrStore, selected: bool| {
+        let mut builder = TemplateIrBuilder::new(store);
+        let selected_slot = builder.push_slot_node(SlotKey::Default, location.clone());
+        let fallback_slot = builder.push_slot_node(SlotKey::Default, location.clone());
+        let branch = TemplateIrBranch::new(
+            TemplateBranchSelector::Bool(bool_expression(selected)),
+            selected_slot,
+            location.clone(),
+            builder.store.next_expression_site_id(),
+        );
+        let root =
+            builder.push_branch_chain_node(vec![branch], Some(fallback_slot), location.clone());
+        let template_id = builder.finish_template(
+            root,
+            Style::default(),
+            TemplateType::SlotInsert(SlotKey::Default),
+            TemplateIrSummary::empty(),
+            location.clone(),
+        );
+        let selected_occurrence = match &store
+            .get_node(selected_slot)
+            .expect("selected slot exists")
+            .kind
+        {
+            TemplateIrNodeKind::Slot { placeholder } => placeholder.occurrence_id,
+            other => panic!("expected selected slot, got {other:?}"),
+        };
+        let fallback_occurrence = match &store
+            .get_node(fallback_slot)
+            .expect("fallback slot exists")
+            .kind
+        {
+            TemplateIrNodeKind::Slot { placeholder } => placeholder.occurrence_id,
+            other => panic!("expected fallback slot, got {other:?}"),
+        };
+        (template_id, selected_occurrence, fallback_occurrence)
+    };
+
+    let (selected_template, selected_occurrence, selected_fallback) =
+        build_branch_template(&mut store, true);
+    assert_eq!(
+        project_pattern_for_template(&store, selected_template, &mut string_table)?,
+        vec![FoldedConstTemplatePiece::Slot(selected_occurrence)]
+    );
+    assert_ne!(selected_occurrence, selected_fallback);
+
+    let (fallback_template, _selected_occurrence, fallback_occurrence) =
+        build_branch_template(&mut store, false);
+    assert_eq!(
+        project_pattern_for_template(&store, fallback_template, &mut string_table)?,
+        vec![FoldedConstTemplatePiece::Slot(fallback_occurrence)]
+    );
+
+    Ok(())
+}
+
+#[test]
+fn const_template_projection_repeats_slots_in_const_loops() -> Result<(), TemplateError> {
+    let mut string_table = StringTable::new();
+    let mut store = TemplateIrStore::new();
+    let location = empty_location();
+    let (template_id, occurrence) = {
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let body = builder.push_slot_node(SlotKey::Default, location.clone());
+        let header = TemplateLoopHeader::Range {
+            bindings: Box::new(LoopBindings {
+                item: None,
+                index: None,
+            }),
+            range: Box::new(RangeLoopSpec {
+                start: int_expression(0),
+                end: int_expression(2),
+                step: None,
+                end_kind: RangeEndKind::Exclusive,
+            }),
+        };
+        let root = builder.push_loop_node(header, body, None, location.clone());
+        let template_id = builder.finish_template(
+            root,
+            Style::default(),
+            TemplateType::SlotInsert(SlotKey::Default),
+            TemplateIrSummary::empty(),
+            location,
+        );
+        let occurrence = match &store.get_node(body).expect("loop slot exists").kind {
+            TemplateIrNodeKind::Slot { placeholder } => placeholder.occurrence_id,
+            other => panic!("expected loop slot, got {other:?}"),
+        };
+        (template_id, occurrence)
+    };
+
+    assert_eq!(
+        project_pattern_for_template(&store, template_id, &mut string_table)?,
+        vec![
+            FoldedConstTemplatePiece::Slot(occurrence),
+            FoldedConstTemplatePiece::Slot(occurrence),
+        ]
+    );
+
+    Ok(())
+}
+
+#[test]
+fn const_template_projection_preserves_slot_in_child_wrapper() -> Result<(), TemplateError> {
+    let mut string_table = StringTable::new();
+    let mut store = TemplateIrStore::new();
+    let location = empty_location();
+    let named_key = SlotKey::Named(string_table.intern("named"));
+
+    let (parent_template_id, wrapper_occurrence) = {
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let wrapper_slot = builder.push_slot_node(named_key, location.clone());
+        let wrapper_root = builder.push_sequence_node(vec![wrapper_slot], location.clone());
+        let wrapper_template_id = builder.finish_template(
+            wrapper_root,
+            Style::default(),
+            TemplateType::String,
+            TemplateIrSummary::empty(),
+            location.clone(),
+        );
+        let wrapper_occurrence = match &builder
+            .store
+            .get_node(wrapper_slot)
+            .expect("wrapper slot exists")
+            .kind
+        {
+            TemplateIrNodeKind::Slot { placeholder } => placeholder.occurrence_id,
+            other => panic!("expected wrapper slot, got {other:?}"),
+        };
+        let child_text = string_table.intern("child");
+        let child_node = builder.push_text_node(
+            child_text,
+            "child".len(),
+            TemplateSegmentOrigin::Body,
+            location.clone(),
+        );
+        let child_root = builder.push_sequence_node(vec![child_node], location.clone());
+        let parent_template_id = builder.finish_template(
+            child_root,
+            Style::default(),
+            TemplateType::SlotInsert(SlotKey::Default),
+            TemplateIrSummary::empty(),
+            location,
+        );
+        let wrapper_set = builder.store.push_or_reuse_wrapper_set(vec![
+            crate::compiler_frontend::ast::templates::tir::refs::TemplateWrapperReference::new(
+                wrapper_template_id,
+                TemplateTirPhase::Composed,
+                TemplateViewContext::default(),
+            ),
+        ]);
+        builder
+            .store
+            .set_conditional_child_wrapper_set(parent_template_id, wrapper_set)
+            .expect("wrapper set should attach to parent");
+        (parent_template_id, wrapper_occurrence)
+    };
+
+    assert_eq!(
+        project_pattern_for_template(&store, parent_template_id, &mut string_table)?,
+        vec![
+            FoldedConstTemplatePiece::Slot(wrapper_occurrence),
+            FoldedConstTemplatePiece::Text("child".to_owned()),
+        ]
+    );
+
+    Ok(())
+}
+
+#[test]
+fn const_template_projection_preserves_loop_aggregate_content() -> Result<(), TemplateError> {
+    let mut string_table = StringTable::new();
+    let mut store = TemplateIrStore::new();
+    let location = empty_location();
+    let (template_id, body_occurrence) = {
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let body_slot = builder.push_slot_node(SlotKey::Default, location.clone());
+        let header = TemplateLoopHeader::Range {
+            bindings: Box::new(LoopBindings {
+                item: None,
+                index: None,
+            }),
+            range: Box::new(RangeLoopSpec {
+                start: int_expression(0),
+                end: int_expression(2),
+                step: None,
+                end_kind: RangeEndKind::Exclusive,
+            }),
+        };
+        let aggregate_output = builder.store.push_node(TemplateIrNode::new(
+            TemplateIrNodeKind::AggregateOutput,
+            location.clone(),
+        ));
+        let open = builder.push_text_node(
+            string_table.intern("<"),
+            1,
+            TemplateSegmentOrigin::Body,
+            location.clone(),
+        );
+        let close = builder.push_text_node(
+            string_table.intern(">"),
+            1,
+            TemplateSegmentOrigin::Body,
+            location.clone(),
+        );
+        let aggregate_wrapper =
+            builder.push_sequence_node(vec![open, aggregate_output, close], location.clone());
+        let root =
+            builder.push_loop_node(header, body_slot, Some(aggregate_wrapper), location.clone());
+        let template_id = builder.finish_template(
+            root,
+            Style::default(),
+            TemplateType::SlotInsert(SlotKey::Default),
+            TemplateIrSummary::empty(),
+            location,
+        );
+        let body_occurrence = match &builder
+            .store
+            .get_node(body_slot)
+            .expect("body slot exists")
+            .kind
+        {
+            TemplateIrNodeKind::Slot { placeholder } => placeholder.occurrence_id,
+            other => panic!("expected body slot, got {other:?}"),
+        };
+        (template_id, body_occurrence)
+    };
+
+    assert_eq!(
+        project_pattern_for_template(&store, template_id, &mut string_table)?,
+        vec![
+            FoldedConstTemplatePiece::Text("<".to_owned()),
+            FoldedConstTemplatePiece::Slot(body_occurrence),
+            FoldedConstTemplatePiece::Slot(body_occurrence),
+            FoldedConstTemplatePiece::Text(">".to_owned()),
+        ]
+    );
+
+    Ok(())
+}
+
+#[test]
+fn const_template_projection_keeps_structural_no_output_empty() -> Result<(), TemplateError> {
+    let mut string_table = StringTable::new();
+    let mut store = TemplateIrStore::new();
+    let location = empty_location();
+
+    let false_branch_template = {
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let hidden_slot = builder.push_slot_node(SlotKey::Default, location.clone());
+        let branch = TemplateIrBranch::new(
+            TemplateBranchSelector::Bool(bool_expression(false)),
+            hidden_slot,
+            location.clone(),
+            builder.store.next_expression_site_id(),
+        );
+        let root = builder.push_branch_chain_node(vec![branch], None, location.clone());
+        builder.finish_template(
+            root,
+            Style::default(),
+            TemplateType::SlotInsert(SlotKey::Default),
+            TemplateIrSummary::empty(),
+            location.clone(),
+        )
+    };
+    assert!(
+        project_pattern_for_template(&store, false_branch_template, &mut string_table,)?.is_empty()
+    );
+
+    let zero_iteration_template = {
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let body = builder.push_slot_node(SlotKey::Default, location.clone());
+        let header = TemplateLoopHeader::Range {
+            bindings: Box::new(LoopBindings {
+                item: None,
+                index: None,
+            }),
+            range: Box::new(RangeLoopSpec {
+                start: int_expression(0),
+                end: int_expression(0),
+                step: None,
+                end_kind: RangeEndKind::Exclusive,
+            }),
+        };
+        let root = builder.push_loop_node(header, body, None, location.clone());
+        builder.finish_template(
+            root,
+            Style::default(),
+            TemplateType::SlotInsert(SlotKey::Default),
+            TemplateIrSummary::empty(),
+            location,
+        )
+    };
+    assert!(
+        project_pattern_for_template(&store, zero_iteration_template, &mut string_table,)?
+            .is_empty()
+    );
+
+    Ok(())
 }
 
 // -------------------------
@@ -189,6 +626,7 @@ fn final_view_fold_branch_selects_body() {
             TemplateBranchSelector::Bool(bool_expression(true)),
             yes_node,
             empty_location(),
+            builder.store.next_expression_site_id(),
         );
         let root = builder.push_branch_chain_node(vec![branch], None, empty_location());
 
@@ -223,6 +661,7 @@ fn final_view_fold_false_branch_no_else_is_no_output() {
             TemplateBranchSelector::Bool(bool_expression(false)),
             yes_node,
             empty_location(),
+            builder.store.next_expression_site_id(),
         );
         let root = builder.push_branch_chain_node(vec![branch], None, empty_location());
 
@@ -260,6 +699,7 @@ fn final_view_fold_false_branch_selects_fallback() {
             TemplateBranchSelector::Bool(bool_expression(false)),
             yes_node,
             empty_location(),
+            builder.store.next_expression_site_id(),
         );
         let root =
             builder.push_branch_chain_node(vec![branch], Some(fallback_node), empty_location());
@@ -392,9 +832,6 @@ fn final_view_fold_loop_binding_provenance_reaches_exact_result() {
         )
     });
 
-    let resolver = test_project_path_resolver();
-    let path_format = PathStringFormatConfig::default();
-    let source_scope = InternedPath::new();
     let store = fixture.store.borrow();
     let view = TirView::new(
         &store,
@@ -403,16 +840,13 @@ fn final_view_fold_loop_binding_provenance_reaches_exact_result() {
         fixture.context,
     )
     .expect("range loop view should construct");
-    let prepared = match prepare_tir_view(&view, TemplatePreparationMode::Value)
-        .expect("range loop view should prepare")
-    {
-        PreparedTemplate::Foldable(prepared) => prepared,
-        PreparedTemplate::Runtime(_) | PreparedTemplate::Helper(_) => {
-            panic!("range loop fixture should be foldable")
-        }
-    };
-    let mut fold_context =
-        build_test_fold_context(&mut string_table, &resolver, &path_format, &source_scope);
+    let prepared = prepare_tir_view(&view, TemplatePreparationMode::Value)
+        .expect("range loop view should prepare");
+    assert!(matches!(
+        prepared.outcome,
+        TemplatePreparationOutcome::Foldable
+    ));
+    let mut fold_context = build_test_fold_context(&mut string_table);
     let result = fold_prepared_template(&prepared, view, &mut fold_context)
         .expect("range loop exact fold should succeed");
 
@@ -641,9 +1075,8 @@ fn final_view_aggregate_output_outside_wrapper_classifies_as_runtime() {
         .expect("preparation should classify AggregateOutput outside a wrapper");
     assert!(
         matches!(
-            prepared,
-            PreparedTemplate::Runtime(runtime)
-                if runtime.reason == RuntimeTemplateReason::AggregateOutput
+            prepared.outcome,
+            TemplatePreparationOutcome::Runtime(RuntimeTemplateReason::AggregateOutput)
         ),
         "AggregateOutput outside a wrapper should classify as runtime, got: {prepared:?}"
     );
@@ -667,7 +1100,7 @@ fn build_formatted_markdown_fixture(string_table: &mut StringTable) -> FinalView
         let text = string_table.intern("Hello `code`");
         let root = builder.push_text_node(
             text,
-            "Hello `code`".len() as u32,
+            "Hello `code`".len(),
             TemplateSegmentOrigin::Body,
             empty_location(),
         );
@@ -694,18 +1127,20 @@ fn build_formatted_markdown_fixture(string_table: &mut StringTable) -> FinalView
         .root
     };
 
-    {
+    let formatted_template_id = {
         let mut store_borrow = store.borrow_mut();
         store_borrow
-            .templates
-            .get_mut(template_id.index())
-            .expect("formatted template should exist")
-            .root = formatted_root;
-    }
+            .push_structurally_derived_template(
+                template_id,
+                formatted_root,
+                crate::compiler_frontend::ast::templates::tir::DerivedTemplateMetadata::preserve_source(),
+            )
+            .expect("formatted root should publish with a matching summary")
+    };
 
     FinalViewFoldFixture {
         store,
-        template_id,
+        template_id: formatted_template_id,
         context,
     }
 }
@@ -739,7 +1174,6 @@ fn final_view_runtime_slot_application_requires_handoff() {
         let handoff = OwnedRuntimeSlotApplicationHandoff {
             wrapper: OwnedRuntimeTemplateNode::Text {
                 text: wrapper_text,
-                byte_len: "<shell>".len() as u32,
                 reactive_subscription: None,
                 location: empty_location(),
             },
@@ -765,9 +1199,6 @@ fn final_view_runtime_slot_application_requires_handoff() {
         )
     });
 
-    let resolver = test_project_path_resolver();
-    let path_format = PathStringFormatConfig::default();
-    let source_scope = InternedPath::new();
     let store = fixture.store.borrow();
     let view = TirView::new(
         &store,
@@ -776,12 +1207,14 @@ fn final_view_runtime_slot_application_requires_handoff() {
         fixture.context,
     )
     .expect("final view should construct");
-    let fold_context =
-        build_test_fold_context(&mut string_table, &resolver, &path_format, &source_scope);
+    let fold_context = build_test_fold_context(&mut string_table);
 
     let first = prepare_tir_view(&view, TemplatePreparationMode::Value)
         .expect("runtime slot application should prepare as runtime");
-    assert!(matches!(first, PreparedTemplate::Runtime(_)));
+    assert!(matches!(
+        first.outcome,
+        TemplatePreparationOutcome::Runtime(_)
+    ));
 
     let key = TirFoldCacheKey {
         identity: view.identity(),
@@ -795,6 +1228,9 @@ fn final_view_runtime_slot_application_requires_handoff() {
 
     let second = prepare_tir_view(&view, TemplatePreparationMode::Value)
         .expect("runtime slot application should remain a runtime result");
-    assert!(matches!(second, PreparedTemplate::Runtime(_)));
+    assert!(matches!(
+        second.outcome,
+        TemplatePreparationOutcome::Runtime(_)
+    ));
     assert!(fold_context.fold_cache.get(&key).is_none());
 }

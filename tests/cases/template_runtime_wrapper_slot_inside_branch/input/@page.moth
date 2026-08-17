@@ -1,6 +1,4 @@
-show = true
-
-list = [$children([if show:
+list = [$children([if true:
     <li class="branch-slot">[$slot]</li>
 ]):
     <ul>[$slot]</ul>

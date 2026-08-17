@@ -59,7 +59,7 @@ pub fn parse_struct_shell(
 /// references are unresolved and cannot be validated yet.
 ///
 /// Template constness is classified through the caller's effective view over the module TIR store.
-/// A TIR classification failure preserves its typed infrastructure lane instead of being rendered
+/// A preparation failure preserves its typed infrastructure lane instead of being rendered
 /// into the generic non-constant source diagnostic.
 pub(crate) fn validate_struct_default_values(
     fields: &[Declaration],

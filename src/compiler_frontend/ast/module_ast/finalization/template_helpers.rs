@@ -9,18 +9,15 @@
 use crate::compiler_frontend::ast::module_ast::finalization::normalize_ast::TemplateNormalizationError;
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template_folding::{
-    TemplateEmission, TemplateFoldContext,
+    TemplateEmission, TirFoldContext,
 };
 use crate::compiler_frontend::ast::templates::tir::{
-    PreparedRuntime, PreparedTemplate, TemplateHelperKind, TemplateIrStore,
-    TemplatePreparationMode, TemplateTirPhase, TirFoldCache, TirView, fold_prepared_template,
+    TemplateHelperKind, TemplateIrStore, TemplatePreparation, TemplatePreparationMode,
+    TemplatePreparationOutcome, TemplateTirPhase, TirFoldCache, TirView, fold_prepared_template,
     prepare_tir_view,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
-use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
-use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use std::cell::RefCell;
@@ -33,7 +30,7 @@ use std::rc::Rc;
 ///      as independent optional/disposition fields that can contradict each other.
 pub(super) enum FinalizedTemplateValue {
     Folded(StringId, SyntheticInterfaceProvenance),
-    Runtime(PreparedRuntime),
+    Runtime(TemplatePreparation),
     Helper(TemplateHelperKind),
 }
 
@@ -69,21 +66,18 @@ pub(super) fn finalize_template_value(
     // Preparation validates and classifies the exact view before cache lookup
     // or folding. Its compact result is the sole final-value decision source.
     let preparation = prepare_tir_view(&view, preparation_mode)?;
-    let fold_preparation = match preparation {
-        PreparedTemplate::Helper(kind) => {
+    let fold_preparation = match preparation.outcome {
+        TemplatePreparationOutcome::Helper(kind) => {
             increment_ast_counter(AstCounter::TirFinalizationFoldSuccesses);
             return Ok(FinalizedTemplateValue::Helper(kind));
         }
-        PreparedTemplate::Runtime(prepared) => {
-            return Ok(FinalizedTemplateValue::Runtime(prepared));
+        TemplatePreparationOutcome::Runtime(_) => {
+            return Ok(FinalizedTemplateValue::Runtime(preparation));
         }
-        PreparedTemplate::Foldable(prepared) => prepared,
+        TemplatePreparationOutcome::Foldable => preparation,
     };
 
     let mut fold_context = make_fold_context(
-        fold_inputs.source_file_scope,
-        fold_inputs.path_format_config,
-        fold_inputs.project_path_resolver,
         fold_inputs.string_table,
         fold_inputs.template_const_loop_iteration_limit,
     );
@@ -97,7 +91,7 @@ pub(super) fn finalize_template_value(
 
 fn template_emission_to_string_id(
     emission: TemplateEmission,
-    fold_context: &mut TemplateFoldContext<'_>,
+    fold_context: &mut TirFoldContext<'_>,
 ) -> Result<StringId, TemplateNormalizationError> {
     match emission {
         TemplateEmission::NoOutput => Ok(fold_context.string_table.intern("")),
@@ -111,38 +105,26 @@ fn template_emission_to_string_id(
     }
 }
 
-/// Project-aware inputs for finalization-time template folding.
+/// Inputs for finalization-time template folding.
 ///
-/// WHAT: bundles the stable services and TIR ownership handle needed to build
-/// the exact finalization view and run one fold operation.
+/// WHAT: bundles the string interner, loop policy and TIR ownership handle needed
+/// to build the exact finalization view and run one fold operation.
 /// WHY: finalization owns the module-store handle while the active `TirView`
 /// carries structural authority through preparation and folding.
-pub(super) struct TemplateValueFinalizationInputs<'a, 'strings> {
-    pub(super) source_file_scope: &'a InternedPath,
-    pub(super) path_format_config: &'a PathStringFormatConfig,
-    pub(super) project_path_resolver: &'a ProjectPathResolver,
+pub(super) struct TemplateValueFinalizationInputs<'store, 'strings> {
     pub(super) string_table: &'strings mut StringTable,
     pub(super) template_const_loop_iteration_limit: usize,
-    pub(super) template_ir_store: &'a Rc<RefCell<TemplateIrStore>>,
+    pub(super) template_ir_store: &'store Rc<RefCell<TemplateIrStore>>,
 }
 
-/// Creates a `TemplateFoldContext` from finalization parameters.
+/// Creates a narrow TIR fold context from finalization parameters.
 ///
-/// WHAT: bundles project-aware folding services for one fold operation.
-/// WHY: TIR structural authority comes from the exact view at each fold entry
-///      point rather than from a duplicate context field.
 pub(super) fn make_fold_context<'a>(
-    source_file_scope: &'a InternedPath,
-    path_format_config: &'a PathStringFormatConfig,
-    project_path_resolver: &'a ProjectPathResolver,
     string_table: &'a mut StringTable,
     template_const_loop_iteration_limit: usize,
-) -> TemplateFoldContext<'a> {
-    TemplateFoldContext {
+) -> TirFoldContext<'a> {
+    TirFoldContext {
         string_table,
-        project_path_resolver,
-        path_format_config,
-        source_file_scope,
         template_const_loop_iteration_limit,
         bindings: Vec::new(),
         fold_cache: TirFoldCache::new(),

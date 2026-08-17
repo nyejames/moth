@@ -1,0 +1,17 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains_exactly_once = [
+    "<b>A</b>",
+    "<b>B</b>",
+    "<i>0</i>",
+    "<i>1</i>",
+    "Y",
+]
+rendered_output_not_contains = [
+    "<b><b>",
+    "<i><i>",
+    "<u>",
+    "<s>",
+    "Z",
+]

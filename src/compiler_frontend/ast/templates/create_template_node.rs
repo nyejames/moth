@@ -38,10 +38,9 @@ use crate::compiler_frontend::ast::templates::template_render_units::{
     prepare_control_flow_render_units,
 };
 use crate::compiler_frontend::ast::templates::tir::{
-    PreparedTemplate, TemplateConstructionContext, TemplateIr, TemplateTirPhase,
+    TemplateConstructionContext, TemplatePreparation, TemplatePreparationMode, TemplateTirPhase,
     TemplateTirReference, TemplateWrapperReference, TirView, attach_wrapper_context_overlay,
-    classify_effective_tir_view_template, compose_tir_head_chain_with_overlays,
-    merge_tir_slot_resolution_contexts,
+    compose_tir_head_chain_from_root, prepare_tir_view,
 };
 
 use crate::builder_surface::SourceFileKind;
@@ -76,7 +75,7 @@ type TemplateConstructionResult = Result<Template, TemplateError>;
 #[derive(Debug)]
 pub(crate) struct ConstRequiredTemplateConstruction {
     pub(crate) template: Template,
-    pub(crate) preparation: PreparedTemplate,
+    pub(crate) preparation: TemplatePreparation,
 }
 
 type ConstRequiredTemplateConstructionResult =
@@ -265,29 +264,21 @@ impl Template {
         // templates keep branch/body units structured so later folding/lowering
         // can stay lazy.
         let style = build_state.style.to_owned();
-        let child_wrappers = build_state.child_wrappers.to_owned();
-        let has_control_flow = {
-            let store = construction_context.store();
-            construction_context
-                .builder()
-                .control_flow_node_id(&store)
-                .is_some()
-        };
+        let has_control_flow = construction_context.control_flow_node_id().is_some();
         if has_control_flow {
             prepare_control_flow_render_units(
                 &mut construction_context,
                 ControlFlowRenderUnitRequest {
                     style: &style,
-                    child_wrappers: &child_wrappers,
                     context,
                     string_table,
                 },
             )?;
         }
 
-        // Finish the parser builder-state TIR with a provisional kind. The
-        // kind is updated after classification once the TIR-native composition
-        // block below has produced the final post-composition reference.
+        // Finish parser-emitted TIR with a provisional kind. The kind is
+        // updated after classification once the TIR-native composition block
+        // below has produced the final post-composition reference.
         //
         // Prepared control-flow owner roots are at Formatted phase because
         // render-unit preparation has installed formatted body content. Linear
@@ -298,12 +289,12 @@ impl Template {
         } else {
             TemplateTirPhase::Parsed
         };
+        let construction_location = construction_context.location().to_owned();
         let mut tir_reference = construction_context.finish(
             build_state.style.to_owned(),
             build_state.kind.to_owned(),
             owner_phase,
-            construction_context.location().to_owned(),
-        );
+        )?;
         let style = build_state.style.to_owned();
         install_formatted_tir_reference_for_linear_template(
             &mut tir_reference,
@@ -320,12 +311,9 @@ impl Template {
             // reference directly. There is no second template representation to
             // reconstruct here.
             //
-            // Overlay threading: head-chain composition returns a `ComposedTirRoot`
-            // with an optional slot-resolution view context. Wrapper
-            // context is attached after head-chain composition so it uses the
-            // final child occurrence IDs. The store borrow is released during
-            // shared-store calls so composition can access the same store
-            // through its internal `RefCell` without a borrow conflict.
+            // Wrapper-context overlays are attached after head-chain composition
+            // so they use the final child occurrence IDs. Slot-resolution
+            // context lives on each composed child reference.
 
             let template_id = tir_reference.root;
 
@@ -345,12 +333,9 @@ impl Template {
                     })?
             };
 
-            // Run shared-store head-chain composition. The store borrow is
-            // released so composition can access the same store through its
-            // internal `RefCell`.
-            let composed = compose_tir_head_chain_with_overlays(
-                &context.template_ir_store,
-                template_id,
+            let composed_root = compose_tir_head_chain_from_root(
+                &mut context.template_ir_store.borrow_mut(),
+                original_root,
                 string_table,
                 matches!(
                     control_flow_validation,
@@ -358,42 +343,15 @@ impl Template {
                 ),
             )?;
 
-            if composed.root != original_root {
+            if composed_root != original_root {
                 add_ast_counter(AstCounter::TemplateTirHeadChainCompositionHits, 1);
 
-                // Thread the non-empty view context from head-chain
-                // composition. When child-wrapper composition already
-                // produced a slot-resolution overlay, merge the two payloads
-                // through the slot-composition owner instead of composing
-                // view contexts and overwriting one slot-resolution dimension.
-                let previous_context = tir_reference.context;
-
-                let merged_context = if let Some(slot_context) = composed.slot_context {
-                    merge_tir_slot_resolution_contexts(
-                        &mut context.template_ir_store.borrow_mut(),
-                        previous_context,
-                        slot_context,
-                    )?
-                } else {
-                    previous_context
-                };
-
                 let mut template_ir_store = context.template_ir_store.borrow_mut();
-                let original_template = template_ir_store
-                    .get_template(template_id)
-                    .cloned()
-                    .ok_or_else(|| {
-                        TemplateError::from(CompilerError::compiler_error(
-                            "Template head-chain composition lost its source TIR template.",
-                        ))
-                    })?;
-                let composed_template_id = template_ir_store.push_template(TemplateIr::new(
-                    composed.root,
-                    original_template.style,
-                    original_template.kind,
-                    original_template.summary,
-                    original_template.location,
-                ));
+                let composed_template_id = template_ir_store.push_structurally_derived_template(
+                    template_id,
+                    composed_root,
+                    crate::compiler_frontend::ast::templates::tir::DerivedTemplateMetadata::preserve_source(),
+                )?;
 
                 let phase = if tir_reference.phase.is_at_least(TemplateTirPhase::Formatted) {
                     TemplateTirPhase::Formatted
@@ -403,12 +361,8 @@ impl Template {
 
                 tir_reference = TemplateTirReference {
                     root: composed_template_id,
-                    // Head-chain composition consumes the already formatted
-                    // body root only when Phase 8 installed one earlier in
-                    // this constructor flow. Otherwise this remains a
-                    // Composed root pending formatter preparation.
                     phase,
-                    context: merged_context,
+                    context: tir_reference.context,
                 };
             }
 
@@ -429,14 +383,14 @@ impl Template {
             }
         }
 
-        // Stage 6: Classification from the effective TirView of the final
+        // Stage 6: Preparation from the effective TirView of the final
         // reference (post-composition).
         //
         // The reference is now either a composed root with slots expanded and
-        // inserts consumed, or a formatted linear root. Classification reads
+        // inserts consumed, or a formatted linear root. Preparation reads
         // that authoritative view — preserving exact root, phase and view context
         // identity — without a separate TIR allocation.
-        let template_classification = {
+        let template_preparation = {
             let store = context.template_ir_store.borrow();
             let view = TirView::with_minimum_phase(
                 &store,
@@ -446,20 +400,20 @@ impl Template {
                 tir_reference.context,
             )
             .map_err(TemplateError::from)?;
-            classify_effective_tir_view_template(&view)?
+            prepare_tir_view(&view, TemplatePreparationMode::Value)?
         };
 
-        build_state.refresh_kind_from_tir_classification(&template_classification);
+        build_state.refresh_kind_from_preparation(&template_preparation.facts);
 
         // Post-parse validation
         if matches!(
             build_state.kind,
             TemplateType::Comment(CommentDirectiveKind::Doc)
-        ) && !template_classification.shape_const_evaluable
+        ) && !template_preparation.facts.is_const_evaluable_shape
         {
             return Err(CompilerDiagnostic::invalid_template_structure(
                 InvalidTemplateStructureReason::NonFoldableDocComment,
-                construction_context.location().to_owned(),
+                construction_location.clone(),
             )
             .into());
         }
@@ -482,15 +436,15 @@ impl Template {
             .map_err(TemplateError::from)?
             .is_some();
         if !matches!(build_state.kind, TemplateType::SlotInsert(_))
-            && !template_classification.has_unresolved_slots
-            && template_classification.has_slot_insertions
+            && !template_preparation.facts.has_unresolved_slot_occurrences
+            && template_preparation.facts.has_escaped_insert_helpers
             && !tir_reference.phase.is_at_least(TemplateTirPhase::Composed)
             && !is_stored_insert_carrier
         {
             return Err(CompilerDiagnostic::invalid_template_slot(
                 InvalidTemplateSlotReason::InsertOutsideParentSlot,
                 None,
-                construction_context.location().to_owned(),
+                construction_location.clone(),
             )
             .into());
         }
@@ -499,19 +453,14 @@ impl Template {
         // constructing the durable handle. All later consumers read this TIR entry.
         let template_id = tir_reference.root;
         let mut template_ir_store = context.template_ir_store.borrow_mut();
-        if !template_ir_store.set_template_kind(template_id, build_state.kind.to_owned()) {
-            return Err(CompilerError::compiler_error(
-                "Constructed template kind could not be initialized in its TIR store.",
-            )
-            .into());
-        }
+        template_ir_store.set_template_kind(template_id, build_state.kind.to_owned())?;
         drop(template_ir_store);
 
         // Construct the durable `Template` only after its authoritative TIR
         // entry has received the final parser classification.
         let template = Template {
             tir_reference,
-            location: construction_context.location().to_owned(),
+            location: construction_location.clone(),
         };
 
         if matches!(

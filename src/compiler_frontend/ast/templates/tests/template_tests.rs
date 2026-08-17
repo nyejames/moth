@@ -18,8 +18,6 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::headers::parse_file_headers::TopLevelConstFragment;
-use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
-use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::parse_support::{
@@ -81,27 +79,13 @@ fn push_start_runtime_fragment_node(
     }
 }
 
-fn test_project_path_resolver() -> ProjectPathResolver {
-    let cwd = std::env::temp_dir();
-    ProjectPathResolver::new(
-        cwd.clone(),
-        cwd,
-        crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots::empty(),
-        &crate::builder_surface::SourceFileKindRegistry::default(),
-    )
-    .expect("test path resolver should be valid")
-}
-
 fn collect_and_strip_comment_templates_for_tests_with_store(
     ast_nodes: &mut [AstNode],
     string_table: &mut StringTable,
     template_ir_store: Rc<RefCell<TemplateIrStore>>,
 ) -> Result<Vec<AstDocFragment>, TemplateError> {
-    let resolver = test_project_path_resolver();
     collect_and_strip_comment_templates(
         ast_nodes,
-        &resolver,
-        &PathStringFormatConfig::default(),
         string_table,
         DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         template_ir_store,
@@ -217,7 +201,7 @@ fn formatted_doc_template_with_direct_tir(
 ) -> (Template, Rc<RefCell<TemplateIrStore>>) {
     let location = test_location(2);
     let text_id = string_table.intern(text);
-    let byte_len = text.len() as u32;
+    let byte_len = text.len();
 
     let style = Style {
         formatter: Some(markdown_formatter()),

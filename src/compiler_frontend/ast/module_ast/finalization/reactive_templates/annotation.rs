@@ -34,9 +34,10 @@ use crate::compiler_frontend::ast::templates::template_control_flow::{
 };
 use crate::compiler_frontend::ast::templates::tir::{
     ExpressionSiteId, TemplateIrId, TemplateIrNodeId, TemplateIrNodeKind, TemplateIrStore,
-    TemplateLoopHeaderExpressionSites, TemplateSlotPlanId, TemplateSlotSiteRenderPiece,
-    TemplateTirPhase, TemplateViewContext, TirExpressionOverlay, TirView, TirViewIdentity,
-    collect_effective_tir_expression_overlay_payloads_with_phase,
+    TemplateLoopHeaderExpressionSites, TemplateSlotPlanId, TemplateTirPhase, TirView,
+    TirViewIdentity, collect_effective_tir_expression_overlay_payloads,
+    replace_expression_overlay_entries, runtime_slot_plan_roots,
+    runtime_slot_plan_site_render_root,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
@@ -84,85 +85,21 @@ struct EnvironmentAwarePayload {
 ///      control-flow body, but each body's expressions must be annotated with
 ///      the environment active inside that body, not a flattened scope.
 fn collect_environment_aware_tir_expression_payloads(
-    store: &TemplateIrStore,
-    root_template_id: TemplateIrId,
-    root: TemplateIrNodeId,
-    root_phase: TemplateTirPhase,
-    root_context: TemplateViewContext,
+    root_view: TirView<'_>,
     base_environment: &ReactiveTemplateValueEnvironment,
     flows: &FxHashMap<InternedPath, FunctionTemplateFlow>,
 ) -> Result<Vec<EnvironmentAwarePayload>, CompilerError> {
+    let root = root_view.root_template()?.root;
     // This is a construction-time merge input used to annotate one complete
     // root overlay. It is not a durable read context; recursive reads remain
     // owned by the exact `TirView` below.
-    let effective_expressions = collect_effective_tir_expression_overlay_payloads_with_phase(
-        store,
-        root_template_id,
-        root_phase,
-        root_context,
-    )?
-    .into_iter()
-    .collect();
-    let root_view = TirView::new(store, root_template_id, root_phase, root_context)?;
+    let effective_expressions = collect_effective_tir_expression_overlay_payloads(&root_view)?
+        .into_iter()
+        .collect();
     let mut collector =
         EnvironmentAwarePayloadCollector::new(flows, root_view, effective_expressions);
     collector.collect_node(root, base_environment)?;
     Ok(collector.into_payloads())
-}
-
-/// Composes annotated expression overrides with the existing view context,
-/// preserving pre-existing overrides for sites that annotation did not visit.
-///
-/// WHAT: filters the existing expression overlay to remove only the sites that
-///       received fresh annotated overrides, then merges and allocates one new
-///       composed view context.
-/// WHY: later finalization passes and the effective TIR view must observe the
-///      result of earlier overlay layers rather than replacing them silently.
-fn compose_expression_overlays(
-    store: &mut TemplateIrStore,
-    current_context: TemplateViewContext,
-    annotated_overrides: Vec<(ExpressionSiteId, Box<Expression>)>,
-) -> Result<TemplateViewContext, CompilerError> {
-    let existing_overrides = if let Some(existing_overlay_id) = current_context.expression_overlay {
-        store
-            .expression_overlay(existing_overlay_id)
-            .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "TIR reactive annotation referenced missing expression overlay {}",
-                    existing_overlay_id
-                ))
-            })?
-            .overrides
-            .iter()
-            .map(|(site_id, expression)| (*site_id, expression.clone()))
-            .collect::<Vec<_>>()
-    } else {
-        Vec::new()
-    };
-
-    if annotated_overrides.is_empty() {
-        return Ok(current_context);
-    }
-
-    let annotated_site_ids = annotated_overrides
-        .iter()
-        .map(|(site_id, _)| *site_id)
-        .collect::<HashSet<_>>();
-
-    let mut overrides: Vec<(ExpressionSiteId, Box<Expression>)> = existing_overrides
-        .into_iter()
-        .filter(|(site_id, _)| !annotated_site_ids.contains(site_id))
-        .collect();
-    overrides.extend(annotated_overrides);
-
-    let expression_overlay_id =
-        store.allocate_expression_overlay(TirExpressionOverlay { overrides });
-    let expression_context = TemplateViewContext {
-        expression_overlay: Some(expression_overlay_id),
-        slot_resolution: None,
-        wrapper_context: None,
-    };
-    Ok(current_context.merge(expression_context))
 }
 
 /// Environment-aware TIR expression-payload collector.
@@ -179,7 +116,7 @@ struct EnvironmentAwarePayloadCollector<'store, 'flow> {
     // Temporary normalization input for the root overlay being constructed.
     // Durable effective-expression reads belong to `TirView`, not this map.
     effective_expressions: FxHashMap<ExpressionSiteId, Expression>,
-    payloads: Vec<EnvironmentAwarePayload>,
+    payloads: FxHashMap<ExpressionSiteId, EnvironmentAwarePayload>,
     active_nodes: HashSet<(TemplateIrNodeId, TirViewIdentity)>,
     completed_nodes: HashSet<(TemplateIrNodeId, TirViewIdentity)>,
     active_templates: HashSet<TirViewIdentity>,
@@ -198,7 +135,7 @@ impl<'store, 'flow> EnvironmentAwarePayloadCollector<'store, 'flow> {
             flows,
             view,
             effective_expressions,
-            payloads: Vec::new(),
+            payloads: FxHashMap::default(),
             active_nodes: HashSet::new(),
             completed_nodes: HashSet::new(),
             active_templates: HashSet::new(),
@@ -209,7 +146,15 @@ impl<'store, 'flow> EnvironmentAwarePayloadCollector<'store, 'flow> {
     }
 
     fn into_payloads(self) -> Vec<EnvironmentAwarePayload> {
-        self.payloads
+        let mut payloads: Vec<_> = self.payloads.into_values().collect();
+        payloads.sort_unstable_by_key(|payload| payload.site_id.index());
+        payloads
+    }
+
+    fn record_payload(&mut self, payload: EnvironmentAwarePayload) {
+        // Site IDs are module-unique; repeated reachability is shared structure,
+        // so retain the first environment and sort only at the overlay boundary.
+        self.payloads.entry(payload.site_id).or_insert(payload);
     }
 
     fn effective_expression(
@@ -282,7 +227,8 @@ impl<'store, 'flow> EnvironmentAwarePayloadCollector<'store, 'flow> {
             ));
         }
 
-        let (contribution_roots, site_render_roots) = self.slot_plan_roots(slot_plan_id)?;
+        let (contribution_roots, site_render_roots) =
+            runtime_slot_plan_roots(self.view.store(), slot_plan_id)?;
 
         let result = self.collect_node(wrapper_root, environment).and_then(|()| {
             for root in contribution_roots {
@@ -299,45 +245,6 @@ impl<'store, 'flow> EnvironmentAwarePayloadCollector<'store, 'flow> {
             self.completed_slot_plans.insert(traversal_key);
         }
         result
-    }
-
-    fn slot_plan_roots(
-        &self,
-        slot_plan_id: TemplateSlotPlanId,
-    ) -> Result<(Vec<TemplateIrNodeId>, Vec<TemplateIrNodeId>), CompilerError> {
-        let slot_plan = self.view.store().get_slot_plan(slot_plan_id).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "TIR environment-aware payload collection referenced missing runtime slot plan {}",
-                slot_plan_id
-            ))
-        })?;
-
-        let contribution_roots: Vec<TemplateIrNodeId> = slot_plan
-            .contribution_sources
-            .iter()
-            .map(|source| source.render_root)
-            .collect();
-
-        let mut site_render_roots = Vec::new();
-        for site in &slot_plan.slot_sites {
-            for piece in &site.render_plan.pieces {
-                match piece {
-                    TemplateSlotSiteRenderPiece::Render(root) => {
-                        site_render_roots.push(*root);
-                    }
-                    TemplateSlotSiteRenderPiece::ContributionSource(source_id) => {
-                        if source_id.0 >= slot_plan.contribution_sources.len() {
-                            return Err(CompilerError::compiler_error(format!(
-                                "TIR environment-aware payload collection referenced missing runtime slot contribution source {:?} in plan {}",
-                                source_id, slot_plan_id
-                            )));
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok((contribution_roots, site_render_roots))
     }
 
     fn collect_node(
@@ -390,7 +297,7 @@ impl<'store, 'flow> EnvironmentAwarePayloadCollector<'store, 'flow> {
                 site_id,
                 ..
             } => {
-                self.payloads.push(EnvironmentAwarePayload {
+                self.record_payload(EnvironmentAwarePayload {
                     site_id: *site_id,
                     expression: self.effective_expression(*site_id, expression)?,
                     environment: environment.clone(),
@@ -406,7 +313,7 @@ impl<'store, 'flow> EnvironmentAwarePayloadCollector<'store, 'flow> {
                     )?;
                     let mut branch_environment = environment.clone();
 
-                    self.payloads.push(EnvironmentAwarePayload {
+                    self.record_payload(EnvironmentAwarePayload {
                         site_id: branch.selector_site_id,
                         expression: selector_expression.clone(),
                         environment: environment.clone(),
@@ -475,39 +382,15 @@ impl<'store, 'flow> EnvironmentAwarePayloadCollector<'store, 'flow> {
             }
 
             TemplateIrNodeKind::RuntimeSlotSite { plan, site } => {
-                let slot_plan = self.view.store().get_slot_plan(*plan).ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
-                        "TIR environment-aware payload collection referenced missing runtime slot plan {}",
-                        plan
-                    ))
-                })?;
-                let site_plan = slot_plan
-                    .slot_sites
-                    .iter()
-                    .find(|site_plan| site_plan.site == *site)
-                    .ok_or_else(|| {
-                        CompilerError::compiler_error(format!(
-                            "TIR environment-aware payload collection referenced missing runtime slot site {:?} in plan {}",
-                            site, plan
-                        ))
-                    })?;
-                for piece in &site_plan.render_plan.pieces {
-                    if let TemplateSlotSiteRenderPiece::ContributionSource(source_id) = piece
-                        && source_id.0 >= slot_plan.contribution_sources.len()
-                    {
-                        return Err(CompilerError::compiler_error(format!(
-                            "TIR environment-aware payload collection referenced missing runtime slot contribution source {:?}",
-                            source_id
-                        )));
-                    }
-                }
+                runtime_slot_plan_site_render_root(self.view.store(), *plan, *site)?;
                 Ok(())
             }
 
             TemplateIrNodeKind::Text { .. }
             | TemplateIrNodeKind::Slot { .. }
             | TemplateIrNodeKind::AggregateOutput
-            | TemplateIrNodeKind::LoopControl { .. } => Ok(()),
+            | TemplateIrNodeKind::LoopControl { .. }
+            | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => Ok(()),
         }
     }
 
@@ -522,7 +405,7 @@ impl<'store, 'flow> EnvironmentAwarePayloadCollector<'store, 'flow> {
                 TemplateLoopHeader::Conditional { condition },
                 TemplateLoopHeaderExpressionSites::Conditional { condition: site_id },
             ) => {
-                self.payloads.push(EnvironmentAwarePayload {
+                self.record_payload(EnvironmentAwarePayload {
                     site_id: *site_id,
                     expression: self.effective_expression(*site_id, condition)?,
                     environment: environment.clone(),
@@ -533,12 +416,12 @@ impl<'store, 'flow> EnvironmentAwarePayloadCollector<'store, 'flow> {
                 TemplateLoopHeader::Range { range, .. },
                 TemplateLoopHeaderExpressionSites::Range { start, end, step },
             ) => {
-                self.payloads.push(EnvironmentAwarePayload {
+                self.record_payload(EnvironmentAwarePayload {
                     site_id: *start,
                     expression: self.effective_expression(*start, &range.start)?,
                     environment: environment.clone(),
                 });
-                self.payloads.push(EnvironmentAwarePayload {
+                self.record_payload(EnvironmentAwarePayload {
                     site_id: *end,
                     expression: self.effective_expression(*end, &range.end)?,
                     environment: environment.clone(),
@@ -546,7 +429,7 @@ impl<'store, 'flow> EnvironmentAwarePayloadCollector<'store, 'flow> {
 
                 match (step, &range.step) {
                     (Some(step_site_id), Some(step_expression)) => {
-                        self.payloads.push(EnvironmentAwarePayload {
+                        self.record_payload(EnvironmentAwarePayload {
                             site_id: *step_site_id,
                             expression: self
                                 .effective_expression(*step_site_id, step_expression)?,
@@ -566,7 +449,7 @@ impl<'store, 'flow> EnvironmentAwarePayloadCollector<'store, 'flow> {
                 TemplateLoopHeader::Collection { iterable, .. },
                 TemplateLoopHeaderExpressionSites::Collection { iterable: site_id },
             ) => {
-                self.payloads.push(EnvironmentAwarePayload {
+                self.record_payload(EnvironmentAwarePayload {
                     site_id: *site_id,
                     expression: self.effective_expression(*site_id, iterable)?,
                     environment: environment.clone(),
@@ -1003,7 +886,7 @@ fn annotate_runtime_slot_handoff(
     runtime_handoff::walk_owned_runtime_slot_application_handoff_mut(
         handoff,
         &mut |event| -> Result<(), CompilerError> {
-            annotate_owned_runtime_template_handoff_event(event, flows, value_environment, store)?;
+            annotate_owned_runtime_template_node(event, flows, value_environment, store)?;
             Ok(())
         },
     )?;
@@ -1026,7 +909,7 @@ fn annotate_owned_runtime_template_handoff(
         (),
         CompilerError,
     > {
-        annotate_owned_runtime_template_handoff_event(event, flows, value_environment, store)?;
+        annotate_owned_runtime_template_node(event, flows, value_environment, store)?;
         Ok(())
     })?;
 
@@ -1036,27 +919,6 @@ fn annotate_owned_runtime_template_handoff(
     metadata_for_owned_runtime_template_handoff(handoff, &mut |expression| {
         Ok(expression.reactive_template.clone())
     })
-}
-
-fn annotate_owned_runtime_template_handoff_event(
-    event: runtime_handoff::OwnedRuntimeTemplateWalkMutEvent<'_>,
-    flows: &FxHashMap<InternedPath, FunctionTemplateFlow>,
-    value_environment: &mut ReactiveTemplateValueEnvironment,
-    store: &mut TemplateIrStore,
-) -> Result<(), CompilerError> {
-    match event {
-        runtime_handoff::OwnedRuntimeTemplateWalkMutEvent::Node(node) => {
-            annotate_owned_runtime_template_node(node, flows, value_environment, store)?;
-        }
-
-        runtime_handoff::OwnedRuntimeTemplateWalkMutEvent::HandoffAfterBody(_handoff) => {
-            // Wrapper templates are owned by TIR wrapper-context overlays
-            // and visited through normal template recursion. There is nothing
-            // to annotate at the handoff boundary.
-        }
-    }
-
-    Ok(())
 }
 
 fn annotate_owned_runtime_template_node(
@@ -1087,6 +949,7 @@ fn annotate_owned_runtime_template_node(
         | OwnedRuntimeTemplateNode::AggregateOutput
         | OwnedRuntimeTemplateNode::LoopControl { .. }
         | OwnedRuntimeTemplateNode::RuntimeSlotSite { .. }
+        | OwnedRuntimeTemplateNode::RuntimeSlotContributionSource { .. }
         | OwnedRuntimeTemplateNode::Slot { .. } => {}
     }
 
@@ -1229,25 +1092,9 @@ fn annotate_template_tir_root(
         return Ok(());
     }
 
-    let root = store
-        .get_template(reference.root)
-        .map(|tir_template| tir_template.root)
-        .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "TIR reactive annotation referenced missing root template {}",
-                reference.root
-            ))
-        })?;
-
-    let environment_aware_payloads = collect_environment_aware_tir_expression_payloads(
-        store,
-        reference.root,
-        root,
-        reference.phase,
-        reference.context,
-        value_environment,
-        flows,
-    )?;
+    let root_view = TirView::new(store, reference.root, reference.phase, reference.context)?;
+    let environment_aware_payloads =
+        collect_environment_aware_tir_expression_payloads(root_view, value_environment, flows)?;
 
     if environment_aware_payloads.is_empty() {
         // The reference is already at least Composed, and the collector has
@@ -1266,7 +1113,8 @@ fn annotate_template_tir_root(
         annotated_overrides.push((payload.site_id, Box::new(payload.expression)));
     }
 
-    let new_context = compose_expression_overlays(store, reference.context, annotated_overrides)?;
+    let new_context =
+        replace_expression_overlay_entries(store, reference.context, annotated_overrides)?;
 
     reference.context = new_context;
 

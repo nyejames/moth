@@ -1,0 +1,4 @@
+card #= [:before[$slot]after]
+rendered #= [card]
+
+io.line(rendered)

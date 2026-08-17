@@ -531,15 +531,15 @@ fn build_resolved_slot_template_store() -> (Template, Rc<RefCell<TemplateIrStore
         (template_id, fill_template_id)
     };
 
-    let slot_overlay_id =
-        store_handle
-            .borrow_mut()
-            .allocate_slot_resolution_overlay(TirSlotResolutionOverlay {
-                resolutions: vec![(
-                    SlotOccurrenceId::new(0),
-                    TirSlotResolution::resolved(SlotKey::Default, vec![fill_template_id]),
-                )],
-            });
+    let slot_overlay_id = store_handle
+        .borrow_mut()
+        .allocate_slot_resolution_overlay(TirSlotResolutionOverlay {
+            resolutions: vec![(
+                SlotOccurrenceId::new(0),
+                TirSlotResolution::resolved(SlotKey::Default, vec![fill_template_id]),
+            )],
+        })
+        .expect("test overlay allocation");
     let context = TemplateViewContext {
         expression_overlay: None,
         slot_resolution: Some(slot_overlay_id),

@@ -16,8 +16,8 @@ use crate::compiler_frontend::ast::templates::template_slots::{
     RuntimeSlotContributionSourceId, RuntimeSlotSiteId,
 };
 use crate::compiler_frontend::ast::templates::{
-    OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeSlotSiteRenderPiece, OwnedRuntimeTemplateBody,
-    OwnedRuntimeTemplateBranch, OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
+    OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeTemplateBody, OwnedRuntimeTemplateBranch,
+    OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
 };
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::compiler_errors::CompilerError;
@@ -186,7 +186,8 @@ impl<'a> HirBuilder<'a> {
             | OwnedRuntimeTemplateNode::Loop { .. }
             | OwnedRuntimeTemplateNode::AggregateOutput
             | OwnedRuntimeTemplateNode::LoopControl { .. }
-            | OwnedRuntimeTemplateNode::RuntimeSlotSite { .. } => {
+            | OwnedRuntimeTemplateNode::RuntimeSlotSite { .. }
+            | OwnedRuntimeTemplateNode::RuntimeSlotContributionSource { .. } => {
                 return_hir_transformation_error!(
                     "Reactive linear template lowering received a non-linear owned node. Reactive control-flow and slot sites must use their dedicated lowering paths.",
                     self.hir_error_location(location)
@@ -290,6 +291,7 @@ impl<'a> HirBuilder<'a> {
             | OwnedRuntimeTemplateNode::AggregateOutput
             | OwnedRuntimeTemplateNode::LoopControl { .. }
             | OwnedRuntimeTemplateNode::RuntimeSlotSite { .. }
+            | OwnedRuntimeTemplateNode::RuntimeSlotContributionSource { .. }
             | OwnedRuntimeTemplateNode::Slot { .. } => false,
         }
     }
@@ -459,13 +461,8 @@ impl<'a> HirBuilder<'a> {
                 })
             }
 
-            OwnedRuntimeTemplateNode::Text {
-                text,
-                byte_len,
-                location,
-                ..
-            } => {
-                if *byte_len == 0 {
+            OwnedRuntimeTemplateNode::Text { text, location, .. } => {
+                if self.string_table.resolve(*text).is_empty() {
                     return Ok(TemplateBodyEmission::NoOutput);
                 }
 
@@ -603,6 +600,20 @@ impl<'a> HirBuilder<'a> {
             OwnedRuntimeTemplateNode::RuntimeSlotSite { site, .. } => {
                 let emission = self.append_runtime_slot_site_to_accumulator(
                     *site,
+                    append_context,
+                    fallback_location,
+                )?;
+                self.mark_owned_runtime_template_output_if_needed(
+                    emission,
+                    append_context,
+                    fallback_location,
+                )?;
+                Ok(emission)
+            }
+
+            OwnedRuntimeTemplateNode::RuntimeSlotContributionSource { source } => {
+                let emission = self.append_runtime_slot_source_to_accumulator(
+                    *source,
                     append_context,
                     fallback_location,
                 )?;
@@ -1178,40 +1189,12 @@ impl<'a> HirBuilder<'a> {
             );
         };
 
-        let mut emitted_output = false;
-
-        for piece in &site.render_plan.pieces {
-            let emission = match piece {
-                OwnedRuntimeSlotSiteRenderPiece::Render(node) => self
-                    .append_owned_runtime_template_node_to_accumulator(
-                        node,
-                        append_context,
-                        None,
-                        &site.location,
-                    )?,
-
-                OwnedRuntimeSlotSiteRenderPiece::ContributionSource(source_id) => self
-                    .append_runtime_slot_source_to_accumulator(
-                        *source_id,
-                        append_context,
-                        &site.location,
-                    )?,
-            };
-
-            match emission {
-                TemplateBodyEmission::NoOutput => {}
-                TemplateBodyEmission::Output => emitted_output = true,
-                TemplateBodyEmission::Break | TemplateBodyEmission::Continue => {
-                    return Ok(emission);
-                }
-            }
-        }
-
-        Ok(if emitted_output {
-            TemplateBodyEmission::Output
-        } else {
-            TemplateBodyEmission::NoOutput
-        })
+        self.append_owned_runtime_template_node_to_accumulator(
+            &site.render_root,
+            append_context,
+            None,
+            &site.location,
+        )
     }
 
     fn append_runtime_slot_source_to_accumulator(
@@ -1558,6 +1541,7 @@ fn owned_runtime_template_node_contains_runtime_slot_application(
         | OwnedRuntimeTemplateNode::AggregateOutput
         | OwnedRuntimeTemplateNode::LoopControl { .. }
         | OwnedRuntimeTemplateNode::RuntimeSlotSite { .. }
+        | OwnedRuntimeTemplateNode::RuntimeSlotContributionSource { .. }
         | OwnedRuntimeTemplateNode::Slot { .. } => false,
     }
 }

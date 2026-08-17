@@ -72,15 +72,6 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         top_level_const_fragments: &[TopLevelConstFragment],
         string_table: &mut StringTable,
     ) -> Result<AstBuildResult, CompilerMessages> {
-        // A project path resolver is required for all template folding and path
-        // coercion operations that follow. Fail early if it is missing.
-        let project_path_resolver = self.context.project_path_resolver.as_ref().ok_or_else(|| {
-            let error = CompilerError::compiler_error(
-                "AST construction requires a project path resolver for template folding and path coercion.",
-            );
-            self.error_messages(error, &emitted.warnings, string_table)
-        })?;
-
         // ----------------------------
         //  Collect doc fragments
         // ----------------------------
@@ -88,8 +79,6 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         let doc_fragments_start = crate::timing::start_detailed_timer();
         let doc_fragments = collect_and_strip_comment_templates(
             &mut emitted.ast,
-            project_path_resolver,
-            &self.context.path_format_config,
             string_table,
             self.context.template_const_loop_iteration_limit,
             Rc::clone(&self.context.template_ir_store),
@@ -141,7 +130,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         // ----------------------------
         #[cfg(feature = "detailed_timers")]
         let ast_template_normalization_start = crate::timing::start_detailed_timer();
-        self.normalize_ast_templates_for_hir(&mut emitted.ast, project_path_resolver, string_table)
+        self.normalize_ast_templates_for_hir(&mut emitted.ast, string_table)
             .map_err(|error| {
                 self.template_normalization_error_messages(error, &emitted.warnings, string_table)
             })?;
@@ -164,14 +153,10 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         // node, so their retained defaults are normalized in place through the same helper.
         #[cfg(feature = "detailed_timers")]
         let public_default_synchronization_start = crate::timing::start_detailed_timer();
-        self.synchronize_normalized_public_defaults(
-            &emitted.ast,
-            project_path_resolver,
-            string_table,
-        )
-        .map_err(|error| {
-            self.template_normalization_error_messages(error, &emitted.warnings, string_table)
-        })?;
+        self.synchronize_normalized_public_defaults(&emitted.ast, string_table)
+            .map_err(|error| {
+                self.template_normalization_error_messages(error, &emitted.warnings, string_table)
+            })?;
         timer_log!(
             public_default_synchronization_start,
             "AST/finalize/public defaults synchronized in: "
@@ -184,13 +169,17 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         // ----------------------------
         #[cfg(feature = "detailed_timers")]
         let module_constant_normalization_start = crate::timing::start_detailed_timer();
-        let projected_const_templates = self
-            .project_const_templates(project_path_resolver, string_table)
-            .map_err(|error| {
-                self.template_normalization_error_messages(error, &emitted.warnings, string_table)
-            })?;
+        let projected_const_templates =
+            self.project_const_templates(string_table)
+                .map_err(|error| {
+                    self.template_normalization_error_messages(
+                        error,
+                        &emitted.warnings,
+                        string_table,
+                    )
+                })?;
         let module_constants = self
-            .normalize_module_constants_for_hir(project_path_resolver, string_table)
+            .normalize_module_constants_for_hir(string_table)
             .map_err(|error| {
                 self.template_normalization_error_messages(error, &emitted.warnings, string_table)
             })?;

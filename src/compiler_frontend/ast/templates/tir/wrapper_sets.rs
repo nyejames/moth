@@ -4,7 +4,9 @@
 //! `$children(..)` wrapper sets in the `TemplateIrStore` side table, and the
 //! wrapper-context overlay construction that records inherited wrapper sets
 //! and `$fresh` suppression for child-template occurrences on a template's
-//! authoritative structural root.
+//! authoritative structural root. Wrapper-context overlays are the sole owner
+//! of direct-child inherited wrappers, including children inside branch and
+//! loop bodies.
 //!
 //! WHY: wrapper sets and wrapper-context overlays both describe how
 //! `$children(..)` wrappers apply to child-template boundaries. Keeping the
@@ -28,6 +30,9 @@ use crate::compiler_frontend::ast::templates::tir::refs::{
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
 use crate::compiler_frontend::ast::templates::tir::view::{TemplateTirPhase, validate_context};
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::instrumentation::{
+    AstCounter, add_ast_counter, increment_ast_counter,
+};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -138,6 +143,8 @@ pub(crate) fn attach_wrapper_context_overlay(
             .root
     };
 
+    increment_ast_counter(AstCounter::TemplateTirChildWrapperCalls);
+
     let mut pending_contexts = Vec::new();
     {
         let store = store_handle.borrow();
@@ -147,6 +154,15 @@ pub(crate) fn attach_wrapper_context_overlay(
     if pending_contexts.is_empty() {
         return Ok(());
     }
+
+    let applied_wrapper_count = pending_contexts
+        .iter()
+        .filter(|context| !context.skip_parent_child_wrappers)
+        .count();
+    add_ast_counter(
+        AstCounter::TemplateTirChildWrapperHits,
+        applied_wrapper_count,
+    );
 
     // Every inherited context uses the same ordered wrapper references. Allocate
     // or reuse that set once, after the full structural walk has validated all
@@ -184,7 +200,7 @@ pub(crate) fn attach_wrapper_context_overlay(
 
     let mut store = store_handle.borrow_mut();
     let wrapper_overlay_id =
-        store.allocate_wrapper_context_overlay(TirWrapperContextOverlay { contexts });
+        store.allocate_wrapper_context_overlay(TirWrapperContextOverlay { contexts })?;
     let wrapper_only_context = TemplateViewContext {
         expression_overlay: None,
         slot_resolution: None,
@@ -319,11 +335,7 @@ fn resolve_child_wrapper_metadata(
         ))
     })?;
     Ok(ChildWrapperMetadata {
-        has_control_flow: child.summary.has_control_flow,
+        has_control_flow: child.summary.has_control_flow(),
         skip_parent_child_wrappers: child.style.skip_parent_child_wrappers,
     })
 }
-
-#[cfg(test)]
-#[path = "tests/wrapper_context_construction_tests.rs"]
-mod wrapper_context_construction_tests;

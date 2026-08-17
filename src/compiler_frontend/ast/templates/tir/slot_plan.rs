@@ -58,25 +58,65 @@ pub(crate) struct TemplateSlotContributionSourcePlan {
 }
 
 /// TIR-side plan for one concrete runtime slot site.
+///
+/// WHAT: stores the site identity, slot key and a single TIR render root.
+/// WHY: contribution splices are TIR nodes, including when they sit directly
+///      in a site, so a parallel piece list would be a second representation.
 #[derive(Clone, Debug)]
 pub(crate) struct TemplateSlotSitePlan {
     pub(crate) site: RuntimeSlotSiteId,
     pub(crate) key: SlotKey,
-    pub(crate) render_plan: TemplateSlotSiteRenderPlan,
+    pub(crate) render_root: TemplateIrNodeId,
     pub(crate) location: SourceLocation,
 }
 
-/// TIR-side render plan for one concrete slot site.
-#[derive(Clone, Debug, Default)]
-pub(crate) struct TemplateSlotSiteRenderPlan {
-    pub(crate) pieces: Vec<TemplateSlotSiteRenderPiece>,
+pub(crate) fn runtime_slot_plan_roots(
+    store: &TemplateIrStore,
+    slot_plan_id: TemplateSlotPlanId,
+) -> Result<(Vec<TemplateIrNodeId>, Vec<TemplateIrNodeId>), CompilerError> {
+    let slot_plan = store.get_slot_plan(slot_plan_id).ok_or_else(|| {
+        CompilerError::compiler_error(
+            "TIR runtime slot-plan root lookup referenced a missing slot plan.",
+        )
+    })?;
+
+    let contribution_roots = slot_plan
+        .contribution_sources
+        .iter()
+        .map(|source| source.render_root)
+        .collect();
+
+    let site_render_roots = slot_plan
+        .slot_sites
+        .iter()
+        .map(|site| site.render_root)
+        .collect();
+
+    Ok((contribution_roots, site_render_roots))
 }
 
-/// One TIR-side slot-site render piece.
-#[derive(Clone, Debug)]
-pub(crate) enum TemplateSlotSiteRenderPiece {
-    Render(TemplateIrNodeId),
-    ContributionSource(RuntimeSlotContributionSourceId),
+pub(crate) fn runtime_slot_plan_site_render_root(
+    store: &TemplateIrStore,
+    slot_plan_id: TemplateSlotPlanId,
+    site_id: RuntimeSlotSiteId,
+) -> Result<TemplateIrNodeId, CompilerError> {
+    let slot_plan = store.get_slot_plan(slot_plan_id).ok_or_else(|| {
+        CompilerError::compiler_error(
+            "TIR runtime slot-plan site lookup referenced a missing slot plan.",
+        )
+    })?;
+
+    slot_plan
+        .slot_sites
+        .iter()
+        .find(|site| site.site == site_id)
+        .map(|site| site.render_root)
+        .ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "TIR runtime slot-plan site lookup referenced missing site {:?} in plan {}.",
+                site_id, slot_plan_id
+            ))
+        })
 }
 
 pub(super) fn convert_runtime_slot_site(
@@ -94,6 +134,24 @@ pub(super) fn convert_runtime_slot_site(
     ))
 }
 
+/// Plants one plan-qualified contribution-source marker.
+///
+/// WHAT: constructs the only TIR splice representation used by runtime slot
+///       site planning. The marker always carries the active slot plan.
+/// WHY: a marker without a plan cannot be checked against its owning source
+///      list, and nested plans may reuse the same local source index.
+pub(crate) fn push_runtime_slot_contribution_source(
+    store: &mut TemplateIrStore,
+    plan: TemplateSlotPlanId,
+    source: RuntimeSlotContributionSourceId,
+    location: SourceLocation,
+) -> TemplateIrNodeId {
+    store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::RuntimeSlotContributionSource { plan, source },
+        location,
+    ))
+}
+
 // ---------------------------------------------------------------------------
 //  Slot-to-RuntimeSlotSite conversion
 // ---------------------------------------------------------------------------
@@ -107,9 +165,8 @@ pub(super) fn convert_runtime_slot_site(
 ///
 /// `ChildTemplate` nodes are recursed into so nested slots inside child
 /// templates are converted in the same document-order pass. When a child
-/// template has slots converted, its `TemplateIr.summary` is updated to
-/// reflect the conversion: `slot_count` is set to 0 and
-/// `is_const_evaluable_shape` is set to false.
+/// template has slots converted, its `TemplateIr.summary` is recomputed from
+/// the converted tree.
 ///
 /// WHY: after materializing a scratch wrapper tree with `Slot` nodes still
 /// intact (for site-draft collection), this conversion replaces them with the
@@ -120,6 +177,7 @@ pub(super) fn convert_runtime_slot_site(
 pub(crate) fn convert_tir_tree_to_active_slot_plan(
     root_node_id: TemplateIrNodeId,
     slot_plan_id: TemplateSlotPlanId,
+    slot_sites: &[TemplateSlotSitePlan],
     store: &mut TemplateIrStore,
     copy_state: &mut TirCopyState,
 ) -> Result<bool, TemplateError> {
@@ -136,15 +194,18 @@ pub(crate) fn convert_tir_tree_to_active_slot_plan(
     let converted = match node_kind {
         TemplateIrNodeKind::Slot { placeholder } => {
             let site_id = copy_state
-                .next_runtime_slot_site_for_key(slot_plan_id, &placeholder.key, store)
+                .next_runtime_slot_site_for_key_in_sites(
+                    slot_plan_id,
+                    &placeholder.key,
+                    slot_sites,
+                )
                 .ok_or_else(|| {
                     CompilerError::compiler_error(
                         "TIR active-slot conversion: no matching site found for a slot placeholder.",
                     )
                 })?;
 
-            let node = &mut store.nodes[root_node_id.index()];
-            node.kind = TemplateIrNodeKind::RuntimeSlotSite {
+            store.node_mut(root_node_id)?.kind = TemplateIrNodeKind::RuntimeSlotSite {
                 plan: slot_plan_id,
                 site: site_id,
             };
@@ -158,6 +219,7 @@ pub(crate) fn convert_tir_tree_to_active_slot_plan(
                 any_converted |= convert_tir_tree_to_active_slot_plan(
                     child_id,
                     slot_plan_id,
+                    slot_sites,
                     store,
                     copy_state,
                 )?;
@@ -177,13 +239,29 @@ pub(crate) fn convert_tir_tree_to_active_slot_plan(
                 })?
                 .root;
 
-            let child_converted =
-                convert_tir_tree_to_active_slot_plan(child_root, slot_plan_id, store, copy_state)?;
+            let child_converted = convert_tir_tree_to_active_slot_plan(
+                child_root,
+                slot_plan_id,
+                slot_sites,
+                store,
+                copy_state,
+            )?;
 
             if child_converted {
-                let child_template = &mut store.templates[child_template_id.index()];
-                child_template.summary.slot_count = 0;
-                child_template.summary.is_const_evaluable_shape = false;
+                let child_root = store
+                    .get_template(child_template_id)
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "TIR active-slot conversion: child template ID was not present in the store.",
+                        )
+                    })?
+                    .root;
+                let derived_child_template_id = store.push_structurally_derived_template(
+                    child_template_id,
+                    child_root,
+                    crate::compiler_frontend::ast::templates::tir::DerivedTemplateMetadata::preserve_source(),
+                )?;
+                store.replace_child_template_reference(root_node_id, derived_child_template_id)?;
             }
 
             child_converted
@@ -195,6 +273,7 @@ pub(crate) fn convert_tir_tree_to_active_slot_plan(
                 any_converted |= convert_tir_tree_to_active_slot_plan(
                     branch.body,
                     slot_plan_id,
+                    slot_sites,
                     store,
                     copy_state,
                 )?;
@@ -203,6 +282,7 @@ pub(crate) fn convert_tir_tree_to_active_slot_plan(
                 any_converted |= convert_tir_tree_to_active_slot_plan(
                     fallback_id,
                     slot_plan_id,
+                    slot_sites,
                     store,
                     copy_state,
                 )?;
@@ -215,12 +295,18 @@ pub(crate) fn convert_tir_tree_to_active_slot_plan(
             aggregate_wrapper,
             ..
         } => {
-            let mut any_converted =
-                convert_tir_tree_to_active_slot_plan(body, slot_plan_id, store, copy_state)?;
+            let mut any_converted = convert_tir_tree_to_active_slot_plan(
+                body,
+                slot_plan_id,
+                slot_sites,
+                store,
+                copy_state,
+            )?;
             if let Some(aggregate_wrapper_id) = aggregate_wrapper {
                 any_converted |= convert_tir_tree_to_active_slot_plan(
                     aggregate_wrapper_id,
                     slot_plan_id,
+                    slot_sites,
                     store,
                     copy_state,
                 )?;
@@ -233,7 +319,8 @@ pub(crate) fn convert_tir_tree_to_active_slot_plan(
         | TemplateIrNodeKind::AggregateOutput
         | TemplateIrNodeKind::InsertContribution { .. }
         | TemplateIrNodeKind::LoopControl { .. }
-        | TemplateIrNodeKind::RuntimeSlotSite { .. } => false,
+        | TemplateIrNodeKind::RuntimeSlotSite { .. }
+        | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => false,
     };
 
     Ok(converted)

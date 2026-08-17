@@ -344,7 +344,6 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
 
         let opening_location = construction_context.location().to_owned();
         loop {
-            let branch_location_snapshot = opening_location.clone();
             let mut branch_construction_context =
                 tir_only_body_construction_context(&opening_location, &branch_context);
             let parse_input = BodyParseInput {
@@ -366,14 +365,15 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
             let branch_body_node_id = finalize_tir_body_builder(
                 build_state.style.clone(),
                 build_state.kind.clone(),
-                branch_location_snapshot,
-                &mut branch_construction_context,
-            );
+                branch_construction_context,
+            )?;
 
+            let selector_site_id = construction_context.next_expression_site_id();
             branch_tir_branches.push(TemplateIrBranch::new(
                 branch_selector.clone(),
                 branch_body_node_id,
                 branch_location.clone(),
+                selector_site_id,
             ));
 
             match boundary {
@@ -428,7 +428,7 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
     /// Parses the `[else]` fallback body of a branch chain.
     ///
     /// WHAT: validates the sentinel boundary, parses the fallback body as TIR-only,
-    ///       trims leading whitespace, and seals the builder state.
+    ///       trims leading whitespace, and finishes the construction context.
     /// WHY: fallback bodies share the same control-flow semantics as branch bodies
     ///      but start from a different sentinel and must begin on a fresh boundary.
     fn parse_fallback_branch(
@@ -461,9 +461,8 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
         let fallback_body_node_id = finalize_tir_body_builder(
             build_state.style.clone(),
             build_state.kind.clone(),
-            opening_location.to_owned(),
-            &mut else_construction_context,
-        );
+            else_construction_context,
+        )?;
 
         Ok(ParsedFallbackBranch {
             body_node_id: fallback_body_node_id,
@@ -550,9 +549,8 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
         let body_node_id = finalize_tir_body_builder(
             build_state.style.clone(),
             build_state.kind.clone(),
-            loop_location_snapshot,
-            &mut body_construction_context,
-        );
+            body_construction_context,
+        )?;
 
         construction_context.record_loop(input.header, body_node_id, input.location);
 
@@ -644,7 +642,7 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
         let has_control_flow_root = {
             let store = construction_context.store();
             store
-                .control_flow_node_id_for_template(child_template_id)
+                .control_flow_node_id_for_template(child_template_id)?
                 .is_some()
         };
         if has_control_flow_root {
@@ -846,27 +844,24 @@ fn body_sentinel_target<'a>(
 /// Finalizes a control-flow body template's parser-emitted TIR and returns the
 /// body root node ID.
 ///
-/// WHAT: every branch/loop body shell starts a `TemplateConstructionContext`
-///       with its own parser TIR builder state. This helper seals that builder
-///       state into a finalized `TemplateIr` and reads the root node from the
-///       shared store.
+/// WHAT: every branch/loop body shell starts a `TemplateConstructionContext`.
+///       This helper finishes that context into a finalized `TemplateIr` and
+///       reads the root node from the shared store.
 /// WHY: control-flow bodies are emitted directly into TIR, so the body only
 ///      needs to be finished. The body root node ID is all render-unit
 ///      preparation needs to format, wrap and install the body.
 fn finalize_tir_body_builder(
     style: Style,
     kind: TemplateType,
-    location: SourceLocation,
-    construction_context: &mut TemplateConstructionContext,
-) -> TemplateIrNodeId {
-    let tir_reference =
-        construction_context.finish(style, kind, TemplateTirPhase::Parsed, location);
-
-    let store = construction_context.store();
+    construction_context: TemplateConstructionContext,
+) -> Result<TemplateIrNodeId, TemplateError> {
+    let store = construction_context.store_handle();
+    let tir_reference = construction_context.finish(style, kind, TemplateTirPhase::Parsed)?;
+    let store = store.borrow();
     let template_ir = store
         .get_template(tir_reference.root)
-        .expect("finalized control-flow body template should exist in the TIR store");
-    template_ir.root
+        .expect("a just-pushed control-flow body template must exist in the TIR store");
+    Ok(template_ir.root)
 }
 
 /// Ensures an `[else]` fallback body starts on a new boundary line.
@@ -874,14 +869,14 @@ fn finalize_tir_body_builder(
 /// WHAT: after the `[else]` sentinel is consumed, the first meaningful content
 ///       in the fallback body must not share the sentinel's line.
 /// WHY: control-flow bodies are TIR-only, so boundary validation reads the
-///      in-progress builder state.
+///      in-progress construction context.
 fn ensure_else_body_starts_on_new_boundary(
     construction_context: &TemplateConstructionContext,
     sentinel_location: &SourceLocation,
     string_table: &StringTable,
 ) -> BodyParseResult<()> {
     let store = construction_context.store();
-    let Some(first_child_id) = construction_context.builder().root_children().first() else {
+    let Some(first_child_id) = construction_context.root_children().first() else {
         return Ok(());
     };
 

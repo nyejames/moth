@@ -37,7 +37,7 @@ use crate::compiler_frontend::ast::expressions::expression::{Expression, Express
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template::TemplateType;
 use crate::compiler_frontend::ast::templates::tir::{
-    PreparedTemplate, TemplateHelperKind, TemplateIrStore, TemplatePreparationMode,
+    TemplateHelperKind, TemplateIrStore, TemplatePreparationMode, TemplatePreparationOutcome,
     TemplateTirPhase, TirView, prepare_tir_view,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
@@ -46,8 +46,6 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
-use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 impl AstFinalizer<'_, '_> {
@@ -60,7 +58,6 @@ impl AstFinalizer<'_, '_> {
     /// must be fully foldable and have stable backend-facing shapes.
     pub(super) fn normalize_module_constants_for_hir(
         &self,
-        project_path_resolver: &ProjectPathResolver,
         string_table: &mut StringTable,
     ) -> Result<Vec<Declaration>, TemplateNormalizationError> {
         let mut normalized_constants =
@@ -77,22 +74,10 @@ impl AstFinalizer<'_, '_> {
                 continue;
             }
 
-            let source_file_scope = self
-                .environment
-                .lookups
-                .module_symbols
-                .canonical_source_by_symbol_path
-                .get(&declaration.id)
-                .unwrap_or(&declaration.value.location.scope);
-
             normalized_constants.push(Declaration {
                 id: declaration.id.to_owned(),
-                value: self.normalize_module_constant_expression(
-                    &declaration.value,
-                    source_file_scope,
-                    project_path_resolver,
-                    string_table,
-                )?,
+                value: self
+                    .normalize_module_constant_expression(&declaration.value, string_table)?,
             });
         }
 
@@ -111,8 +96,6 @@ impl AstFinalizer<'_, '_> {
     fn normalize_module_constant_expression(
         &self,
         expression: &Expression,
-        source_file_scope: &InternedPath,
-        project_path_resolver: &ProjectPathResolver,
         string_table: &mut StringTable,
     ) -> Result<Expression, TemplateNormalizationError> {
         increment_ast_counter(AstCounter::ModuleConstantNormalizationExpressionsVisited);
@@ -120,12 +103,7 @@ impl AstFinalizer<'_, '_> {
         // Shorthand for the recursive case so each arm reads as a single step.
         let mut normalize_expr =
             |expr: &Expression| -> Result<Expression, TemplateNormalizationError> {
-                self.normalize_module_constant_expression(
-                    expr,
-                    source_file_scope,
-                    project_path_resolver,
-                    string_table,
-                )
+                self.normalize_module_constant_expression(expr, string_table)
             };
 
         if let ExpressionKind::Template(template) = &expression.kind {
@@ -133,9 +111,6 @@ impl AstFinalizer<'_, '_> {
                 expression,
                 template,
                 TemplateValueFinalizationInputs {
-                    source_file_scope,
-                    path_format_config: &self.context.path_format_config,
-                    project_path_resolver,
                     string_table,
                     template_const_loop_iteration_limit: self
                         .context
@@ -268,8 +243,8 @@ impl AstFinalizer<'_, '_> {
         let preparation = prepare_tir_view(&view, TemplatePreparationMode::Value)?;
 
         Ok(matches!(
-            preparation,
-            PreparedTemplate::Helper(TemplateHelperKind::SlotInsert)
+            preparation.outcome,
+            TemplatePreparationOutcome::Helper(TemplateHelperKind::SlotInsert)
         ))
     }
 }

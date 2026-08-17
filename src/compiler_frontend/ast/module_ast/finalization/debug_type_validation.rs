@@ -18,7 +18,6 @@ use crate::compiler_frontend::ast::expressions::expression_rpn::{
 use crate::compiler_frontend::ast::expressions::expression_types::CastHandling;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
-use crate::compiler_frontend::ast::templates::runtime_handoff::OwnedRuntimeSlotSiteRenderPlan;
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template_control_flow::{
     TemplateBranchSelector, TemplateLoopHeader,
@@ -27,8 +26,8 @@ use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrStore, finalized_tir_view_for_template, walk_tir_view_expression_payloads,
 };
 use crate::compiler_frontend::ast::templates::{
-    OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeSlotSiteRenderPiece, OwnedRuntimeTemplateBody,
-    OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
+    OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff,
+    OwnedRuntimeTemplateNode,
 };
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceVariantPayloadDefinition, TypeDefinition,
@@ -718,6 +717,7 @@ fn debug_validate_runtime_template_node_type_ids(
         | OwnedRuntimeTemplateNode::AggregateOutput
         | OwnedRuntimeTemplateNode::LoopControl { .. }
         | OwnedRuntimeTemplateNode::RuntimeSlotSite { .. }
+        | OwnedRuntimeTemplateNode::RuntimeSlotContributionSource { .. }
         | OwnedRuntimeTemplateNode::Slot { .. } => {}
     }
 }
@@ -771,18 +771,7 @@ fn debug_validate_runtime_slot_application_handoff_type_ids(
     }
 
     for site in &handoff.slot_sites {
-        debug_validate_runtime_slot_site_render_plan_type_ids(&site.render_plan, context);
-    }
-}
-
-fn debug_validate_runtime_slot_site_render_plan_type_ids(
-    render_plan: &OwnedRuntimeSlotSiteRenderPlan,
-    context: &DebugTypeValidationContext,
-) {
-    for piece in &render_plan.pieces {
-        if let OwnedRuntimeSlotSiteRenderPiece::Render(node) = piece {
-            debug_validate_runtime_template_node_type_ids(node, context);
-        }
+        debug_validate_runtime_template_node_type_ids(&site.render_root, context);
     }
 }
 

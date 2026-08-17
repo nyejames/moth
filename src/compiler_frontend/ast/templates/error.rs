@@ -1,12 +1,11 @@
 //! Local template error boundary.
 //!
-//! WHAT: keeps formatter and template-owned source diagnostics typed while template helpers still
-//! expose a mix of `CompilerDiagnostic` and older `CompilerError` entrypoints.
+//! WHAT: keeps formatter and template-owned source diagnostics typed while infrastructure failures
+//! remain on the compiler-error lane.
 //! WHY: template construction and folding sit between AST source diagnostics and project-aware
-//! formatting/folding infrastructure. This boundary makes that distinction explicit locally.
+//! formatting/folding infrastructure. This boundary keeps that distinction explicit locally.
 
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::templates::template_slots::TemplateSlotError;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::paths::compile_time_paths::CompileTimePathResolutionError;
@@ -69,15 +68,6 @@ impl From<ExpressionParseError> for TemplateError {
         match error {
             ExpressionParseError::Diagnostic(diagnostic) => TemplateError::Diagnostic(diagnostic),
             ExpressionParseError::Infrastructure(error) => TemplateError::Infrastructure(error),
-        }
-    }
-}
-
-impl From<TemplateSlotError> for TemplateError {
-    fn from(error: TemplateSlotError) -> Self {
-        match error {
-            TemplateSlotError::Diagnostic(diagnostic) => TemplateError::Diagnostic(diagnostic),
-            TemplateSlotError::Infrastructure(error) => TemplateError::Infrastructure(error),
         }
     }
 }

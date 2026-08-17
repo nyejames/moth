@@ -1,6 +1,4 @@
-items = {"x"}
-
-list = [$children([loop items |item|:
+list = [$children([loop 0 to 1 |item|:
     <li class="loop-slot">[$slot]-[item]</li>
 ]):
     <ul>[$slot]</ul>

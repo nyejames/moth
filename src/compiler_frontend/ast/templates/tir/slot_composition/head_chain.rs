@@ -1,55 +1,33 @@
 //! TIR-native head-chain composition.
 //!
-//! WHAT: resolves wrapper templates in a template's head section against the
-//!       body content that fills their slots. It partitions root children by
-//!       head/body origin, builds a chain graph of receiving layers, and
-//!       resolves each layer by routing contributions and expanding slot
-//!       placeholders.
-//!
-//! WHY: this is the TIR-native equivalent of the atom-level
-//!      `compose_template_head_chain_atoms` in `template_composition.rs`. It
-//!      replaces the atom-level chain graph with TIR node operations while
-//!      reusing the schema, contribution, and expansion helpers.
+//! Partitions root children by head/body origin, builds a chain of receiving
+//! layers, and resolves each layer from a carried slot layout plus one
+//! routing of its fill nodes.
 
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::{TemplateSegmentOrigin, TemplateType};
-use crate::compiler_frontend::ast::templates::template_slots::{
-    materialize_tir_native_runtime_slot_plan, tir_contributions_need_runtime,
+use crate::compiler_frontend::ast::templates::tir::refs::TemplateWrapperReference;
+use crate::compiler_frontend::ast::templates::tir::slot_layout::{
+    TirSlotLayout, collect_tir_slot_layout,
 };
-use crate::compiler_frontend::ast::templates::tir::overlays::TemplateViewContext;
-use crate::compiler_frontend::ast::templates::tir::refs::TemplateTirChildReference;
-use crate::compiler_frontend::ast::templates::tir::view::TemplateTirPhase;
 use crate::compiler_frontend::ast::templates::tir::{
-    TemplateIrId, TemplateIrNode, TemplateIrNodeId, TemplateIrNodeKind, TemplateIrStore,
+    TemplateIrNode, TemplateIrNodeId, TemplateIrNodeKind, TemplateIrStore,
 };
+
+#[cfg(test)]
+use crate::compiler_frontend::ast::templates::tir::TemplateIrId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use super::helpers::{
-    ComposedTirRoot, SlotResolutionComposition, build_composed_wrapper_template,
-    build_tir_fill_template, children_of_node, internal_compiler_error, rebuild_root_sequence,
+    children_of_node, compose_wrapper_application, internal_compiler_error, rebuild_root_sequence,
 };
-use super::overlays::allocate_slot_resolution_context;
-use super::schema::{collect_tir_slot_schema, expand_tir_slot_placeholders_into};
 
 /// Typed result for the TIR head-chain composition family.
 type HeadChainResult<T> = Result<T, TemplateError>;
 
-/// Bundles the shared state threaded through recursive chain resolution.
-///
-/// WHAT: carries the string table, accumulated slot compositions, and the
-///       runtime-plan flag so recursive `resolve_tir_chain_items` /
-///       `resolve_tir_chain_layer` calls stay readable without a long argument
-///       list.
-/// WHY: the same four values are passed unchanged through every recursion
-///      level. Grouping them in one struct keeps the recursive call sites
-///      short and makes it obvious that nested layers inherit the caller's
-///      real composition state rather than a fresh or default context.
+/// Carries the immutable services shared by recursive chain resolution.
 struct HeadChainResolutionInputs<'a> {
     string_table: &'a StringTable,
-    slot_compositions: &'a mut Vec<SlotResolutionComposition>,
     allow_runtime_plans: bool,
 }
 
@@ -62,11 +40,8 @@ struct HeadChainResolutionInputs<'a> {
 /// WHY: nested head wrappers need one layer-local fill list before the chain is
 ///      resolved into effective TIR nodes.
 struct TirChainLayer {
-    /// Effective wrapper identity from the head-origin child occurrence.
-    wrapper_reference: TemplateTirChildReference,
-
-    /// Fill content items, in authored order. Items may be direct node IDs or
-    /// references to nested chain layers that must be resolved first.
+    wrapper_reference: TemplateWrapperReference,
+    layout: TirSlotLayout,
     fill_items: Vec<TirChainItem>,
 }
 
@@ -92,72 +67,59 @@ enum TirChainItem {
     },
 }
 
-/// Composes a template's head-chain by resolving wrapper templates with their
-/// fill content, producing a new TIR root node.
+/// Composes a template's head-chain from a template ID.
 ///
-/// WHAT: walks the template's TIR root `Sequence` children, partitions them by
-///       origin (Head vs Body), identifies head-origin wrapper templates that
-///       open receiving layers, accumulates fill content for each layer, and
-///       resolves each layer by routing and expanding slot contributions.
-/// WHY: this is the TIR-native equivalent of the atom-level
-///      `compose_template_head_chain_atoms` in `template_composition.rs`. It
-///      replaces the atom-level chain graph with TIR node operations, using the
-///      already-implemented `route_tir_slot_contributions` and
-///      `expand_tir_slot_placeholders`.
+/// Test convenience wrapper: production callers use `compose_tir_head_chain_from_root`
+/// directly to avoid pushing scratch templates for node-root composition.
+#[cfg(test)]
 pub(crate) fn compose_tir_head_chain(
     store: &mut TemplateIrStore,
     template_id: TemplateIrId,
     string_table: &StringTable,
     allow_runtime_plans: bool,
 ) -> HeadChainResult<TemplateIrNodeId> {
-    let mut slot_compositions = Vec::new();
-    let mut inputs = HeadChainResolutionInputs {
-        string_table,
-        slot_compositions: &mut slot_compositions,
-        allow_runtime_plans,
-    };
-    compose_tir_head_chain_into(store, template_id, &mut inputs)
-}
-
-/// Internal head-chain composition that also collects slot-bearing wrapper/fill
-/// pairs into `slot_compositions` for later overlay allocation.
-///
-/// WHY: the slot-composition entry point (`compose_tir_head_chain_with_overlays`)
-///      needs the pairs to allocate slot-resolution overlays after the store
-///      borrow is released. The public `compose_tir_head_chain` discards them.
-fn compose_tir_head_chain_into(
-    store: &mut TemplateIrStore,
-    template_id: TemplateIrId,
-    inputs: &mut HeadChainResolutionInputs,
-) -> HeadChainResult<TemplateIrNodeId> {
     let template = store.get_template(template_id).ok_or_else(|| {
         internal_compiler_error(
             "TIR head-chain composition: template ID was not present in the store.",
         )
     })?;
-
-    // Fast path: no child-template references means no wrapper receivers can
-    // exist, and the original root is unchanged. The summary is cheap to check
-    // and avoids partitioning/walking children for the common case.
-    if template.summary.child_template_count == 0 {
-        return Ok(template.root);
-    }
-
     let root_node_id = template.root;
+    compose_tir_head_chain_from_root(store, root_node_id, string_table, allow_runtime_plans)
+}
 
+/// Composes a head-chain directly from a root node, without requiring a
+/// durable `TemplateIr` entry.
+///
+/// WHAT: partitions the root node's children by head/body origin, builds the
+///       wrapper chain, and resolves each layer. Returns the composed root
+///       node ID.
+/// WHY: control-flow body roots and aggregate-wrapper candidates are node
+///      roots, not published templates. Composing them directly avoids pushing
+///      a scratch `TemplateIr` that would remain in the durable store without
+///      a referencing identity.
+pub(crate) fn compose_tir_head_chain_from_root(
+    store: &mut TemplateIrStore,
+    root_node_id: TemplateIrNodeId,
+    string_table: &StringTable,
+    allow_runtime_plans: bool,
+) -> HeadChainResult<TemplateIrNodeId> {
+    let inputs = HeadChainResolutionInputs {
+        string_table,
+        allow_runtime_plans,
+    };
+    compose_tir_head_chain_from_root_into(store, root_node_id, &inputs)
+}
+
+fn compose_tir_head_chain_from_root_into(
+    store: &mut TemplateIrStore,
+    root_node_id: TemplateIrNodeId,
+    inputs: &HeadChainResolutionInputs,
+) -> HeadChainResult<TemplateIrNodeId> {
     // Fast path: if the root is not a sequence, no receiving layer can exist
     // and the original root is unchanged.
     let Some(root_children) = root_sequence_children(store, root_node_id)? else {
         return Ok(root_node_id);
     };
-
-    // Cheap pre-scan: if no head-origin child template is a wrapper receiver,
-    // the original root is unchanged and we can avoid allocating the head/body
-    // partition vectors. This matters because many templates contain head
-    // references (e.g. function calls) that are not slot-bearing wrappers.
-    if !has_tir_head_chain_receiver(store, root_children)? {
-        return Ok(root_node_id);
-    }
 
     let (head_children, body_children) = partition_tir_children_by_origin(store, root_children)?;
 
@@ -176,55 +138,8 @@ fn compose_tir_head_chain_into(
     rebuild_root_sequence(store, root_node_id, resolved_root_children)
 }
 
-/// Composes the TIR head chain on the shared module-local store and threads a
-/// slot-resolution view context onto the result when the
-/// composition resolved one or more slot-bearing wrappers.
-///
-/// WHAT: runs the existing store-local structural head-chain composition
-///       (unchanged behavior), collects slot-bearing wrapper/fill pairs, then
-///       releases the mutable store borrow before constructing the value
-///       context after overlay payload materialization.
-/// WHY: production composition call sites need both the composed root for
-///      structural expansion and the value context for `TemplateTirReference`
-///      threading. Keeping the orchestration in the slot-composition owner
-///      avoids ad hoc overlay construction at call sites.
-pub(crate) fn compose_tir_head_chain_with_overlays(
-    store_handle: &Rc<RefCell<TemplateIrStore>>,
-    template_id: TemplateIrId,
-    string_table: &StringTable,
-    allow_runtime_plans: bool,
-) -> HeadChainResult<ComposedTirRoot> {
-    let (composed_root, slot_compositions) = {
-        let mut store = store_handle.borrow_mut();
-        let mut slot_compositions = Vec::new();
-        let mut inputs = HeadChainResolutionInputs {
-            string_table,
-            slot_compositions: &mut slot_compositions,
-            allow_runtime_plans,
-        };
-        let composed_root = compose_tir_head_chain_into(&mut store, template_id, &mut inputs)?;
-        (composed_root, slot_compositions)
-    };
-
-    let slot_context = allocate_slot_resolution_context(
-        &mut store_handle.borrow_mut(),
-        &slot_compositions,
-        string_table,
-    )?;
-
-    Ok(ComposedTirRoot {
-        root: composed_root,
-        slot_context,
-    })
-}
-
 /// Returns the children of a `Sequence` root node, or `None` if the root is not
 /// a sequence.
-///
-/// WHAT: centralizes the root-shape check so callers can treat non-sequence
-///       roots as uncomposable.
-/// WHY: head-chain composition only applies to templates whose body is a
-///      sequence of children.
 pub(super) fn root_sequence_children(
     store: &TemplateIrStore,
     node_id: TemplateIrNodeId,
@@ -239,54 +154,6 @@ pub(super) fn root_sequence_children(
         TemplateIrNodeKind::Sequence { children } => Ok(Some(children)),
         _ => Ok(None),
     }
-}
-
-/// Cheaply checks whether a root sequence contains a head-origin wrapper
-/// receiver.
-///
-/// WHAT: walks children in source order, stopping at the first body-origin
-///       `Text`/`DynamicExpression`. Within the head prefix, any `ChildTemplate`
-///       that references a slot-bearing, non-helper template makes the template
-///       a composition candidate.
-/// WHY: this avoids allocating head/body vectors for the vast majority of
-///      templates whose head references are not slot wrappers.
-fn has_tir_head_chain_receiver(
-    store: &TemplateIrStore,
-    children: &[TemplateIrNodeId],
-) -> HeadChainResult<bool> {
-    let mut saw_body_origin = false;
-
-    for child_id in children {
-        let child_node = store.get_node(*child_id).ok_or_else(|| {
-            internal_compiler_error(
-                "TIR head-chain composition: child node ID was not present in the store while scanning for receivers.",
-            )
-        })?;
-
-        let is_body = match &child_node.kind {
-            TemplateIrNodeKind::Text { origin, .. }
-            | TemplateIrNodeKind::DynamicExpression { origin, .. } => {
-                *origin == TemplateSegmentOrigin::Body
-            }
-
-            TemplateIrNodeKind::AggregateOutput => true,
-
-            _ => saw_body_origin,
-        };
-
-        if is_body {
-            saw_body_origin = true;
-            continue;
-        }
-
-        if matches!(child_node.kind, TemplateIrNodeKind::ChildTemplate { .. })
-            && is_tir_receiver(store, *child_id)?.is_some()
-        {
-            return Ok(true);
-        }
-    }
-
-    Ok(false)
 }
 
 /// Partitions root sequence children into head-origin and body-origin groups.
@@ -350,7 +217,7 @@ fn partition_tir_children_by_origin(
 fn is_tir_receiver(
     store: &TemplateIrStore,
     node_id: TemplateIrNodeId,
-) -> HeadChainResult<Option<TemplateTirChildReference>> {
+) -> HeadChainResult<Option<(TemplateWrapperReference, TirSlotLayout)>> {
     let Some(node) = store.get_node(node_id) else {
         return Err(internal_compiler_error(
             "TIR head-chain composition: child node ID was not present in the store while checking receiver.",
@@ -374,10 +241,13 @@ fn is_tir_receiver(
         return Ok(None);
     }
 
-    let schema = collect_tir_slot_schema(store, reference.root)?;
+    let layout = collect_tir_slot_layout(store, reference.root)?;
 
-    Ok(if schema.has_any_slots() {
-        Some(*reference)
+    Ok(if layout.schema.has_any_slots() {
+        Some((
+            TemplateWrapperReference::new(reference.root, reference.phase, reference.context),
+            layout,
+        ))
     } else {
         None
     })
@@ -389,8 +259,6 @@ fn is_tir_receiver(
 ///       `LayerRef` item routed to the active layer (or root). Non-receivers
 ///       become `DirectNode` items. Body children become fill for the deepest
 ///       active layer, or root items when no layer is active.
-/// WHY: this mirrors the atom-level chain-graph construction in
-///      `compose_template_head_chain_atoms` while using TIR item references.
 fn build_tir_chain_graph(
     store: &TemplateIrStore,
     head_children: &[TemplateIrNodeId],
@@ -401,7 +269,7 @@ fn build_tir_chain_graph(
     let mut active_layer: Option<usize> = None;
 
     for child_id in head_children {
-        if let Some(wrapper_reference) = is_tir_receiver(store, *child_id)? {
+        if let Some((wrapper_reference, layout)) = is_tir_receiver(store, *child_id)? {
             let layer_index = layers.len();
 
             push_tir_chain_item(
@@ -416,6 +284,7 @@ fn build_tir_chain_graph(
 
             layers.push(TirChainLayer {
                 wrapper_reference,
+                layout,
                 fill_items: Vec::new(),
             });
             active_layer = Some(layer_index);
@@ -430,8 +299,8 @@ fn build_tir_chain_graph(
         );
     }
 
-    // Body atoms are appended after head parsing. If the head opened a receiving
-    // chain, body atoms become contributions to the deepest active receiver.
+    // Body nodes are appended after head parsing. If the head opened a receiving
+    // chain, body nodes become contributions to the deepest active receiver.
     for child_id in body_children {
         push_tir_chain_item(
             &mut root_items,
@@ -467,7 +336,7 @@ fn resolve_tir_chain_items(
     store: &mut TemplateIrStore,
     items: &[TirChainItem],
     layers: &[TirChainLayer],
-    inputs: &mut HeadChainResolutionInputs,
+    inputs: &HeadChainResolutionInputs,
 ) -> HeadChainResult<Vec<TemplateIrNodeId>> {
     let mut resolved_nodes = Vec::with_capacity(items.len());
 
@@ -511,7 +380,7 @@ fn resolve_tir_chain_layer(
     layer_index: usize,
     layers: &[TirChainLayer],
     original_node_id: TemplateIrNodeId,
-    inputs: &mut HeadChainResolutionInputs,
+    inputs: &HeadChainResolutionInputs,
 ) -> HeadChainResult<TemplateIrNodeId> {
     let layer = &layers[layer_index];
 
@@ -521,96 +390,31 @@ fn resolve_tir_chain_layer(
         return Ok(original_node_id);
     }
 
-    // Module-local wrapper: structural expansion path.
-    let wrapper_template_id = layer.wrapper_reference.root;
-
     let resolved_fill_node_ids = resolve_tir_chain_items(store, &layer.fill_items, layers, inputs)?;
 
-    let fill_template_id =
-        build_tir_fill_template(store, resolved_fill_node_ids, original_node_id)?;
+    let original_location = store
+        .get_node(original_node_id)
+        .map(|node| node.location.to_owned())
+        .ok_or_else(|| {
+            internal_compiler_error(
+                "TIR head-chain composition: original wrapper node ID was not present in the store.",
+            )
+        })?;
 
-    let routed = super::contributions::route_tir_slot_contributions(
+    let resolved = compose_wrapper_application(
         store,
-        wrapper_template_id,
-        fill_template_id,
+        layer.wrapper_reference,
+        &layer.layout,
+        resolved_fill_node_ids,
+        original_location.clone(),
         inputs.string_table,
+        inputs.allow_runtime_plans,
     )?;
 
-    // Decide between structural expansion and runtime slot planning. When the
-    // fill content contains non-const-evaluable (runtime) nodes — such as
-    // asset references, dynamic expressions, or loop control — the wrapper must
-    // lower as a runtime slot plan so the HIR preserves slot-site boundaries
-    // and loop-control semantics. Structural expansion would flatten wrapper
-    // text and fill content together, which breaks `continue` inside slot
-    // fills and drops runtime slot-site metadata.
-    let schema = collect_tir_slot_schema(store, wrapper_template_id)?;
-
-    let composed_template_id = if inputs.allow_runtime_plans
-        && tir_contributions_need_runtime(
-            &schema,
-            &routed.contributions,
-            inputs.string_table,
-            store,
-        ) {
-        let original_location = store
-            .get_node(original_node_id)
-            .map(|node| node.location.to_owned())
-            .ok_or_else(|| {
-                internal_compiler_error(
-                    "TIR head-chain composition: original wrapper node ID was not present in the store.",
-                )
-            })?;
-
-        materialize_tir_native_runtime_slot_plan(
-            store,
-            wrapper_template_id,
-            &routed,
-            inputs.string_table,
-            &original_location,
-        )
-        .map_err(TemplateError::from)?
-    } else {
-        // Const-evaluable fill: structurally expand slot placeholders into the
-        // wrapper tree. This is the compile-time composition path that produces
-        // a fully flattened render tree with no runtime slot-plan metadata.
-        let expanded_root = expand_tir_slot_placeholders_into(
-            store,
-            wrapper_template_id,
-            &routed,
-            inputs.string_table,
-            inputs.slot_compositions,
-        )?;
-
-        build_composed_wrapper_template(store, wrapper_template_id, expanded_root)?
-    };
-
-    // Record the wrapper/fill pair so the shared-store entry point can allocate
-    // a slot-resolution overlay after the structural borrow is released.
-    let fill_reference = fill_template_id;
-    inputs
-        .slot_compositions
-        .push(SlotResolutionComposition::new(
-            layer.wrapper_reference,
-            fill_reference,
-        ));
-
-    let original_node = store.get_node(original_node_id).ok_or_else(|| {
-        internal_compiler_error(
-            "TIR head-chain composition: original wrapper node ID was not present in the store.",
-        )
-    })?;
-
-    let original_location = original_node.location.to_owned();
-
     let occurrence_id = store.next_child_template_occurrence_id();
-    let reference = TemplateTirChildReference::new(
-        composed_template_id,
-        TemplateTirPhase::Parsed,
-        TemplateViewContext::default(),
-    );
     Ok(store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::ChildTemplate {
-            reference,
+            reference: resolved,
             occurrence_id,
         },
         original_location,

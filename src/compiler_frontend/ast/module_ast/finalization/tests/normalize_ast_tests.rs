@@ -5,7 +5,7 @@ use super::super::template_helpers::{
 };
 use super::*;
 use crate::compiler_frontend::ast::expressions::expression::{
-    ExpressionKind, ReactiveSource, ReactiveSourceKind,
+    Expression, ExpressionKind, ReactiveSource, ReactiveSourceKind,
 };
 use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
 use crate::compiler_frontend::ast::templates::template::{
@@ -17,27 +17,25 @@ use crate::compiler_frontend::ast::templates::template_control_flow::{
 use crate::compiler_frontend::ast::templates::tir::TirExpressionOverlayId;
 use crate::compiler_frontend::ast::templates::tir::refs::TemplateTirChildReference;
 use crate::compiler_frontend::ast::templates::tir::{
-    PreparedRuntime, RuntimeTemplateReason, TemplatePreparationMode,
+    MalformedTirStore, TemplateIr, TemplateIrBranch, TemplateIrBuilder, TemplateIrNode,
+    TemplateIrNodeKind, TemplateIrStore, TemplateIrSummary, TemplateLoopHeaderExpressionSites,
+    TemplateSlotPlan, TemplateTirPhase, TemplateTirReference, TemplateWrapperReference,
+    TemplateWrapperSet, TirView,
 };
 use crate::compiler_frontend::ast::templates::tir::{
-    TemplateIr, TemplateIrBranch, TemplateIrBuilder, TemplateIrNode, TemplateIrNodeKind,
-    TemplateIrStore, TemplateIrSummary, TemplateLoopHeaderExpressionSites, TemplateSlotPlan,
-    TemplateTirPhase, TemplateTirReference, TemplateWrapperReference, TemplateWrapperSet, TirView,
+    TemplatePreparationMode, TemplatePreparationOutcome, prepare_tir_view,
 };
 use crate::compiler_frontend::ast::templates::tir::{
     TemplateViewContext, TirExpressionOverlay, TirSlotResolution, TirSlotResolutionOverlay,
     TirWrapperContext, TirWrapperContextOverlay,
 };
 use crate::compiler_frontend::ast::templates::{
-    OwnedRuntimeSlotSiteRenderPiece, OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff,
-    OwnedRuntimeTemplateNode,
+    OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
 };
 use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
-use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
@@ -52,17 +50,6 @@ use crate::compiler_frontend::instrumentation::ast_counters::{
 };
 use std::cell::RefCell;
 use std::rc::Rc;
-
-fn test_project_path_resolver() -> ProjectPathResolver {
-    let cwd = std::env::temp_dir();
-    ProjectPathResolver::new(
-        cwd.clone(),
-        cwd,
-        crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots::empty(),
-        &crate::builder_surface::SourceFileKindRegistry::default(),
-    )
-    .expect("test path resolver should be valid")
-}
 
 fn finalized_folded(value: FinalizedTemplateValue) -> StringId {
     // This helper owns text-only assertions; provenance is covered by the focused fold tests.
@@ -89,7 +76,7 @@ fn registered_text_template(
     template_ir_store: &Rc<RefCell<TemplateIrStore>>,
     string_table: &StringTable,
 ) -> Template {
-    let byte_len = string_table.resolve(text).len() as u32;
+    let byte_len = string_table.resolve(text).len();
     let template_id = {
         let mut store = template_ir_store.borrow_mut();
         let mut builder = TemplateIrBuilder::new(&mut store);
@@ -143,7 +130,7 @@ fn nested_wrapper_finalization_fixture(
             let text = string_table.intern("parent");
             let text_node = builder.push_text_node(
                 text,
-                "parent".len() as u32,
+                "parent".len(),
                 TemplateSegmentOrigin::Body,
                 SourceLocation::default(),
             );
@@ -162,7 +149,7 @@ fn nested_wrapper_finalization_fixture(
             let text = string_table.intern("nested");
             let text_node = builder.push_text_node(
                 text,
-                "nested".len() as u32,
+                "nested".len(),
                 TemplateSegmentOrigin::Body,
                 SourceLocation::default(),
             );
@@ -182,14 +169,14 @@ fn nested_wrapper_finalization_fixture(
             let after = string_table.intern("inner-after");
             let before_node = builder.push_text_node(
                 before,
-                "inner-before".len() as u32,
+                "inner-before".len(),
                 TemplateSegmentOrigin::Body,
                 SourceLocation::default(),
             );
             let slot_node = builder.push_slot_node(SlotKey::Default, SourceLocation::default());
             let after_node = builder.push_text_node(
                 after,
-                "inner-after".len() as u32,
+                "inner-after".len(),
                 TemplateSegmentOrigin::Body,
                 SourceLocation::default(),
             );
@@ -212,8 +199,9 @@ fn nested_wrapper_finalization_fixture(
                 contribution_sources: Vec::new(),
                 slot_sites: Vec::new(),
             });
-            store.templates[inner_wrapper_template_id.index()].runtime_slot_plan =
-                Some(runtime_slot_plan_id);
+            store
+                .attach_runtime_slot_plan(inner_wrapper_template_id, runtime_slot_plan_id)
+                .expect("inner wrapper should accept the committed slot plan");
         }
 
         let inner_wrapper_reference = TemplateWrapperReference::new(
@@ -250,7 +238,7 @@ fn nested_wrapper_finalization_fixture(
             let after = string_table.intern("outer-after");
             let after_node = builder.push_text_node(
                 after,
-                "outer-after".len() as u32,
+                "outer-after".len(),
                 TemplateSegmentOrigin::Body,
                 SourceLocation::default(),
             );
@@ -344,27 +332,31 @@ fn nested_wrapper_finalization_fixture(
                     ..TirWrapperContext::default()
                 },
             )],
-        });
-    let outer_expression_overlay_id =
-        template_ir_store
-            .borrow_mut()
-            .allocate_expression_overlay(TirExpressionOverlay {
-                overrides: vec![(
-                    outer_expression_site_id,
-                    Box::new(Expression::string_slice(
-                        string_table.intern("outer-overlay"),
-                        SourceLocation::default(),
-                        ValueMode::ImmutableOwned,
-                    )),
-                )],
-            });
+        })
+        .expect("test overlay allocation");
+    let outer_expression_overlay_id = template_ir_store
+        .borrow_mut()
+        .allocate_expression_overlay(TirExpressionOverlay {
+            overrides: vec![(
+                outer_expression_site_id,
+                Box::new(Expression::string_slice(
+                    string_table.intern("outer-overlay"),
+                    SourceLocation::default(),
+                    ValueMode::ImmutableOwned,
+                )),
+            )],
+        })
+        .expect("test overlay allocation");
     let outer_context = TemplateViewContext {
         expression_overlay: Some(outer_expression_overlay_id),
         slot_resolution: None,
         wrapper_context: Some(nested_context_overlay_id),
     };
-    template_ir_store.borrow_mut().wrapper_sets[outer_wrapper_set_id.index()].wrappers[0].context =
-        outer_context;
+    MalformedTirStore::new(&mut template_ir_store.borrow_mut()).set_wrapper_reference_context(
+        outer_wrapper_set_id,
+        0,
+        outer_context,
+    );
 
     let parent_context_overlay_id = template_ir_store
         .borrow_mut()
@@ -376,7 +368,8 @@ fn nested_wrapper_finalization_fixture(
                     ..TirWrapperContext::default()
                 },
             )],
-        });
+        })
+        .expect("test overlay allocation");
     let parent_context = TemplateViewContext {
         expression_overlay: None,
         slot_resolution: None,
@@ -430,9 +423,6 @@ fn finalization_fold_composed_tir_root_folds_view_text() {
     let mut string_table = StringTable::new();
     let view_text = string_table.intern("store-backed view");
 
-    let project_path_resolver = test_project_path_resolver();
-    let path_format_config = PathStringFormatConfig::default();
-    let source_file_scope = InternedPath::new();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let context = TemplateViewContext::default();
 
@@ -442,9 +432,6 @@ fn finalization_fold_composed_tir_root_folds_view_text() {
         finalize_template_value(
             &template,
             TemplateValueFinalizationInputs {
-                source_file_scope: &source_file_scope,
-                path_format_config: &path_format_config,
-                project_path_resolver: &project_path_resolver,
                 string_table: &mut string_table,
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
                 template_ir_store: &template_ir_store,
@@ -465,9 +452,6 @@ fn finalization_normalizes_dynamic_expression_payloads_into_expression_overlay()
     let mut string_table = StringTable::new();
     let normalized_text = string_table.intern("normalized dynamic payload");
 
-    let project_path_resolver = test_project_path_resolver();
-    let path_format_config = PathStringFormatConfig::default();
-    let source_file_scope = InternedPath::new();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let context = TemplateViewContext::default();
 
@@ -518,9 +502,6 @@ fn finalization_normalizes_dynamic_expression_payloads_into_expression_overlay()
     );
 
     let mut context = TemplateNormalizationContext {
-        source_file_scope: &source_file_scope,
-        path_format_config: &path_format_config,
-        project_path_resolver: &project_path_resolver,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
@@ -617,29 +598,19 @@ fn finalization_merges_expression_overrides_without_duplicate_sites() {
             other => panic!("expected dynamic expression node, got {other:?}"),
         }
     };
-    let existing_overlay_id =
-        template_ir_store
-            .borrow_mut()
-            .allocate_expression_overlay(TirExpressionOverlay {
-                overrides: vec![
-                    (
-                        site_id,
-                        Box::new(Expression::int(
-                            2,
-                            SourceLocation::default(),
-                            ValueMode::ImmutableOwned,
-                        )),
-                    ),
-                    (
-                        site_id,
-                        Box::new(Expression::int(
-                            3,
-                            SourceLocation::default(),
-                            ValueMode::ImmutableOwned,
-                        )),
-                    ),
-                ],
-            });
+    let existing_overlay_id = template_ir_store
+        .borrow_mut()
+        .allocate_expression_overlay(TirExpressionOverlay {
+            overrides: vec![(
+                site_id,
+                Box::new(Expression::int(
+                    2,
+                    SourceLocation::default(),
+                    ValueMode::ImmutableOwned,
+                )),
+            )],
+        })
+        .expect("test overlay allocation");
     let initial_context = TemplateViewContext {
         expression_overlay: Some(existing_overlay_id),
         slot_resolution: None,
@@ -654,13 +625,7 @@ fn finalization_merges_expression_overrides_without_duplicate_sites() {
         SourceLocation::default(),
     );
 
-    let project_path_resolver = test_project_path_resolver();
-    let path_format_config = PathStringFormatConfig::default();
-    let source_file_scope = InternedPath::new();
     let mut context = TemplateNormalizationContext {
-        source_file_scope: &source_file_scope,
-        path_format_config: &path_format_config,
-        project_path_resolver: &project_path_resolver,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
@@ -691,9 +656,6 @@ fn finalization_does_not_mark_parsed_expression_overlay_reference_finalized() {
     let mut string_table = StringTable::new();
     let normalized_text = string_table.intern("normalized parsed dynamic payload");
 
-    let project_path_resolver = test_project_path_resolver();
-    let path_format_config = PathStringFormatConfig::default();
-    let source_file_scope = InternedPath::new();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let context = TemplateViewContext::default();
 
@@ -729,9 +691,6 @@ fn finalization_does_not_mark_parsed_expression_overlay_reference_finalized() {
     );
 
     let mut context = TemplateNormalizationContext {
-        source_file_scope: &source_file_scope,
-        path_format_config: &path_format_config,
-        project_path_resolver: &project_path_resolver,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
@@ -754,13 +713,125 @@ fn finalization_does_not_mark_parsed_expression_overlay_reference_finalized() {
 }
 
 #[test]
+fn finalization_uses_durable_phase_for_pre_finalized_descendant_overlay_collection() {
+    let mut string_table = StringTable::new();
+    let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
+    let (root_template_id, root_context, child_site_id) = {
+        let mut store = template_ir_store.borrow_mut();
+        let child_dynamic_node = {
+            let mut builder = TemplateIrBuilder::new(&mut store);
+            builder.push_dynamic_expression_node(
+                Expression::int(1, SourceLocation::default(), ValueMode::ImmutableOwned),
+                TemplateSegmentOrigin::Body,
+                None,
+                SourceLocation::default(),
+            )
+        };
+        let child_site_id = match &store
+            .get_node(child_dynamic_node)
+            .expect("child dynamic node should exist")
+            .kind
+        {
+            TemplateIrNodeKind::DynamicExpression { site_id, .. } => *site_id,
+            other => panic!("expected child dynamic expression, got {other:?}"),
+        };
+        let child_template_id = store.push_template(TemplateIr::new(
+            child_dynamic_node,
+            Style::default(),
+            TemplateType::StringFunction,
+            TemplateIrSummary::default(),
+            SourceLocation::default(),
+        ));
+        let child_expression_overlay = store
+            .allocate_expression_overlay(TirExpressionOverlay {
+                overrides: vec![(
+                    child_site_id,
+                    Box::new(Expression::int(
+                        2,
+                        SourceLocation::default(),
+                        ValueMode::ImmutableOwned,
+                    )),
+                )],
+            })
+            .expect("child expression overlay should allocate");
+
+        let child_node = {
+            let occurrence_id = store.next_child_template_occurrence_id();
+            store.push_node(TemplateIrNode::new(
+                TemplateIrNodeKind::ChildTemplate {
+                    reference: TemplateTirChildReference::new(
+                        child_template_id,
+                        TemplateTirPhase::Composed,
+                        TemplateViewContext {
+                            expression_overlay: Some(child_expression_overlay),
+                            slot_resolution: None,
+                            wrapper_context: None,
+                        },
+                    ),
+                    occurrence_id,
+                },
+                SourceLocation::default(),
+            ))
+        };
+        let root = store.push_node(TemplateIrNode::new(
+            TemplateIrNodeKind::Sequence {
+                children: vec![child_node],
+            },
+            SourceLocation::default(),
+        ));
+        let root_template_id = store.push_template(TemplateIr::new(
+            root,
+            Style::default(),
+            TemplateType::StringFunction,
+            TemplateIrSummary::default(),
+            SourceLocation::default(),
+        ));
+
+        (
+            root_template_id,
+            TemplateViewContext::default(),
+            child_site_id,
+        )
+    };
+    let mut template = template_with_reference(
+        TemplateTirReference {
+            root: root_template_id,
+            phase: TemplateTirPhase::Parsed,
+            context: root_context,
+        },
+        SourceLocation::default(),
+    );
+
+    let mut context = TemplateNormalizationContext {
+        template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        string_table: &mut string_table,
+        template_ir_store: Rc::clone(&template_ir_store),
+    };
+
+    normalize_template_for_hir(&mut template, &mut context)
+        .expect("pre-finalized descendant overlays should normalize");
+
+    assert_eq!(template.tir_reference.phase, TemplateTirPhase::Parsed);
+    let store = template_ir_store.borrow();
+    let view = TirView::new(
+        &store,
+        template.tir_reference.root,
+        template.tir_reference.phase,
+        template.tir_reference.context,
+    )
+    .expect("the parsed reference should retain its exact durable identity");
+    let effective_expression = view
+        .effective_expression_for_site(child_site_id)
+        .expect("child expression site should remain valid")
+        .expect("normalization should publish the descendant overlay");
+    assert!(matches!(effective_expression.kind, ExpressionKind::Int(2)));
+}
+
+#[test]
 fn finalization_normalizes_branch_selector_payloads_into_expression_overlay() {
     let mut string_table = StringTable::new();
     let normalized_text = string_table.intern("normalized branch selector payload");
 
-    let project_path_resolver = test_project_path_resolver();
-    let path_format_config = PathStringFormatConfig::default();
-    let source_file_scope = InternedPath::new();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let context = TemplateViewContext::default();
 
@@ -780,8 +851,8 @@ fn finalization_normalizes_branch_selector_payloads_into_expression_overlay() {
             TemplateBranchSelector::Bool(selector_expression),
             branch_body,
             selector_location.clone(),
-        )
-        .with_selector_site_id(selector_site_id);
+            selector_site_id,
+        );
         let branch_chain_node_id = store.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::BranchChain {
                 branches: vec![branch],
@@ -810,9 +881,6 @@ fn finalization_normalizes_branch_selector_payloads_into_expression_overlay() {
     );
 
     let mut context = TemplateNormalizationContext {
-        source_file_scope: &source_file_scope,
-        path_format_config: &path_format_config,
-        project_path_resolver: &project_path_resolver,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
@@ -874,9 +942,6 @@ fn finalization_normalizes_loop_header_payloads_into_expression_overlay() {
     let mut string_table = StringTable::new();
     let normalized_text = string_table.intern("normalized loop header payload");
 
-    let project_path_resolver = test_project_path_resolver();
-    let path_format_config = PathStringFormatConfig::default();
-    let source_file_scope = InternedPath::new();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let context = TemplateViewContext::default();
 
@@ -929,9 +994,6 @@ fn finalization_normalizes_loop_header_payloads_into_expression_overlay() {
     );
 
     let mut context = TemplateNormalizationContext {
-        source_file_scope: &source_file_scope,
-        path_format_config: &path_format_config,
-        project_path_resolver: &project_path_resolver,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
@@ -999,9 +1061,6 @@ fn finalization_fold_uses_finalized_expression_overlay_view() {
     let structural_text = string_table.intern("structural dynamic payload");
     let overlay_text = string_table.intern("finalized expression overlay");
 
-    let project_path_resolver = test_project_path_resolver();
-    let path_format_config = PathStringFormatConfig::default();
-    let source_file_scope = InternedPath::new();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let empty_context = TemplateViewContext::default();
 
@@ -1042,19 +1101,19 @@ fn finalization_fold_uses_finalized_expression_overlay_view() {
         }
     };
 
-    let expression_overlay_id =
-        template_ir_store
-            .borrow_mut()
-            .allocate_expression_overlay(TirExpressionOverlay {
-                overrides: vec![(
-                    site_id,
-                    Box::new(Expression::string_slice(
-                        overlay_text,
-                        SourceLocation::default(),
-                        ValueMode::ImmutableOwned,
-                    )),
-                )],
-            });
+    let expression_overlay_id = template_ir_store
+        .borrow_mut()
+        .allocate_expression_overlay(TirExpressionOverlay {
+            overrides: vec![(
+                site_id,
+                Box::new(Expression::string_slice(
+                    overlay_text,
+                    SourceLocation::default(),
+                    ValueMode::ImmutableOwned,
+                )),
+            )],
+        })
+        .expect("test overlay allocation");
     let expression_context = TemplateViewContext {
         expression_overlay: Some(expression_overlay_id),
         slot_resolution: None,
@@ -1078,9 +1137,6 @@ fn finalization_fold_uses_finalized_expression_overlay_view() {
         finalize_template_value(
             &template,
             TemplateValueFinalizationInputs {
-                source_file_scope: &source_file_scope,
-                path_format_config: &path_format_config,
-                project_path_resolver: &project_path_resolver,
                 string_table: &mut string_table,
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
                 template_ir_store: &template_ir_store,
@@ -1103,9 +1159,6 @@ fn finalization_classifies_root_expression_overlay_through_nested_children() {
     let branch_text = string_table.intern("root-overlay-branch");
     let loop_text = string_table.intern("root-overlay-loop");
 
-    let project_path_resolver = test_project_path_resolver();
-    let path_format_config = PathStringFormatConfig::default();
-    let source_file_scope = InternedPath::new();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let empty_context = TemplateViewContext::default();
 
@@ -1129,10 +1182,11 @@ fn finalization_classifies_root_expression_overlay_through_nested_children() {
             );
             let branch_text_node = builder.push_text_node(
                 branch_text,
-                "root-overlay-branch".len() as u32,
+                "root-overlay-branch".len(),
                 TemplateSegmentOrigin::Body,
                 SourceLocation::default(),
             );
+            let nested_selector_site = builder.store.next_expression_site_id();
             let branch_node = builder.push_branch_chain_node(
                 vec![TemplateIrBranch::new(
                     TemplateBranchSelector::Bool(Expression::reference_with_type_id(
@@ -1145,13 +1199,14 @@ fn finalization_classifies_root_expression_overlay_through_nested_children() {
                     )),
                     branch_text_node,
                     SourceLocation::default(),
+                    nested_selector_site,
                 )],
                 None,
                 SourceLocation::default(),
             );
             let loop_text_node = builder.push_text_node(
                 loop_text,
-                "root-overlay-loop".len() as u32,
+                "root-overlay-loop".len(),
                 TemplateSegmentOrigin::Body,
                 SourceLocation::default(),
             );
@@ -1245,37 +1300,37 @@ fn finalization_classifies_root_expression_overlay_through_nested_children() {
         )
     };
 
-    let expression_overlay_id =
-        template_ir_store
-            .borrow_mut()
-            .allocate_expression_overlay(TirExpressionOverlay {
-                overrides: vec![
-                    (
-                        dynamic_site_id,
-                        Box::new(Expression::string_slice(
-                            dynamic_text,
-                            SourceLocation::default(),
-                            ValueMode::ImmutableOwned,
-                        )),
-                    ),
-                    (
-                        selector_site_id,
-                        Box::new(Expression::bool(
-                            true,
-                            SourceLocation::default(),
-                            ValueMode::ImmutableOwned,
-                        )),
-                    ),
-                    (
-                        loop_site_id,
-                        Box::new(Expression::bool(
-                            false,
-                            SourceLocation::default(),
-                            ValueMode::ImmutableOwned,
-                        )),
-                    ),
-                ],
-            });
+    let expression_overlay_id = template_ir_store
+        .borrow_mut()
+        .allocate_expression_overlay(TirExpressionOverlay {
+            overrides: vec![
+                (
+                    dynamic_site_id,
+                    Box::new(Expression::string_slice(
+                        dynamic_text,
+                        SourceLocation::default(),
+                        ValueMode::ImmutableOwned,
+                    )),
+                ),
+                (
+                    selector_site_id,
+                    Box::new(Expression::bool(
+                        true,
+                        SourceLocation::default(),
+                        ValueMode::ImmutableOwned,
+                    )),
+                ),
+                (
+                    loop_site_id,
+                    Box::new(Expression::bool(
+                        false,
+                        SourceLocation::default(),
+                        ValueMode::ImmutableOwned,
+                    )),
+                ),
+            ],
+        })
+        .expect("test overlay allocation");
     let root_context = TemplateViewContext {
         expression_overlay: Some(expression_overlay_id),
         slot_resolution: None,
@@ -1295,9 +1350,6 @@ fn finalization_classifies_root_expression_overlay_through_nested_children() {
         finalize_template_value(
             &template,
             TemplateValueFinalizationInputs {
-                source_file_scope: &source_file_scope,
-                path_format_config: &path_format_config,
-                project_path_resolver: &project_path_resolver,
                 string_table: &mut string_table,
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
                 template_ir_store: &template_ir_store,
@@ -1320,9 +1372,6 @@ fn finalization_ignores_parsed_child_overlay_before_later_composed_descendant() 
     let structural_text = string_table.intern("structural");
     let override_text = string_table.intern("root-override");
 
-    let project_path_resolver = test_project_path_resolver();
-    let path_format_config = PathStringFormatConfig::default();
-    let source_file_scope = InternedPath::new();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let empty_context = TemplateViewContext::default();
     let missing_context = TemplateViewContext {
@@ -1404,19 +1453,19 @@ fn finalization_ignores_parsed_child_overlay_before_later_composed_descendant() 
         (root_template_id, descendant_site_id)
     };
 
-    let expression_overlay_id =
-        template_ir_store
-            .borrow_mut()
-            .allocate_expression_overlay(TirExpressionOverlay {
-                overrides: vec![(
-                    descendant_site_id,
-                    Box::new(Expression::string_slice(
-                        override_text,
-                        SourceLocation::default(),
-                        ValueMode::ImmutableOwned,
-                    )),
-                )],
-            });
+    let expression_overlay_id = template_ir_store
+        .borrow_mut()
+        .allocate_expression_overlay(TirExpressionOverlay {
+            overrides: vec![(
+                descendant_site_id,
+                Box::new(Expression::string_slice(
+                    override_text,
+                    SourceLocation::default(),
+                    ValueMode::ImmutableOwned,
+                )),
+            )],
+        })
+        .expect("test overlay allocation");
     let root_context = TemplateViewContext {
         expression_overlay: Some(expression_overlay_id),
         slot_resolution: None,
@@ -1435,9 +1484,6 @@ fn finalization_ignores_parsed_child_overlay_before_later_composed_descendant() 
         finalize_template_value(
             &template,
             TemplateValueFinalizationInputs {
-                source_file_scope: &source_file_scope,
-                path_format_config: &path_format_config,
-                project_path_resolver: &project_path_resolver,
                 string_table: &mut string_table,
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
                 template_ir_store: &template_ir_store,
@@ -1458,16 +1504,10 @@ fn finalization_rejects_nested_runtime_wrapper_in_exact_wrapper_overlay() {
     let mut string_table = StringTable::new();
     let (template, template_ir_store) =
         nested_wrapper_finalization_fixture(&mut string_table, true);
-    let project_path_resolver = test_project_path_resolver();
-    let path_format_config = PathStringFormatConfig::default();
-    let source_file_scope = InternedPath::new();
 
     let result = finalize_template_value(
         &template,
         TemplateValueFinalizationInputs {
-            source_file_scope: &source_file_scope,
-            path_format_config: &path_format_config,
-            project_path_resolver: &project_path_resolver,
             string_table: &mut string_table,
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             template_ir_store: &template_ir_store,
@@ -1498,18 +1538,14 @@ fn finalization_keeps_valid_runtime_slot_plan_out_of_folded_string() {
             contribution_sources: Vec::new(),
             slot_sites: Vec::new(),
         });
-        store.templates[template_id.index()].runtime_slot_plan = Some(slot_plan_id);
+        store
+            .attach_runtime_slot_plan(template_id, slot_plan_id)
+            .expect("template should accept the committed slot plan");
     }
 
-    let project_path_resolver = test_project_path_resolver();
-    let path_format_config = PathStringFormatConfig::default();
-    let source_file_scope = InternedPath::new();
     let result = finalize_template_value(
         &template,
         TemplateValueFinalizationInputs {
-            source_file_scope: &source_file_scope,
-            path_format_config: &path_format_config,
-            project_path_resolver: &project_path_resolver,
             string_table: &mut string_table,
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             template_ir_store: &template_ir_store,
@@ -1523,7 +1559,10 @@ fn finalization_keeps_valid_runtime_slot_plan_out_of_folded_string() {
         "a valid runtime slot plan must not become a folded empty string"
     );
     assert!(
-        template_ir_store.borrow().templates[template_id.index()]
+        template_ir_store
+            .borrow()
+            .get_template(template_id)
+            .expect("template should remain in the store")
             .runtime_slot_plan
             .is_some(),
         "the runtime slot plan must remain available for owned handoff"
@@ -1546,17 +1585,13 @@ fn finalization_replaces_renderable_runtime_slot_plan_with_owned_handoff() {
             contribution_sources: Vec::new(),
             slot_sites: Vec::new(),
         });
-        store.templates[template_id.index()].runtime_slot_plan = Some(slot_plan_id);
+        store
+            .attach_runtime_slot_plan(template_id, slot_plan_id)
+            .expect("template should accept the committed slot plan");
     }
 
     let mut expression = Expression::template(template, ValueMode::ImmutableOwned);
-    let project_path_resolver = test_project_path_resolver();
-    let path_format_config = PathStringFormatConfig::default();
-    let source_file_scope = InternedPath::new();
     let mut context = TemplateNormalizationContext {
-        source_file_scope: &source_file_scope,
-        path_format_config: &path_format_config,
-        project_path_resolver: &project_path_resolver,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
@@ -1573,7 +1608,10 @@ fn finalization_replaces_renderable_runtime_slot_plan_with_owned_handoff() {
         "the owned handoff must retain the valid empty slot plan"
     );
     assert!(
-        template_ir_store.borrow().templates[template_id.index()]
+        template_ir_store
+            .borrow()
+            .get_template(template_id)
+            .expect("template should remain in the store")
             .runtime_slot_plan
             .is_some(),
         "normalization must retain the source runtime slot plan"
@@ -1597,28 +1635,30 @@ fn runtime_handoff_shape_uses_root_slot_plan_not_preparation_reason() {
             contribution_sources: Vec::new(),
             slot_sites: Vec::new(),
         });
-        store.templates[template_id.index()].runtime_slot_plan = Some(slot_plan_id);
+        store
+            .attach_runtime_slot_plan(template_id, slot_plan_id)
+            .expect("template should accept the committed slot plan");
     }
 
-    let project_path_resolver = test_project_path_resolver();
-    let path_format_config = PathStringFormatConfig::default();
-    let source_file_scope = InternedPath::new();
     let mut context = TemplateNormalizationContext {
-        source_file_scope: &source_file_scope,
-        path_format_config: &path_format_config,
-        project_path_resolver: &project_path_resolver,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
     };
-    let prepared = PreparedRuntime {
-        identity: crate::compiler_frontend::ast::templates::tir::TirViewIdentity {
-            root: template_id,
-            phase: TemplateTirPhase::Finalized,
-            context: TemplateViewContext::default(),
-        },
-        reason: RuntimeTemplateReason::RuntimeExpression,
-    };
+    let store = template_ir_store.borrow();
+    let view = TirView::new(
+        &store,
+        template_id,
+        TemplateTirPhase::Finalized,
+        TemplateViewContext::default(),
+    )
+    .expect("finalized runtime-slot view should construct");
+    let prepared = prepare_tir_view(&view, TemplatePreparationMode::Value)
+        .expect("runtime-slot preparation should succeed");
+    assert!(matches!(
+        prepared.outcome,
+        TemplatePreparationOutcome::Runtime(_)
+    ));
 
     let normalized = super::materialize_runtime_template_handoff_for_hir(
         &template,
@@ -1654,23 +1694,19 @@ fn module_constant_normalization_rejects_runtime_slot_plan_with_structured_diagn
             contribution_sources: Vec::new(),
             slot_sites: Vec::new(),
         });
-        store.templates[template_id.index()].runtime_slot_plan = Some(slot_plan_id);
+        store
+            .attach_runtime_slot_plan(template_id, slot_plan_id)
+            .expect("template should accept the committed slot plan");
     }
 
     let expression = Expression::template(template, ValueMode::ImmutableOwned);
     let ExpressionKind::Template(template) = &expression.kind else {
         panic!("module constant regression must start from a template expression");
     };
-    let project_path_resolver = test_project_path_resolver();
-    let path_format_config = PathStringFormatConfig::default();
-    let source_file_scope = InternedPath::new();
     let result = super::super::normalize_constants::normalize_module_constant_template_expression(
         &expression,
         template,
         TemplateValueFinalizationInputs {
-            source_file_scope: &source_file_scope,
-            path_format_config: &path_format_config,
-            project_path_resolver: &project_path_resolver,
             string_table: &mut string_table,
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             template_ir_store: &template_ir_store,
@@ -1701,17 +1737,11 @@ fn finalization_accepts_supported_nested_wrapper_exact_view() {
     let mut string_table = StringTable::new();
     let (template, template_ir_store) =
         nested_wrapper_finalization_fixture(&mut string_table, false);
-    let project_path_resolver = test_project_path_resolver();
-    let path_format_config = PathStringFormatConfig::default();
-    let source_file_scope = InternedPath::new();
 
     let folded = finalized_folded(
         finalize_template_value(
             &template,
             TemplateValueFinalizationInputs {
-                source_file_scope: &source_file_scope,
-                path_format_config: &path_format_config,
-                project_path_resolver: &project_path_resolver,
                 string_table: &mut string_table,
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
                 template_ir_store: &template_ir_store,
@@ -1735,9 +1765,6 @@ fn finalization_fold_uses_resolved_slot_view_context() {
     let after_text = string_table.intern("after");
     let fill_text = string_table.intern("filled");
 
-    let project_path_resolver = test_project_path_resolver();
-    let path_format_config = PathStringFormatConfig::default();
-    let source_file_scope = InternedPath::new();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
 
     let reference = {
@@ -1745,7 +1772,7 @@ fn finalization_fold_uses_resolved_slot_view_context() {
         let mut fill_builder = TemplateIrBuilder::new(&mut store);
         let fill_node = fill_builder.push_text_node(
             fill_text,
-            "filled".len() as u32,
+            "filled".len(),
             TemplateSegmentOrigin::Body,
             SourceLocation::default(),
         );
@@ -1761,14 +1788,14 @@ fn finalization_fold_uses_resolved_slot_view_context() {
         let mut wrapper_builder = TemplateIrBuilder::new(&mut store);
         let before_node = wrapper_builder.push_text_node(
             before_text,
-            "before".len() as u32,
+            "before".len(),
             TemplateSegmentOrigin::Body,
             SourceLocation::default(),
         );
         let slot_node = wrapper_builder.push_slot_node(SlotKey::Default, SourceLocation::default());
         let after_node = wrapper_builder.push_text_node(
             after_text,
-            "after".len() as u32,
+            "after".len(),
             TemplateSegmentOrigin::Body,
             SourceLocation::default(),
         );
@@ -1793,12 +1820,14 @@ fn finalization_fold_uses_resolved_slot_view_context() {
             _ => panic!("expected slot node"),
         };
 
-        let slot_overlay_id = store.allocate_slot_resolution_overlay(TirSlotResolutionOverlay {
-            resolutions: vec![(
-                slot_occurrence_id,
-                TirSlotResolution::resolved(SlotKey::Default, vec![fill_template_id]),
-            )],
-        });
+        let slot_overlay_id = store
+            .allocate_slot_resolution_overlay(TirSlotResolutionOverlay {
+                resolutions: vec![(
+                    slot_occurrence_id,
+                    TirSlotResolution::resolved(SlotKey::Default, vec![fill_template_id]),
+                )],
+            })
+            .expect("test overlay allocation");
         let context = TemplateViewContext {
             expression_overlay: None,
             slot_resolution: Some(slot_overlay_id),
@@ -1822,9 +1851,6 @@ fn finalization_fold_uses_resolved_slot_view_context() {
         finalize_template_value(
             &template,
             TemplateValueFinalizationInputs {
-                source_file_scope: &source_file_scope,
-                path_format_config: &path_format_config,
-                project_path_resolver: &project_path_resolver,
                 string_table: &mut string_table,
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
                 template_ir_store: &template_ir_store,
@@ -1846,9 +1872,6 @@ fn finalization_fold_composed_root_with_unfilled_slot_emits_no_slot_output() {
     let mut string_table = StringTable::new();
     let text_id = string_table.intern("text before unfilled slot");
 
-    let project_path_resolver = test_project_path_resolver();
-    let path_format_config = PathStringFormatConfig::default();
-    let source_file_scope = InternedPath::new();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let context = TemplateViewContext::default();
 
@@ -1860,7 +1883,7 @@ fn finalization_fold_composed_root_with_unfilled_slot_emits_no_slot_output() {
         let mut builder = TemplateIrBuilder::new(&mut store);
         let text_node = builder.push_text_node(
             text_id,
-            "text before unfilled slot".len() as u32,
+            "text before unfilled slot".len(),
             TemplateSegmentOrigin::Body,
             location.clone(),
         );
@@ -1887,9 +1910,6 @@ fn finalization_fold_composed_root_with_unfilled_slot_emits_no_slot_output() {
         finalize_template_value(
             &template,
             TemplateValueFinalizationInputs {
-                source_file_scope: &source_file_scope,
-                path_format_config: &path_format_config,
-                project_path_resolver: &project_path_resolver,
                 string_table: &mut string_table,
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
                 template_ir_store: &template_ir_store,
@@ -1913,9 +1933,6 @@ fn finalization_fold_formatted_root_with_unfilled_slot_emits_no_slot_output() {
     let mut string_table = StringTable::new();
     let text_id = string_table.intern("formatted text before unfilled slot");
 
-    let project_path_resolver = test_project_path_resolver();
-    let path_format_config = PathStringFormatConfig::default();
-    let source_file_scope = InternedPath::new();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let context = TemplateViewContext::default();
 
@@ -1925,7 +1942,7 @@ fn finalization_fold_formatted_root_with_unfilled_slot_emits_no_slot_output() {
         let mut builder = TemplateIrBuilder::new(&mut store);
         let text_node = builder.push_text_node(
             text_id,
-            "formatted text before unfilled slot".len() as u32,
+            "formatted text before unfilled slot".len(),
             TemplateSegmentOrigin::Body,
             location.clone(),
         );
@@ -1936,7 +1953,6 @@ fn finalization_fold_formatted_root_with_unfilled_slot_emits_no_slot_output() {
             Style::default(),
             TemplateType::String,
             TemplateIrSummary {
-                has_slots: true,
                 slot_count: 1,
                 ..TemplateIrSummary::default()
             },
@@ -1959,9 +1975,6 @@ fn finalization_fold_formatted_root_with_unfilled_slot_emits_no_slot_output() {
         finalize_template_value(
             &template,
             TemplateValueFinalizationInputs {
-                source_file_scope: &source_file_scope,
-                path_format_config: &path_format_config,
-                project_path_resolver: &project_path_resolver,
                 string_table: &mut string_table,
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
                 template_ir_store: &template_ir_store,
@@ -2012,13 +2025,13 @@ fn branch_tir_root_normalizes_into_owned_runtime_handoff() {
         let mut builder = TemplateIrBuilder::new(&mut store);
         let branch_body = builder.push_text_node(
             branch_text,
-            "branch body".len() as u32,
+            "branch body".len(),
             TemplateSegmentOrigin::Body,
             location.clone(),
         );
         let fallback_body = builder.push_text_node(
             fallback_text,
-            "fallback body".len() as u32,
+            "fallback body".len(),
             TemplateSegmentOrigin::Body,
             location.clone(),
         );
@@ -2033,6 +2046,7 @@ fn branch_tir_root_normalizes_into_owned_runtime_handoff() {
             )),
             branch_body,
             location.clone(),
+            builder.store.next_expression_site_id(),
         );
         let root =
             builder.push_branch_chain_node(vec![branch], Some(fallback_body), location.clone());
@@ -2055,13 +2069,7 @@ fn branch_tir_root_normalizes_into_owned_runtime_handoff() {
     );
 
     let mut expression = Expression::template(template, ValueMode::ImmutableOwned);
-    let project_path_resolver = test_project_path_resolver();
-    let path_format_config = PathStringFormatConfig::default();
-    let source_file_scope = InternedPath::new();
     let mut context = TemplateNormalizationContext {
-        source_file_scope: &source_file_scope,
-        path_format_config: &path_format_config,
-        project_path_resolver: &project_path_resolver,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
@@ -2104,7 +2112,7 @@ fn loop_tir_root_normalizes_into_owned_runtime_handoff() {
         let mut builder = TemplateIrBuilder::new(&mut store);
         let body = builder.push_text_node(
             loop_text,
-            "loop body".len() as u32,
+            "loop body".len(),
             TemplateSegmentOrigin::Body,
             location.clone(),
         );
@@ -2144,13 +2152,7 @@ fn loop_tir_root_normalizes_into_owned_runtime_handoff() {
     );
 
     let mut expression = Expression::template(template, ValueMode::ImmutableOwned);
-    let project_path_resolver = test_project_path_resolver();
-    let path_format_config = PathStringFormatConfig::default();
-    let source_file_scope = InternedPath::new();
     let mut context = TemplateNormalizationContext {
-        source_file_scope: &source_file_scope,
-        path_format_config: &path_format_config,
-        project_path_resolver: &project_path_resolver,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
@@ -2181,11 +2183,7 @@ fn collect_owned_handoff_string_slice_expressions(
                 collect_owned_node_string_slice_expressions(&source.render_root, string_slices);
             }
             for site in &slot_handoff.slot_sites {
-                for piece in &site.render_plan.pieces {
-                    if let OwnedRuntimeSlotSiteRenderPiece::Render(node) = piece {
-                        collect_owned_node_string_slice_expressions(node, string_slices);
-                    }
-                }
+                collect_owned_node_string_slice_expressions(&site.render_root, string_slices);
             }
         }
     }
@@ -2243,6 +2241,7 @@ fn collect_owned_node_string_slice_expressions(
         | OwnedRuntimeTemplateNode::AggregateOutput
         | OwnedRuntimeTemplateNode::LoopControl { .. }
         | OwnedRuntimeTemplateNode::RuntimeSlotSite { .. }
+        | OwnedRuntimeTemplateNode::RuntimeSlotContributionSource { .. }
         | OwnedRuntimeTemplateNode::Slot { .. } => {}
     }
 }
@@ -2261,7 +2260,7 @@ fn registered_runtime_template(
     template_ir_store: &Rc<RefCell<TemplateIrStore>>,
     string_table: &mut StringTable,
 ) -> Template {
-    let byte_len = string_table.resolve(text).len() as u32;
+    let byte_len = string_table.resolve(text).len();
     let reference_path = InternedPath::from_single_str(reference_name, string_table);
     let reference_expression = Expression::reference_with_type_id(
         reference_path,
@@ -2311,9 +2310,6 @@ fn ordinary_runtime_template_handoff_uses_module_tir_store() {
     let mut string_table = StringTable::new();
     let text = string_table.intern("hello ");
 
-    let project_path_resolver = test_project_path_resolver();
-    let path_format_config = PathStringFormatConfig::default();
-    let source_file_scope = InternedPath::new();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let context = TemplateViewContext::default();
 
@@ -2323,9 +2319,6 @@ fn ordinary_runtime_template_handoff_uses_module_tir_store() {
     let mut expression = Expression::template(template, ValueMode::ImmutableOwned);
 
     let mut context = TemplateNormalizationContext {
-        source_file_scope: &source_file_scope,
-        path_format_config: &path_format_config,
-        project_path_resolver: &project_path_resolver,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
@@ -2391,6 +2384,7 @@ fn folded_template_preserves_selected_effective_dynamic_provenance() {
             )),
             unselected_node,
             location.clone(),
+            builder.store.next_expression_site_id(),
         );
         let root = builder.push_branch_chain_node(vec![branch], Some(selected_node), location);
         let template_id = builder.finish_template(
@@ -2411,24 +2405,24 @@ fn folded_template_preserves_selected_effective_dynamic_provenance() {
         (template_id, selected_site_id)
     };
 
-    let overlay_id =
-        template_ir_store
-            .borrow_mut()
-            .allocate_expression_overlay(TirExpressionOverlay {
-                overrides: vec![(
-                    selected_site_id,
-                    Box::new(
-                        Expression::string_slice(
-                            selected_effective_text,
-                            SourceLocation::default(),
-                            ValueMode::ImmutableOwned,
-                        )
-                        .with_synthetic_interface_provenance(
-                            SyntheticInterfaceProvenance::single(selected_member.clone()),
-                        ),
+    let overlay_id = template_ir_store
+        .borrow_mut()
+        .allocate_expression_overlay(TirExpressionOverlay {
+            overrides: vec![(
+                selected_site_id,
+                Box::new(
+                    Expression::string_slice(
+                        selected_effective_text,
+                        SourceLocation::default(),
+                        ValueMode::ImmutableOwned,
+                    )
+                    .with_synthetic_interface_provenance(
+                        SyntheticInterfaceProvenance::single(selected_member.clone()),
                     ),
-                )],
-            });
+                ),
+            )],
+        })
+        .expect("test overlay allocation");
     let template = template_with_reference(
         TemplateTirReference {
             root: template_id,
@@ -2448,9 +2442,6 @@ fn folded_template_preserves_selected_effective_dynamic_provenance() {
         "the outer template must start without injected provenance"
     );
 
-    let project_path_resolver = test_project_path_resolver();
-    let path_format_config = PathStringFormatConfig::default();
-    let source_file_scope = InternedPath::new();
     let ExpressionKind::Template(constant_template) = &constant_expression.kind else {
         panic!("module constant regression must start from a template expression");
     };
@@ -2459,9 +2450,6 @@ fn folded_template_preserves_selected_effective_dynamic_provenance() {
             &constant_expression,
             constant_template,
             TemplateValueFinalizationInputs {
-                source_file_scope: &source_file_scope,
-                path_format_config: &path_format_config,
-                project_path_resolver: &project_path_resolver,
                 string_table: &mut string_table,
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
                 template_ir_store: &template_ir_store,
@@ -2476,9 +2464,6 @@ fn folded_template_preserves_selected_effective_dynamic_provenance() {
 
     let mut expression = Expression::template(template, ValueMode::ImmutableOwned);
     let mut context = TemplateNormalizationContext {
-        source_file_scope: &source_file_scope,
-        path_format_config: &path_format_config,
-        project_path_resolver: &project_path_resolver,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
@@ -2503,9 +2488,6 @@ fn runtime_template_expression_normalization_replaces_template_with_owned_handof
     let mut string_table = StringTable::new();
     let text = string_table.intern("hello ");
 
-    let project_path_resolver = test_project_path_resolver();
-    let path_format_config = PathStringFormatConfig::default();
-    let source_file_scope = InternedPath::new();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let context = TemplateViewContext::default();
 
@@ -2525,9 +2507,6 @@ fn runtime_template_expression_normalization_replaces_template_with_owned_handof
         ));
 
     let mut context = TemplateNormalizationContext {
-        source_file_scope: &source_file_scope,
-        path_format_config: &path_format_config,
-        project_path_resolver: &project_path_resolver,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
@@ -2564,9 +2543,6 @@ fn runtime_template_expression_handoff_uses_finalized_expression_overlay_view() 
     let overlay_text = string_table.intern("normalized overlay text");
     let runtime_path = InternedPath::from_single_str("runtime_name", &mut string_table);
 
-    let project_path_resolver = test_project_path_resolver();
-    let path_format_config = PathStringFormatConfig::default();
-    let source_file_scope = InternedPath::new();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let empty_context = TemplateViewContext::default();
     let nested_template_expression = Expression::template(
@@ -2625,9 +2601,6 @@ fn runtime_template_expression_handoff_uses_finalized_expression_overlay_view() 
     let mut expression = Expression::template(template, ValueMode::ImmutableOwned);
 
     let mut context = TemplateNormalizationContext {
-        source_file_scope: &source_file_scope,
-        path_format_config: &path_format_config,
-        project_path_resolver: &project_path_resolver,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
@@ -2659,9 +2632,6 @@ fn nested_runtime_template_normalizes_through_final_view() {
     let mut string_table = StringTable::new();
     let nested_text = string_table.intern("nested runtime text");
 
-    let project_path_resolver = test_project_path_resolver();
-    let path_format_config = PathStringFormatConfig::default();
-    let source_file_scope = InternedPath::new();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let context = TemplateViewContext::default();
 
@@ -2706,9 +2676,6 @@ fn nested_runtime_template_normalizes_through_final_view() {
     let mut expression = Expression::template(template, ValueMode::ImmutableOwned);
 
     let mut context = TemplateNormalizationContext {
-        source_file_scope: &source_file_scope,
-        path_format_config: &path_format_config,
-        project_path_resolver: &project_path_resolver,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
@@ -2785,11 +2752,8 @@ fn nested_const_template_folds_through_final_view() {
     let mut string_table = StringTable::new();
     let child_text_str = "child folded text";
     let child_text = string_table.intern(child_text_str);
-    let child_byte_len = child_text_str.len() as u32;
+    let child_byte_len = child_text_str.len();
 
-    let project_path_resolver = test_project_path_resolver();
-    let path_format_config = PathStringFormatConfig::default();
-    let source_file_scope = InternedPath::new();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let context = TemplateViewContext::default();
 
@@ -2838,9 +2802,6 @@ fn nested_const_template_folds_through_final_view() {
         finalize_template_value(
             &template,
             TemplateValueFinalizationInputs {
-                source_file_scope: &source_file_scope,
-                path_format_config: &path_format_config,
-                project_path_resolver: &project_path_resolver,
                 string_table: &mut string_table,
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
                 template_ir_store: &template_ir_store,
@@ -2864,9 +2825,6 @@ fn reactive_metadata_derived_from_nested_final_view() {
     let mut string_table = StringTable::new();
     let reactive_path = InternedPath::from_single_str("reactive_source", &mut string_table);
 
-    let project_path_resolver = test_project_path_resolver();
-    let path_format_config = PathStringFormatConfig::default();
-    let source_file_scope = InternedPath::new();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let context = TemplateViewContext::default();
 
@@ -2918,9 +2876,6 @@ fn reactive_metadata_derived_from_nested_final_view() {
     let mut expression = Expression::template(template, ValueMode::ImmutableOwned);
 
     let mut context = TemplateNormalizationContext {
-        source_file_scope: &source_file_scope,
-        path_format_config: &path_format_config,
-        project_path_resolver: &project_path_resolver,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
@@ -2954,9 +2909,6 @@ fn helper_artifact_rejected_after_final_view_traversal() {
     let mut string_table = StringTable::new();
     let text = string_table.intern("slot insert content");
 
-    let project_path_resolver = test_project_path_resolver();
-    let path_format_config = PathStringFormatConfig::default();
-    let source_file_scope = InternedPath::new();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let context = TemplateViewContext::default();
 
@@ -2967,7 +2919,7 @@ fn helper_artifact_rejected_after_final_view_traversal() {
         let mut builder = TemplateIrBuilder::new(&mut store);
         let text_node = builder.push_text_node(
             text,
-            "slot insert content".len() as u32,
+            "slot insert content".len(),
             TemplateSegmentOrigin::Body,
             SourceLocation::default(),
         );
@@ -2993,9 +2945,6 @@ fn helper_artifact_rejected_after_final_view_traversal() {
     let mut expression = Expression::template(template, ValueMode::ImmutableOwned);
 
     let mut context = TemplateNormalizationContext {
-        source_file_scope: &source_file_scope,
-        path_format_config: &path_format_config,
-        project_path_resolver: &project_path_resolver,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
@@ -3048,15 +2997,8 @@ fn retained_signature_default_normalizes_template_to_string_slice() {
         returns: Vec::new(),
     };
 
-    let project_path_resolver = test_project_path_resolver();
-    let path_format_config = PathStringFormatConfig::default();
-    let source_file = InternedPath::new();
-
     normalize_retained_signature_defaults(
         &mut signature,
-        &source_file,
-        &project_path_resolver,
-        &path_format_config,
         DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         &template_ir_store,
         &mut string_table,

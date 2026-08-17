@@ -265,7 +265,6 @@ define_stable_reason_keys! {
     &InvalidTemplateStructureReason::EmptyPathInTemplateHead => "invalid_template_structure.empty_path_in_template_head",
     &InvalidTemplateStructureReason::IncompatibleHeadItem => "invalid_template_structure.incompatible_head_item",
     &InvalidTemplateStructureReason::HelperOutsideWrapperSlot => "invalid_template_structure.helper_outside_wrapper_slot",
-    &InvalidTemplateStructureReason::RuntimeControlFlowUnresolvedSlot => "invalid_template_structure.runtime_control_flow_unresolved_slot",
     &InvalidTemplateStructureReason::RuntimeControlFlowUnresolvedInsert => "invalid_template_structure.runtime_control_flow_unresolved_insert",
     &InvalidTemplateStructureReason::MissingCommaBeforeControlFlowSuffix => "invalid_template_structure.missing_comma_before_control_flow_suffix",
     &InvalidTemplateStructureReason::ControlFlowSuffixNotFinal => "invalid_template_structure.control_flow_suffix_not_final",
@@ -627,7 +626,6 @@ define_stable_reason_keys! {
     &InvalidTemplateSlotReason::InsertCannotTargetDefaultSlot => "invalid_template_slot.insert_cannot_target_default_slot",
     &InvalidTemplateSlotReason::InsertTargetsUnknownNamedSlot => "invalid_template_slot.insert_targets_unknown_named_slot",
     &InvalidTemplateSlotReason::InsertTargetsUnknownPositionalSlot => "invalid_template_slot.insert_targets_unknown_positional_slot",
-    &InvalidTemplateSlotReason::MultipleDefaultSlots => "invalid_template_slot.multiple_default_slots",
     &InvalidTemplateSlotReason::SlotDefinitionOutsideTemplateBody => "invalid_template_slot.slot_definition_outside_template_body",
     },
 

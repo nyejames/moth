@@ -1,18 +1,27 @@
 //! Central TIR storage.
 //!
-//! WHAT: `TemplateIrStore` owns every TIR template, node, wrapper set, and side-table
-//! entry in contiguous vectors. Consumers obtain cheap `Copy` IDs from the store
-//! and look up data by index.
+//! `TemplateIrStore` owns every TIR template, node, wrapper set, overlay and
+//! slot-plan entry in contiguous private vectors. Consumers obtain cheap `Copy`
+//! IDs and use checked lookup or named mutation APIs.
 //!
-//! WHY: a single store with typed IDs avoids scattered `Box<TemplateIr>` allocations,
-//! makes tree ownership trivial, and keeps the TIR data cache-friendly for later
-//! folding and formatting passes.
+//! The store is AST-local. It is not shared with HIR, backends or the public
+//! API. Each module AST construction may create its own store; the store is
+//! dropped when the AST stage finishes template processing for that module.
 //!
-//! ## Ownership contract
+//! Low-level `push_template` and `push_node` append records. They do not prove
+//! that every stored ID is reachable or that the reachable graph is well
+//! formed. Preparation remains the exhaustive authority validator.
 //!
-//! The store is AST-local. It is not shared with HIR, backends, or the public API.
-//! Each module AST construction may create its own store; the store is dropped when
-//! the AST stage finishes template processing for that module.
+//! Concept-specific mutation lives in sibling modules:
+//! `control_flow`, `slot_plans` and `overlays`.
+
+mod control_flow;
+mod overlays;
+mod slot_plans;
+
+#[cfg(test)]
+#[path = "tests/store_support.rs"]
+mod store_support;
 
 use crate::compiler_frontend::arena::capacity::FrontendArenaCapacityEstimate;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
@@ -20,7 +29,6 @@ use crate::compiler_frontend::ast::templates::template::{
     ReactiveSubscription, SlotPlaceholder, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_control_flow::TemplateLoopHeader;
-use crate::compiler_frontend::ast::templates::tir::control_flow_roots::ControlFlowBodyKind;
 use crate::compiler_frontend::ast::templates::tir::ids::{
     ChildTemplateOccurrenceId, ExpressionSiteId, SlotOccurrenceId, TemplateIrId, TemplateIrNodeId,
     TemplateSlotPlanId, TemplateWrapperSetId,
@@ -30,46 +38,36 @@ use crate::compiler_frontend::ast::templates::tir::node::{
     TirSlotPlaceholder,
 };
 use crate::compiler_frontend::ast::templates::tir::overlays::{
-    TirExpressionOverlay, TirExpressionOverlayId, TirSlotResolutionOverlay,
-    TirSlotResolutionOverlayId, TirWrapperContextOverlay, TirWrapperContextOverlayId,
+    TirExpressionOverlay, TirSlotResolutionOverlay, TirWrapperContextOverlay,
 };
 use crate::compiler_frontend::ast::templates::tir::refs::TemplateWrapperReference;
-use crate::compiler_frontend::ast::templates::tir::slot_plan::TemplateSlotPlan;
+use crate::compiler_frontend::ast::templates::tir::summary::{
+    TemplateIrSummary, summarize_existing_root, summarize_runtime_slot_representation,
+};
 use crate::compiler_frontend::ast::templates::tir::wrapper_sets::wrapper_sets_are_equivalent;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
-use std::collections::HashSet;
+
+pub(crate) use control_flow::ControlFlowBodyKind;
+#[cfg(test)]
+pub(crate) use store_support::MalformedTirStore;
+
+use slot_plans::SlotPlanSlot;
 
 // -------------------------
 //  Side-table types
 // -------------------------
 
-// These tables keep bulky or rarely read template metadata outside the main
-// `TemplateIr` and `TemplateIrNode` records. Slot plans carry TIR-owned runtime
-// slot-application route data until materialization creates neutral owned
-// handoff payloads.
-
 /// A reusable set of `$children(..)` wrapper template refs.
 ///
-/// WHAT: groups wrapper templates as effective wrapper references behind a
-/// typed side-table ID.
-/// WHY: many sibling templates inherit wrappers from their parent; storing them
-/// as effective refs outside `TemplateIr` keeps the core template record small,
-/// avoids recursive `Template` ownership, makes store-local ownership explicit,
-/// and gives later phases a clear place to deduplicate identical wrapper
-/// combinations.
-///
-/// Design constraint: wrapper sets store effective wrapper references (root,
-/// phase, and value-carried context). A wrapper's effective identity is not only its
-/// structural root — it also has a phase and overlay context.
+/// Wrapper sets store effective wrapper references (root, phase and
+/// value-carried context). A wrapper's effective identity is not only its
+/// structural root.
 #[derive(Clone, Debug)]
 pub(crate) struct TemplateWrapperSet {
-    /// Effective wrapper template refs that must be applied around a child
-    /// template's output during folding, ordered from innermost to outermost as
-    /// they were stored on the AST `Template`.
-    ///
-    /// WHY: storing the effective view identity keeps wrapper reuse precise
-    /// without duplicating template content.
+    /// Effective wrapper refs, innermost to outermost as stored on the AST
+    /// `Template`.
     pub(crate) wrappers: Vec<TemplateWrapperReference>,
 }
 
@@ -79,80 +77,34 @@ pub(crate) struct TemplateWrapperSet {
 
 /// Central owned storage for all TIR data within one module's template subsystem.
 ///
-/// WHAT: contiguous vectors of templates, nodes, wrapper sets, and side-table entries
-/// indexed by typed IDs.
+/// Invariants that checked APIs maintain:
+/// - every issued ID indexes an entry in its collection
+/// - `get_slot_plan` returns only committed plans
+/// - derived publication copies complete source identity
 ///
-/// WHY:
-/// - Contiguous storage avoids per-template heap allocation and improves locality.
-/// - Typed IDs prevent accidental cross-collection index misuse.
-/// - The store is module-scoped so it can be dropped after AST template processing.
-///
-/// ## Invariants
-///
-/// - Every `TemplateIrId` indexes a valid entry in `templates`.
-/// - Every `TemplateIrNodeId` indexes a valid entry in `nodes`.
-/// - Every `TemplateWrapperSetId` indexes a valid entry in `wrapper_sets`.
-/// - `TemplateIr::root` always points to a valid node in `nodes`.
-///
-/// Construction APIs preserve these invariants. Focused malformed-store tests
-/// exercise them through `tests/validation_support.rs`.
+/// Append APIs do not prove that the reachable graph is complete. Preparation
+/// is the exhaustive validator for reachable authority.
 #[derive(Debug)]
 pub(crate) struct TemplateIrStore {
-    /// Document-order counter for `Slot` node occurrences.
-    ///
-    /// WHAT: advances by one each time a `Slot` node is emitted into this store.
-    /// WHY: gives overlay and slot-resolution phases a stable per-occurrence key
-    /// that does not depend on traversal order or node-vector positions.
     next_slot_occurrence: u32,
-
-    /// Document-order counter for `ChildTemplate` node occurrences.
-    ///
-    /// WHAT: advances by one each time a `ChildTemplate` node is emitted into
-    /// this store.
-    /// WHY: gives wrapper-overlay phases a stable per-occurrence key for each
-    /// child-template boundary.
     next_child_template_occurrence: u32,
-
-    /// Document-order counter for `DynamicExpression` node sites.
-    ///
-    /// WHAT: advances by one each time a `DynamicExpression` node is emitted
-    /// into this store.
-    /// WHY: gives expression-overlay phases a stable per-site key for each
-    /// dynamic-expression splice. Branch selectors and loop headers draw from
-    /// the same counter so every expression-bearing position is module-unique.
     next_expression_site: u32,
 
-    /// Top-level templates.
-    pub(crate) templates: Vec<TemplateIr>,
+    templates: Vec<TemplateIr>,
+    nodes: Vec<TemplateIrNode>,
+    wrapper_sets: Vec<TemplateWrapperSet>,
+    slot_plans: Vec<SlotPlanSlot>,
+    expression_overlays: Vec<TirExpressionOverlay>,
+    slot_resolution_overlays: Vec<TirSlotResolutionOverlay>,
+    wrapper_context_overlays: Vec<TirWrapperContextOverlay>,
 
-    /// Nodes forming the template body trees.
-    pub(crate) nodes: Vec<TemplateIrNode>,
-
-    /// Wrapper sets for `$children(..)` wrappers.
-    pub(crate) wrapper_sets: Vec<TemplateWrapperSet>,
-
-    /// Slot routing plans.
-    pub(crate) slot_plans: Vec<TemplateSlotPlan>,
-
-    /// Overlay payloads for effective template views.
-    pub(crate) expression_overlays: Vec<TirExpressionOverlay>,
-    pub(crate) slot_resolution_overlays: Vec<TirSlotResolutionOverlay>,
-    pub(crate) wrapper_context_overlays: Vec<TirWrapperContextOverlay>,
-
-    /// Reactive `$(source)` subscription metadata attached to individual TIR
-    /// nodes. Indexed by `TemplateIrNodeId`; `None` means the node carries no
+    /// Reactive `$(source)` subscription metadata attached to text nodes.
+    /// Indexed by `TemplateIrNodeId`; `None` means the node carries no
     /// reactive dependency.
-    ///
-    /// WHAT: stores subscriptions for node kinds that cannot carry the metadata
-    ///       in their payload, currently `Text` nodes.
-    /// WHY: reactive literal text must survive TIR formatting and runtime
-    ///      handoff materialization without broadening the
-    ///      `TemplateIrNodeKind` enum shape.
-    pub(crate) node_reactive_subscriptions: Vec<Option<ReactiveSubscription>>,
+    node_reactive_subscriptions: Vec<Option<ReactiveSubscription>>,
 }
 
 impl TemplateIrStore {
-    /// Creates an empty store with no pre-allocated capacity.
     pub(crate) fn new() -> Self {
         Self {
             next_slot_occurrence: 0,
@@ -171,19 +123,10 @@ impl TemplateIrStore {
 
     /// Creates a store pre-sized from a module-level capacity estimate.
     ///
-    /// WHAT: seeds `templates`, `nodes`, and side vectors with conservative capacities
-    /// derived from `FrontendArenaCapacityEstimate` fields.
-    /// WHY: avoids immediate reallocations when converting a module's templates into TIR;
-    ///      the estimate is policy-only and does not affect correctness.
+    /// The estimate is policy-only and does not affect correctness.
     pub(crate) fn with_capacity_estimate(estimate: FrontendArenaCapacityEstimate) -> Self {
-        // Templates are typically fewer than nodes; use the estimate directly.
         let template_capacity = estimate.templates;
-
-        // Nodes scale roughly with template atoms — each atom becomes at least one node.
-        // Use `template_atoms` as a conservative base.
         let node_capacity = estimate.template_atoms;
-
-        // Wrapper sets and slot plans are typically small; cap them at the template count.
         let side_capacity = template_capacity;
 
         Self {
@@ -201,11 +144,6 @@ impl TemplateIrStore {
         }
     }
 
-    /// Assigns and returns the next `SlotOccurrenceId` in document order.
-    ///
-    /// WHAT: returns the current counter value then advances it by one.
-    /// WHY: both the builder and the materialization path call this when
-    /// emitting a `Slot` node so every construction path shares one counter.
     pub(crate) fn next_slot_occurrence_id(&mut self) -> SlotOccurrenceId {
         let id = SlotOccurrenceId::new(self.next_slot_occurrence as usize);
         self.next_slot_occurrence = self
@@ -215,12 +153,6 @@ impl TemplateIrStore {
         id
     }
 
-    /// Assigns and returns the next `ChildTemplateOccurrenceId` in document order.
-    ///
-    /// WHAT: returns the current counter value then advances it by one.
-    /// WHY: both the builder and the materialization path call this when
-    /// emitting a `ChildTemplate` node so every construction path shares one
-    /// counter.
     pub(crate) fn next_child_template_occurrence_id(&mut self) -> ChildTemplateOccurrenceId {
         let id = ChildTemplateOccurrenceId::new(self.next_child_template_occurrence as usize);
         self.next_child_template_occurrence = self
@@ -230,12 +162,6 @@ impl TemplateIrStore {
         id
     }
 
-    /// Assigns and returns the next `ExpressionSiteId` in document order.
-    ///
-    /// WHAT: returns the current counter value then advances it by one.
-    /// WHY: both the builder and the materialization path call this when
-    /// emitting a `DynamicExpression` node so every construction path shares
-    /// one counter.
     pub(crate) fn next_expression_site_id(&mut self) -> ExpressionSiteId {
         let id = ExpressionSiteId::new(self.next_expression_site as usize);
         self.next_expression_site = self
@@ -248,13 +174,6 @@ impl TemplateIrStore {
     /// Allocates expression-site IDs for every expression-bearing position in a
     /// loop header, drawing from the same document-order counter as
     /// `DynamicExpression` and branch-selector sites.
-    ///
-    /// WHAT: mirrors the `TemplateLoopHeader` shape, assigning one
-    /// `ExpressionSiteId` per expression (condition, range start/end/optional
-    /// step, collection iterable) in a deterministic order.
-    /// WHY: keeps loop-header site allocation in one place so the builder and
-    /// direct-push materialization paths cannot diverge. The range variant
-    /// allocates start, then end, then the optional step, matching source order.
     pub(crate) fn allocate_loop_header_expression_sites(
         &mut self,
         header: &TemplateLoopHeader,
@@ -278,38 +197,170 @@ impl TemplateIrStore {
         }
     }
 
-    /// Returns the number of templates currently stored.
     pub(crate) fn template_count(&self) -> usize {
         self.templates.len()
     }
 
-    /// Returns the number of nodes currently stored.
     pub(crate) fn node_count(&self) -> usize {
         self.nodes.len()
     }
 
-    /// Pushes a template into the store and returns its ID.
+    fn allocated_child_template_occurrence_count(&self) -> usize {
+        self.next_child_template_occurrence as usize
+    }
+
+    fn allocated_expression_site_count(&self) -> usize {
+        self.next_expression_site as usize
+    }
+
+    /// Appends a newly constructed template. Does not prove reachable-graph
+    /// completeness; derived versions must use a named publication path.
     pub(crate) fn push_template(&mut self, template: TemplateIr) -> TemplateIrId {
         let id = TemplateIrId::new(self.templates.len());
         self.templates.push(template);
         id
     }
 
-    /// Writes the final parser classification for an already-materialized TIR entry.
+    /// Versions an existing store-owned template around a new structural root.
     ///
-    /// WHAT: replaces the provisional kind supplied while parser TIR is being
-    /// assembled with the classification from the completed effective view.
-    /// WHY: `TemplateIr.kind` is the durable authority consumed by later AST
-    /// template operations and owned runtime handoff construction.
-    pub(crate) fn set_template_kind(&mut self, id: TemplateIrId, kind: TemplateType) -> bool {
-        let Some(template) = self.templates.get_mut(id.index()) else {
-            return false;
-        };
-        template.kind = kind;
-        true
+    /// Recomputes structural summary facts from `new_root`. Style, kind,
+    /// location, wrapper set and committed runtime-plan identity stay with the
+    /// source. Head-node and wrapper counts are preserved or replaced only
+    /// through [`DerivedTemplateMetadata`].
+    pub(crate) fn push_structurally_derived_template(
+        &mut self,
+        source: TemplateIrId,
+        new_root: TemplateIrNodeId,
+        metadata: DerivedTemplateMetadata,
+    ) -> Result<TemplateIrId, CompilerError> {
+        self.validate_derived_publication(source, new_root)?;
+        let summary = summarize_existing_root(self, new_root)?;
+        let derived = self.derived_template(source, new_root, summary, metadata)?;
+        Ok(self.push_template(derived))
     }
 
-    /// Pushes a node into the store and returns its ID.
+    /// Versions an existing template as a runtime-slot application.
+    ///
+    /// Computes one summary from the completed wrapper root and the committed
+    /// plan's source and site trees, then publishes the derived template with
+    /// that plan attached.
+    pub(crate) fn push_runtime_slot_derived_template(
+        &mut self,
+        source: TemplateIrId,
+        new_root: TemplateIrNodeId,
+        plan: TemplateSlotPlanId,
+        metadata: DerivedTemplateMetadata,
+    ) -> Result<TemplateIrId, CompilerError> {
+        self.validate_derived_publication(source, new_root)?;
+        if self.get_slot_plan(plan).is_none() {
+            return Err(CompilerError::compiler_error(format!(
+                "TIR store cannot publish runtime-slot template {source} with missing or uncommitted slot plan {plan}."
+            )));
+        }
+
+        let summary = summarize_runtime_slot_representation(self, new_root, plan)?;
+        let mut derived = self.derived_template(source, new_root, summary, metadata)?;
+        derived.runtime_slot_plan = None;
+        let template_id = self.push_template(derived);
+        self.attach_runtime_slot_plan(template_id, plan)?;
+        Ok(template_id)
+    }
+
+    fn validate_derived_publication(
+        &self,
+        source: TemplateIrId,
+        new_root: TemplateIrNodeId,
+    ) -> Result<(), CompilerError> {
+        let Some(source_template) = self.get_template(source) else {
+            return Err(CompilerError::compiler_error(format!(
+                "TIR store cannot derive from unknown source template {source}."
+            )));
+        };
+
+        if self.get_node(new_root).is_none() {
+            return Err(CompilerError::compiler_error(format!(
+                "TIR store cannot version template {source} around missing root node {new_root}."
+            )));
+        }
+
+        if let Some(plan) = source_template.runtime_slot_plan
+            && self.get_slot_plan(plan).is_none()
+        {
+            return Err(CompilerError::compiler_error(format!(
+                "TIR store cannot preserve missing or uncommitted slot plan {plan} while deriving template {source}."
+            )));
+        }
+
+        Ok(())
+    }
+
+    fn derived_template(
+        &self,
+        source: TemplateIrId,
+        new_root: TemplateIrNodeId,
+        mut summary: TemplateIrSummary,
+        metadata: DerivedTemplateMetadata,
+    ) -> Result<TemplateIr, CompilerError> {
+        let source_template = self.get_template(source).ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "TIR store cannot derive from unknown source template {source}."
+            ))
+        })?;
+        apply_derived_metadata(&mut summary, source_template, metadata);
+
+        Ok(TemplateIr {
+            root: new_root,
+            style: source_template.style.clone(),
+            kind: source_template.kind.clone(),
+            summary,
+            location: source_template.location.clone(),
+            conditional_child_wrapper_set: source_template.conditional_child_wrapper_set,
+            runtime_slot_plan: source_template.runtime_slot_plan,
+        })
+    }
+
+    pub(crate) fn set_template_kind(
+        &mut self,
+        id: TemplateIrId,
+        kind: TemplateType,
+    ) -> Result<(), CompilerError> {
+        let template = self.template_mut(id)?;
+        template.kind = kind;
+        Ok(())
+    }
+
+    pub(crate) fn attach_runtime_slot_plan(
+        &mut self,
+        id: TemplateIrId,
+        plan: TemplateSlotPlanId,
+    ) -> Result<(), CompilerError> {
+        if self.get_slot_plan(plan).is_none() {
+            return Err(CompilerError::compiler_error(format!(
+                "TIR store cannot attach missing or uncommitted slot plan {plan} to template {id}."
+            )));
+        }
+
+        let template = self.template_mut(id)?;
+        template.runtime_slot_plan = Some(plan);
+        Ok(())
+    }
+
+    pub(crate) fn set_conditional_child_wrapper_set(
+        &mut self,
+        id: TemplateIrId,
+        wrapper_set: TemplateWrapperSetId,
+    ) -> Result<(), CompilerError> {
+        if self.get_wrapper_set(wrapper_set).is_none() {
+            return Err(CompilerError::compiler_error(format!(
+                "TIR store cannot attach missing wrapper set {wrapper_set} to template {id}."
+            )));
+        }
+
+        let template = self.template_mut(id)?;
+        template.conditional_child_wrapper_set = Some(wrapper_set);
+        Ok(())
+    }
+
     pub(crate) fn push_node(&mut self, node: TemplateIrNode) -> TemplateIrNodeId {
         let id = TemplateIrNodeId::new(self.nodes.len());
         self.nodes.push(node);
@@ -317,28 +368,55 @@ impl TemplateIrStore {
         id
     }
 
-    /// Returns the reactive subscription attached to a node, if any.
+    /// Reads aligned text-node subscription metadata without hiding store corruption.
     pub(crate) fn node_reactive_subscription(
         &self,
         node_id: TemplateIrNodeId,
-    ) -> Option<&ReactiveSubscription> {
+    ) -> Result<Option<&ReactiveSubscription>, CompilerError> {
+        if self.get_node(node_id).is_none() {
+            return Err(CompilerError::compiler_error(format!(
+                "TIR store reactive subscription lookup referenced missing node {node_id}."
+            )));
+        }
+
         self.node_reactive_subscriptions
-            .get(node_id.index())?
-            .as_ref()
+            .get(node_id.index())
+            .map(|subscription| subscription.as_ref())
+            .ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "TIR store reactive side table is missing node {node_id}."
+                ))
+            })
     }
 
-    /// Attaches a reactive subscription to an existing node.
+    /// Attaches a reactive subscription to an existing text node.
     pub(crate) fn set_node_reactive_subscription(
         &mut self,
         node_id: TemplateIrNodeId,
         subscription: ReactiveSubscription,
-    ) {
-        if let Some(entry) = self.node_reactive_subscriptions.get_mut(node_id.index()) {
-            *entry = Some(subscription);
+    ) -> Result<(), CompilerError> {
+        let Some(node) = self.get_node(node_id) else {
+            return Err(CompilerError::compiler_error(format!(
+                "TIR store cannot attach a reactive subscription to missing node {node_id}."
+            )));
+        };
+
+        if !matches!(node.kind, TemplateIrNodeKind::Text { .. }) {
+            return Err(CompilerError::compiler_error(format!(
+                "TIR store cannot attach a reactive subscription to non-text node {node_id}."
+            )));
         }
+
+        let Some(entry) = self.node_reactive_subscriptions.get_mut(node_id.index()) else {
+            return Err(CompilerError::compiler_error(format!(
+                "TIR store reactive side table is missing node {node_id}."
+            )));
+        };
+
+        *entry = Some(subscription);
+        Ok(())
     }
 
-    /// Pushes a wrapper set into the store and returns its ID.
     pub(crate) fn push_wrapper_set(
         &mut self,
         wrapper_set: TemplateWrapperSet,
@@ -348,23 +426,6 @@ impl TemplateIrStore {
         id
     }
 
-    /// Pushes a wrapper set or reuses an existing equivalent set.
-    ///
-    /// WHAT: searches the existing wrapper-set side table for a set that is
-    /// equivalent to `wrappers`. Callers pass pre-qualified
-    /// `TemplateWrapperReference` values (root + phase + context). Empty
-    /// wrapper vectors always reuse. Non-empty sets reuse only when every
-    /// `TemplateWrapperReference` matches an existing set in the same order. If a
-    /// match is found, its ID is returned and `TirWrapperSetReuseHits` is
-    /// incremented; otherwise a new entry is pushed and
-    /// `TirWrapperSetsCreated` is incremented.
-    ///
-    /// WHY: many sibling templates inherit identical `$children(..)` wrapper
-    /// combinations; sharing one side-table entry reduces allocation churn and
-    /// keeps `TemplateIrSummary::wrapper_count` accurate as a per-template
-    /// wrapper count. `TemplateWrapperReference` identity (all three fields) is
-    /// the reuse authority; `Template` values and content comparison are
-    /// no longer inspected.
     pub(crate) fn push_or_reuse_wrapper_set(
         &mut self,
         wrappers: Vec<TemplateWrapperReference>,
@@ -380,7 +441,6 @@ impl TemplateIrStore {
         self.push_wrapper_set(TemplateWrapperSet { wrappers })
     }
 
-    /// Stores or reuses a non-empty ordered wrapper-reference set.
     fn push_or_reuse_optional_wrapper_set(
         &mut self,
         wrappers: &[TemplateWrapperReference],
@@ -392,13 +452,6 @@ impl TemplateIrStore {
         Some(self.push_or_reuse_wrapper_set(wrappers.to_vec()))
     }
 
-    /// Builds the final TIR payload for one parser slot placeholder.
-    ///
-    /// WHAT: copies only the slot key and skip flag from `SlotPlaceholder`,
-    /// converts both wrapper vectors to wrapper-set IDs, and assigns a fresh
-    /// `SlotOccurrenceId`.
-    /// WHY: this is the parser/store boundary where recursive wrapper templates
-    /// become store-owned wrapper-set IDs before the slot enters TIR.
     pub(crate) fn tir_slot_placeholder_from_ast(
         &mut self,
         placeholder: &SlotPlaceholder,
@@ -420,250 +473,65 @@ impl TemplateIrStore {
         ))
     }
 
-    /// Pushes a slot plan into the store and returns its ID.
-    pub(crate) fn push_slot_plan(&mut self, slot_plan: TemplateSlotPlan) -> TemplateSlotPlanId {
-        let id = TemplateSlotPlanId::new(self.slot_plans.len());
-        self.slot_plans.push(slot_plan);
-        id
-    }
-
-    /// Returns the first control-flow node under a finalized template root.
-    ///
-    /// WHAT: parser-emitted control-flow templates store their `BranchChain` or
-    ///       `Loop` node inside the root sequence. This lookup finds that node
-    ///       without mutating the store.
-    /// WHY: render-unit preparation resolves the exact owning node before it
-    ///      builds replacement body roots, so a missing owner fails as an
-    ///      internal invariant instead of leaving ambiguous state behind.
-    pub(crate) fn control_flow_node_id_for_template(
-        &self,
-        owning_template_id: TemplateIrId,
-    ) -> Option<TemplateIrNodeId> {
-        let template = self.templates.get(owning_template_id.index())?;
-        self.control_flow_node_id_in_subtree(template.root)
-    }
-
-    /// Recursively searches a TIR subtree for the template-owned control-flow node.
-    ///
-    /// WHAT: walks wrapper-shaped `Sequence` nodes until it finds a `BranchChain`
-    ///       or `Loop` node. A single-child `ChildTemplate` forwarding root is
-    ///       followed only after the current sequence has no local control-flow
-    ///       node; arbitrary child-template references are not traversed.
-    /// WHY: parser-time builder state and finalized references both need the
-    ///      same ownership-preserving lookup after wrapper/head-chain composition
-    ///      nests the owner control-flow node below the root sequence.
-    pub(crate) fn control_flow_node_id_in_subtree(
-        &self,
-        root: TemplateIrNodeId,
-    ) -> Option<TemplateIrNodeId> {
-        let mut visited = HashSet::new();
-        self.find_control_flow_node_in_subtree(root, &mut visited)
-    }
-
-    fn find_control_flow_node_in_subtree(
-        &self,
-        node_id: TemplateIrNodeId,
-        visited: &mut HashSet<TemplateIrNodeId>,
-    ) -> Option<TemplateIrNodeId> {
-        if !visited.insert(node_id) {
-            return None;
-        }
-
-        let node = self.nodes.get(node_id.index())?;
-
-        match &node.kind {
-            TemplateIrNodeKind::BranchChain { .. } | TemplateIrNodeKind::Loop { .. } => {
-                Some(node_id)
-            }
-
-            TemplateIrNodeKind::Sequence { children } => {
-                if let Some(control_flow_node) = children
-                    .iter()
-                    .copied()
-                    .find_map(|child| self.find_control_flow_node_in_subtree(child, visited))
-                {
-                    return Some(control_flow_node);
-                }
-
-                // Runtime slot/head-chain composition can produce a forwarding
-                // template whose root sequence contains only one child-template
-                // reference. In that narrow shape, the referenced child is the
-                // owner's control-flow tree, not arbitrary nested content.
-                let [only_child] = children.as_slice() else {
-                    return None;
-                };
-
-                let child_node = self.nodes.get(only_child.index())?;
-                let TemplateIrNodeKind::ChildTemplate { reference, .. } = &child_node.kind else {
-                    return None;
-                };
-
-                let template_id = reference.root;
-                let template_ir = self.templates.get(template_id.index())?;
-                self.find_control_flow_node_in_subtree(template_ir.root, visited)
-            }
-
-            _ => None,
-        }
-    }
-
-    /// Replaces one body node ID inside a specific control-flow parser-TIR node.
-    ///
-    /// WHAT: the caller supplies the control-flow node ID from the in-progress
-    ///       parser builder state so body preparation can run before the
-    ///       builder state is finished into a `TemplateIrId`.
-    /// WHY: render-unit preparation runs before parser construction finishes,
-    ///      so the finalized owning-template ID does not exist yet.
-    pub(crate) fn replace_control_flow_body_node_by_id(
-        &mut self,
-        control_flow_node_id: TemplateIrNodeId,
-        body_kind: ControlFlowBodyKind,
-        new_body_root: TemplateIrNodeId,
-    ) -> bool {
-        let Some(control_flow_node) = self.nodes.get_mut(control_flow_node_id.index()) else {
-            return false;
-        };
-
-        match (&mut control_flow_node.kind, body_kind) {
-            (
-                TemplateIrNodeKind::BranchChain { branches, .. },
-                ControlFlowBodyKind::Branch { index },
-            ) => {
-                if let Some(branch) = branches.get_mut(index) {
-                    branch.body = new_body_root;
-                    return true;
-                }
-                false
-            }
-
-            (TemplateIrNodeKind::BranchChain { fallback, .. }, ControlFlowBodyKind::Fallback) => {
-                if let Some(fallback_body) = fallback.as_mut() {
-                    *fallback_body = new_body_root;
-                    return true;
-                }
-                false
-            }
-
-            (TemplateIrNodeKind::Loop { body, .. }, ControlFlowBodyKind::LoopBody) => {
-                *body = new_body_root;
-                true
-            }
-
-            _ => false,
-        }
-    }
-
-    /// Replaces the `aggregate_wrapper` field of a `Loop` control-flow node.
-    ///
-    /// WHAT: render-unit preparation builds the loop aggregate-wrapper TIR
-    ///       subtree after the parser has already emitted the `Loop` node with
-    ///       `aggregate_wrapper: None`. This helper installs the composed
-    ///       wrapper root in place.
-    /// WHY: keeps loop aggregate-wrapper mutation in the same store-owned
-    ///      helper family as body-root replacement.
-    pub(crate) fn replace_loop_aggregate_wrapper_node_by_id(
-        &mut self,
-        control_flow_node_id: TemplateIrNodeId,
-        new_aggregate_wrapper_root: TemplateIrNodeId,
-    ) -> bool {
-        let Some(control_flow_node) = self.nodes.get_mut(control_flow_node_id.index()) else {
-            return false;
-        };
-
-        match &mut control_flow_node.kind {
-            TemplateIrNodeKind::Loop {
-                aggregate_wrapper, ..
-            } => {
-                *aggregate_wrapper = Some(new_aggregate_wrapper_root);
-                true
-            }
-            _ => false,
-        }
-    }
-
-    /// Returns a reference to the template at the given ID, or `None` if out of bounds.
     pub(crate) fn get_template(&self, id: TemplateIrId) -> Option<&TemplateIr> {
         self.templates.get(id.index())
     }
 
-    /// Returns a reference to the node at the given ID, or `None` if out of bounds.
+    pub(super) fn template_mut(
+        &mut self,
+        id: TemplateIrId,
+    ) -> Result<&mut TemplateIr, CompilerError> {
+        self.templates.get_mut(id.index()).ok_or_else(|| {
+            CompilerError::compiler_error(format!("TIR store has no template {id}."))
+        })
+    }
+
     pub(crate) fn get_node(&self, id: TemplateIrNodeId) -> Option<&TemplateIrNode> {
         self.nodes.get(id.index())
     }
 
-    /// Returns a reference to the wrapper set at the given ID, or `None` if out of bounds.
+    pub(crate) fn replace_child_template_reference(
+        &mut self,
+        node_id: TemplateIrNodeId,
+        template_id: TemplateIrId,
+    ) -> Result<(), CompilerError> {
+        let node = self.node_mut(node_id)?;
+        let TemplateIrNodeKind::ChildTemplate { reference, .. } = &mut node.kind else {
+            return Err(CompilerError::compiler_error(
+                "TIR store cannot replace a non-child-template reference.",
+            ));
+        };
+        reference.root = template_id;
+        Ok(())
+    }
+
+    pub(super) fn node_mut(
+        &mut self,
+        id: TemplateIrNodeId,
+    ) -> Result<&mut TemplateIrNode, CompilerError> {
+        self.nodes
+            .get_mut(id.index())
+            .ok_or_else(|| CompilerError::compiler_error(format!("TIR store has no node {id}.")))
+    }
+
     pub(crate) fn get_wrapper_set(&self, id: TemplateWrapperSetId) -> Option<&TemplateWrapperSet> {
         self.wrapper_sets.get(id.index())
     }
 
-    /// Returns a reference to the slot plan at the given ID, or `None` if out of bounds.
-    pub(crate) fn get_slot_plan(&self, id: TemplateSlotPlanId) -> Option<&TemplateSlotPlan> {
-        self.slot_plans.get(id.index())
-    }
-
-    // -------------------------
-    //  Overlay storage
-    // -------------------------
-
-    /// Allocates an expression overlay payload.
-    pub(crate) fn allocate_expression_overlay(
-        &mut self,
-        overlay: TirExpressionOverlay,
-    ) -> TirExpressionOverlayId {
-        for (site_id, _) in &overlay.overrides {
-            assert!(
-                site_id.index() < self.next_expression_site as usize,
-                "TIR expression overlay entry {site_id} was not allocated by this module's expression-site counter"
-            );
-        }
-
-        let id = TirExpressionOverlayId::new(self.expression_overlays.len());
-        self.expression_overlays.push(overlay);
-        id
-    }
-
-    /// Allocates a slot-resolution overlay payload.
-    pub(crate) fn allocate_slot_resolution_overlay(
-        &mut self,
-        overlay: TirSlotResolutionOverlay,
-    ) -> TirSlotResolutionOverlayId {
-        let id = TirSlotResolutionOverlayId::new(self.slot_resolution_overlays.len());
-        self.slot_resolution_overlays.push(overlay);
-        id
-    }
-
-    /// Allocates a wrapper-context overlay payload.
-    pub(crate) fn allocate_wrapper_context_overlay(
-        &mut self,
-        overlay: TirWrapperContextOverlay,
-    ) -> TirWrapperContextOverlayId {
-        let id = TirWrapperContextOverlayId::new(self.wrapper_context_overlays.len());
-        self.wrapper_context_overlays.push(overlay);
-        id
-    }
-
-    /// Returns an expression overlay payload by ID.
-    pub(crate) fn expression_overlay(
+    /// Looks up the unique module-local slot placeholder for an occurrence ID.
+    ///
+    /// Public const-template projection uses this lookup to resolve the
+    /// donor-local slot metadata before the TIR store is dropped.
+    pub(crate) fn slot_placeholder(
         &self,
-        id: TirExpressionOverlayId,
-    ) -> Option<&TirExpressionOverlay> {
-        self.expression_overlays.get(id.index())
-    }
-
-    /// Returns a slot-resolution overlay payload by ID.
-    pub(crate) fn slot_resolution_overlay(
-        &self,
-        id: TirSlotResolutionOverlayId,
-    ) -> Option<&TirSlotResolutionOverlay> {
-        self.slot_resolution_overlays.get(id.index())
-    }
-
-    /// Returns a wrapper-context overlay payload by ID.
-    pub(crate) fn wrapper_context_overlay(
-        &self,
-        id: TirWrapperContextOverlayId,
-    ) -> Option<&TirWrapperContextOverlay> {
-        self.wrapper_context_overlays.get(id.index())
+        occurrence: SlotOccurrenceId,
+    ) -> Option<&TirSlotPlaceholder> {
+        self.nodes.iter().find_map(|node| match &node.kind {
+            TemplateIrNodeKind::Slot { placeholder } if placeholder.occurrence_id == occurrence => {
+                Some(placeholder)
+            }
+            _ => None,
+        })
     }
 }
 
@@ -671,4 +539,42 @@ impl Default for TemplateIrStore {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Non-structural facts that a derived publication may preserve or replace.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct DerivedTemplateMetadata {
+    pub(crate) head_node_count: DerivedCount,
+    pub(crate) wrapper_count: DerivedCount,
+}
+
+impl DerivedTemplateMetadata {
+    pub(crate) fn preserve_source() -> Self {
+        Self {
+            head_node_count: DerivedCount::PreserveSource,
+            wrapper_count: DerivedCount::PreserveSource,
+        }
+    }
+}
+
+/// Whether a non-structural count should stay with the source or be replaced.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum DerivedCount {
+    PreserveSource,
+    Replace(u32),
+}
+
+fn apply_derived_metadata(
+    summary: &mut TemplateIrSummary,
+    source: &TemplateIr,
+    metadata: DerivedTemplateMetadata,
+) {
+    summary.head_node_count = match metadata.head_node_count {
+        DerivedCount::PreserveSource => source.summary.head_node_count,
+        DerivedCount::Replace(count) => count,
+    };
+    summary.wrapper_count = match metadata.wrapper_count {
+        DerivedCount::PreserveSource => source.summary.wrapper_count,
+        DerivedCount::Replace(count) => count,
+    };
 }

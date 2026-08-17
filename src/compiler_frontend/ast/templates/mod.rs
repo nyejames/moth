@@ -50,7 +50,7 @@
 //! | `formatter_contract.rs` | Define formatter input/output and anchor boundaries |
 //! | `template_folding.rs` | Own AST folding context and final value-boundary policy |
 //! | `top_level_templates.rs` | Collect top-level constant and documentation fragments |
-//! | `reactive_template_metadata.rs` | Collect reactive metadata across template structure and owned payloads |
+//! | `reactive_template_metadata/` | Reduce reactive metadata separately for exact TIR views and owned handoffs |
 //! | `template_renderability.rs` | Resolve template-head renderability from semantic types |
 //! | `runtime_handoff.rs` | Define neutral owned runtime-template and slot payloads for HIR |
 //! | `tir/` | Own module-local TIR storage, views, preparation, folding, formatting, and materialization |
@@ -89,8 +89,8 @@ pub(crate) mod tir;
 
 pub(crate) use runtime_handoff::{
     OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeSlotContributionSource, OwnedRuntimeSlotSite,
-    OwnedRuntimeSlotSiteRenderPiece, OwnedRuntimeTemplateBody, OwnedRuntimeTemplateBranch,
-    OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
+    OwnedRuntimeTemplateBody, OwnedRuntimeTemplateBranch, OwnedRuntimeTemplateHandoff,
+    OwnedRuntimeTemplateNode,
 };
 
 // -------------------------

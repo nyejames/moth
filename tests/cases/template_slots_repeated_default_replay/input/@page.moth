@@ -1,0 +1,4 @@
+repeated #= [:A[$slot]B[$slot]C]
+rendered #= [repeated:X]
+
+io.line([: [rendered]])

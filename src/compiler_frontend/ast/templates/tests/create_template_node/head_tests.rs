@@ -30,7 +30,7 @@ use crate::compiler_frontend::ast::templates::tir::{
 };
 #[cfg(feature = "benchmark_counters")]
 use crate::compiler_frontend::ast::templates::tir::{
-    PreparedTemplate, TirView, fold_prepared_template,
+    TemplatePreparationOutcome, TirView, fold_prepared_template,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
@@ -496,6 +496,7 @@ fn source_authored_template_range_loop_suffix_reaches_ast() {
     assert!(
         store
             .control_flow_node_id_for_template(template_id)
+            .expect("control-flow lookup")
             .is_some()
     );
 }
@@ -1503,17 +1504,16 @@ fn runtime_template_loop_with_continue_as_slot_fill_parses() {
 }
 
 #[test]
-fn runtime_template_if_rejects_unresolved_slot() {
-    let diagnostic = parse_template_error(
+fn runtime_template_if_allows_unresolved_slot_receiver() {
+    let (template, context, _string_table) = parse_runtime_template_without_validation(
         "[if true:
             [$slot]
         ]",
     );
 
-    assert_invalid_template_structure(
-        &diagnostic,
-        InvalidTemplateStructureReason::RuntimeControlFlowUnresolvedSlot,
-    );
+    let store = context.template_ir_store.borrow();
+    validate_runtime_template_control_flow_slot_artifacts(&template, &store)
+        .expect("receiver $slot markers may remain inside runtime control flow");
 }
 
 #[test]
@@ -2132,13 +2132,12 @@ fn const_required_construction_preparation_is_reused_by_folding() {
         Template::new_const_required(&mut token_stream, &context, vec![], &mut string_table)
             .expect("const-required template should parse");
     let template = construction.template;
-    let PreparedTemplate::Foldable(prepared) = construction.preparation else {
+    let prepared = construction.preparation;
+    if !matches!(prepared.outcome, TemplatePreparationOutcome::Foldable) {
         panic!("const-required test template should be foldable");
-    };
+    }
 
-    let mut fold_context = context
-        .new_template_fold_context(&mut string_table, "const preparation reuse test")
-        .expect("test context should include fold dependencies");
+    let mut fold_context = context.new_tir_fold_context(&mut string_table);
     let store = context.template_ir_store.borrow();
     let reference = template.tir_reference;
     let view = TirView::with_minimum_phase(
@@ -2150,11 +2149,9 @@ fn const_required_construction_preparation_is_reused_by_folding() {
     )
     .expect("const-required construction view should remain valid for folding");
     // This counter test asserts only the folded text shape.
-    let TemplateFoldResult {
-        emission,
-        provenance: _,
-    } = fold_prepared_template(&prepared, view, &mut fold_context)
-        .expect("returned const-required preparation should fold");
+    let TemplateFoldResult { emission, .. } =
+        fold_prepared_template(&prepared, view, &mut fold_context)
+            .expect("returned const-required preparation should fold");
 
     assert!(matches!(emission, TemplateEmission::Output(_)));
     assert_eq!(
@@ -2172,9 +2169,7 @@ fn const_required_template_loop_reports_expansion_limit() {
         ]",
     );
 
-    let mut fold_context = context
-        .new_template_fold_context(&mut string_table, "template tests fold limit")
-        .expect("test context should include fold dependencies");
+    let mut fold_context = context.new_tir_fold_context(&mut string_table);
     let error = fold_template_with_fold_context(
         &template,
         &context.template_ir_store,
@@ -2202,9 +2197,7 @@ fn const_required_template_loop_uses_configured_expansion_limit() {
         ]",
     );
 
-    let mut fold_context = context
-        .new_template_fold_context(&mut string_table, "template tests configured fold limit")
-        .expect("test context should include fold dependencies");
+    let mut fold_context = context.new_tir_fold_context(&mut string_table);
     fold_context.template_const_loop_iteration_limit = 10_001;
 
     let folded = fold_template_with_fold_context(
@@ -2509,7 +2502,7 @@ fn const_required_option_capture_template_with_direct_tir(
 
         let hello_node = builder.push_text_node(
             hello_id,
-            "Hello ".len() as u32,
+            "Hello ".len(),
             TemplateSegmentOrigin::Body,
             location.clone(),
         );
@@ -2524,7 +2517,7 @@ fn const_required_option_capture_template_with_direct_tir(
 
         let guest_node = builder.push_text_node(
             guest_id,
-            "Guest".len() as u32,
+            "Guest".len(),
             TemplateSegmentOrigin::Body,
             location.clone(),
         );
@@ -2540,7 +2533,12 @@ fn const_required_option_capture_template_with_direct_tir(
                 binding_location: location.clone(),
             }),
         };
-        let branch = TemplateIrBranch::new(selector, branch_body, location.clone());
+        let branch = TemplateIrBranch::new(
+            selector,
+            branch_body,
+            location.clone(),
+            builder.store.next_expression_site_id(),
+        );
         let branch_chain_root =
             builder.push_branch_chain_node(vec![branch], Some(fallback_body), location.clone());
 
@@ -2551,7 +2549,6 @@ fn const_required_option_capture_template_with_direct_tir(
             dynamic_expression_count: 1,
             max_depth: 2,
             has_control_flow: true,
-            is_const_evaluable_shape: false,
             ..TemplateIrSummary::default()
         };
 
@@ -2648,16 +2645,18 @@ fn parse_control_flow_template_after_body_parse(
     )
     .expect("template body should parse");
 
-    let tir_reference = construction_context.finish(
-        build_state.style.clone(),
-        build_state.kind.clone(),
-        crate::compiler_frontend::ast::templates::tir::TemplateTirPhase::Parsed,
-        construction_context.location().to_owned(),
-    );
+    let location = construction_context.location().to_owned();
+    let tir_reference = construction_context
+        .finish(
+            build_state.style.clone(),
+            build_state.kind.clone(),
+            crate::compiler_frontend::ast::templates::tir::TemplateTirPhase::Parsed,
+        )
+        .expect("parsed template TIR is finite");
 
     let template = Template {
         tir_reference,
-        location: construction_context.location().to_owned(),
+        location,
     };
 
     (template, context, string_table)
@@ -2765,12 +2764,13 @@ fn parse_runtime_template_without_validation(
     let style = build_state.style.to_owned();
     let kind = build_state.kind.to_owned();
     let location = construction_context.location().to_owned();
-    let tir_reference =
-        construction_context.finish(style, kind, TemplateTirPhase::Parsed, location);
+    let tir_reference = construction_context
+        .finish(style, kind, TemplateTirPhase::Parsed)
+        .expect("parsed template TIR is finite");
 
     let template = Template {
         tir_reference,
-        location: construction_context.location().to_owned(),
+        location,
     };
 
     (template, context, string_table)
@@ -2967,9 +2967,11 @@ fn const_required_validation_ignores_referenced_child_expression_overlay() {
             ConstRecordState::RuntimeValue,
         );
 
-        let overlay_id = store.allocate_expression_overlay(TirExpressionOverlay {
-            overrides: vec![(site_id, Box::new(non_const_condition))],
-        });
+        let overlay_id = store
+            .allocate_expression_overlay(TirExpressionOverlay {
+                overrides: vec![(site_id, Box::new(non_const_condition))],
+            })
+            .expect("test overlay allocation");
         TemplateViewContext {
             expression_overlay: Some(overlay_id),
             slot_resolution: None,
@@ -3020,30 +3022,34 @@ fn const_required_validation_ignores_referenced_child_expression_overlay() {
     };
 
     let store = context.template_ir_store.borrow();
-    validate_const_required_template_control_flow(&recursive_template, &store)
-        .expect("referenced child expression overlays must be ignored by structural validation");
+    let error = validate_const_required_template_control_flow(&recursive_template, &store)
+        .expect_err("exact-view child cycles must be CompilerError");
+    let TemplateError::Infrastructure(error) = error else {
+        panic!("exact-view child cycles must stay on the infrastructure lane, got {error:?}");
+    };
+    assert_eq!(
+        error.error_type,
+        crate::compiler_frontend::compiler_errors::ErrorType::Compiler
+    );
+    assert!(
+        error.msg.contains("re-entered while still active"),
+        "cycle error should name exact-view re-entry, got: {}",
+        error.msg
+    );
+    assert!(
+        !error.msg.contains("runtime_condition"),
+        "structural validation must not import the child's expression overlay"
+    );
 }
 
 #[test]
-fn runtime_template_if_rejects_unresolved_slot_through_tir_view() {
+fn runtime_template_if_allows_unresolved_slot_through_tir_view() {
     let (template, context, _string_table) =
         parse_runtime_template_without_validation("[if true:\n            [$slot]\n        ]");
 
     let store = context.template_ir_store.borrow();
-    let expected_location = find_first_branch_location(&template, &store)
-        .expect("runtime branch should have a stable source location");
-
-    let error = validate_runtime_template_control_flow_slot_artifacts(&template, &store)
-        .expect_err("TirView path should report the unresolved slot in the branch body");
-
-    let TemplateError::Diagnostic(diagnostic) = error else {
-        panic!("unresolved runtime slot should remain a source diagnostic");
-    };
-    assert_invalid_template_structure(
-        &diagnostic,
-        InvalidTemplateStructureReason::RuntimeControlFlowUnresolvedSlot,
-    );
-    assert_eq!(diagnostic.primary_location, expected_location);
+    validate_runtime_template_control_flow_slot_artifacts(&template, &store)
+        .expect("receiver $slot markers may remain inside runtime control flow");
 }
 
 #[test]
@@ -3278,9 +3284,11 @@ fn install_expression_overlay_on_template(
     site_id: ExpressionSiteId,
     expression: Expression,
 ) {
-    let overlay_id = store.allocate_expression_overlay(TirExpressionOverlay {
-        overrides: vec![(site_id, Box::new(expression))],
-    });
+    let overlay_id = store
+        .allocate_expression_overlay(TirExpressionOverlay {
+            overrides: vec![(site_id, Box::new(expression))],
+        })
+        .expect("test overlay allocation");
     let context = TemplateViewContext {
         expression_overlay: Some(overlay_id),
         slot_resolution: None,
@@ -3347,9 +3355,11 @@ fn install_slot_resolution_overlay_on_template(
     occurrence_id: SlotOccurrenceId,
     resolution: TirSlotResolution,
 ) {
-    let overlay_id = store.allocate_slot_resolution_overlay(TirSlotResolutionOverlay {
-        resolutions: vec![(occurrence_id, resolution)],
-    });
+    let overlay_id = store
+        .allocate_slot_resolution_overlay(TirSlotResolutionOverlay {
+            resolutions: vec![(occurrence_id, resolution)],
+        })
+        .expect("test overlay allocation");
     let context = TemplateViewContext {
         expression_overlay: None,
         slot_resolution: Some(overlay_id),
@@ -3434,7 +3444,8 @@ fn collect_static_tir_fragments(
         TemplateIrNodeKind::Slot { .. }
         | TemplateIrNodeKind::AggregateOutput
         | TemplateIrNodeKind::LoopControl { .. }
-        | TemplateIrNodeKind::RuntimeSlotSite { .. } => {}
+        | TemplateIrNodeKind::RuntimeSlotSite { .. }
+        | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => {}
     }
 }
 
@@ -3489,7 +3500,8 @@ fn tir_subtree_contains_slot(
         | TemplateIrNodeKind::DynamicExpression { .. }
         | TemplateIrNodeKind::AggregateOutput
         | TemplateIrNodeKind::LoopControl { .. }
-        | TemplateIrNodeKind::RuntimeSlotSite { .. } => false,
+        | TemplateIrNodeKind::RuntimeSlotSite { .. }
+        | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => false,
     }
 }
 
@@ -3552,7 +3564,8 @@ fn count_tir_loop_control_signals(
         | TemplateIrNodeKind::DynamicExpression { .. }
         | TemplateIrNodeKind::Slot { .. }
         | TemplateIrNodeKind::AggregateOutput
-        | TemplateIrNodeKind::RuntimeSlotSite { .. } => 0,
+        | TemplateIrNodeKind::RuntimeSlotSite { .. }
+        | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => 0,
     }
 }
 
@@ -3599,6 +3612,7 @@ fn expect_branch_chain_node(template: &Template, context: &ScopeContext) -> Temp
     let template_id = template.tir_reference.root;
     let control_flow_node_id = store
         .control_flow_node_id_for_template(template_id)
+        .expect("control-flow lookup")
         .expect("template should contain a control-flow node");
     let node = store
         .get_node(control_flow_node_id)
@@ -3615,6 +3629,7 @@ fn expect_loop_node(template: &Template, context: &ScopeContext) -> TemplateIrNo
     let template_id = template.tir_reference.root;
     let control_flow_node_id = store
         .control_flow_node_id_for_template(template_id)
+        .expect("control-flow lookup")
         .expect("template should contain a control-flow node");
     let node = store
         .get_node(control_flow_node_id)

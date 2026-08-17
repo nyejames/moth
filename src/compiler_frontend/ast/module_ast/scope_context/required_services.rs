@@ -75,28 +75,16 @@ impl ScopeContext {
         })
     }
 
-    /// Build a [`TemplateFoldContext`] from the current scope's shared services.
-    ///
-    /// WHAT: gathers the path resolver, source file scope, and format config needed
-    ///       to fold template expressions at compile time.
-    /// WHY: template folding happens in several parser paths (body parser, expression
-    ///      parser, top-level const folding); this keeps the context assembly in one place.
-    pub fn new_template_fold_context<'b>(
+    /// Build the narrow TIR fold state for the current AST scope.
+    pub fn new_tir_fold_context<'b>(
         &'b self,
         string_table: &'b mut StringTable,
-        operation: &str,
-    ) -> Result<TemplateFoldContext<'b>, CompilerError> {
-        let resolver = self.required_project_path_resolver(operation)?;
-        let source_file_scope = self.required_source_file_scope(operation)?;
-
-        Ok(TemplateFoldContext {
+    ) -> TirFoldContext<'b> {
+        TirFoldContext {
             string_table,
-            project_path_resolver: resolver,
-            path_format_config: &self.path_format_config,
-            source_file_scope,
             template_const_loop_iteration_limit: self.shared.template_const_loop_iteration_limit,
             bindings: Vec::new(),
             fold_cache: TirFoldCache::new(),
-        })
+        }
     }
 }

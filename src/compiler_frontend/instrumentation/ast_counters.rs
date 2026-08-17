@@ -76,8 +76,6 @@ pub(crate) enum AstCounter {
     TirMaxDepth,
     TirWrapperSetsCreated,
     TirWrapperSetReuseHits,
-    #[cfg(any(test, feature = "benchmark_counters"))]
-    TirValidationNodesVisited,
     TirPreparationAttempts,
     TirPreparationNodesVisited,
 
@@ -261,8 +259,6 @@ mod detailed {
             AstCounter::TirMaxDepth,
             AstCounter::TirWrapperSetsCreated,
             AstCounter::TirWrapperSetReuseHits,
-            #[cfg(any(test, feature = "benchmark_counters"))]
-            AstCounter::TirValidationNodesVisited,
             AstCounter::TirPreparationAttempts,
             AstCounter::TirPreparationNodesVisited,
             AstCounter::TirFoldTemplatesFolded,
@@ -356,8 +352,6 @@ mod detailed {
             AstCounter::TirMaxDepth => "TIR max depth",
             AstCounter::TirWrapperSetsCreated => "TIR wrapper sets created",
             AstCounter::TirWrapperSetReuseHits => "TIR wrapper set reuse hits",
-            #[cfg(any(test, feature = "benchmark_counters"))]
-            AstCounter::TirValidationNodesVisited => "TIR validation nodes visited",
             AstCounter::TirPreparationAttempts => "TIR preparation attempts",
             AstCounter::TirPreparationNodesVisited => "TIR preparation nodes visited",
 
@@ -471,8 +465,6 @@ mod detailed {
             AstCounter::TirMaxDepth => "ast_tir_max_depth",
             AstCounter::TirWrapperSetsCreated => "ast_tir_wrapper_sets_created",
             AstCounter::TirWrapperSetReuseHits => "ast_tir_wrapper_set_reuse_hits",
-            #[cfg(any(test, feature = "benchmark_counters"))]
-            AstCounter::TirValidationNodesVisited => "ast_tir_validation_nodes_visited",
             AstCounter::TirPreparationAttempts => "ast_tir_preparation_attempts",
             AstCounter::TirPreparationNodesVisited => "ast_tir_preparation_nodes_visited",
 

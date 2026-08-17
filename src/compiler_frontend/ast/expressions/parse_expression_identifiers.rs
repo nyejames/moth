@@ -204,9 +204,9 @@ pub(super) fn parse_identifier_or_call(
         }
 
         // Constant contexts reject non-constant local references. The unresolved
-        // constant placeholder exemption is checked before TIR classification so
+        // constant placeholder exemption is checked before TIR preparation so
         // placeholders that have not been folded yet are not rejected prematurely.
-        // Template constness comes from the exact effective view so composed
+        // Template constness comes from preparation's exact effective view so composed
         // templates retain their module-local reference and overlays.
         if context.kind.is_constant_context() && !binding.is_unresolved_constant_placeholder() {
             let is_compile_time_constant = binding

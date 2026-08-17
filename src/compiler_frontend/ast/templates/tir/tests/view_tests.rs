@@ -11,7 +11,6 @@
 //! unready roots, and overlay dimension accessors resolve entries through the
 //! value-carried view context.
 
-use super::super::builder::TemplateIrBuilder;
 use super::super::ids::{
     ChildTemplateOccurrenceId, ExpressionSiteId, SlotOccurrenceId, TemplateIrId, TemplateIrNodeId,
 };
@@ -27,6 +26,7 @@ use super::super::refs::{
 use super::super::store::TemplateIrStore;
 use super::super::summary::TemplateIrSummary;
 use super::super::view::{TemplateTirPhase, TirView};
+use super::builder::TemplateIrBuilder;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
 use crate::compiler_frontend::ast::templates::template::SlotKey;
@@ -229,9 +229,11 @@ fn effective_expression_for_site_resolves_override_and_none_cases() {
     let site_id = dynamic_expression_site_id(&store, root_node);
 
     // Override present: the site covered by the overlay resolves.
-    let present_overlay_id = store.allocate_expression_overlay(TirExpressionOverlay {
-        overrides: vec![(site_id, Box::new(bool_expression()))],
-    });
+    let present_overlay_id = store
+        .allocate_expression_overlay(TirExpressionOverlay {
+            overrides: vec![(site_id, Box::new(bool_expression()))],
+        })
+        .expect("test overlay allocation");
     let present_view = TirView::new(
         &store,
         template_id,
@@ -270,9 +272,11 @@ fn effective_expression_for_site_resolves_override_and_none_cases() {
     // Uncovered site: the overlay covers a different site, so this site is None.
     let other_site = store.next_expression_site_id();
     assert_ne!(other_site, site_id);
-    let uncovered_overlay_id = store.allocate_expression_overlay(TirExpressionOverlay {
-        overrides: vec![(other_site, Box::new(bool_expression()))],
-    });
+    let uncovered_overlay_id = store
+        .allocate_expression_overlay(TirExpressionOverlay {
+            overrides: vec![(other_site, Box::new(bool_expression()))],
+        })
+        .expect("test overlay allocation");
     let uncovered_view = TirView::new(
         &store,
         template_id,
@@ -301,9 +305,11 @@ fn effective_expression_for_node_resolves_override_and_none_cases() {
     let (expression_template_id, expression_root) =
         build_template_with_dynamic_expression(&mut store);
     let expression_site = dynamic_expression_site_id(&store, expression_root);
-    let expression_overlay_id = store.allocate_expression_overlay(TirExpressionOverlay {
-        overrides: vec![(expression_site, Box::new(bool_expression()))],
-    });
+    let expression_overlay_id = store
+        .allocate_expression_overlay(TirExpressionOverlay {
+            overrides: vec![(expression_site, Box::new(bool_expression()))],
+        })
+        .expect("test overlay allocation");
     let expression_view = TirView::new(
         &store,
         expression_template_id,
@@ -332,9 +338,11 @@ fn effective_expression_for_node_resolves_override_and_none_cases() {
         .expect("template should exist")
         .root;
     let unused_site = store.next_expression_site_id();
-    let unused_overlay_id = store.allocate_expression_overlay(TirExpressionOverlay {
-        overrides: vec![(unused_site, Box::new(bool_expression()))],
-    });
+    let unused_overlay_id = store
+        .allocate_expression_overlay(TirExpressionOverlay {
+            overrides: vec![(unused_site, Box::new(bool_expression()))],
+        })
+        .expect("test overlay allocation");
     let text_view = TirView::new(
         &store,
         text_template_id,
@@ -361,14 +369,16 @@ fn effective_slot_resolution_resolves_present_and_none_cases() {
     let template_id = build_empty_template(&mut store);
 
     // Present: the typed resolution carries its exact source template.
-    let occurrence_id = SlotOccurrenceId::new(0);
+    let occurrence_id = store.next_slot_occurrence_id();
     let source = template_id;
-    let slot_overlay_id = store.allocate_slot_resolution_overlay(TirSlotResolutionOverlay {
-        resolutions: vec![(
-            occurrence_id,
-            TirSlotResolution::resolved(SlotKey::Default, vec![source]),
-        )],
-    });
+    let slot_overlay_id = store
+        .allocate_slot_resolution_overlay(TirSlotResolutionOverlay {
+            resolutions: vec![(
+                occurrence_id,
+                TirSlotResolution::resolved(SlotKey::Default, vec![source]),
+            )],
+        })
+        .expect("test overlay allocation");
     let present_view = TirView::new(
         &store,
         template_id,
@@ -396,7 +406,7 @@ fn effective_slot_resolution_resolves_present_and_none_cases() {
     .expect("view should construct");
     assert!(
         none_view
-            .effective_slot_resolution(SlotOccurrenceId::new(0))
+            .effective_slot_resolution(occurrence_id)
             .expect("slot resolution lookup should succeed")
             .is_none(),
         "no resolution without a slot-resolution overlay"
@@ -409,15 +419,17 @@ fn effective_wrapper_context_resolves_present_and_none_cases() {
     let template_id = build_empty_template(&mut store);
 
     // Present: the typed wrapper context carries its exact field values.
-    let occurrence_id = ChildTemplateOccurrenceId::new(0);
+    let occurrence_id = store.next_child_template_occurrence_id();
     let wrapper_context = TirWrapperContext {
         inherited_wrapper_set: None,
         skip_parent_child_wrappers: true,
         application_mode: TirWrapperApplicationMode::IfChildEmits,
     };
-    let wrapper_overlay_id = store.allocate_wrapper_context_overlay(TirWrapperContextOverlay {
-        contexts: vec![(occurrence_id, wrapper_context.clone())],
-    });
+    let wrapper_overlay_id = store
+        .allocate_wrapper_context_overlay(TirWrapperContextOverlay {
+            contexts: vec![(occurrence_id, wrapper_context.clone())],
+        })
+        .expect("test overlay allocation");
     let present_view = TirView::new(
         &store,
         template_id,
@@ -445,19 +457,19 @@ fn effective_wrapper_context_resolves_present_and_none_cases() {
     .expect("view should construct");
     assert!(
         none_view
-            .effective_wrapper_context(ChildTemplateOccurrenceId::new(0))
+            .effective_wrapper_context(occurrence_id)
             .expect("wrapper context lookup should succeed")
             .is_none(),
         "no context without a wrapper-context overlay"
     );
 
     // None for uncovered occurrence: the overlay covers a different occurrence.
-    let uncovered_overlay_id = store.allocate_wrapper_context_overlay(TirWrapperContextOverlay {
-        contexts: vec![(
-            ChildTemplateOccurrenceId::new(1),
-            TirWrapperContext::empty(),
-        )],
-    });
+    let uncovered_occurrence = store.next_child_template_occurrence_id();
+    let uncovered_overlay_id = store
+        .allocate_wrapper_context_overlay(TirWrapperContextOverlay {
+            contexts: vec![(uncovered_occurrence, TirWrapperContext::empty())],
+        })
+        .expect("test overlay allocation");
     let uncovered_view = TirView::new(
         &store,
         template_id,
@@ -714,10 +726,15 @@ fn named_view_transitions_preserve_their_documented_overlay_authority() {
     let parent_id = build_empty_template(&mut store);
     let child_id = build_empty_template(&mut store);
 
-    let expression_overlay = store.allocate_expression_overlay(TirExpressionOverlay::default());
-    let slot_overlay = store.allocate_slot_resolution_overlay(TirSlotResolutionOverlay::default());
-    let wrapper_overlay =
-        store.allocate_wrapper_context_overlay(TirWrapperContextOverlay::default());
+    let expression_overlay = store
+        .allocate_expression_overlay(TirExpressionOverlay::default())
+        .expect("test overlay allocation");
+    let slot_overlay = store
+        .allocate_slot_resolution_overlay(TirSlotResolutionOverlay::default())
+        .expect("test overlay allocation");
+    let wrapper_overlay = store
+        .allocate_wrapper_context_overlay(TirWrapperContextOverlay::default())
+        .expect("test overlay allocation");
     let parent_context = TemplateViewContext {
         expression_overlay: Some(expression_overlay),
         slot_resolution: None,
@@ -803,8 +820,9 @@ fn structural_transition_does_not_import_referenced_expression_overlay() {
     let mut store = TemplateIrStore::new();
     let parent_id = build_empty_template(&mut store);
     let child_id = build_empty_template(&mut store);
-    let child_expression_overlay =
-        store.allocate_expression_overlay(TirExpressionOverlay::default());
+    let child_expression_overlay = store
+        .allocate_expression_overlay(TirExpressionOverlay::default())
+        .expect("test overlay allocation");
 
     let parent_view = TirView::new(
         &store,
@@ -842,10 +860,15 @@ fn resolved_slot_source_and_structural_helper_preserve_exact_parent_view() {
     let mut store = TemplateIrStore::new();
     let parent_id = build_empty_template(&mut store);
     let source_id = build_empty_template(&mut store);
-    let expression_overlay = store.allocate_expression_overlay(TirExpressionOverlay::default());
-    let slot_overlay = store.allocate_slot_resolution_overlay(TirSlotResolutionOverlay::default());
-    let wrapper_overlay =
-        store.allocate_wrapper_context_overlay(TirWrapperContextOverlay::default());
+    let expression_overlay = store
+        .allocate_expression_overlay(TirExpressionOverlay::default())
+        .expect("test overlay allocation");
+    let slot_overlay = store
+        .allocate_slot_resolution_overlay(TirSlotResolutionOverlay::default())
+        .expect("test overlay allocation");
+    let wrapper_overlay = store
+        .allocate_wrapper_context_overlay(TirWrapperContextOverlay::default())
+        .expect("test overlay allocation");
     let parent_context = TemplateViewContext {
         expression_overlay: Some(expression_overlay),
         slot_resolution: Some(slot_overlay),
@@ -884,15 +907,25 @@ fn overlay_dimension_accessors_resolve_each_dimension() {
 
     // Seed index zero, then select a nonzero typed overlay in each dimension so
     // the accessors must resolve the exact ID rather than merely return an entry.
-    store.allocate_expression_overlay(TirExpressionOverlay::default());
-    store.allocate_slot_resolution_overlay(TirSlotResolutionOverlay::default());
-    store.allocate_wrapper_context_overlay(TirWrapperContextOverlay::default());
+    store
+        .allocate_expression_overlay(TirExpressionOverlay::default())
+        .expect("test overlay allocation");
+    store
+        .allocate_slot_resolution_overlay(TirSlotResolutionOverlay::default())
+        .expect("test overlay allocation");
+    store
+        .allocate_wrapper_context_overlay(TirWrapperContextOverlay::default())
+        .expect("test overlay allocation");
 
-    let expression_overlay_id = store.allocate_expression_overlay(TirExpressionOverlay::default());
-    let slot_overlay_id =
-        store.allocate_slot_resolution_overlay(TirSlotResolutionOverlay::default());
-    let wrapper_overlay_id =
-        store.allocate_wrapper_context_overlay(TirWrapperContextOverlay::default());
+    let expression_overlay_id = store
+        .allocate_expression_overlay(TirExpressionOverlay::default())
+        .expect("test overlay allocation");
+    let slot_overlay_id = store
+        .allocate_slot_resolution_overlay(TirSlotResolutionOverlay::default())
+        .expect("test overlay allocation");
+    let wrapper_overlay_id = store
+        .allocate_wrapper_context_overlay(TirWrapperContextOverlay::default())
+        .expect("test overlay allocation");
 
     // Empty context: every dimension accessor returns None.
     let empty_view = TirView::new(
@@ -1221,6 +1254,7 @@ fn build_template_with_branch_chain(
         TemplateBranchSelector::Bool(bool_expression_with_location(&branch_location)),
         branch_body,
         branch_location,
+        builder.store.next_expression_site_id(),
     );
 
     let root = builder.push_branch_chain_node(vec![branch], Some(fallback_body), empty_location());

@@ -10,15 +10,16 @@
 
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::templates::error::TemplateError;
+use crate::compiler_frontend::ast::templates::template::TemplateConstValueKind;
 use crate::compiler_frontend::ast::templates::template::{
     SlotKey, Style, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_control_flow::TemplateBranchSelector;
 use crate::compiler_frontend::ast::templates::template_folding::{
-    TemplateEmission, TemplateFoldContext, TemplateFoldResult,
+    TemplateEmission, TemplateFoldResult, TirFoldContext,
 };
+use crate::compiler_frontend::ast::templates::tir::TemplateIrBuilder;
 use crate::compiler_frontend::ast::templates::tir::TemplateSlotPlan;
-use crate::compiler_frontend::ast::templates::tir::builder::TemplateIrBuilder;
 use crate::compiler_frontend::ast::templates::tir::fold::fold_prepared_template;
 use crate::compiler_frontend::ast::templates::tir::fold_cache::TirFoldCache;
 use crate::compiler_frontend::ast::templates::tir::ids::{
@@ -32,17 +33,19 @@ use crate::compiler_frontend::ast::templates::tir::overlays::{
     TirWrapperContextOverlay,
 };
 use crate::compiler_frontend::ast::templates::tir::preparation::{
-    PreparedRuntime, RuntimeTemplateReason,
+    RuntimeTemplateReason, TemplatePreparation, TemplatePreparationFacts, TemplatePreparationMode,
+    TemplatePreparationOutcome,
 };
 use crate::compiler_frontend::ast::templates::tir::refs::{
     TemplateTirChildReference, TemplateWrapperReference,
 };
-use crate::compiler_frontend::ast::templates::tir::store::{TemplateIrStore, TemplateWrapperSet};
+use crate::compiler_frontend::ast::templates::tir::store::{
+    MalformedTirStore, TemplateIrStore, TemplateWrapperSet,
+};
 use crate::compiler_frontend::ast::templates::tir::summary::TemplateIrSummary;
 use crate::compiler_frontend::ast::templates::tir::view::{TemplateTirPhase, TirView};
 use crate::compiler_frontend::ast::templates::tir::{
-    PreparedTemplate, TemplatePreparationMode, owned_runtime_template_handoff_for_prepared_view,
-    prepare_tir_view,
+    owned_runtime_template_handoff_for_prepared_view, prepare_tir_view,
 };
 use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
@@ -50,8 +53,6 @@ use crate::compiler_frontend::ast::templates::{
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
-use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
@@ -64,26 +65,9 @@ fn empty_location() -> SourceLocation {
     SourceLocation::default()
 }
 
-fn fold_context<'a>(string_table: &'a mut StringTable) -> TemplateFoldContext<'a> {
-    let cwd = std::env::temp_dir();
-    let resolver = Box::leak(Box::new(
-        ProjectPathResolver::new(
-            cwd.clone(),
-            cwd,
-            crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots::empty(
-            ),
-            &crate::builder_surface::SourceFileKindRegistry::default(),
-        )
-        .expect("test path resolver should be valid"),
-    ));
-    let path_format = Box::leak(Box::new(PathStringFormatConfig::default()));
-    let source_scope = Box::leak(Box::new(InternedPath::new()));
-
-    TemplateFoldContext {
+fn fold_context<'a>(string_table: &'a mut StringTable) -> TirFoldContext<'a> {
+    TirFoldContext {
         string_table,
-        project_path_resolver: resolver,
-        path_format_config: path_format,
-        source_file_scope: source_scope,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         bindings: vec![],
         fold_cache: TirFoldCache::new(),
@@ -114,7 +98,7 @@ fn build_text_template(
     let mut builder = TemplateIrBuilder::new(store);
     let text_node = builder.push_text_node(
         text_id,
-        text.len() as u32,
+        text.len(),
         TemplateSegmentOrigin::Body,
         empty_location(),
     );
@@ -140,14 +124,14 @@ fn build_slot_wrapper_template(
     let mut builder = TemplateIrBuilder::new(store);
     let before_node = builder.push_text_node(
         before_id,
-        before.len() as u32,
+        before.len(),
         TemplateSegmentOrigin::Body,
         empty_location(),
     );
     let slot_node = builder.push_slot_node(SlotKey::Default, empty_location());
     let after_node = builder.push_text_node(
         after_id,
-        after.len() as u32,
+        after.len(),
         TemplateSegmentOrigin::Body,
         empty_location(),
     );
@@ -175,7 +159,7 @@ fn build_two_slot_wrapper_template(
     let mut builder = TemplateIrBuilder::new(store);
     let before_node = builder.push_text_node(
         before_id,
-        "before".len() as u32,
+        "before".len(),
         TemplateSegmentOrigin::Body,
         empty_location(),
     );
@@ -183,7 +167,7 @@ fn build_two_slot_wrapper_template(
     let named_slot = builder.push_slot_node(named_key.clone(), empty_location());
     let after_node = builder.push_text_node(
         after_id,
-        "after".len() as u32,
+        "after".len(),
         TemplateSegmentOrigin::Body,
         empty_location(),
     );
@@ -251,7 +235,7 @@ fn build_false_no_else_branch_template(
     let mut builder = TemplateIrBuilder::new(store);
     let body_node = builder.push_text_node(
         body_text,
-        "hidden".len() as u32,
+        "hidden".len(),
         TemplateSegmentOrigin::Body,
         empty_location(),
     );
@@ -259,6 +243,7 @@ fn build_false_no_else_branch_template(
         TemplateBranchSelector::Bool(bool_expression(false)),
         body_node,
         empty_location(),
+        builder.store.next_expression_site_id(),
     );
     let root = builder.push_branch_chain_node(vec![branch], None, empty_location());
     builder.finish_template(
@@ -279,6 +264,7 @@ struct WrapperContextFixture {
     parent: TemplateIrId,
     /// The inherited wrapper template id, when the fixture built one.
     wrapper_template_id: Option<TemplateIrId>,
+    wrapper_set_id: Option<TemplateWrapperSetId>,
     context: TemplateViewContext,
 }
 
@@ -301,8 +287,8 @@ fn allocate_wrapper_context_overlay(
     child_occurrence_id: ChildTemplateOccurrenceId,
     wrapper_context: TirWrapperContext,
 ) -> TemplateViewContext {
-    let wrapper_context_overlay_id =
-        store.allocate_wrapper_context_overlay(TirWrapperContextOverlay {
+    let wrapper_context_overlay_id = store
+        .allocate_wrapper_context_overlay(TirWrapperContextOverlay {
             contexts: vec![(
                 child_occurrence_id,
                 TirWrapperContext {
@@ -310,7 +296,8 @@ fn allocate_wrapper_context_overlay(
                     ..wrapper_context
                 },
             )],
-        });
+        })
+        .expect("test overlay allocation");
     TemplateViewContext {
         expression_overlay: None,
         slot_resolution: None,
@@ -366,11 +353,11 @@ fn build_wrapper_context_fixture(
         );
         (parent, wrapper_template_id, wrapper_set_id, context)
     };
-    let _ = wrapper_set_id;
     WrapperContextFixture {
         store,
         parent,
         wrapper_template_id: Some(wrapper_template_id),
+        wrapper_set_id: Some(wrapper_set_id),
         context,
     }
 }
@@ -410,9 +397,11 @@ fn build_expression_wrapper_fixture(
             empty_location(),
         );
 
-        let wrapper_expression_overlay_id = tir.allocate_expression_overlay(TirExpressionOverlay {
-            overrides: vec![(site_id, Box::new(wrapper_expression))],
-        });
+        let wrapper_expression_overlay_id = tir
+            .allocate_expression_overlay(TirExpressionOverlay {
+                overrides: vec![(site_id, Box::new(wrapper_expression))],
+            })
+            .expect("test overlay allocation");
         let wrapper_context = TemplateViewContext {
             expression_overlay: Some(wrapper_expression_overlay_id),
             slot_resolution: None,
@@ -427,17 +416,19 @@ fn build_expression_wrapper_fixture(
         let wrapper_set_id = tir.push_or_reuse_wrapper_set(vec![wrapper_ref]);
 
         let parent_context = if let Some(outer_expression) = outer_expression {
-            let wrapper_context_overlay_id =
-                tir.allocate_wrapper_context_overlay(TirWrapperContextOverlay {
+            let wrapper_context_overlay_id = tir
+                .allocate_wrapper_context_overlay(TirWrapperContextOverlay {
                     contexts: vec![(
                         ChildTemplateOccurrenceId::new(0),
                         TirWrapperContext::inherited(wrapper_set_id),
                     )],
-                });
-            let outer_expression_overlay_id =
-                tir.allocate_expression_overlay(TirExpressionOverlay {
+                })
+                .expect("test overlay allocation");
+            let outer_expression_overlay_id = tir
+                .allocate_expression_overlay(TirExpressionOverlay {
                     overrides: vec![(site_id, Box::new(outer_expression))],
-                });
+                })
+                .expect("test overlay allocation");
             TemplateViewContext {
                 expression_overlay: Some(outer_expression_overlay_id),
                 slot_resolution: None,
@@ -459,13 +450,13 @@ fn build_expression_wrapper_fixture(
             parent_context,
         )
     };
-    let _ = wrapper_set_id;
     let _ = wrapper_template_id;
     (
         WrapperContextFixture {
             store,
             parent,
             wrapper_template_id: Some(wrapper_template_id),
+            wrapper_set_id: Some(wrapper_set_id),
             context,
         },
         site_id,
@@ -506,12 +497,14 @@ fn build_slot_resolution_wrapper_fixture(
             empty_location(),
         );
 
-        let slot_overlay_id = tir.allocate_slot_resolution_overlay(TirSlotResolutionOverlay {
-            resolutions: vec![(
-                named_slot_id,
-                TirSlotResolution::resolved(named_key, vec![source_template_id]),
-            )],
-        });
+        let slot_overlay_id = tir
+            .allocate_slot_resolution_overlay(TirSlotResolutionOverlay {
+                resolutions: vec![(
+                    named_slot_id,
+                    TirSlotResolution::resolved(named_key, vec![source_template_id]),
+                )],
+            })
+            .expect("test overlay allocation");
         let wrapper_context = TemplateViewContext {
             expression_overlay: None,
             slot_resolution: Some(slot_overlay_id),
@@ -538,13 +531,13 @@ fn build_slot_resolution_wrapper_fixture(
             context,
         )
     };
-    let _ = wrapper_set_id;
     let _ = wrapper_template_id;
     (
         WrapperContextFixture {
             store,
             parent,
             wrapper_template_id: Some(wrapper_template_id),
+            wrapper_set_id: Some(wrapper_set_id),
             context,
         },
         source_template_id,
@@ -607,7 +600,7 @@ fn build_nested_virtual_wrapper_fixture(string_table: &mut StringTable) -> Wrapp
             let after_text = string_table.intern("outer-after");
             let after_node = builder.push_text_node(
                 after_text,
-                "outer-after".len() as u32,
+                "outer-after".len(),
                 TemplateSegmentOrigin::Body,
                 empty_location(),
             );
@@ -706,6 +699,7 @@ fn build_nested_virtual_wrapper_fixture(string_table: &mut StringTable) -> Wrapp
                 TirWrapperContext::inherited(inner_wrapper_set_id),
             )],
         })
+        .expect("test overlay allocation")
     };
     let outer_expression_overlay_id = {
         let mut tir = store.borrow_mut();
@@ -719,6 +713,7 @@ fn build_nested_virtual_wrapper_fixture(string_table: &mut StringTable) -> Wrapp
                 )),
             )],
         })
+        .expect("test overlay allocation")
     };
     let outer_context = {
         TemplateViewContext {
@@ -730,7 +725,11 @@ fn build_nested_virtual_wrapper_fixture(string_table: &mut StringTable) -> Wrapp
 
     {
         let mut tir = store.borrow_mut();
-        tir.wrapper_sets[outer_wrapper_set_id.index()].wrappers[0].context = outer_context;
+        MalformedTirStore::new(&mut tir).set_wrapper_reference_context(
+            outer_wrapper_set_id,
+            0,
+            outer_context,
+        );
     }
 
     let parent_context_overlay_id = {
@@ -741,6 +740,7 @@ fn build_nested_virtual_wrapper_fixture(string_table: &mut StringTable) -> Wrapp
                 TirWrapperContext::inherited(outer_wrapper_set_id),
             )],
         })
+        .expect("test overlay allocation")
     };
     let parent_context = {
         TemplateViewContext {
@@ -754,6 +754,7 @@ fn build_nested_virtual_wrapper_fixture(string_table: &mut StringTable) -> Wrapp
         store,
         parent: parent_template_id,
         wrapper_template_id: Some(outer_wrapper_template_id),
+        wrapper_set_id: Some(outer_wrapper_set_id),
         context: parent_context,
     }
 }
@@ -787,28 +788,24 @@ fn prepared_fold_fixture_result(
     let (phase, store) = fixture_parent_view(fixture);
     let view = TirView::new(&store, fixture.parent, phase, fixture.context)
         .expect("test view should construct");
-    let preparation = match prepare_tir_view(&view, TemplatePreparationMode::Value)? {
-        PreparedTemplate::Foldable(preparation) => preparation,
-        PreparedTemplate::Runtime(runtime) => {
-            return Err(CompilerError::compiler_error(format!(
-                "supported wrapper fixture unexpectedly requires runtime: {:?}",
-                runtime.reason
-            ))
-            .into());
-        }
-        PreparedTemplate::Helper(_) => {
-            return Err(CompilerError::compiler_error(
-                "supported wrapper fixture unexpectedly produced a helper.",
-            )
-            .into());
-        }
-    };
+    let preparation = prepare_tir_view(&view, TemplatePreparationMode::Value)?;
+    if let TemplatePreparationOutcome::Runtime(reason) = preparation.outcome {
+        return Err(CompilerError::compiler_error(format!(
+            "supported wrapper fixture unexpectedly requires runtime: {:?}",
+            reason
+        ))
+        .into());
+    }
+    if let TemplatePreparationOutcome::Helper(_) = preparation.outcome {
+        return Err(CompilerError::compiler_error(
+            "supported wrapper fixture unexpectedly produced a helper.",
+        )
+        .into());
+    }
     let mut context = fold_context(string_table);
     // Wrapper-context tests here assert rendered text; provenance is not owned by this helper.
-    let TemplateFoldResult {
-        emission,
-        provenance: _,
-    } = fold_prepared_template(&preparation, view, &mut context)?;
+    let TemplateFoldResult { emission, .. } =
+        fold_prepared_template(&preparation, view, &mut context)?;
     Ok(emission)
 }
 
@@ -819,9 +816,20 @@ fn handoff_fixture_result(
     let (phase, store) = fixture_parent_view(fixture);
     let view = TirView::new(&store, fixture.parent, phase, fixture.context)
         .expect("test view should construct");
-    let prepared = PreparedRuntime {
+    let prepared = TemplatePreparation {
         identity: view.identity(),
-        reason: RuntimeTemplateReason::RuntimeExpression,
+        facts: TemplatePreparationFacts {
+            is_const_evaluable_shape: false,
+            has_unresolved_slot_occurrences: false,
+            has_resolved_slot_sources: false,
+            has_escaped_insert_helpers: false,
+            wrapper_foldable: false,
+            has_runtime_slot_plan: false,
+            has_runtime_slot_sites: false,
+            has_reactive_dependence: false,
+            final_value_kind: TemplateConstValueKind::NonConst,
+        },
+        outcome: TemplatePreparationOutcome::Runtime(RuntimeTemplateReason::RuntimeExpression),
     };
     owned_runtime_template_handoff_for_prepared_view(&prepared, view).map_err(Into::into)
 }
@@ -927,7 +935,7 @@ fn wrapper_context_fold_applies_inherited_wrapper_set_innermost_to_outermost() {
     let mut string_table = StringTable::new();
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
 
-    let (parent, context) = {
+    let (parent, wrapper_set_id, context) = {
         let mut tir = store.borrow_mut();
         let child_template_id = build_text_template(&mut tir, &mut string_table, "child");
         let inner_wrapper =
@@ -970,13 +978,14 @@ fn wrapper_context_fold_applies_inherited_wrapper_set_innermost_to_outermost() {
             ChildTemplateOccurrenceId::new(0),
             TirWrapperContext::default(),
         );
-        (parent, context)
+        (parent, wrapper_set_id, context)
     };
 
     let fixture = WrapperContextFixture {
         store,
         parent,
         wrapper_template_id: None,
+        wrapper_set_id: Some(wrapper_set_id),
         context,
     };
 
@@ -1177,7 +1186,7 @@ fn preparation_classifies_outer_override_by_const_vs_runtime_expression() {
             .expect("outer runtime wrapper override should be a valid runtime result")
     };
     assert!(
-        matches!(preparation, PreparedTemplate::Runtime(_)),
+        matches!(preparation.outcome, TemplatePreparationOutcome::Runtime(_)),
         "a runtime outer override must not be classified as a const wrapper"
     );
 
@@ -1222,9 +1231,11 @@ fn preparation_ignores_runtime_referenced_wrapper_expression_overlay() {
     );
     let runtime_context = {
         let mut tir = fixture.store.borrow_mut();
-        let expression_overlay_id = tir.allocate_expression_overlay(TirExpressionOverlay {
-            overrides: vec![(site_id, Box::new(runtime_string_expression()))],
-        });
+        let expression_overlay_id = tir
+            .allocate_expression_overlay(TirExpressionOverlay {
+                overrides: vec![(site_id, Box::new(runtime_string_expression()))],
+            })
+            .expect("test overlay allocation");
         TemplateViewContext {
             expression_overlay: Some(expression_overlay_id),
             slot_resolution: None,
@@ -1236,17 +1247,15 @@ fn preparation_ignores_runtime_referenced_wrapper_expression_overlay() {
         let wrapper_template_id = fixture
             .wrapper_template_id
             .expect("expression wrapper should be present");
-        let wrapper_set = tir
-            .wrapper_sets
-            .iter_mut()
-            .find(|wrapper_set| {
-                wrapper_set
-                    .wrappers
-                    .iter()
-                    .any(|wrapper| wrapper.root == wrapper_template_id)
-            })
+        let wrapper_set_id = fixture
+            .wrapper_set_id
             .expect("expression wrapper set should be present");
-        wrapper_set.wrappers[0].context = runtime_context;
+        let _ = wrapper_template_id;
+        MalformedTirStore::new(&mut tir).set_wrapper_reference_context(
+            wrapper_set_id,
+            0,
+            runtime_context,
+        );
     }
 
     let preparation = {
@@ -1257,7 +1266,7 @@ fn preparation_ignores_runtime_referenced_wrapper_expression_overlay() {
             .expect("referenced wrapper expression should be ignored by the structural transition")
     };
     assert!(
-        matches!(preparation, PreparedTemplate::Foldable(_)),
+        matches!(preparation.outcome, TemplatePreparationOutcome::Foldable),
         "a referenced wrapper expression must not change the parent fold decision"
     );
 
@@ -1315,7 +1324,8 @@ fn preparation_falls_back_for_runtime_non_injected_slot_source() {
             contribution_sources: Vec::new(),
             slot_sites: Vec::new(),
         });
-        tir.templates[source_template_id.index()].runtime_slot_plan = Some(slot_plan_id);
+        tir.attach_runtime_slot_plan(source_template_id, slot_plan_id)
+            .expect("source template should accept the committed slot plan");
     }
     let _ = resolved_text;
 
@@ -1332,14 +1342,13 @@ fn preparation_falls_back_for_runtime_non_injected_slot_source() {
             .expect("runtime slot source should be an eligible runtime result")
     };
     assert_eq!(
-        match preparation {
-            PreparedTemplate::Runtime(runtime) => Some(runtime.reason),
-            PreparedTemplate::Foldable(_) | PreparedTemplate::Helper(_) => None,
+        match preparation.outcome {
+            TemplatePreparationOutcome::Runtime(reason) => Some(reason),
+            TemplatePreparationOutcome::Foldable | TemplatePreparationOutcome::Helper(_) => None,
         },
         Some(RuntimeTemplateReason::InheritedWrapperApplication),
         "a runtime source in a non-injected wrapper slot must stay on the handoff path"
     );
-
     let handoff = handoff_fixture(&fixture, &mut string_table);
     assert!(
         format!("{:?}", handoff.body).contains("RuntimeSlotApplication"),
@@ -1365,25 +1374,17 @@ fn below_composed_wrapper_reference_uses_structural_root_without_overlay_lookup(
 
     {
         let mut tir = fixture.store.borrow_mut();
-        let wrapper_set = tir
-            .wrapper_sets
-            .iter_mut()
-            .find(|wrapper_set| {
-                wrapper_set
-                    .wrappers
-                    .iter()
-                    .any(|wrapper| wrapper.root == wrapper_template_id)
-            })
-            .expect("fixture should have an inherited wrapper set");
-        let wrapper = wrapper_set
-            .wrappers
-            .first_mut()
-            .expect("inherited wrapper set should not be empty");
-        wrapper.phase = TemplateTirPhase::Parsed;
-        wrapper.context = TemplateViewContext {
-            expression_overlay: Some(TirExpressionOverlayId::new(999)),
-            ..TemplateViewContext::default()
-        };
+        let wrapper_set_id = fixture
+            .wrapper_set_id
+            .expect("fixture should have a wrapper set");
+        let _ = wrapper_template_id;
+        MalformedTirStore::new(&mut tir).mutate_wrapper(wrapper_set_id, 0, |wrapper| {
+            wrapper.phase = TemplateTirPhase::Parsed;
+            wrapper.context = TemplateViewContext {
+                expression_overlay: Some(TirExpressionOverlayId::new(999)),
+                ..TemplateViewContext::default()
+            };
+        });
     }
 
     let emission = fold_fixture(&fixture, &mut string_table);
@@ -1417,21 +1418,23 @@ fn prepared_fold_rejects_slot_insert_from_wrapper_context_set() {
     );
     {
         let mut tir = fixture.store.borrow_mut();
-        assert!(
-            tir.set_template_kind(
-                fixture
-                    .wrapper_template_id
-                    .expect("fixture should include its wrapper template"),
-                TemplateType::SlotInsert(SlotKey::Default),
-            )
-        );
+        tir.set_template_kind(
+            fixture
+                .wrapper_template_id
+                .expect("fixture should include its wrapper template"),
+            TemplateType::SlotInsert(SlotKey::Default),
+        )
+        .expect("wrapper kind should be writable");
     }
     let (phase, store) = fixture_parent_view(&fixture);
     let view = TirView::new(&store, fixture.parent, phase, fixture.context)
         .expect("test view should construct");
     let preparation = prepare_tir_view(&view, TemplatePreparationMode::Value)
         .expect("slot insert helper should prepare without folding");
-    assert!(!matches!(preparation, PreparedTemplate::Foldable(_)));
+    assert!(!matches!(
+        preparation.outcome,
+        TemplatePreparationOutcome::Foldable
+    ));
 }
 
 #[test]
@@ -1442,13 +1445,16 @@ fn prepared_fold_rejects_slot_insert_from_effective_slot_source() {
         let mut tir = store.borrow_mut();
         let wrapper = build_slot_wrapper_template(&mut tir, &mut string_table, "", "");
         let source = build_text_template(&mut tir, &mut string_table, "escaped");
-        assert!(tir.set_template_kind(source, TemplateType::SlotInsert(SlotKey::Default)));
-        let slot_overlay_id = tir.allocate_slot_resolution_overlay(TirSlotResolutionOverlay {
-            resolutions: vec![(
-                SlotOccurrenceId::new(0),
-                TirSlotResolution::resolved(SlotKey::Default, vec![source]),
-            )],
-        });
+        tir.set_template_kind(source, TemplateType::SlotInsert(SlotKey::Default))
+            .expect("source kind should be writable");
+        let slot_overlay_id = tir
+            .allocate_slot_resolution_overlay(TirSlotResolutionOverlay {
+                resolutions: vec![(
+                    SlotOccurrenceId::new(0),
+                    TirSlotResolution::resolved(SlotKey::Default, vec![source]),
+                )],
+            })
+            .expect("test overlay allocation");
         let context = TemplateViewContext {
             expression_overlay: None,
             slot_resolution: Some(slot_overlay_id),
@@ -1468,7 +1474,10 @@ fn prepared_fold_rejects_slot_insert_from_effective_slot_source() {
     .expect("slot-overlay view should construct");
     let preparation = prepare_tir_view(&view, TemplatePreparationMode::Value)
         .expect("slot insert source should prepare without folding");
-    assert!(!matches!(preparation, PreparedTemplate::Foldable(_)));
+    assert!(!matches!(
+        preparation.outcome,
+        TemplatePreparationOutcome::Foldable
+    ));
 }
 
 // ---------------------------------------------------------------------------
@@ -1528,25 +1537,27 @@ fn preparation_terminates_for_cyclic_nested_wrapper_contexts() {
 
         // Self-referential wrapper context: the wrapper inherits wrapper set 0,
         // which is allocated below as the set that contains this wrapper.
-        let nested_context_overlay_id =
-            tir.allocate_wrapper_context_overlay(TirWrapperContextOverlay {
+        let nested_context_overlay_id = tir
+            .allocate_wrapper_context_overlay(TirWrapperContextOverlay {
                 contexts: vec![(
                     ChildTemplateOccurrenceId::new(0),
                     TirWrapperContext::inherited(TemplateWrapperSetId::new(0)),
                 )],
-            });
+            })
+            .expect("test overlay allocation");
         let nested_wrapper_context = TemplateViewContext {
             expression_overlay: None,
             slot_resolution: None,
             wrapper_context: Some(nested_context_overlay_id),
         };
-        let parent_context_overlay_id =
-            tir.allocate_wrapper_context_overlay(TirWrapperContextOverlay {
+        let parent_context_overlay_id = tir
+            .allocate_wrapper_context_overlay(TirWrapperContextOverlay {
                 contexts: vec![(
                     ChildTemplateOccurrenceId::new(1),
                     TirWrapperContext::inherited(TemplateWrapperSetId::new(0)),
                 )],
-            });
+            })
+            .expect("test overlay allocation");
         let parent_context = TemplateViewContext {
             expression_overlay: None,
             slot_resolution: None,
@@ -1572,11 +1583,16 @@ fn preparation_terminates_for_cyclic_nested_wrapper_contexts() {
         parent_context,
     )
     .expect("cyclic wrapper view should construct");
-    let preparation = prepare_tir_view(&view, TemplatePreparationMode::Value)
-        .expect("cyclic wrapper contexts should produce a bounded runtime result");
-    assert!(
-        matches!(preparation, PreparedTemplate::Runtime(_)),
-        "cyclic wrapper-context applications must be runtime-dependent"
+    let error = match prepare_tir_view(&view, TemplatePreparationMode::Value) {
+        Err(error) => error,
+        Ok(prepared) => panic!("cyclic wrapper contexts must be CompilerError, got {prepared:?}"),
+    };
+    let TemplateError::Infrastructure(error) = error else {
+        panic!("cyclic wrapper contexts must stay on the infrastructure lane, got {error:?}");
+    };
+    assert_eq!(
+        error.error_type,
+        crate::compiler_frontend::compiler_errors::ErrorType::Compiler
     );
 }
 

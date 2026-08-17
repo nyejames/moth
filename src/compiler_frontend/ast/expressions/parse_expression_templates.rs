@@ -10,8 +10,8 @@ use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template::{TemplateConstValueKind, TemplateType};
 use crate::compiler_frontend::ast::templates::tir::{
-    PreparedTemplate, TemplatePreparationMode, TemplateTirPhase, TirView, fold_prepared_template,
-    prepare_tir_view,
+    TemplatePreparationMode, TemplatePreparationOutcome, TemplateTirPhase, TirView,
+    fold_prepared_template, prepare_tir_view,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
@@ -91,18 +91,20 @@ pub(super) fn parse_template_expression(
                 reference.context,
             )?;
             let preparation = prepare_tir_view(&view, TemplatePreparationMode::Value)?;
-            let PreparedTemplate::Foldable(prepared) = preparation else {
+            if !matches!(preparation.outcome, TemplatePreparationOutcome::Foldable) {
                 return Ok(Some(Expression::template(template, value_mode.to_owned())));
-            };
-            if matches!(prepared.value_kind, TemplateConstValueKind::WrapperTemplate) {
+            }
+            if matches!(
+                preparation.facts.final_value_kind,
+                TemplateConstValueKind::WrapperTemplate
+            ) {
                 return Ok(Some(Expression::template(template, value_mode.to_owned())));
             }
 
             ast_log!("Template is foldable now. Folding...");
 
-            let mut fold_context = template_context
-                .new_template_fold_context(string_table, "expression parsing template fold")?;
-            let fold_result = fold_prepared_template(&prepared, view, &mut fold_context)?;
+            let mut fold_context = template_context.new_tir_fold_context(string_table);
+            let fold_result = fold_prepared_template(&preparation, view, &mut fold_context)?;
             let folded_string = match fold_result.emission {
                 crate::compiler_frontend::ast::templates::template_folding::TemplateEmission::Output(
                     value,

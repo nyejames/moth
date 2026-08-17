@@ -21,10 +21,12 @@ use crate::compiler_frontend::ast::expressions::expression_types::ConstValueKind
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template::TemplateConstValueKind;
+#[cfg(test)]
+use crate::compiler_frontend::ast::templates::tir::TemplatePreparationFacts;
 use crate::compiler_frontend::ast::templates::tir::{
-    TemplateIrStore, TemplateTirPhase, TirTemplateClassification, TirView,
-    classify_effective_tir_view_template,
+    TemplateIrStore, TemplatePreparationMode, TemplateTirPhase, TirView, prepare_tir_view,
 };
+#[cfg(test)]
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -361,7 +363,7 @@ impl<'a> ConstValueResolver<'a> {
 /// Classifies one template through its module-local effective TIR view.
 ///
 /// WHAT: validates the module-local reference, phase and overlay identity before
-///       using the existing effective-view classifier on the shared module store.
+///       using preparation facts from the effective view on the shared module store.
 /// WHY: AST const consumers run after composition, so missing or pre-Composed
 ///      identity is a broken phase invariant rather than permission to recover
 ///      semantics outside the exact module-local view.
@@ -369,23 +371,29 @@ pub(crate) fn classify_template_from_effective_tir(
     template: &Template,
     store: &Rc<RefCell<TemplateIrStore>>,
 ) -> Result<TemplateConstValueKind, TemplateError> {
-    Ok(classify_template_effective_tir(template, store)?.const_value_kind)
+    let reference = &template.tir_reference;
+    let store = store.borrow();
+    let view = TirView::with_minimum_phase(
+        &store,
+        reference.root,
+        reference.phase,
+        TemplateTirPhase::Composed,
+        reference.context,
+    )?;
+    let preparation = prepare_tir_view(&view, TemplatePreparationMode::Value)?;
+    Ok(preparation.facts.final_value_kind)
 }
 
-/// Returns the full classification for one module-local template view.
-///
-/// WHAT: exposes structural slot and insert facts alongside the const-value kind.
-/// WHY: parser-side folding must retain an unfilled wrapper template even though
-///      final fold boundaries render its missing slots as empty output.
-pub(crate) fn classify_template_effective_tir(
+#[cfg(test)]
+pub(crate) fn prepare_template_tir_facts(
     template: &Template,
     store: &Rc<RefCell<TemplateIrStore>>,
-) -> Result<TirTemplateClassification, TemplateError> {
+) -> Result<TemplatePreparationFacts, TemplateError> {
     let reference = &template.tir_reference;
 
     if !reference.phase.is_at_least(TemplateTirPhase::Composed) {
         return Err(CompilerError::compiler_error(format!(
-            "AST const template classification requires Composed TIR, but root {} is at phase {}.",
+            "AST const template preparation requires Composed TIR, but root {} is at phase {}.",
             reference.root, reference.phase
         ))
         .into());
@@ -399,5 +407,5 @@ pub(crate) fn classify_template_effective_tir(
         TemplateTirPhase::Composed,
         reference.context,
     )?;
-    classify_effective_tir_view_template(&view)
+    Ok(prepare_tir_view(&view, TemplatePreparationMode::Value)?.facts)
 }

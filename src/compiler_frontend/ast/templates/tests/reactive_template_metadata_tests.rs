@@ -13,7 +13,7 @@ use crate::compiler_frontend::ast::templates::tir::{
     TemplateIr, TemplateIrId, TemplateIrNode, TemplateIrNodeId, TemplateIrNodeKind,
     TemplateIrStore, TemplateIrSummary, TemplateTirPhase, TemplateTirReference,
     TemplateViewContext, TemplateWrapperReference, TemplateWrapperSet, TirExpressionOverlay,
-    TirSlotPlaceholder, TirSlotResolution, TirSlotResolutionOverlay,
+    TirSlotPlaceholder, TirSlotResolution, TirSlotResolutionOverlay, TirView,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::DataType;
@@ -125,6 +125,33 @@ fn composed_view_walk_collects_dynamic_subscription_metadata() {
 }
 
 #[test]
+fn composed_view_walk_collects_text_side_table_subscription_metadata() {
+    let mut strings = StringTable::new();
+    let (_, subscription) = reactive_expression(&mut strings, "text-value");
+    let mut store = TemplateIrStore::new();
+    let text = store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::Text {
+            text: strings.intern("reactive text"),
+            byte_len: "reactive text".len(),
+            origin: TemplateSegmentOrigin::Body,
+        },
+        location(),
+    ));
+    store
+        .set_node_reactive_subscription(text, subscription.clone())
+        .expect("text node should accept a subscription");
+    let template = template_from_node(
+        &mut store,
+        text,
+        TemplateTirPhase::Composed,
+        TemplateViewContext::default(),
+    );
+
+    let metadata = merge(&template, &store).expect("text metadata walk should succeed");
+    assert!(metadata.subscriptions.contains(&subscription));
+}
+
+#[test]
 fn finalized_view_walk_reads_expression_overlay_metadata() {
     let mut strings = StringTable::new();
     let (structural, _) = reactive_expression(&mut strings, "structural");
@@ -140,9 +167,11 @@ fn finalized_view_walk_reads_expression_overlay_metadata() {
         },
         location(),
     ));
-    let overlay_id = store.allocate_expression_overlay(TirExpressionOverlay {
-        overrides: vec![(site_id, Box::new(overlay_expression))],
-    });
+    let overlay_id = store
+        .allocate_expression_overlay(TirExpressionOverlay {
+            overrides: vec![(site_id, Box::new(overlay_expression))],
+        })
+        .expect("test overlay allocation");
     let context = TemplateViewContext {
         expression_overlay: Some(overlay_id),
         slot_resolution: None,
@@ -239,13 +268,14 @@ fn resolved_slot_source_contributes_metadata_through_exact_view_context() {
         },
         location(),
     ));
-    let slot_resolution_overlay =
-        store.allocate_slot_resolution_overlay(TirSlotResolutionOverlay {
+    let slot_resolution_overlay = store
+        .allocate_slot_resolution_overlay(TirSlotResolutionOverlay {
             resolutions: vec![(
                 occurrence_id,
                 TirSlotResolution::resolved(SlotKey::Default, vec![source.tir_reference.root]),
             )],
-        });
+        })
+        .expect("test overlay allocation");
     let root = template_from_node(
         &mut store,
         slot_node,
@@ -387,4 +417,40 @@ fn missing_composed_root_returns_compiler_error() {
 
     let error = merge(&template, &store).expect_err("missing root should fail");
     assert!(error.msg.contains("does not exist"));
+}
+
+#[test]
+fn exact_view_cycle_is_an_internal_reactive_metadata_error() {
+    let mut store = TemplateIrStore::new();
+    let template_id = TemplateIrId::new(store.template_count());
+    let occurrence_id = store.next_child_template_occurrence_id();
+    let child_node = store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::ChildTemplate {
+            reference: TemplateTirChildReference::new(
+                template_id,
+                TemplateTirPhase::Composed,
+                TemplateViewContext::default(),
+            ),
+            occurrence_id,
+        },
+        location(),
+    ));
+    store.push_template(TemplateIr::new(
+        child_node,
+        Style::default(),
+        TemplateType::StringFunction,
+        TemplateIrSummary::default(),
+        location(),
+    ));
+    let template = Template {
+        tir_reference: TemplateTirReference {
+            root: template_id,
+            phase: TemplateTirPhase::Composed,
+            context: TemplateViewContext::default(),
+        },
+        location: location(),
+    };
+
+    let error = merge(&template, &store).expect_err("active exact-view recursion must fail");
+    assert!(error.msg.contains("re-entered while still active"));
 }

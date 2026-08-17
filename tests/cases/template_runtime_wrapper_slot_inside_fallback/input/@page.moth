@@ -1,0 +1,13 @@
+list = [$children([if false:
+    no
+[else]
+    <li class="fallback-slot">[$slot]</li>
+]):
+    <ul>[$slot]</ul>
+]
+
+[:template_runtime_wrapper_slot_inside_fallback
+    [list:
+        [: hello]
+    ]
+]

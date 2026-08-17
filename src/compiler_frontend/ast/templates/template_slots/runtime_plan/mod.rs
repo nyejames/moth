@@ -11,9 +11,9 @@ mod sites;
 mod sources;
 mod types;
 
-use super::error::TemplateSlotError;
+use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::tir::{
-    TemplateIr, TemplateIrStore, TemplateSlotPlan, TirCopyState,
+    TemplateIrStore, TemplateSlotPlan, TirCopyState, TirSlotContributions, TirSlotSchema,
     convert_tir_tree_to_active_slot_plan, copy_tir_subtree_with_active_slot_plan,
     record_tir_copy_counters,
 };
@@ -41,22 +41,22 @@ pub(crate) use types::{RuntimeSlotContributionSourceId, RuntimeSlotSiteId};
 pub(in crate::compiler_frontend::ast::templates) fn materialize_tir_native_runtime_slot_plan(
     store: &mut TemplateIrStore,
     wrapper_template_id: crate::compiler_frontend::ast::templates::tir::TemplateIrId,
-    routed: &crate::compiler_frontend::ast::templates::tir::RoutedTirSlotContributions,
+    schema: &TirSlotSchema,
+    routed: &TirSlotContributions,
     string_table: &StringTable,
     location: &SourceLocation,
-) -> Result<crate::compiler_frontend::ast::templates::tir::TemplateIrId, TemplateSlotError> {
-    use crate::compiler_frontend::ast::templates::tir::collect_tir_slot_schema;
-
-    // Clone the wrapper template's style, kind, and root up front so the
-    // immutable store borrow ends before the mutable borrows that follow.
-    let (wrapper_root, wrapper_style, wrapper_kind) = store
+) -> Result<crate::compiler_frontend::ast::templates::tir::TemplateIrId, TemplateError> {
+    let wrapper_root = store
         .get_template(wrapper_template_id)
-        .map(|template| (template.root, template.style.clone(), template.kind.clone()))
         .ok_or_else(|| {
             CompilerError::compiler_error(
                 "TIR-native runtime slot plan: wrapper template ID was not present in the store.",
             )
-        })?;
+        })?
+        .root;
+
+    let templates_before = store.template_count();
+    let nodes_before = store.node_count();
 
     let mut copy_state = TirCopyState::new();
     let mut scratch_copy_state = TirCopyState::new();
@@ -65,36 +65,19 @@ pub(in crate::compiler_frontend::ast::templates) fn materialize_tir_native_runti
     // passed so Slot nodes stay as Slot nodes for site-draft collection, then
     // get converted to RuntimeSlotSite nodes after the site plan is built.
     let scratch_tir_root =
-        copy_tir_subtree_with_active_slot_plan(wrapper_root, None, store, &mut scratch_copy_state)
-            .map_err(TemplateSlotError::from)?;
+        copy_tir_subtree_with_active_slot_plan(wrapper_root, None, store, &mut scratch_copy_state)?;
 
-    let templates_before = store.template_count();
-    let nodes_before = store.node_count();
-    let slot_plan_id = store.push_slot_plan(TemplateSlotPlan {
-        location: location.clone(),
-        contribution_sources: vec![],
-        slot_sites: vec![],
-    });
-
-    // Re-collect the wrapper's slot schema in production, since
-    // RoutedTirSlotContributions only carries the schema in test builds.
-    let schema =
-        collect_tir_slot_schema(store, wrapper_template_id).map_err(TemplateSlotError::from)?;
+    let slot_plan_id = store.reserve_slot_plan();
 
     let sources = sources::build_tir_native_contribution_sources(
-        &schema,
-        &routed.contributions,
+        schema,
+        routed,
         location,
         string_table,
         store,
         &mut copy_state,
-    )
-    .map_err(TemplateSlotError::from)?;
+    )?;
 
-    let source_plans = sources
-        .iter()
-        .map(|source| source.source.clone())
-        .collect::<Vec<_>>();
     let slot_sites = sites::build_runtime_wrapper_site_plan(
         scratch_tir_root,
         &sources,
@@ -103,35 +86,30 @@ pub(in crate::compiler_frontend::ast::templates) fn materialize_tir_native_runti
         &mut copy_state,
     )?;
 
-    let Some(slot_plan) = store.slot_plans.get_mut(slot_plan_id.index()) else {
-        return Err(CompilerError::compiler_error(
-            "TIR-native runtime slot plan materialization lost its TIR slot-plan entry.",
-        )
-        .into());
+    let slot_plan = TemplateSlotPlan {
+        location: location.clone(),
+        contribution_sources: sources.into_iter().map(|source| source.source).collect(),
+        slot_sites,
     };
-    slot_plan.contribution_sources = source_plans;
-    slot_plan.slot_sites = slot_sites;
 
-    // Convert the scratch tree's Slot nodes into RuntimeSlotSite nodes using
-    // the active slot plan's cursor.
+    // Convert the scratch tree using the local site-plan slice before commit.
     copy_state.reset_runtime_slot_site_cursor(slot_plan_id);
-    convert_tir_tree_to_active_slot_plan(scratch_tir_root, slot_plan_id, store, &mut copy_state)
-        .map_err(TemplateSlotError::from)?;
-
-    copy_state
-        .summary
-        .merge_converted_wrapper_tree(&scratch_copy_state.summary);
-
-    let mut tir_template = TemplateIr::new(
+    convert_tir_tree_to_active_slot_plan(
         scratch_tir_root,
-        wrapper_style,
-        wrapper_kind,
-        copy_state.summary.clone(),
-        location.clone(),
-    );
-    tir_template.runtime_slot_plan = Some(slot_plan_id);
+        slot_plan_id,
+        &slot_plan.slot_sites,
+        store,
+        &mut copy_state,
+    )?;
 
-    let template_id = store.push_template(tir_template);
+    store.commit_slot_plan(slot_plan_id, slot_plan)?;
+
+    let template_id = store.push_runtime_slot_derived_template(
+        wrapper_template_id,
+        scratch_tir_root,
+        slot_plan_id,
+        crate::compiler_frontend::ast::templates::tir::DerivedTemplateMetadata::preserve_source(),
+    )?;
     record_tir_copy_counters(store, templates_before, nodes_before, &copy_state);
     add_ast_counter(AstCounter::RuntimeSlotHandoffsMaterialized, 1);
 

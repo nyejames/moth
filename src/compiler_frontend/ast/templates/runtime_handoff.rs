@@ -73,7 +73,6 @@ pub(crate) enum OwnedRuntimeTemplateNode {
 
     Text {
         text: StringId,
-        byte_len: u32,
         reactive_subscription: Option<ReactiveSubscription>,
         location: SourceLocation,
     },
@@ -125,6 +124,11 @@ pub(crate) enum OwnedRuntimeTemplateNode {
         site: RuntimeSlotSiteId,
     },
 
+    /// Planned runtime contribution spliced into a copied wrapper tree.
+    RuntimeSlotContributionSource {
+        source: RuntimeSlotContributionSourceId,
+    },
+
     /// Structural slot placeholder that survived as a runtime value.
     ///
     /// WHAT: mirrors a structural slot placeholder for wrapper-shaped templates
@@ -157,24 +161,14 @@ pub(crate) struct OwnedRuntimeSlotContributionSource {
 }
 
 /// Owned runtime slot-site plan for one wrapper placeholder occurrence.
+///
+/// The site render tree uses the same owned-node vocabulary as wrapper bodies.
+/// Contribution splices are `RuntimeSlotContributionSource` nodes.
 #[derive(Clone, Debug)]
 pub(crate) struct OwnedRuntimeSlotSite {
     pub(crate) site: RuntimeSlotSiteId,
-    pub(crate) render_plan: OwnedRuntimeSlotSiteRenderPlan,
+    pub(crate) render_root: OwnedRuntimeTemplateNode,
     pub(crate) location: SourceLocation,
-}
-
-/// Owned render plan for a concrete runtime slot site.
-#[derive(Clone, Debug, Default)]
-pub(crate) struct OwnedRuntimeSlotSiteRenderPlan {
-    pub(crate) pieces: Vec<OwnedRuntimeSlotSiteRenderPiece>,
-}
-
-/// One owned slot-site render piece.
-#[derive(Clone, Debug)]
-pub(crate) enum OwnedRuntimeSlotSiteRenderPiece {
-    Render(OwnedRuntimeTemplateNode),
-    ContributionSource(RuntimeSlotContributionSourceId),
 }
 
 /// Walks every nested `OwnedRuntimeTemplateNode` in `handoff` and calls `callback` for each.
@@ -184,9 +178,9 @@ pub(crate) enum OwnedRuntimeSlotSiteRenderPiece {
 /// WHY: the handoff shape is the neutral AST/HIR boundary; keeping its walker co-located with
 /// the data prevents three separate local copies from drifting out of sync.
 ///
-/// `callback` is invoked on a node before the walk recurses into its children, preserving the
-/// document order of the previous local walkers. The callback may short-circuit
-/// the walk by returning `Err`.
+/// `callback` is invoked on a node before the walk recurses into its children,
+/// preserving document order. The callback may short-circuit the walk by
+/// returning `Err`.
 pub(crate) fn walk_owned_runtime_template_handoff<E>(
     handoff: &OwnedRuntimeTemplateHandoff,
     callback: &mut impl FnMut(&OwnedRuntimeTemplateNode) -> Result<(), E>,
@@ -218,20 +212,7 @@ pub(crate) fn walk_owned_runtime_slot_application_handoff<E>(
     }
 
     for site in &handoff.slot_sites {
-        walk_owned_runtime_slot_site_render_plan(&site.render_plan, callback)?;
-    }
-
-    Ok(())
-}
-
-fn walk_owned_runtime_slot_site_render_plan<E>(
-    plan: &OwnedRuntimeSlotSiteRenderPlan,
-    callback: &mut impl FnMut(&OwnedRuntimeTemplateNode) -> Result<(), E>,
-) -> Result<(), E> {
-    for piece in &plan.pieces {
-        if let OwnedRuntimeSlotSiteRenderPiece::Render(node) = piece {
-            walk_owned_runtime_template_node(node, callback)?;
-        }
+        walk_owned_runtime_template_node(&site.render_root, callback)?;
     }
 
     Ok(())
@@ -291,36 +272,24 @@ pub(crate) fn walk_owned_runtime_template_node<E>(
         | OwnedRuntimeTemplateNode::AggregateOutput
         | OwnedRuntimeTemplateNode::LoopControl { .. }
         | OwnedRuntimeTemplateNode::RuntimeSlotSite { .. }
+        | OwnedRuntimeTemplateNode::RuntimeSlotContributionSource { .. }
         | OwnedRuntimeTemplateNode::Slot { .. } => {}
     }
 
     Ok(())
 }
 
-/// Events emitted by the mutable owned-runtime-template walker.
-pub(crate) enum OwnedRuntimeTemplateWalkMutEvent<'a> {
-    /// A runtime template node before its children are walked.
-    Node(&'a mut OwnedRuntimeTemplateNode),
-    /// A runtime template handoff after its body has been walked.
-    ///
-    /// WHAT: previously emitted after walking the handoff body so callers could
-    ///       visit style child templates that were stored on `Style`. `Style` no
-    ///       longer carries recursive wrapper templates, so this event now only
-    ///       signals the boundary after the handoff body has been processed.
-    HandoffAfterBody(&'a mut OwnedRuntimeTemplateHandoff),
-}
-
 /// Mutable variant of [`walk_owned_runtime_template_handoff`].
 ///
-/// WHAT: same traversal order as the previous local mutable walkers, but allows
-/// the callback to mutate each visited node or post-body handoff. The callback
-/// may short-circuit the walk by returning `Err`.
+/// WHAT: same traversal order as the immutable walker, but allows the callback
+/// to mutate each visited node. The callback may short-circuit the walk by
+/// returning `Err`.
 /// WHY: HIR normalization and the annotation pass need to mutate expressions inside the
 /// owned handoff; sharing one mutable walker avoids duplicating the recursion alongside
 /// the immutable copy.
 pub(crate) fn walk_owned_runtime_template_handoff_mut<E>(
     handoff: &mut OwnedRuntimeTemplateHandoff,
-    callback: &mut impl FnMut(OwnedRuntimeTemplateWalkMutEvent<'_>) -> Result<(), E>,
+    callback: &mut impl FnMut(&mut OwnedRuntimeTemplateNode) -> Result<(), E>,
 ) -> Result<(), E> {
     match &mut handoff.body {
         OwnedRuntimeTemplateBody::Render(node) => {
@@ -332,15 +301,13 @@ pub(crate) fn walk_owned_runtime_template_handoff_mut<E>(
         }
     }
 
-    callback(OwnedRuntimeTemplateWalkMutEvent::HandoffAfterBody(handoff))?;
-
     Ok(())
 }
 
 /// Mutable variant of [`walk_owned_runtime_slot_application_handoff`].
 pub(crate) fn walk_owned_runtime_slot_application_handoff_mut<E>(
     handoff: &mut OwnedRuntimeSlotApplicationHandoff,
-    callback: &mut impl FnMut(OwnedRuntimeTemplateWalkMutEvent<'_>) -> Result<(), E>,
+    callback: &mut impl FnMut(&mut OwnedRuntimeTemplateNode) -> Result<(), E>,
 ) -> Result<(), E> {
     walk_owned_runtime_template_node_mut(&mut handoff.wrapper, callback)?;
 
@@ -349,20 +316,7 @@ pub(crate) fn walk_owned_runtime_slot_application_handoff_mut<E>(
     }
 
     for site in &mut handoff.slot_sites {
-        walk_owned_runtime_slot_site_render_plan_mut(&mut site.render_plan, callback)?;
-    }
-
-    Ok(())
-}
-
-fn walk_owned_runtime_slot_site_render_plan_mut<E>(
-    plan: &mut OwnedRuntimeSlotSiteRenderPlan,
-    callback: &mut impl FnMut(OwnedRuntimeTemplateWalkMutEvent<'_>) -> Result<(), E>,
-) -> Result<(), E> {
-    for piece in &mut plan.pieces {
-        if let OwnedRuntimeSlotSiteRenderPiece::Render(node) = piece {
-            walk_owned_runtime_template_node_mut(node, callback)?;
-        }
+        walk_owned_runtime_template_node_mut(&mut site.render_root, callback)?;
     }
 
     Ok(())
@@ -371,9 +325,9 @@ fn walk_owned_runtime_slot_site_render_plan_mut<E>(
 /// Mutable variant of [`walk_owned_runtime_template_node`].
 pub(crate) fn walk_owned_runtime_template_node_mut<E>(
     node: &mut OwnedRuntimeTemplateNode,
-    callback: &mut impl FnMut(OwnedRuntimeTemplateWalkMutEvent<'_>) -> Result<(), E>,
+    callback: &mut impl FnMut(&mut OwnedRuntimeTemplateNode) -> Result<(), E>,
 ) -> Result<(), E> {
-    callback(OwnedRuntimeTemplateWalkMutEvent::Node(node))?;
+    callback(node)?;
 
     match node {
         OwnedRuntimeTemplateNode::Sequence { children, .. } => {
@@ -420,6 +374,7 @@ pub(crate) fn walk_owned_runtime_template_node_mut<E>(
         | OwnedRuntimeTemplateNode::AggregateOutput
         | OwnedRuntimeTemplateNode::LoopControl { .. }
         | OwnedRuntimeTemplateNode::RuntimeSlotSite { .. }
+        | OwnedRuntimeTemplateNode::RuntimeSlotContributionSource { .. }
         | OwnedRuntimeTemplateNode::Slot { .. } => {}
     }
 

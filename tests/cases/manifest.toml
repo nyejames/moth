@@ -5267,6 +5267,13 @@ contract = "language.templates.children_wrapper_applied_once_on_runtime_if"
 role = "primary"
 
 [[case]]
+id = "template_children_wrapper_on_control_flow_body"
+path = "template_children_wrapper_on_control_flow_body"
+tags = ["integration","templates"]
+contract = "language.templates.children_wrapper_on_control_flow_body"
+role = "primary"
+
+[[case]]
 id = "template_runtime_branch_fallback_wrapped_output"
 path = "template_runtime_branch_fallback_wrapped_output"
 tags = ["integration","templates"]
@@ -5358,10 +5365,10 @@ contract = "language.templates.conditional_loop_runtime_multiple_iterations"
 role = "primary"
 
 [[case]]
-id = "template_conditional_loop_runtime_slot_rejected"
-path = "template_conditional_loop_runtime_slot_rejected"
-tags = ["integration","templates","diagnostics"]
-contract = "language.templates.conditional_loop_runtime_slot_rejected"
+id = "template_conditional_loop_runtime_slot_renders_empty"
+path = "template_conditional_loop_runtime_slot_renders_empty"
+tags = ["integration","templates"]
+contract = "language.templates.conditional_loop_runtime_slot_renders_empty"
 role = "primary"
 
 [[case]]
@@ -5953,10 +5960,10 @@ contract = "language.templates.runtime_control_flow_insert_rejected"
 role = "primary"
 
 [[case]]
-id = "template_runtime_control_flow_slot_rejected"
-path = "template_runtime_control_flow_slot_rejected"
-tags = ["integration","templates","diagnostics"]
-contract = "language.templates.runtime_control_flow_slot_rejected"
+id = "template_runtime_control_flow_slot_renders_empty"
+path = "template_runtime_control_flow_slot_renders_empty"
+tags = ["integration","templates"]
+contract = "language.templates.runtime_control_flow_slot_renders_empty"
 role = "primary"
 
 [[case]]
@@ -5997,16 +6004,44 @@ role = "primary"
 [[case]]
 id = "template_runtime_wrapper_slot_inside_branch"
 path = "template_runtime_wrapper_slot_inside_branch"
-tags = ["integration","templates","diagnostics"]
-contract = "language.templates.runtime_control_flow_slot_rejected"
-role = "boundary"
+tags = ["integration","templates"]
+contract = "language.templates.runtime_wrapper_slot_inside_branch"
+role = "primary"
 
 [[case]]
 id = "template_runtime_wrapper_slot_inside_loop"
 path = "template_runtime_wrapper_slot_inside_loop"
-tags = ["integration","templates","diagnostics"]
-contract = "language.templates.runtime_control_flow_slot_rejected"
-role = "boundary"
+tags = ["integration","templates"]
+contract = "language.templates.runtime_wrapper_slot_inside_loop"
+role = "primary"
+
+[[case]]
+id = "template_runtime_wrapper_slot_inside_fallback"
+path = "template_runtime_wrapper_slot_inside_fallback"
+tags = ["integration","templates"]
+contract = "language.templates.runtime_wrapper_slot_inside_fallback"
+role = "primary"
+
+[[case]]
+id = "template_runtime_wrapper_slot_inside_loop_aggregate"
+path = "template_runtime_wrapper_slot_inside_loop_aggregate"
+tags = ["integration","templates"]
+contract = "language.templates.runtime_wrapper_slot_inside_loop_aggregate"
+role = "primary"
+
+[[case]]
+id = "template_runtime_wrapper_slot_inside_child_template"
+path = "template_runtime_wrapper_slot_inside_child_template"
+tags = ["integration","templates"]
+contract = "language.templates.runtime_wrapper_slot_inside_child_template"
+role = "primary"
+
+[[case]]
+id = "template_missing_standalone_slot_renders_empty"
+path = "template_missing_standalone_slot_renders_empty"
+tags = ["integration","templates"]
+contract = "language.templates.missing_standalone_slot_renders_empty"
+role = "primary"
 
 [[case]]
 id = "template_runtime_slot_continue_inside_loop"
@@ -6083,6 +6118,13 @@ id = "template_slots_const_folding"
 path = "template_slots_const_folding"
 tags = ["integration","templates"]
 contract = "language.templates.slots_const_folding_acceptance"
+role = "primary"
+
+[[case]]
+id = "template_slots_repeated_default_replay"
+path = "template_slots_repeated_default_replay"
+tags = ["integration","templates"]
+contract = "language.templates.slots_repeated_default_replay"
 role = "primary"
 
 [[case]]

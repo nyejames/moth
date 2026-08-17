@@ -37,9 +37,6 @@ pub(crate) fn invalid_template_slot_message(
         InvalidTemplateSlotReason::InsertTargetsUnknownPositionalSlot => {
             "$insert targets a positional slot that does not exist on the immediate parent template.".to_string()
         }
-        InvalidTemplateSlotReason::MultipleDefaultSlots => {
-            "Templates can only define one default $slot.".to_string()
-        }
         InvalidTemplateSlotReason::SlotDefinitionOutsideTemplateBody => {
             "$slot markers are only valid as direct nested templates inside template bodies.".to_string()
         }
@@ -247,9 +244,6 @@ pub(crate) fn invalid_template_structure_message(
         }
         crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::HelperOutsideWrapperSlot => {
             "Template helper reached AST finalization outside immediate wrapper-slot composition.".to_string()
-        }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::RuntimeControlFlowUnresolvedSlot => {
-            "Runtime template control-flow bodies cannot leave unresolved `$slot` placeholders.".to_string()
         }
         crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::RuntimeControlFlowUnresolvedInsert => {
             "Runtime template control-flow bodies cannot leave unresolved `$insert(...)` helpers.".to_string()

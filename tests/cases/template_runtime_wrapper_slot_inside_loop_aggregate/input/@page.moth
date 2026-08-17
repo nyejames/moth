@@ -1,0 +1,11 @@
+list = [$children([:<section class="agg-slot">[$slot]</section>, loop 0 to 1:
+    item
+]):
+    <ul>[$slot]</ul>
+]
+
+[:template_runtime_wrapper_slot_inside_loop_aggregate
+    [list:
+        [: hello]
+    ]
+]

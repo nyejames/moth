@@ -704,7 +704,6 @@ pub enum InvalidTemplateStructureReason {
     EmptyPathInTemplateHead,
     IncompatibleHeadItem,
     HelperOutsideWrapperSlot,
-    RuntimeControlFlowUnresolvedSlot,
     RuntimeControlFlowUnresolvedInsert,
     MissingCommaBeforeControlFlowSuffix,
     ControlFlowSuffixNotFinal,
@@ -1315,7 +1314,6 @@ pub enum InvalidTemplateSlotReason {
     InsertCannotTargetDefaultSlot,
     InsertTargetsUnknownNamedSlot,
     InsertTargetsUnknownPositionalSlot,
-    MultipleDefaultSlots,
     SlotDefinitionOutsideTemplateBody,
 }
 

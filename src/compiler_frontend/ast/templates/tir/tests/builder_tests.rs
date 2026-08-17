@@ -1,9 +1,9 @@
-use super::super::builder::TemplateIrBuilder;
 use super::super::node::{
     TemplateIr, TemplateIrBranch, TemplateIrNodeKind, TemplateLoopHeaderExpressionSites,
 };
 use super::super::store::TemplateIrStore;
 use super::super::summary::TemplateIrSummary;
+use super::builder::TemplateIrBuilder;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::templates::template::{
     SlotKey, Style, TemplateSegmentOrigin, TemplateType,
@@ -687,6 +687,7 @@ fn newly_created_nodes_receive_fresh_ids_after_existing_allocations() {
             )),
             branch_body_a,
             empty_location(),
+            builder.store.next_expression_site_id(),
         );
         let chain_first =
             builder.push_branch_chain_node(vec![branch_first], None, empty_location());
@@ -754,6 +755,7 @@ fn newly_created_nodes_receive_fresh_ids_after_existing_allocations() {
             )),
             branch_body_b,
             empty_location(),
+            builder.store.next_expression_site_id(),
         );
         let chain_second =
             builder.push_branch_chain_node(vec![branch_second], None, empty_location());
@@ -862,6 +864,7 @@ fn branch_selector_site_ids_assigned_in_document_order() {
             )),
             body_a,
             empty_location(),
+            builder.store.next_expression_site_id(),
         );
         let branch_b = TemplateIrBranch::new(
             TemplateBranchSelector::Bool(Expression::bool(
@@ -871,6 +874,7 @@ fn branch_selector_site_ids_assigned_in_document_order() {
             )),
             body_b,
             empty_location(),
+            builder.store.next_expression_site_id(),
         );
 
         let chain_id =
@@ -1124,6 +1128,7 @@ fn expression_sites_share_one_document_order_counter() {
             )),
             branch_body,
             empty_location(),
+            builder.store.next_expression_site_id(),
         );
         let chain_node = builder.push_branch_chain_node(vec![branch], None, empty_location());
 

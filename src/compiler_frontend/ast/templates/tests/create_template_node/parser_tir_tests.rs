@@ -677,7 +677,7 @@ fn parser_tir_records_default_slot_placeholder() {
         .get_template(template.tir_reference.root)
         .expect("parent parser TIR template should exist");
     assert_eq!(parent_template.summary.slot_count, 1);
-    assert!(parent_template.summary.has_slots);
+    assert!(parent_template.summary.has_slots());
 
     let slot = match &store
         .get_node(children[1])
@@ -1177,7 +1177,6 @@ fn pure_direct_dynamic_formatter_template_records_formatted_tir_phase() {
             let summary = TemplateIrSummary {
                 dynamic_expression_count: 1,
                 max_depth: 1,
-                is_const_evaluable_shape: false,
                 ..TemplateIrSummary::default()
             };
             (root, summary)
@@ -1190,6 +1189,7 @@ fn pure_direct_dynamic_formatter_template_records_formatted_tir_phase() {
         let store = context.template_ir_store.borrow();
         store
             .control_flow_node_id_for_template(template.tir_reference.root)
+            .expect("control-flow lookup")
             .is_some()
     };
     let tir_reference = &mut template.tir_reference;
@@ -1260,7 +1260,6 @@ fn reactive_body_segment_records_formatted_tir_phase() {
                 dynamic_expression_count: 1,
                 max_depth: 1,
                 has_reactivity: true,
-                is_const_evaluable_shape: false,
                 ..TemplateIrSummary::default()
             };
             (root, summary)
@@ -1273,6 +1272,7 @@ fn reactive_body_segment_records_formatted_tir_phase() {
         let store = context.template_ir_store.borrow();
         store
             .control_flow_node_id_for_template(template.tir_reference.root)
+            .expect("control-flow lookup")
             .is_some()
     };
     let tir_reference = &mut template.tir_reference;
@@ -1347,7 +1347,7 @@ fn reactive_literal_text_segment_records_formatted_tir_phase() {
         location.clone(),
         move |store, string_table| {
             let text = string_table.intern("reactive body");
-            let byte_len = "reactive body".len() as u32;
+            let byte_len = "reactive body".len();
             let mut builder = TemplateIrBuilder::new(store);
             let body_node = builder.push_text_node_with_subscription(
                 text,
@@ -1358,9 +1358,9 @@ fn reactive_literal_text_segment_records_formatted_tir_phase() {
             );
             let root = builder.push_sequence_node(vec![body_node], location.clone());
             let summary = TemplateIrSummary {
-                estimated_output_bytes: byte_len as usize,
+                estimated_output_bytes: byte_len,
                 text_node_count: 1,
-                text_byte_count: byte_len as usize,
+                text_byte_count: byte_len,
                 max_depth: 1,
                 has_reactivity: true,
                 ..TemplateIrSummary::default()
@@ -1375,6 +1375,7 @@ fn reactive_literal_text_segment_records_formatted_tir_phase() {
         let store = context.template_ir_store.borrow();
         store
             .control_flow_node_id_for_template(template.tir_reference.root)
+            .expect("control-flow lookup")
             .is_some()
     };
     let tir_reference = &mut template.tir_reference;
@@ -1401,6 +1402,7 @@ fn reactive_literal_text_segment_records_formatted_tir_phase() {
     assert_eq!(
         store
             .node_reactive_subscription(children[0])
+            .expect("reactive side-table lookup should succeed")
             .map(|subscription| &subscription.source.path),
         Some(&expected_source_path),
         "formatting must preserve the text node's reactive side-table entry"
@@ -2164,7 +2166,10 @@ fn parser_tir_records_finalized_child_template_as_child_template_node() {
         .get_template(template.tir_reference.root)
         .expect("parent parser TIR template should exist");
     assert_eq!(parent_template.summary.child_template_count, 1);
-    assert!(parent_template.summary.is_const_evaluable_shape);
+    assert_eq!(parent_template.summary.dynamic_expression_count, 0);
+    assert_eq!(parent_template.summary.slot_count, 0);
+    assert!(!parent_template.summary.has_control_flow);
+    assert!(!parent_template.summary.has_reactivity);
 
     assert_eq!(parent_template.summary.max_depth, 1);
 }
@@ -2226,7 +2231,7 @@ fn parser_records_template_valued_head_as_structural_child_before_body_parse() {
     )
     .expect("template-valued head should parse");
 
-    let root_children = construction_context.builder().root_children();
+    let root_children = construction_context.root_children();
     assert_eq!(root_children.len(), 1);
     let store = shared_store.borrow();
     let child_node = store

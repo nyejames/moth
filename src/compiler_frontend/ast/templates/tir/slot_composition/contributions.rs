@@ -24,10 +24,17 @@ use rustc_hash::FxHashMap;
 
 use super::helpers::{
     children_of_node, extra_loose_content_without_default_slot_error, internal_compiler_error,
-    location_for_template, loose_content_without_default_slot_error, root_node_id_for_template,
-    unknown_slot_target_error,
+    loose_content_without_default_slot_error, root_node_id_for_template, unknown_slot_target_error,
 };
-use super::schema::{TirSlotSchema, collect_tir_slot_schema};
+use crate::compiler_frontend::ast::templates::tir::slot_layout::TirSlotSchema;
+use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
+
+#[cfg(test)]
+use super::helpers::location_for_template;
+#[cfg(test)]
+use crate::compiler_frontend::ast::templates::tir::slot_layout::{
+    TirSlotLayout, collect_tir_slot_layout,
+};
 
 /// Typed result for slot-contribution routing.
 type ContributionResult<T> = Result<T, TemplateError>;
@@ -86,20 +93,6 @@ impl TirSlotContributions {
     }
 }
 
-/// Result of routing fill content against a wrapper's slot schema.
-///
-/// WHAT: carries the bucketed contributions produced by routing fill content
-///       against a wrapper's slot schema.
-/// WHY: a named return keeps the routed buckets explicit at the stage boundary.
-///      A test-only `schema` field is retained so focused tests can assert the
-///      wrapper schema without re-deriving it.
-#[derive(Debug)]
-pub(crate) struct RoutedTirSlotContributions {
-    #[cfg(test)]
-    pub(crate) schema: TirSlotSchema,
-    pub(crate) contributions: TirSlotContributions,
-}
-
 /// Routes fill template content against a wrapper's slot schema.
 ///
 /// WHAT: discovers the wrapper's slot schema, walks the fill template's TIR
@@ -109,43 +102,51 @@ pub(crate) struct RoutedTirSlotContributions {
 ///       slot.
 /// WHY: TIR-native slot composition needs a single routing entry point that
 ///      partitions authored fill content before expansion or runtime planning.
+#[cfg(test)]
 pub(crate) fn route_tir_slot_contributions(
     store: &TemplateIrStore,
     wrapper_template_id: TemplateIrId,
     fill_template_id: TemplateIrId,
     string_table: &StringTable,
-) -> ContributionResult<RoutedTirSlotContributions> {
-    increment_ast_counter(AstCounter::TirContributionRoutingCalls);
-    let schema = collect_tir_slot_schema(store, wrapper_template_id)?;
+) -> ContributionResult<TirSlotContributions> {
+    let layout = collect_tir_slot_layout(store, wrapper_template_id)?;
+    route_tir_fill_against_layout(store, &layout, fill_template_id, string_table)
+}
 
-    if !schema.has_any_slots() {
+#[cfg(test)]
+pub(super) fn route_tir_fill_against_layout(
+    store: &TemplateIrStore,
+    layout: &TirSlotLayout,
+    fill_template_id: TemplateIrId,
+    string_table: &StringTable,
+) -> ContributionResult<TirSlotContributions> {
+    if !layout.schema.has_any_slots() {
         return Err(internal_compiler_error(
             "Internal template wrapper state error: expected at least one '$slot' while composing.",
         ));
     }
 
-    route_tir_fill_against_schema(store, &schema, fill_template_id, string_table)
-}
-
-/// Routes fill template content against a pre-collected wrapper slot schema.
-///
-/// WHAT: walks the fill template's TIR nodes, buckets explicit
-///       `InsertContribution` nodes by their target slot key, groups remaining
-///       nodes into loose contribution chunks, and routes loose chunks to
-///       positional slots first, then the default slot.
-/// WHY: head-chain composition reads the wrapper schema and routes fill
-///      content from the one module store. Separating schema collection from
-///      fill routing keeps one fill-walking owner without duplicating the
-///      insert/loose-content traversal.
-pub(super) fn route_tir_fill_against_schema(
-    store: &TemplateIrStore,
-    schema: &TirSlotSchema,
-    fill_template_id: TemplateIrId,
-    string_table: &StringTable,
-) -> ContributionResult<RoutedTirSlotContributions> {
     let fill_root = root_node_id_for_template(store, fill_template_id)?;
     let fill_children = children_of_node(store, fill_root)?;
     let fill_location = location_for_template(store, fill_template_id)?;
+    route_tir_fill_nodes_against_schema(
+        store,
+        &layout.schema,
+        &fill_children,
+        &fill_location,
+        string_table,
+    )
+}
+
+/// Routes already-collected fill nodes against a wrapper schema.
+pub(super) fn route_tir_fill_nodes_against_schema(
+    store: &TemplateIrStore,
+    schema: &TirSlotSchema,
+    fill_children: &[TemplateIrNodeId],
+    fill_location: &SourceLocation,
+    string_table: &StringTable,
+) -> ContributionResult<TirSlotContributions> {
+    increment_ast_counter(AstCounter::TirContributionRoutingCalls);
 
     let mut contributions = TirSlotContributions::default();
     let mut loose_nodes = Vec::new();
@@ -154,7 +155,7 @@ pub(super) fn route_tir_fill_against_schema(
     // (either as `InsertContribution` nodes or as `ChildTemplate` references to
     // a `SlotInsert` helper) are bucketed by target key; everything else becomes
     // loose content that flows into positional or default slots.
-    for child_id in fill_children {
+    for &child_id in fill_children {
         let Some(child_node) = store.get_node(child_id) else {
             return Err(internal_compiler_error(
                 "TIR slot routing: fill template child node ID was not present in the store.",
@@ -265,17 +266,13 @@ pub(super) fn route_tir_fill_against_schema(
         }
 
         if schema.positional_slots.is_empty() {
-            return Err(loose_content_without_default_slot_error(fill_location).into());
+            return Err(loose_content_without_default_slot_error(fill_location.clone()).into());
         }
 
-        return Err(extra_loose_content_without_default_slot_error(fill_location).into());
+        return Err(extra_loose_content_without_default_slot_error(fill_location.clone()).into());
     }
 
-    Ok(RoutedTirSlotContributions {
-        #[cfg(test)]
-        schema: schema.clone(),
-        contributions,
-    })
+    Ok(contributions)
 }
 
 /// Expands a SlotInsert helper referenced by an `InsertContribution` node into

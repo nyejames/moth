@@ -4,7 +4,7 @@
 //! propagation, call-argument parameter rebasing, prior-declaration references,
 //! non-inheritance through runtime string operations, branch/fallback/loop body
 //! overlay composition, selector/body overlay precedence, option-capture
-//! bodies, sink operands, and runtime slot-site render pieces.
+//! bodies, sink operands, and runtime slot-site render roots.
 //! WHY: reactive metadata is the value-level contract between finalized AST
 //!      templates and the reactive backend. One `TemplateIrStore` owns every
 //!      TIR root and overlay payload used here.
@@ -24,8 +24,7 @@ use crate::compiler_frontend::ast::statements::functions::{
 };
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::templates::runtime_handoff::{
-    OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeSlotSite, OwnedRuntimeSlotSiteRenderPiece,
-    OwnedRuntimeSlotSiteRenderPlan, OwnedRuntimeTemplateNode,
+    OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeSlotSite, OwnedRuntimeTemplateNode,
 };
 use crate::compiler_frontend::ast::templates::template::{
     ReactiveSubscription, Style, Template, TemplateSegmentOrigin, TemplateType,
@@ -36,10 +35,10 @@ use crate::compiler_frontend::ast::templates::template_control_flow::{
 use crate::compiler_frontend::ast::templates::template_slots::RuntimeSlotSiteId;
 use crate::compiler_frontend::ast::templates::tir::TirExpressionOverlayId;
 use crate::compiler_frontend::ast::templates::tir::{
-    ExpressionSiteId, TemplateIr, TemplateIrBranch, TemplateIrId, TemplateIrNode, TemplateIrNodeId,
-    TemplateIrNodeKind, TemplateIrStore, TemplateIrSummary, TemplateLoopHeaderExpressionSites,
-    TemplateTirPhase, TemplateTirReference, TemplateViewContext, TirExpressionOverlay,
-    refs::TemplateTirChildReference,
+    ExpressionSiteId, MalformedTirStore, TemplateIr, TemplateIrBranch, TemplateIrId,
+    TemplateIrNode, TemplateIrNodeId, TemplateIrNodeKind, TemplateIrStore, TemplateIrSummary,
+    TemplateLoopHeaderExpressionSites, TemplateTirPhase, TemplateTirReference, TemplateViewContext,
+    TirExpressionOverlay, refs::TemplateTirChildReference,
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -597,8 +596,8 @@ fn annotates_branch_body_tir_root_metadata() {
         )),
         body_root,
         location.clone(),
-    )
-    .with_selector_site_id(selector_site_id);
+        selector_site_id,
+    );
 
     let root = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::BranchChain {
@@ -665,8 +664,8 @@ fn annotates_fallback_body_tir_root_metadata() {
         )),
         branch_body_node,
         location.clone(),
-    )
-    .with_selector_site_id(selector_site_id);
+        selector_site_id,
+    );
 
     let root = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::BranchChain {
@@ -793,8 +792,8 @@ fn annotates_branch_selector_and_body_through_one_root_overlay() {
         TemplateBranchSelector::Bool(selector_expression),
         body_root,
         location.clone(),
-    )
-    .with_selector_site_id(selector_site_id);
+        selector_site_id,
+    );
 
     let root = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::BranchChain {
@@ -899,8 +898,7 @@ fn option_capture_body_uses_scrutinee_reactive_metadata() {
             binding_location: location.clone(),
         }),
     };
-    let branch = TemplateIrBranch::new(selector, body_root, location.clone())
-        .with_selector_site_id(selector_site_id);
+    let branch = TemplateIrBranch::new(selector, body_root, location.clone(), selector_site_id);
     let root = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::BranchChain {
             branches: vec![branch],
@@ -989,16 +987,18 @@ fn annotates_existing_effective_expression_override_instead_of_structural_payloa
         location.clone(),
     ));
 
-    let expression_overlay_id = store.allocate_expression_overlay(TirExpressionOverlay {
-        overrides: vec![(
-            site_id,
-            Box::new(reference_expression(
-                show_path,
-                DataType::StringSlice,
-                builtin_type_ids::STRING,
-            )),
-        )],
-    });
+    let expression_overlay_id = store
+        .allocate_expression_overlay(TirExpressionOverlay {
+            overrides: vec![(
+                site_id,
+                Box::new(reference_expression(
+                    show_path,
+                    DataType::StringSlice,
+                    builtin_type_ids::STRING,
+                )),
+            )],
+        })
+        .expect("test overlay allocation");
     let context = TemplateViewContext {
         expression_overlay: Some(expression_overlay_id),
         slot_resolution: None,
@@ -1083,16 +1083,18 @@ fn annotates_existing_child_expression_override() {
         location.clone(),
     ));
 
-    let child_expression_overlay_id = store.allocate_expression_overlay(TirExpressionOverlay {
-        overrides: vec![(
-            child_site_id,
-            Box::new(reference_expression(
-                show_path,
-                DataType::StringSlice,
-                builtin_type_ids::STRING,
-            )),
-        )],
-    });
+    let child_expression_overlay_id = store
+        .allocate_expression_overlay(TirExpressionOverlay {
+            overrides: vec![(
+                child_site_id,
+                Box::new(reference_expression(
+                    show_path,
+                    DataType::StringSlice,
+                    builtin_type_ids::STRING,
+                )),
+            )],
+        })
+        .expect("test overlay allocation");
     let child_context = TemplateViewContext {
         expression_overlay: Some(child_expression_overlay_id),
         slot_resolution: None,
@@ -1161,7 +1163,7 @@ fn annotates_existing_child_expression_override() {
 }
 
 // -------------------------
-//  Sink operands and runtime slot-site render pieces
+//  Sink operands and runtime slot-site render roots
 // -------------------------
 
 #[test]
@@ -1239,9 +1241,7 @@ fn propagates_metadata_through_runtime_slot_site_render_piece() {
 
     let slot_site = OwnedRuntimeSlotSite {
         site: RuntimeSlotSiteId(0),
-        render_plan: OwnedRuntimeSlotSiteRenderPlan {
-            pieces: vec![OwnedRuntimeSlotSiteRenderPiece::Render(render_piece_node)],
-        },
+        render_root: render_piece_node,
         location: location.clone(),
     };
 
@@ -1275,12 +1275,9 @@ fn propagates_metadata_through_runtime_slot_site_render_piece() {
         panic!("expected runtime slot application handoff expression");
     };
     let site = handoff.slot_sites.first().expect("expected one slot site");
-    let OwnedRuntimeSlotSiteRenderPiece::Render(node) = &site.render_plan.pieces[0] else {
-        panic!("expected render piece");
-    };
     let OwnedRuntimeTemplateNode::DynamicExpression {
         expression: inner, ..
-    } = node
+    } = &site.render_root
     else {
         panic!("expected dynamic expression node");
     };
@@ -1291,7 +1288,7 @@ fn propagates_metadata_through_runtime_slot_site_render_piece() {
     assert_eq!(
         inner_metadata.subscriptions.len(),
         1,
-        "inner dynamic expression in slot-site render piece should keep its subscription"
+        "inner dynamic expression in a slot-site render root should keep its subscription"
     );
     assert_eq!(inner_metadata.subscriptions[0].source.path, source_path);
 }
@@ -1383,13 +1380,15 @@ fn reactive_annotation_rejects_missing_expression_overlay() {
     // then drop the expression-overlay arena so the retained ID dangles. This
     // keeps the malformed state inside the test-owned store without adding a
     // production constructor.
-    let expression_overlay_id = store.allocate_expression_overlay(TirExpressionOverlay::default());
+    let expression_overlay_id = store
+        .allocate_expression_overlay(TirExpressionOverlay::default())
+        .expect("test overlay allocation");
     let context = TemplateViewContext {
         expression_overlay: Some(expression_overlay_id),
         slot_resolution: None,
         wrapper_context: None,
     };
-    store.expression_overlays.clear();
+    MalformedTirStore::new(&mut store).clear_expression_overlays();
 
     let template = template_with_reference(
         TemplateTirReference {

@@ -10,7 +10,7 @@ use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template::TemplateType;
 use crate::compiler_frontend::ast::templates::tir::{
-    PreparedTemplate, TemplateIrNodeId, TemplateIrNodeKind, TemplateIrStore,
+    TemplateIrNodeId, TemplateIrNodeKind, TemplateIrStore, TemplatePreparation,
     TemplatePreparationMode, TemplateTirPhase, TirView, TirViewIdentity, prepare_tir_view,
 };
 use crate::compiler_frontend::compiler_messages::{
@@ -34,7 +34,7 @@ use std::collections::HashSet;
 pub(crate) fn validate_const_required_template_control_flow(
     template: &Template,
     tir_store: &TemplateIrStore,
-) -> Result<PreparedTemplate, TemplateError> {
+) -> Result<TemplatePreparation, TemplateError> {
     let reference = &template.tir_reference;
     let view = TirView::with_minimum_phase(
         tir_store,
@@ -93,7 +93,6 @@ fn runtime_tir_view_for_template<'a>(
 
 #[derive(Clone, Copy)]
 enum RuntimeControlFlowArtifact {
-    UnresolvedSlot,
     EscapedInsert,
 }
 
@@ -101,9 +100,8 @@ enum RuntimeControlFlowArtifact {
 /// `TirView`.
 ///
 /// WHAT: walks the view's structural tree, checking `BranchChain` and `Loop`
-///       bodies for unresolved slots and escaped `$insert(...)` contributions.
-///       Slot occurrences are checked against the view's effective slot-resolution
-///       overlay so resolved slots are not falsely reported as artifacts.
+///       bodies for escaped `$insert(...)` contributions. Receiver `$slot`
+///       markers may remain until a later wrapper or parent routes them.
 ///       Nested child-template traversal descends through module-store child
 ///       views, preserving each child reference's exact root, phase and overlay
 ///       identity.
@@ -113,6 +111,16 @@ enum RuntimeControlFlowArtifact {
 fn validate_runtime_tir_view_control_flow_slot_artifacts(
     view: &TirView<'_>,
 ) -> Result<(), TemplateError> {
+    // Render-unit validation can still receive parser-owned Parsed TIR. The
+    // complete preparation proof begins at Composed, so retain the narrow
+    // structural check for that earlier construction boundary.
+    if view.phase().is_at_least(TemplateTirPhase::Composed) {
+        let preparation = prepare_tir_view(view, TemplatePreparationMode::Value)?;
+        if !preparation.facts.has_escaped_insert_helpers {
+            return Ok(());
+        }
+    }
+
     let root_node_id = view.root_template()?.root;
     let mut visiting = HashSet::from([view.identity()]);
 
@@ -188,7 +196,8 @@ fn validate_runtime_tir_view_node(
         | TemplateIrNodeKind::Slot { .. }
         | TemplateIrNodeKind::AggregateOutput
         | TemplateIrNodeKind::LoopControl { .. }
-        | TemplateIrNodeKind::RuntimeSlotSite { .. } => {}
+        | TemplateIrNodeKind::RuntimeSlotSite { .. }
+        | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => {}
     }
 
     Ok(())
@@ -217,42 +226,25 @@ fn validate_runtime_qualified_child_view(
     result
 }
 
-/// Checks a control-flow body root for unresolved slots and escaped inserts.
+/// Checks a control-flow body root for escaped inserts.
 ///
-/// WHAT: runs two independent artifact scans over the body subtree, each with a
-///       fresh cycle set, so a child view checked for one artifact kind is still
-///       checked for the other.
+/// Receiver `$slot` markers may remain until later routing or wrapper fill
+/// injection. Escaped `$insert(...)` helpers stay invalid.
 fn validate_runtime_tir_view_control_flow_body(
     view: &TirView<'_>,
     body_root: TemplateIrNodeId,
     location: &SourceLocation,
 ) -> Result<(), TemplateError> {
-    let body_ref = body_root;
-    let root_cycle_key = view.identity();
-    let mut escaped_insert_visiting = HashSet::from([root_cycle_key]);
+    let mut escaped_insert_visiting = HashSet::from([view.identity()]);
 
     if tir_view_subtree_contains_runtime_artifact(
         view,
-        body_ref,
+        body_root,
         RuntimeControlFlowArtifact::EscapedInsert,
         &mut escaped_insert_visiting,
     )? {
         return Err(CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::RuntimeControlFlowUnresolvedInsert,
-            location.clone(),
-        )
-        .into());
-    }
-
-    let mut unresolved_slot_visiting = HashSet::from([root_cycle_key]);
-    if tir_view_subtree_contains_runtime_artifact(
-        view,
-        body_ref,
-        RuntimeControlFlowArtifact::UnresolvedSlot,
-        &mut unresolved_slot_visiting,
-    )? {
-        return Err(CompilerDiagnostic::invalid_template_structure(
-            InvalidTemplateStructureReason::RuntimeControlFlowUnresolvedSlot,
             location.clone(),
         )
         .into());
@@ -278,18 +270,7 @@ fn tir_view_subtree_contains_runtime_artifact(
 ) -> Result<bool, TemplateError> {
     let node = view.effective_node(node_ref)?;
     match &node.kind {
-        TemplateIrNodeKind::Slot { placeholder } => {
-            let occurrence_id = placeholder.occurrence_id;
-
-            if !matches!(artifact, RuntimeControlFlowArtifact::UnresolvedSlot) {
-                return Ok(false);
-            }
-
-            let resolution = view.effective_slot_resolution(occurrence_id)?;
-            let is_resolved = resolution.is_some_and(|r| !r.is_unresolved());
-
-            Ok(!is_resolved)
-        }
+        TemplateIrNodeKind::Slot { .. } => Ok(false),
 
         TemplateIrNodeKind::Sequence { children } => {
             let children = children.clone();
@@ -355,7 +336,8 @@ fn tir_view_subtree_contains_runtime_artifact(
         | TemplateIrNodeKind::DynamicExpression { .. }
         | TemplateIrNodeKind::AggregateOutput
         | TemplateIrNodeKind::LoopControl { .. }
-        | TemplateIrNodeKind::RuntimeSlotSite { .. } => Ok(false),
+        | TemplateIrNodeKind::RuntimeSlotSite { .. }
+        | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => Ok(false),
     }
 }
 

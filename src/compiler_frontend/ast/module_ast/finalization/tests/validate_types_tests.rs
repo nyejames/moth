@@ -56,9 +56,11 @@ fn template_with_dynamic_overlay(
         TemplateIrSummary::default(),
         SourceLocation::default(),
     ));
-    let expression_overlay_id = store.allocate_expression_overlay(TirExpressionOverlay {
-        overrides: vec![(site_id, Box::new(overlay))],
-    });
+    let expression_overlay_id = store
+        .allocate_expression_overlay(TirExpressionOverlay {
+            overrides: vec![(site_id, Box::new(overlay))],
+        })
+        .expect("test overlay allocation");
     let context = TemplateViewContext {
         expression_overlay: Some(expression_overlay_id),
         slot_resolution: None,
@@ -171,9 +173,11 @@ fn finalized_template_with_site_overlay(
     site_id: ExpressionSiteId,
     overlay_expression: Expression,
 ) -> Template {
-    let expression_overlay_id = store.allocate_expression_overlay(TirExpressionOverlay {
-        overrides: vec![(site_id, Box::new(overlay_expression))],
-    });
+    let expression_overlay_id = store
+        .allocate_expression_overlay(TirExpressionOverlay {
+            overrides: vec![(site_id, Box::new(overlay_expression))],
+        })
+        .expect("test overlay allocation");
     let context = TemplateViewContext {
         expression_overlay: Some(expression_overlay_id),
         slot_resolution: None,
@@ -218,6 +222,7 @@ fn finalized_tir_view_branch_selector_payload_validates_effective_overlay_expres
             TemplateBranchSelector::Bool(structural_selector),
             branch_body,
             structural_location,
+            builder.store.next_expression_site_id(),
         );
         let branch_chain_node_id =
             builder.push_branch_chain_node(vec![branch], None, SourceLocation::default());

@@ -12,8 +12,6 @@ use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::headers::parse_file_headers::TopLevelConstFragment;
-use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
-use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
@@ -113,16 +111,12 @@ pub(crate) fn collect_const_top_level_fragments(
 /// Extracts documentation fragments from comment templates and removes the comments from the AST.
 pub(crate) fn collect_and_strip_comment_templates(
     ast_nodes: &mut [AstNode],
-    project_path_resolver: &ProjectPathResolver,
-    path_format_config: &PathStringFormatConfig,
     string_table: &mut StringTable,
     template_const_loop_iteration_limit: usize,
     template_ir_store: Rc<RefCell<TemplateIrStore>>,
 ) -> Result<Vec<AstDocFragment>, TemplateError> {
     doc_fragments::collect_and_strip_comment_templates(
         ast_nodes,
-        project_path_resolver,
-        path_format_config,
         string_table,
         template_const_loop_iteration_limit,
         template_ir_store,

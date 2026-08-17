@@ -6,35 +6,41 @@
 
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
+use crate::compiler_frontend::ast::templates::template::TemplateConstValueKind;
 use crate::compiler_frontend::ast::templates::template::{
     SlotKey, Style, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_control_flow::{
     TemplateBranchSelector, TemplateLoopHeader,
 };
-use crate::compiler_frontend::ast::templates::tir::builder::TemplateIrBuilder;
+use crate::compiler_frontend::ast::templates::template_slots::RuntimeSlotSiteId;
+use crate::compiler_frontend::ast::templates::tir::TemplateIrBuilder;
 use crate::compiler_frontend::ast::templates::tir::ids::{
-    ExpressionSiteId, SlotOccurrenceId, TemplateIrId, TemplateIrNodeId,
+    ExpressionSiteId, SlotOccurrenceId, TemplateIrId, TemplateIrNodeId, TemplateSlotPlanId,
 };
 use crate::compiler_frontend::ast::templates::tir::node::{
-    TemplateIr, TemplateIrBranch, TemplateIrNode, TemplateIrNodeKind, TirSlotPlaceholder,
+    TemplateIr, TemplateIrBranch, TemplateIrNode, TemplateIrNodeKind,
+    TemplateLoopHeaderExpressionSites, TirSlotPlaceholder,
 };
 use crate::compiler_frontend::ast::templates::tir::overlays::{
     TemplateViewContext, TirExpressionOverlay, TirSlotResolution, TirSlotResolutionOverlay,
     TirSlotResolutionOverlayId, TirWrapperApplicationMode, TirWrapperContext,
     TirWrapperContextOverlay,
 };
+use crate::compiler_frontend::ast::templates::tir::preparation::TemplatePreparationFacts;
 use crate::compiler_frontend::ast::templates::tir::refs::{
     TemplateTirChildReference, TemplateWrapperReference,
 };
-use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
+use crate::compiler_frontend::ast::templates::tir::store::{MalformedTirStore, TemplateIrStore};
 use crate::compiler_frontend::ast::templates::tir::summary::{
     TemplateIrSummary, summarize_existing_root,
 };
 use crate::compiler_frontend::ast::templates::tir::view::{TemplateTirPhase, TirView};
 use crate::compiler_frontend::ast::templates::tir::{
-    PreparedRuntime, RuntimeTemplateReason, owned_runtime_template_handoff_for_prepared_view,
+    RuntimeTemplateReason, TemplatePreparation, TemplatePreparationOutcome,
+    owned_runtime_template_handoff_for_prepared_view,
 };
+use crate::compiler_frontend::ast::templates::tir::{TemplateSlotPlan, TemplateSlotSitePlan};
 use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeTemplateBody, OwnedRuntimeTemplateNode,
 };
@@ -53,10 +59,21 @@ fn empty_location() -> SourceLocation {
     SourceLocation::default()
 }
 
-fn prepared_runtime(view: &TirView<'_>) -> PreparedRuntime {
-    PreparedRuntime {
+fn prepared_runtime(view: &TirView<'_>) -> TemplatePreparation {
+    TemplatePreparation {
         identity: view.identity(),
-        reason: RuntimeTemplateReason::RuntimeExpression,
+        facts: TemplatePreparationFacts {
+            is_const_evaluable_shape: false,
+            has_unresolved_slot_occurrences: false,
+            has_resolved_slot_sources: false,
+            has_escaped_insert_helpers: false,
+            wrapper_foldable: false,
+            has_runtime_slot_plan: false,
+            has_runtime_slot_sites: false,
+            has_reactive_dependence: false,
+            final_value_kind: TemplateConstValueKind::NonConst,
+        },
+        outcome: TemplatePreparationOutcome::Runtime(RuntimeTemplateReason::RuntimeExpression),
     }
 }
 
@@ -77,7 +94,7 @@ fn text_node_id(
     store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Text {
             text: text_id,
-            byte_len: text.len() as u32,
+            byte_len: text.len(),
             origin: TemplateSegmentOrigin::Body,
         },
         empty_location(),
@@ -90,7 +107,7 @@ fn finish_text_template(store: &mut TemplateIrStore, root: TemplateIrNodeId) -> 
         root,
         Style::default(),
         TemplateType::StringFunction,
-        summarize_existing_root(store, root),
+        summarize_existing_root(store, root).expect("text template root is acyclic"),
         empty_location(),
     ))
 }
@@ -126,8 +143,9 @@ fn expression_overlay_context(
         .into_iter()
         .map(|(site_id, expression)| (site_id, Box::new(expression)))
         .collect();
-    let expression_overlay_id =
-        store.allocate_expression_overlay(TirExpressionOverlay { overrides });
+    let expression_overlay_id = store
+        .allocate_expression_overlay(TirExpressionOverlay { overrides })
+        .expect("test overlay allocation");
     TemplateViewContext {
         expression_overlay: Some(expression_overlay_id),
         slot_resolution: None,
@@ -140,8 +158,9 @@ fn slot_resolution_context(
     store: &mut TemplateIrStore,
     resolutions: Vec<(SlotOccurrenceId, TirSlotResolution)>,
 ) -> TemplateViewContext {
-    let slot_resolution_overlay_id =
-        store.allocate_slot_resolution_overlay(TirSlotResolutionOverlay { resolutions });
+    let slot_resolution_overlay_id = store
+        .allocate_slot_resolution_overlay(TirSlotResolutionOverlay { resolutions })
+        .expect("test overlay allocation");
     TemplateViewContext {
         expression_overlay: None,
         slot_resolution: Some(slot_resolution_overlay_id),
@@ -249,6 +268,7 @@ fn build_branch_wrapper_template(store: &mut TemplateIrStore) -> TemplateIrId {
             )),
             default_slot,
             empty_location(),
+            builder.store.next_expression_site_id(),
         ),
         TemplateIrBranch::new(
             TemplateBranchSelector::Bool(Expression::bool(
@@ -258,6 +278,7 @@ fn build_branch_wrapper_template(store: &mut TemplateIrStore) -> TemplateIrId {
             )),
             positional_slot,
             empty_location(),
+            builder.store.next_expression_site_id(),
         ),
     ];
     let root = builder.push_branch_chain_node(branches, None, empty_location());
@@ -278,7 +299,7 @@ fn build_loop_wrapper_template(
     let body_default_slot = builder.push_slot_node(SlotKey::Default, empty_location());
     let aggregate_before = builder.push_text_node(
         string_table.intern("aggregate-before"),
-        "aggregate-before".len() as u32,
+        "aggregate-before".len(),
         TemplateSegmentOrigin::Body,
         empty_location(),
     );
@@ -286,7 +307,7 @@ fn build_loop_wrapper_template(
         builder.push_slot_node(SlotKey::Positional(1), empty_location());
     let aggregate_after = builder.push_text_node(
         string_table.intern("aggregate-after"),
-        "aggregate-after".len() as u32,
+        "aggregate-after".len(),
         TemplateSegmentOrigin::Body,
         empty_location(),
     );
@@ -322,14 +343,14 @@ fn build_child_wrapper_template(
     let mut builder = TemplateIrBuilder::new(store);
     let nested_before = builder.push_text_node(
         string_table.intern("nested-before"),
-        "nested-before".len() as u32,
+        "nested-before".len(),
         TemplateSegmentOrigin::Body,
         empty_location(),
     );
     let nested_positional_slot = builder.push_slot_node(SlotKey::Positional(0), empty_location());
     let nested_after = builder.push_text_node(
         string_table.intern("nested-after"),
-        "nested-after".len() as u32,
+        "nested-after".len(),
         TemplateSegmentOrigin::Body,
         empty_location(),
     );
@@ -419,14 +440,14 @@ fn build_slot_wrapper_template(
     let mut builder = TemplateIrBuilder::new(store);
     let before_node = builder.push_text_node(
         string_table.intern(before),
-        before.len() as u32,
+        before.len(),
         TemplateSegmentOrigin::Body,
         empty_location(),
     );
     let slot_node = builder.push_slot_node(SlotKey::Default, empty_location());
     let after_node = builder.push_text_node(
         string_table.intern(after),
-        after.len() as u32,
+        after.len(),
         TemplateSegmentOrigin::Body,
         empty_location(),
     );
@@ -488,12 +509,14 @@ fn build_parent_with_inherited_wrapper_and_overlay(
         (parent_template_id, wrapper_set_id, child_occurrence_id)
     };
 
-    let wrapper_overlay_id = store.allocate_wrapper_context_overlay(TirWrapperContextOverlay {
-        contexts: vec![(
-            child_occurrence_id,
-            TirWrapperContext::inherited(wrapper_set_id),
-        )],
-    });
+    let wrapper_overlay_id = store
+        .allocate_wrapper_context_overlay(TirWrapperContextOverlay {
+            contexts: vec![(
+                child_occurrence_id,
+                TirWrapperContext::inherited(wrapper_set_id),
+            )],
+        })
+        .expect("test overlay allocation");
     let context = TemplateViewContext {
         expression_overlay: None,
         slot_resolution: None,
@@ -542,15 +565,17 @@ fn build_parent_with_inherited_wrapper_set(
         .collect();
     let wrapper_set_id = store.push_or_reuse_wrapper_set(wrapper_refs);
 
-    let wrapper_overlay_id = store.allocate_wrapper_context_overlay(TirWrapperContextOverlay {
-        contexts: vec![(
-            child_occurrence_id,
-            TirWrapperContext {
-                inherited_wrapper_set: Some(wrapper_set_id),
-                ..wrapper_context
-            },
-        )],
-    });
+    let wrapper_overlay_id = store
+        .allocate_wrapper_context_overlay(TirWrapperContextOverlay {
+            contexts: vec![(
+                child_occurrence_id,
+                TirWrapperContext {
+                    inherited_wrapper_set: Some(wrapper_set_id),
+                    ..wrapper_context
+                },
+            )],
+        })
+        .expect("test overlay allocation");
     let context = TemplateViewContext {
         expression_overlay: None,
         slot_resolution: None,
@@ -584,6 +609,30 @@ fn owned_handoff_materializes_text_from_the_shared_store() {
 }
 
 #[test]
+fn owned_handoff_text_uses_interned_text_without_a_narrowed_byte_len() {
+    let store = Rc::new(RefCell::new(TemplateIrStore::new()));
+    let mut strings = StringTable::new();
+    let source = "hello owned handoff text";
+    let template_id = {
+        let mut store_ref = store.borrow_mut();
+        text_template(&mut store_ref, &mut strings, source)
+    };
+    let handoff = {
+        let store_ref = store.borrow();
+        let view = view_for(&store_ref, template_id, TemplateViewContext::default());
+        handoff_for_view(view).expect("text handoff should succeed")
+    };
+
+    let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Text { text, .. }) =
+        handoff.body
+    else {
+        panic!("text template should materialize as an owned text node");
+    };
+    assert_eq!(strings.resolve(text), source);
+    assert_eq!(strings.resolve(text).len(), source.len());
+}
+
+#[test]
 fn owned_handoff_resolves_slot_overlay_to_a_child_template() {
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
@@ -601,7 +650,7 @@ fn owned_handoff_resolves_slot_overlay_to_a_child_template() {
             },
             empty_location(),
         ));
-        let summary = summarize_existing_root(&store_ref, slot);
+        let summary = summarize_existing_root(&store_ref, slot).expect("slot root is acyclic");
         let parent_id = store_ref.push_template(TemplateIr::new(
             slot,
             Style::default(),
@@ -609,13 +658,14 @@ fn owned_handoff_resolves_slot_overlay_to_a_child_template() {
             summary,
             empty_location(),
         ));
-        let slot_overlay_id =
-            store_ref.allocate_slot_resolution_overlay(TirSlotResolutionOverlay {
+        let slot_overlay_id = store_ref
+            .allocate_slot_resolution_overlay(TirSlotResolutionOverlay {
                 resolutions: vec![(
                     occurrence_id,
                     TirSlotResolution::resolved(SlotKey::Default, vec![source_id]),
                 )],
-            });
+            })
+            .expect("test overlay allocation");
         let context = TemplateViewContext {
             expression_overlay: None,
             slot_resolution: Some(slot_overlay_id),
@@ -701,7 +751,8 @@ fn owned_handoff_preserves_child_boundary() {
             },
             empty_location(),
         ));
-        let summary = summarize_existing_root(&store_ref, child_node);
+        let summary =
+            summarize_existing_root(&store_ref, child_node).expect("child root is acyclic");
         store_ref.push_template(TemplateIr::new(
             child_node,
             Style::default(),
@@ -952,7 +1003,13 @@ fn child_infrastructure_error_propagates_through_hir_handoff() {
             &mut store_ref,
             child_reference(child_template_id, empty_context),
         );
-        let parent_id = finish_text_template(&mut store_ref, child_node);
+        let parent_id = store_ref.push_template(TemplateIr::new(
+            child_node,
+            Style::default(),
+            TemplateType::StringFunction,
+            TemplateIrSummary::empty(),
+            empty_location(),
+        ));
         (parent_id, empty_context)
     };
 
@@ -1342,7 +1399,7 @@ fn malformed_child_view_context_propagates_view_failure() {
 }
 
 #[test]
-fn missing_wrapper_tree_node_propagates_schema_extraction_error() {
+fn missing_wrapper_tree_node_propagates_layout_error() {
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
     let (parent_id, context) = {
@@ -1384,14 +1441,14 @@ fn missing_wrapper_tree_node_propagates_schema_extraction_error() {
         .expect_err("missing wrapper tree node should produce a CompilerError");
 
     assert!(
-        error.msg.contains("TIR slot schema extraction: node ID"),
-        "expected schema-owned node error, got: {}",
+        error.msg.contains("TIR slot layout requested missing node"),
+        "expected layout-owned node error, got: {}",
         error.msg
     );
 }
 
 #[test]
-fn missing_child_in_wrapper_propagates_schema_extraction_error() {
+fn missing_child_in_wrapper_propagates_layout_error() {
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
     let (parent_id, context) = {
@@ -1406,7 +1463,13 @@ fn missing_child_in_wrapper_propagates_schema_extraction_error() {
             },
             empty_location(),
         ));
-        let wrapper_template_id = finish_text_template(&mut store_ref, missing_child_node);
+        let wrapper_template_id = store_ref.push_template(TemplateIr::new(
+            missing_child_node,
+            Style::default(),
+            TemplateType::StringFunction,
+            TemplateIrSummary::empty(),
+            empty_location(),
+        ));
         build_parent_with_inherited_wrapper(
             &mut store_ref,
             wrapper_template_id,
@@ -1421,17 +1484,146 @@ fn missing_child_in_wrapper_propagates_schema_extraction_error() {
     assert!(
         error
             .msg
-            .contains("TIR slot schema extraction: child template ID"),
-        "expected schema-owned child-template error, got: {}",
+            .contains("TIR slot layout referenced missing child template"),
+        "expected layout-owned child-template error, got: {}",
         error.msg
     );
 }
 
+fn runtime_site_template(
+    store: &mut TemplateIrStore,
+    plan: TemplateSlotPlanId,
+    site: RuntimeSlotSiteId,
+) -> TemplateIrId {
+    let runtime_site = store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::RuntimeSlotSite { plan, site },
+        empty_location(),
+    ));
+    let template_id = store.push_template(TemplateIr::new(
+        runtime_site,
+        Style::default(),
+        TemplateType::StringFunction,
+        TemplateIrSummary::empty(),
+        empty_location(),
+    ));
+    store
+        .attach_runtime_slot_plan(template_id, plan)
+        .expect("runtime slot plan should attach");
+    template_id
+}
+
+#[test]
+fn handoff_rejects_runtime_slot_site_from_a_different_plan() {
+    let mut store = TemplateIrStore::new();
+    let render_root = text_node_id(&mut store, &mut StringTable::new(), "site");
+    let owner_plan = store.push_slot_plan(TemplateSlotPlan {
+        location: empty_location(),
+        contribution_sources: Vec::new(),
+        slot_sites: vec![TemplateSlotSitePlan {
+            site: RuntimeSlotSiteId(0),
+            key: SlotKey::Default,
+            render_root,
+            location: empty_location(),
+        }],
+    });
+    let other_plan = store.push_slot_plan(TemplateSlotPlan {
+        location: empty_location(),
+        contribution_sources: Vec::new(),
+        slot_sites: vec![TemplateSlotSitePlan {
+            site: RuntimeSlotSiteId(0),
+            key: SlotKey::Default,
+            render_root,
+            location: empty_location(),
+        }],
+    });
+    let template_id = runtime_site_template(&mut store, other_plan, RuntimeSlotSiteId(0));
+    store
+        .attach_runtime_slot_plan(template_id, owner_plan)
+        .expect("owner plan should replace the forged plan");
+
+    let view = view_for(&store, template_id, TemplateViewContext::default());
+    let error = handoff_for_view(view).expect_err("wrong-plan site must fail at handoff");
+    assert!(error.msg.contains("outside its owning slot application"));
+}
+
+#[test]
+fn handoff_rejects_out_of_range_runtime_slot_site() {
+    let mut store = TemplateIrStore::new();
+    let plan = store.push_slot_plan(TemplateSlotPlan {
+        location: empty_location(),
+        contribution_sources: Vec::new(),
+        slot_sites: Vec::new(),
+    });
+    let template_id = runtime_site_template(&mut store, plan, RuntimeSlotSiteId(0));
+
+    let view = view_for(&store, template_id, TemplateViewContext::default());
+    let error = handoff_for_view(view).expect_err("out-of-range site must fail at handoff");
+    assert!(error.msg.contains("out-of-range runtime slot site"));
+}
+
+#[test]
+fn handoff_rejects_mismatched_runtime_slot_site_identity() {
+    let mut store = TemplateIrStore::new();
+    let render_root = text_node_id(&mut store, &mut StringTable::new(), "site");
+    let plan = store.push_slot_plan(TemplateSlotPlan {
+        location: empty_location(),
+        contribution_sources: Vec::new(),
+        slot_sites: vec![TemplateSlotSitePlan {
+            site: RuntimeSlotSiteId(0),
+            key: SlotKey::Default,
+            render_root,
+            location: empty_location(),
+        }],
+    });
+    MalformedTirStore::new(&mut store).replace_slot_sites(
+        plan,
+        vec![TemplateSlotSitePlan {
+            site: RuntimeSlotSiteId(7),
+            key: SlotKey::Default,
+            render_root,
+            location: empty_location(),
+        }],
+    );
+    let template_id = runtime_site_template(&mut store, plan, RuntimeSlotSiteId(0));
+
+    let view = view_for(&store, template_id, TemplateViewContext::default());
+    let error = handoff_for_view(view).expect_err("mismatched site identity must fail");
+    assert!(
+        error
+            .msg
+            .contains("slot site whose stored identity does not match")
+    );
+}
+
+#[test]
+fn handoff_rejects_mismatched_loop_header_shape() {
+    let mut store = TemplateIrStore::new();
+    let body = text_node_id(&mut store, &mut StringTable::new(), "body");
+    let loop_node = store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::Loop {
+            header: TemplateLoopHeader::Conditional {
+                condition: Box::new(Expression::bool(
+                    false,
+                    empty_location(),
+                    ValueMode::ImmutableOwned,
+                )),
+            },
+            header_sites: TemplateLoopHeaderExpressionSites::Collection {
+                iterable: ExpressionSiteId::new(0),
+            },
+            body,
+            aggregate_wrapper: None,
+        },
+        empty_location(),
+    ));
+    let template_id = finish_text_template(&mut store, loop_node);
+    let view = view_for(&store, template_id, TemplateViewContext::default());
+
+    let error = handoff_for_view(view).expect_err("loop header shape mismatch must fail closed");
+    assert!(error.msg.contains("loop header shape mismatch"));
+}
+
 /// Exact-view child cycles must fail before owned-handoff recursion.
-///
-/// This test is ignored until Phase 2C adds a cycle guard. Running it against
-/// the current materializer recurses until the process overflows.
-#[ignore = "Phase 0 reproduced: exact-view cycles stack-overflow during handoff; un-ignore in Phase 2C"]
 #[test]
 fn handoff_rejects_exact_view_child_cycle() {
     let mut store = TemplateIrStore::new();
@@ -1442,7 +1634,13 @@ fn handoff_rejects_exact_view_child_cycle() {
         TemplateViewContext::default(),
     );
     let child_node = child_template_node_id(&mut store, child);
-    let actual_id = finish_text_template(&mut store, child_node);
+    let actual_id = store.push_template(TemplateIr::new(
+        child_node,
+        Style::default(),
+        TemplateType::StringFunction,
+        TemplateIrSummary::empty(),
+        empty_location(),
+    ));
     assert_eq!(actual_id, template_id);
 
     let view = TirView::new(

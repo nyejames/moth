@@ -368,11 +368,7 @@ fn materialize_public_const_template_in_store(
                 store.push_node(TemplateIrNode::new(
                     TemplateIrNodeKind::Text {
                         text: text_id,
-                        byte_len: u32::try_from(text.len()).map_err(|_| {
-                            CompilerError::compiler_error(
-                                "Imported const-template text exceeds the TIR byte-length range.",
-                            )
-                        })?,
+                        byte_len: text.len(),
                         origin: TemplateSegmentOrigin::Head,
                     },
                     location.clone(),
@@ -400,7 +396,7 @@ fn materialize_public_const_template_in_store(
             TemplateType::SlotInsert(materialize_public_slot_key(key, string_table))
         }
     };
-    let summary = summarize_existing_root(store, root);
+    let summary = summarize_existing_root(store, root)?;
     let mut template_ir = TemplateIr::new(root, Style::default(), kind, summary, location.clone());
     let conditional_wrappers = materialize_public_wrapper_references(
         &template.conditional_child_wrappers,

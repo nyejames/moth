@@ -11,7 +11,7 @@
 //!
 //! ## Cache lifetime
 //!
-//! The cache is AST-phase-local. It lives on `TemplateFoldContext`, which is
+//! The cache is AST-phase-local. It lives on `TirFoldContext`, which is
 //! created and dropped during one compile-time template fold operation. It does
 //! not survive into HIR, backend, or public API data and is never global or
 //! static.
@@ -23,11 +23,8 @@
 //! - const-loop iteration limit;
 //! - whether the active fold-binding stack is empty.
 //!
-//! It deliberately does NOT include `source_file_scope`, `path_format_config`,
-//! or `project_path_resolver`, because `TemplateFoldContext` stores those as
-//! references without stable identity. It also does not include the binding
-//! stack contents; the cache is only valid when bindings are empty, which is
-//! recorded as a boolean guard.
+//! It does not include the binding stack contents. The cache is only valid when
+//! bindings are empty, which is recorded as a boolean guard.
 
 use std::collections::HashMap;
 

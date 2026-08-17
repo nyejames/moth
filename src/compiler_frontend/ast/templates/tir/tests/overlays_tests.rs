@@ -5,9 +5,8 @@ use std::mem::size_of;
 use super::super::ids::{TemplateIrId, TemplateWrapperSetId};
 use super::super::overlays::{
     TemplateViewContext, TirExpressionOverlay, TirExpressionOverlayId, TirSlotResolution,
-    TirSlotResolutionKind, TirSlotResolutionOverlay, TirSlotResolutionOverlayId,
-    TirWrapperApplicationMode, TirWrapperContext, TirWrapperContextOverlay,
-    TirWrapperContextOverlayId,
+    TirSlotResolutionOverlay, TirSlotResolutionOverlayId, TirWrapperApplicationMode,
+    TirWrapperContext, TirWrapperContextOverlay, TirWrapperContextOverlayId,
 };
 use super::super::refs::{
     TemplateTirChildReference, TemplateTirReference, TemplateWrapperReference,
@@ -81,9 +80,15 @@ fn empty_context_is_the_default_value() {
 #[test]
 fn overlay_payload_ids_index_typed_store_entries() {
     let mut store = super::super::store::TemplateIrStore::new();
-    let expression = store.allocate_expression_overlay(TirExpressionOverlay::default());
-    let slot = store.allocate_slot_resolution_overlay(TirSlotResolutionOverlay::default());
-    let wrapper = store.allocate_wrapper_context_overlay(TirWrapperContextOverlay::default());
+    let expression = store
+        .allocate_expression_overlay(TirExpressionOverlay::default())
+        .expect("test overlay allocation");
+    let slot = store
+        .allocate_slot_resolution_overlay(TirSlotResolutionOverlay::default())
+        .expect("test overlay allocation");
+    let wrapper = store
+        .allocate_wrapper_context_overlay(TirWrapperContextOverlay::default())
+        .expect("test overlay allocation");
 
     assert_eq!(store.expression_overlay(expression).map(|_| ()), Some(()));
     assert_eq!(store.slot_resolution_overlay(slot).map(|_| ()), Some(()));
@@ -96,15 +101,6 @@ fn slot_resolution_payload_preserves_replay_sources() {
     let resolution = TirSlotResolution::resolved(SlotKey::Default, vec![source]);
 
     assert_eq!(resolution.sources(), &[source]);
-}
-
-#[test]
-fn slot_resolution_payload_preserves_unresolved_state() {
-    let resolution = TirSlotResolution::unresolved(SlotKey::Default);
-
-    assert!(resolution.is_unresolved());
-    assert!(matches!(resolution.kind, TirSlotResolutionKind::Unresolved));
-    assert!(resolution.sources().is_empty());
 }
 
 #[test]

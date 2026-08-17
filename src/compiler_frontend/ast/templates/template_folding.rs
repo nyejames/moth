@@ -18,15 +18,14 @@ use crate::compiler_frontend::ast::templates::template_control_flow::{
     TemplateFoldBinding, TemplateLoopControlKind,
 };
 use crate::compiler_frontend::ast::templates::tir::{
-    TemplateIrStore, TemplateTirPhase, TirFoldCache, TirView, classify_effective_tir_view_template,
+    FoldedConstTemplatePiece, TemplateIrStore, TemplatePreparationMode, TemplateTirPhase,
+    TirFoldCache, TirView, prepare_tir_view,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
-use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
-use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
@@ -36,16 +35,12 @@ use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 //  Folding Context
 // -------------------------
 
-/// Required context for compile-time template folding.
+/// Narrow state shared by TIR constant folding and its AST expression helpers.
 ///
-/// WHAT: carries all project-aware state that folding can require.
-/// WHY: folding must not rely on ad-hoc inherited-style placeholders or
-///       resolver-less fallback branches.
-pub struct TemplateFoldContext<'a> {
+/// The exact TIR view owns structural authority. Project path and formatting services stay at the
+/// outer AST boundaries that consume them rather than travelling through the TIR reducer.
+pub(crate) struct TirFoldContext<'a> {
     pub string_table: &'a mut StringTable,
-    pub(crate) project_path_resolver: &'a ProjectPathResolver,
-    pub path_format_config: &'a PathStringFormatConfig,
-    pub source_file_scope: &'a InternedPath,
     pub template_const_loop_iteration_limit: usize,
 
     pub(crate) bindings: Vec<TemplateFoldBinding>,
@@ -80,16 +75,19 @@ pub(crate) enum TemplateEmission {
 pub(crate) struct TemplateFoldResult {
     pub(crate) emission: TemplateEmission,
     pub(crate) provenance: SyntheticInterfaceProvenance,
+    pub(crate) projection_pieces: Option<Vec<FoldedConstTemplatePiece>>,
 }
 
 impl TemplateFoldResult {
-    pub(crate) fn new(
+    pub(crate) fn with_projection(
         emission: TemplateEmission,
         provenance: SyntheticInterfaceProvenance,
+        projection_pieces: Option<Vec<FoldedConstTemplatePiece>>,
     ) -> Self {
         Self {
             emission,
             provenance,
+            projection_pieces,
         }
     }
 }
@@ -126,7 +124,7 @@ impl FoldResolvedExpression<'_> {
     }
 }
 
-impl TemplateFoldContext<'_> {
+impl TirFoldContext<'_> {
     fn lookup_binding(&self, path: &InternedPath) -> Option<&Expression> {
         self.bindings
             .iter()
@@ -159,7 +157,7 @@ pub(crate) fn selected_option_capture_payload_with_provenance(
     scrutinee: &Expression,
     pattern: &MatchPattern,
     store: &TemplateIrStore,
-    fold_context: &mut TemplateFoldContext<'_>,
+    fold_context: &mut TirFoldContext<'_>,
 ) -> Result<(Option<TemplateFoldBinding>, SyntheticInterfaceProvenance), TemplateError> {
     match const_option_presence(scrutinee, store, fold_context)? {
         ConstOptionPresence::Present { value, provenance } => Ok((
@@ -187,7 +185,7 @@ enum ConstOptionPresence {
 fn const_option_presence(
     scrutinee: &Expression,
     store: &TemplateIrStore,
-    fold_context: &mut TemplateFoldContext<'_>,
+    fold_context: &mut TirFoldContext<'_>,
 ) -> Result<ConstOptionPresence, TemplateError> {
     let resolved = resolve_fold_bindings_in_expression(scrutinee, fold_context)?;
 
@@ -219,7 +217,9 @@ fn const_option_presence(
                         TemplateTirPhase::Composed,
                         reference.context,
                     )?;
-                    Ok(classify_effective_tir_view_template(&view)?.const_value_kind)
+                    Ok(prepare_tir_view(&view, TemplatePreparationMode::Value)?
+                        .facts
+                        .final_value_kind)
                 })?
                 .is_compile_time_value();
 
@@ -287,18 +287,11 @@ pub(crate) fn condition_location_or_loop_location(
     }
 }
 
-pub(crate) fn loop_body_not_const_error(
-    error: TemplateError,
-    _diagnostic_location: &SourceLocation,
-) -> TemplateError {
-    error
-}
-
 /// Evaluates a const template condition and returns the exact value provenance consumed by it.
 pub(crate) fn fold_bool_condition_with_provenance(
     condition: &Expression,
     fallback_location: &SourceLocation,
-    fold_context: &mut TemplateFoldContext<'_>,
+    fold_context: &mut TirFoldContext<'_>,
 ) -> Result<(bool, SyntheticInterfaceProvenance), TemplateError> {
     let resolved = resolve_fold_bindings_in_expression(condition, fold_context)?;
 
@@ -355,7 +348,7 @@ pub(crate) fn template_emission_from_output_and_signal(
 ///      approach avoids allocation on the no-substitution path entirely.
 pub(crate) fn resolve_fold_bindings_in_expression<'a>(
     expression: &'a Expression,
-    fold_context: &mut TemplateFoldContext<'_>,
+    fold_context: &mut TirFoldContext<'_>,
 ) -> Result<FoldResolvedExpression<'a>, TemplateError> {
     match &expression.kind {
         ExpressionKind::Reference(path) => {
@@ -425,7 +418,7 @@ pub(crate) fn resolve_fold_bindings_in_expression<'a>(
 fn fold_runtime_expression_with_bindings<'a>(
     expression: &'a Expression,
     rpn: &ExpressionRpn,
-    fold_context: &mut TemplateFoldContext<'_>,
+    fold_context: &mut TirFoldContext<'_>,
 ) -> Result<FoldResolvedExpression<'a>, TemplateError> {
     let mut substituted = Vec::with_capacity(rpn.items.len());
     let mut any_substituted = false;

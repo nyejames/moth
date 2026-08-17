@@ -90,7 +90,7 @@ fn validate_template_head_value_type(
 }
 
 /// Handles a template-typed value found in the template head.
-/// Wrapper templates preserve slot semantics while TIR classification owns constness.
+/// Wrapper templates preserve slot semantics while preparation owns constness.
 pub(super) fn handle_template_value_in_template_head(
     value: &Template,
     context: &ScopeContext,

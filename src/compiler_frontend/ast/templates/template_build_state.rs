@@ -13,7 +13,7 @@
 
 use crate::compiler_frontend::ast::templates::template::{Style, TemplateType};
 use crate::compiler_frontend::ast::templates::tir::{
-    TemplateWrapperReference, TirTemplateClassification, refresh_kind_from_classification,
+    TemplatePreparationFacts, TemplateWrapperReference, refresh_kind_from_preparation,
 };
 
 /// Parser-local mutable state accumulated during template head and body parsing.
@@ -39,12 +39,9 @@ impl TemplateBuildState {
         }
     }
 
-    /// Applies generic String/StringFunction classification from an already
-    /// effective TirView classification.
-    pub(crate) fn refresh_kind_from_tir_classification(
-        &mut self,
-        classification: &TirTemplateClassification,
-    ) {
-        refresh_kind_from_classification(&mut self.kind, classification);
+    /// Applies generic String/StringFunction classification from complete
+    /// preparation facts for the effective TIR view.
+    pub(crate) fn refresh_kind_from_preparation(&mut self, facts: &TemplatePreparationFacts) {
+        refresh_kind_from_preparation(&mut self.kind, facts);
     }
 }

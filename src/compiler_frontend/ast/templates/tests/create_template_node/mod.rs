@@ -7,8 +7,9 @@ use crate::compiler_frontend::ast::templates::template_folding::{
     TemplateEmission, TemplateFoldResult,
 };
 use crate::compiler_frontend::ast::templates::tir::{
-    PreparedTemplate, TemplateIrNodeId, TemplateIrNodeKind, TemplateIrStore,
-    TemplatePreparationMode, TemplateTirPhase, TirView, fold_prepared_template, prepare_tir_view,
+    TemplateIrNodeId, TemplateIrNodeKind, TemplateIrStore, TemplatePreparationMode,
+    TemplatePreparationOutcome, TemplateTirPhase, TirView, fold_prepared_template,
+    prepare_tir_view,
 };
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarationTable};
 use crate::compiler_frontend::compiler_messages::render::{
@@ -170,9 +171,7 @@ fn fold_template_in_context(
     // Every caller supplies a parser-emitted or direct module-local TIR
     // reference, so folding never needs a content-finalizer fallback here.
 
-    let mut fold_context = context
-        .new_template_fold_context(string_table, "template tests fold")
-        .expect("test context should include fold dependencies");
+    let mut fold_context = context.new_tir_fold_context(string_table);
     fold_template_with_fold_context(
         template,
         &context.template_ir_store,
@@ -185,7 +184,9 @@ fn fold_template_in_context(
 fn fold_template_with_fold_context(
     template: &Template,
     store_handle: &Rc<RefCell<TemplateIrStore>>,
-    fold_context: &mut crate::compiler_frontend::ast::templates::template_folding::TemplateFoldContext<'_>,
+    fold_context: &mut crate::compiler_frontend::ast::templates::template_folding::TirFoldContext<
+        '_,
+    >,
     preparation_mode: TemplatePreparationMode,
 ) -> Result<StringId, crate::compiler_frontend::ast::templates::error::TemplateError> {
     let store = store_handle.borrow();
@@ -197,17 +198,13 @@ fn fold_template_with_fold_context(
         TemplateTirPhase::Composed,
         reference.context,
     )?;
-    let prepared = match prepare_tir_view(&view, preparation_mode)? {
-        PreparedTemplate::Foldable(prepared) => prepared,
-        PreparedTemplate::Runtime(_) | PreparedTemplate::Helper(_) => {
-            panic!("test template expected to be foldable")
-        }
-    };
+    let prepared = prepare_tir_view(&view, preparation_mode)?;
+    if !matches!(prepared.outcome, TemplatePreparationOutcome::Foldable) {
+        panic!("test template expected to be foldable")
+    }
     // This test helper returns only rendered text for parser assertions.
-    let TemplateFoldResult {
-        emission,
-        provenance: _,
-    } = fold_prepared_template(&prepared, view, fold_context)?;
+    let TemplateFoldResult { emission, .. } =
+        fold_prepared_template(&prepared, view, fold_context)?;
     match emission {
         TemplateEmission::Output(output) => Ok(output),
         TemplateEmission::NoOutput => Ok(fold_context.string_table.intern("")),
