@@ -16,6 +16,7 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 ## Queued implementation chain
 
 - [Test-suite honesty and infrastructure hardening](./plans/test-suite-honesty-and-infrastructure-hardening-plan.md)
+- [Frontend module compilation ownership cleanup](./plans/frontend-module-compilation-ownership-cleanup-plan.md)
 - [CFG timers fixes](./plans/command-timing-accounting-and-reporting-correction-plan.md)
 - [Constant evaluation, static control-flow specialisation and type-system architecture](./plans/constant-folding-and-type-system-hot-path-optimization-plan.md)
 - [Path values and resource linking](./plans/path-values-and-resource-linking-plan.md)
