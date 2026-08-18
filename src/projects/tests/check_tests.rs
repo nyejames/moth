@@ -4,6 +4,7 @@
 use super::run_check_for_tests;
 use super::{execute_check, format_terse_summary_line};
 use crate::build_system::build::{ProjectBuilder, build_project};
+#[cfg(feature = "timers")]
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::render::{
@@ -14,6 +15,7 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidConfigReason, InvalidOutputFolderReason,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_tests::test_fs::assert_path_missing;
 use crate::compiler_tests::test_support::unused_temp_path;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 #[cfg(feature = "timers")]
@@ -217,8 +219,8 @@ fn check_rejects_symlinked_directory_output_roots_before_frontend_work() {
                 } if *reason == expected_reason
             )
         }));
-        assert!(!outside.join("index.html").exists());
-        assert!(!source_root.join("index.html").exists());
+        assert_path_missing(&outside.join("index.html"));
+        assert_path_missing(&source_root.join("index.html"));
 
         fs::remove_dir_all(&root).expect("should remove project root");
         fs::remove_dir_all(&outside).expect("should remove target root");
@@ -308,18 +310,9 @@ if value is:
 
     // `check` is a no-artifact overlay: it must not create dev/release/index.html and must leave
     // the project root holding only the authored source file.
-    assert!(
-        !warning_root.join("dev").exists(),
-        "check should not create dev output artifacts"
-    );
-    assert!(
-        !warning_root.join("release").exists(),
-        "check should not create release output artifacts"
-    );
-    assert!(
-        !warning_root.join("index.html").exists(),
-        "check should not emit backend output artifacts"
-    );
+    assert_path_missing(&warning_root.join("dev"));
+    assert_path_missing(&warning_root.join("release"));
+    assert_path_missing(&warning_root.join("index.html"));
     assert_eq!(
         fs::read_dir(&warning_root)
             .expect("should read warning project root")

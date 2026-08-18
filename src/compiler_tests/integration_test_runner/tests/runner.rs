@@ -9,6 +9,12 @@ use super::super::{
     BackendId, CaseExecutionResult, CaseRole, ExpectedOutcome, FailureKind, SuccessExpectation,
     TestCaseSpec, TestRunnerOptions, TestSuiteSpec, WarningExpectation,
 };
+use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, RuleDiagnosticKind,
+};
+use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -203,13 +209,23 @@ fn triage_report_write_failure_returns_error() {
     let result = run_loaded_suite(
         suite_with_case(Some(CaseRole::Backend), Some("backend.lowering.shared")),
         TestRunnerOptions::default(),
-        |_| CaseExecutionResult {
-            passed: false,
-            panic_message: None,
-            build_result: None,
-            messages: None,
-            failure_reason: Some("forced test failure".to_owned()),
-            failure_kind: Some(FailureKind::ExpectationViolation),
+        |_| {
+            let table = StringTable::new();
+            let diagnostic = CompilerDiagnostic::with_severity(
+                DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
+                DiagnosticSeverity::Error,
+                SourceLocation::default(),
+                DiagnosticPayload::None,
+            );
+            let messages = CompilerMessages::from_diagnostics(vec![diagnostic], table);
+            CaseExecutionResult {
+                passed: false,
+                panic_message: None,
+                build_result: None,
+                messages: Some(messages),
+                failure_reason: Some("forced test failure".to_owned()),
+                failure_kind: Some(FailureKind::ExpectationViolation),
+            }
         },
         inventory_path
             .to_str()

@@ -20,12 +20,19 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::style_directives::StyleDirectiveSpec;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::projects::settings::{Config, ProjectConfigError};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, OnceLock};
+
+#[cfg(test)]
+type RestoreFn = Box<dyn Fn(&Path) -> Result<(), std::io::Error> + Send>;
 
 struct CurrentDirGuard {
     _lock: MutexGuard<'static, ()>,
     previous: Option<PathBuf>,
+    /// Optional injection seam for testing restore failures. When set, this
+    /// function is called instead of `std::env::set_current_dir`.
+    #[cfg(test)]
+    restore_override: Option<RestoreFn>,
 }
 
 impl CurrentDirGuard {
@@ -41,6 +48,8 @@ impl CurrentDirGuard {
         Self {
             _lock: lock,
             previous: Some(previous),
+            #[cfg(test)]
+            restore_override: None,
         }
     }
 
@@ -52,22 +61,64 @@ impl CurrentDirGuard {
     ///   caller cares about restore success.
     fn finish(mut self) -> Result<(), std::io::Error> {
         let previous = self.previous.take().expect("previous should be set");
-        std::env::set_current_dir(&previous)?;
+        restore_directory(&previous, &self.restore_override)?;
         Ok(())
     }
+
+    /// Set a custom restore function for testing restore-failure scenarios.
+    #[cfg(test)]
+    fn with_restore_override(mut self, f: RestoreFn) -> Self {
+        self.restore_override = Some(f);
+        self
+    }
+
+    /// Test-only: attempt restoration and return the previous path and result,
+    /// without consuming self. The caller must manually restore CWD afterward
+    /// since `previous` has been taken and `Drop` will not retry. The lock
+    /// remains held, which is critical for avoiding parallel-test interference.
+    #[cfg(test)]
+    fn test_restore(&mut self) -> (PathBuf, Result<(), std::io::Error>) {
+        let previous = self.previous.take().expect("previous should be set");
+        let result = restore_directory(&previous, &self.restore_override);
+        (previous, result)
+    }
+}
+
+/// Restore the working directory, using the override if set (test seam).
+#[cfg(test)]
+fn restore_directory(path: &Path, override_fn: &Option<RestoreFn>) -> Result<(), std::io::Error> {
+    if let Some(f) = override_fn {
+        f(path)
+    } else {
+        std::env::set_current_dir(path)
+    }
+}
+
+#[cfg(not(test))]
+fn restore_directory(path: &Path, _override_fn: &Option<()>) -> Result<(), std::io::Error> {
+    std::env::set_current_dir(path)
 }
 
 impl Drop for CurrentDirGuard {
     fn drop(&mut self) {
         // If `finish()` already restored, `previous` is `None` and we do nothing.
-        if let Some(previous) = self.previous.take()
-            && let Err(error) = std::env::set_current_dir(&previous)
-            && !std::thread::panicking()
-        {
-            panic!(
-                "CurrentDirGuard failed to restore directory to {:?}: {}",
-                previous, error
-            );
+        if let Some(previous) = self.previous.take() {
+            let restore_result = restore_directory(&previous, &self.restore_override);
+            if let Err(ref error) = restore_result
+                && !std::thread::panicking()
+            {
+                panic!(
+                    "CurrentDirGuard failed to restore directory to {:?}: {}",
+                    previous, error
+                );
+            } else if let Err(ref error) = restore_result
+                && std::thread::panicking()
+            {
+                eprintln!(
+                    "CurrentDirGuard failed to restore directory to {:?}: {}",
+                    previous, error
+                );
+            }
         }
     }
 }

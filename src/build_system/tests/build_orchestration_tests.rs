@@ -85,10 +85,7 @@ fn build_project_returns_result_without_writing_files() {
     .expect("build should succeed");
 
     assert!(!result.project.output_files.is_empty());
-    assert!(
-        !root.join("index.html").exists(),
-        "build_project should not write files to disk"
-    );
+    assert_path_missing(&root.join("index.html"));
 }
 
 #[test]
@@ -904,10 +901,7 @@ fn skip_unchanged_mode_still_cleans_stale_manifest_tracked_outputs() {
         .modified()
         .expect("metadata should include modified time");
     assert_eq!(index_modified, updated_index_modified);
-    assert!(
-        !output_root.join("about/index.html").exists(),
-        "stale manifest-tracked output should still be removed in skip-unchanged mode"
-    );
+    assert_path_missing(&output_root.join("about/index.html"));
 }
 
 #[test]
@@ -1293,10 +1287,7 @@ fn duplicate_output_destination_causes_zero_files_written() {
     let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
     assert!(result.is_err(), "duplicate output path should be rejected");
 
-    assert!(
-        !root.join("index.html").exists(),
-        "no files should be written when a duplicate destination is detected"
-    );
+    assert_path_missing(&root.join("index.html"));
 }
 
 #[test]
@@ -1352,10 +1343,7 @@ fn file_ancestor_conflict_causes_zero_files_written() {
 
     let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
     assert!(result.is_err(), "a file cannot contain a child output");
-    assert!(
-        !root.join("assets").exists(),
-        "preflight must reject the batch before creating an ancestor"
-    );
+    assert_path_missing(&root.join("assets"));
 }
 
 #[test]
@@ -1753,10 +1741,7 @@ fn invalid_later_output_path_causes_zero_files_written() {
     let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
     assert!(result.is_err(), "invalid later path should be rejected");
 
-    assert!(
-        !root.join("index.html").exists(),
-        "preflight must reject the batch before any file is written"
-    );
+    assert_path_missing(&root.join("index.html"));
 }
 
 #[test]

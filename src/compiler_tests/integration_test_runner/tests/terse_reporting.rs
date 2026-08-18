@@ -71,37 +71,67 @@ fn expected_failure_case(case_id: &str, backend_id: BackendId) -> TestCaseSpec {
     }
 }
 
-/// Display-only synthetic for formatter tests. The terse reporter reads `passed`,
-/// `failure_kind`, `panic_message`, `failure_reason` and `messages` — it never accesses
-/// `build_result`. Creating a real `BuildResult` would couple formatter tests to the
-/// build pipeline, so this value is intentionally minimal for display-only assertions.
+/// Minimal valid `BuildResult` for formatter tests. The real pipeline always
+/// produces a `BuildResult` when compilation succeeds, so a passed result
+/// carries `build_result: Some(_)`. This fixture preserves that invariant
+/// without coupling to semantic build pipeline internals.
+fn minimal_build_result() -> BuildResult {
+    let string_table = StringTable::new();
+    BuildResult {
+        project: Project {
+            output_files: vec![OutputFile::new(
+                PathBuf::from("index.html"),
+                FileKind::Html(String::from("<html></html>")),
+            )],
+            entry_page_rel: Some(PathBuf::from("index.html")),
+            cleanup_policy: CleanupPolicy::html(),
+            warnings: Vec::new(),
+        },
+        config: Config::new(PathBuf::from("main.moth")),
+        warnings: Vec::new(),
+        string_table,
+        output_owner: OutputOwner {
+            builder: BuilderKind::Html,
+            profile: BuildProfile::Dev,
+        },
+        directory_output_plan: None,
+    }
+}
+
+/// Valid passed result: a real successful compilation always carries a
+/// `BuildResult`. This preserves the production invariant.
 fn passed_result() -> CaseExecutionResult {
     CaseExecutionResult {
         passed: true,
         panic_message: None,
-        build_result: None,
+        build_result: Some(minimal_build_result()),
         messages: None,
         failure_reason: None,
         failure_kind: None,
     }
 }
 
+/// Valid failed result with messages: when build fails, the runner carries
+/// the `CompilerMessages` so diagnostics can be rendered.
 fn failed_result(reason: &str, kind: FailureKind) -> CaseExecutionResult {
+    let messages = error_and_warning_messages();
     CaseExecutionResult {
         passed: false,
         panic_message: None,
         build_result: None,
-        messages: None,
+        messages: Some(messages),
         failure_reason: Some(reason.to_owned()),
         failure_kind: Some(kind),
     }
 }
 
+/// Valid unexpected success: the real runner carries `build_result: Some(_)`
+/// when build succeeded but the case expected failure.
 fn unexpected_success_result() -> CaseExecutionResult {
     CaseExecutionResult {
         passed: false,
         panic_message: None,
-        build_result: None,
+        build_result: Some(minimal_build_result()),
         messages: None,
         failure_reason: Some(
             "Expected a compilation failure, but the case built successfully.".to_owned(),
@@ -392,8 +422,8 @@ fn terse_mixed_results_preserve_case_order_and_summary() {
 
     assert_eq!(
         output.len(),
-        2,
-        "one failure line + one summary: {:?}",
+        3,
+        "one failure header + one error line + one summary: {:?}",
         output
     );
     assert!(
@@ -401,5 +431,5 @@ fn terse_mixed_results_preserve_case_order_and_summary() {
         "first line is failure: {}",
         output[0]
     );
-    assert_eq!(output[1], "Tests: 1/2 correct, 1 incorrect in 1.00s.");
+    assert_eq!(output[2], "Tests: 1/2 correct, 1 incorrect in 1.00s.");
 }

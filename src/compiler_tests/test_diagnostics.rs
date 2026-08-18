@@ -43,15 +43,33 @@ pub fn assert_no_infrastructure_errors(messages: &CompilerMessages) {
     );
 }
 
-/// Assert that `messages` contains exactly one infrastructure error of the
-/// expected `ErrorType`.
+/// Assert that `messages` contains exactly one error diagnostic overall, and
+/// that error is an infrastructure error of the expected `ErrorType`.
+///
+/// WHAT: verifies the total error diagnostic count is 1, that error is an
+///   infrastructure error, and its `ErrorType` matches.
+/// WHY: `assert_exact_infrastructure_error` should not pass when additional
+///   non-infrastructure error diagnostics accompany the expected one. A
+///   missing-file failure should produce exactly one File infrastructure error,
+///   not that plus an unrelated semantic error.
 #[track_caller]
 pub fn assert_exact_infrastructure_error(messages: &CompilerMessages, expected_type: &ErrorType) {
+    let total_errors: Vec<_> = messages
+        .diagnostics()
+        .filter(|d| d.severity == DiagnosticSeverity::Error)
+        .collect();
+    assert_eq!(
+        total_errors.len(),
+        1,
+        "expected exactly one error diagnostic overall, found {}: {total_errors:?}",
+        total_errors.len()
+    );
+
     let infra_errors: Vec<_> = messages.infrastructure_errors_for_tests().collect();
     assert_eq!(
         infra_errors.len(),
         1,
-        "expected exactly one infrastructure error, found {}: {infra_errors:?}",
+        "expected the single error to be an infrastructure error, found {}: {infra_errors:?}",
         infra_errors.len()
     );
     assert_eq!(
@@ -206,6 +224,36 @@ mod tests {
         );
         let messages = messages_with_errors(vec![diagnostic], table);
         assert_exact_infrastructure_error(&messages, &ErrorType::File);
+    }
+
+    #[test]
+    fn assert_exact_infrastructure_error_rejects_additional_rule_error() {
+        let table = StringTable::new();
+        let infra_diagnostic = CompilerDiagnostic::with_severity(
+            DiagnosticKind::Infrastructure(
+                crate::compiler_frontend::compiler_messages::InfrastructureDiagnosticKind::InfrastructureFailure,
+            ),
+            DiagnosticSeverity::Error,
+            SourceLocation::default(),
+            DiagnosticPayload::InfrastructureError {
+                msg: "file not found".to_string(),
+                error_type: ErrorType::File,
+                metadata: std::collections::HashMap::new(),
+            },
+        );
+        let rule_diagnostic = CompilerDiagnostic::new(
+            DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
+            SourceLocation::default(),
+            DiagnosticPayload::None,
+        );
+        let messages = messages_with_errors(vec![infra_diagnostic, rule_diagnostic], table);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            assert_exact_infrastructure_error(&messages, &ErrorType::File);
+        }));
+        assert!(
+            result.is_err(),
+            "should panic when an additional non-infrastructure error is present"
+        );
     }
 
     #[test]

@@ -6,43 +6,48 @@
 WORK_ID: test-suite-honesty
 WORK_SOURCE: docs/roadmap/plans/test-suite-honesty-and-infrastructure-hardening-plan.md
 BASE_REVISION: f41f93a7a (post-TIR, post-benchmark-counters-timers)
-STATUS: active — correction pass applied, under review
-CURRENT_SCOPE: Phase 0-3 correction pass complete, awaiting re-review before Phase 4
+STATUS: active — second correction pass applied, under review
+CURRENT_SCOPE: Phase 0-3 second correction pass complete, awaiting re-review before Phase 4
 COMPLETED:
-  Phase 0: baseline established (4311 unit tests, 0 ignored, 1851 integration cases correct);
-    test_honesty_inventory.json produced with 22 findings and dispositions;
-    feature lane mapping documented (timers pass, benchmark_counters pre-existing failure)
+  Phase 0: baseline established (4314 unit tests, 0 ignored, 1851 integration cases correct);
+    durable inventory at docs/roadmap/evidence/test_honesty_inventory.json with 26 findings
+    and dispositions; feature lane mapping documented (timers pass, benchmark_counters
+    pre-existing failure); stale CFG timer language fixed (now references frontend module
+    compilation ownership cleanup)
   Phase 1: test_fs helpers (assert_path_missing, assert_regular_file, assert_directory,
     assert_symlink, read_bytes, read_utf8) with symlink_metadata;
-    temp_dir→unused_temp_path rename; ~240 callers migrated from unused_temp_path+create_dir_all
-    to tempfile::tempdir() with owned cleanup; hardcoded /tmp/ removed;
-    Linux non-UTF-8 fixtures fixed to use tempfile::tempdir();
-    exists()/is_dir() in build_orchestration_tests and build_cleanup_tests migrated to
-    assert_path_missing/assert_directory; fixture discovery fail-open fixed with
-    symlink_metadata and non-UTF-8 identity rejection
-  Phase 2: infrastructure_errors_for_tests() iterator scanning all error diagnostics;
-    test_diagnostics helpers (assert_exact_diagnostic_codes, assert_no_infrastructure_errors,
-    assert_exact_infrastructure_error, assert_diagnostic_reason using reason_key,
-    error_code_counts); single_file_rejects_missing_file migrated to exact infrastructure error;
-    26 broad is_err() in build_orchestration_tests remain for Phase 2 follow-up
+    temp_dir→unused_temp_path rename; ~240 callers migrated to tempfile::tempdir();
+    hardcoded /tmp/ removed; Linux non-UTF-8 fixtures fixed;
+    all negative exists() assertions in build_orchestration_tests, build_cleanup_tests,
+    check_tests, and cli_tests migrated to assert_path_missing;
+    fixture discovery fail-closed with symlink_metadata and non-UTF-8 rejection
+  Phase 2: infrastructure_errors_for_tests() iterator; test_diagnostics helpers;
+    assert_exact_infrastructure_error tightened to require exactly one error diagnostic
+    overall (not just one infrastructure error);
+    single_file_rejects_missing_file uses assert_exact_infrastructure_error;
+    remaining broad is_err() in build_orchestration_tests noted as Phase 2 follow-up
   Phase 3: WarningBuilder StringId uses active string_table; CurrentDirGuard redesigned with
-    Option<PathBuf> take pattern (finish restores once, Drop does not retry);
-    CurrentDirGuard restore-failure regression test added; CaseExecutionResult constructors
-    removed from production type; runner tests use panic_if_called callback;
-    triage test failure_kind fixed; ScopedEnvVar panic-safe env guard in xtask tests;
-    surface_thread_panic replaces discarded thread joins; exact panic-payload assertion
-NEXT_ACTION: re-review of correction pass, then Phase 4 exact positive assertions and artifact inventory
-VALIDATION: cargo fmt --check; cargo clippy -D warnings; cargo test --workspace (4311+17+643 passed);
+    Option<PathBuf> take pattern; CurrentDirGuard restore-failure injection seam
+    (test_restore, with_restore_override, RestoreFn type);
+    CurrentDirGuard Drop reports restore failure to stderr during unwinding;
+    restore-failure regression tests (finish-returns-error and unwind-reports-without-double-panic);
+    CaseExecutionResult constructors removed from production; all synthetic fixtures now
+    carry valid build_result or messages; runner tests use panic_if_called callback;
+    triage test uses valid messages with FailureKind::ExpectationViolation;
+    terse_reporting uses valid BuildResult and CompilerMessages in all fixtures;
+    ScopedEnvVar panic-safe env guard; surface_thread_panic replaces discarded joins
+NEXT_ACTION: re-review of second correction pass, then Phase 4 exact positive assertions
+VALIDATION: cargo fmt --check; cargo clippy -D warnings; cargo test --workspace (4314+17+643);
   cargo run -- tests --terse (1851/1851); cargo test --features timers (pass);
   pre-existing benchmark_counters failure unchanged; Linux lane not run on macOS host
-AUDITS: correction pass applied per reviewer findings; 11 of 11 gate items addressed
-BLOCKERS: Linux CI lane needed to verify Linux-only tests (macOS host cannot run them)
+AUDITS: second correction pass applied per reviewer's 10 closeout items
+BLOCKERS: Linux CI lane needed to verify Linux-only tests (macOS host cannot run them);
+  remaining broad is_err() in build_orchestration_tests need exact diagnostic migration
 NOTES: Pre-existing benchmark_counters feature test failures are not caused by this work.
-  264 unused_temp_path uses remain (genuine non-existence contracts + helper functions
-  returning PathBuf that need tuple-return migration). 26 broad is_err() in
-  build_orchestration_tests need exact diagnostic migration (Phase 2 follow-up).
-  39 exists/is_file/is_dir remain in build test files (positive assertions needing
-  file-vs-dir determination). 296 remove_dir_all calls remain in files not yet migrated.
+  Remaining unused_temp_path uses are genuine non-existence contracts or helper functions
+  needing tuple-return migration. Remaining broad is_err() assertions in
+  build_orchestration_tests (write_project_outputs patterns) need exact diagnostic
+  migration as Phase 2 follow-up.
 ```
 
 ## Purpose
@@ -58,7 +63,7 @@ The first patch must not weaken an assertion merely to preserve a green suite. A
 
 ## Sequencing and patch policy
 
-This plan runs immediately after the TIR corrections and simplification plan. It blocks CFG timer corrections and every later item in the queued roadmap chain.
+This plan runs immediately after the TIR corrections and simplification plan. It blocks frontend module compilation ownership cleanup and every later item in the queued roadmap chain.
 
 ### Patch A: honesty and infrastructure
 
@@ -844,7 +849,7 @@ Delete the ledger file when its final entry closes, or retain an empty historica
 5. Run the complete validation matrix below.
 6. Audit changed production seams for minimality and non-test ownership.
 7. Update the roadmap capsule and mark this plan complete.
-8. Only then allow CFG timer corrections to become active.
+8. Only then allow frontend module compilation ownership cleanup to become active.
 
 ## Validation matrix
 

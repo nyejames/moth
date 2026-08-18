@@ -22,6 +22,7 @@ use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_tests::integration_test_runner::{
     BackendId, IntegrationRunSummary, TestRunnerOptions,
 };
+use crate::compiler_tests::test_fs::assert_path_missing;
 use crate::compiler_tests::test_support::unused_temp_path;
 use crate::projects::command_status::CommandStatus;
 use crate::projects::dev_server::DevServerOptions;
@@ -91,7 +92,7 @@ fn build_command_writes_the_validated_directory_output_plan() {
     );
     assert_eq!(status, CommandStatus::Success);
     assert!(root.join("preview/index.html").exists());
-    assert!(!root.join("dev/index.html").exists());
+    assert_path_missing(&root.join("dev/index.html"));
 
     fs::remove_dir_all(&root).expect("should remove temp dir");
 }

@@ -1,0 +1,216 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-08-19T00:30:00Z",
+  "work_id": "test-suite-honesty",
+  "base_revision": "f41f93a7a",
+  "branch": "test-suite-honesty",
+  "host_platform": "macOS",
+  "summary": {
+    "unit_tests_passed": 4314,
+    "unit_tests_failed": 0,
+    "unit_tests_ignored": 0,
+    "integration_cases_correct": 1851,
+    "integration_backend_executions": 1851,
+    "feature_lanes": {
+      "default": "pass",
+      "timers": "pass",
+      "benchmark_counters": "pre-existing failure: const_required_construction_preparation_is_reused_by_folding",
+      "timers+benchmark_counters": "pre-existing failures: 4 tests"
+    },
+    "linux_lane": "not run on host (macOS); Linux-only tests require CI or Linux host"
+  },
+  "findings": [
+    {
+      "code": "temp_dir_uncreated_paths",
+      "severity": "hard",
+      "description": "test_support::temp_dir returned uncreated paths; callers had to create_dir_all manually",
+      "disposition": "fixed: renamed to unused_temp_path with non-existence contract; ~240 callers migrated to tempfile::tempdir() with owned cleanup; remaining uses are genuine non-existence contracts or helper functions needing tuple-return migration",
+      "status": "resolved"
+    },
+    {
+      "code": "hardcoded_tmp_paths",
+      "severity": "hard",
+      "description": "Hardcoded /tmp/ paths in test files",
+      "disposition": "fixed: all hardcoded /tmp/ paths removed and replaced with tempfile::tempdir() or unused_temp_path",
+      "status": "resolved"
+    },
+    {
+      "code": "exists_isfile_isdir_hiding_io_failures",
+      "severity": "hard",
+      "description": "exists()/is_file()/is_dir() mask IO errors as absence",
+      "disposition": "fixed: test_fs helpers use symlink_metadata; all negative exists() assertions in build_orchestration_tests, build_cleanup_tests, check_tests, and cli_tests migrated to assert_path_missing; fixture discovery uses symlink_metadata with fail-closed on metadata errors",
+      "status": "resolved"
+    },
+    {
+      "code": "broad_iserr_assertions",
+      "severity": "review",
+      "description": "Broad is_err()/error_count()>0 assertions accept wrong failure at multi-lane boundaries",
+      "disposition": "partially fixed: single_file_rejects_missing_file uses assert_exact_infrastructure_error; remaining broad is_err() in build_orchestration_tests and benchmark seeds need exact diagnostic migration as Phase 2 follow-up",
+      "status": "in_progress"
+    },
+    {
+      "code": "infrastructure_error_inspection_missing_later_errors",
+      "severity": "hard",
+      "description": "first_infrastructure_error_for_tests only returned the first infrastructure error",
+      "disposition": "fixed: infrastructure_errors_for_tests() iterator scans all error diagnostics",
+      "status": "resolved"
+    },
+    {
+      "code": "synthetic_test_data_violating_identity_rules",
+      "severity": "hard",
+      "description": "WarningBuilder created StringId from fresh StringTable; CaseExecutionResult had impossible states",
+      "disposition": "fixed: WarningBuilder uses active string_table; CaseExecutionResult constructors removed from production; runner tests use panic_if_called; terse_reporting uses valid BuildResult and CompilerMessages in all synthetic fixtures",
+      "status": "resolved"
+    },
+    {
+      "code": "current_dir_restoration_failures_discarded",
+      "severity": "hard",
+      "description": "CurrentDirGuard::Drop discarded restoration failures",
+      "disposition": "fixed: Option<PathBuf> take pattern prevents double-restore; finish() returns Result; Drop panics on restore failure (non-unwinding) or reports to stderr (unwinding); restore-failure injection seam with test_restore; regression tests for both finish-error and unwind-report paths",
+      "status": "resolved"
+    },
+    {
+      "code": "lossy_path_text_conversion",
+      "severity": "review",
+      "description": "to_string_lossy/from_utf8_lossy across ~30 files",
+      "disposition": "deferred to Phase 4",
+      "status": "open"
+    },
+    {
+      "code": "weak_positive_assertions",
+      "severity": "review",
+      "description": "Tests use >= or > assertions where exact counts are needed",
+      "disposition": "deferred to Phase 4",
+      "status": "open"
+    },
+    {
+      "code": "golden_comparison_accepting_directories_as_empty_files",
+      "severity": "review",
+      "description": "Golden comparison accepts directory entries as empty golden files",
+      "disposition": "deferred to Phase 5",
+      "status": "open"
+    },
+    {
+      "code": "html_wasm_baseline_broad_fragments",
+      "severity": "review",
+      "description": "HTML/Wasm baseline tests rely on broad fragment matching",
+      "disposition": "deferred to Phase 5",
+      "status": "open"
+    },
+    {
+      "code": "node_runtime_harness_can_hang",
+      "severity": "review",
+      "description": "Node runtime harness tests can hang without timeout",
+      "disposition": "deferred to Phase 5",
+      "status": "open"
+    },
+    {
+      "code": "fixture_discovery_fail_open",
+      "severity": "hard",
+      "description": "Fixture discovery used is_dir/is_file which fail open; non-UTF-8 identities silently skipped",
+      "disposition": "fixed: symlink_metadata with NotFound-only continue; non-UTF-8 names return error; manifest_path and expect_path checks use symlink_metadata",
+      "status": "resolved"
+    },
+    {
+      "code": "timing_concurrency_tests_machine_speed",
+      "severity": "review",
+      "description": "Timing/concurrency tests depend on machine speed",
+      "disposition": "deferred to Phase 6",
+      "status": "open"
+    },
+    {
+      "code": "feature_gated_tests_not_executed",
+      "severity": "review",
+      "description": "Feature-gated test modules need explicit execution lane mapping",
+      "disposition": "documented: timers (pass), benchmark_counters (pre-existing failure), detailed_timers (depends on timers), timers+benchmark_counters (pre-existing failures)",
+      "status": "documented"
+    },
+    {
+      "code": "filesystem_timestamp_tests",
+      "severity": "review",
+      "description": "Tests rely on filesystem timestamps",
+      "disposition": "deferred to Phase 6",
+      "status": "open"
+    },
+    {
+      "code": "monolithic_ci_steps",
+      "severity": "review",
+      "description": "CI steps are monolithic",
+      "disposition": "deferred to Phase 8",
+      "status": "open"
+    },
+    {
+      "code": "acceptance_only_smoke_overclaiming",
+      "severity": "review",
+      "description": "Acceptance-only smoke cases overclaim coverage",
+      "disposition": "deferred to Phase 7",
+      "status": "open"
+    },
+    {
+      "code": "ignored_tests_needing_governance",
+      "severity": "review",
+      "description": "Any #[ignore] tests would lack governance",
+      "disposition": "confirmed: 0 #[ignore] attributes in src or xtask",
+      "status": "resolved"
+    },
+    {
+      "code": "source_text_tests_false_confidence",
+      "severity": "review",
+      "description": "Tests comparing source text create false confidence",
+      "disposition": "deferred to Phase 4",
+      "status": "open"
+    },
+    {
+      "code": "stale_partial_machine_readable_reports",
+      "severity": "review",
+      "description": "Machine-readable reports can become stale or partial",
+      "disposition": "deferred to Phase 8",
+      "status": "open"
+    },
+    {
+      "code": "env_mutation_not_panic_safe",
+      "severity": "hard",
+      "description": "xtask bench_history tests manually save/set/restore RAYON_NUM_THREADS without panic-safe guard",
+      "disposition": "fixed: ScopedEnvVar guard restores on drop including during unwinding",
+      "status": "resolved"
+    },
+    {
+      "code": "discarded_thread_joins",
+      "severity": "hard",
+      "description": "Timing tests discarded thread join results",
+      "disposition": "fixed: surface_thread_panic helper replaces discarded joins",
+      "status": "resolved"
+    },
+    {
+      "code": "diagnostic_reason_parallel_taxonomy",
+      "severity": "hard",
+      "description": "assert_diagnostic_reason used manual payload_variant_name mapping instead of reason_key",
+      "disposition": "fixed: uses diagnostic.identity().reason_key with unwrap_or fallback",
+      "status": "resolved"
+    },
+    {
+      "code": "case_execution_result_impossible_states",
+      "severity": "hard",
+      "description": "Test fixtures created CaseExecutionResult with impossible states (passed=true with build_result=None, failure with no build_result or messages)",
+      "disposition": "fixed: all synthetic CaseExecutionResult fixtures now carry valid build_result or messages; triage test uses valid messages; terse_reporting uses valid BuildResult and CompilerMessages",
+      "status": "resolved"
+    },
+    {
+      "code": "assert_exact_infrastructure_error_too_loose",
+      "severity": "review",
+      "description": "assert_exact_infrastructure_error only checked infrastructure error count, not total error count",
+      "disposition": "fixed: now requires exactly one error diagnostic overall, and that error must be the expected infrastructure type",
+      "status": "resolved"
+    }
+  ],
+  "infrastructure_added": [
+    "src/compiler_tests/test_fs.rs: assert_path_missing, assert_regular_file, assert_directory, assert_symlink, read_bytes, read_utf8",
+    "src/compiler_tests/test_diagnostics.rs: assert_exact_diagnostic_codes, assert_no_infrastructure_errors, assert_exact_infrastructure_error (tightened), assert_diagnostic_reason, error_code_counts",
+    "infrastructure_errors_for_tests() iterator in CompilerMessages",
+    "ScopedEnvVar guard in xtask bench_history/tests.rs",
+    "surface_thread_panic helper in timing/tests/enabled_tests.rs",
+    "CurrentDirGuard::finish() with Option<PathBuf> take pattern",
+    "CurrentDirGuard restore-failure injection seam (test_restore, with_restore_override, RestoreFn type)",
+    "CurrentDirGuard Drop reports restore failure to stderr during unwinding"
+  ]
+}
