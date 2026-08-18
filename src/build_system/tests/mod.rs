@@ -25,10 +25,7 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 
 struct CurrentDirGuard {
     _lock: MutexGuard<'static, ()>,
-    previous: PathBuf,
-    /// Records a restore failure during unwinding so it can be surfaced
-    /// without replacing the original panic.
-    restore_error: Option<std::io::Error>,
+    previous: Option<PathBuf>,
 }
 
 impl CurrentDirGuard {
@@ -43,37 +40,34 @@ impl CurrentDirGuard {
         std::env::set_current_dir(path).expect("should change current directory for test");
         Self {
             _lock: lock,
-            previous,
-            restore_error: None,
+            previous: Some(previous),
         }
     }
 
-    /// Explicitly finish the guard, returning a restore failure on the normal path.
+    /// Explicitly restore the previous directory, returning an error if restoration fails.
     ///
-    /// WHAT: restores the previous directory and returns an error if restoration fails.
-    /// WHY: `Drop` cannot return errors. Tests that care about restore success should
-    /// call `finish()` instead of letting the guard drop implicitly.
-    #[allow(dead_code)]
-    fn finish(self) -> Result<(), std::io::Error> {
-        std::env::set_current_dir(&self.previous)?;
+    /// WHAT: takes ownership of the restore responsibility so `Drop` will not retry it.
+    /// WHY: without this, `Drop` would run after `finish` and attempt restoration again.
+    ///   `Drop` cannot return errors, so the normal path must use `finish()` when the
+    ///   caller cares about restore success.
+    fn finish(mut self) -> Result<(), std::io::Error> {
+        let previous = self.previous.take().expect("previous should be set");
+        std::env::set_current_dir(&previous)?;
         Ok(())
     }
 }
 
 impl Drop for CurrentDirGuard {
     fn drop(&mut self) {
-        if let Err(error) = std::env::set_current_dir(&self.previous) {
-            // During unwinding, preserve the original panic and record the restore failure.
-            // On the normal path, `finish()` should have been called instead.
-            self.restore_error = Some(error);
-            // If we are not already unwinding, panic to surface the failure.
-            if !std::thread::panicking() {
-                panic!(
-                    "CurrentDirGuard failed to restore directory to {:?}: {}",
-                    self.previous,
-                    self.restore_error.as_ref().unwrap()
-                );
-            }
+        // If `finish()` already restored, `previous` is `None` and we do nothing.
+        if let Some(previous) = self.previous.take()
+            && let Err(error) = std::env::set_current_dir(&previous)
+            && !std::thread::panicking()
+        {
+            panic!(
+                "CurrentDirGuard failed to restore directory to {:?}: {}",
+                previous, error
+            );
         }
     }
 }

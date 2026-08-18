@@ -26,8 +26,9 @@ use std::time::Duration;
 
 #[test]
 fn check_compiles_single_file_without_writing_artifacts() {
-    let root = unused_temp_path("single_file");
-    fs::create_dir_all(&root).expect("should create temp root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let entry_file = root.join("main.moth");
     fs::write(&entry_file, "value = 1\n").expect("should write source file");
 
@@ -50,8 +51,6 @@ fn check_compiles_single_file_without_writing_artifacts() {
         1,
         "check should not write output artifacts to the source folder"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 /// Check records its bootstrap and frontend boundaries in owner order.
@@ -59,8 +58,9 @@ fn check_compiles_single_file_without_writing_artifacts() {
 #[test]
 fn successful_check_finishes_bootstrap_before_frontend() {
     let _test_guard = crate::timing::lock_instrumentation_tests();
-    let root = unused_temp_path("check_timer_stage_boundaries");
-    fs::create_dir_all(&root).expect("should create temporary project root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let entry_file = root.join("main.moth");
     fs::write(&entry_file, "value = 1\n").expect("should write source file");
 
@@ -80,8 +80,6 @@ fn successful_check_finishes_bootstrap_before_frontend() {
             TimingMetric::BuildFrontendTotal,
         ],
     );
-
-    fs::remove_dir_all(&root).expect("should remove temporary project root");
 }
 
 /// Config AST stages use their dedicated v1 identities and finish in owner order.
@@ -234,11 +232,12 @@ type DiagnosticIdentityRow = (&'static str, Option<&'static str>, String, i32);
 ///
 /// WHAT: returns an unmanaged temp project root containing only the authored source file.
 /// WHY: the parity test reuses one project shape for both `execute_check` and `build_project`.
-fn write_page_project(prefix: &str, source: &str) -> PathBuf {
-    let root = unused_temp_path(prefix);
-    fs::create_dir_all(&root).expect("should create temp project root");
+fn write_page_project(_prefix: &str, source: &str) -> (tempfile::TempDir, PathBuf) {
+    let temp = tempfile::tempdir().expect("should create temp dir");
+    let root = temp.path().to_path_buf();
+
     fs::write(root.join("@page.moth"), source).expect("should write @page.moth source");
-    root
+    (temp, root)
 }
 
 /// Collect ordered frontend diagnostic identity rows for parity comparison.
@@ -294,7 +293,8 @@ if value is:
 
 [:pattern_unreachable_after_duplicate_literal_warning result=[result]]
 ";
-    let warning_root = write_page_project("check_build_parity_warning", warning_source);
+    let (_warning_temp, warning_root) =
+        write_page_project("check_build_parity_warning", warning_source);
 
     let check_warning_outcome = execute_check(
         warning_root
@@ -377,7 +377,7 @@ increment |value ~Int|:
 count ~= 0
 increment(count)
 ";
-    let error_root = write_page_project("check_build_parity_error", error_source);
+    let (_error_temp, error_root) = write_page_project("check_build_parity_error", error_source);
 
     let check_error_outcome = execute_check(
         error_root
@@ -439,8 +439,9 @@ fn terse_summary_line_matches_clean_success_contract() {
 #[test]
 fn run_check_records_command_check_total() {
     let _test_guard = crate::timing::lock_instrumentation_tests();
-    let root = unused_temp_path("check_run_check_timer");
-    fs::create_dir_all(&root).expect("should create temporary project root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let entry_file = root.join("main.moth");
     fs::write(&entry_file, "value = 1\n").expect("should write source file");
 
@@ -463,8 +464,6 @@ fn run_check_records_command_check_total() {
         .find(|observation| observation.metric.descriptor().stable_name == "command.check.total")
         .expect("command.check.total must be recorded");
     assert_eq!(command_total.samples, 1);
-
-    fs::remove_dir_all(&root).expect("should remove temporary project root");
 }
 
 /// Boundary regression: a scripted check duration is recorded before rendering and

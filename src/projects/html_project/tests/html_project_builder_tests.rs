@@ -18,7 +18,6 @@ use crate::compiler_frontend::paths::compile_time_paths::{
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::utilities::basic::portable_path_text;
-use crate::compiler_tests::test_support::unused_temp_path;
 use crate::projects::html_project::tests::test_support::{
     RenderedPathUsageInput, add_reachable_external_import, collect_output_paths,
     create_test_module, expect_bytes_output, expect_html_output, expect_js_output,
@@ -265,7 +264,8 @@ fn emits_const_fragment_and_calls_start() {
 
 #[test]
 fn directory_build_maps_routes_relative_to_entry_root() {
-    let root = unused_temp_path("directory_routes");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("src/about")).expect("should create about dir");
     fs::create_dir_all(root.join("src/docs/basics")).expect("should create docs dir");
     fs::create_dir_all(root.join("src/blog")).expect("should create blog dir");
@@ -294,13 +294,12 @@ fn directory_build_maps_routes_relative_to_entry_root() {
     assert!(output_paths.contains(&PathBuf::from("docs/basics/index.html")));
     assert!(output_paths.contains(&PathBuf::from("blog/index.html")));
     assert_eq!(project.entry_page_rel, Some(PathBuf::from("index.html")));
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn js_runtime_asset_emitted_verbatim() {
-    let root = unused_temp_path("js_runtime_asset");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("src")).expect("should create src dir");
     fs::write(root.join("src/lib.js"), "export function foo() {}").expect("should write js");
     let canonical_root = fs::canonicalize(&root).expect("root should resolve");
@@ -345,13 +344,12 @@ fn js_runtime_asset_emitted_verbatim() {
     let js_path = js_paths[0].to_str().unwrap();
     let js_content = expect_js_output(&project.output_files, js_path);
     assert_eq!(js_content, "export function foo() {}");
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn js_runtime_asset_deduped_across_modules() {
-    let root = unused_temp_path("js_runtime_dedupe");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("src")).expect("should create src dir");
     fs::write(root.join("src/lib.js"), "export function foo() {}").expect("should write js");
     let canonical_root = fs::canonicalize(&root).expect("root should resolve");
@@ -405,13 +403,12 @@ fn js_runtime_asset_deduped_across_modules() {
         js_count, 1,
         "same canonical JS source referenced by multiple modules should emit one output file"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn js_runtime_assets_with_same_stem_get_distinct_output_paths() {
-    let root = unused_temp_path("js_runtime_same_stem");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("a")).expect("should create a dir");
     fs::create_dir_all(root.join("b")).expect("should create b dir");
     fs::write(root.join("a/lib.js"), "export function a() {}").expect("should write a");
@@ -466,13 +463,12 @@ fn js_runtime_assets_with_same_stem_get_distinct_output_paths() {
         "two JS assets with same stem but different paths should get distinct output paths"
     );
     assert_ne!(js_paths[0], js_paths[1]);
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn non_js_runtime_asset_is_ignored() {
-    let root = unused_temp_path("non_js_runtime_asset");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("src")).expect("should create src dir");
     fs::write(root.join("src/lib.css"), "body {}").expect("should write css");
     let canonical_root = fs::canonicalize(&root).expect("root should resolve");
@@ -511,13 +507,12 @@ fn non_js_runtime_asset_is_ignored() {
         !has_js_assets,
         "non-JS runtime assets should not be emitted as JS"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn directory_build_supports_custom_entry_root_names() {
-    let root = unused_temp_path("custom_entry_root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("pages/docs")).expect("should create pages dir");
     let entry_root = fs::canonicalize(root.join("pages")).expect("entry root should resolve");
 
@@ -540,13 +535,12 @@ fn directory_build_supports_custom_entry_root_names() {
     assert!(output_paths.contains(&PathBuf::from("index.html")));
     assert!(output_paths.contains(&PathBuf::from("docs/index.html")));
     assert_eq!(project.entry_page_rel, Some(PathBuf::from("index.html")));
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn directory_build_requires_homepage_at_entry_root() {
-    let root = unused_temp_path("missing_homepage");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("src/about")).expect("should create about dir");
     let entry_root = fs::canonicalize(root.join("src")).expect("entry root should resolve");
 
@@ -576,13 +570,12 @@ fn directory_build_requires_homepage_at_entry_root() {
         err.string_table.resolve(*reported_entry_root),
         entry_root.display().to_string()
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn directory_build_skips_api_only_sibling_from_all_artifact_planning() {
-    let root = unused_temp_path("api_only_sibling");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("src/api")).expect("should create module directories");
     let entry_root = fs::canonicalize(root.join("src")).expect("entry root should resolve");
 
@@ -631,8 +624,6 @@ fn directory_build_skips_api_only_sibling_from_all_artifact_planning() {
     let output_paths = collect_output_paths(&project.output_files);
     assert_eq!(output_paths, vec![PathBuf::from("index.html")]);
     assert_eq!(project.entry_page_rel, Some(PathBuf::from("index.html")));
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
@@ -708,7 +699,8 @@ fn wasm_mode_uses_per_page_folder_layout() {
 
 #[test]
 fn wasm_directory_build_preserves_nested_routes() {
-    let root = unused_temp_path("wasm_directory_routes");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("src/docs")).expect("should create docs dir");
     fs::create_dir_all(root.join("src/blog")).expect("should create blog dir");
     let entry_root = fs::canonicalize(root.join("src")).expect("entry root should resolve");
@@ -740,8 +732,6 @@ fn wasm_directory_build_preserves_nested_routes() {
     assert!(output_paths.contains(&PathBuf::from("blog/page.js")));
     assert!(output_paths.contains(&PathBuf::from("blog/page.wasm")));
     assert_eq!(project.entry_page_rel, Some(PathBuf::from("index.html")));
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
@@ -777,7 +767,8 @@ fn builder_rejects_invalid_origin_config() {
 
 #[test]
 fn build_backend_emits_tracked_assets_and_dedupes_same_source_output() {
-    let root = unused_temp_path("builder_tracked_asset_dedupe");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("assets")).expect("should create assets dir");
     fs::create_dir_all(root.join("docs")).expect("should create docs dir");
     fs::write(root.join("assets/logo.png"), [1_u8, 2, 3]).expect("should write asset");
@@ -847,13 +838,12 @@ fn build_backend_emits_tracked_assets_and_dedupes_same_source_output() {
         1,
         "same source/same emitted path should dedupe"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn build_backend_allows_same_source_file_to_emit_multiple_relative_outputs() {
-    let root = unused_temp_path("builder_tracked_asset_relative_copies");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("blog/post")).expect("should create blog dir");
     fs::create_dir_all(root.join("shared")).expect("should create shared dir");
     fs::write(root.join("shared/logo.png"), [4_u8, 5, 6]).expect("should write asset");
@@ -918,13 +908,12 @@ fn build_backend_allows_same_source_file_to_emit_multiple_relative_outputs() {
         expect_bytes_output(&project.output_files, "blog/shared/logo.png"),
         [4_u8, 5, 6]
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn build_backend_rejects_conflicting_tracked_asset_output_paths() {
-    let root = unused_temp_path("builder_tracked_asset_conflict");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("assets")).expect("should create assets dir");
     fs::create_dir_all(root.join("docs")).expect("should create docs dir");
     fs::write(root.join("assets/logo-a.png"), [1_u8]).expect("should write first asset");
@@ -989,13 +978,12 @@ fn build_backend_rejects_conflicting_tracked_asset_output_paths() {
         portable_path_text(error.string_table.resolve(*output_path)),
         "assets/logo.png"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn build_backend_rejects_tracked_asset_output_that_matches_generated_html() {
-    let root = unused_temp_path("builder_tracked_asset_generated_output_conflict");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("assets")).expect("should create assets dir");
     fs::write(root.join("assets/copied.html"), b"asset").expect("should write asset");
     let canonical_root = fs::canonicalize(&root).expect("root should resolve");
@@ -1037,6 +1025,4 @@ fn build_backend_rejects_tracked_asset_output_that_matches_generated_html() {
         panic!("expected tracked asset versus generated output config reason");
     };
     assert_eq!(error.string_table.resolve(*output_path), "index.html");
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }

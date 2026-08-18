@@ -303,59 +303,6 @@ pub(crate) struct CaseExecutionResult {
     pub failure_kind: Option<FailureKind>,
 }
 
-impl CaseExecutionResult {
-    /// Create a valid success result with a build result.
-    ///
-    /// WHAT: enforces that a passed result carries a `BuildResult`, which the
-    ///   real pipeline always produces on success.
-    /// WHY: synthetic results with `passed = true` and `build_result = None`
-    ///   could make orchestration tests green while the value could not have
-    ///   been produced by the real pipeline.
-    #[cfg(test)]
-    #[allow(dead_code)]
-    pub(crate) fn success(build_result: BuildResult) -> Self {
-        Self {
-            passed: true,
-            panic_message: None,
-            build_result: Some(build_result),
-            messages: None,
-            failure_reason: None,
-            failure_kind: None,
-        }
-    }
-
-    /// Create a valid failure result with a reason and failure kind.
-    ///
-    /// WHAT: enforces that a failed result carries both a reason and a kind,
-    ///   which the real pipeline always sets on failure.
-    #[cfg(test)]
-    #[allow(dead_code)]
-    pub(crate) fn failure(reason: String, kind: FailureKind) -> Self {
-        Self {
-            passed: false,
-            panic_message: None,
-            build_result: None,
-            messages: None,
-            failure_reason: Some(reason),
-            failure_kind: Some(kind),
-        }
-    }
-
-    /// Create a harness-panic result.
-    #[cfg(test)]
-    #[allow(dead_code)]
-    pub(crate) fn harness_panic(message: String) -> Self {
-        Self {
-            passed: false,
-            panic_message: Some(message),
-            build_result: None,
-            messages: None,
-            failure_reason: None,
-            failure_kind: Some(FailureKind::HarnessFailed),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct SummaryCounts {
     pub total_tests: usize,

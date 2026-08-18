@@ -513,8 +513,8 @@ fn synthetic_prepared_identity_snapshot(
 }
 
 fn synthetic_identity_fixture(dependency_order: &[&str]) -> Vec<SyntheticPreparedIdentitySnapshot> {
-    let root = unused_temp_path("synthetic_rebound_identity_order");
-    fs::create_dir_all(&root).expect("should create synthetic fixture root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
 
     let dependency_clauses = dependency_order
         .iter()
@@ -572,10 +572,7 @@ fn synthetic_identity_fixture(dependency_order: &[&str]) -> Vec<SyntheticPrepare
             source_byte_count,
         )
         .expect("synthetic outputs should prepare against the retained source table");
-    let snapshot = synthetic_prepared_identity_snapshot(&prepared);
-
-    fs::remove_dir_all(&root).expect("should remove synthetic fixture root");
-    snapshot
+    synthetic_prepared_identity_snapshot(&prepared)
 }
 
 #[test]
@@ -612,8 +609,9 @@ fn synthetic_preparation_reuses_complete_outputs_for_one_final_header_pass() {
     let _test_guard = SOURCE_READ_COUNTER_TEST_LOCK
         .lock()
         .expect("source read counter test lock poisoned");
-    let root = unused_temp_path("synthetic_complete_output_reuse");
-    fs::create_dir_all(&root).expect("should create synthetic fixture root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     fs::write(root.join("main.moth"), "@helper greet\n").expect("should write entry");
     fs::write(
         root.join("helper.moth"),
@@ -757,8 +755,6 @@ fn synthetic_preparation_reuses_complete_outputs_for_one_final_header_pass() {
     assert_eq!(counter_value("file_preparation_pass_count"), 2.0);
     #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
     assert_eq!(counter_value("prepared_file_count"), 2.0);
-
-    fs::remove_dir_all(&root).expect("should remove synthetic fixture root");
 }
 
 #[test]
@@ -766,8 +762,9 @@ fn synthetic_diagnosed_preparation_is_not_consumed_again() {
     let _test_guard = SOURCE_READ_COUNTER_TEST_LOCK
         .lock()
         .expect("source read counter test lock poisoned");
-    let root = unused_temp_path("synthetic_diagnosed_preparation_once");
-    fs::create_dir_all(&root).expect("should create synthetic fixture root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     fs::write(root.join("main.moth"), "@helper\n").expect("should write entry");
     fs::write(root.join("helper.moth"), "@core/math sin,\n")
         .expect("should write malformed helper");
@@ -867,8 +864,6 @@ fn synthetic_diagnosed_preparation_is_not_consumed_again() {
         0.0,
         "diagnosed preparation attempts must not be counted as successful retained outputs"
     );
-
-    fs::remove_dir_all(&root).expect("should remove synthetic fixture root");
 }
 
 #[test]
@@ -1238,7 +1233,8 @@ fn source_tree_index_ignores_collision_in_fixed_skipped_directory() {
 
 #[test]
 fn source_tree_index_ignores_package_prefix_collision_in_skipped_directory() {
-    let root = unused_temp_path("source_tree_index_skipped_prefix_collision");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
     let entry_root = root.join("src");
     fs::create_dir_all(&entry_root).expect("should create entry root");
 
@@ -1274,13 +1270,12 @@ fn source_tree_index_ignores_package_prefix_collision_in_skipped_directory() {
         &mut string_table,
     )
     .expect("skipped folder matching a package prefix must not trigger prefix collision");
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn source_tree_index_detects_collision_in_non_skipped_directory() {
-    let root = unused_temp_path("source_tree_index_non_skipped_collision");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
     let entry_root = root.join("src");
     fs::create_dir_all(entry_root.join("helper")).expect("should create helper folder");
     fs::write(entry_root.join("helper.moth"), "x ~= 1\n").expect("should write colliding file");
@@ -1311,8 +1306,6 @@ fn source_tree_index_detects_collision_in_non_skipped_directory() {
         first_invalid_config_reason(&messages),
         InvalidConfigReason::SourceFileFolderCollision { .. }
     ));
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
@@ -1608,8 +1601,9 @@ impl ExternalImportProvider for ResolvingCountingProvider {
 
 #[test]
 fn parses_config_constant_declarations() {
-    let root = unused_temp_path("config_constants");
-    fs::create_dir_all(&root).expect("should create root dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
     fs::write(
@@ -1645,14 +1639,13 @@ fn parses_config_constant_declarations() {
         config.has_explicit_package_folders,
         "package_folders should be marked as explicitly configured"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn loads_canonical_config_file_from_project_root() {
-    let root = unused_temp_path("canonical_config_lookup");
-    fs::create_dir_all(&root).expect("should create root dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
         "entry_root #= \"src\"\n",
@@ -1673,8 +1666,6 @@ fn loads_canonical_config_file_from_project_root() {
 
     assert_eq!(config.config_file_path(), root.join("config.moth"));
     assert_eq!(config.entry_root, PathBuf::from("src"));
-
-    fs::remove_dir_all(&root).expect("should remove root dir");
 }
 
 #[test]
@@ -1725,8 +1716,9 @@ fn rejects_direct_canonical_config_dependency_paths() {
 
 #[test]
 fn rejects_unknown_config_key() {
-    let root = unused_temp_path("config_unknown_key");
-    fs::create_dir_all(&root).expect("should create root dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
     fs::write(&config_path, "custom_key #= \"custom_value\"\n").expect("should write config");
@@ -1771,14 +1763,13 @@ fn rejects_unknown_config_key() {
         diagnostic.primary_location.end_pos.char_column, 10,
         "UnknownKey should end at the authored key name span, not the initializer value"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn rejects_output_folder_inside_or_equal_to_entry_root_with_exact_location() {
-    let root = unused_temp_path("config_output_inside_entry_root");
-    fs::create_dir_all(&root).expect("should create root dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
     // `entry_root` covers `src`, so an `output_folder` of `src/out` is inside the entry root.
@@ -1821,8 +1812,6 @@ fn rejects_output_folder_inside_or_equal_to_entry_root_with_exact_location() {
     );
     assert_eq!(diagnostic.primary_location.start_pos.line_number, 1);
     assert_eq!(diagnostic.primary_location.start_pos.char_column, 18);
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
@@ -1862,8 +1851,9 @@ fn rejects_config_plain_and_mutable_bindings() {
 
 #[test]
 fn parses_config_explicit_hash_binding_mode() {
-    let root = unused_temp_path("config_hash_binding");
-    fs::create_dir_all(&root).expect("should create root dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
     fs::write(
@@ -1880,14 +1870,13 @@ fn parses_config_explicit_hash_binding_mode() {
     assert_eq!(config.entry_root, PathBuf::from("src"));
     assert_eq!(config.project_name, "docs");
     assert_eq!(config.version, "1.0");
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn rejects_config_function_declarations() {
-    let root = unused_temp_path("config_function_rejected");
-    fs::create_dir_all(&root).expect("should create root dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
     fs::write(&config_path, "helper ||:\n    entry_root = \"src\"\n;\n")
@@ -1910,8 +1899,6 @@ fn rejects_config_function_declarations() {
         "unexpected diagnostic payload: {:?}",
         diagnostic.payload
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
@@ -1952,8 +1939,9 @@ fn accepts_config_type_declarations() {
 
 #[test]
 fn rejects_config_standalone_template() {
-    let root = unused_temp_path("config_standalone_template_rejected");
-    fs::create_dir_all(&root).expect("should create root dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
     fs::write(&config_path, "[: hello]\n").expect("should write config");
@@ -1975,14 +1963,13 @@ fn rejects_config_standalone_template() {
         "unexpected diagnostic payload: {:?}",
         diagnostic.payload
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn rejects_config_const_page_fragment() {
-    let root = unused_temp_path("config_const_fragment_rejected");
-    fs::create_dir_all(&root).expect("should create root dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
     fs::write(&config_path, "#[: hello]\n").expect("should write config");
@@ -2004,14 +1991,13 @@ fn rejects_config_const_page_fragment() {
         "unexpected diagnostic payload: {:?}",
         diagnostic.payload
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn rejects_project_local_config_dependency_even_when_module_root_exists() {
-    let root = unused_temp_path("config_project_local_import_rejected");
-    fs::create_dir_all(&root).expect("should create root dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     fs::create_dir_all(root.join("settings")).expect("should create settings module");
     fs::write(root.join("settings/@mod.moth"), "value #= \"src\"\n")
         .expect("should write settings root");
@@ -2036,8 +2022,6 @@ fn rejects_project_local_config_dependency_even_when_module_root_exists() {
         "unexpected diagnostic payload: {:?}",
         diagnostic.payload
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
@@ -2088,7 +2072,8 @@ fn rejects_builder_config_dependency_without_discovering_the_package_root() {
 
 #[test]
 fn legacy_package_folder_does_not_register_project_local_source_metadata() {
-    let root = unused_temp_path("configured_project_local_package_metadata");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
     let package_root = root.join("packages/widgets");
     fs::create_dir_all(&package_root).expect("should create project-local package");
     fs::create_dir_all(root.join("src")).expect("should create entry root");
@@ -2112,13 +2097,12 @@ fn legacy_package_folder_does_not_register_project_local_source_metadata() {
         resolver.source_package_roots().is_empty(),
         "ordinary configured package folders must not register source packages"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn ordinary_package_folder_does_not_collide_with_entry_root() {
-    let root = unused_temp_path("entry_root_lib_collision");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("src/helper")).expect("should create src/helper");
     fs::create_dir_all(root.join("lib/helper")).expect("should create lib/helper");
     fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
@@ -2144,14 +2128,13 @@ fn ordinary_package_folder_does_not_collide_with_entry_root() {
 
     let resolver = result.expect("ordinary package folders are not canonical package roots");
     assert!(resolver.source_package_roots().is_empty());
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn rejects_package_folder_absolute_path_entry() {
-    let root = unused_temp_path("invalid_package_folders_absolute");
-    fs::create_dir_all(&root).expect("should create root dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
     fs::write(&config_path, "package_folders #= { \"/absolute/lib\" }\n")
@@ -2177,14 +2160,13 @@ fn rejects_package_folder_absolute_path_entry() {
         "unexpected diagnostic payload: {:?}",
         diagnostic.payload
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn rejects_package_folder_parent_directory_entry() {
-    let root = unused_temp_path("invalid_package_folders_dotdot");
-    fs::create_dir_all(&root).expect("should create root dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
     fs::write(&config_path, "package_folders #= { \"../lib\" }\n").expect("should write config");
@@ -2209,14 +2191,13 @@ fn rejects_package_folder_parent_directory_entry() {
         "unexpected diagnostic payload: {:?}",
         diagnostic.payload
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn rejects_duplicate_package_folder_entries() {
-    let root = unused_temp_path("duplicate_package_folders");
-    fs::create_dir_all(&root).expect("should create root dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
     fs::write(&config_path, "package_folders #= { \"lib\", \"lib\" }\n")
@@ -2239,14 +2220,13 @@ fn rejects_duplicate_package_folder_entries() {
         "unexpected diagnostic payload: {:?}",
         diagnostic.payload
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn rejects_nested_package_folder_entry() {
-    let root = unused_temp_path("invalid_package_folders_nested");
-    fs::create_dir_all(&root).expect("should create root dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
     fs::write(&config_path, "package_folders #= { \"lib/helpers\" }\n")
@@ -2272,13 +2252,12 @@ fn rejects_nested_package_folder_entry() {
         "unexpected diagnostic payload: {:?}",
         diagnostic.payload
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn missing_default_package_folder_is_ignored() {
-    let root = unused_temp_path("missing_default_lib_ignored");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("src")).expect("should create src");
     fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(root.join("config.moth"), "entry_root #= \"src\"\n").expect("should write config");
@@ -2310,14 +2289,13 @@ fn missing_default_package_folder_is_ignored() {
         resolver.source_package_roots().is_empty(),
         "no source-backed packages should be discovered when default /lib is missing"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn accepts_config_const_record_field_projection() {
-    let root = unused_temp_path("config_const_record_projection");
-    fs::create_dir_all(&root).expect("should create root dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
     fs::write(
@@ -2336,8 +2314,6 @@ fn accepts_config_const_record_field_projection() {
         PathBuf::from("src"),
         "entry_root should resolve through const-record field projection"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
@@ -2397,8 +2373,9 @@ fn malformed_dependency_path_keeps_precise_location_during_module_discovery() {
 
 #[test]
 fn config_dependency_parse_failure_keeps_precise_location_in_compiler_messages() {
-    let root = unused_temp_path("config_import_location");
-    fs::create_dir_all(&root).expect("should create root dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let config_path = root.join(settings::CONFIG_FILE_NAME);
     fs::write(&config_path, "@core/math sin\n").expect("should write invalid config");
 
@@ -2430,8 +2407,6 @@ fn config_dependency_parse_failure_keeps_precise_location_in_compiler_messages()
         "unexpected diagnostic payload: {:?}",
         diagnostic.payload
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
@@ -2797,8 +2772,9 @@ fn discover_all_modules_finds_normal_roots_across_multiple_directories() {
 
 #[test]
 fn accepts_folded_template_initializer_for_compile_time_config_binding() {
-    let root = unused_temp_path("config_folded_template");
-    fs::create_dir_all(&root).expect("should create root dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
     fs::write(&config_path, "project #= [:html]\n").expect("should write config");
@@ -2813,14 +2789,13 @@ fn accepts_folded_template_initializer_for_compile_time_config_binding() {
         Some(&"html".to_string()),
         "folded template should become config string value"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn accepts_config_local_reference_to_earlier_private_const() {
-    let root = unused_temp_path("config_local_reference");
-    fs::create_dir_all(&root).expect("should create root dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
     fs::write(&config_path, "version #= \"0.2.0\"\nauthor #= version\n")
@@ -2836,14 +2811,13 @@ fn accepts_config_local_reference_to_earlier_private_const() {
         config.author, "0.2.0",
         "author should resolve through private const reference"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn rejects_config_unresolved_local_reference() {
-    let root = unused_temp_path("config_unresolved_local_reference");
-    fs::create_dir_all(&root).expect("should create root dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
     fs::write(
@@ -2863,14 +2837,13 @@ fn rejects_config_unresolved_local_reference() {
         "unexpected diagnostic payload: {:?}",
         diagnostic.payload
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn rejects_config_non_compile_time_constant_value() {
-    let root = unused_temp_path("config_non_foldable");
-    fs::create_dir_all(&root).expect("should create root dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
     fs::write(&config_path, "project #= Error(\"bad\").message\n").expect("should write config");
@@ -2892,14 +2865,13 @@ fn rejects_config_non_compile_time_constant_value() {
         "unexpected diagnostic payload: {:?}",
         diagnostic.payload
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn rejects_duplicate_plain_config_bindings_before_config_validation() {
-    let root = unused_temp_path("config_duplicate_private");
-    fs::create_dir_all(&root).expect("should create root dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
     fs::write(
@@ -2927,14 +2899,13 @@ fn rejects_duplicate_plain_config_bindings_before_config_validation() {
         "expected immutable-assignment diagnostic for duplicate private keys, got: {:?}",
         diagnostic.payload
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn rejects_config_non_key_private_helper() {
-    let root = unused_temp_path("config_non_key_helper");
-    fs::create_dir_all(&root).expect("should create root dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
     fs::write(&config_path, "helper #= \"src\"\nentry_root #= helper\n")
@@ -2957,14 +2928,13 @@ fn rejects_config_non_key_private_helper() {
         "expected unknown key diagnostic for non-key helper, got: {:?}",
         diagnostic.payload
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn rejects_config_runtime_call_in_value() {
-    let root = unused_temp_path("config_runtime_call");
-    fs::create_dir_all(&root).expect("should create root dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
     fs::write(&config_path, "project #= io.line([: [\"hello\"]])\n").expect("should write config");
@@ -2986,16 +2956,15 @@ fn rejects_config_runtime_call_in_value() {
         "expected external-function-call-in-constant-context diagnostic for runtime call, got: {:?}",
         diagnostic.payload
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 // ── Config value shape enforcement tests ──────────────────────────────────────
 
 #[test]
 fn accepts_valid_bool_config_keys() {
-    let root = unused_temp_path("config_bool_shape_ok");
-    fs::create_dir_all(&root).expect("should create root dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
     fs::write(
@@ -3017,14 +2986,13 @@ fn accepts_valid_bool_config_keys() {
         config.settings.get("html_inject_core_css"),
         Some(&"true".to_string())
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn rejects_core_string_key_with_bool_value() {
-    let root = unused_temp_path("config_string_shape_bool_rejected");
-    fs::create_dir_all(&root).expect("should create root dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
     fs::write(&config_path, "entry_root #= true\n").expect("should write config");
@@ -3043,14 +3011,13 @@ fn rejects_core_string_key_with_bool_value() {
         "a string value",
         "string-key shape mismatch must report the expected string shape"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn rejects_backend_bool_key_with_string_value() {
-    let root = unused_temp_path("config_bool_shape_string_rejected");
-    fs::create_dir_all(&root).expect("should create root dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
     fs::write(&config_path, "redirect_index_html #= \"false\"\n").expect("should write config");
@@ -3070,14 +3037,13 @@ fn rejects_backend_bool_key_with_string_value() {
         "a boolean value",
         "backend bool-key shape mismatch must report the expected bool shape"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn rejects_package_folders_with_bool_value() {
-    let root = unused_temp_path("config_package_folders_bool_rejected");
-    fs::create_dir_all(&root).expect("should create root dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
     fs::write(&config_path, "package_folders #= true\n").expect("should write config");
@@ -3099,14 +3065,13 @@ fn rejects_package_folders_with_bool_value() {
         "unexpected diagnostic payload: {:?}",
         diagnostic.payload
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn accepts_package_folders_single_string() {
-    let root = unused_temp_path("config_package_folders_single_string");
-    fs::create_dir_all(&root).expect("should create root dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
     fs::write(&config_path, "package_folders #= \"lib\"\n").expect("should write config");
@@ -3118,14 +3083,13 @@ fn accepts_package_folders_single_string() {
 
     assert_eq!(config.package_folders, vec![PathBuf::from("lib")]);
     assert!(config.has_explicit_package_folders);
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn accepts_config_local_reference_after_shape_enforcement() {
-    let root = unused_temp_path("config_local_ref_after_shape");
-    fs::create_dir_all(&root).expect("should create root dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
     fs::write(
@@ -3149,14 +3113,13 @@ fn accepts_config_local_reference_after_shape_enforcement() {
         PathBuf::from("dev"),
         "dev_folder should keep its explicit value"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn detects_duplicate_top_level_config_constants() {
-    let root = unused_temp_path("config_duplicate_top_level_constants");
-    fs::create_dir_all(&root).expect("should create root dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
     fs::write(
@@ -3182,8 +3145,6 @@ fn detects_duplicate_top_level_config_constants() {
         "unexpected diagnostic payload: {:?}",
         diagnostic.payload
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 // ── Canonical config identity tests ──────────────────────────────────────────
@@ -3193,8 +3154,9 @@ fn authored_config_keeps_non_canonical_spelling_in_duplicate_diagnostic() {
     // The caller-provided config path spelling is preserved as the authored source-location
     // identity even when it is non-canonical. The resolver directory comes only from the
     // canonical config parent, while diagnostics keep the authored spelling.
-    let root = unused_temp_path("config_non_canonical_spelling");
-    fs::create_dir_all(&root).expect("should create root dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     fs::create_dir_all(root.join("sub")).expect("should create sub dir");
     let config_path = root.join("config.moth");
     fs::write(
@@ -3235,16 +3197,15 @@ fn authored_config_keeps_non_canonical_spelling_in_duplicate_diagnostic() {
         rendered_scope.contains("sub") && rendered_scope.contains(".."),
         "expected non-canonical authored spelling in diagnostic scope, got: {rendered_scope}"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn authored_config_resolver_uses_canonical_parent_for_noncanonical_spelling() {
     // A non-canonical config path that detours through a sibling directory must still derive
     // the resolver directory from the canonical config parent and apply the config value.
-    let root = unused_temp_path("config_relative_parent_spelling");
-    fs::create_dir_all(&root).expect("should create root dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     fs::create_dir_all(root.join("sub")).expect("should create sub dir");
     let config_path = root.join("config.moth");
     fs::write(&config_path, "entry_root #= \"src\"\n").expect("should write config");
@@ -3257,14 +3218,13 @@ fn authored_config_resolver_uses_canonical_parent_for_noncanonical_spelling() {
         .expect("non-canonical authored spelling should resolve and apply config");
 
     assert_eq!(config.entry_root, PathBuf::from("src"));
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn project_local_lib_directory_is_ignored_as_source_package_root() {
-    let root = unused_temp_path("project_local_lib");
-    fs::create_dir_all(&root).expect("should create root dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     fs::create_dir_all(root.join("lib/helper")).expect("should create lib/helper");
     fs::create_dir_all(root.join("src")).expect("should create src");
     fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
@@ -3301,14 +3261,13 @@ fn project_local_lib_directory_is_ignored_as_source_package_root() {
             .is_err(),
         "legacy lib folders must not resolve as source packages"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn builder_package_prefix_is_independent_of_ordinary_lib_directory() {
-    let root = unused_temp_path("lib_collision");
-    fs::create_dir_all(&root).expect("should create root dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     fs::create_dir_all(root.join("lib/html")).expect("should create lib/html");
     fs::create_dir_all(root.join("builder/html")).expect("should create builder/html");
     fs::create_dir_all(root.join("src")).expect("should create src");
@@ -3340,14 +3299,13 @@ fn builder_package_prefix_is_independent_of_ordinary_lib_directory() {
         resolver.source_package_roots().get("html"),
         Some(&fs::canonicalize(root.join("builder/html")).unwrap())
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn configured_package_folder_is_ignored_as_source_package_root() {
-    let root = unused_temp_path("project_local_custom_package_folder");
-    fs::create_dir_all(&root).expect("should create root dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     fs::create_dir_all(root.join("packages/helper")).expect("should create packages/helper");
     fs::create_dir_all(root.join("src")).expect("should create src");
     fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
@@ -3389,13 +3347,12 @@ fn configured_package_folder_is_ignored_as_source_package_root() {
             .is_err(),
         "configured package folders must not become source-backed packages"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn missing_explicit_package_folder_is_ignored_by_stage0() {
-    let root = unused_temp_path("missing_explicit_package_folder");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("src")).expect("should create src");
     fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(
@@ -3423,13 +3380,12 @@ fn missing_explicit_package_folder_is_ignored_by_stage0() {
 
     let resolver = result.expect("legacy package folder validation is outside canonical Stage 0");
     assert!(resolver.source_package_roots().is_empty());
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn explicit_package_folder_file_is_ignored_by_stage0() {
-    let root = unused_temp_path("package_folder_not_directory");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("src")).expect("should create src");
     fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(root.join("packages"), "").expect("should write file in place of folder");
@@ -3458,13 +3414,12 @@ fn explicit_package_folder_file_is_ignored_by_stage0() {
 
     let resolver = result.expect("legacy package folder validation is outside canonical Stage 0");
     assert!(resolver.source_package_roots().is_empty());
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn entry_root_requires_at_least_one_root_entry_file() {
-    let root = unused_temp_path("entry_root_without_entries");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("src")).expect("should create src");
     fs::write(root.join("config.moth"), "entry_root #= \"src\"\n").expect("should write config");
 
@@ -3486,15 +3441,14 @@ fn entry_root_requires_at_least_one_root_entry_file() {
         first_invalid_config_reason(&messages),
         InvalidConfigReason::NoRootModuleEntries { .. }
     ));
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 // ── Phase 4 project-structure collision tests ─────────────────────────────────
 
 #[test]
 fn rejects_moth_file_and_folder_collision_in_same_directory() {
-    let root = unused_temp_path("moth_folder_collision");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("src/UI")).expect("should create src/UI");
     fs::write(root.join("src/UI/@page.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(root.join("src/ui.moth"), "y ~= 2\n").expect("should write colliding file");
@@ -3527,13 +3481,12 @@ fn rejects_moth_file_and_folder_collision_in_same_directory() {
         first_invalid_config_reason(&messages),
         InvalidConfigReason::SourceFileFolderCollision { .. }
     ));
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn rejects_template_file_and_folder_collision_in_same_directory() {
-    let root = unused_temp_path("template_folder_collision");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("src/ui")).expect("should create src/ui");
     fs::write(root.join("src/ui/@page.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(root.join("src/ui.mtf"), "template\n").expect("should write colliding file");
@@ -3561,13 +3514,12 @@ fn rejects_template_file_and_folder_collision_in_same_directory() {
         first_invalid_config_reason(&messages),
         InvalidConfigReason::SourceFileFolderCollision { .. }
     ));
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn allows_same_stem_in_different_directories() {
-    let root = unused_temp_path("same_stem_different_dirs");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("src/components")).expect("should create src/components");
     fs::create_dir_all(root.join("src/pages")).expect("should create src/pages");
     fs::write(root.join("src/components/card.moth"), "x ~= 1\n").expect("should write card");
@@ -3592,13 +3544,12 @@ fn allows_same_stem_in_different_directories() {
         &mut string_table,
     )
     .expect("same stem in different directories should be allowed");
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn rejects_collision_with_empty_folder() {
-    let root = unused_temp_path("collision_empty_folder");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("src/helper")).expect("should create src/helper");
     fs::write(root.join("src/helper.moth"), "x ~= 1\n").expect("should write colliding file");
     fs::write(root.join("src/@page.moth"), "y ~= 2\n").expect("should write entry");
@@ -3631,13 +3582,12 @@ fn rejects_collision_with_empty_folder() {
         first_invalid_config_reason(&messages),
         InvalidConfigReason::SourceFileFolderCollision { .. }
     ));
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn js_file_with_same_stem_as_folder_does_not_trigger_collision() {
-    let root = unused_temp_path("js_same_stem_no_collision");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("src/helper")).expect("should create src/helper");
     fs::write(root.join("src/helper.js"), "// js\n").expect("should write js file");
     fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
@@ -3660,8 +3610,6 @@ fn js_file_with_same_stem_as_folder_does_not_trigger_collision() {
         &mut string_table,
     )
     .expect(".js file with same stem as folder should not trigger collision");
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
@@ -4491,8 +4439,8 @@ fn stage0_loads_asset_sources_and_preserves_deterministic_input_order() {
 
 #[test]
 fn stage0_parallel_missing_source_loading_preserves_input_order() {
-    let root = unused_temp_path("stage0_parallel_missing_source_order");
-    fs::create_dir_all(&root).expect("should create root dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
 
     let source_paths = (0..super::source_discovery::STAGE0_PARALLEL_SOURCE_LOAD_MIN_FILES)
         .map(|index| {
@@ -4534,14 +4482,13 @@ fn stage0_parallel_missing_source_loading_preserves_input_order() {
             _ => panic!("missing-source loading should produce PlainMarkdown inputs"),
         }
     }
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn stage0_missing_source_load_preserves_file_error_shape() {
-    let root = unused_temp_path("stage0_missing_source_load_error");
-    fs::create_dir_all(&root).expect("should create root dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let missing_source = root.join("missing.md");
     let mut string_table = StringTable::new();
 
@@ -4566,8 +4513,6 @@ fn stage0_missing_source_load_preserves_file_error_shape() {
             .contains("missing.md"),
         "missing source path should be preserved in the diagnostic location"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
@@ -6730,8 +6675,9 @@ fn module_package_dependency_index_walks_only_direct_dependencies() {
 #[test]
 fn synthetic_traversal_prepares_retained_clauses_without_a_token_rescan() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let root = unused_temp_path("synthetic_no_token_rescan");
-    fs::create_dir_all(&root).expect("should create temp root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     fs::create_dir_all(root.join("utils")).expect("should create utils directory");
     fs::write(root.join("main.moth"), "@utils/helper greet\ngreet()\n")
         .expect("should write main file");
@@ -6816,8 +6762,6 @@ fn synthetic_traversal_prepares_retained_clauses_without_a_token_rescan() {
         0.0,
         "no explicit-extension provider clause is bound in this traversal"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[cfg(all(feature = "timers", feature = "benchmark_counters"))]

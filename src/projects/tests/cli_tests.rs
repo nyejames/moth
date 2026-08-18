@@ -101,8 +101,9 @@ fn build_command_writes_the_validated_directory_output_plan() {
 #[test]
 fn failed_output_plan_records_the_build_command_total() {
     let _test_guard = crate::timing::lock_instrumentation_tests();
-    let root = unused_temp_path("cli_failed_output_plan_timer");
-    fs::create_dir_all(&root).expect("should create temporary project root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let entry_file = root.join("main.moth");
     fs::write(&entry_file, "value = 1\n").expect("should write source file");
 
@@ -144,8 +145,6 @@ fn failed_output_plan_records_the_build_command_total() {
         1,
         "the failed output-plan path must finish the output segment before the session drains"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temporary project root");
 }
 
 #[test]
@@ -989,8 +988,9 @@ fn build_command_total_excludes_renderer_work() {
 #[test]
 fn failed_output_write_records_build_command_total() {
     let _test_guard = crate::timing::lock_instrumentation_tests();
-    let root = unused_temp_path("cli_failed_output_write_timer");
-    fs::create_dir_all(&root).expect("should create temporary project root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let entry_file = root.join("main.moth");
     fs::write(&entry_file, "value = 1\n").expect("should write source file");
 
@@ -1033,6 +1033,4 @@ fn failed_output_write_records_build_command_total() {
         1,
         "the failed output-write path must finish the output segment before the session drains"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temporary project root");
 }

@@ -71,6 +71,10 @@ fn expected_failure_case(case_id: &str, backend_id: BackendId) -> TestCaseSpec {
     }
 }
 
+/// Display-only synthetic for formatter tests. The terse reporter reads `passed`,
+/// `failure_kind`, `panic_message`, `failure_reason` and `messages` — it never accesses
+/// `build_result`. Creating a real `BuildResult` would couple formatter tests to the
+/// build pipeline, so this value is intentionally minimal for display-only assertions.
 fn passed_result() -> CaseExecutionResult {
     CaseExecutionResult {
         passed: true,

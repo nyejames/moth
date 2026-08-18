@@ -6,10 +6,8 @@
 //!   infrastructure error type or authored reason so an unrelated error
 //!   cannot satisfy the intended contract.
 
-#![allow(dead_code)]
-
 use crate::compiler_frontend::compiler_errors::{CompilerMessages, ErrorType};
-use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, DiagnosticSeverity};
+use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use std::collections::BTreeMap;
 
 /// Assert that the diagnostic codes of all error-severity diagnostics match
@@ -63,13 +61,16 @@ pub fn assert_exact_infrastructure_error(messages: &CompilerMessages, expected_t
 }
 
 /// Assert that the error diagnostic with the given `code` and 1-based
-/// `occurrence` carries the expected `DiagnosticPayload` reason variant.
+/// `occurrence` carries the expected stable reason key.
 ///
-/// WHAT: finds the n-th occurrence of `code` among error diagnostics and
-///   checks that its payload matches the expected variant name.
+/// WHAT: finds the n-th occurrence of `code` among error diagnostics and checks
+///   that its `diagnostic.identity().reason_key` matches the expected value.
 /// WHY: broad `is_err()` accepts any failure. Reason assertions prove the
-///   correct diagnostic lane, not just that an error was emitted.
+///   correct diagnostic lane, not just that an error was emitted. Reason keys
+///   come from compiler payload identity — this helper does not invent a
+///   parallel reason taxonomy.
 #[track_caller]
+#[allow(dead_code)]
 pub fn assert_diagnostic_reason(
     messages: &CompilerMessages,
     code: &str,
@@ -88,7 +89,8 @@ pub fn assert_diagnostic_reason(
     );
 
     let diagnostic = matching[occurrence - 1];
-    let actual_reason = payload_variant_name(&diagnostic.payload);
+    let identity = diagnostic.identity();
+    let actual_reason = identity.reason_key.unwrap_or("<none>");
     assert_eq!(
         actual_reason, expected_reason,
         "diagnostic '{code}' occurrence {occurrence} has reason '{actual_reason}', \
@@ -96,34 +98,12 @@ pub fn assert_diagnostic_reason(
     );
 }
 
-/// Return the variant name of a `DiagnosticPayload` for reason assertions.
-fn payload_variant_name(payload: &DiagnosticPayload) -> &'static str {
-    match payload {
-        DiagnosticPayload::None => "None",
-        DiagnosticPayload::ExpectedToken { .. } => "ExpectedToken",
-        DiagnosticPayload::UnexpectedToken { .. } => "UnexpectedToken",
-        DiagnosticPayload::UnexpectedTrailingComma => "UnexpectedTrailingComma",
-        DiagnosticPayload::UnescapedImplicitTemplateClose { .. } => {
-            "UnescapedImplicitTemplateClose"
-        }
-        DiagnosticPayload::UnknownName { .. } => "UnknownName",
-        DiagnosticPayload::TypeMismatch { .. } => "TypeMismatch",
-        DiagnosticPayload::DuplicateDeclaration { .. } => "DuplicateDeclaration",
-        DiagnosticPayload::MissingImportTarget { .. } => "MissingImportTarget",
-        DiagnosticPayload::AmbiguousImportTarget { .. } => "AmbiguousImportTarget",
-        DiagnosticPayload::BareFileImport { .. } => "BareFileImport",
-        DiagnosticPayload::DirectSpecialFileImport { .. } => "DirectSpecialFileImport",
-        DiagnosticPayload::InfrastructureError { .. } => "InfrastructureError",
-        // This is not exhaustive — add more variants as needed by tests.
-        _ => "Other",
-    }
-}
-
 /// Build an exact count map of error diagnostic codes.
 ///
 /// WHAT: returns a `BTreeMap` from code to occurrence count.
 /// WHY: useful for comparing multisets in tests that need exact cardinality.
 #[track_caller]
+#[allow(dead_code)]
 pub fn error_code_counts(messages: &CompilerMessages) -> BTreeMap<String, usize> {
     let mut counts = BTreeMap::new();
     for diagnostic in messages.diagnostics() {

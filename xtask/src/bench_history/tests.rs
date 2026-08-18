@@ -10,6 +10,65 @@ use tempfile::tempdir;
 
 static THREAD_ENV_LOCK: Mutex<()> = Mutex::new(());
 
+/// Panic-safe scoped environment variable guard.
+///
+/// WHAT: saves the current value of an env var, sets a new one (or removes it),
+///   and restores the original on drop — even during unwinding.
+/// WHY: direct `set_var`/`remove_var` without a guard leaves the environment
+///   modified if an assertion panics, poisoning the test mutex and breaking
+///   every subsequent test that depends on the same variable.
+struct ScopedEnvVar {
+    key: &'static str,
+    saved: Option<std::ffi::OsString>,
+    /// Once consumed by `restore`, the guard will not restore again on drop.
+    restored: bool,
+}
+
+impl ScopedEnvVar {
+    fn set(key: &'static str, value: &str) -> Self {
+        let saved = std::env::var_os(key);
+        // SAFETY: no other thread accesses this env var while we hold THREAD_ENV_LOCK.
+        unsafe {
+            std::env::set_var(key, value);
+        }
+        Self {
+            key,
+            saved,
+            restored: false,
+        }
+    }
+
+    fn remove(key: &'static str) -> Self {
+        let saved = std::env::var_os(key);
+        // SAFETY: no other thread accesses this env var while we hold THREAD_ENV_LOCK.
+        unsafe {
+            std::env::remove_var(key);
+        }
+        Self {
+            key,
+            saved,
+            restored: false,
+        }
+    }
+}
+
+impl Drop for ScopedEnvVar {
+    fn drop(&mut self) {
+        if self.restored {
+            return;
+        }
+        // SAFETY: no other thread accesses this env var while we hold THREAD_ENV_LOCK.
+        match &self.saved {
+            Some(value) => unsafe {
+                std::env::set_var(self.key, value);
+            },
+            None => unsafe {
+                std::env::remove_var(self.key);
+            },
+        }
+    }
+}
+
 fn cli_runner() -> BenchmarkRunner {
     BenchmarkRunner::Cli {
         command: CliBenchmarkCommand::Check,
@@ -560,25 +619,18 @@ fn effective_thread_count_distinguishes_unset_and_fixed() {
     let _guard = THREAD_ENV_LOCK
         .lock()
         .expect("environment lock should work");
-    let saved = std::env::var_os("RAYON_NUM_THREADS");
 
-    unsafe {
-        std::env::remove_var("RAYON_NUM_THREADS");
+    // The scoped guards restore the original env value on drop, including
+    // during unwinding, so a panicking assertion cannot leave the environment
+    // modified or poison the mutex for subsequent tests.
+    {
+        let _env = ScopedEnvVar::remove("RAYON_NUM_THREADS");
+        assert_eq!(effective_thread_count(), Ok(None));
     }
-    assert_eq!(effective_thread_count(), Ok(None));
 
-    unsafe {
-        std::env::set_var("RAYON_NUM_THREADS", "4");
-    }
-    assert_eq!(effective_thread_count(), Ok(Some(4)));
-
-    match saved {
-        Some(value) => unsafe {
-            std::env::set_var("RAYON_NUM_THREADS", value);
-        },
-        None => unsafe {
-            std::env::remove_var("RAYON_NUM_THREADS");
-        },
+    {
+        let _env = ScopedEnvVar::set("RAYON_NUM_THREADS", "4");
+        assert_eq!(effective_thread_count(), Ok(Some(4)));
     }
 }
 

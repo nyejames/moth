@@ -136,7 +136,8 @@ fn accepts_acceptance_only_without_fixture_specific_source_marker() {
 
 #[test]
 fn empty_backend_golden_directory_has_no_contract() {
-    let root = unused_temp_path("empty_backend_golden_directory");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
@@ -156,13 +157,12 @@ fn empty_backend_golden_directory_has_no_contract() {
     };
     assert!(!expectation.golden.is_present());
     assert_eq!(expectation.golden.mode, None);
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
 fn empty_nested_golden_directory_has_no_contract() {
-    let root = unused_temp_path("empty_nested_golden_directory");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(case_root.join(GOLDEN_DIR_NAME).join("html").join("nested"))
@@ -182,8 +182,6 @@ fn empty_nested_golden_directory_has_no_contract() {
     };
     assert!(!expectation.golden.is_present());
     assert_eq!(expectation.golden.mode, None);
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
@@ -773,7 +771,8 @@ fn symlink_directory(target: &Path, link: &Path) -> std::io::Result<()> {
 #[test]
 fn rejects_input_directory_symlink_escape() {
     let root = unused_temp_path("input_directory_symlink_escape");
-    let outside = unused_temp_path("input_directory_symlink_escape_target");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let outside = _temp.path().to_path_buf();
     let case_root = root.join("case");
     let input_link = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&case_root).expect("should create fixture root");
@@ -781,7 +780,7 @@ fn rejects_input_directory_symlink_escape() {
     fs::write(outside.join("@page.moth"), "#[:ok]\n").expect("should write outside source");
     if symlink_directory(&outside, &input_link).is_err() {
         fs::remove_dir_all(&root).expect("should clean up root");
-        fs::remove_dir_all(&outside).expect("should clean up target");
+
         return;
     }
     fs::write(
@@ -806,7 +805,8 @@ fn rejects_input_directory_symlink_escape() {
 #[test]
 fn rejects_entry_symlink_escape() {
     let root = unused_temp_path("entry_symlink_escape");
-    let outside = unused_temp_path("entry_symlink_escape_target");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let outside = _temp.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     let entry_link = input_root.join("escape.mtf");
@@ -816,7 +816,7 @@ fn rejects_entry_symlink_escape() {
     fs::write(&outside_entry, "#[:ok]\n").expect("should write outside entry");
     if symlink_file(&outside_entry, &entry_link).is_err() {
         fs::remove_dir_all(&root).expect("should clean up root");
-        fs::remove_dir_all(&outside).expect("should clean up target");
+
         return;
     }
     fs::write(
@@ -876,7 +876,8 @@ fn rejects_contained_golden_file_symlink() {
 #[test]
 fn rejects_escaping_golden_file_symlink() {
     let root = unused_temp_path("golden_escaping_file_symlink");
-    let outside = unused_temp_path("golden_escaping_file_symlink_target");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let outside = _temp.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     let golden_root = case_root.join(GOLDEN_DIR_NAME).join("html");
@@ -888,7 +889,7 @@ fn rejects_escaping_golden_file_symlink() {
     fs::write(&outside_file, "<h1>stolen</h1>\n").expect("should write outside golden");
     if symlink_file(&outside_file, &golden_root.join("escape.html")).is_err() {
         fs::remove_dir_all(&root).expect("should clean up root");
-        fs::remove_dir_all(&outside).expect("should clean up target");
+
         return;
     }
     fs::write(
@@ -910,7 +911,8 @@ fn rejects_escaping_golden_file_symlink() {
 #[test]
 fn rejects_golden_directory_symlink() {
     let root = unused_temp_path("golden_directory_symlink");
-    let outside = unused_temp_path("golden_directory_symlink_target");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let outside = _temp.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     let golden_root = case_root.join(GOLDEN_DIR_NAME).join("html");
@@ -922,7 +924,7 @@ fn rejects_golden_directory_symlink() {
         .expect("should write outside golden");
     if symlink_directory(&outside, &golden_root.join("linked_dir")).is_err() {
         fs::remove_dir_all(&root).expect("should clean up root");
-        fs::remove_dir_all(&outside).expect("should clean up target");
+
         return;
     }
     fs::write(
@@ -944,7 +946,8 @@ fn rejects_golden_directory_symlink() {
 #[test]
 fn rejects_backend_golden_root_symlink() {
     let root = unused_temp_path("golden_root_symlink");
-    let outside = unused_temp_path("golden_root_symlink_target");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let outside = _temp.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     let golden_parent = case_root.join(GOLDEN_DIR_NAME);
@@ -956,7 +959,7 @@ fn rejects_backend_golden_root_symlink() {
         .expect("should write outside golden");
     if symlink_directory(&outside, &golden_parent.join("html")).is_err() {
         fs::remove_dir_all(&root).expect("should clean up root");
-        fs::remove_dir_all(&outside).expect("should clean up target");
+
         return;
     }
     fs::write(
@@ -981,7 +984,8 @@ fn rejects_backend_golden_root_symlink() {
 #[test]
 fn rejects_golden_parent_symlink() {
     let root = unused_temp_path("golden_parent_symlink");
-    let outside = unused_temp_path("golden_parent_symlink_target");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let outside = _temp.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     let golden_parent = case_root.join(GOLDEN_DIR_NAME);
@@ -994,7 +998,7 @@ fn rejects_golden_parent_symlink() {
         .expect("should write outside golden");
     if symlink_directory(&outside, &golden_parent).is_err() {
         fs::remove_dir_all(&root).expect("should clean up root");
-        fs::remove_dir_all(&outside).expect("should clean up target");
+
         return;
     }
     fs::write(

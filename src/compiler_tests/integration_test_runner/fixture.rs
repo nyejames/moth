@@ -33,12 +33,30 @@ pub(crate) fn load_test_suite_from_root(root: &Path) -> Result<TestSuiteSpec, St
     })?;
     let mut cases = Vec::new();
     let manifest_path = canonical_suite_root.join(MANIFEST_FILE_NAME);
-    if !manifest_path.is_file() {
-        return Err(format!(
-            "Canonical integration root '{}' must define '{}'.",
-            canonical_suite_root.display(),
-            MANIFEST_FILE_NAME
-        ));
+    // Use symlink_metadata to distinguish absence from IO errors so metadata
+    // failures do not masquerade as a missing manifest.
+    match std::fs::symlink_metadata(&manifest_path) {
+        Ok(metadata) if metadata.is_file() => {}
+        Ok(_) => {
+            return Err(format!(
+                "Canonical integration root '{}' has '{}' but it is not a regular file.",
+                canonical_suite_root.display(),
+                MANIFEST_FILE_NAME
+            ));
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err(format!(
+                "Canonical integration root '{}' must define '{}'.",
+                canonical_suite_root.display(),
+                MANIFEST_FILE_NAME
+            ));
+        }
+        Err(error) => {
+            return Err(format!(
+                "Failed to read metadata for manifest '{}': {error}",
+                manifest_path.display()
+            ));
+        }
     }
 
     let manifest_cases = super::manifest::parse_manifest_file(&manifest_path)?;
@@ -175,19 +193,49 @@ fn discover_canonical_fixture_roots(root: &Path) -> Result<Vec<PathBuf>, String>
     for entry in entries {
         let entry = entry.map_err(|error| format!("Failed to read test entry: {error}"))?;
         let path = entry.path();
-        if !path.is_dir() {
+
+        // Use symlink_metadata to distinguish NotFound (a legitimate skip) from
+        // other IO errors (which must surface as failures, not silent skips).
+        let metadata = match std::fs::symlink_metadata(&path) {
+            Ok(m) => m,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(format!(
+                    "Failed to read metadata for fixture entry '{}': {error}",
+                    path.display()
+                ));
+            }
+        };
+        if !metadata.is_dir() {
             continue;
         }
 
+        // Non-UTF-8 fixture identities cannot be declared in the manifest, so they
+        // are a fixture-discovery error, not a silent skip.
         let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-            continue;
+            return Err(format!(
+                "Fixture directory '{}' has a non-UTF-8 name; fixture identities must be UTF-8",
+                path.display()
+            ));
         };
 
         if matches!(name, "success" | "failure") {
             continue;
         }
 
-        if !path.join(INPUT_DIR_NAME).is_dir() {
+        // Check for the input directory using the same metadata-based approach.
+        let input_dir = path.join(INPUT_DIR_NAME);
+        let input_metadata = match std::fs::symlink_metadata(&input_dir) {
+            Ok(m) => m,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(format!(
+                    "Failed to read metadata for input dir '{}': {error}",
+                    input_dir.display()
+                ));
+            }
+        };
+        if !input_metadata.is_dir() {
             continue;
         }
 
@@ -239,18 +287,41 @@ fn load_canonical_case_specs_at(
 
     let expect_path = fixture_root.join(EXPECT_FILE_NAME);
 
-    if !expect_path.is_file() {
-        let case_name = manifest_case
-            .as_ref()
-            .map(|case| case.id.as_str())
-            .or_else(|| fixture_root.file_name().and_then(|name| name.to_str()))
-            .unwrap_or("unnamed_case");
-        return Err(format!(
-            "Canonical case '{}' at fixture '{}' is missing required expectation file '{}'.",
-            case_name,
-            fixture_root.display(),
-            expect_path.display()
-        ));
+    // Use symlink_metadata to distinguish absence from IO errors.
+    match std::fs::symlink_metadata(&expect_path) {
+        Ok(metadata) if metadata.is_file() => {}
+        Ok(_) => {
+            let case_name = manifest_case
+                .as_ref()
+                .map(|case| case.id.as_str())
+                .or_else(|| fixture_root.file_name().and_then(|name| name.to_str()))
+                .unwrap_or("unnamed_case");
+            return Err(format!(
+                "Canonical case '{}' at fixture '{}' has '{}' but it is not a regular file.",
+                case_name,
+                fixture_root.display(),
+                EXPECT_FILE_NAME
+            ));
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let case_name = manifest_case
+                .as_ref()
+                .map(|case| case.id.as_str())
+                .or_else(|| fixture_root.file_name().and_then(|name| name.to_str()))
+                .unwrap_or("unnamed_case");
+            return Err(format!(
+                "Canonical case '{}' at fixture '{}' is missing required expectation file '{}'.",
+                case_name,
+                fixture_root.display(),
+                expect_path.display()
+            ));
+        }
+        Err(error) => {
+            return Err(format!(
+                "Failed to read metadata for expectation file '{}': {error}",
+                expect_path.display()
+            ));
+        }
     }
 
     let parsed_expectation = super::expectations::parse_expectation_file(&expect_path)?;

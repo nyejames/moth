@@ -10,8 +10,8 @@ use std::path::PathBuf;
 
 #[test]
 fn html_project_directives_fail_when_builder_does_not_register_them() {
-    let root = unused_temp_path("directive_boundary_missing");
-    fs::create_dir_all(&root).expect("should create temp root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
 
     for (directive_name, source) in [
         ("html", "[$html:\n<div>Hello</div>\n]"),
@@ -46,14 +46,12 @@ fn html_project_directives_fail_when_builder_does_not_register_them() {
                 .collect::<Vec<_>>()
         );
     }
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn frontend_builtin_directives_work_without_builder_registered_project_directives() {
-    let root = unused_temp_path("frontend_builtin_boundary");
-    fs::create_dir_all(&root).expect("should create temp root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
 
     let entry_file = root.join("builtins.moth");
     fs::write(
@@ -77,8 +75,4 @@ fn frontend_builtin_directives_work_without_builder_registered_project_directive
         result.project.output_files[0].relative_output_path(),
         PathBuf::from("index.html")
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
-
-use crate::compiler_tests::test_support::unused_temp_path;

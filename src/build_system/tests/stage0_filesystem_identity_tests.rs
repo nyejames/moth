@@ -179,7 +179,8 @@ mod non_utf8_filesystem_identity {
 
     #[test]
     fn legacy_package_folder_does_not_scan_non_utf8_names() {
-        let root = unused_temp_path("package_prefix_non_utf8");
+        let _temp = tempfile::tempdir().expect("should create temp dir");
+        let root = _temp.path().to_path_buf();
         let packages_folder = root.join("packages");
         fs::create_dir_all(&packages_folder).expect("should create packages folder");
 
@@ -204,7 +205,6 @@ mod non_utf8_filesystem_identity {
         .expect("legacy package folders must not be scanned");
 
         assert!(resolver.source_package_roots().is_empty());
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 }
 
@@ -233,7 +233,8 @@ mod non_utf8_single_file_identity {
 
     #[test]
     fn single_file_rejects_non_utf8_extension() {
-        let root = unused_temp_path("single_file_non_utf8_ext");
+        let temp = tempfile::tempdir().expect("should create temp dir");
+        let root = temp.path().to_path_buf();
         let entry = root.join("main.");
         let bad_ext = OsString::from_vec(vec![0xC3, 0x28]);
         let entry_with_bad_ext = entry.with_extension(bad_ext);
@@ -259,12 +260,12 @@ mod non_utf8_single_file_identity {
         };
 
         assert_file_infrastructure_error(&messages);
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn single_file_rejects_non_utf8_entry_name() {
-        let root = unused_temp_path("single_file_non_utf8_name");
+        let temp = tempfile::tempdir().expect("should create temp dir");
+        let root = temp.path().to_path_buf();
         let bad_name = OsString::from_vec(vec![0xC3, 0x28]);
         let bad_file = root.join(bad_name).with_extension("moth");
         fs::write(&bad_file, "x ~= 1\n").expect("should write entry file");
@@ -289,7 +290,6 @@ mod non_utf8_single_file_identity {
         };
 
         assert_file_infrastructure_error(&messages);
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 }
 
@@ -394,8 +394,9 @@ mod source_package_boundary_indexes_tests {
 
     #[test]
     fn canonicalization_failure_returns_file_error() {
-        let root = unused_temp_path("package_boundary_canonical_failure");
-        fs::create_dir_all(&root).expect("should create temp root");
+        let _temp = tempfile::tempdir().expect("should create temp dir");
+        let root = _temp.path().to_path_buf();
+
         let nonexistent = root.join("does_not_exist");
 
         let mut source_packages = SourcePackageRegistry::new();
@@ -413,8 +414,6 @@ mod source_package_boundary_indexes_tests {
             message.contains("canonicalize"),
             "error message should mention canonicalization: {message}"
         );
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
@@ -1571,8 +1570,10 @@ mod module_identity_tests {
 
     #[test]
     fn cosmetic_root_suffix_rename_does_not_change_stable_identity() {
-        let root_a = unused_temp_path("stable_identity_cosmetic_a");
-        let root_b = unused_temp_path("stable_identity_cosmetic_b");
+        let _temp = tempfile::tempdir().expect("should create temp dir");
+        let root_a = _temp.path().to_path_buf();
+        let _temp = tempfile::tempdir().expect("should create temp dir");
+        let root_b = _temp.path().to_path_buf();
         fs::create_dir_all(root_a.join("src")).expect("should create entry root a");
         fs::create_dir_all(root_b.join("src")).expect("should create entry root b");
         fs::write(root_a.join("src/@page.moth"), "").expect("should write page-named root");
@@ -1586,9 +1587,6 @@ mod module_identity_tests {
             entry_module_origin(&table_b, &entry_b),
             "cosmetic root filename suffix rename must not change the stable identity"
         );
-
-        fs::remove_dir_all(&root_a).expect("should remove root a");
-        fs::remove_dir_all(&root_b).expect("should remove root b");
     }
 
     #[test]
@@ -2321,8 +2319,9 @@ mod owned_source_inventory_tests {
         // The current compatibility case: project root equals entry root, so the facade root
         // file lies inside the traversal. It must appear exactly once, owned only by the facade
         // module, and must not also appear in the entry-root module's owned source set.
-        let root = unused_temp_path("facade_exact_once_same_root");
-        fs::create_dir_all(&root).expect("should create entry root");
+        let _temp = tempfile::tempdir().expect("should create temp dir");
+        let root = _temp.path().to_path_buf();
+
         fs::write(root.join("@page.moth"), "").expect("should write entry root file");
         fs::write(root.join("+package.moth"), "").expect("should write facade root file");
 
@@ -2384,14 +2383,13 @@ mod owned_source_inventory_tests {
             facade_record_count, 1,
             "the facade source must appear exactly once in the central source table"
         );
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn compilation_root_table_excludes_facade_when_it_shares_entry_root() {
-        let root = unused_temp_path("facade_resolver_root_table");
-        fs::create_dir_all(&root).expect("should create entry root");
+        let _temp = tempfile::tempdir().expect("should create temp dir");
+        let root = _temp.path().to_path_buf();
+
         fs::write(root.join("@page.moth"), "").expect("should write entry root file");
         fs::write(root.join("+package.moth"), "").expect("should write facade root file");
 
@@ -2409,8 +2407,6 @@ mod owned_source_inventory_tests {
             !compilation_roots.is_root_file(&canonical_root.join("+package.moth")),
             "the project facade must not become a resolver module root"
         );
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]

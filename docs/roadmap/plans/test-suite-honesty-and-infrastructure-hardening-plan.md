@@ -6,14 +6,43 @@
 WORK_ID: test-suite-honesty
 WORK_SOURCE: docs/roadmap/plans/test-suite-honesty-and-infrastructure-hardening-plan.md
 BASE_REVISION: f41f93a7a (post-TIR, post-benchmark-counters-timers)
-STATUS: active
-CURRENT_SCOPE: Phase 0-3 complete, paused for review
-COMPLETED: Phase 0 baseline (4310 unit tests pass, 0 ignored, 1699 integration cases audit clean); Phase 1 test filesystem ownership (test_fs helpers, temp_dir→unused_temp_path migration, hardcoded /tmp removal, CurrentDirGuard restore-failure surfacing); Phase 2 structured failure identity (infrastructure_errors_for_tests iterator, test_diagnostics assertion helpers); Phase 3 synthetic state and global process state (WarningBuilder StringId fix, CurrentDirGuard finish() + restore-failure surfacing, CaseExecutionResult checked constructors, thread-join panic surfacing, exact panic-payload assertion)
-NEXT_ACTION: user review of Phase 0-3 work, then Phase 4 exact positive assertions and artifact inventory
-VALIDATION: cargo fmt --check; cargo clippy -D warnings; cargo test --workspace (4310+17+643 passed); cargo run -- tests --terse (1851/1851); cargo test --features timers (pass); pre-existing benchmark_counters failure unchanged
-AUDITS: none yet (interim audit deferred to after user review)
-BLOCKERS: none
-NOTES: Pre-existing benchmark_counters feature test failures are not caused by this work. test_fs and test_diagnostics modules are new shared test infrastructure. The unused_temp_path helper replaces temp_dir for non-existence contracts. Most test callers still use unused_temp_path + create_dir_all pattern; full migration to tempfile::tempdir() is deferred to Phase 1 follow-up where it improves cleanup ownership.
+STATUS: active — correction pass applied, under review
+CURRENT_SCOPE: Phase 0-3 correction pass complete, awaiting re-review before Phase 4
+COMPLETED:
+  Phase 0: baseline established (4311 unit tests, 0 ignored, 1851 integration cases correct);
+    test_honesty_inventory.json produced with 22 findings and dispositions;
+    feature lane mapping documented (timers pass, benchmark_counters pre-existing failure)
+  Phase 1: test_fs helpers (assert_path_missing, assert_regular_file, assert_directory,
+    assert_symlink, read_bytes, read_utf8) with symlink_metadata;
+    temp_dir→unused_temp_path rename; ~240 callers migrated from unused_temp_path+create_dir_all
+    to tempfile::tempdir() with owned cleanup; hardcoded /tmp/ removed;
+    Linux non-UTF-8 fixtures fixed to use tempfile::tempdir();
+    exists()/is_dir() in build_orchestration_tests and build_cleanup_tests migrated to
+    assert_path_missing/assert_directory; fixture discovery fail-open fixed with
+    symlink_metadata and non-UTF-8 identity rejection
+  Phase 2: infrastructure_errors_for_tests() iterator scanning all error diagnostics;
+    test_diagnostics helpers (assert_exact_diagnostic_codes, assert_no_infrastructure_errors,
+    assert_exact_infrastructure_error, assert_diagnostic_reason using reason_key,
+    error_code_counts); single_file_rejects_missing_file migrated to exact infrastructure error;
+    26 broad is_err() in build_orchestration_tests remain for Phase 2 follow-up
+  Phase 3: WarningBuilder StringId uses active string_table; CurrentDirGuard redesigned with
+    Option<PathBuf> take pattern (finish restores once, Drop does not retry);
+    CurrentDirGuard restore-failure regression test added; CaseExecutionResult constructors
+    removed from production type; runner tests use panic_if_called callback;
+    triage test failure_kind fixed; ScopedEnvVar panic-safe env guard in xtask tests;
+    surface_thread_panic replaces discarded thread joins; exact panic-payload assertion
+NEXT_ACTION: re-review of correction pass, then Phase 4 exact positive assertions and artifact inventory
+VALIDATION: cargo fmt --check; cargo clippy -D warnings; cargo test --workspace (4311+17+643 passed);
+  cargo run -- tests --terse (1851/1851); cargo test --features timers (pass);
+  pre-existing benchmark_counters failure unchanged; Linux lane not run on macOS host
+AUDITS: correction pass applied per reviewer findings; 11 of 11 gate items addressed
+BLOCKERS: Linux CI lane needed to verify Linux-only tests (macOS host cannot run them)
+NOTES: Pre-existing benchmark_counters feature test failures are not caused by this work.
+  264 unused_temp_path uses remain (genuine non-existence contracts + helper functions
+  returning PathBuf that need tuple-return migration). 26 broad is_err() in
+  build_orchestration_tests need exact diagnostic migration (Phase 2 follow-up).
+  39 exists/is_file/is_dir remain in build test files (positive assertions needing
+  file-vs-dir determination). 296 remove_dir_all calls remain in files not yet migrated.
 ```
 
 ## Purpose

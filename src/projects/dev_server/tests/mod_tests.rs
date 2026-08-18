@@ -95,8 +95,9 @@ fn defaults_match_dev_server_contract() {
 
 #[test]
 fn entry_path_validation_accepts_moth_files() {
-    let root = unused_temp_path("entry_file");
-    fs::create_dir_all(&root).expect("should create temp root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let file = root.join("main.moth");
     fs::write(&file, "x = 1").expect("should write test file");
 
@@ -107,13 +108,13 @@ fn entry_path_validation_accepts_moth_files() {
     .expect("valid moth path should pass validation");
 
     assert!(validated.ends_with("main.moth"));
-    fs::remove_dir_all(&root).expect("should clean up temp dir");
 }
 
 #[test]
 fn entry_path_validation_accepts_directories() {
-    let root = unused_temp_path("entry_dir");
-    fs::create_dir_all(&root).expect("should create temp root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let validated = validate_dev_entry_path(
         root.to_str()
             .expect("temp path should be valid utf-8 for this test"),
@@ -124,7 +125,6 @@ fn entry_path_validation_accepts_directories() {
         validated,
         root.canonicalize().expect("temp dir should canonicalize")
     );
-    fs::remove_dir_all(&root).expect("should clean up temp dir");
 }
 
 #[test]
@@ -139,8 +139,9 @@ fn empty_entry_path_uses_current_directory() {
 
 #[test]
 fn resolve_dev_runtime_paths_use_configured_dev_folder_for_directory_projects() {
-    let root = unused_temp_path("configured_dev_folder");
-    fs::create_dir_all(&root).expect("should create temp root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     fs::write(root.join(CONFIG_FILE_NAME), "dev_folder #= \"preview\"\n")
         .expect("should write config");
 
@@ -149,7 +150,6 @@ fn resolve_dev_runtime_paths_use_configured_dev_folder_for_directory_projects() 
         .expect("directory output dir should resolve");
 
     assert_eq!(resolved.output_dir, root.join("preview"));
-    fs::remove_dir_all(&root).expect("should clean up temp dir");
 }
 
 #[cfg(unix)]
@@ -209,8 +209,9 @@ fn resolve_dev_runtime_paths_rejects_symlinked_output_roots() {
 
 #[test]
 fn resolve_dev_runtime_paths_rejects_empty_dev_folder() {
-    let root = unused_temp_path("empty_dev_folder");
-    fs::create_dir_all(&root).expect("should create temp root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     fs::write(root.join(CONFIG_FILE_NAME), "dev_folder #= \"\"\n").expect("should write config");
 
     let builder = ProjectBuilder::new(Box::new(NoopBuilder));
@@ -220,13 +221,13 @@ fn resolve_dev_runtime_paths_rejects_empty_dev_folder() {
         result.is_err(),
         "empty dev folder should be rejected at config validation"
     );
-    fs::remove_dir_all(&root).expect("should clean up temp dir");
 }
 
 #[test]
 fn resolve_dev_runtime_paths_return_config_load_failures() {
-    let root = unused_temp_path("bad_config");
-    fs::create_dir_all(&root).expect("should create temp root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     fs::write(root.join(CONFIG_FILE_NAME), "@core/math sin\n").expect("should write bad config");
 
     let builder = ProjectBuilder::new(Box::new(NoopBuilder));
@@ -246,13 +247,12 @@ fn resolve_dev_runtime_paths_return_config_load_failures() {
         "unexpected diagnostic payload: {:?}",
         diagnostics[0].payload
     );
-    fs::remove_dir_all(&root).expect("should clean up temp dir");
 }
 
 #[test]
 fn resolve_dev_runtime_paths_return_style_directive_merge_failures() {
-    let root = unused_temp_path("style_directive_conflict");
-    fs::create_dir_all(&root).expect("should create temp root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
 
     let builder = ProjectBuilder::new(Box::new(ConflictingDirectiveBuilder));
     let messages = resolve_dev_runtime_paths(&builder, &root, &[])
@@ -263,5 +263,4 @@ fn resolve_dev_runtime_paths_return_style_directive_merge_failures() {
         .first_infrastructure_error_for_tests()
         .expect("directive conflict should be wrapped for rendering");
     assert!(message.contains("cannot override") || message.contains("already exists"));
-    fs::remove_dir_all(&root).expect("should clean up temp dir");
 }
