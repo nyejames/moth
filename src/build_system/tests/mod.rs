@@ -26,6 +26,9 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 struct CurrentDirGuard {
     _lock: MutexGuard<'static, ()>,
     previous: PathBuf,
+    /// Records a restore failure during unwinding so it can be surfaced
+    /// without replacing the original panic.
+    restore_error: Option<std::io::Error>,
 }
 
 impl CurrentDirGuard {
@@ -41,13 +44,37 @@ impl CurrentDirGuard {
         Self {
             _lock: lock,
             previous,
+            restore_error: None,
         }
+    }
+
+    /// Explicitly finish the guard, returning a restore failure on the normal path.
+    ///
+    /// WHAT: restores the previous directory and returns an error if restoration fails.
+    /// WHY: `Drop` cannot return errors. Tests that care about restore success should
+    /// call `finish()` instead of letting the guard drop implicitly.
+    #[allow(dead_code)]
+    fn finish(self) -> Result<(), std::io::Error> {
+        std::env::set_current_dir(&self.previous)?;
+        Ok(())
     }
 }
 
 impl Drop for CurrentDirGuard {
     fn drop(&mut self) {
-        let _ = std::env::set_current_dir(&self.previous);
+        if let Err(error) = std::env::set_current_dir(&self.previous) {
+            // During unwinding, preserve the original panic and record the restore failure.
+            // On the normal path, `finish()` should have been called instead.
+            self.restore_error = Some(error);
+            // If we are not already unwinding, panic to surface the failure.
+            if !std::thread::panicking() {
+                panic!(
+                    "CurrentDirGuard failed to restore directory to {:?}: {}",
+                    self.previous,
+                    self.restore_error.as_ref().unwrap()
+                );
+            }
+        }
     }
 }
 
@@ -180,7 +207,7 @@ impl BackendBuilder for WarningBuilder {
         _config: &Config,
         _build_profile: BuildProfile,
         _flags: &[Flag],
-        _string_table: &mut StringTable,
+        string_table: &mut StringTable,
     ) -> Result<Project, CompilerMessages> {
         Ok(Project {
             output_files: vec![OutputFile::new(
@@ -190,7 +217,7 @@ impl BackendBuilder for WarningBuilder {
             entry_page_rel: None,
             cleanup_policy: CleanupPolicy::generic([".js"]),
             warnings: vec![unused_variable_warning(
-                StringTable::new().get_or_intern("x".to_string()),
+                string_table.get_or_intern("x".to_string()),
                 SourceLocation::default(),
             )],
         })

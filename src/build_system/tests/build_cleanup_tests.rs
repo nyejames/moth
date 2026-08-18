@@ -19,7 +19,7 @@ use crate::build_system::output::manifest::{
     BUILD_MANIFEST_FILENAME, read_build_manifest, remove_manifest_tracked_stale_artifacts,
     validate_output_root_is_safe, write_build_manifest,
 };
-use crate::compiler_tests::test_support::temp_dir;
+use crate::compiler_tests::test_support::unused_temp_path;
 use std::collections::{BTreeSet, HashSet};
 
 fn html_owner(profile: BuildProfile) -> OutputOwner {
@@ -43,7 +43,7 @@ fn valid_manifest(paths: Vec<PathBuf>, profile: BuildProfile) -> ManifestReadRes
 
 #[test]
 fn cleanup_manifest_diff_removes_stale_managed_files() {
-    let root = temp_dir("cleanup_stale");
+    let root = unused_temp_path("cleanup_stale");
     fs::create_dir_all(&root).expect("should create temp root");
     let project_dir = root.join("project");
     fs::create_dir_all(&project_dir).expect("should create project dir");
@@ -111,7 +111,7 @@ fn cleanup_manifest_diff_removes_stale_managed_files() {
 
 #[test]
 fn cleanup_manifest_diff_removes_stale_tracked_byte_assets_from_manifest() {
-    let root = temp_dir("cleanup_stale_bytes");
+    let root = unused_temp_path("cleanup_stale_bytes");
     fs::create_dir_all(&root).expect("should create temp root");
     let project_dir = root.join("project");
     fs::create_dir_all(&project_dir).expect("should create project dir");
@@ -171,7 +171,7 @@ fn cleanup_manifest_diff_removes_stale_tracked_byte_assets_from_manifest() {
 
 #[test]
 fn cleanup_missing_manifest_preserves_stale_html_route_alias() {
-    let root = temp_dir("cleanup_missing_manifest_alias");
+    let root = unused_temp_path("cleanup_missing_manifest_alias");
     fs::create_dir_all(&root).expect("should create temp root");
     let project_dir = root.join("project");
     fs::create_dir_all(&project_dir).expect("should create project dir");
@@ -215,7 +215,7 @@ fn cleanup_missing_manifest_preserves_stale_html_route_alias() {
 
 #[test]
 fn cleanup_first_build_writes_manifest_without_removing() {
-    let root = temp_dir("cleanup_first_build");
+    let root = unused_temp_path("cleanup_first_build");
     fs::create_dir_all(&root).expect("should create temp root");
     let project_dir = root.join("project");
     fs::create_dir_all(&project_dir).expect("should create project dir");
@@ -252,7 +252,7 @@ fn cleanup_first_build_writes_manifest_without_removing() {
 
 #[test]
 fn cleanup_removes_empty_parent_directories_after_deleting_managed_files() {
-    let root = temp_dir("cleanup_empty_parents");
+    let root = unused_temp_path("cleanup_empty_parents");
     fs::create_dir_all(&root).expect("should create temp root");
     let project_dir = root.join("project");
     fs::create_dir_all(&project_dir).expect("should create project dir");
@@ -295,7 +295,7 @@ fn cleanup_removes_empty_parent_directories_after_deleting_managed_files() {
 
 #[test]
 fn cleanup_preserves_current_explicit_directory_after_removing_stale_child() {
-    let root = temp_dir("cleanup_explicit_directory");
+    let root = unused_temp_path("cleanup_explicit_directory");
     fs::create_dir_all(&root).expect("should create temp root");
     let project_dir = root.join("project");
     fs::create_dir_all(&project_dir).expect("should create project dir");
@@ -341,16 +341,8 @@ fn cleanup_preserves_current_explicit_directory_after_removing_stale_child() {
 fn stale_cleanup_preserves_non_regular_nodes() {
     use std::os::unix::net::UnixListener;
 
-    let unique = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("time should be after epoch")
-        .as_nanos();
-    let root = PathBuf::from(format!(
-        "/tmp/moth_socket_{}_{}",
-        std::process::id(),
-        unique
-    ));
-    fs::create_dir_all(&root).expect("should create temp root");
+    let temp = tempfile::tempdir().expect("should create temp dir");
+    let root = temp.path().to_path_buf();
     let socket_path = root.join("stale.sock");
     let listener = UnixListener::bind(&socket_path).expect("should create stale socket");
     let stale_path = PathBuf::from("stale.sock");
@@ -362,21 +354,21 @@ fn stale_cleanup_preserves_non_regular_nodes() {
         std::slice::from_ref(&stale_path),
     );
 
+    // The socket must still exist — use symlink_metadata, not exists(),
+    // so a metadata failure cannot look like absence.
     assert!(
-        socket_path.exists(),
+        std::fs::symlink_metadata(&socket_path).is_ok(),
         "stale special nodes must not be unlinked"
     );
     assert_eq!(report.removed_paths, Vec::<PathBuf>::new());
     assert_eq!(report.retained_paths, vec![stale_path]);
 
     drop(listener);
-    fs::remove_file(&socket_path).expect("should remove test socket");
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn cleanup_preserves_parent_directories_when_non_managed_files_remain() {
-    let root = temp_dir("cleanup_preserves_parent_dirs");
+    let root = unused_temp_path("cleanup_preserves_parent_dirs");
     fs::create_dir_all(&root).expect("should create temp root");
     let project_dir = root.join("project");
     fs::create_dir_all(&project_dir).expect("should create project dir");
@@ -426,7 +418,7 @@ fn cleanup_preserves_parent_directories_when_non_managed_files_remain() {
 
 #[test]
 fn validate_output_root_rejects_dangerous_paths() {
-    let project_dir = PathBuf::from("/tmp/test_project");
+    let project_dir = unused_temp_path("validate_dangerous_project");
 
     let dangerous_paths = vec![
         PathBuf::from("/"),
@@ -449,7 +441,7 @@ fn validate_output_root_rejects_dangerous_paths() {
 
 #[test]
 fn validate_output_root_accepts_project_subdirectory() {
-    let root = temp_dir("validate_accept");
+    let root = unused_temp_path("validate_accept");
     fs::create_dir_all(root.join("dev")).expect("should create output dir");
 
     let result = validate_output_root_is_safe(&root.join("dev"), &root, None, &StringTable::new());
@@ -463,7 +455,7 @@ fn validate_output_root_accepts_project_subdirectory() {
 
 #[test]
 fn cleanup_unreadable_manifest_enters_recoverable_mode_and_preserves_existing_files() {
-    let root = temp_dir("cleanup_garbage_manifest");
+    let root = unused_temp_path("cleanup_garbage_manifest");
     fs::create_dir_all(&root).expect("should create temp root");
     let project_dir = root.join("project");
     fs::create_dir_all(&project_dir).expect("should create project dir");
@@ -521,7 +513,7 @@ fn cleanup_unreadable_manifest_enters_recoverable_mode_and_preserves_existing_fi
 
 #[test]
 fn cleanup_disabled_skips_manifest_cleanup() {
-    let root = temp_dir("cleanup_disabled");
+    let root = unused_temp_path("cleanup_disabled");
     fs::create_dir_all(root.join("docs")).expect("should create temp root");
     fs::write(root.join("docs/basics.html"), "<html>stale alias</html>")
         .expect("should write stale alias");
@@ -551,7 +543,7 @@ fn cleanup_disabled_skips_manifest_cleanup() {
 
 #[test]
 fn unsupported_manifest_preserves_existing_files_until_next_cleanup() {
-    let root = temp_dir("cleanup_legacy_manifest");
+    let root = unused_temp_path("cleanup_legacy_manifest");
     fs::create_dir_all(&root).expect("should create temp root");
     let project_dir = root.join("project");
     fs::create_dir_all(&project_dir).expect("should create project dir");
@@ -640,7 +632,7 @@ fn html_active_extensions() -> BTreeSet<String> {
 
 #[test]
 fn read_build_manifest_accepts_equivalent_managed_extensions_in_different_order() {
-    let root = temp_dir("cleanup_ext_order");
+    let root = unused_temp_path("cleanup_ext_order");
     fs::create_dir_all(&root).expect("should create temp root");
 
     write_v4_manifest_text(&root, "html", "dev", ".wasm,.html,.js", &["index.html"]);
@@ -655,7 +647,7 @@ fn read_build_manifest_accepts_equivalent_managed_extensions_in_different_order(
 
 #[test]
 fn read_build_manifest_normalizes_managed_extension_case_and_leading_dot() {
-    let root = temp_dir("cleanup_ext_normalize");
+    let root = unused_temp_path("cleanup_ext_normalize");
     fs::create_dir_all(&root).expect("should create temp root");
 
     // Uppercase and dotless forms must normalize to the active lowercased dotted set.
@@ -671,7 +663,7 @@ fn read_build_manifest_normalizes_managed_extension_case_and_leading_dot() {
 
 #[test]
 fn read_build_manifest_rejects_missing_managed_extension() {
-    let root = temp_dir("cleanup_ext_missing");
+    let root = unused_temp_path("cleanup_ext_missing");
     fs::create_dir_all(&root).expect("should create temp root");
 
     let manifest_extensions: BTreeSet<String> = [".html", ".js"]
@@ -697,7 +689,7 @@ fn read_build_manifest_rejects_missing_managed_extension() {
 
 #[test]
 fn read_build_manifest_rejects_extra_managed_extension() {
-    let root = temp_dir("cleanup_ext_extra");
+    let root = unused_temp_path("cleanup_ext_extra");
     fs::create_dir_all(&root).expect("should create temp root");
 
     let manifest_extensions: BTreeSet<String> = [".css", ".html", ".js", ".wasm"]
@@ -748,7 +740,7 @@ fn read_v4_recovery_retains_known_owner_after_extension_metadata_damage() {
     ];
 
     for (case_name, manifest_text, reason) in cases {
-        let root = temp_dir(&format!("cleanup_owner_recovery_{case_name}"));
+        let root = unused_temp_path(&format!("cleanup_owner_recovery_{case_name}"));
         fs::create_dir_all(&root).expect("should create temp root");
         fs::write(root.join(BUILD_MANIFEST_FILENAME), manifest_text)
             .expect("should write damaged v4 manifest");
@@ -771,7 +763,7 @@ fn read_v4_recovery_retains_known_owner_after_extension_metadata_damage() {
 fn stale_cleanup_retains_paths_with_dangling_symlink_components() {
     use std::os::unix::fs::symlink;
 
-    let root = temp_dir("cleanup_dangling_symlink");
+    let root = unused_temp_path("cleanup_dangling_symlink");
     fs::create_dir_all(&root).expect("should create output root");
     symlink(root.join("real"), root.join("alias")).expect("should create dangling alias");
 
@@ -814,7 +806,7 @@ fn foreign_profile_in_recoverable_v4_manifest_fails_without_mutation() {
     ];
 
     for (case_name, manifest_text) in manifest_variants {
-        let root = temp_dir(&format!("cleanup_foreign_recovery_{case_name}"));
+        let root = unused_temp_path(&format!("cleanup_foreign_recovery_{case_name}"));
         let project_dir = root.join("project");
         let output_root = project_dir.join("dev");
         fs::create_dir_all(&output_root).expect("should create output root");
@@ -864,7 +856,7 @@ fn foreign_profile_in_recoverable_v4_manifest_fails_without_mutation() {
 
 #[test]
 fn foreign_profile_with_invalid_utf8_path_record_fails_without_mutation() {
-    let root = temp_dir("cleanup_foreign_invalid_utf8_path");
+    let root = unused_temp_path("cleanup_foreign_invalid_utf8_path");
     let project_dir = root.join("project");
     let output_root = project_dir.join("dev");
     fs::create_dir_all(&output_root).expect("should create output root");
@@ -913,7 +905,7 @@ fn foreign_profile_with_invalid_utf8_path_record_fails_without_mutation() {
 
 #[test]
 fn case_variant_manifest_paths_enter_recoverable_mode_with_owner() {
-    let root = temp_dir("cleanup_case_variant_manifest_reader");
+    let root = unused_temp_path("cleanup_case_variant_manifest_reader");
     fs::create_dir_all(&root).expect("should create temp root");
 
     write_v4_manifest_text(
@@ -937,7 +929,7 @@ fn case_variant_manifest_paths_enter_recoverable_mode_with_owner() {
 
 #[test]
 fn matching_owner_with_case_variant_manifest_paths_preserves_stale_files() {
-    let root = temp_dir("cleanup_case_variant_manifest_matching_owner");
+    let root = unused_temp_path("cleanup_case_variant_manifest_matching_owner");
     let project_dir = root.join("project");
     let output_root = project_dir.join("dev");
     fs::create_dir_all(output_root.join("Pages")).expect("should create output directory");
@@ -977,7 +969,7 @@ fn matching_owner_with_case_variant_manifest_paths_preserves_stale_files() {
 
 #[test]
 fn foreign_owner_with_case_variant_manifest_paths_fails_without_mutation() {
-    let root = temp_dir("cleanup_case_variant_manifest_foreign_owner");
+    let root = unused_temp_path("cleanup_case_variant_manifest_foreign_owner");
     let project_dir = root.join("project");
     let output_root = project_dir.join("dev");
     fs::create_dir_all(output_root.join("Pages")).expect("should create output directory");
@@ -1030,7 +1022,7 @@ fn foreign_owner_with_case_variant_manifest_paths_fails_without_mutation() {
 
 #[test]
 fn read_build_manifest_rejects_malformed_v4_metadata() {
-    let root = temp_dir("cleanup_ext_malformed_metadata");
+    let root = unused_temp_path("cleanup_ext_malformed_metadata");
     fs::create_dir_all(&root).expect("should create temp root");
 
     // An explicit v4 owner with an unknown builder is foreign ownership, not ownerless recovery.
@@ -1053,7 +1045,7 @@ fn assert_foreign_manifest_owner_fails_without_mutation(
     builder: &str,
     profile: &str,
 ) {
-    let root = temp_dir(test_name);
+    let root = unused_temp_path(test_name);
     let project_dir = root.join("project");
     let output_root = project_dir.join("dev");
     fs::create_dir_all(&output_root).expect("should create output root");
@@ -1133,7 +1125,7 @@ fn unknown_v4_profile_fails_without_mutation() {
 
 #[test]
 fn cleanup_extension_mismatch_preserves_stale_files_and_rewrites_manifest() {
-    let root = temp_dir("cleanup_ext_mismatch_stale");
+    let root = unused_temp_path("cleanup_ext_mismatch_stale");
     fs::create_dir_all(&root).expect("should create temp root");
     let project_dir = root.join("project");
     fs::create_dir_all(&project_dir).expect("should create project dir");
@@ -1217,7 +1209,7 @@ fn cleanup_extension_mismatch_preserves_stale_files_and_rewrites_manifest() {
 
 #[test]
 fn write_build_manifest_produces_sorted_output() {
-    let root = temp_dir("manifest_sorted");
+    let root = unused_temp_path("manifest_sorted");
     fs::create_dir_all(&root).expect("should create temp root");
 
     let paths: HashSet<PathBuf> = [
@@ -1259,7 +1251,7 @@ fn write_build_manifest_produces_sorted_output() {
 
 #[test]
 fn manifest_paths_round_trip_leading_and_interior_spaces() {
-    let root = temp_dir("manifest_space_paths");
+    let root = unused_temp_path("manifest_space_paths");
     fs::create_dir_all(&root).expect("should create temp root");
 
     let paths: HashSet<PathBuf> = [
@@ -1329,7 +1321,7 @@ fn stale_cleanup_ignores_reserved_manifest_paths() {
     ];
 
     for (case_name, stale_path, filesystem_path) in cases {
-        let root = temp_dir(&format!("cleanup_reserved_manifest_{case_name}"));
+        let root = unused_temp_path(&format!("cleanup_reserved_manifest_{case_name}"));
         fs::create_dir_all(&root).expect("should create temp root");
         if let Some(parent) = filesystem_path.parent()
             && parent != Path::new("")
@@ -1361,7 +1353,7 @@ fn stale_cleanup_ignores_reserved_manifest_paths() {
 
 #[test]
 fn matching_v4_owner_performs_stale_cleanup() {
-    let root = temp_dir("v4_matching_cleanup");
+    let root = unused_temp_path("v4_matching_cleanup");
     fs::create_dir_all(&root).expect("should create temp root");
     let project_dir = root.join("project");
     fs::create_dir_all(&project_dir).expect("should create project dir");
@@ -1414,7 +1406,7 @@ fn matching_v4_owner_performs_stale_cleanup() {
 fn stale_cleanup_tracks_canonical_final_file_symlink_destination() {
     use std::os::unix::fs::symlink;
 
-    let root = temp_dir("canonical_file_symlink_cleanup");
+    let root = unused_temp_path("canonical_file_symlink_cleanup");
     let project_dir = root.join("project");
     let output_root = project_dir.join("dev");
     fs::create_dir_all(&output_root).expect("should create output root");
@@ -1468,7 +1460,7 @@ fn stale_cleanup_tracks_canonical_final_file_symlink_destination() {
 fn stale_cleanup_does_not_follow_retargeted_directory_aliases() {
     use std::os::unix::fs::symlink;
 
-    let root = temp_dir("canonical_directory_symlink_cleanup");
+    let root = unused_temp_path("canonical_directory_symlink_cleanup");
     let project_dir = root.join("project");
     let output_root = project_dir.join("dev");
     let old_target = output_root.join("old_target");
@@ -1518,7 +1510,7 @@ fn stale_cleanup_does_not_follow_retargeted_directory_aliases() {
 
 #[test]
 fn dev_then_release_against_same_v4_root_fails_without_mutation() {
-    let root = temp_dir("v4_profile_mismatch");
+    let root = unused_temp_path("v4_profile_mismatch");
     fs::create_dir_all(&root).expect("should create temp root");
     let project_dir = root.join("project");
     fs::create_dir_all(&project_dir).expect("should create project dir");
@@ -1589,7 +1581,7 @@ fn dev_then_release_against_same_v4_root_fails_without_mutation() {
 
 #[test]
 fn builder_owner_conflict_fails_without_mutation() {
-    let root = temp_dir("v4_builder_owner_conflict");
+    let root = unused_temp_path("v4_builder_owner_conflict");
     fs::create_dir_all(&root).expect("should create temp root");
     let project_dir = root.join("project");
     fs::create_dir_all(&project_dir).expect("should create project dir");
@@ -1669,7 +1661,7 @@ fn builder_owner_conflict_fails_without_mutation() {
 
 #[test]
 fn manifest_reader_returns_manifest_owner_without_comparing_active_owner() {
-    let root = temp_dir("v4_builder_mismatch");
+    let root = unused_temp_path("v4_builder_mismatch");
     fs::create_dir_all(&root).expect("should create temp root");
 
     let generic_policy = CleanupPolicy::generic([".html"]);
@@ -1705,7 +1697,7 @@ fn manifest_reader_returns_manifest_owner_without_comparing_active_owner() {
 
 #[test]
 fn v3_manifest_enters_recoverable_mode() {
-    let root = temp_dir("v3_legacy");
+    let root = unused_temp_path("v3_legacy");
     fs::create_dir_all(&root).expect("should create temp root");
 
     fs::write(
@@ -1728,7 +1720,7 @@ fn v3_manifest_enters_recoverable_mode() {
 
 #[test]
 fn managed_extension_drift_preserves_old_files() {
-    let root = temp_dir("v4_ext_drift");
+    let root = unused_temp_path("v4_ext_drift");
     fs::create_dir_all(&root).expect("should create temp root");
     let project_dir = root.join("project");
     fs::create_dir_all(&project_dir).expect("should create project dir");
@@ -1774,7 +1766,7 @@ fn managed_extension_drift_preserves_old_files() {
 
 #[test]
 fn failed_stale_deletion_remains_owned_in_next_manifest() {
-    let root = temp_dir("cleanup_failed_stale_delete");
+    let root = unused_temp_path("cleanup_failed_stale_delete");
     let project_dir = root.join("project");
     let output_root = project_dir.join("dev");
     fs::create_dir_all(output_root.join("stale.html")).expect("should create stale directory");

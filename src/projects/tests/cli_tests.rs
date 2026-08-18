@@ -22,7 +22,7 @@ use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_tests::integration_test_runner::{
     BackendId, IntegrationRunSummary, TestRunnerOptions,
 };
-use crate::compiler_tests::test_support::temp_dir;
+use crate::compiler_tests::test_support::unused_temp_path;
 use crate::projects::command_status::CommandStatus;
 use crate::projects::dev_server::DevServerOptions;
 use crate::projects::html_project::new_html_project::NewHtmlProjectOptions;
@@ -70,7 +70,7 @@ fn build_command_uses_current_directory_when_path_is_missing() {
 #[test]
 fn build_command_writes_the_validated_directory_output_plan() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let root = temp_dir("cli_directory_output_plan");
+    let root = unused_temp_path("cli_directory_output_plan");
     let source_root = root.join("src");
     fs::create_dir_all(&source_root).expect("should create source root");
     fs::write(
@@ -101,7 +101,7 @@ fn build_command_writes_the_validated_directory_output_plan() {
 #[test]
 fn failed_output_plan_records_the_build_command_total() {
     let _test_guard = crate::timing::lock_instrumentation_tests();
-    let root = temp_dir("cli_failed_output_plan_timer");
+    let root = unused_temp_path("cli_failed_output_plan_timer");
     fs::create_dir_all(&root).expect("should create temporary project root");
     let entry_file = root.join("main.moth");
     fs::write(&entry_file, "value = 1\n").expect("should write source file");
@@ -901,7 +901,7 @@ fn successful_build_with_warnings_exposes_warning_messages() {
 #[test]
 fn successful_build_records_command_build_total() {
     let _test_guard = crate::timing::lock_instrumentation_tests();
-    let root = temp_dir("cli_successful_build_timer");
+    let root = unused_temp_path("cli_successful_build_timer");
     let source_root = root.join("src");
     fs::create_dir_all(&source_root).expect("should create temporary project root");
     fs::write(root.join("config.moth"), "entry_root #= \"src\"\n")
@@ -937,7 +937,7 @@ fn successful_build_records_command_build_total() {
 #[test]
 fn build_command_total_excludes_renderer_work() {
     let _test_guard = crate::timing::lock_instrumentation_tests();
-    let root = temp_dir("cli_build_boundary_renderer");
+    let root = unused_temp_path("cli_build_boundary_renderer");
     let source_root = root.join("src");
     fs::create_dir_all(&source_root).expect("should create source root");
     fs::write(root.join("config.moth"), "entry_root #= \"src\"\n").expect("should write config");
@@ -989,7 +989,7 @@ fn build_command_total_excludes_renderer_work() {
 #[test]
 fn failed_output_write_records_build_command_total() {
     let _test_guard = crate::timing::lock_instrumentation_tests();
-    let root = temp_dir("cli_failed_output_write_timer");
+    let root = unused_temp_path("cli_failed_output_write_timer");
     fs::create_dir_all(&root).expect("should create temporary project root");
     let entry_file = root.join("main.moth");
     fs::write(&entry_file, "value = 1\n").expect("should write source file");

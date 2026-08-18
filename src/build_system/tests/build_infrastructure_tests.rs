@@ -7,10 +7,11 @@ use std::fs;
 
 #[test]
 fn current_dir_guard_recovers_after_mutex_poisoning() {
-    let root = temp_dir("poison_recovery");
-    fs::create_dir_all(&root).expect("should create temp root");
+    let temp = tempfile::tempdir().expect("should create temp dir");
+    let root = temp.path().to_path_buf();
 
     // Intentionally poison the cwd mutex by panicking while holding the guard.
+    // The panic payload is exact so a different panic cannot satisfy the test.
     let panic_result = std::panic::catch_unwind(|| {
         let _guard = CurrentDirGuard::set_to(&root);
         panic!("deliberate panic to poison the cwd mutex");
@@ -20,6 +21,18 @@ fn current_dir_guard_recovers_after_mutex_poisoning() {
         "catch_unwind should capture the panic"
     );
 
+    // Verify the exact panic payload, not just that some panic happened.
+    let panic_payload = panic_result.unwrap_err();
+    let panic_message = panic_payload
+        .downcast_ref::<String>()
+        .map(|s| s.as_str())
+        .or_else(|| panic_payload.downcast_ref::<&str>().copied());
+    assert_eq!(
+        panic_message,
+        Some("deliberate panic to poison the cwd mutex"),
+        "must capture the exact intentional panic payload, not any panic"
+    );
+
     // A subsequent guard acquisition must succeed despite the poisoned mutex.
     let guard = CurrentDirGuard::set_to(&root);
     let current = fs::canonicalize(std::env::current_dir().expect("current dir should resolve"))
@@ -27,8 +40,4 @@ fn current_dir_guard_recovers_after_mutex_poisoning() {
     let expected = fs::canonicalize(&root).expect("temp root should canonicalize");
     assert_eq!(current, expected);
     drop(guard);
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
-
-use crate::compiler_tests::test_support::temp_dir;

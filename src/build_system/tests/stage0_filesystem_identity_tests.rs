@@ -11,7 +11,7 @@
 use super::*;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_tests::test_support::temp_dir;
+use crate::compiler_tests::test_support::unused_temp_path;
 
 #[cfg(target_os = "linux")]
 mod non_utf8_filesystem_identity {
@@ -38,7 +38,7 @@ mod non_utf8_filesystem_identity {
 
     #[test]
     fn source_tree_rejects_non_utf8_file_name() {
-        let root = temp_dir("source_tree_non_utf8_file");
+        let root = unused_temp_path("source_tree_non_utf8_file");
         let entry_root = root.join("src");
         fs::create_dir_all(&entry_root).expect("should create entry root");
         fs::write(entry_root.join("@home.moth"), "").expect("should write entry root");
@@ -74,7 +74,7 @@ mod non_utf8_filesystem_identity {
 
     #[test]
     fn source_tree_rejects_non_utf8_folder_name() {
-        let root = temp_dir("source_tree_non_utf8_folder");
+        let root = unused_temp_path("source_tree_non_utf8_folder");
         let entry_root = root.join("src");
         fs::create_dir_all(&entry_root).expect("should create entry root");
         fs::write(entry_root.join("@home.moth"), "").expect("should write entry root");
@@ -110,7 +110,7 @@ mod non_utf8_filesystem_identity {
 
     #[test]
     fn facade_discovery_rejects_non_utf8_direct_child_of_project_root() {
-        let root = temp_dir("facade_non_utf8_child");
+        let root = unused_temp_path("facade_non_utf8_child");
         let entry_root = root.join("src");
         fs::create_dir_all(&entry_root).expect("should create entry root");
         fs::write(entry_root.join("@page.moth"), "").expect("should write entry root");
@@ -148,7 +148,7 @@ mod non_utf8_filesystem_identity {
 
     #[test]
     fn package_boundary_traversal_rejects_non_utf8_name() {
-        let root = temp_dir("package_boundary_non_utf8_name");
+        let root = unused_temp_path("package_boundary_non_utf8_name");
         let package_root = root.join("pkg");
         fs::create_dir_all(&package_root).expect("should create package root");
 
@@ -179,7 +179,7 @@ mod non_utf8_filesystem_identity {
 
     #[test]
     fn legacy_package_folder_does_not_scan_non_utf8_names() {
-        let root = temp_dir("package_prefix_non_utf8");
+        let root = unused_temp_path("package_prefix_non_utf8");
         let packages_folder = root.join("packages");
         fs::create_dir_all(&packages_folder).expect("should create packages folder");
 
@@ -233,7 +233,7 @@ mod non_utf8_single_file_identity {
 
     #[test]
     fn single_file_rejects_non_utf8_extension() {
-        let root = temp_dir("single_file_non_utf8_ext");
+        let root = unused_temp_path("single_file_non_utf8_ext");
         let entry = root.join("main.");
         let bad_ext = OsString::from_vec(vec![0xC3, 0x28]);
         let entry_with_bad_ext = entry.with_extension(bad_ext);
@@ -264,7 +264,7 @@ mod non_utf8_single_file_identity {
 
     #[test]
     fn single_file_rejects_non_utf8_entry_name() {
-        let root = temp_dir("single_file_non_utf8_name");
+        let root = unused_temp_path("single_file_non_utf8_name");
         let bad_name = OsString::from_vec(vec![0xC3, 0x28]);
         let bad_file = root.join(bad_name).with_extension("moth");
         fs::write(&bad_file, "x ~= 1\n").expect("should write entry file");
@@ -341,7 +341,7 @@ mod source_package_boundary_indexes_tests {
 
     #[test]
     fn canonical_root_with_single_hash_file_derives_unique_view() {
-        let root = temp_dir("package_boundary_canonical_success");
+        let root = unused_temp_path("package_boundary_canonical_success");
         let package_root = root.join("pkg");
         fs::create_dir_all(&package_root).expect("should create package root");
         fs::write(package_root.join("@home.moth"), "").expect("should write normal module root");
@@ -394,7 +394,7 @@ mod source_package_boundary_indexes_tests {
 
     #[test]
     fn canonicalization_failure_returns_file_error() {
-        let root = temp_dir("package_boundary_canonical_failure");
+        let root = unused_temp_path("package_boundary_canonical_failure");
         fs::create_dir_all(&root).expect("should create temp root");
         let nonexistent = root.join("does_not_exist");
 
@@ -419,7 +419,7 @@ mod source_package_boundary_indexes_tests {
 
     #[test]
     fn missing_normal_module_root_rejected_during_boundary_indexing() {
-        let root = temp_dir("package_boundary_missing_root");
+        let root = unused_temp_path("package_boundary_missing_root");
         let package_root = root.join("pkg");
         fs::create_dir_all(&package_root).expect("should create package root");
 
@@ -439,7 +439,7 @@ mod source_package_boundary_indexes_tests {
 
     #[test]
     fn support_root_does_not_satisfy_package_normal_module_root_requirement() {
-        let root = temp_dir("package_boundary_support_only");
+        let root = unused_temp_path("package_boundary_support_only");
         let package_root = root.join("pkg");
         fs::create_dir_all(&package_root).expect("should create package root");
         fs::write(package_root.join("+support.moth"), "").expect("should write support root");
@@ -460,7 +460,7 @@ mod source_package_boundary_indexes_tests {
 
     #[test]
     fn support_root_beside_package_normal_module_root_uses_shared_root_collision_diagnostic() {
-        let root = temp_dir("package_boundary_hash_and_support");
+        let root = unused_temp_path("package_boundary_hash_and_support");
         let package_root = root.join("pkg");
         fs::create_dir_all(&package_root).expect("should create package root");
         fs::write(package_root.join("@mod.moth"), "").expect("should write normal module root");
@@ -482,7 +482,7 @@ mod source_package_boundary_indexes_tests {
 
     #[test]
     fn multiple_normal_module_roots_rejected_during_boundary_indexing() {
-        let root = temp_dir("package_boundary_multiple_roots");
+        let root = unused_temp_path("package_boundary_multiple_roots");
         let package_root = root.join("pkg");
         fs::create_dir_all(&package_root).expect("should create package root");
         fs::write(package_root.join("@home.moth"), "")
@@ -513,7 +513,7 @@ mod source_package_boundary_indexes_tests {
     fn unreadable_normal_module_root_returns_file_error() {
         use std::os::unix::fs::PermissionsExt;
 
-        let root = temp_dir("package_boundary_unreadable");
+        let root = unused_temp_path("package_boundary_unreadable");
         let package_root = root.join("pkg");
         fs::create_dir_all(&package_root).expect("should create package root");
         fs::write(package_root.join("@home.moth"), "").expect("should write normal module root");
@@ -543,7 +543,7 @@ mod source_package_boundary_indexes_tests {
 
     #[test]
     fn independent_package_indexes_have_boundary_local_module_ids() {
-        let root = temp_dir("package_boundary_local_ids");
+        let root = unused_temp_path("package_boundary_local_ids");
         let alpha_root = root.join("alpha");
         let beta_root = root.join("beta");
         fs::create_dir_all(&alpha_root).expect("should create alpha root");
@@ -599,7 +599,7 @@ mod source_package_boundary_indexes_tests {
 
     #[test]
     fn package_boundary_indexes_classify_provider_files_under_nearest_module() {
-        let root = temp_dir("package_boundary_provider_file");
+        let root = unused_temp_path("package_boundary_provider_file");
         let package_root = root.join("pkg");
         fs::create_dir_all(&package_root).expect("should create package root");
         fs::write(package_root.join("@mod.moth"), "").expect("should write package root");
@@ -695,7 +695,7 @@ mod non_utf8_package_boundary_candidate_tests {
     }
 
     fn package_with_non_utf8_child() -> (PathBuf, PathBuf) {
-        let root = temp_dir("package_boundary_non_utf8_candidate");
+        let root = unused_temp_path("package_boundary_non_utf8_candidate");
         let package_root = root.join("pkg");
         fs::create_dir_all(&package_root).expect("should create package root");
 
@@ -801,7 +801,7 @@ mod module_identity_tests {
 
     #[test]
     fn assigns_module_ids_in_canonical_logical_path_order() {
-        let root = temp_dir("module_id_canonical_order");
+        let root = unused_temp_path("module_id_canonical_order");
         let src = root.join("src");
         fs::create_dir_all(src.join("zeta")).expect("should create zeta");
         fs::create_dir_all(src.join("alpha")).expect("should create alpha");
@@ -857,7 +857,7 @@ mod module_identity_tests {
 
     #[test]
     fn module_identity_is_independent_of_cosmetic_root_filename_suffix() {
-        let root = temp_dir("module_id_cosmetic_suffix");
+        let root = unused_temp_path("module_id_cosmetic_suffix");
         let src = root.join("src");
         fs::create_dir_all(src.join("page")).expect("should create page module");
         fs::create_dir_all(src.join("other")).expect("should create sibling module");
@@ -920,7 +920,7 @@ mod module_identity_tests {
 
     #[test]
     fn records_explicit_root_roles_for_normal_and_support_roots() {
-        let root = temp_dir("module_root_roles");
+        let root = unused_temp_path("module_root_roles");
         let src = root.join("src");
         fs::create_dir_all(src.join("page")).expect("should create page module");
         fs::create_dir_all(src.join("components")).expect("should create support module");
@@ -972,7 +972,7 @@ mod module_identity_tests {
 
     #[test]
     fn records_structural_ancestry_by_nearest_module_containment() {
-        let root = temp_dir("module_ancestry");
+        let root = unused_temp_path("module_ancestry");
         let src = root.join("src");
         fs::create_dir_all(src.join("outer/inner")).expect("should create nested modules");
         fs::write(src.join("@page.moth"), "").expect("should write entry root");
@@ -1021,7 +1021,7 @@ mod module_identity_tests {
 
     #[test]
     fn support_roots_participate_in_structural_ancestry() {
-        let root = temp_dir("module_support_ancestry");
+        let root = unused_temp_path("module_support_ancestry");
         let src = root.join("src");
         fs::create_dir_all(src.join("page/components")).expect("should create modules");
         fs::write(src.join("page/@page.moth"), "").expect("should write normal root");
@@ -1052,7 +1052,7 @@ mod module_identity_tests {
 
     #[test]
     fn discovers_project_package_facade_outside_entry_root_containment() {
-        let root = temp_dir("module_facade_separation");
+        let root = unused_temp_path("module_facade_separation");
         let src = root.join("src");
         fs::create_dir_all(&src).expect("should create entry root");
         fs::write(src.join("@page.moth"), "").expect("should write entry module");
@@ -1113,7 +1113,7 @@ mod module_identity_tests {
 
     #[test]
     fn missing_project_root_surfaces_file_error_not_missing_facade() {
-        let root = temp_dir("facade_missing_project_root");
+        let root = unused_temp_path("facade_missing_project_root");
         let entry_root = root.join("src");
         fs::create_dir_all(&entry_root).expect("should create entry root");
         fs::write(entry_root.join("@page.moth"), "").expect("should write entry root");
@@ -1149,7 +1149,7 @@ mod module_identity_tests {
     fn unreadable_project_root_surfaces_file_error_not_missing_facade() {
         use std::os::unix::fs::PermissionsExt;
 
-        let root = temp_dir("facade_unreadable_project_root");
+        let root = unused_temp_path("facade_unreadable_project_root");
         let entry_root = root.join("src");
         fs::create_dir_all(&entry_root).expect("should create entry root");
         fs::write(entry_root.join("@page.moth"), "").expect("should write entry root");
@@ -1207,7 +1207,7 @@ mod module_identity_tests {
 
     #[test]
     fn facade_outside_entry_root_is_not_classified_as_a_support_root() {
-        let root = temp_dir("module_facade_not_support");
+        let root = unused_temp_path("module_facade_not_support");
         let src = root.join("src");
         fs::create_dir_all(&src).expect("should create entry root");
         fs::write(src.join("@page.moth"), "").expect("should write entry module");
@@ -1236,7 +1236,7 @@ mod module_identity_tests {
 
     #[test]
     fn rejects_multiple_normal_module_roots_in_one_directory() {
-        let root = temp_dir("module_multiple_normal_module_roots");
+        let root = unused_temp_path("module_multiple_normal_module_roots");
         let src = root.join("src");
         fs::create_dir_all(&src).expect("should create entry root");
         fs::write(src.join("@page.moth"), "").expect("should write first root");
@@ -1271,7 +1271,7 @@ mod module_identity_tests {
 
     #[test]
     fn rejects_mixed_normal_and_support_roots_in_one_directory() {
-        let root = temp_dir("module_mixed_roots");
+        let root = unused_temp_path("module_mixed_roots");
         let src = root.join("src");
         fs::create_dir_all(&src).expect("should create entry root");
         fs::write(src.join("@page.moth"), "").expect("should write normal root");
@@ -1306,7 +1306,7 @@ mod module_identity_tests {
 
     #[test]
     fn rejects_multiple_support_roots_in_one_directory() {
-        let root = temp_dir("module_multiple_support_roots");
+        let root = unused_temp_path("module_multiple_support_roots");
         let src = root.join("src");
         fs::create_dir_all(src.join("pkg")).expect("should create support directory");
         fs::write(src.join("pkg/+one.moth"), "").expect("should write first support root");
@@ -1401,8 +1401,8 @@ mod module_identity_tests {
     /// source-file path.
     #[test]
     fn stable_identity_is_equal_across_distinct_checkout_roots() {
-        let root_a = temp_dir("stable_identity_root_a");
-        let root_b = temp_dir("stable_identity_root_b");
+        let root_a = unused_temp_path("stable_identity_root_a");
+        let root_b = unused_temp_path("stable_identity_root_b");
         for root in [&root_a, &root_b] {
             let src = root.join("src");
             fs::create_dir_all(src.join("alpha/inner")).expect("should create nested modules");
@@ -1464,8 +1464,8 @@ mod module_identity_tests {
 
     #[test]
     fn changing_project_name_changes_stable_identity() {
-        let root_a = temp_dir("stable_identity_name_a");
-        let root_b = temp_dir("stable_identity_name_b");
+        let root_a = unused_temp_path("stable_identity_name_a");
+        let root_b = unused_temp_path("stable_identity_name_b");
         for root in [&root_a, &root_b] {
             let src = root.join("src");
             fs::create_dir_all(&src).expect("should create entry root");
@@ -1491,7 +1491,7 @@ mod module_identity_tests {
 
     #[test]
     fn changing_logical_module_path_changes_stable_identity() {
-        let root = temp_dir("stable_identity_path_change");
+        let root = unused_temp_path("stable_identity_path_change");
         let src = root.join("src");
         fs::create_dir_all(src.join("alpha")).expect("should create nested module");
         fs::write(src.join("@home.moth"), "").expect("should write entry root");
@@ -1520,8 +1520,8 @@ mod module_identity_tests {
     fn changing_root_role_changes_stable_identity() {
         // The facade shares the project root directory, whose logical path is empty just like the
         // entry root's, so role is the differentiator.
-        let root_a = temp_dir("stable_identity_role_a");
-        let root_b = temp_dir("stable_identity_role_b");
+        let root_a = unused_temp_path("stable_identity_role_a");
+        let root_b = unused_temp_path("stable_identity_role_b");
         for root in [&root_a, &root_b] {
             let src = root.join("src");
             fs::create_dir_all(&src).expect("should create entry root");
@@ -1571,8 +1571,8 @@ mod module_identity_tests {
 
     #[test]
     fn cosmetic_root_suffix_rename_does_not_change_stable_identity() {
-        let root_a = temp_dir("stable_identity_cosmetic_a");
-        let root_b = temp_dir("stable_identity_cosmetic_b");
+        let root_a = unused_temp_path("stable_identity_cosmetic_a");
+        let root_b = unused_temp_path("stable_identity_cosmetic_b");
         fs::create_dir_all(root_a.join("src")).expect("should create entry root a");
         fs::create_dir_all(root_b.join("src")).expect("should create entry root b");
         fs::write(root_a.join("src/@page.moth"), "").expect("should write page-named root");
@@ -1856,7 +1856,7 @@ mod owned_source_inventory_tests {
 
     #[test]
     fn root_and_nested_files_receive_correct_nearest_owner() {
-        let root = temp_dir("owned_source_nearest_owner");
+        let root = unused_temp_path("owned_source_nearest_owner");
         build_nested_module_tree(&root);
 
         let index =
@@ -1917,7 +1917,7 @@ mod owned_source_inventory_tests {
 
     #[test]
     fn nested_module_files_transfer_to_nested_module_not_ancestor() {
-        let root = temp_dir("owned_source_nested_transfer");
+        let root = unused_temp_path("owned_source_nested_transfer");
         build_nested_module_tree(&root);
 
         let index =
@@ -1943,7 +1943,7 @@ mod owned_source_inventory_tests {
 
     #[test]
     fn registered_bd_and_md_kinds_are_included() {
-        let root = temp_dir("owned_source_registered_kinds");
+        let root = unused_temp_path("owned_source_registered_kinds");
         let src = root.join("src");
         fs::create_dir_all(&src).expect("should create entry root");
         fs::write(src.join("@page.moth"), "").expect("should write root file");
@@ -1984,7 +1984,7 @@ mod owned_source_inventory_tests {
 
     #[test]
     fn known_but_unselected_sources_are_indexed_as_unsupported() {
-        let root = temp_dir("owned_source_excluded_kinds");
+        let root = unused_temp_path("owned_source_excluded_kinds");
         let src = root.join("src");
         fs::create_dir_all(&src).expect("should create entry root");
         fs::write(src.join("@page.moth"), "").expect("should write root file");
@@ -2029,7 +2029,7 @@ mod owned_source_inventory_tests {
 
     #[test]
     fn owned_entries_have_deterministic_logical_order_independent_of_creation() {
-        let root = temp_dir("owned_source_deterministic_order");
+        let root = unused_temp_path("owned_source_deterministic_order");
         let src = root.join("src");
         fs::create_dir_all(src.join("internal")).expect("should create internal dir");
         fs::write(src.join("@page.moth"), "").expect("should write root file");
@@ -2070,7 +2070,7 @@ mod owned_source_inventory_tests {
 
     #[test]
     fn project_facade_owns_its_root_source() {
-        let root = temp_dir("owned_source_facade_root");
+        let root = unused_temp_path("owned_source_facade_root");
         let src = root.join("src");
         fs::create_dir_all(&src).expect("should create entry root");
         fs::write(src.join("@page.moth"), "").expect("should write entry root file");
@@ -2106,7 +2106,7 @@ mod owned_source_inventory_tests {
 
     #[test]
     fn unrooted_supported_candidates_remain_explicit_facts() {
-        let root = temp_dir("owned_source_unrooted");
+        let root = unused_temp_path("owned_source_unrooted");
         let src = root.join("src");
         fs::create_dir_all(&src).expect("should create entry root");
         // No module root file in the entry root: the .moth files are unrooted.
@@ -2144,8 +2144,8 @@ mod owned_source_inventory_tests {
 
     #[test]
     fn owned_source_identity_is_independent_of_checkout_root() {
-        let root_a = temp_dir("owned_source_checkout_a");
-        let root_b = temp_dir("owned_source_checkout_b");
+        let root_a = unused_temp_path("owned_source_checkout_a");
+        let root_b = unused_temp_path("owned_source_checkout_b");
         for root in [&root_a, &root_b] {
             build_nested_module_tree(root);
         }
@@ -2193,7 +2193,7 @@ mod owned_source_inventory_tests {
 
     #[test]
     fn unknown_registered_extension_is_excluded() {
-        let root = temp_dir("owned_source_unknown_registered_extension");
+        let root = unused_temp_path("owned_source_unknown_registered_extension");
         let src = root.join("src");
         fs::create_dir_all(&src).expect("should create entry root");
         fs::write(src.join("@page.moth"), "").expect("should write root file");
@@ -2231,7 +2231,7 @@ mod owned_source_inventory_tests {
 
     #[test]
     fn mismatched_known_extension_mapping_is_indexed_as_unsupported() {
-        let root = temp_dir("owned_source_mismatched_mapping");
+        let root = unused_temp_path("owned_source_mismatched_mapping");
         let src = root.join("src");
         fs::create_dir_all(&src).expect("should create entry root");
         fs::write(src.join("@page.moth"), "").expect("should write root file");
@@ -2279,8 +2279,8 @@ mod owned_source_inventory_tests {
         // Two distinct checkout roots with unrooted files created in reverse-logical order.
         // The unrooted source IDs must sort by portable entry-root-relative logical path,
         // not by absolute checkout path or creation order.
-        let root_a = temp_dir("unrooted_logical_order_a");
-        let root_b = temp_dir("unrooted_logical_order_b");
+        let root_a = unused_temp_path("unrooted_logical_order_a");
+        let root_b = unused_temp_path("unrooted_logical_order_b");
 
         let build_tree = |root: &Path| {
             let src = root.join("src");
@@ -2321,7 +2321,7 @@ mod owned_source_inventory_tests {
         // The current compatibility case: project root equals entry root, so the facade root
         // file lies inside the traversal. It must appear exactly once, owned only by the facade
         // module, and must not also appear in the entry-root module's owned source set.
-        let root = temp_dir("facade_exact_once_same_root");
+        let root = unused_temp_path("facade_exact_once_same_root");
         fs::create_dir_all(&root).expect("should create entry root");
         fs::write(root.join("@page.moth"), "").expect("should write entry root file");
         fs::write(root.join("+package.moth"), "").expect("should write facade root file");
@@ -2390,7 +2390,7 @@ mod owned_source_inventory_tests {
 
     #[test]
     fn compilation_root_table_excludes_facade_when_it_shares_entry_root() {
-        let root = temp_dir("facade_resolver_root_table");
+        let root = unused_temp_path("facade_resolver_root_table");
         fs::create_dir_all(&root).expect("should create entry root");
         fs::write(root.join("@page.moth"), "").expect("should write entry root file");
         fs::write(root.join("+package.moth"), "").expect("should write facade root file");
@@ -2415,7 +2415,7 @@ mod owned_source_inventory_tests {
 
     #[test]
     fn source_ids_equal_their_contiguous_table_index() {
-        let root = temp_dir("source_id_contiguous_index");
+        let root = unused_temp_path("source_id_contiguous_index");
         build_nested_module_tree(&root);
         let index =
             discover_index_with_kinds(&root, "src", "my-project", &html_source_file_kinds());
@@ -2434,7 +2434,7 @@ mod owned_source_inventory_tests {
 
     #[test]
     fn every_supported_file_appears_exactly_once() {
-        let root = temp_dir("source_id_exact_once");
+        let root = unused_temp_path("source_id_exact_once");
         build_nested_module_tree(&root);
         let index =
             discover_index_with_kinds(&root, "src", "my-project", &html_source_file_kinds());
@@ -2481,7 +2481,7 @@ mod owned_source_inventory_tests {
 
     #[test]
     fn owned_and_unrooted_sets_reference_valid_records_with_matching_state() {
-        let root = temp_dir("source_id_matching_state");
+        let root = unused_temp_path("source_id_matching_state");
         build_nested_module_tree(&root);
         let index =
             discover_index_with_kinds(&root, "src", "my-project", &html_source_file_kinds());
@@ -2502,7 +2502,7 @@ mod owned_source_inventory_tests {
             }
         }
 
-        let unrooted_root = temp_dir("source_id_matching_unrooted_state");
+        let unrooted_root = unused_temp_path("source_id_matching_unrooted_state");
         let unrooted_src = unrooted_root.join("src");
         fs::create_dir_all(&unrooted_src).expect("should create unrooted source directory");
         fs::write(unrooted_src.join("orphan.moth"), "").expect("should write unrooted source");
@@ -2543,8 +2543,8 @@ mod owned_source_inventory_tests {
         // The same logical tree built in two distinct checkout roots with reverse creation order
         // must assign identical SourceId -> logical identity mappings, because SourceIds are
         // derived from portable logical identity, not traversal or absolute paths.
-        let root_a = temp_dir("source_id_deterministic_a");
-        let root_b = temp_dir("source_id_deterministic_b");
+        let root_a = unused_temp_path("source_id_deterministic_a");
+        let root_b = unused_temp_path("source_id_deterministic_b");
 
         let build_tree_reverse = |root: &Path| {
             let src = root.join("src");
@@ -2675,7 +2675,7 @@ mod owned_source_inventory_tests {
 
     #[test]
     fn provider_owned_files_are_classified_and_owned_by_nearest_module() {
-        let root = temp_dir("provider_owned_classification");
+        let root = unused_temp_path("provider_owned_classification");
         let src = root.join("src");
         let feature = src.join("feature");
         fs::create_dir_all(&feature).expect("should create feature module");
@@ -2776,7 +2776,7 @@ mod owned_source_inventory_tests {
 
     #[test]
     fn provider_owned_files_without_a_registered_provider_are_not_indexed() {
-        let root = temp_dir("provider_owned_unregistered_extension");
+        let root = unused_temp_path("provider_owned_unregistered_extension");
         let src = root.join("src");
         fs::create_dir_all(&src).expect("should create entry root");
         fs::write(src.join("@page.moth"), "").expect("should write entry root");
@@ -2875,7 +2875,7 @@ mod project_module_graph_tests {
 
     #[test]
     fn nodes_are_stored_in_deterministic_module_id_order() {
-        let root = temp_dir("graph_node_order");
+        let root = unused_temp_path("graph_node_order");
         let src = root.join("src");
         fs::create_dir_all(src.join("zeta")).expect("should create zeta");
         fs::create_dir_all(src.join("alpha")).expect("should create alpha");
@@ -2928,7 +2928,7 @@ mod project_module_graph_tests {
 
     #[test]
     fn entry_modules_are_normal_only_and_facade_is_separate() {
-        let root = temp_dir("graph_entries_and_facade");
+        let root = unused_temp_path("graph_entries_and_facade");
         let src = root.join("src");
         fs::create_dir_all(src.join("pages")).expect("should create pages");
         fs::create_dir_all(src.join("components")).expect("should create components");
@@ -2984,7 +2984,7 @@ mod project_module_graph_tests {
 
     #[test]
     fn support_visibility_is_visible_to_owner_and_normal_descendants_outside_subtree() {
-        let root = temp_dir("graph_support_visibility");
+        let root = unused_temp_path("graph_support_visibility");
         let src = root.join("src");
         fs::create_dir_all(src.join("markdown/parser")).expect("should create markdown parser");
         fs::create_dir_all(src.join("pages/article")).expect("should create pages article");
@@ -3024,7 +3024,7 @@ mod project_module_graph_tests {
 
     #[test]
     fn support_visibility_enforces_private_same_scope_and_outer_scope_boundaries() {
-        let root = temp_dir("graph_support_visibility_rejections");
+        let root = unused_temp_path("graph_support_visibility_rejections");
         let src = root.join("src");
         fs::create_dir_all(src.join("markdown/parser")).expect("should create markdown parser");
         fs::create_dir_all(src.join("assets")).expect("should create same-scope support");
@@ -3077,7 +3077,7 @@ mod project_module_graph_tests {
 
     #[test]
     fn support_visibility_rejects_modules_outside_owner_subtree() {
-        let root = temp_dir("graph_support_visibility_outside");
+        let root = unused_temp_path("graph_support_visibility_outside");
         let src = root.join("src");
         fs::create_dir_all(src.join("other")).expect("should create other branch");
         fs::create_dir_all(src.join("pages/components")).expect("should create pages components");
@@ -3103,7 +3103,7 @@ mod project_module_graph_tests {
 
     #[test]
     fn independent_ready_modules_share_wave_zero_in_module_id_order() {
-        let root = temp_dir("graph_independent_waves");
+        let root = unused_temp_path("graph_independent_waves");
         let src = root.join("src");
         fs::create_dir_all(src.join("alpha")).expect("should create alpha");
         fs::create_dir_all(src.join("beta")).expect("should create beta");
@@ -3175,7 +3175,7 @@ mod project_module_graph_tests {
 
     #[test]
     fn facade_is_ordered_by_real_edges_not_a_fake_dependency() {
-        let root = temp_dir("graph_facade_order");
+        let root = unused_temp_path("graph_facade_order");
         let src = root.join("src");
         fs::create_dir_all(src.join("pages")).expect("should create pages");
 
@@ -3246,7 +3246,7 @@ mod project_module_graph_tests {
 
     #[test]
     fn dependency_cycle_reports_blocked_modules_as_internal_error() {
-        let root = temp_dir("graph_cycle_detection");
+        let root = unused_temp_path("graph_cycle_detection");
         let src = root.join("src");
         fs::create_dir_all(src.join("alpha")).expect("should create alpha");
         fs::create_dir_all(src.join("beta")).expect("should create beta");
@@ -3295,7 +3295,7 @@ mod project_module_graph_tests {
 
     #[test]
     fn self_edge_and_invalid_ids_are_rejected_without_panicking() {
-        let root = temp_dir("graph_edge_validation");
+        let root = unused_temp_path("graph_edge_validation");
         let src = root.join("src");
         fs::create_dir_all(src.join("alpha")).expect("should create alpha");
 
@@ -3337,7 +3337,7 @@ mod project_module_graph_tests {
         // `Vec<ModuleId>` storage, so the consumer wave preserves `ModuleId` order regardless of
         // edge insertion order. The frozen order is observable through the wave that follows the
         // provider.
-        let root = temp_dir("graph_frozen_consumer_order");
+        let root = unused_temp_path("graph_frozen_consumer_order");
         let src = root.join("src");
         fs::create_dir_all(src.join("alpha")).expect("should create alpha");
         fs::create_dir_all(src.join("beta")).expect("should create beta");
@@ -3404,7 +3404,7 @@ mod project_module_graph_tests {
         // Scheduling before completion, mutation after completion and double completion all
         // surface as internal `CompilerError`s without panicking, and a completed graph still
         // schedules cleanly from its frozen adjacency.
-        let root = temp_dir("graph_phase_validation");
+        let root = unused_temp_path("graph_phase_validation");
         let src = root.join("src");
         fs::create_dir_all(src.join("alpha")).expect("should create alpha");
         fs::create_dir_all(src.join("beta")).expect("should create beta");

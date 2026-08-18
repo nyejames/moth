@@ -9,12 +9,12 @@ use super::super::types::{
     DiagnosticMatchMode, ExactWarningExpectation, SuccessContract, WarningExpectation,
 };
 use super::super::{EXPECT_FILE_NAME, ExpectedOutcome, GOLDEN_DIR_NAME, INPUT_DIR_NAME};
-use crate::compiler_tests::test_support::temp_dir;
+use crate::compiler_tests::test_support::unused_temp_path;
 use std::fs;
 use std::path::PathBuf;
 
 fn write_fixture(name: &str, expectation_source: &str) -> (PathBuf, PathBuf) {
-    let root = temp_dir(name);
+    let root = unused_temp_path(name);
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
@@ -677,7 +677,7 @@ fn rejects_acceptance_only_with_authored_expected_warning() {
 
 #[test]
 fn rejects_error_type_expectation_key() {
-    let root = temp_dir("reject_error_type_key");
+    let root = unused_temp_path("reject_error_type_key");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
@@ -698,7 +698,7 @@ fn rejects_error_type_expectation_key() {
 
 #[test]
 fn rejects_legacy_top_level_expectation_contract() {
-    let root = temp_dir("success_contract_backend_baseline");
+    let root = unused_temp_path("success_contract_backend_baseline");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
@@ -722,7 +722,7 @@ fn rejects_legacy_top_level_expectation_contract() {
 
 #[test]
 fn rejects_backend_panic_expectation_key() {
-    let root = temp_dir("reject_backend_panic_key");
+    let root = unused_temp_path("reject_backend_panic_key");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
@@ -743,7 +743,7 @@ fn rejects_backend_panic_expectation_key() {
 
 #[test]
 fn rejects_top_level_panic_expectation_key() {
-    let root = temp_dir("reject_top_level_panic_key");
+    let root = unused_temp_path("reject_top_level_panic_key");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
@@ -764,7 +764,7 @@ fn rejects_top_level_panic_expectation_key() {
 
 #[test]
 fn rejects_unknown_backend_matrix_key() {
-    let root = temp_dir("backend_matrix_unknown");
+    let root = unused_temp_path("backend_matrix_unknown");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
@@ -788,7 +788,7 @@ fn rejects_unknown_backend_matrix_key() {
 
 #[test]
 fn accepts_normalized_golden_mode() {
-    let root = temp_dir("normalized_golden_mode");
+    let root = unused_temp_path("normalized_golden_mode");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     let golden_root = case_root.join(GOLDEN_DIR_NAME).join("html");
@@ -811,7 +811,7 @@ fn accepts_normalized_golden_mode() {
 
 #[test]
 fn rejects_unknown_golden_mode() {
-    let root = temp_dir("unknown_golden_mode");
+    let root = unused_temp_path("unknown_golden_mode");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
@@ -835,7 +835,7 @@ fn rejects_unknown_golden_mode() {
 
 #[test]
 fn accepts_success_fixture_with_rendered_output_only() {
-    let root = temp_dir("rendered_output_only");
+    let root = unused_temp_path("rendered_output_only");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
@@ -1021,7 +1021,7 @@ fn rejects_invalid_ordered_and_exactly_once_authored_lists() {
 
 #[test]
 fn rejects_rendered_output_in_failure_mode() {
-    let root = temp_dir("rendered_output_failure_mode");
+    let root = unused_temp_path("rendered_output_failure_mode");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
@@ -1045,7 +1045,7 @@ fn rejects_rendered_output_in_failure_mode() {
 
 #[test]
 fn rejects_normalized_contains_on_wasm_artifact() {
-    let root = temp_dir("normalized_contains_wasm");
+    let root = unused_temp_path("normalized_contains_wasm");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
@@ -1066,7 +1066,7 @@ fn rejects_normalized_contains_on_wasm_artifact() {
 
 #[test]
 fn accepts_artifacts_must_not_exist_in_success_mode() {
-    let root = temp_dir("absence_contract_success");
+    let root = unused_temp_path("absence_contract_success");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
@@ -1095,7 +1095,7 @@ fn accepts_artifacts_must_not_exist_in_success_mode() {
 
 #[test]
 fn rejects_artifacts_must_not_exist_in_failure_mode() {
-    let root = temp_dir("absence_contract_failure");
+    let root = unused_temp_path("absence_contract_failure");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
@@ -1119,7 +1119,7 @@ fn rejects_artifacts_must_not_exist_in_failure_mode() {
 
 #[test]
 fn rejects_empty_artifacts_must_not_exist_entry() {
-    let root = temp_dir("absence_contract_empty");
+    let root = unused_temp_path("absence_contract_empty");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");

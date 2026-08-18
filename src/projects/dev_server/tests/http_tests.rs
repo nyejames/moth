@@ -1,7 +1,7 @@
 //! Tests for dev-server HTTP routing during successful and failed builds.
 
 use super::{PreparedResponse, handle_connection_with_timeouts, prepare_static_response};
-use crate::compiler_tests::test_support::temp_dir;
+use crate::compiler_tests::test_support::unused_temp_path;
 use crate::projects::dev_server::state::{BuildState, DevServerState};
 use std::fs;
 use std::io::{Read, Write};
@@ -35,7 +35,7 @@ fn configure_failed_build_state(
 
 #[test]
 fn nested_html_request_uses_stored_error_page_during_failed_build() {
-    let root = temp_dir("nested_html");
+    let root = unused_temp_path("nested_html");
     let output_dir = root.join("dev");
     fs::create_dir_all(output_dir.join("docs/basics")).expect("should create docs output dir");
     fs::write(
@@ -72,7 +72,7 @@ fn nested_html_request_uses_stored_error_page_during_failed_build() {
 
 #[test]
 fn failed_build_keeps_css_js_and_image_assets_reachable() {
-    let root = temp_dir("assets");
+    let root = unused_temp_path("assets");
     let output_dir = root.join("dev");
     fs::create_dir_all(output_dir.join("styles")).expect("should create styles dir");
     fs::create_dir_all(output_dir.join("scripts")).expect("should create scripts dir");
@@ -130,7 +130,7 @@ fn failed_build_keeps_css_js_and_image_assets_reachable() {
 
 #[test]
 fn failed_build_traversal_request_still_returns_not_found() {
-    let root = temp_dir("traversal");
+    let root = unused_temp_path("traversal");
     let output_dir = root.join("dev");
     fs::create_dir_all(&output_dir).expect("should create output dir");
     let build_state = configure_failed_build_state(
@@ -158,7 +158,7 @@ fn failed_build_traversal_request_still_returns_not_found() {
 
 #[test]
 fn root_request_uses_failed_build_error_page_without_entry_page() {
-    let root = temp_dir("root_error");
+    let root = unused_temp_path("root_error");
     let output_dir = root.join("dev");
     fs::create_dir_all(&output_dir).expect("should create output dir");
     let build_state =
@@ -183,7 +183,7 @@ fn root_request_uses_failed_build_error_page_without_entry_page() {
 
 #[test]
 fn redirects_are_returned_even_during_failed_build() {
-    let root = temp_dir("failed_build_redirect");
+    let root = unused_temp_path("failed_build_redirect");
     let output_dir = root.join("dev");
     fs::create_dir_all(output_dir.join("about")).expect("should create about output dir");
     fs::write(

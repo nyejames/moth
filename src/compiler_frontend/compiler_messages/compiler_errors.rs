@@ -241,15 +241,30 @@ impl CompilerMessages {
     pub(crate) fn first_infrastructure_error_for_tests(
         &self,
     ) -> Option<(&ErrorType, &str, &SourceLocation)> {
-        let diagnostic = self.first_error()?;
-        let DiagnosticPayload::InfrastructureError {
-            msg, error_type, ..
-        } = &diagnostic.payload
-        else {
-            return None;
-        };
+        self.infrastructure_errors_for_tests().next()
+    }
 
-        Some((error_type, msg.as_str(), &diagnostic.primary_location))
+    /// Iterate over all error-severity infrastructure diagnostics.
+    ///
+    /// WHAT: scans every error diagnostic, not just the first, so a later
+    ///   infrastructure error is not hidden by an earlier non-infrastructure error.
+    /// WHY: `first_infrastructure_error_for_tests` only checked the first error
+    ///   diagnostic and returned `None` when it was not infrastructure, making
+    ///   later infrastructure errors invisible.
+    #[cfg(test)]
+    pub(crate) fn infrastructure_errors_for_tests(
+        &self,
+    ) -> impl Iterator<Item = (&ErrorType, &str, &SourceLocation)> {
+        self.error_diagnostics().filter_map(|diagnostic| {
+            let DiagnosticPayload::InfrastructureError {
+                msg, error_type, ..
+            } = &diagnostic.payload
+            else {
+                return None;
+            };
+
+            Some((error_type, msg.as_str(), &diagnostic.primary_location))
+        })
     }
 
     /// Iterate over diagnostics with `Warning` severity.

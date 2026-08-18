@@ -5,15 +5,15 @@
 ```text
 WORK_ID: test-suite-honesty
 WORK_SOURCE: docs/roadmap/plans/test-suite-honesty-and-infrastructure-hardening-plan.md
-BASE_REVISION: 5cc946bc32a05712060672d1ff31970a7f1e5f4e
-STATUS: queued
-CURRENT_SCOPE: plan and seed fragility inventory complete
-COMPLETED: static repository audit and sequencing definition
-NEXT_ACTION: start only after the TIR corrections plan is complete, then establish the post-TIR baseline and run Phase 0
-VALIDATION: plan-only authoring change, implementation validation is defined below
-AUDITS: static source audit of tests, test support, integration harnesses, build output tests, timing tests and CI
-BLOCKERS: tir-corrections is active
-NOTES: the honesty patch may intentionally expose existing failures; those failures must remain visible in a ledger and be corrected by the follow-up correction patch before CFG timers or any later roadmap work starts
+BASE_REVISION: f41f93a7a (post-TIR, post-benchmark-counters-timers)
+STATUS: active
+CURRENT_SCOPE: Phase 0-3 complete, paused for review
+COMPLETED: Phase 0 baseline (4310 unit tests pass, 0 ignored, 1699 integration cases audit clean); Phase 1 test filesystem ownership (test_fs helpers, temp_dir→unused_temp_path migration, hardcoded /tmp removal, CurrentDirGuard restore-failure surfacing); Phase 2 structured failure identity (infrastructure_errors_for_tests iterator, test_diagnostics assertion helpers); Phase 3 synthetic state and global process state (WarningBuilder StringId fix, CurrentDirGuard finish() + restore-failure surfacing, CaseExecutionResult checked constructors, thread-join panic surfacing, exact panic-payload assertion)
+NEXT_ACTION: user review of Phase 0-3 work, then Phase 4 exact positive assertions and artifact inventory
+VALIDATION: cargo fmt --check; cargo clippy -D warnings; cargo test --workspace (4310+17+643 passed); cargo run -- tests --terse (1851/1851); cargo test --features timers (pass); pre-existing benchmark_counters failure unchanged
+AUDITS: none yet (interim audit deferred to after user review)
+BLOCKERS: none
+NOTES: Pre-existing benchmark_counters feature test failures are not caused by this work. test_fs and test_diagnostics modules are new shared test infrastructure. The unused_temp_path helper replaces temp_dir for non-existence contracts. Most test callers still use unused_temp_path + create_dir_all pattern; full migration to tempfile::tempdir() is deferred to Phase 1 follow-up where it improves cleanup ownership.
 ```
 
 ## Purpose

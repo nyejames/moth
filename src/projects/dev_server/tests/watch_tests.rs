@@ -4,7 +4,7 @@ use super::{
     FileFingerprint, WatchScope, WatchSession, WatchTarget, collect_fingerprints, detect_changes,
     fingerprint_from_modified, should_ignore_path,
 };
-use crate::compiler_tests::test_support::temp_dir;
+use crate::compiler_tests::test_support::unused_temp_path;
 use crate::projects::settings::{CONFIG_FILE_NAME, Config};
 use std::collections::HashMap;
 use std::fs;
@@ -70,7 +70,7 @@ fn detects_modified_file_fingerprints() {
 
 #[test]
 fn directory_scope_ignores_legacy_package_folders() {
-    let root = temp_dir("directory_scope");
+    let root = unused_temp_path("directory_scope");
     let output_dir = root.join("dev");
     fs::create_dir_all(root.join("src")).expect("should create src dir");
     fs::create_dir_all(root.join("assets/vendor")).expect("should create assets dir");
@@ -102,7 +102,7 @@ fn directory_scope_ignores_legacy_package_folders() {
 
 #[test]
 fn directory_scope_without_config_watches_entry_directory() {
-    let root = temp_dir("directory_scope_without_config");
+    let root = unused_temp_path("directory_scope_without_config");
     let output_dir = root.join("dev");
     fs::create_dir_all(root.join("src")).expect("should create src dir");
     fs::create_dir_all(&output_dir).expect("should create output dir");
@@ -118,7 +118,7 @@ fn directory_scope_without_config_watches_entry_directory() {
 
 #[test]
 fn scanner_only_scans_declared_watch_targets() {
-    let root = temp_dir("watch_scan");
+    let root = unused_temp_path("watch_scan");
     let output_dir = root.join("dev");
     let src_dir = root.join("src");
     let unrelated_dir = root.join("target");
@@ -196,7 +196,7 @@ fn ignore_rules_cover_git_output_and_editor_temp_files() {
 
 #[test]
 fn exact_file_target_collects_single_fingerprint() {
-    let root = temp_dir("watch_exact_file");
+    let root = unused_temp_path("watch_exact_file");
     let output_dir = root.join("dev");
     fs::create_dir_all(&root).expect("should create temp test dir");
     let source_file = root.join("page.moth");
@@ -227,7 +227,7 @@ fn exact_file_target_collects_single_fingerprint() {
 
 #[test]
 fn recursive_directory_target_collects_nested_files() {
-    let root = temp_dir("watch_recursive_directory");
+    let root = unused_temp_path("watch_recursive_directory");
     let output_dir = root.join("dev");
     let src_dir = root.join("src");
     let nested_dir = src_dir.join("pages");
@@ -275,7 +275,7 @@ fn timestamp_failure_propagates_with_path_context() {
 
 #[test]
 fn same_length_edit_detected_via_timestamp_change() {
-    let root = temp_dir("watch_same_length_edit");
+    let root = unused_temp_path("watch_same_length_edit");
     let output_dir = root.join("dev");
     fs::create_dir_all(&root).expect("should create temp test dir");
     let source_file = root.join("page.moth");

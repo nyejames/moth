@@ -40,6 +40,23 @@ fn wait_for_timing_flag(mut observed: impl FnMut() -> bool) -> bool {
     false
 }
 
+/// Join a spawned thread and surface its panic instead of discarding it.
+///
+/// WHAT: joins the handle and prints any panic payload to stderr before returning.
+/// WHY: `let _ = handle.join()` silently discards a worker panic. In failure
+///   paths where the test is about to panic anyway, the worker's panic must
+///   still be visible so the root cause is not hidden.
+fn surface_thread_panic<T>(name: &str, handle: std::thread::JoinHandle<T>) {
+    if let Err(panic_payload) = handle.join() {
+        let msg = panic_payload
+            .downcast_ref::<String>()
+            .cloned()
+            .or_else(|| panic_payload.downcast_ref::<&str>().map(|s| s.to_string()))
+            .unwrap_or_else(|| format!("{panic_payload:?}"));
+        eprintln!("worker thread '{name}' panicked: {msg}");
+    }
+}
+
 #[test]
 fn final_benchmark_snapshot_uses_schema_order_and_omits_empty_rows() {
     let snapshot = crate::timing::BenchmarkObservationSnapshot {
@@ -249,7 +266,7 @@ fn admitted_attribution_policy_survives_session_drain() {
         crate::timing::enabled::runtime::record_admission_reached_for_test()
     }) {
         pause.release();
-        let _ = recorder.join();
+        surface_thread_panic("recorder", recorder);
         panic!("the recorder should pause after admission");
     }
 
@@ -258,8 +275,8 @@ fn admitted_attribution_policy_survives_session_drain() {
         crate::timing::enabled::runtime::record_session_deactivated_for_test()
     }) {
         pause.release();
-        let _ = recorder.join();
-        let _ = finisher.join();
+        surface_thread_panic("recorder", recorder);
+        surface_thread_panic("finisher", finisher);
         panic!("session finish should deactivate the fast-path bits before waiting");
     }
 
@@ -318,7 +335,7 @@ fn attributed_duration_context_uses_admitted_session_policy() {
         crate::timing::enabled::runtime::record_admission_reached_for_test()
     }) {
         pause.release();
-        let _ = recorder.join();
+        surface_thread_panic("recorder", recorder);
         let _ = timing_session.finish();
         panic!("the direct-duration recorder should pause after admission");
     }
@@ -334,8 +351,8 @@ fn attributed_duration_context_uses_admitted_session_policy() {
         crate::timing::enabled::runtime::record_session_deactivated_for_test()
     }) {
         pause.release();
-        let _ = recorder.join();
-        let _ = finisher.join();
+        surface_thread_panic("recorder", recorder);
+        surface_thread_panic("finisher", finisher);
         panic!("session finish should deactivate the fast-path bits before waiting");
     }
     assert!(
@@ -413,7 +430,7 @@ fn admitted_attribution_survives_session_drain() {
         crate::timing::enabled::runtime::record_admission_reached_for_test()
     }) {
         pause.release();
-        let _ = recorder.join();
+        surface_thread_panic("recorder", recorder);
         let _ = timing_session.finish();
         panic!("the recorder should pause after admission");
     }
@@ -428,8 +445,8 @@ fn admitted_attribution_survives_session_drain() {
         crate::timing::enabled::runtime::record_session_deactivated_for_test()
     }) {
         pause.release();
-        let _ = recorder.join();
-        let _ = finisher.join();
+        surface_thread_panic("recorder", recorder);
+        surface_thread_panic("finisher", finisher);
         panic!("session finish should deactivate the fast-path bits before waiting");
     }
     assert!(

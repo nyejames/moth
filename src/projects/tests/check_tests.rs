@@ -14,7 +14,7 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidConfigReason, InvalidOutputFolderReason,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_tests::test_support::temp_dir;
+use crate::compiler_tests::test_support::unused_temp_path;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 #[cfg(feature = "timers")]
 use crate::timing::{TimingMetric, start_benchmark_collection};
@@ -26,7 +26,7 @@ use std::time::Duration;
 
 #[test]
 fn check_compiles_single_file_without_writing_artifacts() {
-    let root = temp_dir("single_file");
+    let root = unused_temp_path("single_file");
     fs::create_dir_all(&root).expect("should create temp root");
     let entry_file = root.join("main.moth");
     fs::write(&entry_file, "value = 1\n").expect("should write source file");
@@ -59,7 +59,7 @@ fn check_compiles_single_file_without_writing_artifacts() {
 #[test]
 fn successful_check_finishes_bootstrap_before_frontend() {
     let _test_guard = crate::timing::lock_instrumentation_tests();
-    let root = temp_dir("check_timer_stage_boundaries");
+    let root = unused_temp_path("check_timer_stage_boundaries");
     fs::create_dir_all(&root).expect("should create temporary project root");
     let entry_file = root.join("main.moth");
     fs::write(&entry_file, "value = 1\n").expect("should write source file");
@@ -89,7 +89,7 @@ fn successful_check_finishes_bootstrap_before_frontend() {
 #[test]
 fn config_ast_timers_use_dedicated_identities() {
     let _test_guard = crate::timing::lock_instrumentation_tests();
-    let root = temp_dir("check_config_timer_stage_boundaries");
+    let root = unused_temp_path("check_config_timer_stage_boundaries");
     let source_root = root.join("src");
     fs::create_dir_all(&source_root).expect("should create source root");
     fs::write(root.join("config.moth"), "entry_root #= \"src\"\n")
@@ -137,7 +137,7 @@ fn assert_timing_sequence(
 
 #[test]
 fn check_retains_source_package_warning() {
-    let root = temp_dir("check_source_package_warning");
+    let root = unused_temp_path("check_source_package_warning");
     let package = root.join("src/warnpkg");
     let src = root.join("src");
     fs::create_dir_all(&package).expect("should create package root");
@@ -183,9 +183,9 @@ fn check_rejects_symlinked_directory_output_roots_before_frontend_work() {
             InvalidOutputFolderReason::InsideOrEqualToEntryRoot,
         ),
     ] {
-        let root = temp_dir(&format!("check_output_symlink_{case_name}"));
+        let root = unused_temp_path(&format!("check_output_symlink_{case_name}"));
         let source_root = root.join("src");
-        let outside = temp_dir(&format!("check_output_symlink_target_{case_name}"));
+        let outside = unused_temp_path(&format!("check_output_symlink_target_{case_name}"));
         fs::create_dir_all(&source_root).expect("should create source root");
         fs::create_dir_all(&outside).expect("should create outside root");
         let output_root = root.join("dev");
@@ -235,7 +235,7 @@ type DiagnosticIdentityRow = (&'static str, Option<&'static str>, String, i32);
 /// WHAT: returns an unmanaged temp project root containing only the authored source file.
 /// WHY: the parity test reuses one project shape for both `execute_check` and `build_project`.
 fn write_page_project(prefix: &str, source: &str) -> PathBuf {
-    let root = temp_dir(prefix);
+    let root = unused_temp_path(prefix);
     fs::create_dir_all(&root).expect("should create temp project root");
     fs::write(root.join("@page.moth"), source).expect("should write @page.moth source");
     root
@@ -439,7 +439,7 @@ fn terse_summary_line_matches_clean_success_contract() {
 #[test]
 fn run_check_records_command_check_total() {
     let _test_guard = crate::timing::lock_instrumentation_tests();
-    let root = temp_dir("check_run_check_timer");
+    let root = unused_temp_path("check_run_check_timer");
     fs::create_dir_all(&root).expect("should create temporary project root");
     let entry_file = root.join("main.moth");
     fs::write(&entry_file, "value = 1\n").expect("should write source file");

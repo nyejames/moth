@@ -1,5 +1,32 @@
 use super::*;
 
+/// Assert that no filesystem node exists at `path`.
+///
+/// Only `NotFound` is accepted as missing — permission errors and dangling
+/// symlinks are not absence.
+#[track_caller]
+fn assert_path_missing(path: &std::path::Path) {
+    match std::fs::symlink_metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Ok(metadata) => panic!("expected no filesystem node at {path:?}, found {metadata:?}"),
+        Err(error) => panic!("failed to inspect {path:?} for absence assertion: {error}"),
+    }
+}
+
+/// Assert that `path` is a regular file.
+#[track_caller]
+fn assert_regular_file(path: &std::path::Path) {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            assert!(
+                metadata.is_file(),
+                "expected a regular file at {path:?}, found {metadata:?}"
+            );
+        }
+        Err(error) => panic!("failed to inspect {path:?} for regular-file assertion: {error}"),
+    }
+}
+
 #[test]
 fn test_detect_display_name_mappings() {
     // We cannot change the actual OS/ARCH at runtime, but we can verify
@@ -99,8 +126,8 @@ fn test_escape_toml_string() {
 
 #[test]
 fn test_write_and_read_system_toml_roundtrip() {
-    let temp_dir = std::env::temp_dir();
-    let path = temp_dir.join("bench_system_test_roundtrip.toml");
+    let temp = tempfile::tempdir().expect("should create temp dir");
+    let path = temp.path().join("bench_system_test_roundtrip.toml");
 
     let system = BenchmarkSystem {
         system_uuid: "AABBCCDD11223344556677889900AABB".to_string(),
@@ -115,47 +142,33 @@ fn test_write_and_read_system_toml_roundtrip() {
     assert_eq!(parsed.system_uuid, system.system_uuid);
     assert_eq!(parsed.public_system_id, system.public_system_id);
     assert_eq!(parsed.display_name, system.display_name);
-
-    // Cleanup
-    let _ = std::fs::remove_file(&path);
 }
 
 #[test]
 fn test_load_or_create_system_check_mode_missing_file() {
-    let temp_dir = std::env::temp_dir().join("bench_system_test_check_missing");
-    let _ = std::fs::remove_dir_all(&temp_dir);
-
-    let toml_path = temp_dir.join("system.toml");
+    // Use a nested path under a fresh temp dir — non-existence is the contract.
+    let temp = tempfile::tempdir().expect("should create temp dir");
+    let toml_path = temp.path().join("nested").join("system.toml");
 
     // Check mode with missing file should return Ok(None) and create nothing
     let result = load_or_create_system_at(&toml_path, SystemIdentityMode::ReadOnly);
     assert!(result.is_ok());
     assert!(result.unwrap().is_none());
-    assert!(
-        !toml_path.exists(),
-        "Check mode should not create system.toml"
-    );
-    assert!(
-        !temp_dir.exists(),
-        "Check mode should not create parent directory"
-    );
-
-    // Cleanup
-    let _ = std::fs::remove_dir_all(&temp_dir);
+    assert_path_missing(&toml_path);
+    // The parent directory should not have been created by check mode.
+    assert_path_missing(&temp.path().join("nested"));
 }
 
 #[test]
 fn test_load_or_create_system_record_mode_creates_file() {
-    let temp_dir = std::env::temp_dir().join("bench_system_test_record_create");
-    let _ = std::fs::remove_dir_all(&temp_dir);
-
-    let toml_path = temp_dir.join("system.toml");
+    let temp = tempfile::tempdir().expect("should create temp dir");
+    let toml_path = temp.path().join("system.toml");
 
     // Record mode with missing file should create it
     let result = load_or_create_system_at(&toml_path, SystemIdentityMode::CreateIfMissing);
     assert!(result.is_ok());
     let system1 = result.unwrap().expect("Record mode should return Some");
-    assert!(toml_path.exists(), "Record mode should create system.toml");
+    assert_regular_file(&toml_path);
 
     // Record mode again should reuse the existing file
     let result2 = load_or_create_system_at(&toml_path, SystemIdentityMode::CreateIfMissing);
@@ -163,17 +176,12 @@ fn test_load_or_create_system_record_mode_creates_file() {
     let system2 = result2.unwrap().expect("Record mode should return Some");
     assert_eq!(system1.system_uuid, system2.system_uuid);
     assert_eq!(system1.public_system_id, system2.public_system_id);
-
-    // Cleanup
-    let _ = std::fs::remove_dir_all(&temp_dir);
 }
 
 #[test]
 fn test_load_or_create_system_record_then_check_reuses() {
-    let temp_dir = std::env::temp_dir().join("bench_system_test_record_then_check");
-    let _ = std::fs::remove_dir_all(&temp_dir);
-
-    let toml_path = temp_dir.join("system.toml");
+    let temp = tempfile::tempdir().expect("should create temp dir");
+    let toml_path = temp.path().join("system.toml");
 
     // Record mode creates the file
     let record_result = load_or_create_system_at(&toml_path, SystemIdentityMode::CreateIfMissing);
@@ -191,7 +199,4 @@ fn test_load_or_create_system_record_then_check_reuses() {
         system_from_record.public_system_id,
         system_from_check.public_system_id
     );
-
-    // Cleanup
-    let _ = std::fs::remove_dir_all(&temp_dir);
 }

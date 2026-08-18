@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 #[test]
 fn html_project_directives_fail_when_builder_does_not_register_them() {
-    let root = temp_dir("directive_boundary_missing");
+    let root = unused_temp_path("directive_boundary_missing");
     fs::create_dir_all(&root).expect("should create temp root");
 
     for (directive_name, source) in [
@@ -52,7 +52,7 @@ fn html_project_directives_fail_when_builder_does_not_register_them() {
 
 #[test]
 fn frontend_builtin_directives_work_without_builder_registered_project_directives() {
-    let root = temp_dir("frontend_builtin_boundary");
+    let root = unused_temp_path("frontend_builtin_boundary");
     fs::create_dir_all(&root).expect("should create temp root");
 
     let entry_file = root.join("builtins.moth");
@@ -81,4 +81,4 @@ fn frontend_builtin_directives_work_without_builder_registered_project_directive
     fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
-use crate::compiler_tests::test_support::temp_dir;
+use crate::compiler_tests::test_support::unused_temp_path;

@@ -3,7 +3,7 @@
 use super::{
     ResolvedRequest, ResolvedRequestKind, content_type_for_path, inject_dev_client, resolve_request,
 };
-use crate::compiler_tests::test_support::temp_dir;
+use crate::compiler_tests::test_support::unused_temp_path;
 use crate::projects::routing::{HtmlSiteConfig, PageUrlStyle};
 use std::fs;
 use std::path::Path;
@@ -60,7 +60,7 @@ fn resolve_path_rejects_traversal() {
 
 #[test]
 fn root_uses_entry_page_when_available() {
-    let root = temp_dir("root_page");
+    let root = unused_temp_path("root_page");
     let output_dir = root.join("dev");
     fs::create_dir_all(&output_dir).expect("should create output dir");
     fs::write(output_dir.join("index.html"), "<h1>home</h1>").expect("should write root page");
@@ -86,7 +86,7 @@ fn root_uses_entry_page_when_available() {
 
 #[test]
 fn trailing_slash_mode_redirects_non_canonical_page_forms() {
-    let root = temp_dir("trailing_slash");
+    let root = unused_temp_path("trailing_slash");
     let output_dir = root.join("dev");
     fs::create_dir_all(output_dir.join("about")).expect("should create about dir");
     fs::write(output_dir.join("about/index.html"), "<h1>about</h1>").expect("should write page");
@@ -136,7 +136,7 @@ fn trailing_slash_mode_redirects_non_canonical_page_forms() {
 
 #[test]
 fn no_trailing_slash_mode_redirects_trailing_page_form() {
-    let root = temp_dir("no_trailing_slash");
+    let root = unused_temp_path("no_trailing_slash");
     let output_dir = root.join("dev");
     fs::create_dir_all(output_dir.join("about")).expect("should create about dir");
     fs::write(output_dir.join("about/index.html"), "<h1>about</h1>").expect("should write page");
@@ -186,7 +186,7 @@ fn no_trailing_slash_mode_redirects_trailing_page_form() {
 
 #[test]
 fn ignore_mode_serves_both_slash_forms_but_can_still_redirect_index_alias() {
-    let root = temp_dir("ignore_mode");
+    let root = unused_temp_path("ignore_mode");
     let output_dir = root.join("dev");
     fs::create_dir_all(output_dir.join("about")).expect("should create about dir");
     fs::write(output_dir.join("about/index.html"), "<h1>about</h1>").expect("should write page");
@@ -237,7 +237,7 @@ fn ignore_mode_serves_both_slash_forms_but_can_still_redirect_index_alias() {
 
 #[test]
 fn exact_assets_are_served_without_page_canonicalization() {
-    let root = temp_dir("exact_assets");
+    let root = unused_temp_path("exact_assets");
     let output_dir = root.join("dev");
     fs::create_dir_all(output_dir.join("images")).expect("should create images dir");
     fs::write(output_dir.join("app.js"), "console.log('ok');").expect("should write js");
@@ -299,7 +299,7 @@ fn exact_assets_are_served_without_page_canonicalization() {
 
 #[test]
 fn origin_aware_resolution_and_redirects() {
-    let root = temp_dir("origin_aware");
+    let root = unused_temp_path("origin_aware");
     let output_dir = root.join("dev");
     fs::create_dir_all(output_dir.join("docs")).expect("should create docs dir");
     fs::write(output_dir.join("docs/index.html"), "<h1>docs</h1>").expect("should write page");

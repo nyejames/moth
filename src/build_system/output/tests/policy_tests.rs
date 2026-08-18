@@ -175,8 +175,10 @@ fn config_and_write_time_containment_share_canonical_classification() {
     use crate::build_system::output::manifest::validate_output_root_is_safe;
     use crate::compiler_frontend::symbols::string_interning::StringTable;
 
-    let project_root = crate::compiler_tests::test_support::temp_dir("shared_output_containment");
-    let outside_root = crate::compiler_tests::test_support::temp_dir("shared_output_outside");
+    let project_root =
+        crate::compiler_tests::test_support::unused_temp_path("shared_output_containment");
+    let outside_root =
+        crate::compiler_tests::test_support::unused_temp_path("shared_output_outside");
     fs::create_dir_all(&project_root).expect("should create project root");
     fs::create_dir_all(&outside_root).expect("should create outside root");
     symlink(&outside_root, project_root.join("out")).expect("should create output symlink");

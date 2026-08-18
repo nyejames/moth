@@ -10,13 +10,13 @@ use super::super::{
     BackendId, CaseRole, EXPECT_FILE_NAME, GOLDEN_DIR_NAME, INPUT_DIR_NAME, MANIFEST_FILE_NAME,
     TestRunnerOptions,
 };
-use crate::compiler_tests::test_support::temp_dir;
+use crate::compiler_tests::test_support::unused_temp_path;
 use std::fs;
 use std::path::Path;
 
 #[test]
 fn rejects_failure_fixture_without_diagnostic_codes() {
-    let root = temp_dir("failure_contract_missing_codes");
+    let root = unused_temp_path("failure_contract_missing_codes");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
@@ -40,7 +40,7 @@ fn rejects_failure_fixture_without_diagnostic_codes() {
 
 #[test]
 fn accepts_failure_fixture_without_message_contains() {
-    let root = temp_dir("failure_contract_codes_only");
+    let root = unused_temp_path("failure_contract_codes_only");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
@@ -59,7 +59,7 @@ fn accepts_failure_fixture_without_message_contains() {
 
 #[test]
 fn rejects_canonical_fixture_without_expectation_before_execution() {
-    let root = temp_dir("missing_expectation");
+    let root = unused_temp_path("missing_expectation");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
@@ -83,7 +83,7 @@ fn rejects_canonical_fixture_without_expectation_before_execution() {
 
 #[test]
 fn rejects_acceptance_only_fixture_with_golden_artifacts() {
-    let root = temp_dir("acceptance_only_golden_artifacts");
+    let root = unused_temp_path("acceptance_only_golden_artifacts");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     let golden_root = case_root.join(GOLDEN_DIR_NAME).join("html");
@@ -111,7 +111,7 @@ fn rejects_acceptance_only_fixture_with_golden_artifacts() {
 
 #[test]
 fn accepts_acceptance_only_without_fixture_specific_source_marker() {
-    let root = temp_dir("acceptance_only_without_source_marker");
+    let root = unused_temp_path("acceptance_only_without_source_marker");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
@@ -136,7 +136,7 @@ fn accepts_acceptance_only_without_fixture_specific_source_marker() {
 
 #[test]
 fn empty_backend_golden_directory_has_no_contract() {
-    let root = temp_dir("empty_backend_golden_directory");
+    let root = unused_temp_path("empty_backend_golden_directory");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
@@ -162,7 +162,7 @@ fn empty_backend_golden_directory_has_no_contract() {
 
 #[test]
 fn empty_nested_golden_directory_has_no_contract() {
-    let root = temp_dir("empty_nested_golden_directory");
+    let root = unused_temp_path("empty_nested_golden_directory");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(case_root.join(GOLDEN_DIR_NAME).join("html").join("nested"))
@@ -188,7 +188,7 @@ fn empty_nested_golden_directory_has_no_contract() {
 
 #[test]
 fn explicit_golden_mode_without_files_is_rejected() {
-    let root = temp_dir("explicit_golden_mode_without_files");
+    let root = unused_temp_path("explicit_golden_mode_without_files");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
@@ -212,7 +212,7 @@ fn explicit_golden_mode_without_files_is_rejected() {
 
 #[test]
 fn nested_golden_files_use_relative_inventory_paths() {
-    let root = temp_dir("nested_golden_file_inventory");
+    let root = unused_temp_path("nested_golden_file_inventory");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     let golden_root = case_root.join(GOLDEN_DIR_NAME).join("html");
@@ -244,7 +244,7 @@ fn nested_golden_files_use_relative_inventory_paths() {
 
 #[test]
 fn accepts_backend_matrix_and_expands_case_variants() {
-    let root = temp_dir("backend_matrix");
+    let root = unused_temp_path("backend_matrix");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
@@ -267,7 +267,7 @@ fn accepts_backend_matrix_and_expands_case_variants() {
 
 #[test]
 fn backend_filter_limits_loaded_case_variants() {
-    let root = temp_dir("backend_filter");
+    let root = unused_temp_path("backend_filter");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
@@ -300,7 +300,7 @@ fn backend_filter_limits_loaded_case_variants() {
 
 #[test]
 fn manifest_metadata_survives_backend_expansion() {
-    let root = temp_dir("manifest_metadata_expansion");
+    let root = unused_temp_path("manifest_metadata_expansion");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
@@ -343,7 +343,7 @@ fn manifest_metadata_survives_backend_expansion() {
 
 #[test]
 fn matrix_cases_resolve_backend_specific_golden_directories() {
-    let root = temp_dir("matrix_backend_goldens");
+    let root = unused_temp_path("matrix_backend_goldens");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     let golden_html_root = case_root.join(GOLDEN_DIR_NAME).join("html");
@@ -409,7 +409,7 @@ fn matrix_cases_resolve_backend_specific_golden_directories() {
 
 #[test]
 fn accepts_success_fixture_with_golden_only_assertion() {
-    let root = temp_dir("success_contract_golden_assertion");
+    let root = unused_temp_path("success_contract_golden_assertion");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     let golden_root = case_root.join(GOLDEN_DIR_NAME).join("html");
@@ -432,7 +432,7 @@ fn accepts_success_fixture_with_golden_only_assertion() {
 
 #[test]
 fn accepts_success_fixture_with_artifact_assertion() {
-    let root = temp_dir("success_contract_artifact_assertion");
+    let root = unused_temp_path("success_contract_artifact_assertion");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
@@ -451,7 +451,7 @@ fn accepts_success_fixture_with_artifact_assertion() {
 
 #[test]
 fn accepts_success_fixture_with_rendered_output_assertion() {
-    let root = temp_dir("success_contract_rendered_output");
+    let root = unused_temp_path("success_contract_rendered_output");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
@@ -483,7 +483,7 @@ fn each_new_rendered_output_form_satisfies_success_completeness() {
     ];
 
     for (name, field) in fields {
-        let root = temp_dir(&format!("rendered_output_success_completeness_{name}"));
+        let root = unused_temp_path(&format!("rendered_output_success_completeness_{name}"));
         let case_root = root.join("case");
         let input_root = case_root.join(INPUT_DIR_NAME);
         fs::create_dir_all(&input_root).expect("should create input directory");
@@ -503,7 +503,7 @@ fn each_new_rendered_output_form_satisfies_success_completeness() {
 
 #[test]
 fn accepts_success_fixture_with_artifact_absence_assertion() {
-    let root = temp_dir("success_contract_artifact_absence");
+    let root = unused_temp_path("success_contract_artifact_absence");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
@@ -522,7 +522,7 @@ fn accepts_success_fixture_with_artifact_absence_assertion() {
 
 #[test]
 fn accepts_success_fixture_with_exact_warning_contract() {
-    let root = temp_dir("success_contract_exact_warning");
+    let root = unused_temp_path("success_contract_exact_warning");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
@@ -541,7 +541,7 @@ fn accepts_success_fixture_with_exact_warning_contract() {
 
 #[test]
 fn rejects_failure_fixture_with_authored_golden_mode() {
-    let root = temp_dir("failure_golden_mode");
+    let root = unused_temp_path("failure_golden_mode");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     let golden_root = case_root.join(GOLDEN_DIR_NAME).join("html");
@@ -568,7 +568,7 @@ fn rejects_failure_fixture_with_authored_golden_mode() {
 
 #[test]
 fn rejects_failure_fixture_with_discovered_file_backed_golden() {
-    let root = temp_dir("failure_golden_files");
+    let root = unused_temp_path("failure_golden_files");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     let golden_root = case_root.join(GOLDEN_DIR_NAME).join("html");
@@ -595,7 +595,7 @@ fn rejects_failure_fixture_with_discovered_file_backed_golden() {
 
 #[test]
 fn accepts_failure_fixture_without_any_golden() {
-    let root = temp_dir("failure_no_golden");
+    let root = unused_temp_path("failure_no_golden");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
@@ -614,7 +614,7 @@ fn accepts_failure_fixture_without_any_golden() {
 
 #[test]
 fn rejects_baseline_only_success_fixture() {
-    let root = temp_dir("baseline_only_success");
+    let root = unused_temp_path("baseline_only_success");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
@@ -640,7 +640,7 @@ fn rejects_baseline_only_success_fixture() {
 
 #[test]
 fn default_forbidden_warnings_do_not_satisfy_success_completeness() {
-    let root = temp_dir("default_forbidden_warnings_not_contract");
+    let root = unused_temp_path("default_forbidden_warnings_not_contract");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
@@ -674,7 +674,7 @@ fn rejects_unsafe_configured_entries() {
     ];
 
     for entry in unsafe_entries {
-        let root = temp_dir("unsafe_configured_entry");
+        let root = unused_temp_path("unsafe_configured_entry");
         let case_root = root.join("case");
         let input_root = case_root.join(INPUT_DIR_NAME);
         fs::create_dir_all(&input_root).expect("should create fixture input directory");
@@ -699,7 +699,7 @@ fn rejects_unsafe_configured_entries() {
 
 #[test]
 fn accepts_exact_directory_entry_and_returns_canonical_input() {
-    let root = temp_dir("exact_directory_entry");
+    let root = unused_temp_path("exact_directory_entry");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
@@ -722,7 +722,7 @@ fn accepts_exact_directory_entry_and_returns_canonical_input() {
 
 #[test]
 fn accepts_nested_contained_entry_and_returns_canonical_path() {
-    let root = temp_dir("nested_contained_entry");
+    let root = unused_temp_path("nested_contained_entry");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     let entry_path = input_root.join("nested").join("intro.mtf");
@@ -772,8 +772,8 @@ fn symlink_directory(target: &Path, link: &Path) -> std::io::Result<()> {
 #[cfg(any(unix, windows))]
 #[test]
 fn rejects_input_directory_symlink_escape() {
-    let root = temp_dir("input_directory_symlink_escape");
-    let outside = temp_dir("input_directory_symlink_escape_target");
+    let root = unused_temp_path("input_directory_symlink_escape");
+    let outside = unused_temp_path("input_directory_symlink_escape_target");
     let case_root = root.join("case");
     let input_link = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&case_root).expect("should create fixture root");
@@ -805,8 +805,8 @@ fn rejects_input_directory_symlink_escape() {
 #[cfg(any(unix, windows))]
 #[test]
 fn rejects_entry_symlink_escape() {
-    let root = temp_dir("entry_symlink_escape");
-    let outside = temp_dir("entry_symlink_escape_target");
+    let root = unused_temp_path("entry_symlink_escape");
+    let outside = unused_temp_path("entry_symlink_escape_target");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     let entry_link = input_root.join("escape.mtf");
@@ -840,7 +840,7 @@ fn rejects_entry_symlink_escape() {
 #[cfg(any(unix, windows))]
 #[test]
 fn rejects_contained_golden_file_symlink() {
-    let root = temp_dir("golden_contained_file_symlink");
+    let root = unused_temp_path("golden_contained_file_symlink");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     let golden_root = case_root.join(GOLDEN_DIR_NAME).join("html");
@@ -875,8 +875,8 @@ fn rejects_contained_golden_file_symlink() {
 #[cfg(any(unix, windows))]
 #[test]
 fn rejects_escaping_golden_file_symlink() {
-    let root = temp_dir("golden_escaping_file_symlink");
-    let outside = temp_dir("golden_escaping_file_symlink_target");
+    let root = unused_temp_path("golden_escaping_file_symlink");
+    let outside = unused_temp_path("golden_escaping_file_symlink_target");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     let golden_root = case_root.join(GOLDEN_DIR_NAME).join("html");
@@ -909,8 +909,8 @@ fn rejects_escaping_golden_file_symlink() {
 #[cfg(any(unix, windows))]
 #[test]
 fn rejects_golden_directory_symlink() {
-    let root = temp_dir("golden_directory_symlink");
-    let outside = temp_dir("golden_directory_symlink_target");
+    let root = unused_temp_path("golden_directory_symlink");
+    let outside = unused_temp_path("golden_directory_symlink_target");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     let golden_root = case_root.join(GOLDEN_DIR_NAME).join("html");
@@ -943,8 +943,8 @@ fn rejects_golden_directory_symlink() {
 #[cfg(any(unix, windows))]
 #[test]
 fn rejects_backend_golden_root_symlink() {
-    let root = temp_dir("golden_root_symlink");
-    let outside = temp_dir("golden_root_symlink_target");
+    let root = unused_temp_path("golden_root_symlink");
+    let outside = unused_temp_path("golden_root_symlink_target");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     let golden_parent = case_root.join(GOLDEN_DIR_NAME);
@@ -980,8 +980,8 @@ fn rejects_backend_golden_root_symlink() {
 #[cfg(any(unix, windows))]
 #[test]
 fn rejects_golden_parent_symlink() {
-    let root = temp_dir("golden_parent_symlink");
-    let outside = temp_dir("golden_parent_symlink_target");
+    let root = unused_temp_path("golden_parent_symlink");
+    let outside = unused_temp_path("golden_parent_symlink_target");
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     let golden_parent = case_root.join(GOLDEN_DIR_NAME);

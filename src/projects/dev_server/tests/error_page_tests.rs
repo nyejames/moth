@@ -8,7 +8,7 @@ use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidCon
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::CharPosition;
-use crate::compiler_tests::test_support::temp_dir;
+use crate::compiler_tests::test_support::unused_temp_path;
 use std::fs;
 
 #[test]
@@ -47,7 +47,7 @@ fn formatted_compiler_messages_include_typed_diagnostics() {
 
 #[test]
 fn compiler_error_page_links_to_project_relative_resolved_source_path() {
-    let root = temp_dir("relative_path");
+    let root = unused_temp_path("relative_path");
     let source_file = root.join("src/docs/guide.moth");
     fs::create_dir_all(
         source_file

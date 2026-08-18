@@ -1,0 +1,264 @@
+//! Typed diagnostic assertion helpers for tests.
+//!
+//! WHAT: exact diagnostic code, infrastructure error and reason assertions.
+//! WHY: a bare `is_err()` or `error_count() > 0` accepts the wrong failure at
+//!   multi-lane boundaries. These helpers prove the exact diagnostic kind,
+//!   infrastructure error type or authored reason so an unrelated error
+//!   cannot satisfy the intended contract.
+
+#![allow(dead_code)]
+
+use crate::compiler_frontend::compiler_errors::{CompilerMessages, ErrorType};
+use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, DiagnosticSeverity};
+use std::collections::BTreeMap;
+
+/// Assert that the diagnostic codes of all error-severity diagnostics match
+/// the expected multiset exactly.
+///
+/// WHAT: collects every error diagnostic's stable code into a sorted multiset
+///   and compares against the expected multiset.
+/// WHY: `error_count() > 0` or `is_err()` accepts any error. Exact codes prove
+///   the intended diagnostic, not just that some error happened.
+#[track_caller]
+pub fn assert_exact_diagnostic_codes(messages: &CompilerMessages, expected: &[&str]) {
+    let mut actual: Vec<&str> = messages
+        .diagnostics()
+        .filter(|d| d.severity == DiagnosticSeverity::Error)
+        .map(|d| d.kind.code())
+        .collect();
+    actual.sort_unstable();
+    let mut expected_sorted: Vec<&str> = expected.to_vec();
+    expected_sorted.sort_unstable();
+    assert_eq!(
+        actual, expected_sorted,
+        "diagnostic codes must match exactly"
+    );
+}
+
+/// Assert that `messages` contains no infrastructure errors.
+#[track_caller]
+pub fn assert_no_infrastructure_errors(messages: &CompilerMessages) {
+    let infra_errors: Vec<_> = messages.infrastructure_errors_for_tests().collect();
+    assert!(
+        infra_errors.is_empty(),
+        "expected no infrastructure errors, found: {infra_errors:?}"
+    );
+}
+
+/// Assert that `messages` contains exactly one infrastructure error of the
+/// expected `ErrorType`.
+#[track_caller]
+pub fn assert_exact_infrastructure_error(messages: &CompilerMessages, expected_type: &ErrorType) {
+    let infra_errors: Vec<_> = messages.infrastructure_errors_for_tests().collect();
+    assert_eq!(
+        infra_errors.len(),
+        1,
+        "expected exactly one infrastructure error, found {}: {infra_errors:?}",
+        infra_errors.len()
+    );
+    assert_eq!(
+        infra_errors[0].0, expected_type,
+        "infrastructure error type mismatch"
+    );
+}
+
+/// Assert that the error diagnostic with the given `code` and 1-based
+/// `occurrence` carries the expected `DiagnosticPayload` reason variant.
+///
+/// WHAT: finds the n-th occurrence of `code` among error diagnostics and
+///   checks that its payload matches the expected variant name.
+/// WHY: broad `is_err()` accepts any failure. Reason assertions prove the
+///   correct diagnostic lane, not just that an error was emitted.
+#[track_caller]
+pub fn assert_diagnostic_reason(
+    messages: &CompilerMessages,
+    code: &str,
+    occurrence: usize,
+    expected_reason: &str,
+) {
+    let matching: Vec<_> = messages
+        .diagnostics()
+        .filter(|d| d.severity == DiagnosticSeverity::Error && d.kind.code() == code)
+        .collect();
+
+    assert!(
+        occurrence >= 1 && occurrence <= matching.len(),
+        "diagnostic code '{code}' has {} occurrence(s), cannot select occurrence {occurrence}",
+        matching.len()
+    );
+
+    let diagnostic = matching[occurrence - 1];
+    let actual_reason = payload_variant_name(&diagnostic.payload);
+    assert_eq!(
+        actual_reason, expected_reason,
+        "diagnostic '{code}' occurrence {occurrence} has reason '{actual_reason}', \
+         expected '{expected_reason}'"
+    );
+}
+
+/// Return the variant name of a `DiagnosticPayload` for reason assertions.
+fn payload_variant_name(payload: &DiagnosticPayload) -> &'static str {
+    match payload {
+        DiagnosticPayload::None => "None",
+        DiagnosticPayload::ExpectedToken { .. } => "ExpectedToken",
+        DiagnosticPayload::UnexpectedToken { .. } => "UnexpectedToken",
+        DiagnosticPayload::UnexpectedTrailingComma => "UnexpectedTrailingComma",
+        DiagnosticPayload::UnescapedImplicitTemplateClose { .. } => {
+            "UnescapedImplicitTemplateClose"
+        }
+        DiagnosticPayload::UnknownName { .. } => "UnknownName",
+        DiagnosticPayload::TypeMismatch { .. } => "TypeMismatch",
+        DiagnosticPayload::DuplicateDeclaration { .. } => "DuplicateDeclaration",
+        DiagnosticPayload::MissingImportTarget { .. } => "MissingImportTarget",
+        DiagnosticPayload::AmbiguousImportTarget { .. } => "AmbiguousImportTarget",
+        DiagnosticPayload::BareFileImport { .. } => "BareFileImport",
+        DiagnosticPayload::DirectSpecialFileImport { .. } => "DirectSpecialFileImport",
+        DiagnosticPayload::InfrastructureError { .. } => "InfrastructureError",
+        // This is not exhaustive — add more variants as needed by tests.
+        _ => "Other",
+    }
+}
+
+/// Build an exact count map of error diagnostic codes.
+///
+/// WHAT: returns a `BTreeMap` from code to occurrence count.
+/// WHY: useful for comparing multisets in tests that need exact cardinality.
+#[track_caller]
+pub fn error_code_counts(messages: &CompilerMessages) -> BTreeMap<String, usize> {
+    let mut counts = BTreeMap::new();
+    for diagnostic in messages.diagnostics() {
+        if diagnostic.severity == DiagnosticSeverity::Error {
+            *counts
+                .entry(diagnostic.kind.code().to_string())
+                .or_insert(0) += 1;
+        }
+    }
+    counts
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::compiler_frontend::compiler_errors::SourceLocation;
+    use crate::compiler_frontend::compiler_messages::{
+        CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity,
+        RuleDiagnosticKind,
+    };
+    use crate::compiler_frontend::symbols::string_interning::StringTable;
+
+    fn messages_with_errors(
+        diagnostics: Vec<CompilerDiagnostic>,
+        table: StringTable,
+    ) -> CompilerMessages {
+        CompilerMessages::from_diagnostics(diagnostics, table)
+    }
+
+    #[test]
+    fn assert_exact_diagnostic_codes_matches_single_error() {
+        let table = StringTable::new();
+        let diagnostic = CompilerDiagnostic::new(
+            DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
+            SourceLocation::default(),
+            DiagnosticPayload::None,
+        );
+        let messages = messages_with_errors(vec![diagnostic], table);
+        assert_exact_diagnostic_codes(&messages, &["MOTH-RULE-0001"]);
+    }
+
+    #[test]
+    fn assert_exact_diagnostic_codes_rejects_wrong_count() {
+        let table = StringTable::new();
+        let diagnostic = CompilerDiagnostic::new(
+            DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
+            SourceLocation::default(),
+            DiagnosticPayload::None,
+        );
+        let messages = messages_with_errors(vec![diagnostic], table);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            assert_exact_diagnostic_codes(&messages, &["MOTH-RULE-0001", "MOTH-RULE-0001"]);
+        }));
+        assert!(result.is_err(), "should panic for wrong count");
+    }
+
+    #[test]
+    fn assert_no_infrastructure_errors_accepts_clean_messages() {
+        let table = StringTable::new();
+        let messages = messages_with_errors(vec![], table);
+        assert_no_infrastructure_errors(&messages);
+    }
+
+    #[test]
+    fn assert_no_infrastructure_errors_rejects_infra_error() {
+        let table = StringTable::new();
+        let diagnostic = CompilerDiagnostic::with_severity(
+            DiagnosticKind::Infrastructure(
+                crate::compiler_frontend::compiler_messages::InfrastructureDiagnosticKind::InfrastructureFailure,
+            ),
+            DiagnosticSeverity::Error,
+            SourceLocation::default(),
+            DiagnosticPayload::InfrastructureError {
+                msg: "test failure".to_string(),
+                error_type: ErrorType::File,
+                metadata: std::collections::HashMap::new(),
+            },
+        );
+        let messages = messages_with_errors(vec![diagnostic], table);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            assert_no_infrastructure_errors(&messages);
+        }));
+        assert!(result.is_err(), "should panic for an infrastructure error");
+    }
+
+    #[test]
+    fn assert_exact_infrastructure_error_matches_type() {
+        let table = StringTable::new();
+        let diagnostic = CompilerDiagnostic::with_severity(
+            DiagnosticKind::Infrastructure(
+                crate::compiler_frontend::compiler_messages::InfrastructureDiagnosticKind::InfrastructureFailure,
+            ),
+            DiagnosticSeverity::Error,
+            SourceLocation::default(),
+            DiagnosticPayload::InfrastructureError {
+                msg: "file not found".to_string(),
+                error_type: ErrorType::File,
+                metadata: std::collections::HashMap::new(),
+            },
+        );
+        let messages = messages_with_errors(vec![diagnostic], table);
+        assert_exact_infrastructure_error(&messages, &ErrorType::File);
+    }
+
+    #[test]
+    fn assert_exact_infrastructure_error_rejects_wrong_count() {
+        let table = StringTable::new();
+        let diagnostic1 = CompilerDiagnostic::with_severity(
+            DiagnosticKind::Infrastructure(
+                crate::compiler_frontend::compiler_messages::InfrastructureDiagnosticKind::InfrastructureFailure,
+            ),
+            DiagnosticSeverity::Error,
+            SourceLocation::default(),
+            DiagnosticPayload::InfrastructureError {
+                msg: "first".to_string(),
+                error_type: ErrorType::File,
+                metadata: std::collections::HashMap::new(),
+            },
+        );
+        let diagnostic2 = CompilerDiagnostic::with_severity(
+            DiagnosticKind::Infrastructure(
+                crate::compiler_frontend::compiler_messages::InfrastructureDiagnosticKind::InfrastructureFailure,
+            ),
+            DiagnosticSeverity::Error,
+            SourceLocation::default(),
+            DiagnosticPayload::InfrastructureError {
+                msg: "second".to_string(),
+                error_type: ErrorType::Config,
+                metadata: std::collections::HashMap::new(),
+            },
+        );
+        let messages = messages_with_errors(vec![diagnostic1, diagnostic2], table);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            assert_exact_infrastructure_error(&messages, &ErrorType::File);
+        }));
+        assert!(result.is_err(), "should panic for two infra errors");
+    }
+}

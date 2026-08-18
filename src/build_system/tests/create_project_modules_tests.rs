@@ -50,7 +50,7 @@ use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageR
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::{DependencyShellId, FileId};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_tests::test_support::temp_dir;
+use crate::compiler_tests::test_support::unused_temp_path;
 use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -513,7 +513,7 @@ fn synthetic_prepared_identity_snapshot(
 }
 
 fn synthetic_identity_fixture(dependency_order: &[&str]) -> Vec<SyntheticPreparedIdentitySnapshot> {
-    let root = temp_dir("synthetic_rebound_identity_order");
+    let root = unused_temp_path("synthetic_rebound_identity_order");
     fs::create_dir_all(&root).expect("should create synthetic fixture root");
 
     let dependency_clauses = dependency_order
@@ -612,7 +612,7 @@ fn synthetic_preparation_reuses_complete_outputs_for_one_final_header_pass() {
     let _test_guard = SOURCE_READ_COUNTER_TEST_LOCK
         .lock()
         .expect("source read counter test lock poisoned");
-    let root = temp_dir("synthetic_complete_output_reuse");
+    let root = unused_temp_path("synthetic_complete_output_reuse");
     fs::create_dir_all(&root).expect("should create synthetic fixture root");
     fs::write(root.join("main.moth"), "@helper greet\n").expect("should write entry");
     fs::write(
@@ -766,7 +766,7 @@ fn synthetic_diagnosed_preparation_is_not_consumed_again() {
     let _test_guard = SOURCE_READ_COUNTER_TEST_LOCK
         .lock()
         .expect("source read counter test lock poisoned");
-    let root = temp_dir("synthetic_diagnosed_preparation_once");
+    let root = unused_temp_path("synthetic_diagnosed_preparation_once");
     fs::create_dir_all(&root).expect("should create synthetic fixture root");
     fs::write(root.join("main.moth"), "@helper\n").expect("should write entry");
     fs::write(root.join("helper.moth"), "@core/math sin,\n")
@@ -873,7 +873,7 @@ fn synthetic_diagnosed_preparation_is_not_consumed_again() {
 
 #[test]
 fn direct_selection_resolves_cross_module_child_facade() {
-    let root = temp_dir("direct_selection_cross_module_child_facade");
+    let root = unused_temp_path("direct_selection_cross_module_child_facade");
     let src = root.join("src");
     fs::create_dir_all(src.join("child")).expect("should create child module dir");
     fs::write(
@@ -927,7 +927,7 @@ fn direct_selection_resolves_cross_module_child_facade() {
 
 #[test]
 fn direct_selection_resolves_source_package_facade() {
-    let root = temp_dir("direct_selection_source_package_facade");
+    let root = unused_temp_path("direct_selection_source_package_facade");
     let src = root.join("src");
     let package_root = root.join("builder/helper");
     fs::create_dir_all(&src).expect("should create src dir");
@@ -1106,7 +1106,7 @@ fn first_error_diagnostic(messages: &CompilerMessages) -> &CompilerDiagnostic {
 
 #[test]
 fn source_tree_index_collects_one_scan_and_applies_skip_policy() {
-    let root = temp_dir("source_tree_index_outputs");
+    let root = unused_temp_path("source_tree_index_outputs");
     let entry_root = root.clone();
     let nested = entry_root.join("nested");
     fs::create_dir_all(&nested).expect("should create nested module directory");
@@ -1194,7 +1194,7 @@ fn source_tree_index_collects_one_scan_and_applies_skip_policy() {
 
 #[test]
 fn source_tree_index_ignores_collision_in_fixed_skipped_directory() {
-    let root = temp_dir("source_tree_index_fixed_skipped_collision");
+    let root = unused_temp_path("source_tree_index_fixed_skipped_collision");
     let entry_root = root.clone();
 
     // Fixed-skipped directory with collision-shaped contents. Configured output directories
@@ -1238,7 +1238,7 @@ fn source_tree_index_ignores_collision_in_fixed_skipped_directory() {
 
 #[test]
 fn source_tree_index_ignores_package_prefix_collision_in_skipped_directory() {
-    let root = temp_dir("source_tree_index_skipped_prefix_collision");
+    let root = unused_temp_path("source_tree_index_skipped_prefix_collision");
     let entry_root = root.join("src");
     fs::create_dir_all(&entry_root).expect("should create entry root");
 
@@ -1280,7 +1280,7 @@ fn source_tree_index_ignores_package_prefix_collision_in_skipped_directory() {
 
 #[test]
 fn source_tree_index_detects_collision_in_non_skipped_directory() {
-    let root = temp_dir("source_tree_index_non_skipped_collision");
+    let root = unused_temp_path("source_tree_index_non_skipped_collision");
     let entry_root = root.join("src");
     fs::create_dir_all(entry_root.join("helper")).expect("should create helper folder");
     fs::write(entry_root.join("helper.moth"), "x ~= 1\n").expect("should write colliding file");
@@ -1317,7 +1317,7 @@ fn source_tree_index_detects_collision_in_non_skipped_directory() {
 
 #[test]
 fn bounded_module_roots_for_single_file_indexes_nested_roots_with_ignored_directories() {
-    let root = temp_dir("bounded_single_file_nested_ignored");
+    let root = unused_temp_path("bounded_single_file_nested_ignored");
     let module_dir = root.join("module");
     let nested = module_dir.join("nested");
     fs::create_dir_all(&nested).expect("should create nested module");
@@ -1358,7 +1358,7 @@ fn bounded_module_roots_for_single_file_indexes_nested_roots_with_ignored_direct
 
 #[test]
 fn bounded_module_roots_for_single_file_rejects_dependency_name_collisions() {
-    let root = temp_dir("bounded_single_file_collision");
+    let root = unused_temp_path("bounded_single_file_collision");
     let module_dir = root.join("module");
     fs::create_dir_all(module_dir.join("helper")).expect("should create helper directory");
     fs::write(module_dir.join("helper.moth"), "helper #= 1\n")
@@ -1389,7 +1389,7 @@ fn bounded_module_roots_for_single_file_rejects_dependency_name_collisions() {
 
 #[test]
 fn source_tree_index_rejects_duplicate_normal_module_root_files() {
-    let root = temp_dir("source_tree_index_duplicate_roots");
+    let root = unused_temp_path("source_tree_index_duplicate_roots");
     let entry_root = root.join("src");
     fs::create_dir_all(&entry_root).expect("should create entry root");
     fs::write(entry_root.join("@home.moth"), "").expect("should write page root");
@@ -1608,7 +1608,7 @@ impl ExternalImportProvider for ResolvingCountingProvider {
 
 #[test]
 fn parses_config_constant_declarations() {
-    let root = temp_dir("config_constants");
+    let root = unused_temp_path("config_constants");
     fs::create_dir_all(&root).expect("should create root dir");
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
@@ -1651,7 +1651,7 @@ fn parses_config_constant_declarations() {
 
 #[test]
 fn loads_canonical_config_file_from_project_root() {
-    let root = temp_dir("canonical_config_lookup");
+    let root = unused_temp_path("canonical_config_lookup");
     fs::create_dir_all(&root).expect("should create root dir");
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
@@ -1725,7 +1725,7 @@ fn rejects_direct_canonical_config_dependency_paths() {
 
 #[test]
 fn rejects_unknown_config_key() {
-    let root = temp_dir("config_unknown_key");
+    let root = unused_temp_path("config_unknown_key");
     fs::create_dir_all(&root).expect("should create root dir");
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
@@ -1777,7 +1777,7 @@ fn rejects_unknown_config_key() {
 
 #[test]
 fn rejects_output_folder_inside_or_equal_to_entry_root_with_exact_location() {
-    let root = temp_dir("config_output_inside_entry_root");
+    let root = unused_temp_path("config_output_inside_entry_root");
     fs::create_dir_all(&root).expect("should create root dir");
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
@@ -1831,7 +1831,7 @@ fn rejects_config_plain_and_mutable_bindings() {
     // `config_plain_project_rejected` and `config_mutable_key_rejected` cases cover the
     // user-visible rejection; this unit retains the typed reason for both binding modes.
     for (operator, label) in [("=", "plain"), ("~=", "mutable")] {
-        let root = temp_dir(&format!("config_{label}_binding_rejected"));
+        let root = unused_temp_path(&format!("config_{label}_binding_rejected"));
         fs::create_dir_all(&root).expect("should create root dir");
         let config_path = root.join(settings::CONFIG_FILE_NAME);
 
@@ -1862,7 +1862,7 @@ fn rejects_config_plain_and_mutable_bindings() {
 
 #[test]
 fn parses_config_explicit_hash_binding_mode() {
-    let root = temp_dir("config_hash_binding");
+    let root = unused_temp_path("config_hash_binding");
     fs::create_dir_all(&root).expect("should create root dir");
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
@@ -1886,7 +1886,7 @@ fn parses_config_explicit_hash_binding_mode() {
 
 #[test]
 fn rejects_config_function_declarations() {
-    let root = temp_dir("config_function_rejected");
+    let root = unused_temp_path("config_function_rejected");
     fs::create_dir_all(&root).expect("should create root dir");
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
@@ -1929,7 +1929,7 @@ fn accepts_config_type_declarations() {
     ];
 
     for (case_name, source) in cases {
-        let root = temp_dir(&format!("config_{case_name}_accepted"));
+        let root = unused_temp_path(&format!("config_{case_name}_accepted"));
         fs::create_dir_all(&root).expect("should create root dir");
         let config_path = root.join(settings::CONFIG_FILE_NAME);
 
@@ -1952,7 +1952,7 @@ fn accepts_config_type_declarations() {
 
 #[test]
 fn rejects_config_standalone_template() {
-    let root = temp_dir("config_standalone_template_rejected");
+    let root = unused_temp_path("config_standalone_template_rejected");
     fs::create_dir_all(&root).expect("should create root dir");
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
@@ -1981,7 +1981,7 @@ fn rejects_config_standalone_template() {
 
 #[test]
 fn rejects_config_const_page_fragment() {
-    let root = temp_dir("config_const_fragment_rejected");
+    let root = unused_temp_path("config_const_fragment_rejected");
     fs::create_dir_all(&root).expect("should create root dir");
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
@@ -2010,7 +2010,7 @@ fn rejects_config_const_page_fragment() {
 
 #[test]
 fn rejects_project_local_config_dependency_even_when_module_root_exists() {
-    let root = temp_dir("config_project_local_import_rejected");
+    let root = unused_temp_path("config_project_local_import_rejected");
     fs::create_dir_all(&root).expect("should create root dir");
     fs::create_dir_all(root.join("settings")).expect("should create settings module");
     fs::write(root.join("settings/@mod.moth"), "value #= \"src\"\n")
@@ -2042,7 +2042,7 @@ fn rejects_project_local_config_dependency_even_when_module_root_exists() {
 
 #[test]
 fn rejects_builder_config_dependency_without_discovering_the_package_root() {
-    let root = temp_dir("config_builder_dependency_rejected_before_discovery");
+    let root = unused_temp_path("config_builder_dependency_rejected_before_discovery");
     let package_root = root.join("builder/defaults");
     fs::create_dir_all(&package_root).expect("should create Builder package folder");
     fs::write(package_root.join("@first.moth"), "value #= 1\n")
@@ -2088,7 +2088,7 @@ fn rejects_builder_config_dependency_without_discovering_the_package_root() {
 
 #[test]
 fn legacy_package_folder_does_not_register_project_local_source_metadata() {
-    let root = temp_dir("configured_project_local_package_metadata");
+    let root = unused_temp_path("configured_project_local_package_metadata");
     let package_root = root.join("packages/widgets");
     fs::create_dir_all(&package_root).expect("should create project-local package");
     fs::create_dir_all(root.join("src")).expect("should create entry root");
@@ -2118,7 +2118,7 @@ fn legacy_package_folder_does_not_register_project_local_source_metadata() {
 
 #[test]
 fn ordinary_package_folder_does_not_collide_with_entry_root() {
-    let root = temp_dir("entry_root_lib_collision");
+    let root = unused_temp_path("entry_root_lib_collision");
     fs::create_dir_all(root.join("src/helper")).expect("should create src/helper");
     fs::create_dir_all(root.join("lib/helper")).expect("should create lib/helper");
     fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
@@ -2150,7 +2150,7 @@ fn ordinary_package_folder_does_not_collide_with_entry_root() {
 
 #[test]
 fn rejects_package_folder_absolute_path_entry() {
-    let root = temp_dir("invalid_package_folders_absolute");
+    let root = unused_temp_path("invalid_package_folders_absolute");
     fs::create_dir_all(&root).expect("should create root dir");
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
@@ -2183,7 +2183,7 @@ fn rejects_package_folder_absolute_path_entry() {
 
 #[test]
 fn rejects_package_folder_parent_directory_entry() {
-    let root = temp_dir("invalid_package_folders_dotdot");
+    let root = unused_temp_path("invalid_package_folders_dotdot");
     fs::create_dir_all(&root).expect("should create root dir");
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
@@ -2215,7 +2215,7 @@ fn rejects_package_folder_parent_directory_entry() {
 
 #[test]
 fn rejects_duplicate_package_folder_entries() {
-    let root = temp_dir("duplicate_package_folders");
+    let root = unused_temp_path("duplicate_package_folders");
     fs::create_dir_all(&root).expect("should create root dir");
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
@@ -2245,7 +2245,7 @@ fn rejects_duplicate_package_folder_entries() {
 
 #[test]
 fn rejects_nested_package_folder_entry() {
-    let root = temp_dir("invalid_package_folders_nested");
+    let root = unused_temp_path("invalid_package_folders_nested");
     fs::create_dir_all(&root).expect("should create root dir");
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
@@ -2278,7 +2278,7 @@ fn rejects_nested_package_folder_entry() {
 
 #[test]
 fn missing_default_package_folder_is_ignored() {
-    let root = temp_dir("missing_default_lib_ignored");
+    let root = unused_temp_path("missing_default_lib_ignored");
     fs::create_dir_all(root.join("src")).expect("should create src");
     fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(root.join("config.moth"), "entry_root #= \"src\"\n").expect("should write config");
@@ -2316,7 +2316,7 @@ fn missing_default_package_folder_is_ignored() {
 
 #[test]
 fn accepts_config_const_record_field_projection() {
-    let root = temp_dir("config_const_record_projection");
+    let root = unused_temp_path("config_const_record_projection");
     fs::create_dir_all(&root).expect("should create root dir");
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
@@ -2342,7 +2342,7 @@ fn accepts_config_const_record_field_projection() {
 
 #[test]
 fn malformed_dependency_path_keeps_precise_location_during_module_discovery() {
-    let root = temp_dir("malformed_dependency_path_location");
+    let root = unused_temp_path("malformed_dependency_path_location");
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
     fs::write(
@@ -2397,7 +2397,7 @@ fn malformed_dependency_path_keeps_precise_location_during_module_discovery() {
 
 #[test]
 fn config_dependency_parse_failure_keeps_precise_location_in_compiler_messages() {
-    let root = temp_dir("config_import_location");
+    let root = unused_temp_path("config_import_location");
     fs::create_dir_all(&root).expect("should create root dir");
     let config_path = root.join(settings::CONFIG_FILE_NAME);
     fs::write(&config_path, "@core/math sin\n").expect("should write invalid config");
@@ -2436,7 +2436,7 @@ fn config_dependency_parse_failure_keeps_precise_location_in_compiler_messages()
 
 #[test]
 fn discover_modules_uses_reachable_files_only() {
-    let root = temp_dir("reachable_only");
+    let root = unused_temp_path("reachable_only");
     let src = root.join("src");
     fs::create_dir_all(src.join("libs")).expect("should create libs folder");
     fs::create_dir_all(src.join("styles")).expect("should create styles folder");
@@ -2491,7 +2491,7 @@ fn discover_modules_uses_reachable_files_only() {
 
 #[test]
 fn discover_modules_resolves_relative_child_dependencies() {
-    let root = temp_dir("relative_imports");
+    let root = unused_temp_path("relative_imports");
     let src = root.join("src");
     fs::create_dir_all(src.join("components")).expect("should create components folder");
 
@@ -2541,7 +2541,7 @@ fn discover_modules_resolves_relative_child_dependencies() {
 
 #[test]
 fn dependency_clause_keeps_one_cross_module_edge_for_multiple_selections() {
-    let root = temp_dir("dependency_clause_multiple_selections");
+    let root = unused_temp_path("dependency_clause_multiple_selections");
     let src = root.join("src");
     fs::create_dir_all(src.join("child")).expect("should create child module dir");
 
@@ -2601,7 +2601,7 @@ fn dependency_clause_keeps_one_cross_module_edge_for_multiple_selections() {
 
 #[test]
 fn module_root_relative_dependency_resolves_from_the_entry_root() {
-    let root = temp_dir("entry_root_fallback");
+    let root = unused_temp_path("entry_root_fallback");
     let src = root.join("src");
     let lib = root.join("lib");
     fs::create_dir_all(src.join("helpers")).expect("should create source helpers");
@@ -2662,7 +2662,7 @@ fn module_root_relative_dependency_resolves_from_the_entry_root() {
 
 #[test]
 fn synthetic_module_root_resolution_prefers_owning_nested_module() {
-    let root = temp_dir("synthetic_nested_module_root_precedence");
+    let root = unused_temp_path("synthetic_nested_module_root_precedence");
     let src = root.join("src");
     let child = src.join("child");
     fs::create_dir_all(&child).expect("should create nested module directory");
@@ -2739,7 +2739,7 @@ fn synthetic_module_root_resolution_prefers_owning_nested_module() {
 
 #[test]
 fn discover_all_modules_finds_normal_roots_across_multiple_directories() {
-    let root = temp_dir("multiple_normal_roots");
+    let root = unused_temp_path("multiple_normal_roots");
     let src = root.join("src");
     fs::create_dir_all(src.join("nested")).expect("should create nested folder");
 
@@ -2797,7 +2797,7 @@ fn discover_all_modules_finds_normal_roots_across_multiple_directories() {
 
 #[test]
 fn accepts_folded_template_initializer_for_compile_time_config_binding() {
-    let root = temp_dir("config_folded_template");
+    let root = unused_temp_path("config_folded_template");
     fs::create_dir_all(&root).expect("should create root dir");
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
@@ -2819,7 +2819,7 @@ fn accepts_folded_template_initializer_for_compile_time_config_binding() {
 
 #[test]
 fn accepts_config_local_reference_to_earlier_private_const() {
-    let root = temp_dir("config_local_reference");
+    let root = unused_temp_path("config_local_reference");
     fs::create_dir_all(&root).expect("should create root dir");
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
@@ -2842,7 +2842,7 @@ fn accepts_config_local_reference_to_earlier_private_const() {
 
 #[test]
 fn rejects_config_unresolved_local_reference() {
-    let root = temp_dir("config_unresolved_local_reference");
+    let root = unused_temp_path("config_unresolved_local_reference");
     fs::create_dir_all(&root).expect("should create root dir");
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
@@ -2869,7 +2869,7 @@ fn rejects_config_unresolved_local_reference() {
 
 #[test]
 fn rejects_config_non_compile_time_constant_value() {
-    let root = temp_dir("config_non_foldable");
+    let root = unused_temp_path("config_non_foldable");
     fs::create_dir_all(&root).expect("should create root dir");
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
@@ -2898,7 +2898,7 @@ fn rejects_config_non_compile_time_constant_value() {
 
 #[test]
 fn rejects_duplicate_plain_config_bindings_before_config_validation() {
-    let root = temp_dir("config_duplicate_private");
+    let root = unused_temp_path("config_duplicate_private");
     fs::create_dir_all(&root).expect("should create root dir");
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
@@ -2933,7 +2933,7 @@ fn rejects_duplicate_plain_config_bindings_before_config_validation() {
 
 #[test]
 fn rejects_config_non_key_private_helper() {
-    let root = temp_dir("config_non_key_helper");
+    let root = unused_temp_path("config_non_key_helper");
     fs::create_dir_all(&root).expect("should create root dir");
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
@@ -2963,7 +2963,7 @@ fn rejects_config_non_key_private_helper() {
 
 #[test]
 fn rejects_config_runtime_call_in_value() {
-    let root = temp_dir("config_runtime_call");
+    let root = unused_temp_path("config_runtime_call");
     fs::create_dir_all(&root).expect("should create root dir");
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
@@ -2994,7 +2994,7 @@ fn rejects_config_runtime_call_in_value() {
 
 #[test]
 fn accepts_valid_bool_config_keys() {
-    let root = temp_dir("config_bool_shape_ok");
+    let root = unused_temp_path("config_bool_shape_ok");
     fs::create_dir_all(&root).expect("should create root dir");
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
@@ -3023,7 +3023,7 @@ fn accepts_valid_bool_config_keys() {
 
 #[test]
 fn rejects_core_string_key_with_bool_value() {
-    let root = temp_dir("config_string_shape_bool_rejected");
+    let root = unused_temp_path("config_string_shape_bool_rejected");
     fs::create_dir_all(&root).expect("should create root dir");
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
@@ -3049,7 +3049,7 @@ fn rejects_core_string_key_with_bool_value() {
 
 #[test]
 fn rejects_backend_bool_key_with_string_value() {
-    let root = temp_dir("config_bool_shape_string_rejected");
+    let root = unused_temp_path("config_bool_shape_string_rejected");
     fs::create_dir_all(&root).expect("should create root dir");
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
@@ -3076,7 +3076,7 @@ fn rejects_backend_bool_key_with_string_value() {
 
 #[test]
 fn rejects_package_folders_with_bool_value() {
-    let root = temp_dir("config_package_folders_bool_rejected");
+    let root = unused_temp_path("config_package_folders_bool_rejected");
     fs::create_dir_all(&root).expect("should create root dir");
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
@@ -3105,7 +3105,7 @@ fn rejects_package_folders_with_bool_value() {
 
 #[test]
 fn accepts_package_folders_single_string() {
-    let root = temp_dir("config_package_folders_single_string");
+    let root = unused_temp_path("config_package_folders_single_string");
     fs::create_dir_all(&root).expect("should create root dir");
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
@@ -3124,7 +3124,7 @@ fn accepts_package_folders_single_string() {
 
 #[test]
 fn accepts_config_local_reference_after_shape_enforcement() {
-    let root = temp_dir("config_local_ref_after_shape");
+    let root = unused_temp_path("config_local_ref_after_shape");
     fs::create_dir_all(&root).expect("should create root dir");
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
@@ -3155,7 +3155,7 @@ fn accepts_config_local_reference_after_shape_enforcement() {
 
 #[test]
 fn detects_duplicate_top_level_config_constants() {
-    let root = temp_dir("config_duplicate_top_level_constants");
+    let root = unused_temp_path("config_duplicate_top_level_constants");
     fs::create_dir_all(&root).expect("should create root dir");
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
@@ -3193,7 +3193,7 @@ fn authored_config_keeps_non_canonical_spelling_in_duplicate_diagnostic() {
     // The caller-provided config path spelling is preserved as the authored source-location
     // identity even when it is non-canonical. The resolver directory comes only from the
     // canonical config parent, while diagnostics keep the authored spelling.
-    let root = temp_dir("config_non_canonical_spelling");
+    let root = unused_temp_path("config_non_canonical_spelling");
     fs::create_dir_all(&root).expect("should create root dir");
     fs::create_dir_all(root.join("sub")).expect("should create sub dir");
     let config_path = root.join("config.moth");
@@ -3243,7 +3243,7 @@ fn authored_config_keeps_non_canonical_spelling_in_duplicate_diagnostic() {
 fn authored_config_resolver_uses_canonical_parent_for_noncanonical_spelling() {
     // A non-canonical config path that detours through a sibling directory must still derive
     // the resolver directory from the canonical config parent and apply the config value.
-    let root = temp_dir("config_relative_parent_spelling");
+    let root = unused_temp_path("config_relative_parent_spelling");
     fs::create_dir_all(&root).expect("should create root dir");
     fs::create_dir_all(root.join("sub")).expect("should create sub dir");
     let config_path = root.join("config.moth");
@@ -3263,7 +3263,7 @@ fn authored_config_resolver_uses_canonical_parent_for_noncanonical_spelling() {
 
 #[test]
 fn project_local_lib_directory_is_ignored_as_source_package_root() {
-    let root = temp_dir("project_local_lib");
+    let root = unused_temp_path("project_local_lib");
     fs::create_dir_all(&root).expect("should create root dir");
     fs::create_dir_all(root.join("lib/helper")).expect("should create lib/helper");
     fs::create_dir_all(root.join("src")).expect("should create src");
@@ -3307,7 +3307,7 @@ fn project_local_lib_directory_is_ignored_as_source_package_root() {
 
 #[test]
 fn builder_package_prefix_is_independent_of_ordinary_lib_directory() {
-    let root = temp_dir("lib_collision");
+    let root = unused_temp_path("lib_collision");
     fs::create_dir_all(&root).expect("should create root dir");
     fs::create_dir_all(root.join("lib/html")).expect("should create lib/html");
     fs::create_dir_all(root.join("builder/html")).expect("should create builder/html");
@@ -3346,7 +3346,7 @@ fn builder_package_prefix_is_independent_of_ordinary_lib_directory() {
 
 #[test]
 fn configured_package_folder_is_ignored_as_source_package_root() {
-    let root = temp_dir("project_local_custom_package_folder");
+    let root = unused_temp_path("project_local_custom_package_folder");
     fs::create_dir_all(&root).expect("should create root dir");
     fs::create_dir_all(root.join("packages/helper")).expect("should create packages/helper");
     fs::create_dir_all(root.join("src")).expect("should create src");
@@ -3395,7 +3395,7 @@ fn configured_package_folder_is_ignored_as_source_package_root() {
 
 #[test]
 fn missing_explicit_package_folder_is_ignored_by_stage0() {
-    let root = temp_dir("missing_explicit_package_folder");
+    let root = unused_temp_path("missing_explicit_package_folder");
     fs::create_dir_all(root.join("src")).expect("should create src");
     fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(
@@ -3429,7 +3429,7 @@ fn missing_explicit_package_folder_is_ignored_by_stage0() {
 
 #[test]
 fn explicit_package_folder_file_is_ignored_by_stage0() {
-    let root = temp_dir("package_folder_not_directory");
+    let root = unused_temp_path("package_folder_not_directory");
     fs::create_dir_all(root.join("src")).expect("should create src");
     fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(root.join("packages"), "").expect("should write file in place of folder");
@@ -3464,7 +3464,7 @@ fn explicit_package_folder_file_is_ignored_by_stage0() {
 
 #[test]
 fn entry_root_requires_at_least_one_root_entry_file() {
-    let root = temp_dir("entry_root_without_entries");
+    let root = unused_temp_path("entry_root_without_entries");
     fs::create_dir_all(root.join("src")).expect("should create src");
     fs::write(root.join("config.moth"), "entry_root #= \"src\"\n").expect("should write config");
 
@@ -3494,7 +3494,7 @@ fn entry_root_requires_at_least_one_root_entry_file() {
 
 #[test]
 fn rejects_moth_file_and_folder_collision_in_same_directory() {
-    let root = temp_dir("moth_folder_collision");
+    let root = unused_temp_path("moth_folder_collision");
     fs::create_dir_all(root.join("src/UI")).expect("should create src/UI");
     fs::write(root.join("src/UI/@page.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(root.join("src/ui.moth"), "y ~= 2\n").expect("should write colliding file");
@@ -3533,7 +3533,7 @@ fn rejects_moth_file_and_folder_collision_in_same_directory() {
 
 #[test]
 fn rejects_template_file_and_folder_collision_in_same_directory() {
-    let root = temp_dir("template_folder_collision");
+    let root = unused_temp_path("template_folder_collision");
     fs::create_dir_all(root.join("src/ui")).expect("should create src/ui");
     fs::write(root.join("src/ui/@page.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(root.join("src/ui.mtf"), "template\n").expect("should write colliding file");
@@ -3567,7 +3567,7 @@ fn rejects_template_file_and_folder_collision_in_same_directory() {
 
 #[test]
 fn allows_same_stem_in_different_directories() {
-    let root = temp_dir("same_stem_different_dirs");
+    let root = unused_temp_path("same_stem_different_dirs");
     fs::create_dir_all(root.join("src/components")).expect("should create src/components");
     fs::create_dir_all(root.join("src/pages")).expect("should create src/pages");
     fs::write(root.join("src/components/card.moth"), "x ~= 1\n").expect("should write card");
@@ -3598,7 +3598,7 @@ fn allows_same_stem_in_different_directories() {
 
 #[test]
 fn rejects_collision_with_empty_folder() {
-    let root = temp_dir("collision_empty_folder");
+    let root = unused_temp_path("collision_empty_folder");
     fs::create_dir_all(root.join("src/helper")).expect("should create src/helper");
     fs::write(root.join("src/helper.moth"), "x ~= 1\n").expect("should write colliding file");
     fs::write(root.join("src/@page.moth"), "y ~= 2\n").expect("should write entry");
@@ -3637,7 +3637,7 @@ fn rejects_collision_with_empty_folder() {
 
 #[test]
 fn js_file_with_same_stem_as_folder_does_not_trigger_collision() {
-    let root = temp_dir("js_same_stem_no_collision");
+    let root = unused_temp_path("js_same_stem_no_collision");
     fs::create_dir_all(root.join("src/helper")).expect("should create src/helper");
     fs::write(root.join("src/helper.js"), "// js\n").expect("should write js file");
     fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
@@ -3666,7 +3666,7 @@ fn js_file_with_same_stem_as_folder_does_not_trigger_collision() {
 
 #[test]
 fn unsupported_js_import_without_provider_reports_moth_import_0021() {
-    let root = temp_dir("unsupported_js_import");
+    let root = unused_temp_path("unsupported_js_import");
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
 
@@ -3726,7 +3726,7 @@ fn unsupported_js_import_without_provider_reports_moth_import_0021() {
 
 #[test]
 fn explicit_moth_extension_still_reports_moth_import_0020() {
-    let root = temp_dir("explicit_moth_extension");
+    let root = unused_temp_path("explicit_moth_extension");
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
 
@@ -3780,7 +3780,7 @@ fn explicit_moth_extension_still_reports_moth_import_0020() {
 
 #[test]
 fn unsupported_moth_template_dependency_without_builder_support_reports_moth_import_0025() {
-    let root = temp_dir("unsupported_moth_template_dependency");
+    let root = unused_temp_path("unsupported_moth_template_dependency");
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
 
@@ -3825,7 +3825,7 @@ fn unsupported_moth_template_dependency_without_builder_support_reports_moth_imp
 
 #[test]
 fn direct_moth_template_extension_dependency_reports_moth_import_0024() {
-    let root = temp_dir("direct_moth_template_extension");
+    let root = unused_temp_path("direct_moth_template_extension");
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
 
@@ -3873,7 +3873,7 @@ fn direct_moth_template_extension_dependency_reports_moth_import_0024() {
 
 #[test]
 fn moth_template_files_are_reachable_without_dependency_scanning() {
-    let root = temp_dir("moth_template_no_dependency_scanning");
+    let root = unused_temp_path("moth_template_no_dependency_scanning");
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
 
@@ -3915,7 +3915,7 @@ fn moth_template_files_are_reachable_without_dependency_scanning() {
 
 #[test]
 fn reachable_moth_template_queues_same_directory_root_file() {
-    let root = temp_dir("moth_template_same_directory_root");
+    let root = unused_temp_path("moth_template_same_directory_root");
     let src = root.join("src");
     let docs = src.join("docs");
     fs::create_dir_all(&docs).expect("should create docs dir");
@@ -3988,7 +3988,7 @@ fn reachable_moth_template_queues_same_directory_root_file() {
 
 #[test]
 fn unreferenced_moth_template_file_under_entry_root_is_ignored() {
-    let root = temp_dir("unreferenced_moth_template_ignored");
+    let root = unused_temp_path("unreferenced_moth_template_ignored");
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
 
@@ -4026,7 +4026,7 @@ fn unreferenced_moth_template_file_under_entry_root_is_ignored() {
 
 #[test]
 fn extensionless_moth_dependency_and_virtual_package_dependency_still_work() {
-    let root = temp_dir("extensionless_and_virtual");
+    let root = unused_temp_path("extensionless_and_virtual");
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
 
@@ -4074,7 +4074,7 @@ fn extensionless_moth_dependency_and_virtual_package_dependency_still_work() {
 
 #[test]
 fn indexed_module_inventory_includes_referenced_markdown_without_scanning_its_body() {
-    let root = temp_dir("markdown_no_dependency_scanning");
+    let root = unused_temp_path("markdown_no_dependency_scanning");
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
 
@@ -4118,7 +4118,7 @@ fn indexed_module_inventory_includes_referenced_markdown_without_scanning_its_bo
 
 #[test]
 fn indexed_module_inventory_excludes_unrelated_module_root_from_markdown_owner() {
-    let root = temp_dir("markdown_no_unrelated_module_root");
+    let root = unused_temp_path("markdown_no_unrelated_module_root");
     let src = root.join("src");
     fs::create_dir_all(src.join("other")).expect("should create other module dir");
 
@@ -4165,7 +4165,7 @@ fn indexed_module_inventory_excludes_unrelated_module_root_from_markdown_owner()
 
 #[test]
 fn indexed_module_inventory_ignores_unreferenced_markdown_file() {
-    let root = temp_dir("unreferenced_markdown_ignored");
+    let root = unused_temp_path("unreferenced_markdown_ignored");
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
 
@@ -4204,7 +4204,7 @@ fn indexed_module_inventory_ignores_unreferenced_markdown_file() {
 
 #[test]
 fn indexed_module_inventory_rejects_direct_markdown_extension_dependency() {
-    let root = temp_dir("direct_markdown_extension");
+    let root = unused_temp_path("direct_markdown_extension");
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
 
@@ -4265,7 +4265,7 @@ fn indexed_module_inventory_rejects_direct_markdown_extension_dependency() {
 
 #[test]
 fn indexed_module_inventory_rejects_unsupported_markdown_dependency() {
-    let root = temp_dir("unsupported_markdown_dependency");
+    let root = unused_temp_path("unsupported_markdown_dependency");
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
 
@@ -4323,7 +4323,7 @@ fn indexed_module_inventory_rejects_unsupported_markdown_dependency() {
 
 #[test]
 fn stage0_reuses_scanned_moth_source_when_assembling_input_files() {
-    let root = temp_dir("stage0_reuses_scanned_moth_source");
+    let root = unused_temp_path("stage0_reuses_scanned_moth_source");
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
 
@@ -4373,7 +4373,7 @@ fn stage0_reuses_scanned_moth_source_when_assembling_input_files() {
 
 #[test]
 fn project_source_ids_are_prepared_into_owned_inputs_without_a_retained_store() {
-    let root = temp_dir("project_direct_source_input");
+    let root = unused_temp_path("project_direct_source_input");
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
     fs::write(
@@ -4450,7 +4450,7 @@ fn project_source_ids_are_prepared_into_owned_inputs_without_a_retained_store() 
 
 #[test]
 fn stage0_loads_asset_sources_and_preserves_deterministic_input_order() {
-    let root = temp_dir("stage0_asset_source_loading_order");
+    let root = unused_temp_path("stage0_asset_source_loading_order");
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
 
@@ -4491,7 +4491,7 @@ fn stage0_loads_asset_sources_and_preserves_deterministic_input_order() {
 
 #[test]
 fn stage0_parallel_missing_source_loading_preserves_input_order() {
-    let root = temp_dir("stage0_parallel_missing_source_order");
+    let root = unused_temp_path("stage0_parallel_missing_source_order");
     fs::create_dir_all(&root).expect("should create root dir");
 
     let source_paths = (0..super::source_discovery::STAGE0_PARALLEL_SOURCE_LOAD_MIN_FILES)
@@ -4540,7 +4540,7 @@ fn stage0_parallel_missing_source_loading_preserves_input_order() {
 
 #[test]
 fn stage0_missing_source_load_preserves_file_error_shape() {
-    let root = temp_dir("stage0_missing_source_load_error");
+    let root = unused_temp_path("stage0_missing_source_load_error");
     fs::create_dir_all(&root).expect("should create root dir");
     let missing_source = root.join("missing.md");
     let mut string_table = StringTable::new();
@@ -4572,7 +4572,7 @@ fn stage0_missing_source_load_preserves_file_error_shape() {
 
 #[test]
 fn provider_backed_imports_are_resolved_without_becoming_source_inputs() {
-    let root = temp_dir("provider_dependencies_not_source_inputs");
+    let root = unused_temp_path("provider_dependencies_not_source_inputs");
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
 
@@ -4617,7 +4617,7 @@ fn provider_backed_imports_are_resolved_without_becoming_source_inputs() {
 
 #[test]
 fn synthetic_nested_module_provider_resolves_from_owning_module_root() {
-    let root = temp_dir("synthetic_nested_module_provider_root");
+    let root = unused_temp_path("synthetic_nested_module_provider_root");
     let src = root.join("src");
     let feature = src.join("feature");
     fs::create_dir_all(&feature).expect("should create nested module");
@@ -4696,7 +4696,7 @@ fn synthetic_nested_provider_keys_do_not_collide_with_entry_relative_spellings()
         "@feature/drawing.js as nested\n@drawing.js as local\n",
         "@drawing.js as local\n@feature/drawing.js as nested\n",
     ] {
-        let root = temp_dir("synthetic_nested_provider_key_collision");
+        let root = unused_temp_path("synthetic_nested_provider_key_collision");
         let src = root.join("src");
         let feature = src.join("feature");
         fs::create_dir_all(feature.join("feature")).expect("should create nested provider folder");
@@ -4768,7 +4768,7 @@ fn synthetic_nested_provider_keys_do_not_collide_with_entry_relative_spellings()
 
 #[test]
 fn canonical_multi_entry_discovery_is_deterministic_and_reads_each_source_once() {
-    let root = temp_dir("canonical_multi_entry_deterministic");
+    let root = unused_temp_path("canonical_multi_entry_deterministic");
     let src = root.join("src");
     fs::create_dir_all(src.join("page_a")).expect("should create page_a module");
     fs::create_dir_all(src.join("page_b")).expect("should create page_b module");
@@ -4865,7 +4865,7 @@ fn canonical_multi_entry_discovery_is_deterministic_and_reads_each_source_once()
 
 #[test]
 fn canonical_multi_entry_discovery_calls_provider_once() {
-    let root = temp_dir("canonical_provider_multi_entry");
+    let root = unused_temp_path("canonical_provider_multi_entry");
     let src = root.join("src");
     fs::create_dir_all(src.join("page_a")).expect("should create page_a module");
     fs::create_dir_all(src.join("page_b")).expect("should create page_b module");
@@ -4926,7 +4926,7 @@ fn canonical_multi_entry_discovery_calls_provider_once() {
 
 #[test]
 fn canonical_provider_discovery_reads_and_tokenizes_each_source_once() {
-    let root = temp_dir("canonical_provider_prepare_once");
+    let root = unused_temp_path("canonical_provider_prepare_once");
     let src = root.join("src");
     fs::create_dir_all(src.join("page_a")).expect("should create page_a module");
     fs::create_dir_all(src.join("page_b")).expect("should create page_b module");
@@ -5012,7 +5012,7 @@ fn canonical_provider_discovery_reads_and_tokenizes_each_source_once() {
 
 #[test]
 fn unsupported_external_extension_in_multi_entry_preserves_diagnostic_shape() {
-    let root = temp_dir("unsupported_extension_multi_entry");
+    let root = unused_temp_path("unsupported_extension_multi_entry");
     let src = root.join("src");
     fs::create_dir_all(src.join("page_a")).expect("should create page_a module");
     fs::create_dir_all(src.join("page_b")).expect("should create page_b module");
@@ -5076,7 +5076,7 @@ fn unsupported_external_extension_in_multi_entry_preserves_diagnostic_shape() {
 
 #[test]
 fn directory_provider_dependency_calls_provider_once_for_repeated_physical_source() {
-    let root = temp_dir("provider_exact_once_repeated_source");
+    let root = unused_temp_path("provider_exact_once_repeated_source");
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
 
@@ -5125,7 +5125,7 @@ fn directory_provider_dependency_calls_provider_once_for_repeated_physical_sourc
 
 #[test]
 fn directory_provider_dependency_rejects_cross_module_target() {
-    let root = temp_dir("provider_cross_module_rejected");
+    let root = unused_temp_path("provider_cross_module_rejected");
     let src = root.join("src");
     let feature = src.join("feature");
     fs::create_dir_all(&feature).expect("should create feature module");
@@ -5198,7 +5198,7 @@ fn directory_provider_dependency_rejects_cross_module_target() {
 
 #[test]
 fn directory_provider_dependency_missing_target_reports_structured_diagnostic_without_path_probe() {
-    let root = temp_dir("provider_missing_target_no_probe");
+    let root = unused_temp_path("provider_missing_target_no_probe");
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
 
@@ -5273,7 +5273,7 @@ fn directory_provider_dependency_missing_target_reports_structured_diagnostic_wi
 
 #[test]
 fn canonical_discovery_preserves_cross_module_root_queuing() {
-    let root = temp_dir("canonical_cross_module_root");
+    let root = unused_temp_path("canonical_cross_module_root");
     let src = root.join("src");
     let module_a = src.join("module_a");
     let module_b = module_a.join("module_b");
@@ -5349,7 +5349,7 @@ fn canonical_discovery_preserves_cross_module_root_queuing() {
 
 #[test]
 fn scoped_support_package_is_visible_by_name_to_owner_and_sibling_descendant() {
-    let root = temp_dir("indexed_namespace_support_visibility");
+    let root = unused_temp_path("indexed_namespace_support_visibility");
     let src = root.join("src");
     let support = src.join("markdown");
     let pages = src.join("pages");
@@ -5394,7 +5394,7 @@ fn scoped_support_package_is_visible_by_name_to_owner_and_sibling_descendant() {
 
 #[test]
 fn recognized_source_stem_collision_is_ambiguous_without_extension_precedence() {
-    let root = temp_dir("indexed_namespace_source_stem_collision");
+    let root = unused_temp_path("indexed_namespace_source_stem_collision");
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create source root");
 
@@ -5435,7 +5435,7 @@ fn recognized_source_stem_collision_is_ambiguous_without_extension_precedence() 
 
 #[test]
 fn binding_package_and_local_module_prefix_collision_is_ambiguous() {
-    let root = temp_dir("indexed_namespace_binding_package_collision");
+    let root = unused_temp_path("indexed_namespace_binding_package_collision");
     let src = root.join("src");
     let local_core = src.join("core");
     fs::create_dir_all(&local_core).expect("should create local core module");
@@ -5473,7 +5473,7 @@ fn binding_package_and_local_module_prefix_collision_is_ambiguous() {
 
 #[test]
 fn directory_source_dependency_rejects_obsolete_relative_form() {
-    let root = temp_dir("indexed_namespace_relative_dependency_rejected");
+    let root = unused_temp_path("indexed_namespace_relative_dependency_rejected");
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create source root");
 
@@ -5509,7 +5509,7 @@ fn directory_source_dependency_rejects_obsolete_relative_form() {
 
 #[test]
 fn direct_child_private_path_bypass_is_rejected() {
-    let root = temp_dir("indexed_namespace_child_private_bypass");
+    let root = unused_temp_path("indexed_namespace_child_private_bypass");
     let src = root.join("src");
     let child = src.join("child");
     fs::create_dir_all(&child).expect("should create child module");
@@ -5550,7 +5550,7 @@ fn direct_child_private_path_bypass_is_rejected() {
 
 #[test]
 fn stage0_consumes_moth_tokens_into_retained_header_syntax() {
-    let root = temp_dir("stage0_retained_tokens");
+    let root = unused_temp_path("stage0_retained_tokens");
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
 
@@ -5610,7 +5610,7 @@ fn stage0_consumes_moth_tokens_into_retained_header_syntax() {
 
 #[test]
 fn canonical_discovery_consumes_moth_tokens_for_every_reachable_file() {
-    let root = temp_dir("canonical_retained_tokens");
+    let root = unused_temp_path("canonical_retained_tokens");
     let src = root.join("src");
     let module_a = src.join("module_a");
     let module_b = src.join("module_b");
@@ -5720,7 +5720,7 @@ fn write_cross_module_project(
 
 #[test]
 fn local_dependency_edge_is_recorded_provider_before_consumer() {
-    let root = temp_dir("phase5b_provider_before_consumer");
+    let root = unused_temp_path("phase5b_provider_before_consumer");
     let (config, resolver, style_directives, module_a_root, module_b_root) =
         write_cross_module_project(&root);
 
@@ -5787,7 +5787,7 @@ fn local_dependency_edge_is_recorded_provider_before_consumer() {
 
 #[test]
 fn same_module_dependency_creates_no_project_graph_edge() {
-    let root = temp_dir("phase5b_same_module_no_edge");
+    let root = unused_temp_path("phase5b_same_module_no_edge");
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src");
 
@@ -5845,7 +5845,7 @@ fn same_module_dependency_creates_no_project_graph_edge() {
 fn independent_no_edge_entries_are_grouped_in_one_ready_wave() {
     // Two entry modules with no cross-module dependency edges must be grouped in the same
     // dependency-ready wave; the serial scheduler can then publish them in deterministic order.
-    let root = temp_dir("phase5c_no_edge_same_wave");
+    let root = unused_temp_path("phase5c_no_edge_same_wave");
     let src = root.join("src");
     let module_a = src.join("module_a");
     let module_b = src.join("module_b");
@@ -5927,7 +5927,7 @@ fn independent_no_edge_entries_are_grouped_in_one_ready_wave() {
 
 #[test]
 fn duplicate_dependency_deduplicates_edge_and_orders_provider_first() {
-    let root = temp_dir("phase5b_duplicate_edge");
+    let root = unused_temp_path("phase5b_duplicate_edge");
     let src = root.join("src");
     let module_a = src.join("module_a");
     let module_b = module_a.join("module_b");
@@ -6030,7 +6030,7 @@ fn duplicate_dependency_deduplicates_edge_and_orders_provider_first() {
 
 #[test]
 fn dependency_fact_retains_authored_source_location() {
-    let root = temp_dir("phase5b_source_location_retention");
+    let root = unused_temp_path("phase5b_source_location_retention");
     let (config, resolver, style_directives, module_a_root, module_b_root) =
         write_cross_module_project(&root);
 
@@ -6071,7 +6071,7 @@ fn production_graph_completes_before_scheduling() {
     // compile-wave scheduling, freezing adjacency into sorted `Vec<ModuleId>` storage. The
     // completed graph schedules cleanly from its frozen adjacency, and any later edge insertion
     // is rejected as mutation after completion.
-    let root = temp_dir("r4e1_production_completion");
+    let root = unused_temp_path("r4e1_production_completion");
     let (config, resolver, style_directives, module_a_root, module_b_root) =
         write_cross_module_project(&root);
 
@@ -6133,7 +6133,7 @@ fn discovered_modules_carry_both_graph_assigned_identities() {
     // Hidden invariant: directory discovery must preserve both graph identities rather than
     // re-deriving either from an entry path. The dense ID remains the build-owned scheduling and
     // merge key; the stable origin remains the portable semantic identity.
-    let root = temp_dir("phase7a_origin_preservation");
+    let root = unused_temp_path("phase7a_origin_preservation");
     let (config, resolver, style_directives, _module_a_root, _module_b_root) =
         write_cross_module_project(&root);
 
@@ -6175,7 +6175,7 @@ fn discovered_module_origin_is_not_rederived_from_a_path_component() {
     // Hidden invariant: the stable origin carried by discovery is the graph-owned value type, not
     // a path-derived fallback. The discovered origins must be distinct `StableModuleOriginIdentity`
     // values keyed by canonical logical module path, and must round-trip through the graph node.
-    let root = temp_dir("phase7a_origin_identity_values");
+    let root = unused_temp_path("phase7a_origin_identity_values");
     let (config, resolver, style_directives, _module_a_root, _module_b_root) =
         write_cross_module_project(&root);
 
@@ -6207,7 +6207,7 @@ fn build_source_origin_lookup_maps_each_owned_file_to_its_node_origin() {
     // `SourceTreeIndex` ownership through the graph's owned source IDs. Every owned source
     // record's logical identity module origin must equal its containing graph node's stable
     // origin, and no canonical path may appear twice.
-    let root = temp_dir("source_origin_lookup_node_origin_alignment");
+    let root = unused_temp_path("source_origin_lookup_node_origin_alignment");
     let (config, resolver, style_directives, _module_a_root, _module_b_root) =
         write_cross_module_project(&root);
 
@@ -6256,7 +6256,7 @@ fn build_source_origin_lookup_maps_each_owned_file_to_its_node_origin() {
 
 #[test]
 fn canonical_module_job_excludes_cross_module_donor_sources() {
-    let root = temp_dir("semantic_set_drives_input_assembly");
+    let root = unused_temp_path("semantic_set_drives_input_assembly");
     let src = root.join("src");
     let provider = src.join("a_provider");
     fs::create_dir_all(&provider).expect("should create provider module");
@@ -6309,7 +6309,7 @@ fn indexed_namespace_rejects_direct_entry_root_dependency() {
     // Path components starting with `@` are now rejected by the path parser before
     // namespace resolution. The `@` introducer is consumed by the lexer, so any
     // component starting with `@` is a `@@` form that has no valid dependency meaning.
-    let root = temp_dir("indexed_namespace_direct_entry_root_rejected");
+    let root = unused_temp_path("indexed_namespace_direct_entry_root_rejected");
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create source root");
 
@@ -6345,7 +6345,7 @@ fn indexed_namespace_rejects_direct_entry_root_dependency() {
 
 #[test]
 fn indexed_namespace_rejects_direct_nested_child_root_dependency() {
-    let root = temp_dir("indexed_namespace_direct_nested_child_root_rejected");
+    let root = unused_temp_path("indexed_namespace_direct_nested_child_root_rejected");
     let src = root.join("src");
     let child = src.join("child");
     fs::create_dir_all(&child).expect("should create child module");
@@ -6730,7 +6730,7 @@ fn module_package_dependency_index_walks_only_direct_dependencies() {
 #[test]
 fn synthetic_traversal_prepares_retained_clauses_without_a_token_rescan() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let root = temp_dir("synthetic_no_token_rescan");
+    let root = unused_temp_path("synthetic_no_token_rescan");
     fs::create_dir_all(&root).expect("should create temp root");
     fs::create_dir_all(root.join("utils")).expect("should create utils directory");
     fs::write(root.join("main.moth"), "@utils/helper greet\ngreet()\n")
@@ -6824,7 +6824,7 @@ fn synthetic_traversal_prepares_retained_clauses_without_a_token_rescan() {
 #[test]
 fn directory_discovery_counts_resolved_clauses_by_language_family() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let root = temp_dir("directory_resolved_clause_counters");
+    let root = unused_temp_path("directory_resolved_clause_counters");
     let src = root.join("src");
     let entry_source = "@docs/intro\n@child greet\n@core/io line\n@drawing.js draw\n#[:entry]\n";
     let intro_source = "intro #= \"intro\"\n";

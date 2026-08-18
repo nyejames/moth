@@ -18,6 +18,10 @@ mod compiler_tests {
     pub(crate) mod integration_test_runner; // For running all integration tests and report back the results
 
     #[cfg(test)]
+    pub mod test_diagnostics;
+    #[cfg(test)]
+    pub mod test_fs;
+    #[cfg(test)]
     pub mod test_support;
 }
 pub mod benchmarking;

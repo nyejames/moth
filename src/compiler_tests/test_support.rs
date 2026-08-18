@@ -15,23 +15,25 @@ pub fn frontend_test_style_directives() -> StyleDirectiveRegistry {
         .expect("HTML style directives should merge with core.")
 }
 
-/// Returns a unique temporary directory path for test isolation.
+/// Returns a unique uncreated temporary path for test isolation.
 ///
 /// WHAT: joins `std::env::temp_dir()` with a prefix, process ID, nanosecond timestamp, and
-///       sequence counter to produce an unused path.
-/// WHY: prevents test collisions when multiple tests run concurrently or in sequence.
+///       sequence counter to produce a path that does not exist on disk.
+/// WHY: some tests need a path that is guaranteed not to exist (e.g. asserting absence,
+///      testing missing-file behavior). The name `unused_temp_path` makes the non-existence
+///      contract explicit.
 ///
-/// NOTE: this returns an unmanaged path. It does not create the directory and does not clean it
-///       up. Callers that need an actual created-and-removed directory should use
+/// NOTE: this returns an unmanaged, uncreated path. It does not create the directory and does
+///       not clean it up. Callers that need an actual created-and-removed directory should use
 ///       `tempfile::tempdir()` instead.
-pub fn temp_dir(prefix: &str) -> PathBuf {
-    static TEMP_DIR_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+pub fn unused_temp_path(prefix: &str) -> PathBuf {
+    static TEMP_PATH_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
     let unique = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .expect("time should be after unix epoch")
         .as_nanos();
-    let sequence = TEMP_DIR_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let sequence = TEMP_PATH_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     std::env::temp_dir().join(format!(
         "moth_{prefix}_{}_{}_{}",
         std::process::id(),

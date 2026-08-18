@@ -10,7 +10,7 @@ use std::fs;
 
 #[test]
 fn build_single_file_project_includes_reachable_dependency_files() {
-    let root = temp_dir("single_file_reachable_dependencies");
+    let root = unused_temp_path("single_file_reachable_dependencies");
     fs::create_dir_all(&root).expect("should create temp root");
     fs::create_dir_all(root.join("utils")).expect("should create utils directory");
     fs::write(root.join("main.moth"), "@utils/helper greet\ngreet()\n")
@@ -38,7 +38,7 @@ fn build_single_file_project_includes_reachable_dependency_files() {
 
 #[test]
 fn build_html_project_local_js_import_emits_generated_glue() {
-    let root = temp_dir("html_project_local_js_glue");
+    let root = unused_temp_path("html_project_local_js_glue");
     fs::create_dir_all(&root).expect("should create temp root");
     fs::write(root.join("config.moth"), "project #= \"html\"\n").expect("should write config");
     fs::write(
@@ -96,7 +96,7 @@ fn build_html_project_local_js_import_emits_generated_glue() {
 
 #[test]
 fn build_html_project_fallible_js_with_runtime_helper_emits_runtime_import_map() {
-    let root = temp_dir("html_project_fallible_js_runtime");
+    let root = unused_temp_path("html_project_fallible_js_runtime");
     fs::create_dir_all(&root).expect("should create temp root");
     fs::write(root.join("config.moth"), "project #= \"html\"\n").expect("should write config");
     fs::write(
@@ -149,7 +149,7 @@ fn build_html_project_fallible_js_with_runtime_helper_emits_runtime_import_map()
 
 #[test]
 fn build_html_project_non_fallible_js_with_runtime_helper_emits_runtime_module() {
-    let root = temp_dir("html_project_non_fallible_js_runtime");
+    let root = unused_temp_path("html_project_non_fallible_js_runtime");
     fs::create_dir_all(&root).expect("should create temp root");
     fs::write(root.join("config.moth"), "project #= \"html\"\n").expect("should write config");
     fs::write(
@@ -201,7 +201,7 @@ fn build_html_project_non_fallible_js_with_runtime_helper_emits_runtime_module()
 
 #[test]
 fn build_html_project_fallible_js_without_runtime_import_does_not_emit_runtime_module() {
-    let root = temp_dir("html_project_fallible_no_runtime");
+    let root = unused_temp_path("html_project_fallible_no_runtime");
     fs::create_dir_all(&root).expect("should create temp root");
     fs::write(root.join("config.moth"), "project #= \"html\"\n").expect("should write config");
     fs::write(
@@ -241,7 +241,7 @@ fn build_html_project_fallible_js_without_runtime_import_does_not_emit_runtime_m
 
 #[test]
 fn build_html_project_unreachable_provider_js_import_does_not_emit_runtime_artifacts() {
-    let root = temp_dir("html_project_unreachable_provider_js");
+    let root = unused_temp_path("html_project_unreachable_provider_js");
     fs::create_dir_all(&root).expect("should create temp root");
     fs::write(root.join("config.moth"), "project #= \"html\"\n").expect("should write config");
     fs::write(
@@ -309,7 +309,7 @@ fn build_html_project_unreachable_provider_js_import_does_not_emit_runtime_artif
 
 #[test]
 fn build_html_project_unreachable_html_canvas_helper_dependency_does_not_emit_runtime_artifacts() {
-    let root = temp_dir("html_project_unreachable_html_canvas_helper");
+    let root = unused_temp_path("html_project_unreachable_html_canvas_helper");
     fs::create_dir_all(&root).expect("should create temp root");
     fs::write(root.join("config.moth"), "project #= \"html\"\n").expect("should write config");
     fs::write(
@@ -377,7 +377,7 @@ fn build_html_project_unreachable_html_canvas_helper_dependency_does_not_emit_ru
 
 #[test]
 fn build_html_project_web_canvas_emits_builtin_js_asset_and_glue() {
-    let root = temp_dir("html_project_web_canvas_asset");
+    let root = unused_temp_path("html_project_web_canvas_asset");
     fs::create_dir_all(&root).expect("should create temp root");
     fs::write(root.join("config.moth"), "project #= \"html\"\n").expect("should write config");
     fs::write(
@@ -480,7 +480,7 @@ fn build_html_project_web_canvas_emits_builtin_js_asset_and_glue() {
 
 #[test]
 fn build_html_project_html_canvas_helper_emits_builtin_js_asset_and_glue() {
-    let root = temp_dir("html_project_html_canvas_helper_asset");
+    let root = unused_temp_path("html_project_html_canvas_helper_asset");
     fs::create_dir_all(&root).expect("should create temp root");
     fs::write(root.join("config.moth"), "project #= \"html\"\n").expect("should write config");
     fs::write(
@@ -568,7 +568,7 @@ fn build_html_project_html_canvas_helper_emits_builtin_js_asset_and_glue() {
 
 #[test]
 fn build_project_keeps_one_shared_string_table_for_multi_module_diagnostics() {
-    let root = temp_dir("multi_module_diagnostics");
+    let root = unused_temp_path("multi_module_diagnostics");
     let src_dir = root.join("src");
     let docs_dir = src_dir.join("docs");
     fs::create_dir_all(&docs_dir).expect("should create docs directory");
@@ -616,4 +616,4 @@ fn build_project_keeps_one_shared_string_table_for_multi_module_diagnostics() {
     fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
-use crate::compiler_tests::test_support::temp_dir;
+use crate::compiler_tests::test_support::unused_temp_path;

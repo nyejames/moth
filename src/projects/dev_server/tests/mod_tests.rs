@@ -14,7 +14,7 @@ use crate::compiler_frontend::style_directives::{
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TemplateBodyMode;
-use crate::compiler_tests::test_support::temp_dir;
+use crate::compiler_tests::test_support::unused_temp_path;
 use crate::projects::settings::{CONFIG_FILE_NAME, Config, ProjectConfigError};
 use std::fs;
 
@@ -95,7 +95,7 @@ fn defaults_match_dev_server_contract() {
 
 #[test]
 fn entry_path_validation_accepts_moth_files() {
-    let root = temp_dir("entry_file");
+    let root = unused_temp_path("entry_file");
     fs::create_dir_all(&root).expect("should create temp root");
     let file = root.join("main.moth");
     fs::write(&file, "x = 1").expect("should write test file");
@@ -112,7 +112,7 @@ fn entry_path_validation_accepts_moth_files() {
 
 #[test]
 fn entry_path_validation_accepts_directories() {
-    let root = temp_dir("entry_dir");
+    let root = unused_temp_path("entry_dir");
     fs::create_dir_all(&root).expect("should create temp root");
     let validated = validate_dev_entry_path(
         root.to_str()
@@ -139,7 +139,7 @@ fn empty_entry_path_uses_current_directory() {
 
 #[test]
 fn resolve_dev_runtime_paths_use_configured_dev_folder_for_directory_projects() {
-    let root = temp_dir("configured_dev_folder");
+    let root = unused_temp_path("configured_dev_folder");
     fs::create_dir_all(&root).expect("should create temp root");
     fs::write(root.join(CONFIG_FILE_NAME), "dev_folder #= \"preview\"\n")
         .expect("should write config");
@@ -169,9 +169,9 @@ fn resolve_dev_runtime_paths_rejects_symlinked_output_roots() {
             InvalidOutputFolderReason::InsideOrEqualToEntryRoot,
         ),
     ] {
-        let root = temp_dir(&format!("dev_runtime_output_symlink_{case_name}"));
+        let root = unused_temp_path(&format!("dev_runtime_output_symlink_{case_name}"));
         let source_root = root.join("src");
-        let outside = temp_dir(&format!("dev_runtime_output_target_{case_name}"));
+        let outside = unused_temp_path(&format!("dev_runtime_output_target_{case_name}"));
         fs::create_dir_all(&source_root).expect("should create source root");
         fs::create_dir_all(&outside).expect("should create outside root");
         let output_root = root.join("dev");
@@ -209,7 +209,7 @@ fn resolve_dev_runtime_paths_rejects_symlinked_output_roots() {
 
 #[test]
 fn resolve_dev_runtime_paths_rejects_empty_dev_folder() {
-    let root = temp_dir("empty_dev_folder");
+    let root = unused_temp_path("empty_dev_folder");
     fs::create_dir_all(&root).expect("should create temp root");
     fs::write(root.join(CONFIG_FILE_NAME), "dev_folder #= \"\"\n").expect("should write config");
 
@@ -225,7 +225,7 @@ fn resolve_dev_runtime_paths_rejects_empty_dev_folder() {
 
 #[test]
 fn resolve_dev_runtime_paths_return_config_load_failures() {
-    let root = temp_dir("bad_config");
+    let root = unused_temp_path("bad_config");
     fs::create_dir_all(&root).expect("should create temp root");
     fs::write(root.join(CONFIG_FILE_NAME), "@core/math sin\n").expect("should write bad config");
 
@@ -251,7 +251,7 @@ fn resolve_dev_runtime_paths_return_config_load_failures() {
 
 #[test]
 fn resolve_dev_runtime_paths_return_style_directive_merge_failures() {
-    let root = temp_dir("style_directive_conflict");
+    let root = unused_temp_path("style_directive_conflict");
     fs::create_dir_all(&root).expect("should create temp root");
 
     let builder = ProjectBuilder::new(Box::new(ConflictingDirectiveBuilder));

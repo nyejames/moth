@@ -9,7 +9,7 @@ use super::super::{
     BackendId, CaseExecutionResult, CaseRole, ExpectedOutcome, SuccessExpectation, TestCaseSpec,
     TestRunnerOptions, TestSuiteSpec, WarningExpectation,
 };
-use crate::compiler_tests::test_support::temp_dir;
+use crate::compiler_tests::test_support::unused_temp_path;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -55,7 +55,7 @@ fn successful_execution_result() -> CaseExecutionResult {
 
 #[test]
 fn audit_writes_hard_findings_before_returning_failure() {
-    let root = temp_dir("runner_audit_hard_policy");
+    let root = unused_temp_path("runner_audit_hard_policy");
     fs::create_dir_all(&root).expect("should create temporary report directory");
     let report_path = root.join("inventory.json");
     let callback_called = AtomicBool::new(false);
@@ -116,7 +116,7 @@ fn normal_and_list_execution_reject_hard_findings_before_callback() {
 
 #[test]
 fn advisory_findings_are_serialized_without_failing_audit() {
-    let root = temp_dir("runner_audit_policy_advisory");
+    let root = unused_temp_path("runner_audit_policy_advisory");
     fs::create_dir_all(&root).expect("should create temporary report directory");
     let report_path = root.join("inventory.json");
 
@@ -161,7 +161,7 @@ fn advisory_findings_are_serialized_without_failing_audit() {
 
 #[test]
 fn contractless_smoke_case_passes_audit_without_findings() {
-    let root = temp_dir("runner_audit_contractless_smoke");
+    let root = unused_temp_path("runner_audit_contractless_smoke");
     fs::create_dir_all(&root).expect("should create temporary report directory");
     let report_path = root.join("inventory.json");
 
@@ -200,7 +200,7 @@ fn contractless_smoke_case_passes_audit_without_findings() {
 
 #[test]
 fn triage_report_write_failure_returns_error() {
-    let root = temp_dir("runner_triage_write_failure");
+    let root = unused_temp_path("runner_triage_write_failure");
     fs::create_dir_all(&root).expect("should create temporary report directory");
     let inventory_path = root.join("inventory.json");
     let triage_parent = root.join("triage-parent");
