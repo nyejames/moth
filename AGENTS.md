@@ -4,7 +4,7 @@ Resolve relative paths from the current worktree root. Do not read project refer
 
 ## Reading routes
 
-Always read this file. Before loading other project documentation, classify the task by affected domain and load only the routed canonical material. Re-route when scope expands. When ownership is unclear, a change crosses several stages or a review is architectural, read the relevant authority in full.
+Always read this file. Before loading other project documentation, classify the task by affected domain and load only the routed material. Re-route when scope expands. When ownership is unclear, a change crosses several stages or a review is architectural, read the relevant authority in full.
 
 ### Named sections
 
@@ -22,15 +22,17 @@ Read the selected heading through the next heading of the same or higher level. 
 - **Compiler stages, semantic data or handoffs:** read the opening authority text and `Architectural invariants` in `docs/compiler-design-overview.md`, then its routed task sections and affected producer or consumer handoffs.
 - **Build system and project orchestration:** read the opening authority text and `Architectural invariants` in both `docs/compiler-design-overview.md` and `docs/build-system-design.md`, then routed build sections and relevant compiler handoffs. This includes Stage 0, config, imports, modules, packages, builders, tooling, linking, backend project assembly, outputs, incremental builds and the dev server.
 - **Memory and value flow:** read `docs/src/docs/codebase/memory-management/overview.mtf`, use its task-reading guide and read the selected leaves. This includes access, copies, ownership, borrowing, lifetimes, allocation, GC, drops, reactivity retention, runtime handles and ABI work.
-- **Language syntax or user-visible semantics:** read `docs/src/docs/codebase/language/overview.mtf` and every relevant canonical unsuffixed reference it selects. Also read routed memory material when behaviour touches access, copies, borrows, lifetimes, groups or ownership. Read paired `-basic.mtf` files and `@page.moth` only for teaching, presentation or site structure.
+- **General Moth language understanding or source authoring:** read `docs/src/docs/cheatsheet/moth-language-cheatsheet.md` for a compact overview of the accepted end-state language surface. When source must work with the current Alpha compiler or current implementation or target support matters, also read `docs/src/docs/progress/@page.moth`. The cheatsheet is an orientation and source-writing reference, not the authority for exact semantic edge cases.
+- **Exact language syntax or user-visible semantic work:** read `docs/src/docs/codebase/language/overview.mtf` and every relevant canonical unsuffixed reference it selects. This route is required when a task changes or depends on the precise contract of a language feature. Also read routed memory material when behaviour touches access, copies, borrows, lifetimes, groups or ownership. Read paired `-basic.mtf` files and `@page.moth` only for teaching, presentation or site structure.
 - **Tests:** read relevant sections of `docs/src/docs/codebase/style-guide/testing.mtf` before choosing, adding, changing or reviewing coverage. Read it in full for test infrastructure, suite policy, broad fixture cleanup or audits.
 - **Structured codebase audits and accepted audit fixes:** read `docs/roadmap/audit-guide.md`, the selected guide under `docs/roadmap/audit-kinds/`, the chosen scope in `docs/roadmap/audit-log.md`, `docs/roadmap/open-audit-findings.md` and the owning report when one exists. Audit runs are read-only. Implement accepted findings in a separate task and preserve every invariant and change lane named by the report.
 - **Final validation:** read `docs/src/docs/codebase/style-guide/validation.mtf` before selecting, running or reporting a final gate. It need not remain loaded during implementation.
 - **Architecture plans, cross-stage ownership changes, broad refactors and thorough reviews:** read every relevant authority in full, including adjacent handoff authorities, current status and active sequencing.
 
-Before writing Moth code or changing tokenization, parsing, type checking, semantics, diagnostics or lowering for a language feature, read that feature's canonical unsuffixed reference. Do not infer the language contract from examples, tests, compiler behaviour or a Basic page.
+Before changing tokenization, parsing, type checking, language semantics, diagnostics, lowering, semantic tests or authoritative language documentation for a feature, read that feature's canonical unsuffixed reference. Also read the canonical reference when correctness depends on precise feature semantics or edge cases not fully specified by the cheatsheet. Do not infer the exact language contract from examples, tests, compiler behaviour, the cheatsheet or a Basic page.
 
 Use:
+- `docs/src/docs/cheatsheet/moth-language-cheatsheet.md` for compact accepted end-state language orientation and ordinary Moth source authoring
 - `docs/src/docs/progress/@page.moth` for current implementation status and coverage
 - `docs/roadmap/roadmap.md` for sequencing, active plans and genuinely deferred design
 - `docs/roadmap/audit-log.md` for registered audit scopes and freshness
@@ -46,7 +48,7 @@ Instruction priority:
 3. This file
 4. Existing implementation behaviour
 
-`docs/compiler-design-overview.md` owns compiler semantics and stage contracts. `docs/build-system-design.md` owns project and build orchestration. Canonical unsuffixed language references own syntax and observable language semantics. Roadmap plans cannot override these authorities. Code may lag accepted design, so report conflicts instead of treating implementation as authoritative. The progress matrix says what works today, not what the accepted design means.
+`docs/compiler-design-overview.md` owns compiler semantics and stage contracts. `docs/build-system-design.md` owns project and build orchestration. Canonical unsuffixed language references own syntax and observable language semantics. The language cheatsheet is a compact orientation and source-writing reference derived from those contracts and does not override them. Roadmap plans cannot override these authorities. Code may lag accepted design, so report conflicts instead of treating implementation as authoritative. The progress matrix says what works today, not what the accepted design means.
 
 Core contracts:
 - Each semantic fact has one owner. Later stages consume owned facts rather than rescanning source, reparsing syntax or reconstructing meaning from an earlier IR.
@@ -71,7 +73,7 @@ Core contracts:
 - Use `/tmp` for temporary snippets and artefacts that should be untracked by git.
 
 Required workflow:
-1. Route and read canonical documentation.
+1. Route and read the required project material and canonical authorities for the task.
 2. Inspect the implementation and identify its owner.
 3. Search for overlapping, duplicated, legacy and test paths.
 4. Decide whether to extend, consolidate, replace or remove the existing path.
@@ -115,7 +117,7 @@ Code-bearing work ends with `just validate`. Documentation-only work uses the do
 
 ## Compaction rules
 
-After compaction, reread `AGENTS.md`, reclassify the active task and reload the routed canonical sections and documents. Do not continue from compressed recollection of project contracts.
+After compaction, reread `AGENTS.md`, reclassify the active task and reload the routed material and required canonical sections. Do not continue from compressed recollection of project contracts.
 
 ## Final audit
 
