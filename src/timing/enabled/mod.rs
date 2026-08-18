@@ -38,12 +38,7 @@ pub(crate) use guard::{
 pub(crate) use runtime::TimerOutputMode;
 pub(crate) use schema::TimingMetric;
 pub(crate) use session::{TimingCommandKind, TimingSession, TimingSessionStartError};
-#[cfg(test)]
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
-
-#[cfg(test)]
-static DETAILED_PROSE_EMISSIONS: AtomicUsize = AtomicUsize::new(0);
 
 // ---------------------------------------------------------------------------
 //  Snapshot types
@@ -148,54 +143,6 @@ pub(crate) fn record_counter(name: &'static str, value: f64) -> bool {
     collector::record_counter(name, value).output_suppressed
 }
 
-/// Whether verbose human prose should print for one recorded event.
-///
-/// Takes the output and prose policy captured while recording so callers
-/// never reread mutable session state after the collector has drained.
-pub(crate) fn detailed_prose_enabled(output_suppressed: bool, human_prose_enabled: bool) -> bool {
-    !output_suppressed && human_prose_enabled
-}
-
-/// Whether verbose human prose is enabled for prose-only call sites.
-///
-/// Used by developer logging macros that print without recording; the record
-/// paths use `detailed_prose_enabled` with both captured policy flags.
-#[cfg(feature = "detailed_timers")]
-pub(crate) fn detailed_timer_output_enabled() -> bool {
-    runtime::timer_human_prose_active() && collector::output_enabled()
-}
-
-/// Print the detailed prose owned by one typed metric using its captured span.
-///
-/// Timer prose belongs to the timing subsystem so the displayed duration and
-/// the stored/benchmarked duration share one recording endpoint.
-pub(crate) fn emit_detailed_metric_prose(
-    metric: TimingMetric,
-    duration: Duration,
-    output_suppressed: bool,
-    human_prose_enabled: bool,
-) {
-    let Some(label) = metric.detailed_prose_label() else {
-        return;
-    };
-
-    if detailed_prose_enabled(output_suppressed, human_prose_enabled) {
-        #[cfg(test)]
-        DETAILED_PROSE_EMISSIONS.fetch_add(1, Ordering::Relaxed);
-        saying::say!(label, Green #duration);
-    }
-}
-
-#[cfg(test)]
-pub(crate) fn reset_detailed_prose_emissions_for_test() {
-    DETAILED_PROSE_EMISSIONS.store(0, Ordering::Relaxed);
-}
-
-#[cfg(test)]
-pub(crate) fn detailed_prose_emissions_for_test() -> usize {
-    DETAILED_PROSE_EMISSIONS.load(Ordering::Relaxed)
-}
-
 /// Format the stable final aggregate records for one completed snapshot.
 ///
 /// WHAT: emits the schema header once, then one line for each non-empty row in
@@ -240,7 +187,21 @@ pub(crate) fn emit_bench_timing_snapshot(snapshot: &BenchmarkObservationSnapshot
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn record_pipeline_timing(metric: TimingMetric, duration: Duration) -> bool {
     let outcome = collector::record_timing(metric, duration);
-    finish_recorded_timing(metric, duration, outcome)
+    finish_recorded_timing(outcome)
+}
+
+/// Record one command-total duration using an already-captured stopwatch reading.
+///
+/// WHAT: records the duration under the supplied command-total metric in the active session.
+/// WHY:  ensures human-facing command durations and structured metrics share one clock read,
+///       rejecting non-command-total metrics so this cannot become a generic escape hatch.
+pub(crate) fn record_command_total_timing(metric: TimingMetric, duration: Duration) -> bool {
+    assert!(
+        metric.is_command_total(),
+        "record_command_total_timing only accepts command-total metrics, got {metric:?}"
+    );
+    let outcome = collector::record_timing(metric, duration);
+    finish_recorded_timing(outcome)
 }
 
 /// Record a span using admission retained from before its clock started.
@@ -250,22 +211,10 @@ pub(crate) fn record_pipeline_timing_with_admission(
     admission: runtime::TimingRecordAdmission,
 ) -> bool {
     let outcome = collector::record_timing_with_admission(metric, duration, admission);
-    finish_recorded_timing(metric, duration, outcome)
+    finish_recorded_timing(outcome)
 }
 
-fn finish_recorded_timing(
-    metric: TimingMetric,
-    duration: Duration,
-    outcome: collector::TimingRecordOutcome,
-) -> bool {
-    if outcome.recorded {
-        emit_detailed_metric_prose(
-            metric,
-            duration,
-            outcome.output_suppressed,
-            outcome.human_prose_enabled,
-        );
-    }
+fn finish_recorded_timing(outcome: collector::TimingRecordOutcome) -> bool {
     outcome.output_suppressed
 }
 
@@ -351,7 +300,7 @@ pub(crate) fn record_pipeline_timing_attributed(
     context: Option<TimingContext>,
 ) -> bool {
     let outcome = collector::record_attributed_timing(metric, duration, context);
-    finish_recorded_timing(metric, duration, outcome)
+    finish_recorded_timing(outcome)
 }
 
 /// Record an attributed span using admission retained from before its clock
@@ -364,7 +313,7 @@ pub(crate) fn record_pipeline_timing_attributed_with_admission(
 ) -> bool {
     let outcome =
         collector::record_attributed_timing_with_admission(metric, duration, context, admission);
-    finish_recorded_timing(metric, duration, outcome)
+    finish_recorded_timing(outcome)
 }
 
 /// Record an already-captured duration with lazily constructed attribution.
@@ -390,5 +339,5 @@ pub(crate) fn record_pipeline_timing_attributed_lazy(
     };
     let outcome =
         collector::record_attributed_timing_with_admission(metric, duration, context, admission);
-    finish_recorded_timing(metric, duration, outcome)
+    finish_recorded_timing(outcome)
 }

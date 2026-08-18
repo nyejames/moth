@@ -39,6 +39,13 @@ pub(crate) fn render_timing_summary_report(report: &TimingSummaryReport) {
                 saying::say!();
                 render_section(section);
             }
+            TimingReportItem::AccountingNote => {
+                saying::say!();
+                saying::say!(Dark Yellow
+                    "Only pipeline rows account for the command total. ",
+                    "Remaining sections are overlapping attribution."
+                );
+            }
             TimingReportItem::CompilationBoundaries(boundaries) => {
                 saying::say!();
                 render_boundary_section(boundaries);
@@ -116,6 +123,10 @@ fn render_boundary_section(boundaries: &[TimingBoundarySummary]) {
 pub(crate) fn boundary_section_title() -> &'static str {
     "Compilation boundaries · accumulated work"
 }
+
+/// The accounting note text, printed once after the pipeline section.
+#[cfg(test)]
+pub(crate) const ACCOUNTING_NOTE_TEXT: &str = "Only pipeline rows account for the command total. Remaining sections are overlapping attribution.";
 
 fn render_slowest_module(slowest_module: &TimingSlowestModuleSummary) {
     saying::say!(Blue "Slowest module");

@@ -60,7 +60,7 @@ fn make_grouped_case_with_stddev(
             workload_id: format!("{name}_workload"),
             source_fingerprint: format!("{name}_source_fp"),
             measurement_fingerprint: format!("{name}_measurement_fp"),
-            timing_schema_version: 1,
+            timing_schema_version: 2,
         }),
         group_name: group_name.to_string(),
         runner: BenchmarkRunner::Cli {
@@ -85,7 +85,7 @@ fn make_case_with_observations(
             workload_id: format!("{name}_workload"),
             source_fingerprint: format!("{name}_source_fp"),
             measurement_fingerprint: format!("{name}_measurement_fp"),
-            timing_schema_version: 1,
+            timing_schema_version: 2,
         }),
         group_name: "ungrouped".to_string(),
         runner: BenchmarkRunner::Cli {
@@ -101,7 +101,7 @@ fn make_case_with_observations(
 
 fn observations_with_stages(stages: &[(&str, f64)]) -> BenchmarkCaseObservations {
     BenchmarkCaseObservations {
-        timing_schema_version: 1,
+        timing_schema_version: 2,
         stage_timings: stages
             .iter()
             .map(|(name, value)| BenchmarkMetric {
@@ -285,7 +285,7 @@ fn timing_schema_mismatch_is_incomparable_and_named_explicitly() {
         .identity
         .as_mut()
         .expect("fixture identity")
-        .timing_schema_version = 2;
+        .timing_schema_version = 3;
     let previous = vec![make_case("schema_case", 100.0)];
 
     let comparison = BenchmarkComparison::new(&[current], Some(&previous));
@@ -305,13 +305,13 @@ fn equal_non_current_timing_schemas_are_still_incomparable() {
         .identity
         .as_mut()
         .expect("fixture identity")
-        .timing_schema_version = 2;
+        .timing_schema_version = 3;
     let mut previous = make_case("legacy_schema_case", 100.0);
     previous
         .identity
         .as_mut()
         .expect("fixture identity")
-        .timing_schema_version = 2;
+        .timing_schema_version = 3;
 
     let comparison = BenchmarkComparison::new(&[current], Some(&[previous]));
 

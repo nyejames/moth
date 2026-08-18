@@ -230,3 +230,19 @@ fn command_timing_scope_does_not_evaluate_command_expression() {
 
     assert_eq!(command_evaluated.get(), 0);
 }
+
+#[test]
+fn capture_command_duration_does_not_evaluate_metric_expression() {
+    let metric_evaluated = evaluation_counter();
+    let start = std::time::Instant::now();
+    let duration = capture_command_duration!(
+        {
+            metric_evaluated.set(metric_evaluated.get() + 1);
+            "test.command"
+        },
+        start
+    );
+
+    assert_eq!(metric_evaluated.get(), 0);
+    assert!(duration <= start.elapsed());
+}

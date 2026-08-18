@@ -449,6 +449,33 @@ mod tests {
     }
 
     #[test]
+    fn accepts_timing_scope_attributed_opt_macro_usage() {
+        // The _opt macro variant accepts Option<TimingMetric> and is a valid
+        // facade macro. It must not be flagged as an obsolete timer macro or
+        // a closure-wrapper timer.
+        let failures = audit_source_fragment(
+            "src/compiler_frontend/ast/module_ast/environment/type_resolution.rs",
+            "timing_scope_attributed_opt!(\n    self.context.timing_metric_family.constant_header_resolution(),\n    self.context.timing_context\n);\n",
+            false,
+        );
+
+        assert!(failures.is_empty(), "unexpected failures: {failures:?}");
+    }
+
+    #[test]
+    fn accepts_timed_stage_attributed_opt_macro_usage() {
+        // The _opt macro variant accepts Option<TimingMetric> and evaluates the
+        // expression directly when the metric is None. It must not be flagged.
+        let failures = audit_source_fragment(
+            "src/compiler_frontend/ast/module_ast/emission/emitter.rs",
+            "let result = timed_stage_attributed_opt!(\n    self.context.timing_metric_family.const_template_parse(),\n    self.context.timing_context,\n    parse_const_template(header)\n);\n",
+            false,
+        );
+
+        assert!(failures.is_empty(), "unexpected failures: {failures:?}");
+    }
+
+    #[test]
     fn rejects_direct_timer_clock_outside_allowed_owner() {
         let failures = audit_source_fragment(
             "src/compiler_frontend/example.rs",

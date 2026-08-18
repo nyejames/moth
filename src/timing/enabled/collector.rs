@@ -38,20 +38,18 @@ static GLOBAL_METRICS: [TimingMetricAccumulator; TIMING_METRIC_COUNT] =
 ///
 /// Keeping this structured inside timing avoids emitting benchmark output for
 /// a stale attributed context, while ordinary facade callers still receive
-/// the compact suppression flag they need for human prose.
+/// the compact suppression flag they need.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct TimingRecordOutcome {
     pub(crate) recorded: bool,
     pub(crate) output_suppressed: bool,
-    pub(crate) human_prose_enabled: bool,
 }
 
 impl TimingRecordOutcome {
-    const fn recorded(output_suppressed: bool, human_prose_enabled: bool) -> Self {
+    const fn recorded(output_suppressed: bool) -> Self {
         Self {
             recorded: true,
             output_suppressed,
-            human_prose_enabled,
         }
     }
 }
@@ -204,8 +202,7 @@ pub(crate) fn record_timing_with_admission(
 
     GLOBAL_METRICS[metric.index()].record(duration);
     let output_suppressed = admission.output_suppressed();
-    let human_prose_enabled = admission.human_prose_enabled();
-    TimingRecordOutcome::recorded(output_suppressed, human_prose_enabled)
+    TimingRecordOutcome::recorded(output_suppressed)
 }
 
 /// Record one timing observation with compact boundary/module context.
@@ -254,8 +251,7 @@ pub(crate) fn record_attributed_timing_with_admission(
             .record(metric, duration);
     }
     let output_suppressed = admission.output_suppressed();
-    let human_prose_enabled = admission.human_prose_enabled();
-    TimingRecordOutcome::recorded(output_suppressed, human_prose_enabled)
+    TimingRecordOutcome::recorded(output_suppressed)
 }
 
 /// Register one compilation boundary inside the active attributed session.
@@ -458,24 +454,7 @@ pub(crate) fn record_counter(name: &'static str, value: f64) -> TimingRecordOutc
     collection
         .counters
         .push(BenchmarkObservationMetric { name, value });
-    TimingRecordOutcome::recorded(collection.configuration.suppress_output(), false)
-}
-
-/// Whether stdout output is currently allowed.
-///
-/// Returns false when an in-process collection session has suppressed output.
-/// It first checks the active-channel bit so ordinary inactive call sites do
-/// not take the collector mutex.
-#[cfg(feature = "detailed_timers")]
-pub(crate) fn output_enabled() -> bool {
-    if !runtime::collection_active() {
-        return true;
-    }
-
-    match lock_collector().as_ref() {
-        Some(collection) => !collection.configuration.suppress_output(),
-        None => true,
-    }
+    TimingRecordOutcome::recorded(collection.configuration.suppress_output())
 }
 
 /// Keep boundary module counts derived from the registered module records.

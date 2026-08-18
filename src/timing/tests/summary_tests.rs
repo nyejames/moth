@@ -32,7 +32,7 @@ fn snapshot_with(entries: &[(TimingMetric, f64)]) -> BenchmarkObservationSnapsho
                 samples: 1,
             })
             .collect(),
-        schema_version: 1,
+        schema_version: 2,
         command: None,
         #[cfg(feature = "benchmark_counters")]
         counters: Vec::new(),
@@ -119,6 +119,7 @@ fn report_items_follow_architecture_order() {
         .iter()
         .map(|item| match item {
             TimingReportItem::Section(section) => section.title.as_str(),
+            TimingReportItem::AccountingNote => "Accounting note",
             TimingReportItem::CompilationBoundaries(_) => "Compilation boundaries",
             TimingReportItem::SlowestModule(_) => "Slowest module",
         })
@@ -127,6 +128,7 @@ fn report_items_follow_architecture_order() {
         item_kinds,
         vec![
             "Build pipeline",
+            "Accounting note",
             "Compilation boundaries",
             "Frontend work · 1 module · accumulated",
             "Backend",
@@ -1006,7 +1008,7 @@ fn module_record_with_timings(
 #[test]
 fn boundary_rows_separate_packages_and_project_totals() {
     let snapshot = BenchmarkObservationSnapshot {
-        schema_version: 1,
+        schema_version: 2,
         command: Some(TimingCommandKind::Build),
         timings: vec![aggregate(TimingMetric::CommandBuildTotal, 500.0)],
         #[cfg(feature = "benchmark_counters")]
@@ -1049,7 +1051,7 @@ fn boundary_rows_separate_packages_and_project_totals() {
 #[test]
 fn boundary_rows_follow_registration_order() {
     let snapshot = BenchmarkObservationSnapshot {
-        schema_version: 1,
+        schema_version: 2,
         command: Some(TimingCommandKind::Build),
         timings: vec![aggregate(TimingMetric::CommandBuildTotal, 100.0)],
         #[cfg(feature = "benchmark_counters")]
@@ -1092,7 +1094,7 @@ fn same_module_index_in_two_boundaries_does_not_collide() {
     let project = boundary_id(1);
 
     let snapshot = BenchmarkObservationSnapshot {
-        schema_version: 1,
+        schema_version: 2,
         command: Some(TimingCommandKind::Build),
         timings: vec![aggregate(TimingMetric::CommandBuildTotal, 100.0)],
         #[cfg(feature = "benchmark_counters")]
@@ -1133,7 +1135,7 @@ fn same_module_index_in_two_boundaries_does_not_collide() {
 fn shuffled_events_do_not_change_boundary_or_slowest_module() {
     let html = boundary_id(0);
     let ordered = BenchmarkObservationSnapshot {
-        schema_version: 1,
+        schema_version: 2,
         command: Some(TimingCommandKind::Build),
         timings: vec![aggregate(TimingMetric::CommandBuildTotal, 100.0)],
         #[cfg(feature = "benchmark_counters")]
@@ -1160,7 +1162,7 @@ fn shuffled_events_do_not_change_boundary_or_slowest_module() {
         )],
     };
     let shuffled = BenchmarkObservationSnapshot {
-        schema_version: 1,
+        schema_version: 2,
         command: Some(TimingCommandKind::Build),
         timings: vec![aggregate(TimingMetric::CommandBuildTotal, 100.0)],
         #[cfg(feature = "benchmark_counters")]
@@ -1197,7 +1199,7 @@ fn shuffled_events_do_not_change_boundary_or_slowest_module() {
 fn slowest_module_uses_preparation_plus_semantic_total() {
     let project = boundary_id(0);
     let snapshot = BenchmarkObservationSnapshot {
-        schema_version: 1,
+        schema_version: 2,
         command: Some(TimingCommandKind::Build),
         timings: vec![aggregate(TimingMetric::CommandBuildTotal, 100.0)],
         #[cfg(feature = "benchmark_counters")]
@@ -1251,7 +1253,7 @@ fn slowest_module_ignores_unfinished_source_facts() {
     interrupted.source_facts_finalized = false;
 
     let snapshot = BenchmarkObservationSnapshot {
-        schema_version: 1,
+        schema_version: 2,
         command: Some(TimingCommandKind::Build),
         timings: vec![aggregate(TimingMetric::CommandBuildTotal, 100.0)],
         #[cfg(feature = "benchmark_counters")]
@@ -1283,7 +1285,7 @@ fn slowest_module_ignores_unfinished_source_facts() {
 fn slowest_module_identity_uses_logical_path_not_absolute_path() {
     let project = boundary_id(0);
     let snapshot = BenchmarkObservationSnapshot {
-        schema_version: 1,
+        schema_version: 2,
         command: Some(TimingCommandKind::Build),
         timings: vec![aggregate(TimingMetric::CommandBuildTotal, 100.0)],
         #[cfg(feature = "benchmark_counters")]
@@ -1314,7 +1316,7 @@ fn slowest_module_identity_is_bounded_to_its_unique_tail() {
     let project = boundary_id(0);
     let long_identity = "moth_docs/a/very/deeply/nested/module/path/with/a/unique_tail";
     let snapshot = BenchmarkObservationSnapshot {
-        schema_version: 1,
+        schema_version: 2,
         command: Some(TimingCommandKind::Build),
         timings: vec![aggregate(TimingMetric::CommandBuildTotal, 100.0)],
         #[cfg(feature = "benchmark_counters")]
@@ -1342,7 +1344,7 @@ fn slowest_module_identity_is_bounded_to_its_unique_tail() {
 #[test]
 fn only_registered_boundaries_produce_rows() {
     let snapshot = BenchmarkObservationSnapshot {
-        schema_version: 1,
+        schema_version: 2,
         command: Some(TimingCommandKind::Build),
         timings: vec![aggregate(TimingMetric::CommandBuildTotal, 100.0)],
         #[cfg(feature = "benchmark_counters")]
@@ -1406,5 +1408,69 @@ fn config_and_generated_ast_observations_never_enter_module_ast_children() {
         ast.children.is_empty(),
         "config and generated AST work must not appear as module AST children: {:?}",
         ast.children
+    );
+}
+
+/// The accounting note appears exactly once after the pipeline section.
+#[test]
+fn accounting_note_appears_after_pipeline_for_build() {
+    let report = build_timing_summary(&build_snapshot(), TimingCommandKind::Build, true);
+    let note_count = report
+        .items
+        .iter()
+        .filter(|item| matches!(item, TimingReportItem::AccountingNote))
+        .count();
+    assert_eq!(note_count, 1, "exactly one accounting note is required");
+
+    let mut items = report.items.iter();
+    let pipeline = items.next().expect("pipeline section should be first");
+    assert!(
+        matches!(pipeline, TimingReportItem::Section(section) if section.title == "Build pipeline"),
+        "pipeline section should be first"
+    );
+    let note = items
+        .next()
+        .expect("accounting note should follow pipeline");
+    assert!(
+        matches!(note, TimingReportItem::AccountingNote),
+        "accounting note should follow the pipeline section"
+    );
+}
+
+/// The accounting note appears for the check command.
+#[test]
+fn accounting_note_appears_after_pipeline_for_check() {
+    let report = build_timing_summary(&build_snapshot(), TimingCommandKind::Check, true);
+    let note_count = report
+        .items
+        .iter()
+        .filter(|item| matches!(item, TimingReportItem::AccountingNote))
+        .count();
+    assert_eq!(note_count, 1, "exactly one accounting note is required");
+}
+
+/// The accounting note appears for the dev command.
+#[test]
+fn accounting_note_appears_after_pipeline_for_dev() {
+    let report = build_timing_summary(&build_snapshot(), TimingCommandKind::Dev, true);
+    let note_count = report
+        .items
+        .iter()
+        .filter(|item| matches!(item, TimingReportItem::AccountingNote))
+        .count();
+    assert_eq!(note_count, 1, "exactly one accounting note is required");
+}
+
+/// The accounting note text states the pipeline-only rule.
+#[test]
+fn accounting_note_text_states_pipeline_only_rule() {
+    assert!(
+        crate::timing::enabled::render::ACCOUNTING_NOTE_TEXT
+            .contains("Only pipeline rows account for the command total"),
+        "accounting note must state the pipeline-only rule"
+    );
+    assert!(
+        crate::timing::enabled::render::ACCOUNTING_NOTE_TEXT.contains("overlapping attribution"),
+        "accounting note must mention overlapping attribution"
     );
 }

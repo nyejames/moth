@@ -46,9 +46,6 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 
-#[cfg(feature = "detailed_timers")]
-use crate::timing::detailed_timer_output_enabled;
-
 use rustc_hash::FxHashMap;
 use std::rc::Rc;
 
@@ -63,9 +60,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         trait_environment: &TraitEnvironment,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
-        #[cfg(feature = "detailed_timers")]
-        let mut resolved_function_count = 0usize;
-
         for header in sorted_headers {
             let HeaderKind::Function {
                 generic_parameters,
@@ -286,19 +280,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
             self.resolved_function_signatures_by_path
                 .insert(header.tokens.src_path.to_owned(), resolved_signature);
-
-            #[cfg(feature = "detailed_timers")]
-            {
-                resolved_function_count += 1;
-            }
-        }
-
-        #[cfg(feature = "detailed_timers")]
-        if detailed_timer_output_enabled() {
-            saying::say!(
-                "\n AST/function signatures/resolved count: ",
-                resolved_function_count
-            );
         }
 
         Ok(())
@@ -408,14 +389,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             AstCounter::ReceiverMethodsRegistered,
             catalog.by_function_path.len(),
         );
-
-        #[cfg(feature = "detailed_timers")]
-        if detailed_timer_output_enabled() {
-            saying::say!(
-                "\n AST/receiver catalog/methods indexed: ",
-                catalog.by_function_path.len()
-            );
-        }
 
         Ok(Rc::new(catalog))
     }

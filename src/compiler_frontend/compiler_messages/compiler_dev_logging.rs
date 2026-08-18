@@ -41,20 +41,29 @@ macro_rules! token_log {
 ///      benchmark runs do not have to enable verbose timer prose.
 ///
 /// Counter storage reuses the `timers` collector, so observations are only
-/// recorded when `timers` is also active. The stdout line is delegated to
-/// `timing::emit_bench_counter_line`, which honors the `MOTH_COUNTERS` mode
-/// and the in-process output-suppression flag.
+/// recorded when `timers` is also active. With `timers`, counter call sites
+/// record only — stable `MOTH_BENCH counter` lines are emitted from the
+/// drained snapshot after the command total to avoid perturbing measured
+/// stages. Without `timers` (counter-only builds), the stable line is
+/// emitted directly here since there is no timer boundary to contaminate.
 #[cfg(feature = "benchmark_counters")]
 pub fn log_benchmark_counter(metric_name: &'static str, value: f64) {
     if metric_name.trim().is_empty() || !value.is_finite() {
         return;
     }
 
-    #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
-    let output_suppressed = counter_observation!(metric_name, value);
-    #[cfg(not(all(feature = "timers", feature = "benchmark_counters")))]
-    let output_suppressed = false;
-    crate::timing::emit_bench_counter_line(metric_name, value, output_suppressed);
+    // With timers, record only. Stable bench counter lines are emitted
+    // from the drained BenchmarkObservationSnapshot after the session ends.
+    #[cfg(feature = "timers")]
+    {
+        let _ = counter_observation!(metric_name, value);
+    }
+
+    // Without timers, emit directly — no timer boundary to perturb.
+    #[cfg(not(feature = "timers"))]
+    {
+        crate::timing::emit_bench_counter_line(metric_name, value, false);
+    }
 }
 
 // Headers Logging

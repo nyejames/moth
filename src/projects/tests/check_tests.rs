@@ -1,7 +1,10 @@
 //! Tests for the frontend-only `check` command flow.
 
+#[cfg(feature = "timers")]
+use super::run_check_for_tests;
 use super::{execute_check, format_terse_summary_line};
 use crate::build_system::build::{ProjectBuilder, build_project};
+use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::render::{
     display_line_number, relative_display_path_from_root, resolve_source_file_path,
@@ -17,6 +20,8 @@ use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use crate::timing::{TimingMetric, start_benchmark_collection};
 use std::fs;
 use std::path::PathBuf;
+#[cfg(feature = "timers")]
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 #[test]
@@ -427,4 +432,97 @@ increment(count)
 fn terse_summary_line_matches_clean_success_contract() {
     let summary = format_terse_summary_line(Duration::from_millis(5), 0, 0);
     assert_eq!(summary, "Done in 5ms. No errors or warnings.");
+}
+
+/// Baseline test: run_check records command.check.total with exactly one sample.
+#[cfg(feature = "timers")]
+#[test]
+fn run_check_records_command_check_total() {
+    let _test_guard = crate::timing::lock_instrumentation_tests();
+    let root = temp_dir("check_run_check_timer");
+    fs::create_dir_all(&root).expect("should create temporary project root");
+    let entry_file = root.join("main.moth");
+    fs::write(&entry_file, "value = 1\n").expect("should write source file");
+
+    let timing_session = start_benchmark_collection(true).expect("timing session should start");
+    let status = super::run_check(
+        entry_file
+            .to_str()
+            .expect("temporary path should be valid UTF-8"),
+        super::CheckOptions::default(),
+    );
+    let snapshot = timing_session.finish();
+
+    assert_eq!(
+        status,
+        crate::projects::command_status::CommandStatus::Success
+    );
+    let command_total = snapshot
+        .timings
+        .iter()
+        .find(|observation| observation.metric.descriptor().stable_name == "command.check.total")
+        .expect("command.check.total must be recorded");
+    assert_eq!(command_total.samples, 1);
+
+    fs::remove_dir_all(&root).expect("should remove temporary project root");
+}
+
+/// Boundary regression: a scripted check duration is recorded before rendering and
+/// renderer work cannot change the command total.
+///
+/// WHAT: proves execute/classify -> capture scripted duration -> render ordering
+///       by injecting a renderer callback that performs observable work after capture.
+/// WHY:  the structured command total must equal the scripted duration exactly,
+///       regardless of renderer work, pinning the execution-to-presentation boundary.
+#[cfg(feature = "timers")]
+#[test]
+fn check_command_total_excludes_renderer_work() {
+    let _test_guard = crate::timing::lock_instrumentation_tests();
+
+    let outcome = super::CheckOutcome {
+        messages: CompilerMessages::empty(StringTable::new()),
+        status: crate::projects::command_status::CommandStatus::Success,
+    };
+    let scripted_duration = Duration::from_millis(37);
+    let renderer_calls = AtomicUsize::new(0);
+
+    let timing_session = start_benchmark_collection(true).expect("timing session should start");
+    let (status, _) = run_check_for_tests(
+        outcome,
+        super::CheckOptions::default(),
+        scripted_duration,
+        |outcome, duration| {
+            // Simulate renderer work after capture. The scripted duration must
+            // remain the recorded total regardless of this work.
+            std::thread::sleep(Duration::from_millis(5));
+            assert_eq!(duration, scripted_duration);
+            assert!(
+                !outcome.messages.has_errors(),
+                "renderer receives an outcome whose classification is already decided"
+            );
+            renderer_calls.fetch_add(1, Ordering::SeqCst);
+        },
+    );
+    let snapshot = timing_session.finish();
+
+    assert_eq!(
+        status,
+        crate::projects::command_status::CommandStatus::Success
+    );
+    assert_eq!(
+        renderer_calls.load(Ordering::SeqCst),
+        1,
+        "renderer must run after capture"
+    );
+
+    let command_total = snapshot
+        .timings
+        .iter()
+        .find(|observation| observation.metric.descriptor().stable_name == "command.check.total")
+        .expect("command.check.total must be recorded");
+
+    // The structured total must equal the scripted duration exactly, proving
+    // renderer work did not enter the captured boundary.
+    assert_eq!(command_total.total, scripted_duration);
+    assert_eq!(command_total.samples, 1, "exactly one command-total sample");
 }

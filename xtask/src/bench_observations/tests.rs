@@ -7,7 +7,7 @@ fn parses_exact_live_check_and_build_metrics() {
         (CliBenchmarkCommand::Build, "command.build.total"),
     ] {
         let stdout = format!(
-            "MOTH_BENCH timing-schema 1\nMOTH_BENCH timing {required_name}=8ms\nMOTH_BENCH timing frontend.ast.total=2.5ms\n"
+            "MOTH_BENCH timing-schema 2\nMOTH_BENCH timing {required_name}=8ms\nMOTH_BENCH timing frontend.ast.total=2.5ms\n"
         );
 
         let observations = parse_stdout_observations(&stdout, command)
@@ -46,7 +46,7 @@ fn malformed_stable_timing_lines_fail_closed() {
 fn live_timing_names_and_order_are_registry_closed() {
     let unknown = parse_stdout_observations(
         concat!(
-            "MOTH_BENCH timing-schema 1\n",
+            "MOTH_BENCH timing-schema 2\n",
             "MOTH_BENCH timing command.check.total=8ms\n",
             "MOTH_BENCH timing frontend.ast=2ms\n",
         ),
@@ -62,7 +62,7 @@ fn live_timing_names_and_order_are_registry_closed() {
 
     let reversed = parse_stdout_observations(
         concat!(
-            "MOTH_BENCH timing-schema 1\n",
+            "MOTH_BENCH timing-schema 2\n",
             "MOTH_BENCH timing frontend.ast.total=2ms\n",
             "MOTH_BENCH timing command.check.total=8ms\n",
         ),
@@ -79,7 +79,7 @@ fn live_timing_names_and_order_are_registry_closed() {
 
     let sparse = parse_stdout_observations(
         concat!(
-            "MOTH_BENCH timing-schema 1\n",
+            "MOTH_BENCH timing-schema 2\n",
             "MOTH_BENCH timing command.check.total=8ms\n",
             "MOTH_BENCH timing frontend.prepare=2ms\n",
             "MOTH_BENCH timing frontend.ast.total=3ms\n",
@@ -112,8 +112,8 @@ fn timing_schema_header_is_required_once_and_current() {
 
     let duplicate = parse_stdout_observations(
         concat!(
-            "MOTH_BENCH timing-schema 1\n",
-            "MOTH_BENCH timing-schema 1\n",
+            "MOTH_BENCH timing-schema 2\n",
+            "MOTH_BENCH timing-schema 2\n",
             "MOTH_BENCH timing command.check.total=1ms"
         ),
         CliBenchmarkCommand::Check,
@@ -122,13 +122,13 @@ fn timing_schema_header_is_required_once_and_current() {
     assert_eq!(duplicate, BenchmarkObservationError::DuplicateTimingSchema);
 
     let future = parse_stdout_observations(
-        "MOTH_BENCH timing-schema 2\nMOTH_BENCH timing command.check.total=1ms",
+        "MOTH_BENCH timing-schema 3\nMOTH_BENCH timing command.check.total=1ms",
         CliBenchmarkCommand::Check,
     )
     .expect_err("future schema headers must fail closed");
     assert_eq!(
         future,
-        BenchmarkObservationError::UnsupportedTimingSchema { version: 2 }
+        BenchmarkObservationError::UnsupportedTimingSchema { version: 3 }
     );
 }
 
@@ -136,7 +136,7 @@ fn timing_schema_header_is_required_once_and_current() {
 fn final_timing_records_must_not_repeat_a_metric() {
     let error = parse_stdout_observations(
         concat!(
-            "MOTH_BENCH timing-schema 1\n",
+            "MOTH_BENCH timing-schema 2\n",
             "MOTH_BENCH timing command.check.total=1ms\n",
             "MOTH_BENCH timing command.check.total=2ms"
         ),
@@ -156,7 +156,7 @@ fn final_timing_records_must_not_repeat_a_metric() {
 fn non_finite_and_negative_values_fail() {
     for value in ["NaN", "inf", "-1"] {
         let timing_stdout =
-            format!("MOTH_BENCH timing-schema 1\nMOTH_BENCH timing command.check.total={value}ms");
+            format!("MOTH_BENCH timing-schema 2\nMOTH_BENCH timing command.check.total={value}ms");
         let timing_error = parse_stdout_observations(&timing_stdout, CliBenchmarkCommand::Check)
             .expect_err("invalid timing values must fail");
         assert!(matches!(
@@ -168,7 +168,7 @@ fn non_finite_and_negative_values_fail() {
         ));
 
         let counter_stdout = format!(
-            "MOTH_BENCH timing-schema 1\nMOTH_BENCH timing command.check.total=1ms\nMOTH_BENCH counter work={value}"
+            "MOTH_BENCH timing-schema 2\nMOTH_BENCH timing command.check.total=1ms\nMOTH_BENCH counter work={value}"
         );
         let counter_error = parse_stdout_observations(&counter_stdout, CliBenchmarkCommand::Check)
             .expect_err("invalid counter values must fail");
@@ -185,7 +185,7 @@ fn non_finite_and_negative_values_fail() {
 #[test]
 fn required_cli_total_metric_must_match_command() {
     let check_error = parse_stdout_observations(
-        "MOTH_BENCH timing-schema 1\nMOTH_BENCH timing frontend.ast.total=1ms",
+        "MOTH_BENCH timing-schema 2\nMOTH_BENCH timing frontend.ast.total=1ms",
         CliBenchmarkCommand::Check,
     )
     .expect_err("check total is required");
@@ -197,7 +197,7 @@ fn required_cli_total_metric_must_match_command() {
     );
 
     let build_error = parse_stdout_observations(
-        "MOTH_BENCH timing-schema 1\nMOTH_BENCH timing command.check.total=1ms",
+        "MOTH_BENCH timing-schema 2\nMOTH_BENCH timing command.check.total=1ms",
         CliBenchmarkCommand::Build,
     )
     .expect_err("build total is required");
@@ -212,7 +212,7 @@ fn required_cli_total_metric_must_match_command() {
 #[test]
 fn repeated_final_timing_names_are_rejected() {
     let stdout = concat!(
-        "MOTH_BENCH timing-schema 1\n",
+        "MOTH_BENCH timing-schema 2\n",
         "MOTH_BENCH timing frontend.ast.total=2ms\n",
         "MOTH_BENCH timing frontend.ast.total=3ms\n",
         "MOTH_BENCH timing command.check.total=8ms\n",
@@ -232,7 +232,7 @@ fn repeated_final_timing_names_are_rejected() {
 #[test]
 fn stable_counters_parse_and_sum_when_present() {
     let stdout = concat!(
-        "MOTH_BENCH timing-schema 1\n",
+        "MOTH_BENCH timing-schema 2\n",
         "MOTH_BENCH timing command.check.total=8ms\n",
         "MOTH_BENCH counter work=2\n",
         "MOTH_BENCH counter work=3\n",
@@ -250,7 +250,7 @@ fn stable_counters_parse_and_sum_when_present() {
 fn stable_records_allow_unrelated_surrounding_output_and_emitter_ansi_reset() {
     let stdout = concat!(
         "Checking project\n",
-        "MOTH_BENCH timing-schema 1\u{1b}[0m\n",
+        "MOTH_BENCH timing-schema 2\u{1b}[0m\n",
         "MOTH_BENCH timing command.check.total=8ms\u{1b}[0m\n",
         "MOTH_BENCH counter work=3\u{1b}[0m\n",
         "Finished\n",
@@ -374,7 +374,7 @@ fn frontend_observations_require_valid_nonempty_stages_and_validate_counters() {
 fn malformed_stable_counter_line_fails() {
     let error = parse_stdout_observations(
         concat!(
-            "MOTH_BENCH timing-schema 1\n",
+            "MOTH_BENCH timing-schema 2\n",
             "MOTH_BENCH timing command.check.total=1ms\n",
             "MOTH_BENCH counter work=1 trailing\n",
         ),

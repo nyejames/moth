@@ -16,7 +16,7 @@ fn test_observation() -> ProfileObservation {
         command_args: vec!["test.moth".to_string()],
         wall_ms: 1234.5,
         observations: BenchmarkCaseObservations {
-            timing_schema_version: 1,
+            timing_schema_version: 2,
             stage_timings: vec![
                 BenchmarkMetric {
                     name: "frontend.ast.total".to_string(),
@@ -45,7 +45,7 @@ fn test_case_manifest(case_id: &str, summary_path: Option<String>) -> ProfileCas
             workload_id: "workload".to_string(),
             source_fingerprint: "source".to_string(),
             measurement_fingerprint: "measurement".to_string(),
-            timing_schema_version: 1,
+            timing_schema_version: 2,
         },
         group_name: "core".to_string(),
         command: "check".to_string(),

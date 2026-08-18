@@ -10,10 +10,11 @@
 //! Three output products share one collector:
 //! - `MOTH_TIMERS=summary` prints the curated human report (pipeline,
 //!   compilation boundaries, frontend, backend, slowest module).
-//! - `MOTH_TIMERS=bench` emits one `MOTH_BENCH timing-schema 1` header and one
-//!   final aggregate set of stable `MOTH_BENCH timing` lines in schema order.
-//! - `MOTH_TIMERS=verbose` keeps detailed inline prose and ends with the
-//!   curated report.
+//! - `MOTH_TIMERS=bench` emits one `MOTH_BENCH timing-schema` header (carrying
+//!   the current `TIMING_SCHEMA_VERSION`) and one final aggregate set of
+//!   stable `MOTH_BENCH timing` lines in schema order.
+//! - `MOTH_TIMERS=verbose` ends with the curated report; detailed substage
+//!   evidence is owned by typed metrics and counters rather than inline prose.
 //!
 //! The dev server starts one fresh collection per build cycle and renders
 //! the same report after its one-line status.
@@ -33,36 +34,6 @@
 //! Stage boundaries: this facade owns timing and counter infrastructure only.
 //! It must not import or depend on frontend, analysis, IR, or backend modules.
 
-/// Start one detailed-only prose timer from the timing implementation owner.
-///
-/// Detailed AST microstage logging predates the typed pipeline guards and is
-/// intentionally kept as human evidence rather than a schema metric. Keeping
-/// its clock creation here prevents frontend modules from owning timer types or
-/// direct clock calls.
-#[cfg(feature = "detailed_timers")]
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct DetailedTimerStart(Option<std::time::Instant>);
-
-#[cfg(feature = "detailed_timers")]
-impl DetailedTimerStart {
-    /// Return elapsed time only when the detailed channel captured a start.
-    pub(crate) fn elapsed(&self) -> Option<std::time::Duration> {
-        self.0.map(|start| start.elapsed())
-    }
-}
-
-#[cfg(feature = "detailed_timers")]
-pub(crate) fn start_detailed_timer() -> DetailedTimerStart {
-    if !enabled::runtime::timer_human_prose_active() {
-        return DetailedTimerStart(None);
-    }
-
-    #[cfg(test)]
-    enabled::runtime::record_timing_clock_read_for_test();
-
-    DetailedTimerStart(Some(std::time::Instant::now()))
-}
-
 #[cfg(feature = "timers")]
 mod enabled;
 
@@ -75,16 +46,13 @@ pub(crate) use enabled::{
     PipelineTimingGuardAttributed, PipelineTimingStart, TimerOutputMode, TimingBoundaryId,
     TimingBoundaryKind, TimingBoundaryRecord, TimingCommandKind, TimingContext, TimingMetric,
     TimingMetricAggregate, TimingModuleKey, TimingModuleRecord, TimingSession,
-    TimingSessionStartError, detailed_prose_enabled, emit_detailed_metric_prose,
-    finalize_timing_module_source_facts, record_pipeline_timing, record_pipeline_timing_attributed,
+    TimingSessionStartError, finalize_timing_module_source_facts, record_command_total_timing,
+    record_pipeline_timing, record_pipeline_timing_attributed,
     record_pipeline_timing_attributed_lazy, record_started_pipeline_timing,
     record_started_pipeline_timing_attributed, register_timing_boundary, register_timing_module,
     register_timing_module_for_preparation, render_command_timing_summary, start_command_session,
     start_pipeline_timing, start_raw_benchmark_collection,
 };
-
-#[cfg(all(feature = "timers", feature = "detailed_timers"))]
-pub(crate) use enabled::detailed_timer_output_enabled;
 
 #[cfg(all(feature = "timers", feature = "benchmark_counters", test))]
 pub(crate) use enabled::BenchmarkObservationMetric;
@@ -113,35 +81,12 @@ pub(crate) use enabled::start_command_session_with_configuration;
 pub(crate) use enabled::record_counter;
 
 // ---------------------------------------------------------------------------
-//  Detailed human prose
+//  Legacy detailed-timer macros (no-op)
 // ---------------------------------------------------------------------------
-
-/// Print one detailed-only microstage using the timer's captured start.
-#[macro_export]
-#[cfg(feature = "detailed_timers")]
-macro_rules! timer_log {
-    ($time:expr, $message:expr) => {{
-        if let Some(elapsed) = $time.elapsed() {
-            if $crate::timing::detailed_timer_output_enabled() {
-                saying::say!($message, Green #elapsed);
-            }
-        }
-    }};
-}
-
-#[macro_export]
-#[cfg(not(feature = "detailed_timers"))]
-macro_rules! timer_log {
-    ($time:expr, $message:expr) => {};
-}
-
-/// Print a captured detailed aggregate duration without taking a second clock.
-#[cfg(feature = "detailed_timers")]
-pub(crate) fn log_aggregated_duration(label: &str, duration: std::time::Duration) {
-    if detailed_timer_output_enabled() {
-        saying::say!(label, Green #duration);
-    }
-}
+//
+// These macros are retained as no-ops so legacy call sites compile without
+// modification. Typed metrics and counters are the durable evidence owners;
+// verbose human detail should be derived from the drained typed snapshot.
 
 // ---------------------------------------------------------------------------
 //  Counter output mode (feature = "benchmark_counters")
@@ -161,8 +106,12 @@ pub(crate) fn log_aggregated_duration(label: &str, duration: std::time::Duration
 ///   Explicit raw benchmark sessions may still collect counters programmatically.
 /// - `Summary`: emit stable `MOTH_BENCH counter` lines and print a concise
 ///   grouped counter summary after compilation.
-/// - `Full`: emit stable `MOTH_BENCH counter` lines and print the legacy
-///   per-counter human dump (the old `detailed_timers` behavior).
+/// - `Full`: emit stable `MOTH_BENCH counter` lines and print a concise
+///   grouped counter summary after compilation.
+///
+/// Both `Summary` and `Full` emit the same stable lines and concise summary
+/// from the drained snapshot. The legacy per-counter human dump has been
+/// removed; typed metrics and counters are the sole evidence owners.
 #[cfg(feature = "benchmark_counters")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CounterOutputMode {
@@ -200,16 +149,11 @@ impl CounterOutputMode {
     }
 
     /// Whether the concise grouped counter summary should be printed after
-    /// compilation.
+    /// compilation. Both `Summary` and `Full` modes render the concise grouped
+    /// summary from the drained snapshot.
     #[cfg(feature = "timers")]
     pub(crate) fn emits_counter_summary(self) -> bool {
-        matches!(self, Self::Summary)
-    }
-
-    /// Whether the legacy per-counter human dump should be printed while
-    /// counters are logged.
-    pub(crate) fn emits_human_counter_prose(self) -> bool {
-        matches!(self, Self::Full)
+        matches!(self, Self::Summary | Self::Full)
     }
 }
 
@@ -226,39 +170,21 @@ pub(crate) fn current_counter_output_mode() -> CounterOutputMode {
     *CACHED_COUNTER_MODE.get_or_init(CounterOutputMode::from_environment)
 }
 
-/// Whether legacy per-counter human prose is enabled for the active session.
-#[cfg(feature = "benchmark_counters")]
-pub(crate) fn counter_human_prose_enabled() -> bool {
-    #[cfg(feature = "timers")]
-    {
-        enabled::runtime::counter_human_prose_active()
-    }
-
-    #[cfg(not(feature = "timers"))]
-    {
-        current_counter_output_mode().emits_human_counter_prose()
-    }
-}
-
 /// Emit one stable `MOTH_BENCH counter` line to stdout if the counter output
 /// mode permits and output is not suppressed.
 ///
 /// WHAT: prints a plain `MOTH_BENCH counter <metric>=<value>` line that the
-///      benchmark observation parser can grep without depending on human prose.
+///      benchmark observation parser can grep without depending on human output.
 /// WHY:  like the timing line, separating the stable counter metric from
-///       human prose lets counter logging change its display without breaking
+///       human output lets counter logging change its display without breaking
 ///       benchmark attribution. The line is only emitted for `MOTH_COUNTERS`
 ///       modes that request stdout (`summary` or `full`).
-#[cfg(feature = "benchmark_counters")]
+#[cfg(all(feature = "benchmark_counters", not(feature = "timers")))]
 pub(crate) fn emit_bench_counter_line(name: &'static str, value: f64, output_suppressed: bool) {
     if name.trim().is_empty() {
         return;
     }
 
-    #[cfg(feature = "timers")]
-    let emits_bench_line = enabled::runtime::counter_bench_output_active();
-
-    #[cfg(not(feature = "timers"))]
     let emits_bench_line = current_counter_output_mode().emits_bench_counter_lines();
 
     if !output_suppressed && emits_bench_line {
@@ -377,6 +303,62 @@ macro_rules! timing_scope_attributed {
     ($binding:ident, $metric:expr, $context:expr $(,)?) => {};
 }
 
+/// Start a named scope guard that records an attributed metric when the scope
+/// ends, accepting an optional metric. When the metric is `None` no guard is
+/// created and no timing is recorded. Used by frontend-only nested metrics
+/// that should not fire for config or generated AST families.
+#[macro_export]
+#[cfg(feature = "timers")]
+macro_rules! timing_scope_attributed_opt {
+    ($binding:ident, $metric:expr, $context:expr $(,)?) => {
+        #[allow(unused_variables)]
+        let $binding = $metric.map(|__metric| {
+            $crate::timing::PipelineTimingGuardAttributed::new(__metric, || $context)
+        });
+    };
+}
+
+#[macro_export]
+#[cfg(not(feature = "timers"))]
+macro_rules! timing_scope_attributed_opt {
+    ($binding:ident, $metric:expr, $context:expr $(,)?) => {};
+}
+
+/// Time one expression with an optional attributed metric. When the metric is
+/// `None` the expression is evaluated without timing. Used by frontend-only
+/// nested metrics that should not fire for config or generated AST families.
+#[macro_export]
+#[cfg(feature = "timers")]
+macro_rules! timed_stage_attributed_opt {
+    ($metric:expr, $context:expr, $expression:expr $(,)?) => {{
+        let __opt_metric = $metric;
+        match __opt_metric {
+            Some(__metric) => {
+                let mut __start = $crate::timing::start_pipeline_timing(__metric);
+                let __result = $expression;
+                let __ctx = if __start.attribution_active() {
+                    $context
+                } else {
+                    None
+                };
+                $crate::timing::record_started_pipeline_timing_attributed(
+                    __metric,
+                    &mut __start,
+                    __ctx,
+                );
+                __result
+            }
+            None => $expression,
+        }
+    }};
+}
+
+#[macro_export]
+#[cfg(not(feature = "timers"))]
+macro_rules! timed_stage_attributed_opt {
+    ($metric:expr, $context:expr, $expression:expr $(,)?) => {{ $expression }};
+}
+
 /// Record one already-captured duration under a stable metric.
 ///
 /// The duration expression is only evaluated while `timers` is active.
@@ -460,6 +442,29 @@ macro_rules! finish_command_timing {
 #[cfg(not(feature = "timers"))]
 macro_rules! finish_command_timing {
     ($session:expr, $succeeded:expr) => {};
+}
+
+/// Capture one command duration from its stopwatch, record the command-total
+/// metric when `timers` is active, and return the captured duration.
+///
+/// WHAT: reads the command stopwatch once, records the elapsed time under the
+///       command-total metric, and returns the duration.
+/// WHY:  guarantees human success messages and structured command-total metrics
+///       use identical durations and boundaries without duplicate clock reads.
+#[macro_export]
+#[cfg(feature = "timers")]
+macro_rules! capture_command_duration {
+    ($metric:expr, $start:expr $(,)?) => {{
+        let timing_duration = $start.elapsed();
+        $crate::timing::record_command_total_timing($metric, timing_duration);
+        timing_duration
+    }};
+}
+
+#[macro_export]
+#[cfg(not(feature = "timers"))]
+macro_rules! capture_command_duration {
+    ($metric:expr, $start:expr $(,)?) => {{ $start.elapsed() }};
 }
 
 // ---------------------------------------------------------------------------

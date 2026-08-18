@@ -28,7 +28,7 @@ fn test_record(run_id: &str) -> ProfileHistoryRecord {
                 workload_id: "fixture".to_string(),
                 source_fingerprint: "abc123".to_string(),
                 measurement_fingerprint: "def456".to_string(),
-                timing_schema_version: 1,
+                timing_schema_version: 2,
             },
             group_name: "core".to_string(),
             command: "check".to_string(),
@@ -85,7 +85,7 @@ fn test_record_b(run_id: &str) -> ProfileHistoryRecord {
                 workload_id: "fixture".to_string(),
                 source_fingerprint: "def567".to_string(),
                 measurement_fingerprint: "ghi789".to_string(),
-                timing_schema_version: 1,
+                timing_schema_version: 2,
             },
             group_name: "core".to_string(),
             command: "check".to_string(),
@@ -427,7 +427,7 @@ fn append_rejects_different_timing_schema() {
     let path = temp_dir.path().join("profile-runs.jsonl");
 
     let mut record = test_record("2026-06-18T10-30-schema");
-    record.cases[0].identity.timing_schema_version = 2;
+    record.cases[0].identity.timing_schema_version = 3;
 
     let error = append_profile_run(&path, &record)
         .expect_err("new profile records must use the current timing schema");
@@ -469,7 +469,7 @@ fn persisted_schema_mismatch_reaches_profile_drift_without_numeric_comparison() 
     let path = temp_dir.path().join("profile-runs.jsonl");
 
     let mut previous = test_record("2026-06-18T10-30-previous");
-    previous.cases[0].identity.timing_schema_version = 2;
+    previous.cases[0].identity.timing_schema_version = 3;
     previous.cases[0].stage_timings[1].value = 1.0;
     previous.cases[0].counters[0].value = 1.0;
     previous.cases[0].hot_functions[0].inclusive_pct = 1.0;
@@ -486,7 +486,7 @@ fn persisted_schema_mismatch_reaches_profile_drift_without_numeric_comparison() 
 
     let records = current_records(read_profile_runs(&path).expect("profile history should read"));
     assert_eq!(records.len(), 2);
-    assert_eq!(records[0].cases[0].identity.timing_schema_version, 2);
+    assert_eq!(records[0].cases[0].identity.timing_schema_version, 3);
 
     let report = compute_drift(
         &[drift_input(&records[1].cases[0])],

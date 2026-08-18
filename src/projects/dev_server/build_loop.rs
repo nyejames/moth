@@ -30,6 +30,7 @@ use std::time::Duration;
 pub struct BuildCycleReport {
     pub version: u64,
     pub build_ok: bool,
+    pub build_duration: Duration,
     pub clients_notified: usize,
     pub watch_scope: Option<watch::WatchScope>,
     /// Structured warnings for successful dev builds, carried to the rebuild loop so terminal
@@ -48,6 +49,7 @@ pub struct RebuildRunReport {
 
 struct BuildOutcome {
     build_succeeded: bool,
+    build_duration: Duration,
     entry_page_rel: Option<PathBuf>,
     html_site_config: Option<HtmlSiteConfig>,
     diagnostics_summary: String,
@@ -157,6 +159,7 @@ pub fn run_single_build_cycle(
     let project_root = dev_server_project_root(entry_file);
     let BuildOutcome {
         build_succeeded,
+        build_duration,
         entry_page_rel,
         html_site_config,
         diagnostics_summary,
@@ -227,6 +230,7 @@ pub fn run_single_build_cycle(
     BuildCycleReport {
         version,
         build_ok: build_succeeded,
+        build_duration,
         clients_notified,
         watch_scope,
         success_messages,
@@ -251,9 +255,7 @@ pub fn run_builds_until_stable(
     let latest_watch_scope = loop {
         let build_start_revision = watch_session.current_revision();
 
-        let timer = std::time::Instant::now();
         let report = run_single_build_cycle(state, executor, entry_file, flags);
-        let build_duration = timer.elapsed();
 
         build_count += 1;
         let report_watch_scope = report.watch_scope.clone();
@@ -263,11 +265,12 @@ pub fn run_builds_until_stable(
                 "Dev build ",
                 Blue "#", report.version,
                 Reset " done in ",
-                Green build_duration.as_millis(), " ms ",
+                Green report.build_duration.as_millis(), " ms ",
                 Reset "- Broadcast to ",
                 Blue report.clients_notified,
                 Reset " clients."
             );
+
             if let Some(messages) = report.success_messages {
                 print_compiler_messages(messages);
             }
@@ -367,16 +370,17 @@ fn build_once(
     entry_file: &Path,
     flags: &[Flag],
 ) -> BuildOutcome {
-    // The dev total is owned by the orchestration around the executor trait
-    // call, so every DevBuildExecutor implementation receives the same metric.
-    let mut build_result = match crate::timed_stage!(
-        crate::timing::TimingMetric::CommandDevBuildWrite,
-        executor.build_and_write(entry_file, flags)
-    ) {
+    let start = std::time::Instant::now();
+    let build_result_outcome = executor.build_and_write(entry_file, flags);
+    let build_duration =
+        crate::capture_command_duration!(crate::timing::TimingMetric::CommandDevBuildWrite, start,);
+
+    let mut build_result = match build_result_outcome {
         Ok(build_result) => build_result,
         Err(messages) => {
             return BuildOutcome {
                 build_succeeded: false,
+                build_duration,
                 entry_page_rel: None,
                 html_site_config: None,
                 diagnostics_summary: format_compiler_messages(&messages),
@@ -413,6 +417,7 @@ fn build_once(
                 let messages = error.into_messages(build_result.string_table.clone());
                 return BuildOutcome {
                     build_succeeded: false,
+                    build_duration,
                     entry_page_rel: None,
                     html_site_config: None,
                     diagnostics_summary: format_compiler_messages(&messages),
@@ -449,6 +454,7 @@ fn build_once(
 
         BuildOutcome {
             build_succeeded: true,
+            build_duration,
             entry_page_rel: Some(entry_page_rel),
             html_site_config: Some(html_site_config),
             diagnostics_summary,
@@ -460,6 +466,7 @@ fn build_once(
     } else {
         BuildOutcome {
             build_succeeded: false,
+            build_duration,
             entry_page_rel: None,
             html_site_config: None,
             diagnostics_summary: String::from(

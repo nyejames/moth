@@ -9,6 +9,7 @@ use crate::build_system::BuildProfile;
 use crate::build_system::build::{BuildBootstrap, ProjectBuilder, bootstrap_project_build};
 use crate::build_system::create_project_modules::compile_project_frontend;
 use crate::build_system::path_validation::check_if_valid_path;
+use crate::capture_command_duration;
 use crate::command_timing_scope;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::display_messages::{
@@ -20,7 +21,6 @@ use crate::projects::command_status::{
     CommandStatus, benchmark_diagnostic_counts, emit_benchmark_status,
 };
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
-use crate::timing_scope;
 use saying::say;
 use std::time::{Duration, Instant};
 
@@ -31,49 +31,89 @@ pub struct CheckOptions {
 
 struct CheckOutcome {
     messages: CompilerMessages,
-    duration: Duration,
+    status: CommandStatus,
 }
 
 pub(crate) fn run_check(path: &str, options: CheckOptions) -> CommandStatus {
     command_timing_scope!(timing_session, crate::timing::TimingCommandKind::Check);
-    timing_scope!(
-        timing_guard_command_check_total,
-        crate::timing::TimingMetric::CommandCheckTotal
-    );
+    let start = Instant::now();
     let outcome = execute_check(path);
     let error_count = outcome.messages.error_count();
     let warning_count = outcome.messages.warning_count();
     let benchmark_counts = benchmark_diagnostic_counts(&outcome.messages);
 
-    if options.terse {
-        print_terse_compiler_messages(&outcome.messages);
-        println!(
-            "{}",
-            format_terse_summary_line(outcome.duration, error_count, warning_count)
-        );
-    } else if error_count == 0 && warning_count == 0 {
-        say!(Dark White "---------------------");
-        say!(success_message(outcome.duration));
-        say!(Bold Green "No errors or warnings");
-    } else {
-        print_compiler_messages(outcome.messages);
-    }
-    #[cfg(feature = "timers")]
-    timing_guard_command_check_total.finish();
-    finish_command_timing!(timing_session, error_count == 0);
+    // Capture the single command duration before any terminal rendering.
+    // Classification is already decided inside `execute_check` so the
+    // captured boundary is execution + outcome + classification, not
+    // execution + outcome alone.
+    let duration =
+        capture_command_duration!(crate::timing::TimingMetric::CommandCheckTotal, start,);
+
+    let status = outcome.status;
+    render_check_outcome(outcome, options, duration, error_count, warning_count);
+
+    finish_command_timing!(timing_session, matches!(status, CommandStatus::Success));
     if let Some((error_count, warning_count)) = benchmark_counts {
         emit_benchmark_status(error_count, warning_count);
     }
 
-    if error_count > 0 {
-        CommandStatus::Failure
+    status
+}
+
+/// Render a completed check outcome after the command duration has been captured.
+///
+/// WHAT: owns all terminal presentation for check success and failure paths.
+/// WHY:  presentation must never be interleaved with command work or outcome
+///       classification, so the captured duration excludes rendering.
+fn render_check_outcome(
+    outcome: CheckOutcome,
+    options: CheckOptions,
+    duration: Duration,
+    error_count: usize,
+    warning_count: usize,
+) {
+    if options.terse {
+        print_terse_compiler_messages(&outcome.messages);
+        println!(
+            "{}",
+            format_terse_summary_line(duration, error_count, warning_count)
+        );
+    } else if error_count == 0 && warning_count == 0 {
+        say!(Dark White "---------------------");
+        say!(success_message(duration));
+        say!(Bold Green "No errors or warnings");
     } else {
-        CommandStatus::Success
+        print_compiler_messages(outcome.messages);
     }
 }
 
+/// Test-only boundary seam for proving check work, capture and rendering order.
+///
+/// WHAT: classifies a completed check outcome, records a scripted command
+///       duration, runs an injected renderer delay, then renders the outcome.
+/// WHY:  focused tests need an exact duration and observable post-capture work
+///       without introducing a general clock abstraction into production.
+#[cfg(all(test, feature = "timers"))]
+fn run_check_for_tests(
+    outcome: CheckOutcome,
+    options: CheckOptions,
+    duration: Duration,
+    renderer: impl FnOnce(&CheckOutcome, Duration),
+) -> (CommandStatus, Option<(usize, usize)>) {
+    let error_count = outcome.messages.error_count();
+    let warning_count = outcome.messages.warning_count();
+    let benchmark_counts = benchmark_diagnostic_counts(&outcome.messages);
+    let status = outcome.status;
+    crate::timing::record_command_total_timing(
+        crate::timing::TimingMetric::CommandCheckTotal,
+        duration,
+    );
+    renderer(&outcome, duration);
+    render_check_outcome(outcome, options, duration, error_count, warning_count);
+    (status, benchmark_counts)
+}
+
 fn execute_check(path: &str) -> CheckOutcome {
-    let start = Instant::now();
     let normalized_path = normalize_entry_path(path);
 
     let mut path_string_table = StringTable::new();
@@ -82,7 +122,7 @@ fn execute_check(path: &str) -> CheckOutcome {
         Err(error) => {
             return CheckOutcome {
                 messages: CompilerMessages::from_error(error, path_string_table),
-                duration: start.elapsed(),
+                status: CommandStatus::Failure,
             };
         }
     };
@@ -99,7 +139,7 @@ fn execute_check(path: &str) -> CheckOutcome {
         Err(messages) => {
             return CheckOutcome {
                 messages,
-                duration: start.elapsed(),
+                status: CommandStatus::Failure,
             };
         }
     };
@@ -117,10 +157,12 @@ fn execute_check(path: &str) -> CheckOutcome {
         Err(messages) => messages,
     };
 
-    CheckOutcome {
-        messages,
-        duration: start.elapsed(),
-    }
+    let status = if messages.error_count() > 0 {
+        CommandStatus::Failure
+    } else {
+        CommandStatus::Success
+    };
+    CheckOutcome { messages, status }
 }
 
 fn normalize_entry_path(path: &str) -> &str {

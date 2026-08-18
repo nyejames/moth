@@ -27,7 +27,7 @@ fn benchmark_case() -> BenchmarkCaseResult {
             workload_id: "speed_test".to_string(),
             source_fingerprint: "0123456789abcdef0123456789abcdef".to_string(),
             measurement_fingerprint: "fedcba9876543210fedcba9876543210".to_string(),
-            timing_schema_version: 1,
+            timing_schema_version: 2,
         }),
         group_name: "core".to_string(),
         runner: cli_runner(),
@@ -35,7 +35,7 @@ fn benchmark_case() -> BenchmarkCaseResult {
         median_ms: 39.0,
         stddev_ms: 3.0,
         observations: BenchmarkCaseObservations {
-            timing_schema_version: 1,
+            timing_schema_version: 2,
             stage_timings: vec![BenchmarkMetric {
                 name: "command.check.total".to_string(),
                 value: 20.5,
@@ -379,7 +379,7 @@ fn current_append_rejects_a_different_timing_schema() {
     let directory = tempdir().expect("temporary directory should be created");
     let path = directory.path().join("runs.jsonl");
     let mut record = current_record();
-    record.cases[0].timing_schema_version = Some(2);
+    record.cases[0].timing_schema_version = Some(3);
 
     let error = append_local_run(&path, &record)
         .expect_err("new records must use the current timing schema");
@@ -512,7 +512,7 @@ fn persisted_schema_mismatch_reaches_non_comparable_comparison() {
     let path = directory.path().join("runs.jsonl");
     let mut previous = current_record();
     previous.timestamp = "2026-05-09T15:21".to_string();
-    previous.cases[0].timing_schema_version = Some(2);
+    previous.cases[0].timing_schema_version = Some(3);
     let current = current_record();
     let previous_json = serde_json::to_string(&previous).expect("previous record should serialize");
     let current_json = serde_json::to_string(&current).expect("current record should serialize");
@@ -521,7 +521,7 @@ fn persisted_schema_mismatch_reaches_non_comparable_comparison() {
 
     let records = read_local_runs(&path).expect("historical records should remain readable");
     assert_eq!(records.len(), 2);
-    assert_eq!(records[0].cases[0].timing_schema_version, Some(2));
+    assert_eq!(records[0].cases[0].timing_schema_version, Some(3));
 
     let previous_cases = to_case_results(&records[0]);
     let current_cases = to_case_results(&records[1]);

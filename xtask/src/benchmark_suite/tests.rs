@@ -163,7 +163,7 @@ fn create_output_executable(path: &Path, stdout: &str, stderr: &str, exit_code: 
 }
 
 fn clean_fixed_output() -> &'static str {
-    "MOTH_BENCH status errors=0 warnings=0\nMOTH_BENCH timing-schema 1\nMOTH_BENCH timing command.check.total=1ms"
+    "MOTH_BENCH status errors=0 warnings=0\nMOTH_BENCH timing-schema 2\nMOTH_BENCH timing command.check.total=1ms"
 }
 
 #[test]
@@ -209,7 +209,7 @@ fn case_result_builder_computes_expected_statistics() {
 
     let durations = vec![10.0, 20.0, 30.0];
     let observations = vec![crate::bench_types::BenchmarkCaseObservations {
-        timing_schema_version: 1,
+        timing_schema_version: 2,
         ..Default::default()
     }];
     let result = build_case_result(

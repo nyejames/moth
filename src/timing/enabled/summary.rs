@@ -103,6 +103,8 @@ pub(crate) enum TimingAccountingIssue {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum TimingReportItem {
     Section(TimingSummarySection),
+    /// One concise accounting note printed after the pipeline section.
+    AccountingNote,
     CompilationBoundaries(Vec<TimingBoundarySummary>),
     SlowestModule(TimingSlowestModuleSummary),
 }
@@ -418,6 +420,7 @@ pub(crate) fn build_timing_summary(
         accounting_issue.is_none(),
     ) {
         items.push(TimingReportItem::Section(section));
+        items.push(TimingReportItem::AccountingNote);
     }
     let boundaries = build_boundary_summaries(snapshot);
     if !boundaries.is_empty() {
@@ -709,7 +712,7 @@ fn push_other_row(rows: &mut Vec<TimingSummaryRow>, command_total: Duration, acc
 
 /// Aggregate the AST child metrics from module-attributed dense rows only.
 ///
-/// Config parsing and generated materialisation use separate schema-v1 AST
+/// Config parsing and generated materialisation use separate current-schema AST
 /// identities, so only frontend module child metrics may appear here.
 fn aggregate_module_ast_children(snapshot: &BenchmarkObservationSnapshot) -> MetricTotals {
     let mut aggregates = MetricTotals::new();

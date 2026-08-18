@@ -11,7 +11,7 @@ fn test_identity() -> BenchmarkMeasurementIdentity {
         workload_id: "foo".to_string(),
         source_fingerprint: "aaaa1111aaaa1111".to_string(),
         measurement_fingerprint: "bbbb2222bbbb2222".to_string(),
-        timing_schema_version: 1,
+        timing_schema_version: 2,
     }
 }
 
@@ -739,7 +739,7 @@ fn drift_summary_section_with_items() {
 fn timing_schema_change_is_not_reported_as_measurement_or_numeric_drift() {
     let previous = test_previous_record();
     let mut current_case = test_current_increased();
-    current_case.identity.timing_schema_version = 2;
+    current_case.identity.timing_schema_version = 3;
     current_case.identity.measurement_fingerprint = "changed-measurement".to_string();
     let current = vec![current_case];
     let mut wall_times = HashMap::new();
@@ -764,9 +764,9 @@ fn timing_schema_change_is_not_reported_as_measurement_or_numeric_drift() {
 #[test]
 fn equal_non_current_timing_schema_is_not_reported_as_numeric_drift() {
     let mut previous = test_previous_record();
-    previous.cases[0].identity.timing_schema_version = 2;
+    previous.cases[0].identity.timing_schema_version = 3;
     let mut current_case = test_current_increased();
-    current_case.identity.timing_schema_version = 2;
+    current_case.identity.timing_schema_version = 3;
     let current = vec![current_case];
     let mut wall_times = HashMap::new();
     wall_times.insert("check_foo_bst".to_string(), 1200.0);

@@ -2,6 +2,8 @@
 
 #[cfg(feature = "timers")]
 use super::run_build_command_with_output_plan;
+#[cfg(feature = "timers")]
+use super::run_build_command_with_output_plan_for_tests;
 use super::{
     Command, build_warnings_messages, compact_whitespace, get_command, help_build_flag_entries,
     integration_run_status, is_standalone_version_request, run_build_command,
@@ -29,6 +31,10 @@ use crate::projects::settings::Config;
 use crate::timing::start_benchmark_collection;
 use std::fs;
 use std::path::PathBuf;
+#[cfg(feature = "timers")]
+use std::sync::atomic::{AtomicUsize, Ordering};
+#[cfg(feature = "timers")]
+use std::time::Duration;
 
 fn args(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| value.to_string()).collect()
@@ -888,4 +894,145 @@ fn successful_build_with_warnings_exposes_warning_messages() {
         !messages.has_errors(),
         "successful-build warnings must not be treated as errors"
     );
+}
+
+/// Baseline test: build command records command.build.total with exactly one sample.
+#[cfg(feature = "timers")]
+#[test]
+fn successful_build_records_command_build_total() {
+    let _test_guard = crate::timing::lock_instrumentation_tests();
+    let root = temp_dir("cli_successful_build_timer");
+    let source_root = root.join("src");
+    fs::create_dir_all(&source_root).expect("should create temporary project root");
+    fs::write(root.join("config.moth"), "entry_root #= \"src\"\n")
+        .expect("should write config file");
+    fs::write(source_root.join("@page.moth"), "value = 1\n").expect("should write source file");
+
+    let timing_session = start_benchmark_collection(true).expect("timing session should start");
+    let status = run_build_command(
+        root.to_str().expect("temporary path should be valid UTF-8"),
+        &[],
+    );
+    let snapshot = timing_session.finish();
+
+    assert_eq!(status, CommandStatus::Success);
+    let command_total = snapshot
+        .timings
+        .iter()
+        .find(|observation| observation.metric.descriptor().stable_name == "command.build.total")
+        .expect("command.build.total must be recorded");
+    assert_eq!(command_total.samples, 1);
+
+    fs::remove_dir_all(&root).expect("should remove temporary project root");
+}
+
+/// Boundary regression: a scripted build duration is recorded before rendering and
+/// renderer work cannot change the command total.
+///
+/// WHAT: proves execute/classify -> capture scripted duration -> render ordering
+///       by injecting a renderer callback that performs observable work after capture.
+/// WHY:  the original bug had presentation between two timing boundaries. This test
+///       pins the corrected boundary so renderer work stays outside the command total.
+#[cfg(feature = "timers")]
+#[test]
+fn build_command_total_excludes_renderer_work() {
+    let _test_guard = crate::timing::lock_instrumentation_tests();
+    let root = temp_dir("cli_build_boundary_renderer");
+    let source_root = root.join("src");
+    fs::create_dir_all(&source_root).expect("should create source root");
+    fs::write(root.join("config.moth"), "entry_root #= \"src\"\n").expect("should write config");
+    fs::write(source_root.join("@page.moth"), "value = 1\n").expect("should write source");
+
+    let scripted_duration = Duration::from_millis(42);
+    let renderer_calls = AtomicUsize::new(0);
+
+    let timing_session = start_benchmark_collection(true).expect("timing session should start");
+    let (status, _) = run_build_command_with_output_plan_for_tests(
+        root.to_str().expect("temporary path should be valid UTF-8"),
+        &[],
+        super::create_build_output_plan,
+        scripted_duration,
+        |_outcome, duration| {
+            // Simulate renderer work after capture. The scripted duration must
+            // remain the recorded total regardless of this work.
+            std::thread::sleep(Duration::from_millis(5));
+            assert_eq!(duration, scripted_duration);
+            renderer_calls.fetch_add(1, Ordering::SeqCst);
+        },
+    );
+    let snapshot = timing_session.finish();
+
+    assert_eq!(status, CommandStatus::Success);
+    assert_eq!(
+        renderer_calls.load(Ordering::SeqCst),
+        1,
+        "renderer must run after capture"
+    );
+
+    let command_total = snapshot
+        .timings
+        .iter()
+        .find(|observation| observation.metric.descriptor().stable_name == "command.build.total")
+        .expect("command.build.total must be recorded");
+
+    // The structured total must equal the scripted duration exactly, proving
+    // renderer work did not enter the captured boundary.
+    assert_eq!(command_total.total, scripted_duration);
+    assert_eq!(command_total.samples, 1, "exactly one command-total sample");
+
+    fs::remove_dir_all(&root).expect("should remove temporary project root");
+}
+
+/// Boundary regression: a failed output write still records one command total and
+/// one output total, and rendering happens after capture.
+#[cfg(feature = "timers")]
+#[test]
+fn failed_output_write_records_build_command_total() {
+    let _test_guard = crate::timing::lock_instrumentation_tests();
+    let root = temp_dir("cli_failed_output_write_timer");
+    fs::create_dir_all(&root).expect("should create temporary project root");
+    let entry_file = root.join("main.moth");
+    fs::write(&entry_file, "value = 1\n").expect("should write source file");
+
+    let timing_session = start_benchmark_collection(true).expect("timing session should start");
+    let status = run_build_command_with_output_plan(
+        entry_file
+            .to_str()
+            .expect("temporary path should be valid UTF-8"),
+        &[],
+        |build_result| {
+            // Replace the valid output file with an escaping path so the plan
+            // succeeds but the filesystem write fails validation.
+            build_result.project.output_files = vec![OutputFile::new(
+                PathBuf::from("../escape.html"),
+                FileKind::Html(String::from("<html></html>")),
+            )];
+            super::create_build_output_plan(build_result)
+        },
+    );
+    let snapshot = timing_session.finish();
+
+    assert_eq!(status, CommandStatus::Failure);
+    assert_eq!(
+        snapshot
+            .timings
+            .iter()
+            .find(|observation| observation.metric.descriptor().stable_name == "command.build.total")
+            .expect("the command total must retain a dense row")
+            .samples,
+        1,
+        "the failed output-write path must finish the command total before rendering"
+    );
+    assert_eq!(
+        snapshot
+            .timings
+            .iter()
+            .find(|observation| observation.metric.descriptor().stable_name == "build.output.total")
+            .expect("the output total must retain a dense row")
+            .samples,
+        1,
+        "the failed output-write path must finish the output segment before the session drains"
+    );
+
+    fs::remove_dir_all(&root).expect("should remove temporary project root");
 }

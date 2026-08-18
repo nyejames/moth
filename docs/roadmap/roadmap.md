@@ -11,7 +11,11 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 
 ## Active implementation work
 
-- [CFG timers fixes](./plans/command-timing-accounting-and-reporting-correction-plan.md)
+(none currently active)
+
+## Recently completed
+
+- [Command timing accounting and reporting correction](./plans/command-timing-accounting-and-reporting-correction-plan.md) — completed
 
 ## Queued implementation chain
 

@@ -133,7 +133,7 @@ pub(crate) struct ModuleMaterialisationInput<'a> {
     pub(crate) build_profile: FrontendBuildProfile,
     pub(crate) project_path_resolver: Option<ProjectPathResolver>,
     pub(crate) template_const_loop_iteration_limit: usize,
-    /// The requesting module owns generated work in schema-v1 attribution.
+    /// The requesting module owns generated work in current-schema attribution.
     #[cfg(feature = "timers")]
     pub(crate) timing_context: Option<crate::timing::TimingContext>,
 }

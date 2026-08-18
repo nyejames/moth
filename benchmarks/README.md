@@ -123,7 +123,7 @@ MOTH_BENCH status errors=<usize> warnings=<usize>
 The executor requires exactly one timing schema record and the matching `command.check.total` or `command.build.total` aggregate:
 
 ```text
-MOTH_BENCH timing-schema 1
+MOTH_BENCH timing-schema 2
 MOTH_BENCH timing command.check.total=<ms>ms
 ```
 
@@ -155,7 +155,7 @@ Recorded CLI and frontend runs require an exactly clean committed worktree at st
 Normal benchmark commands build the compiler with the concise `timers` feature.
 End-to-end CLI benchmarks run subprocesses with `MOTH_TIMERS=bench` and
 `MOTH_COUNTERS=off` so stdout contains one timing-schema header and the final
-stable aggregate observations without verbose human prose or counter floods.
+stable aggregate observations without per-event prose or counter floods.
 Focused frontend benchmarks run in-process and read the same timing collector
 directly.
 
@@ -163,7 +163,7 @@ Feature roles:
 
 - `timers`: enables command, build-system, Stage 0, frontend, backend, and output
   timing collection. Timers-only builds default to a concise human summary.
-- `detailed_timers`: implies `timers` and adds verbose developer timing prose
+- `detailed_timers`: implies `timers` and adds detailed AST substage timing evidence
   plus detailed AST substage timings. It does not enable counters by itself.
 - `benchmark_counters`: enables high-volume local diagnostic counters. In a
   counter-only build, counter logging can emit direct `MOTH_BENCH counter`
@@ -176,7 +176,7 @@ Environment controls:
 ```text
 MOTH_TIMERS=summary   # concise human summary
 MOTH_TIMERS=bench     # schema header plus final aggregate MOTH_BENCH lines
-MOTH_TIMERS=verbose   # human prose plus final aggregate timing lines
+MOTH_TIMERS=verbose   # detailed substage evidence plus final aggregate timing lines
 MOTH_TIMERS=off       # disable ordinary command timing and timing output
 
 MOTH_COUNTERS=off     # default
@@ -198,14 +198,14 @@ evidence.
 The human `MOTH_TIMERS=summary` report is a short developer scan, not a fourth
 benchmark system. It shows one command, one set of compilation boundaries, the
 curated frontend and backend sections, and one slowest module. Detailed timers
-keep verbose inline prose; bench mode emits one `MOTH_BENCH timing-schema 1`
+keep detailed substage evidence; bench mode emits one `MOTH_BENCH timing-schema 2`
 header followed by the non-empty final aggregate `MOTH_BENCH timing` lines.
 Both benchmark output and the concise report consume the typed schema rather
 than inferring architecture from metric strings.
 
 `just bench-report` and the tracked monthly summaries print the timing schema
 identity alongside their latest-run evidence. Current records show
-`Timing schema: 1`; an obsolete but uniform record remains readable and is
+`Timing schema: 2`; an obsolete but uniform record remains readable and is
 labelled non-comparable, with no speed, stage or counter movement. A record
 whose cases carry mixed schemas is explicitly omitted from aggregate report
 sections rather than being collapsed into one version. Monthly-summary
@@ -237,7 +237,7 @@ lookups, collector operations or context propagation. The erasure gate
 schema-owned metric inventory plus timer-only environment and report markers,
 and audits both source roots for direct timer implementation leakage.
 
-Timing schema v1 is the compatibility boundary. The typed registry owns stable
+The current timing schema is the compatibility boundary. The typed registry owns stable
 names, semantic boundaries, wall/accumulated/nested meaning and command
 accounting. A change to those meanings requires a schema bump and makes the
 old and new observations non-comparable. Data recorded before v1 is legacy;
@@ -314,7 +314,7 @@ CLI wall-clock time is the public rough regression signal. It measures the built
 Compiler stage timings are attribution and debugging evidence. They help explain whether obvious movement likely came from command/bootstrap setup, Stage 0 project structure, path resolution, reachable-file discovery, file preparation, dependency sorting, AST, HIR, borrow validation, backend lowering, output writing, or another instrumented stage.
 
 Stage observations are emitted after the completed timing session as one
-`MOTH_BENCH timing-schema 1` header followed by stable
+`MOTH_BENCH timing-schema 2` header followed by stable
 `MOTH_BENCH timing <metric>=<ms>ms` aggregate lines when the compiler is built
 with `timers` and run with `MOTH_TIMERS=bench` or `MOTH_TIMERS=verbose`. Lines
 follow the timing registry's canonical order and are emitted only for metrics
@@ -499,7 +499,7 @@ benchmarks/local-data/
 Profile summaries include symbolication health. If most hot function names are raw `0x...` addresses, the summary marks symbolication as failed and function hotspots should not be treated as actionable. A failed-symbolication case also writes `profile-shape.txt`, which records the profile table shape, first function names, libraries, and native-symbol metadata for parser/debug-info investigation. Stage timings, plus any present counters, from the observation pass are still useful in that state.
 
 `profile-hotspots.json`, the root `agent-summary.md`, and each per-case
-`summary.md` identify timing schema v1 alongside their schema-owned stage
+`summary.md` identify the current timing schema alongside their schema-owned stage
 observations. Profile report generation rejects obsolete or mixed-schema case
 data; profile history remains the authority for cross-run comparability and
 drift exclusion.

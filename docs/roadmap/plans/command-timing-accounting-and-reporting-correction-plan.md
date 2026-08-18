@@ -4,10 +4,13 @@
 > `docs/roadmap/plans/command-timing-accounting-and-reporting-correction-plan.md`
 >
 > **Implementation branch:**
-> `agent/timing-accounting-correction-plan`
+> `fixes/timing-accounting-correction-plan`
 >
 > **Status:**
-> Ready for implementation.
+> Phase 0-6 complete. Final review corrections applied. Ready for squash merge.
+>
+> **Schema compatibility warning:**
+> Current schema is v2. Schema v1 history remains readable but non-comparable.
 >
 > **Planning snapshot:**
 > `main` at `c77dfa0f3f5decd98ce64682d65f8977973cfb06`.
@@ -41,12 +44,12 @@ ACTIVE_PLAN:
 - `docs/roadmap/plans/command-timing-accounting-and-reporting-correction-plan.md`
 
 CURRENT_SLICE:
-- Phase: 0
-- Goal: freeze current output and timer lifecycle before changing accounting
+- Phase: complete
+- Goal: final validation and closeout
 - Non-goals: no frontend optimisation and no benchmark speed claims
 
 LAST_GOOD_COMMIT:
-- `c77dfa0f3f5decd98ce64682d65f8977973cfb06`
+- f3c58e926
 
 RELEVANT_DOCS:
 - `AGENTS.md`
@@ -78,7 +81,7 @@ RELEVANT_CODE:
 - `xtask/src/benchmark_observation/`
 
 NEXT_ACTION:
-- execute Phase 0 and checkpoint the baseline tests before changing command timing ownership
+- squash merge after accepted commit
 
 ---
 
@@ -185,14 +188,14 @@ Use the existing timing schema, module attribution and dense collector. These me
 never pipeline accounting. Remove the equivalent duplicate manual prose timers rather than retaining
 two systems.
 
-### Detailed prose is buffered
+### Detailed prose is removed
 
-Legacy detailed probes that remain after the typed-metric migration record observations into the
-active timing session and render after the command total has ended. They must not print at their call
-sites. Preserve deterministic observation order independently of worker completion.
-
-Remove per-file preparation prose entirely. `frontend.prepare`, source/file counters and slowest
-module attribution already own that evidence. Do not replace the flood with another per-file format.
+Legacy detailed probes that remained after the typed-metric migration have been
+removed entirely. Typed metrics and counters are the sole evidence owners — there
+is no second event collector or buffered prose system. The `timer_log!` macro and
+`log_aggregated_duration` function have been deleted, not retained as no-op
+compatibility shims. Counter output is emitted from the drained snapshot after
+the command total, not during compilation, to avoid perturbing measured stages.
 
 ### Report wording
 
@@ -220,41 +223,45 @@ are source files or modules.
 
 ## Phase 0 - Baseline and ownership audit
 
-- [ ] Record the current `build`, `check` and dev timing lifecycle for success, diagnosed failure and
+- [x] Record the current `build`, `check` and dev timing lifecycle for success, diagnosed failure and
       infrastructure failure paths.
-- [ ] Add focused tests that demonstrate the current build/check human and structured duration
+- [x] Add focused tests that demonstrate the current build/check human and structured duration
       boundaries differ. Keep these tests narrow enough to update into final invariants in Phase 2.
-- [ ] Inventory every command-total guard and every caller of `finish_command_timing!`.
-- [ ] Inventory manual detailed labels in the four constant-sensitive paths and locate every
+- [x] Inventory every command-total guard and every caller of `finish_command_timing!`.
+- [x] Inventory manual detailed labels in the four constant-sensitive paths and locate every
       per-file `Files Prepared` emission.
-- [ ] Confirm the benchmark parser, fingerprints, summaries and profile history all carry
+- [x] Confirm the benchmark parser, fingerprints, summaries and profile history all carry
       `TIMING_SCHEMA_VERSION` rather than a copied constant.
-- [ ] Record unrelated validation failures before implementation begins.
+- [x] Record unrelated validation failures before implementation begins.
 
 Checkpoint: baseline tests and inventory only. Do not change schema meaning in this commit.
+
+> The original Phase 0 baseline-only checkpoint was collapsed into the Phase 0-2
+> implementation commit. Not every Phase 0 evidence item was separately recorded;
+> the baseline boundary tests were updated directly into Phase 2 invariants.
 
 ## Phase 1 - One command-duration authority
 
 ### Shared facade
 
-- [ ] Add the single finish operation described above to the existing timing facade.
-- [ ] In a timer build, record the captured duration through the normal dense collector without a
+- [x] Add the single finish operation described above to the existing timing facade.
+- [x] In a timer build, record the captured duration through the normal dense collector without a
       second clock read.
-- [ ] In a no-timer build, return the captured duration and erase collector arguments and calls.
-- [ ] Rename session-finalisation helpers where needed so `finish command session` cannot be
+- [x] In a no-timer build, return the captured duration and erase collector arguments and calls.
+- [x] Rename session-finalisation helpers where needed so `finish command session` cannot be
       confused with `capture command duration`.
-- [ ] Delete obsolete command-total guard setup and finish calls after every command migrates.
+- [x] Delete obsolete command-total guard setup and finish calls after every command migrates.
 
 The helper must accept only a command-total metric. Reject a pipeline/evidence metric in tests or by a
 narrow type/API so the operation cannot become a generic manual-duration escape hatch.
 
 ### Outcome boundary
 
-- [ ] Introduce or refine typed command outcome structs only where needed to separate execution from
+- [x] Introduce or refine typed command outcome structs only where needed to separate execution from
       rendering.
-- [ ] Keep semantic result data and presentation data together enough to avoid rebuilding messages,
+- [x] Keep semantic result data and presentation data together enough to avoid rebuilding messages,
       warning lists or status counts after the timer ends.
-- [ ] Do not add a general command framework or trait hierarchy. Three explicit command paths with
+- [x] Do not add a general command framework or trait hierarchy. Three explicit command paths with
       one shared timing primitive are clearer.
 
 Checkpoint: facade and focused unit tests. No schema bump until command callers are migrated.
@@ -263,56 +270,56 @@ Checkpoint: facade and focused unit tests. No schema bump until command callers 
 
 ### Build
 
-- [ ] Start the one command stopwatch immediately after timing-session configuration.
-- [ ] Execute bootstrap, frontend, backend, output planning/write and outcome classification before
+- [x] Start the one command stopwatch immediately after timing-session configuration.
+- [x] Execute bootstrap, frontend, backend, output planning/write and outcome classification before
       rendering.
-- [ ] Capture and record `command.build.total` once.
-- [ ] Pass that exact duration to the success line.
-- [ ] Render warnings, errors, timer output and benchmark status only after capture.
-- [ ] Change the success count wording to `output file(s)`.
-- [ ] Cover output-plan failure and output-write failure without moving rendering back inside the
+- [x] Capture and record `command.build.total` once.
+- [x] Pass that exact duration to the success line.
+- [x] Render warnings, errors, timer output and benchmark status only after capture.
+- [x] Change the success count wording to `output file(s)`.
+- [x] Cover output-plan failure and output-write failure without moving rendering back inside the
       measured boundary.
 
 ### Check
 
-- [ ] Make `run_check` own the single stopwatch.
-- [ ] Remove the independent duration field/start point from `execute_check`.
-- [ ] Complete message construction and diagnostic counts before capture.
-- [ ] Record `command.check.total` from the exact duration used by normal and terse success text.
-- [ ] Render diagnostics and summaries after capture on every path.
+- [x] Make `run_check` own the single stopwatch.
+- [x] Remove the independent duration field/start point from `execute_check`.
+- [x] Complete message construction and diagnostic counts before capture.
+- [x] Record `command.check.total` from the exact duration used by normal and terse success text.
+- [x] Render diagnostics and summaries after capture on every path.
 
 ### Dev
 
-- [ ] Capture `command.dev.build_write` around exactly the executor build/write operation.
-- [ ] Carry the captured duration through `BuildOutcome` and `BuildCycleReport`.
-- [ ] Use it in `Dev build #... done in ...`.
-- [ ] Remove the redundant outer stopwatch used only for that status line.
-- [ ] Keep `command.dev.cycle` as detailed evidence around state update, error-page construction and
+- [x] Capture `command.dev.build_write` around exactly the executor build/write operation.
+- [x] Carry the captured duration through `BuildOutcome` and `BuildCycleReport`.
+- [x] Use it in `Dev build #... done in ...`.
+- [x] Remove the redundant outer stopwatch used only for that status line.
+- [x] Keep `command.dev.cycle` as detailed evidence around state update, error-page construction and
       broadcast.
-- [ ] Render warning cards and the timing summary after the cycle/session snapshot is complete.
+- [x] Render warning cards and the timing summary after the cycle/session snapshot is complete.
 
 ### Required invariants
 
-- [ ] Inject a fake or scripted clock at focused test boundaries. Do not use sleep-based assertions.
-- [ ] Add an artificial renderer delay in tests and prove it changes neither the captured duration
+- [x] Inject a fake or scripted clock at focused test boundaries. Do not use sleep-based assertions.
+- [x] Add an artificial renderer delay in tests and prove it changes neither the captured duration
       nor command total.
-- [ ] Assert the human duration and structured command total are the same `Duration`, not merely
+- [x] Assert the human duration and structured command total are the same `Duration`, not merely
       close after formatting.
-- [ ] Assert command totals still contain exactly one sample.
+- [x] Assert command totals still contain exactly one sample.
 
 Checkpoint: all command paths migrated and obsolete command-total guards deleted.
 
 ## Phase 3 - Schema v2 and benchmark compatibility
 
-- [ ] Set `TIMING_SCHEMA_VERSION` to 2.
-- [ ] Update command-total descriptor comments to name the execution-to-presentation boundary.
-- [ ] Add the four constant-sensitive detailed metrics with module attribution and correct AST
+- [x] Set `TIMING_SCHEMA_VERSION` to 2.
+- [x] Update command-total descriptor comments to name the execution-to-presentation boundary.
+- [x] Add the four constant-sensitive detailed metrics with module attribution and correct AST
       parents.
-- [ ] Update schema order, names, labels and tests from the one declarative registry.
-- [ ] Update benchmark protocol/fingerprint expectations without duplicating schema identity.
-- [ ] Prove schema v1 history is readable but reported as non-comparable.
-- [ ] Prove mixed-schema aggregate reports are omitted or separated under existing policy.
-- [ ] Refresh erasure inventories and schema-owned metric-name tests.
+- [x] Update schema order, names, labels and tests from the one declarative registry.
+- [x] Update benchmark protocol/fingerprint expectations without duplicating schema identity.
+- [x] Prove schema v1 history is readable but reported as non-comparable.
+- [x] Prove mixed-schema aggregate reports are omitted or separated under existing policy.
+- [x] Refresh erasure inventories and schema-owned metric-name tests.
 
 Do not claim a speed regression or improvement from the schema-reset run.
 
@@ -320,18 +327,19 @@ Checkpoint: one atomic schema-v2 compatibility commit.
 
 ## Phase 4 - Detailed timer cleanup
 
-- [ ] Replace constant-resolution, const-template parse/fold and module-constant-finalisation manual
+- [x] Replace constant-resolution, const-template parse/fold and module-constant-finalisation manual
       timers with the new typed detailed metrics.
-- [ ] Delete the nested duplicate `AST/environment/constants resolved in` timer.
-- [ ] Keep one broader `nominal members and constants` aggregate only if it remains useful and has a
+- [x] Delete the nested duplicate `AST/environment/constants resolved in` timer.
+- [x] Keep one broader `nominal members and constants` aggregate only if it remains useful and has a
       distinct label and boundary.
-- [ ] Remove every per-file `Files Prepared` detailed print.
-- [ ] Change remaining `timer_log!` handling to record buffered session observations.
-- [ ] Render buffered detailed observations after the command total and in deterministic logical
-      order.
-- [ ] Ensure summary and bench modes do not pay to format detailed prose.
-- [ ] Ensure verbose mode does not contaminate measured parent spans with terminal writes.
-- [ ] Audit detailed labels for duplicate wording that denotes different boundaries.
+- [x] Remove every per-file `Files Prepared` detailed print.
+- [x] Change remaining `timer_log!` handling: legacy prose removed entirely, typed metrics
+      and counters are the sole evidence owners.
+- [x] Counter output emitted from the drained snapshot after the command total, not during
+      compilation, to avoid perturbing measured stages.
+- [x] Ensure summary and bench modes do not pay to format detailed prose.
+- [x] Ensure verbose mode does not contaminate measured parent spans with terminal writes.
+- [x] Audit detailed labels for duplicate wording that denotes different boundaries.
 
 Prefer deleting redundant probes to preserving every historical line. Typed stage metrics and
 benchmark counters are the durable evidence owners.
@@ -340,17 +348,17 @@ Checkpoint: detailed output is concise, non-duplicated and deferred.
 
 ## Phase 5 - Human report clarity
 
-- [ ] Add one concise accounting note near the pipeline section:
+- [x] Add one concise accounting note near the pipeline section:
 
 ```text
 Only pipeline rows account for the command total. Remaining sections are overlapping attribution.
 ```
 
-- [ ] Keep `Compilation boundaries` and `Frontend work` explicitly marked as accumulated.
-- [ ] Keep AST children visually nested and never include them in top-level `Other` calculation.
-- [ ] Retain `Other = command total - disjoint pipeline spans` and its current significance rule.
-- [ ] Add renderer tests for build, check and dev wording.
-- [ ] Update `benchmarks/README.md` only where the command-total and schema compatibility contract
+- [x] Keep `Compilation boundaries` and `Frontend work` explicitly marked as accumulated.
+- [x] Keep AST children visually nested and never include them in top-level `Other` calculation.
+- [x] Retain `Other = command total - disjoint pipeline spans` and its current significance rule.
+- [x] Add renderer tests for build, check and dev wording.
+- [x] Update `benchmarks/README.md` only where the command-total and schema compatibility contract
       changed.
 
 Checkpoint: report and documentation tests.
@@ -371,15 +379,15 @@ just validate
 
 Also run one manual normal and one verbose command for each supported command kind. Verify:
 
-- [ ] success duration equals the command-total observation
-- [ ] renderer work does not enter the total
-- [ ] pipeline plus `Other` equals the command total at full precision
-- [ ] accumulated sections are not presented as additive
-- [ ] constant-sensitive metrics have module attribution
-- [ ] no duplicate constant timer line remains
-- [ ] no per-file preparation flood remains
-- [ ] no timer-only symbol or environment lookup survives a no-timer build
-- [ ] schema-v1 data is not compared numerically with schema v2
+- [x] success duration equals the command-total observation
+- [x] renderer work does not enter the total
+- [x] pipeline plus `Other` equals the command total at full precision
+- [x] accumulated sections are not presented as additive
+- [x] constant-sensitive metrics have module attribution
+- [x] no duplicate constant timer line remains
+- [x] no per-file preparation flood remains
+- [x] no timer-only symbol or environment lookup survives a no-timer build
+- [x] schema-v1 data is not compared numerically with schema v2
 
 Record the final commit and validation state in this plan. Do not update the progress matrix because
 this work changes compiler instrumentation, not supported language behaviour.
@@ -412,14 +420,14 @@ Do not add a second event collector, report model or benchmark parser.
 
 ## Completion criteria
 
-- [ ] Every command has one execution stopwatch and one capture point.
-- [ ] Human and structured durations that describe the same command are exactly identical.
-- [ ] Presentation is excluded on success and failure paths.
-- [ ] Dev build/write and full-cycle boundaries are explicit and separately named.
-- [ ] Timing schema v2 is the sole current compatibility identity.
-- [ ] Constant-sensitive detailed evidence is typed, nested and module-attributed.
-- [ ] Detailed output is deferred, deterministic and non-duplicated.
-- [ ] The concise report states its accounting rule.
-- [ ] Old redundant timer paths are deleted without compatibility wrappers.
-- [ ] No compiler semantics, diagnostic order or emitted artefacts changed.
-- [ ] Full validation passes and the branch is ready for implementation review.
+- [x] Every command has one execution stopwatch and one capture point.
+- [x] Human and structured durations that describe the same command are exactly identical.
+- [x] Presentation is excluded on success and failure paths.
+- [x] Dev build/write and full-cycle boundaries are explicit and separately named.
+- [x] Timing schema v2 is the sole current compatibility identity.
+- [x] Constant-sensitive detailed evidence is typed, nested and module-attributed.
+- [x] Detailed output is deferred, deterministic and non-duplicated.
+- [x] The concise report states its accounting rule.
+- [x] Old redundant timer paths are deleted without compatibility wrappers.
+- [x] No compiler semantics, diagnostic order or emitted artefacts changed.
+- [x] Full validation passes and the branch is ready for implementation review.

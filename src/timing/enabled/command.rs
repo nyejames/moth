@@ -75,7 +75,8 @@ pub(crate) fn render_command_timing_summary_with_configuration(
 
     // Counter summary is owned by `benchmark_counters` and reuses the
     // session's counter snapshot; counter storage remains independent of
-    // timing aggregate policy.
+    // timing aggregate policy. The concise grouped summary is rendered for
+    // both Summary and Full counter modes after the session drains.
     #[cfg(feature = "benchmark_counters")]
     if configuration.channels().human_summary()
         && configuration.counter_mode().emits_counter_summary()

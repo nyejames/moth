@@ -8,6 +8,7 @@ use crate::build_system::build::BuildResult;
 use crate::build_system::output::{
     OutputPlan, SingleFileOutputPlan, WriteMode, WriteOptions, write_project_outputs,
 };
+use crate::capture_command_duration;
 use crate::command_timing_scope;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, SourceLocation};
@@ -23,10 +24,9 @@ use crate::projects::command_status::{
 use crate::projects::dev_server::{self, DevServerOptions};
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use crate::projects::html_project::new_html_project::NewHtmlProjectOptions;
-use crate::timing_scope;
 use saying::say;
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use std::{env, process};
 
 /// Build-profile flags accepted by both `build` and `dev`.
@@ -161,6 +161,23 @@ pub fn start_cli() -> process::ExitCode {
     status.into()
 }
 
+enum BuildCommandOutcome {
+    Success {
+        output_file_count: usize,
+        warning_count: usize,
+        warnings: Option<CompilerMessages>,
+    },
+    WriteError(CompilerMessages),
+    OutputPlanError {
+        error: CompilerError,
+        string_table: crate::compiler_frontend::symbols::string_interning::StringTable,
+    },
+    BuildError {
+        messages: CompilerMessages,
+        diagnostic_counts: Option<(usize, usize)>,
+    },
+}
+
 fn run_build_command(path: &str, flags: &[Flag]) -> CommandStatus {
     run_build_command_with_output_plan(path, flags, create_build_output_plan)
 }
@@ -176,16 +193,39 @@ fn run_build_command_with_output_plan(
 ) -> CommandStatus {
     command_timing_scope!(timing_session, crate::timing::TimingCommandKind::Build);
     let start = Instant::now();
-    timing_scope!(
-        timing_guard_command_build_total,
-        crate::timing::TimingMetric::CommandBuildTotal
-    );
     let project_builder = build::ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
-    let (status, diagnostic_counts) = match build::build_project(&project_builder, path, flags) {
+    let outcome = build_command_outcome(&project_builder, path, flags, output_plan_builder);
+
+    // Capture the single command duration before any terminal rendering.
+    let duration =
+        capture_command_duration!(crate::timing::TimingMetric::CommandBuildTotal, start,);
+
+    let (status, diagnostic_counts) = render_build_outcome(outcome, duration);
+
+    finish_command_timing!(timing_session, matches!(status, CommandStatus::Success));
+    if let Some((error_count, warning_count)) = diagnostic_counts {
+        emit_benchmark_status(error_count, warning_count);
+    }
+    status
+}
+
+/// Execute and classify one build command outcome before duration capture.
+///
+/// WHAT: owns bootstrap, frontend, backend, output planning/write and outcome
+///       classification. It performs no terminal rendering.
+/// WHY:  keeps the command-total boundary explicit: all command work and
+///       classification finish before the single duration is captured.
+fn build_command_outcome(
+    project_builder: &build::ProjectBuilder,
+    path: &str,
+    flags: &[Flag],
+    output_plan_builder: impl FnOnce(&mut BuildResult) -> Result<OutputPlan, CompilerError>,
+) -> BuildCommandOutcome {
+    match build::build_project(project_builder, path, flags) {
         Ok(mut build_result) => {
             // Output planning and filesystem emission form one build-pipeline
             // segment. Terminal diagnostics and success rendering remain part
-            // of the command total, not this output orchestration span.
+            // of the command presentation, after duration capture.
             let output_result = crate::timed_stage!(
                 crate::timing::TimingMetric::BuildOutputTotal,
                 (|| {
@@ -204,35 +244,108 @@ fn run_build_command_with_output_plan(
             );
             match output_result {
                 Ok(()) => {
-                    let duration = start.elapsed();
+                    let output_file_count = build_result.project.output_files.len();
                     let warning_count = build_result.warnings.len();
-                    print_build_message(build_result, duration);
-                    (CommandStatus::Success, Some((0, warning_count)))
+                    let warnings = if build_result.warnings.is_empty() {
+                        None
+                    } else {
+                        Some(CompilerMessages::from_diagnostics(
+                            build_result.warnings,
+                            build_result.string_table,
+                        ))
+                    };
+                    BuildCommandOutcome::Success {
+                        output_file_count,
+                        warning_count,
+                        warnings,
+                    }
                 }
                 Err(BuildOutputStageError::Write(mut messages)) => {
                     messages.extend_diagnostics(build_result.warnings);
-                    print_compiler_messages(messages);
-                    (CommandStatus::Failure, None)
+                    BuildCommandOutcome::WriteError(messages)
                 }
                 Err(BuildOutputStageError::OutputPlan(error)) => {
-                    print_formatted_error(error, &build_result.string_table);
-                    (CommandStatus::Failure, None)
+                    BuildCommandOutcome::OutputPlanError {
+                        error,
+                        string_table: build_result.string_table,
+                    }
                 }
             }
         }
         Err(messages) => {
             let diagnostic_counts = benchmark_diagnostic_counts(&messages);
+            BuildCommandOutcome::BuildError {
+                messages,
+                diagnostic_counts,
+            }
+        }
+    }
+}
+
+/// Render a completed build outcome after the command duration has been captured.
+///
+/// WHAT: owns all terminal presentation for build success and failure paths.
+/// WHY:  presentation must never be interleaved with command work or outcome
+///       classification, so the captured duration excludes rendering.
+fn render_build_outcome(
+    outcome: BuildCommandOutcome,
+    duration: Duration,
+) -> (CommandStatus, Option<(usize, usize)>) {
+    match outcome {
+        BuildCommandOutcome::Success {
+            output_file_count,
+            warning_count,
+            warnings,
+        } => {
+            print_build_success_message(output_file_count, duration);
+            if let Some(messages) = warnings {
+                print_compiler_messages(messages);
+            }
+            (CommandStatus::Success, Some((0, warning_count)))
+        }
+        BuildCommandOutcome::WriteError(messages) => {
+            print_compiler_messages(messages);
+            (CommandStatus::Failure, None)
+        }
+        BuildCommandOutcome::OutputPlanError {
+            error,
+            string_table,
+        } => {
+            print_formatted_error(error, &string_table);
+            (CommandStatus::Failure, None)
+        }
+        BuildCommandOutcome::BuildError {
+            messages,
+            diagnostic_counts,
+        } => {
             print_compiler_messages(messages);
             (CommandStatus::Failure, diagnostic_counts)
         }
-    };
-    #[cfg(feature = "timers")]
-    timing_guard_command_build_total.finish();
-    finish_command_timing!(timing_session, matches!(status, CommandStatus::Success));
-    if let Some((error_count, warning_count)) = diagnostic_counts {
-        emit_benchmark_status(error_count, warning_count);
     }
-    status
+}
+
+/// Test-only boundary seam for proving command work, capture and rendering order.
+///
+/// WHAT: executes and classifies a build outcome, records a scripted command
+///       duration, runs an injected renderer delay, then renders the outcome.
+/// WHY:  focused tests need an exact duration and observable post-capture work
+///       without introducing a general clock abstraction into production.
+#[cfg(all(test, feature = "timers"))]
+fn run_build_command_with_output_plan_for_tests(
+    path: &str,
+    flags: &[Flag],
+    output_plan_builder: impl FnOnce(&mut BuildResult) -> Result<OutputPlan, CompilerError>,
+    duration: Duration,
+    renderer: impl FnOnce(&BuildCommandOutcome, Duration),
+) -> (CommandStatus, Option<(usize, usize)>) {
+    let project_builder = build::ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
+    let outcome = build_command_outcome(&project_builder, path, flags, output_plan_builder);
+    crate::timing::record_command_total_timing(
+        crate::timing::TimingMetric::CommandBuildTotal,
+        duration,
+    );
+    renderer(&outcome, duration);
+    render_build_outcome(outcome, duration)
 }
 
 /// Choose the output plan after a successful backend build.
@@ -680,19 +793,18 @@ fn print_help() {
     say!("  --poll-interval-ms <ms>  (default: 300)");
 }
 
-fn print_build_message(build_result: BuildResult, duration: std::time::Duration) {
+fn print_build_success_message(output_file_count: usize, duration: std::time::Duration) {
+    let file_label = if output_file_count == 1 {
+        "output file"
+    } else {
+        "output files"
+    };
     say!(
         "\nBuilt ",
-        Blue build_result.project.output_files.len(),
-        Reset " files successfully in: ",
+        Blue output_file_count,
+        Reset " ", file_label, " successfully in: ",
         Green Bold #duration,
     );
-
-    if !build_result.warnings.is_empty() {
-        let messages =
-            CompilerMessages::from_diagnostics(build_result.warnings, build_result.string_table);
-        print_compiler_messages(messages);
-    }
 }
 
 fn compact_whitespace(text: &str) -> String {

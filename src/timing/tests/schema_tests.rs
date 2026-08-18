@@ -77,10 +77,10 @@ fn no_ms_suffix_remains() {
     }
 }
 
-/// The schema start is schema v1 and every metric carries a level.
+/// The schema start is schema v2 and every metric carries a level.
 #[test]
-fn schema_version_is_v1_and_levels_are_well_formed() {
-    assert_eq!(TIMING_SCHEMA_VERSION, 1);
+fn schema_version_is_v2_and_levels_are_well_formed() {
+    assert_eq!(TIMING_SCHEMA_VERSION, 2);
     for metric in TimingMetric::ALL {
         assert!(
             matches!(
@@ -93,11 +93,11 @@ fn schema_version_is_v1_and_levels_are_well_formed() {
     }
 }
 
-/// The registry count and Basic/Detailed split match the plan's closeout
-/// record (45 metrics, 34 Basic + 11 Detailed).
+/// The registry count and Basic/Detailed split match the plan's Phase 3
+/// schema-v2 closeout record (49 metrics, 34 Basic + 15 Detailed).
 #[test]
 fn registry_size_matches_plan_closeout() {
-    assert_eq!(TimingMetric::ALL.len(), 45);
+    assert_eq!(TimingMetric::ALL.len(), 49);
     let basic = TimingMetric::ALL
         .iter()
         .filter(|metric| metric.descriptor().level == TimingLevel::Basic)
@@ -107,7 +107,7 @@ fn registry_size_matches_plan_closeout() {
         .filter(|metric| metric.descriptor().level == TimingLevel::Detailed)
         .count();
     assert_eq!(basic, 34);
-    assert_eq!(detailed, 11);
+    assert_eq!(detailed, 15);
 }
 
 /// Every command-accounting metric owns one distinct pipeline segment.

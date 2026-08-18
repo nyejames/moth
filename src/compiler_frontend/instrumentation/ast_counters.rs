@@ -191,23 +191,13 @@ mod detailed {
     }
 
     pub(crate) fn log_ast_counters() {
-        // The legacy per-counter human dump only prints in `MOTH_COUNTERS=full`.
-        // Stable `MOTH_BENCH counter` lines (summary/full) are emitted inside
-        // `log_benchmark_counter`, so `off` and `summary` stay quiet of per-line
-        // prose here.
-        let print_human_counters = crate::timing::counter_human_prose_enabled();
-
-        if print_human_counters {
-            saying::say!("AST/churn counters:");
-        }
-
+        // With timers, counter call sites record only — stable MOTH_BENCH counter
+        // lines and any human counter summary are emitted from the drained
+        // snapshot after the command total. Without timers, log_benchmark_counter
+        // emits directly.
         for &counter in all_counters() {
             let value = counter_value(counter);
             log_benchmark_counter(counter_metric_name(counter), value as f64);
-
-            if print_human_counters {
-                saying::say!("  ", counter_label(counter), " = ", Dark Green value);
-            }
         }
     }
 
@@ -280,105 +270,6 @@ mod detailed {
             AstCounter::TirContributionRoutingCalls,
             AstCounter::TirOverlayLookups,
         ]
-    }
-
-    fn counter_label(counter: AstCounter) -> &'static str {
-        match counter {
-            AstCounter::ScopeContextsCreated => "scope contexts created",
-            AstCounter::ScopeMaxFrameDepth => "scope max frame depth",
-            AstCounter::ScopeFrameLookupAncestorSteps => "scope frame lookup ancestor steps",
-            AstCounter::ScopeFrameRedeclarationAncestorChecks => {
-                "scope frame redeclaration ancestor checks"
-            }
-            AstCounter::ScopeLocalDeclarationsInserted => "scope local declarations inserted",
-            AstCounter::BoundedExpressionTokenWindows => "bounded expression token windows",
-            AstCounter::BoundedExpressionTokenCopiesAvoided => {
-                "bounded expression token copies avoided"
-            }
-            AstCounter::TemplateWrapperApplications => "template wrapper applications",
-            AstCounter::TemplateFoldLoopIterations => "template fold loop iterations",
-            AstCounter::TemplateNormalizationNodesVisited => "template normalization nodes visited",
-            AstCounter::ModuleConstantNormalizationExpressionsVisited => {
-                "module constant normalization expressions visited"
-            }
-            AstCounter::TemplatesFoldedDuringFinalization => "templates folded during finalization",
-
-            AstCounter::TemplateTirHeadChainCompositionCalls => "TIR head-chain composition calls",
-            AstCounter::TemplateTirHeadChainCompositionHits => "TIR head-chain composition hits",
-            AstCounter::TemplateTirChildWrapperCalls => "TIR child wrapper calls",
-            AstCounter::TemplateTirChildWrapperHits => "TIR child wrapper hits",
-
-            AstCounter::RuntimeTemplateHandoffsRefreshedForHir => {
-                "runtime template handoffs refreshed for HIR"
-            }
-            AstCounter::RuntimeSlotHandoffsMaterialized => "runtime slot handoffs materialized",
-            AstCounter::RuntimeSlotHandoffOwnedNodesMaterialized => {
-                "runtime slot handoff owned nodes materialized"
-            }
-            AstCounter::RuntimeTemplateHandoffsMaterialized => {
-                "runtime template handoffs materialized"
-            }
-            AstCounter::TemplateNestedTemplateParses => "nested template parses",
-            AstCounter::TemplateBodyTokenVisits => "template body token visits",
-            AstCounter::TemplateTextBytesParsed => "template text bytes parsed",
-            AstCounter::TemplateFoldOutputBytes => "template fold output bytes",
-            AstCounter::TemplateEstimatedFoldOutputBytes => "template estimated fold output bytes",
-            AstCounter::TemplateFoldOutputEstimateMissBytes => {
-                "template fold output estimate miss bytes"
-            }
-            AstCounter::TemplateFoldStringInternCalls => "template fold string-intern calls",
-            AstCounter::TemplateFoldExpressionCloneRequests => {
-                "template fold expression clone requests"
-            }
-            AstCounter::TemplateFoldExpressionOwnedRewrites => {
-                "template fold expression owned rewrites"
-            }
-            AstCounter::TemplateFoldBindingSubstitutions => "template fold binding substitutions",
-
-            AstCounter::TypeResolutionCalls => "type-resolution calls",
-            AstCounter::VisibleTypeLookupAttempts => "visible type lookup attempts",
-            AstCounter::VisibleTypeAliasLookupAttempts => "visible type-alias lookup attempts",
-            AstCounter::VisibleSourceTypeLookupAttempts => "visible source type lookup attempts",
-            AstCounter::ReceiverCatalogHeadersScanned => "receiver catalog headers scanned",
-            AstCounter::ReceiverMethodsRegistered => "receiver methods registered",
-            AstCounter::DeclarationTableReplacements => "declaration table replacements",
-            AstCounter::PublicSurfaceValidationChecks => "public-surface validation checks",
-            AstCounter::PostfixReceiverNodesCopied => "postfix receiver nodes copied",
-
-            AstCounter::TirTemplatesCreated => "TIR templates created",
-            AstCounter::TirNodesCreated => "TIR nodes created",
-            AstCounter::TirTextNodesCreated => "TIR text nodes created",
-            AstCounter::TirTextBytesRecorded => "TIR text bytes recorded",
-            AstCounter::TirMaxDepth => "TIR max depth",
-            AstCounter::TirWrapperSetsCreated => "TIR wrapper sets created",
-            AstCounter::TirWrapperSetReuseHits => "TIR wrapper set reuse hits",
-            AstCounter::TirPreparationAttempts => "TIR preparation attempts",
-            AstCounter::TirPreparationNodesVisited => "TIR preparation nodes visited",
-
-            AstCounter::TirFoldTemplatesFolded => "TIR fold templates folded",
-            AstCounter::TirFoldNodesVisited => "TIR fold nodes visited",
-            AstCounter::TirFoldOutputBytes => "TIR fold output bytes",
-            AstCounter::TirFoldStringInternCalls => "TIR fold string-intern calls",
-
-            AstCounter::TirFinalizationFoldAttempts => "finalization fold attempts",
-            AstCounter::TirFinalizationFoldSuccesses => "finalization fold successes",
-            AstCounter::TirViewFoldsAttempted => "TIR view folds attempted",
-            AstCounter::TirViewFoldOverlayEmpty => "TIR view fold overlay: empty",
-            AstCounter::TirViewFoldOverlayExpressionOnly => {
-                "TIR view fold overlay: expression-only"
-            }
-            AstCounter::TirViewFoldOverlaySlotOnly => "TIR view fold overlay: slot-only",
-            AstCounter::TirViewFoldOverlayExpressionAndSlot => {
-                "TIR view fold overlay: expression+slot"
-            }
-            AstCounter::TirViewFoldWrapperContextPresent => "TIR view fold wrapper-context present",
-            AstCounter::TirFoldCacheHits => "TIR fold cache hits",
-            AstCounter::TirFoldCacheMisses => "TIR fold cache misses",
-            AstCounter::TirCopyPasses => "TIR copy passes",
-            AstCounter::TirSlotSchemaWalks => "TIR slot schema walks",
-            AstCounter::TirContributionRoutingCalls => "TIR contribution routing calls",
-            AstCounter::TirOverlayLookups => "TIR overlay lookups",
-        }
     }
 
     fn counter_metric_name(counter: AstCounter) -> &'static str {

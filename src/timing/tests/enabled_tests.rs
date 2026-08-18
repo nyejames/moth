@@ -69,7 +69,7 @@ fn final_benchmark_snapshot_uses_schema_order_and_omits_empty_rows() {
     assert_eq!(
         lines,
         vec![
-            "MOTH_BENCH timing-schema 1",
+            "MOTH_BENCH timing-schema 2",
             "MOTH_BENCH timing command.check.total=8ms",
             "MOTH_BENCH timing frontend.prepare=2ms",
         ]
@@ -387,9 +387,8 @@ fn attributed_duration_context_uses_admitted_session_policy() {
 }
 
 #[test]
-fn admitted_human_prose_policy_survives_session_drain() {
+fn admitted_attribution_survives_session_drain() {
     let _test_guard = collector_test_guard();
-    crate::timing::enabled::reset_detailed_prose_emissions_for_test();
     let timing_session = start_test_command_session(
         TimingCommandKind::Build,
         crate::timing::TimerOutputMode::Verbose,
@@ -403,9 +402,9 @@ fn admitted_human_prose_policy_survives_session_drain() {
 
     let recorder = std::thread::spawn(move || {
         crate::timing::enabled::runtime::target_record_admission_pause_for_current_thread();
-        let mut start = crate::timing::start_pipeline_timing(TimingMetric::FrontendPrepare);
+        let mut start = crate::timing::start_pipeline_timing(TimingMetric::FrontendBindHeaders);
         crate::timing::record_started_pipeline_timing_attributed(
-            TimingMetric::FrontendPrepare,
+            TimingMetric::FrontendBindHeaders,
             &mut start,
             Some(crate::timing::TimingContext::for_module(module)),
         )
@@ -453,12 +452,7 @@ fn admitted_human_prose_policy_survives_session_drain() {
         .expect("the drained session should publish its snapshot");
 
     assert_eq!(
-        crate::timing::enabled::detailed_prose_emissions_for_test(),
-        1,
-        "the admitted verbose record must emit exactly one prose line"
-    );
-    assert_eq!(
-        timings_named(&snapshot, TimingMetric::FrontendPrepare).len(),
+        timings_named(&snapshot, TimingMetric::FrontendBindHeaders).len(),
         1
     );
     assert_eq!(
@@ -466,7 +460,7 @@ fn admitted_human_prose_policy_survives_session_drain() {
             .modules
             .iter()
             .flat_map(|module| module.timings.iter())
-            .find(|aggregate| aggregate.metric == TimingMetric::FrontendPrepare)
+            .find(|aggregate| aggregate.metric == TimingMetric::FrontendBindHeaders)
             .expect("the pre-clock admitted module row should be retained")
             .samples,
         1
@@ -484,11 +478,6 @@ fn admitted_human_prose_policy_survives_session_drain() {
         Some(crate::timing::TimingContext::for_module(next_module)),
     );
     let _ = next_session.finish();
-    assert_eq!(
-        crate::timing::enabled::detailed_prose_emissions_for_test(),
-        1,
-        "a later summary generation must not emit prose or alter the admitted decision"
-    );
 }
 
 #[test]
@@ -1153,39 +1142,6 @@ fn silent_mode_command_session_is_rejected_without_snapshot() {
 
 #[cfg(feature = "detailed_timers")]
 #[test]
-fn detailed_timer_skips_clock_when_detailed_channel_is_inactive() {
-    let _test_guard = collector_test_guard();
-
-    crate::timing::enabled::runtime::reset_timing_clock_reads_for_test();
-    let silent_session = start_test_command_session(
-        TimingCommandKind::Check,
-        crate::timing::TimerOutputMode::Silent,
-    );
-    let silent_start = crate::timing::start_detailed_timer();
-    assert!(silent_start.elapsed().is_none());
-    assert_eq!(
-        crate::timing::enabled::runtime::timing_clock_reads_for_test(),
-        0,
-        "silent detailed timing must not read the clock"
-    );
-    let _ = silent_session.finish();
-
-    crate::timing::enabled::runtime::reset_timing_clock_reads_for_test();
-    let verbose_session = start_test_command_session(
-        TimingCommandKind::Check,
-        crate::timing::TimerOutputMode::Verbose,
-    );
-    let verbose_start = crate::timing::start_detailed_timer();
-    assert!(verbose_start.elapsed().is_some());
-    assert_eq!(
-        crate::timing::enabled::runtime::timing_clock_reads_for_test(),
-        1,
-        "verbose detailed timing must read the clock once"
-    );
-    let _ = verbose_session.finish();
-}
-
-#[test]
 fn summary_mode_command_session_collects_snapshot() {
     let _test_guard = collector_test_guard();
     let session = start_test_command_session(TimingCommandKind::Build, timer_mode_summary());
@@ -1505,4 +1461,29 @@ fn ast_stage_guard_records_on_drop_including_error_paths() {
         1,
         "the AST stage guard must record when the scope ends, including error paths"
     );
+}
+
+#[test]
+fn capture_command_duration_records_total_and_returns_duration() {
+    let _test_guard = collector_test_guard();
+    let session = start_raw_benchmark_collection(true).expect("timing session should start");
+
+    let start = std::time::Instant::now();
+    let duration = capture_command_duration!(TimingMetric::CommandBuildTotal, start);
+
+    let snapshot = session.finish();
+
+    let observations = timings_named(&snapshot, TimingMetric::CommandBuildTotal);
+    assert_eq!(observations.len(), 1);
+    assert_eq!(observations[0].samples, 1);
+    assert_eq!(observations[0].total, duration);
+}
+
+#[test]
+#[should_panic(expected = "record_command_total_timing only accepts command-total metrics")]
+fn record_command_total_timing_rejects_non_command_total_metrics() {
+    let _test_guard = collector_test_guard();
+    let _session = start_raw_benchmark_collection(true).expect("timing session should start");
+
+    let _ = capture_command_duration!(TimingMetric::FrontendAstTotal, std::time::Instant::now());
 }

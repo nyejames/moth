@@ -747,6 +747,31 @@ fn dev_cycle_records_build_and_write_and_drains_one_collection_per_build() {
         .timing_snapshot
         .expect("every dev cycle must drain a timing snapshot");
 
+    assert_eq!(
+        first.build_duration,
+        first_snapshot
+            .timings
+            .iter()
+            .find(|observation| {
+                observation.metric.descriptor().stable_name == "command.dev.build_write"
+            })
+            .expect("first dev cycle must retain a build/write row")
+            .total,
+        "first report.build_duration must exactly equal the structured command.dev.build_write total"
+    );
+    assert_eq!(
+        second.build_duration,
+        second_snapshot
+            .timings
+            .iter()
+            .find(|observation| {
+                observation.metric.descriptor().stable_name == "command.dev.build_write"
+            })
+            .expect("second dev cycle must retain a build/write row")
+            .total,
+        "second report.build_duration must exactly equal the structured command.dev.build_write total"
+    );
+
     for snapshot in [&first_snapshot, &second_snapshot] {
         assert_eq!(
             snapshot
@@ -773,6 +798,7 @@ fn dev_cycle_records_build_and_write_and_drains_one_collection_per_build() {
             "each dev cycle records one output-plan/filesystem-write observation"
         );
     }
+
     #[cfg(feature = "detailed_timers")]
     {
         assert_eq!(

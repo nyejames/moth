@@ -34,7 +34,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-/// Exact schema-v1 metric family for one AST construction path.
+/// Exact current-schema metric family for one AST construction path.
 ///
 /// Frontend modules, `config.moth`, and generated materialisation all use the
 /// same AST implementation but have deliberately distinct timing identities.
@@ -79,6 +79,51 @@ impl AstTimingMetricFamily {
             Self::Frontend => TimingMetric::FrontendAstFinalise,
             Self::Config => TimingMetric::ConfigAstFinalise,
             Self::Generated => TimingMetric::FrontendGeneratedAstFinalise,
+        }
+    }
+
+    /// Constant-header semantic resolution metric, nested inside the
+    /// environment pass. These four constant-sensitive metrics are
+    /// frontend-module-attributed evidence only, so `None` is returned for
+    /// Config and Generated.
+    pub(crate) const fn constant_header_resolution(self) -> Option<TimingMetric> {
+        match self {
+            Self::Frontend => Some(TimingMetric::FrontendAstEnvironmentConstantHeaderResolution),
+            Self::Config => None,
+            Self::Generated => None,
+        }
+    }
+
+    /// Const-template parsing metric, nested inside the emission pass.
+    /// Frontend-module-attributed evidence only, so `None` is returned
+    /// for Config and Generated.
+    pub(crate) const fn const_template_parse(self) -> Option<TimingMetric> {
+        match self {
+            Self::Frontend => Some(TimingMetric::FrontendAstEmitConstTemplateParse),
+            Self::Config => None,
+            Self::Generated => None,
+        }
+    }
+
+    /// Const-template folding metric, nested inside the emission pass.
+    /// Frontend-module-attributed evidence only, so `None` is returned
+    /// for Config and Generated.
+    pub(crate) const fn const_template_fold(self) -> Option<TimingMetric> {
+        match self {
+            Self::Frontend => Some(TimingMetric::FrontendAstEmitConstTemplateFold),
+            Self::Config => None,
+            Self::Generated => None,
+        }
+    }
+
+    /// Module-constant finalisation metric, nested inside the finalisation
+    /// pass. Frontend-module-attributed evidence only, so `None` is
+    /// returned for Config and Generated.
+    pub(crate) const fn module_constant(self) -> Option<TimingMetric> {
+        match self {
+            Self::Frontend => Some(TimingMetric::FrontendAstFinaliseModuleConstant),
+            Self::Config => None,
+            Self::Generated => None,
         }
     }
 }
@@ -128,7 +173,7 @@ pub struct AstBuildContext<'a> {
     #[cfg(feature = "timers")]
     pub(crate) timing_context: Option<crate::timing::TimingContext>,
 
-    /// Selects the schema-v1 identity family for this AST construction.
+    /// Selects the current-schema identity family for this AST construction.
     #[cfg(feature = "timers")]
     pub(crate) timing_metric_family: AstTimingMetricFamily,
 }

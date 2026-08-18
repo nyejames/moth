@@ -70,10 +70,7 @@ use std::rc::Rc;
 
 #[cfg(feature = "detailed_timers")]
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
-#[cfg(feature = "detailed_timers")]
-use crate::timing::{detailed_timer_output_enabled, log_aggregated_duration};
-#[cfg(feature = "detailed_timers")]
-use std::time::Duration;
+use crate::timed_stage_attributed_opt;
 
 pub(in crate::compiler_frontend::ast) struct AstEmission {
     /// Typed AST nodes emitted for this module (functions, structs, generic instances).
@@ -292,19 +289,9 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         let top_level_declarations = Rc::clone(&self.environment.lookups.declaration_table);
 
         #[cfg(feature = "detailed_timers")]
-        let mut total_function_body_parse_time = Duration::default();
-        #[cfg(feature = "detailed_timers")]
-        let mut total_start_body_parse_time = Duration::default();
-        #[cfg(feature = "detailed_timers")]
-        let mut total_const_template_parse_time = Duration::default();
-        #[cfg(feature = "detailed_timers")]
-        let mut total_const_template_fold_time = Duration::default();
-        #[cfg(feature = "detailed_timers")]
         let mut function_headers_emitted = 0usize;
         #[cfg(feature = "detailed_timers")]
         let mut start_headers_emitted = 0usize;
-        #[cfg(feature = "detailed_timers")]
-        let mut struct_headers_emitted = 0usize;
         #[cfg(feature = "detailed_timers")]
         let mut const_templates_emitted = 0usize;
 
@@ -340,8 +327,6 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                         continue;
                     }
 
-                    #[cfg(feature = "detailed_timers")]
-                    let start = crate::timing::start_detailed_timer();
                     self.emit_function(
                         header,
                         visibility,
@@ -351,16 +336,11 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                     )?;
                     #[cfg(feature = "detailed_timers")]
                     {
-                        if let Some(elapsed) = start.elapsed() {
-                            total_function_body_parse_time += elapsed;
-                        }
                         function_headers_emitted += 1;
                     }
                 }
 
                 HeaderKind::StartFunction => {
-                    #[cfg(feature = "detailed_timers")]
-                    let start = crate::timing::start_detailed_timer();
                     self.emit_start(
                         header,
                         visibility,
@@ -370,9 +350,6 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                     )?;
                     #[cfg(feature = "detailed_timers")]
                     {
-                        if let Some(elapsed) = start.elapsed() {
-                            total_start_body_parse_time += elapsed;
-                        }
                         start_headers_emitted += 1;
                     }
                 }
@@ -384,10 +361,6 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                         continue;
                     }
 
-                    #[cfg(feature = "detailed_timers")]
-                    {
-                        struct_headers_emitted += 1;
-                    }
                     self.emit_struct(header, string_table)?;
                 }
 
@@ -405,27 +378,20 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                         scope_frame_capacity: scope_frame_capacity_budget.next_root_capacity(),
                     });
 
-                    #[cfg(feature = "detailed_timers")]
-                    let const_template_parse_start = crate::timing::start_detailed_timer();
-                    let template =
-                        self.parse_const_template(&mut template_tokens, &context, string_table)?;
-                    #[cfg(feature = "detailed_timers")]
-                    {
-                        if let Some(elapsed) = const_template_parse_start.elapsed() {
-                            total_const_template_parse_time += elapsed;
-                        }
-                    }
+                    let template = timed_stage_attributed_opt!(
+                        self.context.timing_metric_family.const_template_parse(),
+                        self.context.timing_context,
+                        self.parse_const_template(&mut template_tokens, &context, string_table)?
+                    );
                     self.warnings.extend(context.take_emitted_warnings());
 
-                    #[cfg(feature = "detailed_timers")]
-                    let const_template_fold_start = crate::timing::start_detailed_timer();
-                    let folded_result =
-                        self.fold_const_template(template, &context, string_table)?;
+                    let folded_result = timed_stage_attributed_opt!(
+                        self.context.timing_metric_family.const_template_fold(),
+                        self.context.timing_context,
+                        self.fold_const_template(template, &context, string_table)?
+                    );
                     #[cfg(feature = "detailed_timers")]
                     {
-                        if let Some(elapsed) = const_template_fold_start.elapsed() {
-                            total_const_template_fold_time += elapsed;
-                        }
                         const_templates_emitted += 1;
                     }
 
@@ -454,31 +420,6 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
 
         #[cfg(feature = "detailed_timers")]
         {
-            log_aggregated_duration(
-                "AST/node emission/function bodies parsed in: ",
-                total_function_body_parse_time,
-            );
-            log_aggregated_duration(
-                "AST/node emission/start bodies parsed in: ",
-                total_start_body_parse_time,
-            );
-            log_aggregated_duration(
-                "AST/node emission/const templates parsed in: ",
-                total_const_template_parse_time,
-            );
-            log_aggregated_duration(
-                "AST/node emission/const templates folded in: ",
-                total_const_template_fold_time,
-            );
-            if detailed_timer_output_enabled() {
-                saying::say!(
-                    "AST/node emission/headers emitted: \n functions = ", Dark Green function_headers_emitted,
-                    Reset "\n starts = ", Dark Green start_headers_emitted,
-                    Reset "\n structs = ", Dark Green struct_headers_emitted,
-                    Reset "\n const templates = ", Dark Green const_templates_emitted
-                );
-            }
-
             add_frontend_counter(
                 FrontendCounter::AstFunctionBodyRootCount,
                 function_headers_emitted,

@@ -22,7 +22,7 @@ fn benchmark_group_case(case_name: &str, group_name: &str, mean_ms: f64) -> Benc
             workload_id: format!("{case_name}_workload"),
             source_fingerprint: format!("{case_name}_source_fp"),
             measurement_fingerprint: format!("{case_name}_measurement_fp"),
-            timing_schema_version: 1,
+            timing_schema_version: 2,
         }),
         group_name: group_name.to_string(),
         runner: BenchmarkRunner::Cli {
@@ -126,7 +126,7 @@ fn local_record(average_ms: f64, case_spread_ms: f64) -> LocalRunRecord {
             workload_id: Some("docs".to_string()),
             source_fingerprint: Some("docs_source_fp".to_string()),
             measurement_fingerprint: Some("docs_measurement_fp".to_string()),
-            timing_schema_version: Some(1),
+            timing_schema_version: Some(2),
             group_name: "docs".to_string(),
             runner: BenchmarkRunner::Cli {
                 command: CliBenchmarkCommand::Check,
@@ -208,7 +208,7 @@ fn test_format_group_average_line() {
                 workload_id: "a_workload".to_string(),
                 source_fingerprint: "a_source_fp".to_string(),
                 measurement_fingerprint: "a_measurement_fp".to_string(),
-                timing_schema_version: 1,
+                timing_schema_version: 2,
             }),
             group_name: "core".to_string(),
             runner: BenchmarkRunner::Cli {
@@ -226,7 +226,7 @@ fn test_format_group_average_line() {
                 workload_id: "b_workload".to_string(),
                 source_fingerprint: "b_source_fp".to_string(),
                 measurement_fingerprint: "b_measurement_fp".to_string(),
-                timing_schema_version: 1,
+                timing_schema_version: 2,
             }),
             group_name: "docs".to_string(),
             runner: BenchmarkRunner::Cli {
@@ -258,7 +258,7 @@ fn test_generate_system_block_with_change() {
     assert!(
         block.contains("Change since initial benchmark: -12ms avg; 1 faster, 0 slower; 1/1 cases")
     );
-    assert!(block.contains("Timing schema: 1"));
+    assert!(block.contains("Timing schema: 2"));
     assert!(block.contains("Initial: all ~80ms, Core ~120ms, Docs ~60ms"));
     assert!(block.contains("Latest: all ~68ms, Core ~108ms, Docs ~48ms"));
     assert!(block.contains("Case spread latest: ~9ms"));
@@ -267,13 +267,13 @@ fn test_generate_system_block_with_change() {
 #[test]
 fn test_generate_system_block_labels_obsolete_initial_schema_without_drift() {
     let mut initial = local_record(80.0, 6.0);
-    initial.cases[0].timing_schema_version = Some(2);
+    initial.cases[0].timing_schema_version = Some(3);
     let latest = local_record(80.0, 6.0);
 
     let block = generate_system_block("End-to-end CLI", "macOS M1", "B7F2A9", &initial, &latest, 2);
 
-    assert!(block.contains("Timing schema: 1"));
-    assert!(block.contains("Initial timing schema: 2 (obsolete; non-comparable)"));
+    assert!(block.contains("Timing schema: 2"));
+    assert!(block.contains("Initial timing schema: 3 (obsolete; non-comparable)"));
     assert!(block.contains("timing schema changed"));
     assert!(!block.contains("faster"));
     assert!(!block.contains("slower"));
@@ -286,7 +286,7 @@ fn mixed_schema_records_are_excluded_from_monthly_selection() {
         benchmark_case("obsolete", 90.0),
     ]);
     let mut mixed = mixed;
-    mixed.cases[1].timing_schema_version = Some(2);
+    mixed.cases[1].timing_schema_version = Some(3);
 
     assert_eq!(
         TimingSchemaIdentity::from_record(&mixed),
@@ -388,9 +388,9 @@ fn test_generate_run_entry_with_delta() {
     assert_eq!(entry.timestamp_text, "May 10th - 15:21");
     assert_eq!(
         entry.body,
-        "Timing schema: 1\n**-10ms avg**; 1 faster, 0 slower; 1/1 cases\nAvg: all ~110ms, ungrouped ~110ms"
+        "Timing schema: 2\n**-10ms avg**; 1 faster, 0 slower; 1/1 cases\nAvg: all ~110ms, ungrouped ~110ms"
     );
-    assert_eq!(entry.timing_schema, TimingSchemaIdentity::Version(1));
+    assert_eq!(entry.timing_schema, TimingSchemaIdentity::Version(2));
     assert!(
         entry
             .to_markdown()
@@ -407,7 +407,7 @@ fn test_generate_run_entry_baseline() {
     let entry = generate_run_entry(&run, &comparison);
     assert_eq!(
         entry.body,
-        "Timing schema: 1\n**baseline**; 1 cases, avg ~110ms\nAvg: all ~110ms, ungrouped ~110ms"
+        "Timing schema: 2\n**baseline**; 1 cases, avg ~110ms\nAvg: all ~110ms, ungrouped ~110ms"
     );
 }
 
@@ -419,7 +419,7 @@ fn test_generate_run_entry_with_stage_movement() {
             workload_id: "a_workload".to_string(),
             source_fingerprint: "a_source_fp".to_string(),
             measurement_fingerprint: "a_measurement_fp".to_string(),
-            timing_schema_version: 1,
+            timing_schema_version: 2,
         }),
         group_name: "ungrouped".to_string(),
         runner: BenchmarkRunner::Cli {
@@ -430,7 +430,7 @@ fn test_generate_run_entry_with_stage_movement() {
         median_ms: 110.0,
         stddev_ms: 0.0,
         observations: BenchmarkCaseObservations {
-            timing_schema_version: 1,
+            timing_schema_version: 2,
             stage_timings: vec![BenchmarkMetric {
                 name: "frontend.ast.total".to_string(),
                 value: 55.0,
@@ -444,7 +444,7 @@ fn test_generate_run_entry_with_stage_movement() {
             workload_id: "a_workload".to_string(),
             source_fingerprint: "a_source_fp".to_string(),
             measurement_fingerprint: "a_measurement_fp".to_string(),
-            timing_schema_version: 1,
+            timing_schema_version: 2,
         }),
         group_name: "ungrouped".to_string(),
         runner: BenchmarkRunner::Cli {
@@ -455,7 +455,7 @@ fn test_generate_run_entry_with_stage_movement() {
         median_ms: 100.0,
         stddev_ms: 0.0,
         observations: BenchmarkCaseObservations {
-            timing_schema_version: 1,
+            timing_schema_version: 2,
             stage_timings: vec![BenchmarkMetric {
                 name: "frontend.ast.total".to_string(),
                 value: 50.0,
@@ -479,7 +479,7 @@ fn test_generate_run_entry_baseline_hides_stage_movement() {
             workload_id: "a_workload".to_string(),
             source_fingerprint: "a_source_fp".to_string(),
             measurement_fingerprint: "a_measurement_fp".to_string(),
-            timing_schema_version: 1,
+            timing_schema_version: 2,
         }),
         group_name: "ungrouped".to_string(),
         runner: BenchmarkRunner::Cli {
@@ -490,7 +490,7 @@ fn test_generate_run_entry_baseline_hides_stage_movement() {
         median_ms: 110.0,
         stddev_ms: 0.0,
         observations: BenchmarkCaseObservations {
-            timing_schema_version: 1,
+            timing_schema_version: 2,
             stage_timings: vec![BenchmarkMetric {
                 name: "frontend.ast.total".to_string(),
                 value: 55.0,
@@ -901,13 +901,13 @@ fn generated_current_schema_no_change_entry_replaces_same_schema() {
 
     let first_entry = generate_run_entry(&benchmark_run(cases.clone()), &comparison);
     let second_entry = generate_run_entry(&benchmark_run(cases), &comparison);
-    assert!(first_entry.body.starts_with("Timing schema: 1\n"));
+    assert!(first_entry.body.starts_with("Timing schema: 2\n"));
 
     let mut entries = vec![ParsedSummaryRunEntry::Parsed(first_entry)];
     append_or_replace_run_entry(&mut entries, second_entry, &comparison);
 
     assert_eq!(entries.len(), 1);
-    assert!(entries[0].to_markdown().contains("Timing schema: 1"));
+    assert!(entries[0].to_markdown().contains("Timing schema: 2"));
 }
 
 #[test]
@@ -916,7 +916,7 @@ fn no_change_entries_with_other_schema_identities_are_not_replaced() {
     let comparison = BenchmarkComparison::new(&current, Some(&current));
     let existing_identity_cases = [
         TimingSchemaIdentity::Missing,
-        TimingSchemaIdentity::Version(2),
+        TimingSchemaIdentity::Version(3),
         TimingSchemaIdentity::Mixed,
     ];
 

@@ -119,7 +119,7 @@ fn report_includes_only_frontend_history_when_only_frontend_runs_exist() {
     );
     let rendered = format_benchmark_report(&report);
     assert!(rendered.contains("AST ~12ms"));
-    assert!(rendered.contains("Timing schema: 1"));
+    assert!(rendered.contains("Timing schema: 2"));
     assert!(!rendered.contains("frontend.ast.total ~12ms"));
 }
 
@@ -293,7 +293,7 @@ fn report_does_not_derive_current_numbers_from_mismatched_or_legacy_timing() {
         ],
         vec![metric("source_file_count", 3.0)],
     );
-    mismatched.timing_schema_version = Some(2);
+    mismatched.timing_schema_version = Some(3);
 
     let mut legacy = case_record(
         "legacy",
@@ -337,7 +337,7 @@ fn report_marks_equal_non_current_schema_history_non_comparable() {
         ],
         vec![metric("token_count", 10.0)],
     );
-    previous_case.timing_schema_version = Some(2);
+    previous_case.timing_schema_version = Some(3);
 
     let mut current_case = case_record(
         "same_legacy_schema",
@@ -348,7 +348,7 @@ fn report_marks_equal_non_current_schema_history_non_comparable() {
         ],
         vec![metric("token_count", 100.0)],
     );
-    current_case.timing_schema_version = Some(2);
+    current_case.timing_schema_version = Some(3);
 
     let runs = vec![
         run_record(
@@ -383,7 +383,7 @@ fn report_marks_equal_non_current_schema_history_non_comparable() {
     );
     let rendered = format_benchmark_report(&report);
     assert!(rendered.contains("timing schema changed"));
-    assert!(rendered.contains("Timing schema: 2 (obsolete; non-comparable)"));
+    assert!(rendered.contains("Timing schema: 3 (obsolete; non-comparable)"));
     assert!(!rendered.contains("build.bootstrap.total"));
 }
 
@@ -396,14 +396,14 @@ fn report_explicitly_omits_mixed_schema_runs() {
         vec![metric("frontend.ast.total", 10.0)],
         vec![metric("token_count", 10.0)],
     );
-    current_schema.timing_schema_version = Some(1);
+    current_schema.timing_schema_version = Some(2);
     let mut obsolete_schema = case_record(
         "obsolete_schema",
         200.0,
         vec![metric("frontend.ast.total", 20.0)],
         vec![metric("token_count", 20.0)],
     );
-    obsolete_schema.timing_schema_version = Some(2);
+    obsolete_schema.timing_schema_version = Some(3);
 
     let report = calculate_benchmark_report(
         &[run_record(
@@ -577,7 +577,7 @@ fn case_record(
         workload_id: Some(format!("{name}_workload")),
         source_fingerprint: Some(format!("{name}_source_fp")),
         measurement_fingerprint: Some(format!("{name}_measurement_fp")),
-        timing_schema_version: Some(1),
+        timing_schema_version: Some(2),
         group_name: "test".to_string(),
         runner: BenchmarkRunner::Cli {
             command: CliBenchmarkCommand::Check,
@@ -660,7 +660,7 @@ fn test_identity() -> BenchmarkMeasurementIdentity {
         workload_id: "foo".to_string(),
         source_fingerprint: "aaaa1111aaaa1111".to_string(),
         measurement_fingerprint: "bbbb2222bbbb2222".to_string(),
-        timing_schema_version: 1,
+        timing_schema_version: 2,
     }
 }
 

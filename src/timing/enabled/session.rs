@@ -129,11 +129,29 @@ impl TimingSession {
         let emit_bench_output = self.configuration.is_some_and(|configuration| {
             configuration.channels().bench_output() && !configuration.suppress_output()
         });
+
+        #[cfg(feature = "benchmark_counters")]
+        let emit_counter_lines = self.configuration.is_some_and(|configuration| {
+            configuration.counter_mode().emits_bench_counter_lines()
+                && !configuration.suppress_output()
+        });
+
         self.active = false;
         let snapshot = collector::finish_session(self.id);
         if emit_bench_output {
             super::emit_bench_timing_snapshot(&snapshot);
         }
+
+        // Emit stable MOTH_BENCH counter lines from the drained snapshot after
+        // the command total, not during compilation, to avoid perturbing measured
+        // stages. Counter-only builds (no timers) emit directly in log_benchmark_counter.
+        #[cfg(feature = "benchmark_counters")]
+        if emit_counter_lines {
+            for counter in &snapshot.counters {
+                saying::say!("MOTH_BENCH counter ", counter.name, "=", #(counter.value));
+            }
+        }
+
         snapshot
     }
 

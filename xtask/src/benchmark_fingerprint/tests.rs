@@ -351,7 +351,7 @@ fn changed_runner_args_change_fingerprint_and_prevent_comparison() {
             workload_id: "workload".to_string(),
             source_fingerprint: source_fp,
             measurement_fingerprint: measurement_fp,
-            timing_schema_version: 1,
+            timing_schema_version: 2,
         }),
         group_name: "test".to_string(),
         runner,

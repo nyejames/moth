@@ -27,7 +27,7 @@ pub(crate) enum TimerOutputMode {
     Summary,
     /// Stable machine-readable timing lines without human timing prose.
     Bench,
-    /// Detailed prose, stable benchmark lines and the concise report.
+    /// Detailed substage evidence, stable benchmark lines and the concise report.
     Verbose,
 }
 
@@ -82,7 +82,6 @@ impl TimingChannels {
     const DETAILED: u16 = 1 << 3;
     const BENCH_OUTPUT: u16 = 1 << 4;
     const HUMAN_SUMMARY: u16 = 1 << 5;
-    const HUMAN_PROSE: u16 = 1 << 6;
 
     const fn empty() -> Self {
         Self { bits: 0 }
@@ -123,11 +122,6 @@ impl TimingChannels {
     /// Whether any human summary is requested after the command.
     pub(crate) const fn human_summary(self) -> bool {
         self.bits & Self::HUMAN_SUMMARY != 0
-    }
-
-    /// Whether detailed timer prose is emitted during compilation.
-    pub(crate) const fn human_prose(self) -> bool {
-        self.bits & Self::HUMAN_PROSE != 0
     }
 
     /// Whether any event collection channel is active.
@@ -190,10 +184,6 @@ impl TimingRecordAdmission {
     pub(crate) const fn output_suppressed(&self) -> bool {
         self.output_suppressed
     }
-
-    pub(crate) const fn human_prose_enabled(&self) -> bool {
-        self.channels.human_prose()
-    }
 }
 
 impl Drop for TimingRecordAdmission {
@@ -234,8 +224,7 @@ impl TimingSessionConfiguration {
                 .with(TimingChannels::ATTRIBUTION)
                 .with(TimingChannels::DETAILED)
                 .with(TimingChannels::BENCH_OUTPUT)
-                .with(TimingChannels::HUMAN_SUMMARY)
-                .with(TimingChannels::HUMAN_PROSE),
+                .with(TimingChannels::HUMAN_SUMMARY),
         };
 
         #[cfg(feature = "benchmark_counters")]
@@ -351,9 +340,6 @@ impl TimingSessionConfiguration {
             if self.counter_mode.emits_bench_counter_lines() {
                 bits |= ACTIVE_COUNTER_BENCH_OUTPUT;
             }
-            if self.counter_mode.emits_human_counter_prose() {
-                bits |= ACTIVE_COUNTER_HUMAN_PROSE;
-            }
             bits
         }
 
@@ -394,8 +380,6 @@ pub(crate) fn command_session_configuration() -> TimingSessionConfiguration {
 
 #[cfg(feature = "benchmark_counters")]
 const ACTIVE_COUNTER_BENCH_OUTPUT: u16 = 1 << 7;
-#[cfg(feature = "benchmark_counters")]
-const ACTIVE_COUNTER_HUMAN_PROSE: u16 = 1 << 8;
 
 static ACTIVE_CHANNEL_BITS: AtomicU16 = AtomicU16::new(0);
 static ACTIVE_COMMAND_KIND: AtomicU8 = AtomicU8::new(0);
@@ -491,12 +475,6 @@ fn channel_active(bit: u16) -> bool {
     ACTIVE_CHANNEL_BITS.load(Ordering::Acquire) & bit != 0
 }
 
-/// Whether a timing metric needs a clock and collector record.
-#[cfg(feature = "detailed_timers")]
-pub(crate) fn metrics_active() -> bool {
-    channel_active(TimingChannels::METRICS)
-}
-
 /// Whether a counter needs collector storage.
 #[cfg(feature = "benchmark_counters")]
 pub(crate) fn counters_active() -> bool {
@@ -542,35 +520,12 @@ fn command_from_code(code: u8) -> Option<TimingCommandKind> {
     }
 }
 
-/// Whether detailed timer prose is active for the current session.
-#[cfg(feature = "detailed_timers")]
-pub(crate) fn timer_human_prose_active() -> bool {
-    channel_active(TimingChannels::HUMAN_PROSE)
-}
-
 /// Whether a counter output mode requests stable benchmark counter lines.
-#[cfg(feature = "benchmark_counters")]
+/// Only used in counter-only builds (no timers); with timers, counter lines
+/// are emitted from the drained snapshot.
+#[cfg(all(feature = "benchmark_counters", not(feature = "timers")))]
 pub(crate) fn counter_bench_output_active() -> bool {
     channel_active(ACTIVE_COUNTER_BENCH_OUTPUT)
-}
-
-/// Whether a counter output mode requests its legacy human prose.
-#[cfg(feature = "benchmark_counters")]
-pub(crate) fn counter_human_prose_active() -> bool {
-    channel_active(ACTIVE_COUNTER_HUMAN_PROSE)
-}
-
-/// Whether any collection channel is currently active.
-#[cfg(feature = "detailed_timers")]
-pub(crate) fn collection_active() -> bool {
-    #[cfg(feature = "benchmark_counters")]
-    {
-        metrics_active() || counters_active()
-    }
-    #[cfg(not(feature = "benchmark_counters"))]
-    {
-        metrics_active()
-    }
 }
 
 #[cfg(test)]
@@ -711,7 +666,6 @@ mod tests {
         assert!(summary.channels().human_summary());
         assert!(!summary.channels().detailed());
         assert!(!summary.channels().bench_output());
-        assert!(!summary.channels().human_prose());
 
         let verbose = TimingSessionConfiguration::for_test(TimerOutputMode::Verbose);
         assert!(verbose.channels().metrics());
@@ -719,7 +673,6 @@ mod tests {
         assert!(verbose.channels().detailed());
         assert!(verbose.channels().bench_output());
         assert!(verbose.channels().human_summary());
-        assert!(verbose.channels().human_prose());
 
         let bench = TimingSessionConfiguration::for_test(TimerOutputMode::Bench);
         assert!(bench.channels().metrics());
@@ -784,7 +737,7 @@ mod tests {
         );
         assert!(!full.channels().metrics());
         assert!(full.channels().counters());
-        assert!(!full.channels().human_summary());
+        assert!(full.channels().human_summary());
         assert_eq!(full.counter_mode(), CounterOutputMode::Full);
     }
 }

@@ -12,7 +12,7 @@ fn profile_observation_struct_fields() {
         command_args: vec!["foo.moth".to_string()],
         wall_ms: 500.0,
         observations: BenchmarkCaseObservations {
-            timing_schema_version: 1,
+            timing_schema_version: 2,
             stage_timings: vec![BenchmarkMetric {
                 name: "frontend.ast.total".to_string(),
                 value: 300.0,

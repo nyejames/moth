@@ -1,4 +1,4 @@
-//! Timing schema v1 and the typed metric registry.
+//! Timing schema v2 and the typed metric registry.
 //!
 //! WHAT: owns the immutable contract every timing observation, snapshot,
 //!      benchmark line and human summary obeys. One dense registry maps every
@@ -10,7 +10,7 @@
 //!       enum, and lets later phases build dense aggregate storage, snapshot
 //!       ordering and benchmark fingerprints from the same table.
 //!
-//! Compatibility: timing data recorded before schema v1 is legacy and
+//! Compatibility: timing data recorded before schema v2 is legacy and
 //! non-comparable. This module performs no numeric migration and carries no
 //! aliases for provisional names.
 //!
@@ -22,7 +22,7 @@
 ///
 /// Benchmark tooling uses this value to make timing observations comparable
 /// only when the compiler and benchmark parser agree on the same schema.
-pub const TIMING_SCHEMA_VERSION: u32 = 1;
+pub const TIMING_SCHEMA_VERSION: u32 = 2;
 
 /// One versioned contract for timing metric identity and meaning.
 ///
@@ -205,15 +205,21 @@ macro_rules! timing_metrics {
 }
 
 timing_metrics! {
-// `command.build.total`: complete build command work through required
-// output write, excluding timer rendering.
+// `command.build.total`: complete build command work from after timing
+// session configuration through output write and outcome classification,
+// ending at the execution-to-presentation boundary before any terminal
+// rendering of diagnostics, success text, benchmark status or timing output.
     CommandBuildTotal, "command.build.total", Basic, WallSpan, None, BuildOnly, Command,
         None, TimingAccountingRole::CommandTotal;
-// `command.check.total`: complete check command work through diagnostic
-// rendering, preserving the chosen command contract.
+// `command.check.total`: complete check command work from after timing
+// session configuration through frontend outcome and message construction,
+// ending at the execution-to-presentation boundary before any terminal
+// rendering of diagnostics, summaries or timing output.
     CommandCheckTotal, "command.check.total", Basic, WallSpan, None, CheckOnly, Command,
         None, TimingAccountingRole::CommandTotal;
-// `command.dev.build_write`: one dev executor build and output write.
+// `command.dev.build_write`: one dev executor build and output write,
+// ending at the execution-to-presentation boundary before any terminal
+// rendering of the status line, warning cards or timing output.
     CommandDevBuildWrite, "command.dev.build_write", Basic, WallSpan, None, DevOnly, Command,
         None, TimingAccountingRole::CommandTotal;
 // `command.dev.cycle`: detailed full dev cycle, including state and
@@ -275,6 +281,26 @@ timing_metrics! {
 // `frontend.ast.finalise`: AstFinalizer production of the final AST.
     FrontendAstFinalise, "frontend.ast.finalise", Basic, NestedEvidence, Module, Universal, Frontend,
         Some(TimingParent::Metric(TimingMetric::FrontendAstTotal)), TimingAccountingRole::Evidence;
+// `frontend.ast.environment.constant_header_resolution`: detailed
+// constant-header semantic resolution inside the AST environment pass.
+    FrontendAstEnvironmentConstantHeaderResolution,
+        "frontend.ast.environment.constant_header_resolution", Detailed, NestedEvidence, Module, Universal, Frontend,
+        Some(TimingParent::Metric(TimingMetric::FrontendAstEnvironment)), TimingAccountingRole::Evidence;
+// `frontend.ast.emit.const_template_parse`: detailed const-template parsing
+// inside the AST emission pass.
+    FrontendAstEmitConstTemplateParse,
+        "frontend.ast.emit.const_template_parse", Detailed, NestedEvidence, Module, Universal, Frontend,
+        Some(TimingParent::Metric(TimingMetric::FrontendAstEmit)), TimingAccountingRole::Evidence;
+// `frontend.ast.emit.const_template_fold`: detailed const-template folding
+// inside the AST emission pass.
+    FrontendAstEmitConstTemplateFold,
+        "frontend.ast.emit.const_template_fold", Detailed, NestedEvidence, Module, Universal, Frontend,
+        Some(TimingParent::Metric(TimingMetric::FrontendAstEmit)), TimingAccountingRole::Evidence;
+// `frontend.ast.finalise.module_constant`: detailed module-constant
+// finalisation inside the AST finalisation pass.
+    FrontendAstFinaliseModuleConstant,
+        "frontend.ast.finalise.module_constant", Detailed, NestedEvidence, Module, Universal, Frontend,
+        Some(TimingParent::Metric(TimingMetric::FrontendAstFinalise)), TimingAccountingRole::Evidence;
 // `frontend.public_interface.project`: pre-HIR public-interface
 // projection.
     FrontendPublicInterfaceProject,
@@ -432,6 +458,12 @@ pub(crate) const fn benchmark_label(metric: TimingMetric) -> &'static str {
         TimingMetric::FrontendAstEnvironment => "AST environment",
         TimingMetric::FrontendAstEmit => "AST emit",
         TimingMetric::FrontendAstFinalise => "AST finalise",
+        TimingMetric::FrontendAstEnvironmentConstantHeaderResolution => {
+            "AST constant header resolution"
+        }
+        TimingMetric::FrontendAstEmitConstTemplateParse => "AST const-template parse",
+        TimingMetric::FrontendAstEmitConstTemplateFold => "AST const-template fold",
+        TimingMetric::FrontendAstFinaliseModuleConstant => "AST module-constant finalise",
         TimingMetric::FrontendPublicInterfaceProject => "project public interface",
         TimingMetric::FrontendHir => "HIR",
         TimingMetric::FrontendBorrowInitial => "initial borrow",
@@ -491,13 +523,10 @@ impl TimingMetric {
     }
 
     /// Whether this metric answers a command's reported total.
-    #[cfg(test)]
     pub(crate) const fn is_command_total(self) -> bool {
         matches!(
-            self,
-            TimingMetric::CommandBuildTotal
-                | TimingMetric::CommandCheckTotal
-                | TimingMetric::CommandDevBuildWrite
+            self.descriptor().accounting,
+            TimingAccountingRole::CommandTotal
         )
     }
 
@@ -523,44 +552,6 @@ impl TimingMetric {
             TimingCommandScope::BuildOrDev => {
                 matches!(command, TimingCommand::Build | TimingCommand::Dev)
             }
-        }
-    }
-
-    /// Return the detailed human prefix for metrics that historically exposed
-    /// an inline stage message. The label remains presentation-only and never
-    /// becomes part of the stable metric identity.
-    pub(crate) const fn detailed_prose_label(self) -> Option<&'static str> {
-        match self {
-            TimingMetric::FrontendPrepare => Some("Files Prepared in: "),
-            TimingMetric::FrontendBindHeaders => Some("Headers bound in: "),
-            TimingMetric::FrontendOrderDeclarations => Some("Dependency graph created in: "),
-            TimingMetric::FrontendPublicInterfaceProject => Some("Public interface built in: "),
-            TimingMetric::FrontendHir => Some("HIR generated in: "),
-            TimingMetric::FrontendBorrowInitial => Some("Borrow checking completed in: "),
-            TimingMetric::FrontendGeneratedMaterialise => {
-                Some("Generated functions materialized in: ")
-            }
-            TimingMetric::FrontendBorrowConverge => {
-                Some("Exact generated-call borrow checking completed in: ")
-            }
-            TimingMetric::FrontendGeneratedBorrowRecheck => {
-                Some("Generated borrow rechecks completed in: ")
-            }
-            TimingMetric::FrontendPublicInterfaceFinalise => {
-                Some("Public interface finalized in: ")
-            }
-            TimingMetric::FrontendAstTotal => Some("AST construction completed in: "),
-            TimingMetric::FrontendAstEnvironment => Some("AST/build environment completed in: "),
-            TimingMetric::FrontendAstEmit => Some("AST/emit nodes completed in: "),
-            TimingMetric::FrontendAstFinalise => Some("AST/finalize completed in: "),
-            TimingMetric::FrontendGeneratedAstTotal => {
-                Some("Generated AST construction completed in: ")
-            }
-            TimingMetric::FrontendGeneratedAstEmit => Some("Generated AST emission completed in: "),
-            TimingMetric::FrontendGeneratedAstFinalise => {
-                Some("Generated AST finalisation completed in: ")
-            }
-            _ => None,
         }
     }
 }
