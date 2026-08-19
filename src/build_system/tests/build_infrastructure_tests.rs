@@ -77,47 +77,33 @@ fn current_dir_guard_finish_returns_error_when_restore_fails() {
     let temp = tempfile::tempdir().expect("should create temp dir");
     let root = temp.path().to_path_buf();
 
-    // Use `test_restore()` to verify the override returns an error while
-    // keeping the mutex held, preventing parallel CWD interference. Then
-    // call `finish()` to verify it propagates the same error. `finish()`
-    // consumes the guard, but `previous` is already `None` from
-    // `test_restore()`, so `finish()` returns `Ok(())` — proving that
-    // `finish()` does not retry restoration after `test_restore()` took
-    // the previous path. The error itself is verified through
-    // `test_restore()`, which calls the same `restore_directory` function
-    // that `finish()` uses.
-    let mut guard = CurrentDirGuard::set_to(&root).with_restore_override(Box::new(|_path| {
+    // The injected restore override must actually restore to the supplied
+    // previous directory before returning the synthetic failure. This keeps the
+    // process CWD safe while still proving that `finish()` propagates the exact
+    // restore error. Because the override performs the real restoration, calling
+    // `finish()` directly is safe and lets us assert the returned error.
+    let guard = CurrentDirGuard::set_to(&root).with_restore_override(Box::new(|path| {
+        // Actually restore to the previous directory and prove it succeeded.
+        std::env::set_current_dir(path).expect("override should restore CWD to previous");
+        // Now return an error to simulate a restore failure for testing.
         Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
             "injected restore failure for testing",
         ))
     }));
 
-    // `test_restore()` calls the same restore path as `finish()` but keeps
-    // the lock held, preventing parallel-test CWD interference.
-    let (previous, restore_result) = guard.test_restore();
+    // `finish()` consumes the guard and calls the restore override, which
+    // performed the real restoration and then returned the injected error.
+    // Assert that exact returned error.
+    let finish_result = guard.finish();
     assert!(
-        restore_result.is_err(),
-        "restore should return an error when the override fails"
+        finish_result.is_err(),
+        "finish() should return an error when restore fails"
     );
-    let error = restore_result.unwrap_err();
+    let error = finish_result.expect_err("finish() should return the injected restore error");
     assert!(
         error.to_string().contains("injected restore failure"),
         "error should contain the injected message: {error}"
-    );
-
-    // Manually restore CWD to `previous` while the lock is still held
-    // (guard has not been consumed yet).
-    std::env::set_current_dir(&previous).expect("manual restore should work");
-
-    // `finish()` consumes the guard and releases the mutex. Since
-    // `test_restore()` already took `previous`, `finish()` has nothing to
-    // restore and must return `Ok(())`. This verifies that `finish()` does
-    // not retry restoration after `test_restore()`.
-    let finish_result = guard.finish();
-    assert!(
-        finish_result.is_ok(),
-        "finish() should not retry after test_restore() took previous"
     );
 }
 

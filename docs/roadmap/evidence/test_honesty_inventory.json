@@ -25,8 +25,8 @@
       "code": "temp_dir_uncreated_paths",
       "severity": "hard",
       "description": "test_support::temp_dir returned uncreated paths; callers had to create_dir_all manually",
-      "disposition": "fixed: renamed to unused_temp_path with non-existence contract; ~240 callers migrated to tempfile::tempdir() with owned cleanup; remaining ~229 uses still follow unused_temp_path+create_dir_all pattern and need migration to tempfile::tempdir() or tuple-return helper changes",
-      "status": "in_progress"
+      "disposition": "fixed: renamed to unused_temp_path with non-existence contract; ALL created-workspace fixtures migrated to tempfile::tempdir() with owned cleanup; remaining 3 uses (validate_dangerous_project, output_defaults, output_overrides) are genuine uncreated-path contracts",
+      "status": "resolved"
     },
     {
       "code": "hardcoded_tmp_paths",

@@ -72,17 +72,6 @@ impl CurrentDirGuard {
         self.restore_override = Some(f);
         self
     }
-
-    /// Test-only: attempt restoration and return the previous path and result,
-    /// without consuming self. The caller must manually restore CWD afterward
-    /// since `previous` has been taken and `Drop` will not retry. The lock
-    /// remains held, which is critical for avoiding parallel-test interference.
-    #[cfg(test)]
-    fn test_restore(&mut self) -> (PathBuf, Result<(), std::io::Error>) {
-        let previous = self.previous.take().expect("previous should be set");
-        let result = restore_directory(&previous, &self.restore_override);
-        (previous, result)
-    }
 }
 
 /// Restore the working directory, using the override if set (test seam).

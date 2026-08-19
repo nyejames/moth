@@ -16,7 +16,6 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_tests::test_fs::assert_path_missing;
-use crate::compiler_tests::test_support::unused_temp_path;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 #[cfg(feature = "timers")]
 use crate::timing::{TimingMetric, start_benchmark_collection};
@@ -89,7 +88,8 @@ fn successful_check_finishes_bootstrap_before_frontend() {
 #[test]
 fn config_ast_timers_use_dedicated_identities() {
     let _test_guard = crate::timing::lock_instrumentation_tests();
-    let root = unused_temp_path("check_config_timer_stage_boundaries");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let source_root = root.join("src");
     fs::create_dir_all(&source_root).expect("should create source root");
     fs::write(root.join("config.moth"), "entry_root #= \"src\"\n")
@@ -110,8 +110,6 @@ fn config_ast_timers_use_dedicated_identities() {
             TimingMetric::ConfigAstFinalise,
         ],
     );
-
-    fs::remove_dir_all(&root).expect("should remove temporary project root");
 }
 
 #[cfg(feature = "timers")]
@@ -137,7 +135,8 @@ fn assert_timing_sequence(
 
 #[test]
 fn check_retains_source_package_warning() {
-    let root = unused_temp_path("check_source_package_warning");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let package = root.join("src/warnpkg");
     let src = root.join("src");
     fs::create_dir_all(&package).expect("should create package root");
@@ -162,8 +161,6 @@ fn check_retains_source_package_warning() {
         outcome.messages.warning_count() >= 1,
         "check should retain the source-package warning"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[cfg(unix)]
@@ -171,7 +168,7 @@ fn check_retains_source_package_warning() {
 fn check_rejects_symlinked_directory_output_roots_before_frontend_work() {
     use std::os::unix::fs::symlink;
 
-    for (case_name, target_name, expected_reason) in [
+    for (_case_name, target_name, expected_reason) in [
         (
             "sibling",
             "outside",
@@ -183,7 +180,8 @@ fn check_rejects_symlinked_directory_output_roots_before_frontend_work() {
             InvalidOutputFolderReason::InsideOrEqualToEntryRoot,
         ),
     ] {
-        let root = unused_temp_path(&format!("check_output_symlink_{case_name}"));
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let source_root = root.join("src");
         let _temp1 = tempfile::tempdir().expect("should create temp dir");
         let outside = _temp1.path().to_path_buf();
@@ -223,7 +221,6 @@ fn check_rejects_symlinked_directory_output_roots_before_frontend_work() {
         assert_path_missing(&outside.join("index.html"));
         assert_path_missing(&source_root.join("index.html"));
 
-        fs::remove_dir_all(&root).expect("should remove project root");
         fs::remove_dir_all(&outside).expect("should remove target root");
     }
 }

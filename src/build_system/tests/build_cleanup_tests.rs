@@ -787,8 +787,9 @@ fn foreign_profile_in_recoverable_v4_manifest_fails_without_mutation() {
         ),
     ];
 
-    for (case_name, manifest_text) in manifest_variants {
-        let root = unused_temp_path(&format!("cleanup_foreign_recovery_{case_name}"));
+    for (_case_name, manifest_text) in manifest_variants {
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let project_dir = root.join("project");
         let output_root = project_dir.join("dev");
         fs::create_dir_all(&output_root).expect("should create output root");
@@ -831,14 +832,13 @@ fn foreign_profile_in_recoverable_v4_manifest_fails_without_mutation() {
             fs::read(output_root.join(BUILD_MANIFEST_FILENAME)).expect("manifest should remain"),
             previous_manifest
         );
-
-        fs::remove_dir_all(&root).expect("should remove temp dir");
     }
 }
 
 #[test]
 fn foreign_profile_with_invalid_utf8_path_record_fails_without_mutation() {
-    let root = unused_temp_path("cleanup_foreign_invalid_utf8_path");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let project_dir = root.join("project");
     let output_root = project_dir.join("dev");
     fs::create_dir_all(&output_root).expect("should create output root");
@@ -881,8 +881,6 @@ fn foreign_profile_with_invalid_utf8_path_record_fails_without_mutation() {
         fs::read(output_root.join(BUILD_MANIFEST_FILENAME)).expect("manifest should remain"),
         previous_manifest
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
@@ -1016,12 +1014,9 @@ fn read_build_manifest_rejects_malformed_v4_metadata() {
     );
 }
 
-fn assert_foreign_manifest_owner_fails_without_mutation(
-    test_name: &str,
-    builder: &str,
-    profile: &str,
-) {
-    let root = unused_temp_path(test_name);
+fn assert_foreign_manifest_owner_fails_without_mutation(builder: &str, profile: &str) {
+    let _temp = tempfile::tempdir().expect("should create foreign manifest temp dir");
+    let root = _temp.path().to_path_buf();
     let project_dir = root.join("project");
     let output_root = project_dir.join("dev");
     fs::create_dir_all(&output_root).expect("should create output root");
@@ -1077,26 +1072,16 @@ fn assert_foreign_manifest_owner_fails_without_mutation(
         fs::read(output_root.join(BUILD_MANIFEST_FILENAME)).expect("manifest should remain"),
         previous_manifest
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn unknown_v4_builder_fails_without_mutation() {
-    assert_foreign_manifest_owner_fails_without_mutation(
-        "cleanup_unknown_v4_builder_no_mutation",
-        "foreign-builder",
-        "dev",
-    );
+    assert_foreign_manifest_owner_fails_without_mutation("foreign-builder", "dev");
 }
 
 #[test]
 fn unknown_v4_profile_fails_without_mutation() {
-    assert_foreign_manifest_owner_fails_without_mutation(
-        "cleanup_unknown_v4_profile_no_mutation",
-        "html",
-        "future-profile",
-    );
+    assert_foreign_manifest_owner_fails_without_mutation("html", "future-profile");
 }
 
 #[test]
@@ -1377,7 +1362,8 @@ fn matching_v4_owner_performs_stale_cleanup() {
 fn stale_cleanup_tracks_canonical_final_file_symlink_destination() {
     use std::os::unix::fs::symlink;
 
-    let root = unused_temp_path("canonical_file_symlink_cleanup");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let project_dir = root.join("project");
     let output_root = project_dir.join("dev");
     fs::create_dir_all(&output_root).expect("should create output root");
@@ -1422,8 +1408,6 @@ fn stale_cleanup_tracks_canonical_final_file_symlink_destination() {
             .is_symlink()
     );
     assert!(output_root.join("index.html").exists());
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[cfg(unix)]
@@ -1431,7 +1415,8 @@ fn stale_cleanup_tracks_canonical_final_file_symlink_destination() {
 fn stale_cleanup_does_not_follow_retargeted_directory_aliases() {
     use std::os::unix::fs::symlink;
 
-    let root = unused_temp_path("canonical_directory_symlink_cleanup");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let project_dir = root.join("project");
     let output_root = project_dir.join("dev");
     let old_target = output_root.join("old_target");
@@ -1475,8 +1460,6 @@ fn stale_cleanup_does_not_follow_retargeted_directory_aliases() {
         fs::read(new_target.join("old.html")).expect("new target should remain"),
         b"new target"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]

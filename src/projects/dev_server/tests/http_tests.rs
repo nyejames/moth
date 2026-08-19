@@ -1,7 +1,6 @@
 //! Tests for dev-server HTTP routing during successful and failed builds.
 
 use super::{PreparedResponse, handle_connection_with_timeouts, prepare_static_response};
-use crate::compiler_tests::test_support::unused_temp_path;
 use crate::projects::dev_server::state::{BuildState, DevServerState};
 use std::fs;
 use std::io::{Read, Write};
@@ -35,7 +34,8 @@ fn configure_failed_build_state(
 
 #[test]
 fn nested_html_request_uses_stored_error_page_during_failed_build() {
-    let root = unused_temp_path("nested_html");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let output_dir = root.join("dev");
     fs::create_dir_all(output_dir.join("docs/basics")).expect("should create docs output dir");
     fs::write(
@@ -66,13 +66,12 @@ fn nested_html_request_uses_stored_error_page_during_failed_build() {
             panic!("nested html route should not redirect in this scenario")
         }
     }
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn failed_build_keeps_css_js_and_image_assets_reachable() {
-    let root = unused_temp_path("assets");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let output_dir = root.join("dev");
     fs::create_dir_all(output_dir.join("styles")).expect("should create styles dir");
     fs::create_dir_all(output_dir.join("scripts")).expect("should create scripts dir");
@@ -124,13 +123,12 @@ fn failed_build_keeps_css_js_and_image_assets_reachable() {
         PreparedResponse::Text { .. } => panic!("image request should keep serving the asset"),
         PreparedResponse::Redirect { .. } => panic!("image request should not redirect"),
     }
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn failed_build_traversal_request_still_returns_not_found() {
-    let root = unused_temp_path("traversal");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let output_dir = root.join("dev");
     fs::create_dir_all(&output_dir).expect("should create output dir");
     let build_state = configure_failed_build_state(
@@ -152,13 +150,12 @@ fn failed_build_traversal_request_still_returns_not_found() {
         PreparedResponse::File { .. } => panic!("traversal request should return not found"),
         PreparedResponse::Redirect { .. } => panic!("traversal request should not redirect"),
     }
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn root_request_uses_failed_build_error_page_without_entry_page() {
-    let root = unused_temp_path("root_error");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let output_dir = root.join("dev");
     fs::create_dir_all(&output_dir).expect("should create output dir");
     let build_state =
@@ -177,13 +174,12 @@ fn root_request_uses_failed_build_error_page_without_entry_page() {
         PreparedResponse::File { .. } => panic!("root request should render the failed-build page"),
         PreparedResponse::Redirect { .. } => panic!("root request should not redirect"),
     }
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn redirects_are_returned_even_during_failed_build() {
-    let root = unused_temp_path("failed_build_redirect");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let output_dir = root.join("dev");
     fs::create_dir_all(output_dir.join("about")).expect("should create about output dir");
     fs::write(
@@ -209,8 +205,6 @@ fn redirects_are_returned_even_during_failed_build() {
             panic!("canonical page redirects should run before failed-build html substitution")
         }
     }
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]

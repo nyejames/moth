@@ -14,7 +14,6 @@ use crate::compiler_frontend::style_directives::{
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TemplateBodyMode;
-use crate::compiler_tests::test_support::unused_temp_path;
 use crate::projects::settings::{CONFIG_FILE_NAME, Config, ProjectConfigError};
 use std::fs;
 
@@ -157,7 +156,7 @@ fn resolve_dev_runtime_paths_use_configured_dev_folder_for_directory_projects() 
 fn resolve_dev_runtime_paths_rejects_symlinked_output_roots() {
     use std::os::unix::fs::symlink;
 
-    for (case_name, target_name, expected_reason) in [
+    for (_case_name, target_name, expected_reason) in [
         (
             "sibling",
             "outside",
@@ -169,7 +168,8 @@ fn resolve_dev_runtime_paths_rejects_symlinked_output_roots() {
             InvalidOutputFolderReason::InsideOrEqualToEntryRoot,
         ),
     ] {
-        let root = unused_temp_path(&format!("dev_runtime_output_symlink_{case_name}"));
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let source_root = root.join("src");
         let _temp1 = tempfile::tempdir().expect("should create temp dir");
         let outside = _temp1.path().to_path_buf();
@@ -203,7 +203,6 @@ fn resolve_dev_runtime_paths_rejects_symlinked_output_roots() {
             )
         }));
 
-        fs::remove_dir_all(&root).expect("should remove project root");
         fs::remove_dir_all(&outside).expect("should remove target root");
     }
 }

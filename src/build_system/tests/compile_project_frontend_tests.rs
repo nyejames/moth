@@ -25,7 +25,6 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_tests::test_diagnostics::assert_exact_infrastructure_error;
-use crate::compiler_tests::test_support::unused_temp_path;
 use crate::projects::settings::Config;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -616,7 +615,8 @@ fn ast_aggregate_metrics_are_not_double_recorded_with_detailed_timers() {
 #[test]
 fn directory_graph_retains_diagnostics_from_later_independent_source_packages() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = unused_temp_path("graph_outcomes_source_package_diagnostics");
+    let _tmp_dir = tempfile::tempdir().expect("should create temp dir");
+    let dir = _tmp_dir.path().to_path_buf();
     let first_package = dir.join("packages/first");
     let second_package = dir.join("packages/second");
     fs::create_dir_all(&first_package).expect("should create first package");
@@ -685,14 +685,13 @@ fn directory_graph_retains_diagnostics_from_later_independent_source_packages() 
             .any(|path| path.ends_with("packages/second/@mod.moth")),
         "later independent package should still compile: {diagnosed_paths:?}"
     );
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
 #[test]
 fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_errors() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = unused_temp_path("graph_outcomes_package_diagnosed_blocks_project");
+    let _tmp_dir = tempfile::tempdir().expect("should create temp dir");
+    let dir = _tmp_dir.path().to_path_buf();
     let package = dir.join("packages/broken");
     let src = dir.join("src");
     fs::create_dir_all(&package).expect("should create package root");
@@ -755,8 +754,6 @@ fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_
         1,
         "the package diagnostic should render once"
     );
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
 #[test]
@@ -2916,7 +2913,8 @@ fn diagnosed_provider_retains_independent_successful_module() {
 #[test]
 fn source_package_warning_retained_by_frontend_outcome() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = unused_temp_path("source_package_warning_frontend_outcome");
+    let _tmp_dir = tempfile::tempdir().expect("should create temp dir");
+    let dir = _tmp_dir.path().to_path_buf();
     let package = dir.join("packages/warnpkg");
     let src = dir.join("src");
     fs::create_dir_all(&package).expect("should create package root");
@@ -2969,6 +2967,4 @@ fn source_package_warning_retained_by_frontend_outcome() {
         messages.warning_count() >= 1,
         "render boundary should retain the source-package warning"
     );
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
 }

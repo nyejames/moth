@@ -50,7 +50,6 @@ use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageR
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::{DependencyShellId, FileId};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_tests::test_support::unused_temp_path;
 use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -868,7 +867,8 @@ fn synthetic_diagnosed_preparation_is_not_consumed_again() {
 
 #[test]
 fn direct_selection_resolves_cross_module_child_facade() {
-    let root = unused_temp_path("direct_selection_cross_module_child_facade");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(src.join("child")).expect("should create child module dir");
     fs::write(
@@ -916,13 +916,12 @@ fn direct_selection_resolves_cross_module_child_facade() {
             }
         },
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn direct_selection_resolves_source_package_facade() {
-    let root = unused_temp_path("direct_selection_source_package_facade");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     let package_root = root.join("builder/helper");
     fs::create_dir_all(&src).expect("should create src dir");
@@ -975,8 +974,6 @@ fn direct_selection_resolves_source_package_facade() {
             }
         },
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 /// Discover modules and return the populated project module graph plus the shared string table
@@ -1101,7 +1098,8 @@ fn first_error_diagnostic(messages: &CompilerMessages) -> &CompilerDiagnostic {
 
 #[test]
 fn source_tree_index_collects_one_scan_and_applies_skip_policy() {
-    let root = unused_temp_path("source_tree_index_outputs");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let entry_root = root.clone();
     let nested = entry_root.join("nested");
     fs::create_dir_all(&nested).expect("should create nested module directory");
@@ -1183,13 +1181,12 @@ fn source_tree_index_collects_one_scan_and_applies_skip_policy() {
             .unwrap()
     );
     assert_eq!(root_directories[1], "nested");
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn source_tree_index_ignores_collision_in_fixed_skipped_directory() {
-    let root = unused_temp_path("source_tree_index_fixed_skipped_collision");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let entry_root = root.clone();
 
     // Fixed-skipped directory with collision-shaped contents. Configured output directories
@@ -1227,8 +1224,6 @@ fn source_tree_index_ignores_collision_in_fixed_skipped_directory() {
     let graph = super::project_module_graph::ProjectModuleGraph::from_source_tree_index(&index);
     assert_eq!(graph.entry_modules().len(), 2);
     assert_eq!(index.stats().dirs_skipped, 1);
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
@@ -1310,7 +1305,8 @@ fn source_tree_index_detects_collision_in_non_skipped_directory() {
 
 #[test]
 fn bounded_module_roots_for_single_file_indexes_nested_roots_with_ignored_directories() {
-    let root = unused_temp_path("bounded_single_file_nested_ignored");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let module_dir = root.join("module");
     let nested = module_dir.join("nested");
     fs::create_dir_all(&nested).expect("should create nested module");
@@ -1345,13 +1341,12 @@ fn bounded_module_roots_for_single_file_indexes_nested_roots_with_ignored_direct
     assert_eq!(root_directories.len(), 2);
     assert!(root_directories.contains(&"module"));
     assert!(root_directories.contains(&"nested"));
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn bounded_module_roots_for_single_file_rejects_dependency_name_collisions() {
-    let root = unused_temp_path("bounded_single_file_collision");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let module_dir = root.join("module");
     fs::create_dir_all(module_dir.join("helper")).expect("should create helper directory");
     fs::write(module_dir.join("helper.moth"), "helper #= 1\n")
@@ -1376,13 +1371,12 @@ fn bounded_module_roots_for_single_file_rejects_dependency_name_collisions() {
         first_invalid_config_reason(&messages),
         InvalidConfigReason::SourceFileFolderCollision { .. }
     ));
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn source_tree_index_rejects_duplicate_normal_module_root_files() {
-    let root = unused_temp_path("source_tree_index_duplicate_roots");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let entry_root = root.join("src");
     fs::create_dir_all(&entry_root).expect("should create entry root");
     fs::write(entry_root.join("@home.moth"), "").expect("should write page root");
@@ -1420,8 +1414,6 @@ fn source_tree_index_rejects_duplicate_normal_module_root_files() {
         string_table.intern(&fs::canonicalize(&entry_root).unwrap().display().to_string())
     );
     assert_eq!(candidates.len(), 2);
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[derive(Debug)]
@@ -2028,7 +2020,8 @@ fn rejects_project_local_config_dependency_even_when_module_root_exists() {
 
 #[test]
 fn rejects_builder_config_dependency_without_discovering_the_package_root() {
-    let root = unused_temp_path("config_builder_dependency_rejected_before_discovery");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let package_root = root.join("builder/defaults");
     fs::create_dir_all(&package_root).expect("should create Builder package folder");
     fs::write(package_root.join("@first.moth"), "value #= 1\n")
@@ -2068,8 +2061,6 @@ fn rejects_builder_config_dependency_without_discovering_the_package_root() {
         "unexpected diagnostic payload: {:?}",
         diagnostic.payload
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
@@ -2320,7 +2311,8 @@ fn accepts_config_const_record_field_projection() {
 
 #[test]
 fn malformed_dependency_path_keeps_precise_location_during_module_discovery() {
-    let root = unused_temp_path("malformed_dependency_path_location");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
     fs::write(
@@ -2369,8 +2361,6 @@ fn malformed_dependency_path_keeps_precise_location_during_module_discovery() {
         "unexpected diagnostic payload: {:?}",
         diagnostic.payload
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
@@ -2413,7 +2403,8 @@ fn config_dependency_parse_failure_keeps_precise_location_in_compiler_messages()
 
 #[test]
 fn discover_modules_uses_reachable_files_only() {
-    let root = unused_temp_path("reachable_only");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(src.join("libs")).expect("should create libs folder");
     fs::create_dir_all(src.join("styles")).expect("should create styles folder");
@@ -2462,13 +2453,12 @@ fn discover_modules_uses_reachable_files_only() {
     assert!(page_paths.contains("@page.moth"));
     assert!(page_paths.contains("html.moth"));
     assert!(!page_paths.contains("outdated.moth"));
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn discover_modules_resolves_relative_child_dependencies() {
-    let root = unused_temp_path("relative_imports");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(src.join("components")).expect("should create components folder");
 
@@ -2512,13 +2502,12 @@ fn discover_modules_resolves_relative_child_dependencies() {
     assert!(discovered.contains("@page.moth"));
     assert!(discovered.contains("widget.moth"));
     assert!(discovered.contains("common.moth"));
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn dependency_clause_keeps_one_cross_module_edge_for_multiple_selections() {
-    let root = unused_temp_path("dependency_clause_multiple_selections");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(src.join("child")).expect("should create child module dir");
 
@@ -2572,13 +2561,12 @@ fn dependency_clause_keeps_one_cross_module_edge_for_multiple_selections() {
         ],
         "one authored clause must publish one provider graph edge"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn module_root_relative_dependency_resolves_from_the_entry_root() {
-    let root = unused_temp_path("entry_root_fallback");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     let lib = root.join("lib");
     fs::create_dir_all(src.join("helpers")).expect("should create source helpers");
@@ -2633,13 +2621,12 @@ fn module_root_relative_dependency_resolves_from_the_entry_root() {
         !discovered_paths.contains(&package_theme),
         "module-root-relative resolution must not pull in an unrelated same-stem package file"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn synthetic_module_root_resolution_prefers_owning_nested_module() {
-    let root = unused_temp_path("synthetic_nested_module_root_precedence");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     let child = src.join("child");
     fs::create_dir_all(&child).expect("should create nested module directory");
@@ -2710,13 +2697,12 @@ fn synthetic_module_root_resolution_prefers_owning_nested_module() {
         !discovered_paths.contains(&entry_namesake),
         "an entry-root namesake must not shadow an owning nested module dependency"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn discover_all_modules_finds_normal_roots_across_multiple_directories() {
-    let root = unused_temp_path("multiple_normal_roots");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(src.join("nested")).expect("should create nested folder");
 
@@ -2768,8 +2754,6 @@ fn discover_all_modules_finds_normal_roots_across_multiple_directories() {
     assert!(entry_names.contains("@page.moth"));
     assert!(entry_names.contains("@layout.moth"));
     assert!(entry_names.contains("@lib.moth"));
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
@@ -3616,7 +3600,8 @@ fn js_file_with_same_stem_as_folder_does_not_trigger_collision() {
 
 #[test]
 fn unsupported_js_import_without_provider_reports_moth_import_0021() {
-    let root = unused_temp_path("unsupported_js_import");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
 
@@ -3670,13 +3655,12 @@ fn unsupported_js_import_without_provider_reports_moth_import_0021() {
             diagnostic.payload
         );
     }
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn explicit_moth_extension_still_reports_moth_import_0020() {
-    let root = unused_temp_path("explicit_moth_extension");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
 
@@ -3724,13 +3708,12 @@ fn explicit_moth_extension_still_reports_moth_import_0020() {
         "unexpected diagnostic payload: {:?}",
         diagnostic.payload
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn unsupported_moth_template_dependency_without_builder_support_reports_moth_import_0025() {
-    let root = unused_temp_path("unsupported_moth_template_dependency");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
 
@@ -3769,13 +3752,12 @@ fn unsupported_moth_template_dependency_without_builder_support_reports_moth_imp
         &diagnostic.payload,
         DiagnosticPayload::UnsupportedSourceFileKind { .. }
     ));
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn direct_moth_template_extension_dependency_reports_moth_import_0024() {
-    let root = unused_temp_path("direct_moth_template_extension");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
 
@@ -3817,13 +3799,12 @@ fn direct_moth_template_extension_dependency_reports_moth_import_0024() {
         &diagnostic.payload,
         DiagnosticPayload::ExplicitSourceExtension { .. }
     ));
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn moth_template_files_are_reachable_without_dependency_scanning() {
-    let root = unused_temp_path("moth_template_no_dependency_scanning");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
 
@@ -3859,13 +3840,12 @@ fn moth_template_files_are_reachable_without_dependency_scanning() {
     assert!(input_paths.contains("@page.moth"));
     assert!(input_paths.contains("intro.mtf"));
     assert!(modules[0].prepared.contains_moth_template);
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn reachable_moth_template_queues_same_directory_root_file() {
-    let root = unused_temp_path("moth_template_same_directory_root");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     let docs = src.join("docs");
     fs::create_dir_all(&docs).expect("should create docs dir");
@@ -3932,13 +3912,12 @@ fn reachable_moth_template_queues_same_directory_root_file() {
     assert!(docs_input_names.contains("intro.mtf"));
     assert!(docs_input_names.contains("@docs.moth"));
     assert!(docs_module.prepared.contains_moth_template);
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn unreferenced_moth_template_file_under_entry_root_is_ignored() {
-    let root = unused_temp_path("unreferenced_moth_template_ignored");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
 
@@ -3970,13 +3949,12 @@ fn unreferenced_moth_template_file_under_entry_root_is_ignored() {
 
     assert_eq!(module_prepared_source_names(modules[0]), vec!["@page.moth"]);
     assert!(!modules[0].prepared.contains_moth_template);
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn extensionless_moth_dependency_and_virtual_package_dependency_still_work() {
-    let root = unused_temp_path("extensionless_and_virtual");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
 
@@ -4018,13 +3996,12 @@ fn extensionless_moth_dependency_and_virtual_package_dependency_still_work() {
 
     assert!(discovered.contains("@page.moth"));
     assert!(discovered.contains("helper.moth"));
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn indexed_module_inventory_includes_referenced_markdown_without_scanning_its_body() {
-    let root = unused_temp_path("markdown_no_dependency_scanning");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
 
@@ -4062,13 +4039,12 @@ fn indexed_module_inventory_includes_referenced_markdown_without_scanning_its_bo
     assert!(input_paths.contains("intro.md"));
 
     assert!(!modules[0].prepared.contains_moth_template);
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn indexed_module_inventory_excludes_unrelated_module_root_from_markdown_owner() {
-    let root = unused_temp_path("markdown_no_unrelated_module_root");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(src.join("other")).expect("should create other module dir");
 
@@ -4109,13 +4085,12 @@ fn indexed_module_inventory_excludes_unrelated_module_root_from_markdown_owner()
     assert!(!input_paths.contains("@other.moth"));
 
     assert!(!modules[0].prepared.contains_moth_template);
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn indexed_module_inventory_ignores_unreferenced_markdown_file() {
-    let root = unused_temp_path("unreferenced_markdown_ignored");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
 
@@ -4148,13 +4123,12 @@ fn indexed_module_inventory_ignores_unreferenced_markdown_file() {
 
     assert_eq!(module_prepared_source_names(modules[0]), vec!["@page.moth"]);
     assert!(!modules[0].prepared.contains_moth_template);
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn indexed_module_inventory_rejects_direct_markdown_extension_dependency() {
-    let root = unused_temp_path("direct_markdown_extension");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
 
@@ -4209,13 +4183,12 @@ fn indexed_module_inventory_rejects_direct_markdown_extension_dependency() {
             diagnostic.payload
         );
     }
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn indexed_module_inventory_rejects_unsupported_markdown_dependency() {
-    let root = unused_temp_path("unsupported_markdown_dependency");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
 
@@ -4267,13 +4240,12 @@ fn indexed_module_inventory_rejects_unsupported_markdown_dependency() {
             diagnostic.payload
         );
     }
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn stage0_reuses_scanned_moth_source_when_assembling_input_files() {
-    let root = unused_temp_path("stage0_reuses_scanned_moth_source");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
 
@@ -4317,13 +4289,12 @@ fn stage0_reuses_scanned_moth_source_when_assembling_input_files() {
         module_prepared_source_names(modules[0]),
         vec!["@page.moth", "helper.moth"]
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn project_source_ids_are_prepared_into_owned_inputs_without_a_retained_store() {
-    let root = unused_temp_path("project_direct_source_input");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
     fs::write(
@@ -4394,13 +4365,12 @@ fn project_source_ids_are_prepared_into_owned_inputs_without_a_retained_store() 
     );
     assert!(matches!(first, PreparedSourceInput::Moth { .. }));
     assert!(matches!(second, PreparedSourceInput::Moth { .. }));
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn stage0_loads_asset_sources_and_preserves_deterministic_input_order() {
-    let root = unused_temp_path("stage0_asset_source_loading_order");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
 
@@ -4435,8 +4405,6 @@ fn stage0_loads_asset_sources_and_preserves_deterministic_input_order() {
         vec!["@page.moth", "intro.mtf", "notes.md"]
     );
     assert!(modules[0].prepared.contains_moth_template);
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
@@ -4519,7 +4487,8 @@ fn stage0_missing_source_load_preserves_file_error_shape() {
 
 #[test]
 fn provider_backed_imports_are_resolved_without_becoming_source_inputs() {
-    let root = unused_temp_path("provider_dependencies_not_source_inputs");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
 
@@ -4558,13 +4527,12 @@ fn provider_backed_imports_are_resolved_without_becoming_source_inputs() {
 
     assert_eq!(calls.load(Ordering::Relaxed), 1);
     assert_eq!(module_prepared_source_names(modules[0]), vec!["@page.moth"]);
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn synthetic_nested_module_provider_resolves_from_owning_module_root() {
-    let root = unused_temp_path("synthetic_nested_module_provider_root");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     let feature = src.join("feature");
     fs::create_dir_all(&feature).expect("should create nested module");
@@ -4633,8 +4601,6 @@ fn synthetic_nested_module_provider_resolves_from_owning_module_root() {
         vec![nested_provider],
         "prefix-free providers must resolve from the consuming file's owning module root"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
@@ -4643,7 +4609,8 @@ fn synthetic_nested_provider_keys_do_not_collide_with_entry_relative_spellings()
         "@feature/drawing.js as nested\n@drawing.js as local\n",
         "@drawing.js as local\n@feature/drawing.js as nested\n",
     ] {
-        let root = unused_temp_path("synthetic_nested_provider_key_collision");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
         let feature = src.join("feature");
         fs::create_dir_all(feature.join("feature")).expect("should create nested provider folder");
@@ -4708,14 +4675,13 @@ fn synthetic_nested_provider_keys_do_not_collide_with_entry_relative_spellings()
             local.package_id, nested.package_id,
             "accepted provider spellings must retain distinct packages in either clause order"
         );
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 }
 
 #[test]
 fn canonical_multi_entry_discovery_is_deterministic_and_reads_each_source_once() {
-    let root = unused_temp_path("canonical_multi_entry_deterministic");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(src.join("page_a")).expect("should create page_a module");
     fs::create_dir_all(src.join("page_b")).expect("should create page_b module");
@@ -4806,13 +4772,12 @@ fn canonical_multi_entry_discovery_is_deterministic_and_reads_each_source_once()
         module_b_inputs,
         vec!["@pageB.moth", "b_only.moth", "helper.moth"]
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn canonical_multi_entry_discovery_calls_provider_once() {
-    let root = unused_temp_path("canonical_provider_multi_entry");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(src.join("page_a")).expect("should create page_a module");
     fs::create_dir_all(src.join("page_b")).expect("should create page_b module");
@@ -4867,13 +4832,12 @@ fn canonical_multi_entry_discovery_calls_provider_once() {
         module_prepared_source_names(modules[1]),
         vec!["@pageB.moth"]
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn canonical_provider_discovery_reads_and_tokenizes_each_source_once() {
-    let root = unused_temp_path("canonical_provider_prepare_once");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(src.join("page_a")).expect("should create page_a module");
     fs::create_dir_all(src.join("page_b")).expect("should create page_b module");
@@ -4953,13 +4917,12 @@ fn canonical_provider_discovery_reads_and_tokenizes_each_source_once() {
             .iter()
             .all(|module| !module.prepared.contains_moth_template)
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn unsupported_external_extension_in_multi_entry_preserves_diagnostic_shape() {
-    let root = unused_temp_path("unsupported_extension_multi_entry");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(src.join("page_a")).expect("should create page_a module");
     fs::create_dir_all(src.join("page_b")).expect("should create page_b module");
@@ -5017,13 +4980,12 @@ fn unsupported_external_extension_in_multi_entry_preserves_diagnostic_shape() {
             diagnostic.payload
         );
     }
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn directory_provider_dependency_calls_provider_once_for_repeated_physical_source() {
-    let root = unused_temp_path("provider_exact_once_repeated_source");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
 
@@ -5066,13 +5028,12 @@ fn directory_provider_dependency_calls_provider_once_for_repeated_physical_sourc
         1,
         "provider must run exactly once for a repeated physical provider source"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn directory_provider_dependency_rejects_cross_module_target() {
-    let root = unused_temp_path("provider_cross_module_rejected");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     let feature = src.join("feature");
     fs::create_dir_all(&feature).expect("should create feature module");
@@ -5139,13 +5100,12 @@ fn directory_provider_dependency_rejects_cross_module_target() {
         "expected CrossModuleImportNotExported payload, got {:?}",
         diagnostic.payload
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn directory_provider_dependency_missing_target_reports_structured_diagnostic_without_path_probe() {
-    let root = unused_temp_path("provider_missing_target_no_probe");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
 
@@ -5214,13 +5174,12 @@ fn directory_provider_dependency_missing_target_reports_structured_diagnostic_wi
         "expected missing import target diagnostic, got {:?}",
         diagnostic
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn canonical_discovery_preserves_cross_module_root_queuing() {
-    let root = unused_temp_path("canonical_cross_module_root");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     let module_a = src.join("module_a");
     let module_b = module_a.join("module_b");
@@ -5290,13 +5249,12 @@ fn canonical_discovery_preserves_cross_module_root_queuing() {
             && !module_b_inputs.contains(&"impl.moth".to_string()),
         "the queued provider module must retain its root without making an unreferenced private file semantic"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn scoped_support_package_is_visible_by_name_to_owner_and_sibling_descendant() {
-    let root = unused_temp_path("indexed_namespace_support_visibility");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     let support = src.join("markdown");
     let pages = src.join("pages");
@@ -5335,13 +5293,12 @@ fn scoped_support_package_is_visible_by_name_to_owner_and_sibling_descendant() {
         3,
         "both normal modules and the scoped support provider should receive canonical jobs"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn recognized_source_stem_collision_is_ambiguous_without_extension_precedence() {
-    let root = unused_temp_path("indexed_namespace_source_stem_collision");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create source root");
 
@@ -5376,13 +5333,12 @@ fn recognized_source_stem_collision_is_ambiguous_without_extension_precedence() 
         first_error_diagnostic(&messages).kind.code(),
         "MOTH-IMPORT-0006"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn binding_package_and_local_module_prefix_collision_is_ambiguous() {
-    let root = unused_temp_path("indexed_namespace_binding_package_collision");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     let local_core = src.join("core");
     fs::create_dir_all(&local_core).expect("should create local core module");
@@ -5414,13 +5370,12 @@ fn binding_package_and_local_module_prefix_collision_is_ambiguous() {
         first_error_diagnostic(&messages).kind.code(),
         "MOTH-IMPORT-0006"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn directory_source_dependency_rejects_obsolete_relative_form() {
-    let root = unused_temp_path("indexed_namespace_relative_dependency_rejected");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create source root");
 
@@ -5450,13 +5405,12 @@ fn directory_source_dependency_rejects_obsolete_relative_form() {
         first_error_diagnostic(&messages).kind.code(),
         "MOTH-IMPORT-0016"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn direct_child_private_path_bypass_is_rejected() {
-    let root = unused_temp_path("indexed_namespace_child_private_bypass");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     let child = src.join("child");
     fs::create_dir_all(&child).expect("should create child module");
@@ -5491,13 +5445,12 @@ fn direct_child_private_path_bypass_is_rejected() {
         first_error_diagnostic(&messages).kind.code(),
         "MOTH-IMPORT-0015"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn stage0_consumes_moth_tokens_into_retained_header_syntax() {
-    let root = unused_temp_path("stage0_retained_tokens");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src dir");
 
@@ -5551,13 +5504,12 @@ fn stage0_consumes_moth_tokens_into_retained_header_syntax() {
         Some(2),
         "the consumed Moth token payload should produce retained entry dependency facts"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn canonical_discovery_consumes_moth_tokens_for_every_reachable_file() {
-    let root = unused_temp_path("canonical_retained_tokens");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     let module_a = src.join("module_a");
     let module_b = src.join("module_b");
@@ -5609,8 +5561,6 @@ fn canonical_discovery_consumes_moth_tokens_for_every_reachable_file() {
             .values()
             .any(|dependencies| !dependencies.is_empty())
     }));
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 // -------------------------
@@ -5667,7 +5617,8 @@ fn write_cross_module_project(
 
 #[test]
 fn local_dependency_edge_is_recorded_provider_before_consumer() {
-    let root = unused_temp_path("phase5b_provider_before_consumer");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let (config, resolver, style_directives, module_a_root, module_b_root) =
         write_cross_module_project(&root);
 
@@ -5728,13 +5679,12 @@ fn local_dependency_edge_is_recorded_provider_before_consumer() {
         1,
         "the sole consumer is the only entry in its wave"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn same_module_dependency_creates_no_project_graph_edge() {
-    let root = unused_temp_path("phase5b_same_module_no_edge");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src");
 
@@ -5784,15 +5734,14 @@ fn same_module_dependency_creates_no_project_graph_edge() {
         1,
         "the singleton wave contains the one no-edge entry"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn independent_no_edge_entries_are_grouped_in_one_ready_wave() {
     // Two entry modules with no cross-module dependency edges must be grouped in the same
     // dependency-ready wave; the serial scheduler can then publish them in deterministic order.
-    let root = unused_temp_path("phase5c_no_edge_same_wave");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     let module_a = src.join("module_a");
     let module_b = src.join("module_b");
@@ -5868,13 +5817,12 @@ fn independent_no_edge_entries_are_grouped_in_one_ready_wave() {
         inventory_order, expected_order,
         "the inventory wave preserves the graph's canonical ModuleId order"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn duplicate_dependency_deduplicates_edge_and_orders_provider_first() {
-    let root = unused_temp_path("phase5b_duplicate_edge");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     let module_a = src.join("module_a");
     let module_b = module_a.join("module_b");
@@ -5971,13 +5919,12 @@ fn duplicate_dependency_deduplicates_edge_and_orders_provider_first() {
             .is_some_and(|name| name == "@pageA.moth"),
         "module_a is the consumer in the second wave"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn dependency_fact_retains_authored_source_location() {
-    let root = unused_temp_path("phase5b_source_location_retention");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let (config, resolver, style_directives, module_a_root, module_b_root) =
         write_cross_module_project(&root);
 
@@ -6008,8 +5955,6 @@ fn dependency_fact_retains_authored_source_location() {
         retained_location.start_pos.line_number, 0,
         "retained location should point at the first authored source line"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
@@ -6018,7 +5963,8 @@ fn production_graph_completes_before_scheduling() {
     // compile-wave scheduling, freezing adjacency into sorted `Vec<ModuleId>` storage. The
     // completed graph schedules cleanly from its frozen adjacency, and any later edge insertion
     // is rejected as mutation after completion.
-    let root = unused_temp_path("r4e1_production_completion");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let (config, resolver, style_directives, module_a_root, module_b_root) =
         write_cross_module_project(&root);
 
@@ -6071,8 +6017,6 @@ fn production_graph_completes_before_scheduling() {
         "mutation error must name the phase violation: {}",
         mutation_error.msg
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
@@ -6080,7 +6024,8 @@ fn discovered_modules_carry_both_graph_assigned_identities() {
     // Hidden invariant: directory discovery must preserve both graph identities rather than
     // re-deriving either from an entry path. The dense ID remains the build-owned scheduling and
     // merge key; the stable origin remains the portable semantic identity.
-    let root = unused_temp_path("phase7a_origin_preservation");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let (config, resolver, style_directives, _module_a_root, _module_b_root) =
         write_cross_module_project(&root);
 
@@ -6113,8 +6058,6 @@ fn discovered_modules_carry_both_graph_assigned_identities() {
             module.entry_point,
         );
     }
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
@@ -6122,7 +6065,8 @@ fn discovered_module_origin_is_not_rederived_from_a_path_component() {
     // Hidden invariant: the stable origin carried by discovery is the graph-owned value type, not
     // a path-derived fallback. The discovered origins must be distinct `StableModuleOriginIdentity`
     // values keyed by canonical logical module path, and must round-trip through the graph node.
-    let root = unused_temp_path("phase7a_origin_identity_values");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let (config, resolver, style_directives, _module_a_root, _module_b_root) =
         write_cross_module_project(&root);
 
@@ -6144,8 +6088,6 @@ fn discovered_module_origin_is_not_rederived_from_a_path_component() {
         modules.len(),
         "each discovered module must carry its own distinct graph-assigned stable origin"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
@@ -6154,7 +6096,8 @@ fn build_source_origin_lookup_maps_each_owned_file_to_its_node_origin() {
     // `SourceTreeIndex` ownership through the graph's owned source IDs. Every owned source
     // record's logical identity module origin must equal its containing graph node's stable
     // origin, and no canonical path may appear twice.
-    let root = unused_temp_path("source_origin_lookup_node_origin_alignment");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let (config, resolver, style_directives, _module_a_root, _module_b_root) =
         write_cross_module_project(&root);
 
@@ -6197,13 +6140,12 @@ fn build_source_origin_lookup_maps_each_owned_file_to_its_node_origin() {
         total_entries,
         "every owned source path must be unique across all graph nodes"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn canonical_module_job_excludes_cross_module_donor_sources() {
-    let root = unused_temp_path("semantic_set_drives_input_assembly");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     let provider = src.join("a_provider");
     fs::create_dir_all(&provider).expect("should create provider module");
@@ -6247,8 +6189,6 @@ fn canonical_module_job_excludes_cross_module_donor_sources() {
         vec!["@page.moth", "z_local.moth"],
         "the consumer job must contain only its canonical prepared sources; the provider reaches binding through its completed interface"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
@@ -6256,7 +6196,8 @@ fn indexed_namespace_rejects_direct_entry_root_dependency() {
     // Path components starting with `@` are now rejected by the path parser before
     // namespace resolution. The `@` introducer is consumed by the lexer, so any
     // component starting with `@` is a `@@` form that has no valid dependency meaning.
-    let root = unused_temp_path("indexed_namespace_direct_entry_root_rejected");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create source root");
 
@@ -6286,13 +6227,12 @@ fn indexed_namespace_rejects_direct_entry_root_dependency() {
         first_error_diagnostic(&messages).kind.code(),
         "MOTH-SYNTAX-0018"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn indexed_namespace_rejects_direct_nested_child_root_dependency() {
-    let root = unused_temp_path("indexed_namespace_direct_nested_child_root_rejected");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     let child = src.join("child");
     fs::create_dir_all(&child).expect("should create child module");
@@ -6327,8 +6267,6 @@ fn indexed_namespace_rejects_direct_nested_child_root_dependency() {
         first_error_diagnostic(&messages).kind.code(),
         "MOTH-SYNTAX-0018"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
@@ -6770,7 +6708,8 @@ fn synthetic_traversal_prepares_retained_clauses_without_a_token_rescan() {
 #[test]
 fn directory_discovery_counts_resolved_clauses_by_language_family() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let root = unused_temp_path("directory_resolved_clause_counters");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     let entry_source = "@docs/intro\n@child greet\n@core/io line\n@drawing.js draw\n#[:entry]\n";
     let intro_source = "intro #= \"intro\"\n";
@@ -6903,6 +6842,4 @@ fn directory_discovery_counts_resolved_clauses_by_language_family() {
         1.0,
         "the explicit-extension drawing.js clause resolves through a registered provider"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }

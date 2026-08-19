@@ -559,7 +559,8 @@ fn build_html_project_html_canvas_helper_emits_builtin_js_asset_and_glue() {
 
 #[test]
 fn build_project_keeps_one_shared_string_table_for_multi_module_diagnostics() {
-    let root = unused_temp_path("multi_module_diagnostics");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src_dir = root.join("src");
     let docs_dir = src_dir.join("docs");
     fs::create_dir_all(&docs_dir).expect("should create docs directory");
@@ -603,8 +604,4 @@ fn build_project_keeps_one_shared_string_table_for_multi_module_diagnostics() {
             &fs::canonicalize(docs_dir.join("@page.moth")).expect("docs page should canonicalize")
         )
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
-
-use crate::compiler_tests::test_support::unused_temp_path;

@@ -10,13 +10,13 @@ use super::super::{
     BackendId, CaseRole, EXPECT_FILE_NAME, GOLDEN_DIR_NAME, INPUT_DIR_NAME, MANIFEST_FILE_NAME,
     TestRunnerOptions,
 };
-use crate::compiler_tests::test_support::unused_temp_path;
 use std::fs;
 use std::path::Path;
 
 #[test]
 fn rejects_failure_fixture_without_diagnostic_codes() {
-    let root = unused_temp_path("failure_contract_missing_codes");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
@@ -34,13 +34,12 @@ fn rejects_failure_fixture_without_diagnostic_codes() {
         error.contains("diagnostic_codes"),
         "unexpected error: {error}"
     );
-
-    fs::remove_dir_all(&root).expect("should clean up temp fixture root");
 }
 
 #[test]
 fn accepts_failure_fixture_without_message_contains() {
-    let root = unused_temp_path("failure_contract_codes_only");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
@@ -53,13 +52,12 @@ fn accepts_failure_fixture_without_message_contains() {
 
     load_canonical_case_specs(&case_root, None)
         .expect("diagnostic-code-only failure fixtures should be accepted");
-
-    fs::remove_dir_all(&root).expect("should clean up temp fixture root");
 }
 
 #[test]
 fn rejects_canonical_fixture_without_expectation_before_execution() {
-    let root = unused_temp_path("missing_expectation");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
@@ -77,13 +75,12 @@ fn rejects_canonical_fixture_without_expectation_before_execution() {
             && error.contains(&expected_path.display().to_string()),
         "unexpected error: {error}"
     );
-
-    fs::remove_dir_all(&root).expect("should clean up temp fixture root");
 }
 
 #[test]
 fn rejects_acceptance_only_fixture_with_golden_artifacts() {
-    let root = unused_temp_path("acceptance_only_golden_artifacts");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     let golden_root = case_root.join(GOLDEN_DIR_NAME).join("html");
@@ -105,13 +102,12 @@ fn rejects_acceptance_only_fixture_with_golden_artifacts() {
         error.contains("acceptance_only") && error.contains("golden artifacts"),
         "unexpected error: {error}"
     );
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
 fn accepts_acceptance_only_without_fixture_specific_source_marker() {
-    let root = unused_temp_path("acceptance_only_without_source_marker");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
@@ -130,8 +126,6 @@ fn accepts_acceptance_only_without_fixture_specific_source_marker() {
     };
     assert!(!expectation.golden.is_present());
     assert_eq!(expectation.golden.mode, None);
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
@@ -186,7 +180,8 @@ fn empty_nested_golden_directory_has_no_contract() {
 
 #[test]
 fn explicit_golden_mode_without_files_is_rejected() {
-    let root = unused_temp_path("explicit_golden_mode_without_files");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
@@ -204,13 +199,12 @@ fn explicit_golden_mode_without_files_is_rejected() {
         error.contains("golden_mode") && error.contains("no golden files"),
         "{error}"
     );
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
 fn nested_golden_files_use_relative_inventory_paths() {
-    let root = unused_temp_path("nested_golden_file_inventory");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     let golden_root = case_root.join(GOLDEN_DIR_NAME).join("html");
@@ -236,13 +230,12 @@ fn nested_golden_files_use_relative_inventory_paths() {
         expectation.golden.inventory.files[0].relative_path,
         "nested/page.html"
     );
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
 fn accepts_backend_matrix_and_expands_case_variants() {
-    let root = unused_temp_path("backend_matrix");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
@@ -259,13 +252,12 @@ fn accepts_backend_matrix_and_expands_case_variants() {
         .map(|case| case.display_name.as_str())
         .collect::<Vec<_>>();
     assert_eq!(names, vec!["case [html]", "case [html_wasm]"]);
-
-    fs::remove_dir_all(&root).expect("should clean up temp fixture root");
 }
 
 #[test]
 fn backend_filter_limits_loaded_case_variants() {
-    let root = unused_temp_path("backend_filter");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
@@ -292,13 +284,12 @@ fn backend_filter_limits_loaded_case_variants() {
     );
     assert_eq!(suite_cases.len(), 1);
     assert_eq!(suite_cases[0].display_name, "case [html_wasm]");
-
-    fs::remove_dir_all(&root).expect("should clean up temp fixture root");
 }
 
 #[test]
 fn manifest_metadata_survives_backend_expansion() {
-    let root = unused_temp_path("manifest_metadata_expansion");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
@@ -335,13 +326,12 @@ fn manifest_metadata_survives_backend_expansion() {
         );
         assert_eq!(case.role, Some(CaseRole::Primary));
     }
-
-    fs::remove_dir_all(&root).expect("should clean up temp fixture root");
 }
 
 #[test]
 fn matrix_cases_resolve_backend_specific_golden_directories() {
-    let root = unused_temp_path("matrix_backend_goldens");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     let golden_html_root = case_root.join(GOLDEN_DIR_NAME).join("html");
@@ -401,13 +391,12 @@ fn matrix_cases_resolve_backend_specific_golden_directories() {
         fs::canonicalize(golden_wasm_root.join("index.html"))
             .expect("wasm golden should canonicalize")
     );
-
-    fs::remove_dir_all(&root).expect("should clean up temp fixture root");
 }
 
 #[test]
 fn accepts_success_fixture_with_golden_only_assertion() {
-    let root = unused_temp_path("success_contract_golden_assertion");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     let golden_root = case_root.join(GOLDEN_DIR_NAME).join("html");
@@ -424,13 +413,12 @@ fn accepts_success_fixture_with_golden_only_assertion() {
     let cases = load_canonical_case_specs(&case_root, None).expect("fixture should be accepted");
     assert_eq!(cases.len(), 1);
     assert_eq!(cases[0].display_name, "case [html]");
-
-    fs::remove_dir_all(&root).expect("should clean up temp fixture root");
 }
 
 #[test]
 fn accepts_success_fixture_with_artifact_assertion() {
-    let root = unused_temp_path("success_contract_artifact_assertion");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
@@ -443,13 +431,12 @@ fn accepts_success_fixture_with_artifact_assertion() {
 
     load_canonical_case_specs(&case_root, None)
         .expect("artifact assertion-only fixture should be accepted");
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
 fn accepts_success_fixture_with_rendered_output_assertion() {
-    let root = unused_temp_path("success_contract_rendered_output");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
@@ -462,8 +449,6 @@ fn accepts_success_fixture_with_rendered_output_assertion() {
 
     load_canonical_case_specs(&case_root, None)
         .expect("rendered-output assertion-only fixture should be accepted");
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
@@ -481,7 +466,8 @@ fn each_new_rendered_output_form_satisfies_success_completeness() {
     ];
 
     for (name, field) in fields {
-        let root = unused_temp_path(&format!("rendered_output_success_completeness_{name}"));
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let case_root = root.join("case");
         let input_root = case_root.join(INPUT_DIR_NAME);
         fs::create_dir_all(&input_root).expect("should create input directory");
@@ -494,14 +480,13 @@ fn each_new_rendered_output_form_satisfies_success_completeness() {
 
         load_canonical_case_specs(&case_root, None)
             .unwrap_or_else(|error| panic!("{name} should satisfy completeness: {error}"));
-
-        fs::remove_dir_all(&root).expect("should clean up");
     }
 }
 
 #[test]
 fn accepts_success_fixture_with_artifact_absence_assertion() {
-    let root = unused_temp_path("success_contract_artifact_absence");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
@@ -514,13 +499,12 @@ fn accepts_success_fixture_with_artifact_absence_assertion() {
 
     load_canonical_case_specs(&case_root, None)
         .expect("artifact-absence assertion-only fixture should be accepted");
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
 fn accepts_success_fixture_with_exact_warning_contract() {
-    let root = unused_temp_path("success_contract_exact_warning");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
@@ -533,13 +517,12 @@ fn accepts_success_fixture_with_exact_warning_contract() {
 
     load_canonical_case_specs(&case_root, None)
         .expect("a non-empty exact-warning contract should be accepted");
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
 fn rejects_failure_fixture_with_authored_golden_mode() {
-    let root = unused_temp_path("failure_golden_mode");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     let golden_root = case_root.join(GOLDEN_DIR_NAME).join("html");
@@ -560,13 +543,12 @@ fn rejects_failure_fixture_with_authored_golden_mode() {
         error.contains("mode = \"failure\"") && error.contains("must not author 'golden_mode'"),
         "unexpected error: {error}"
     );
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
 fn rejects_failure_fixture_with_discovered_file_backed_golden() {
-    let root = unused_temp_path("failure_golden_files");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     let golden_root = case_root.join(GOLDEN_DIR_NAME).join("html");
@@ -587,13 +569,12 @@ fn rejects_failure_fixture_with_discovered_file_backed_golden() {
         error.contains("mode = \"failure\"") && error.contains("golden artifacts"),
         "unexpected error: {error}"
     );
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
 fn accepts_failure_fixture_without_any_golden() {
-    let root = unused_temp_path("failure_no_golden");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
@@ -606,13 +587,12 @@ fn accepts_failure_fixture_without_any_golden() {
 
     load_canonical_case_specs(&case_root, None)
         .expect("a failure backend without goldens should be accepted");
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
 fn rejects_baseline_only_success_fixture() {
-    let root = unused_temp_path("baseline_only_success");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
@@ -627,18 +607,16 @@ fn rejects_baseline_only_success_fixture() {
         panic!("baseline-only success fixture should be rejected");
     };
     assert!(
-        error.contains("baseline_only_success")
-            && error.contains("html")
+        error.contains("html")
             && error.contains("must author at least one accepted success contract"),
         "unexpected error: {error}"
     );
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
 fn default_forbidden_warnings_do_not_satisfy_success_completeness() {
-    let root = unused_temp_path("default_forbidden_warnings_not_contract");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
@@ -656,8 +634,6 @@ fn default_forbidden_warnings_do_not_satisfy_success_completeness() {
         error.contains("warnings = \"exact\" with warning_codes"),
         "unexpected error: {error}"
     );
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
@@ -672,7 +648,8 @@ fn rejects_unsafe_configured_entries() {
     ];
 
     for entry in unsafe_entries {
-        let root = unused_temp_path("unsafe_configured_entry");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let case_root = root.join("case");
         let input_root = case_root.join(INPUT_DIR_NAME);
         fs::create_dir_all(&input_root).expect("should create fixture input directory");
@@ -690,14 +667,13 @@ fn rejects_unsafe_configured_entries() {
             panic!("unsafe configured entry should be rejected: {entry}");
         };
         assert!(error.contains("invalid entry"), "unexpected: {error}");
-
-        fs::remove_dir_all(&root).expect("should clean up");
     }
 }
 
 #[test]
 fn accepts_exact_directory_entry_and_returns_canonical_input() {
-    let root = unused_temp_path("exact_directory_entry");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
@@ -714,13 +690,12 @@ fn accepts_exact_directory_entry_and_returns_canonical_input() {
         cases[0].entry_path,
         fs::canonicalize(input_root).expect("input root should canonicalize")
     );
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
 fn accepts_nested_contained_entry_and_returns_canonical_path() {
-    let root = unused_temp_path("nested_contained_entry");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     let entry_path = input_root.join("nested").join("intro.mtf");
@@ -743,8 +718,6 @@ fn accepts_nested_contained_entry_and_returns_canonical_path() {
         cases[0].entry_path,
         fs::canonicalize(entry_path).expect("nested entry should canonicalize")
     );
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[cfg(unix)]
@@ -770,7 +743,8 @@ fn symlink_directory(target: &Path, link: &Path) -> std::io::Result<()> {
 #[cfg(any(unix, windows))]
 #[test]
 fn rejects_input_directory_symlink_escape() {
-    let root = unused_temp_path("input_directory_symlink_escape");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let outside = _temp.path().to_path_buf();
     let case_root = root.join("case");
@@ -779,8 +753,6 @@ fn rejects_input_directory_symlink_escape() {
     fs::create_dir_all(&outside).expect("should create outside input root");
     fs::write(outside.join("@page.moth"), "#[:ok]\n").expect("should write outside source");
     if symlink_directory(&outside, &input_link).is_err() {
-        fs::remove_dir_all(&root).expect("should clean up root");
-
         return;
     }
     fs::write(
@@ -797,14 +769,14 @@ fn rejects_input_directory_symlink_escape() {
         "unexpected: {error}"
     );
 
-    fs::remove_dir_all(&root).expect("should clean up root");
     fs::remove_dir_all(&outside).expect("should clean up target");
 }
 
 #[cfg(any(unix, windows))]
 #[test]
 fn rejects_entry_symlink_escape() {
-    let root = unused_temp_path("entry_symlink_escape");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let outside = _temp.path().to_path_buf();
     let case_root = root.join("case");
@@ -815,8 +787,6 @@ fn rejects_entry_symlink_escape() {
     let outside_entry = outside.join("intro.mtf");
     fs::write(&outside_entry, "#[:ok]\n").expect("should write outside entry");
     if symlink_file(&outside_entry, &entry_link).is_err() {
-        fs::remove_dir_all(&root).expect("should clean up root");
-
         return;
     }
     fs::write(
@@ -833,14 +803,14 @@ fn rejects_entry_symlink_escape() {
         "unexpected: {error}"
     );
 
-    fs::remove_dir_all(&root).expect("should clean up root");
     fs::remove_dir_all(&outside).expect("should clean up target");
 }
 
 #[cfg(any(unix, windows))]
 #[test]
 fn rejects_contained_golden_file_symlink() {
-    let root = unused_temp_path("golden_contained_file_symlink");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     let golden_root = case_root.join(GOLDEN_DIR_NAME).join("html");
@@ -855,7 +825,6 @@ fn rejects_contained_golden_file_symlink() {
     )
     .is_err()
     {
-        fs::remove_dir_all(&root).expect("should clean up root");
         return;
     }
     fs::write(
@@ -868,14 +837,13 @@ fn rejects_contained_golden_file_symlink() {
         panic!("contained golden file symlink should be rejected");
     };
     assert!(error.contains("symlink"), "unexpected: {error}");
-
-    fs::remove_dir_all(&root).expect("should clean up root");
 }
 
 #[cfg(any(unix, windows))]
 #[test]
 fn rejects_escaping_golden_file_symlink() {
-    let root = unused_temp_path("golden_escaping_file_symlink");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let outside = _temp.path().to_path_buf();
     let case_root = root.join("case");
@@ -888,8 +856,6 @@ fn rejects_escaping_golden_file_symlink() {
     let outside_file = outside.join("stolen.html");
     fs::write(&outside_file, "<h1>stolen</h1>\n").expect("should write outside golden");
     if symlink_file(&outside_file, &golden_root.join("escape.html")).is_err() {
-        fs::remove_dir_all(&root).expect("should clean up root");
-
         return;
     }
     fs::write(
@@ -903,14 +869,14 @@ fn rejects_escaping_golden_file_symlink() {
     };
     assert!(error.contains("symlink"), "unexpected: {error}");
 
-    fs::remove_dir_all(&root).expect("should clean up root");
     fs::remove_dir_all(&outside).expect("should clean up target");
 }
 
 #[cfg(any(unix, windows))]
 #[test]
 fn rejects_golden_directory_symlink() {
-    let root = unused_temp_path("golden_directory_symlink");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let outside = _temp.path().to_path_buf();
     let case_root = root.join("case");
@@ -923,8 +889,6 @@ fn rejects_golden_directory_symlink() {
     fs::write(outside.join("nested.html"), "<h1>stolen</h1>\n")
         .expect("should write outside golden");
     if symlink_directory(&outside, &golden_root.join("linked_dir")).is_err() {
-        fs::remove_dir_all(&root).expect("should clean up root");
-
         return;
     }
     fs::write(
@@ -938,14 +902,14 @@ fn rejects_golden_directory_symlink() {
     };
     assert!(error.contains("symlink"), "unexpected: {error}");
 
-    fs::remove_dir_all(&root).expect("should clean up root");
     fs::remove_dir_all(&outside).expect("should clean up target");
 }
 
 #[cfg(any(unix, windows))]
 #[test]
 fn rejects_backend_golden_root_symlink() {
-    let root = unused_temp_path("golden_root_symlink");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let outside = _temp.path().to_path_buf();
     let case_root = root.join("case");
@@ -958,8 +922,6 @@ fn rejects_backend_golden_root_symlink() {
     fs::write(outside.join("index.html"), "<h1>stolen</h1>\n")
         .expect("should write outside golden");
     if symlink_directory(&outside, &golden_parent.join("html")).is_err() {
-        fs::remove_dir_all(&root).expect("should clean up root");
-
         return;
     }
     fs::write(
@@ -976,14 +938,14 @@ fn rejects_backend_golden_root_symlink() {
         "unexpected: {error}"
     );
 
-    fs::remove_dir_all(&root).expect("should clean up root");
     fs::remove_dir_all(&outside).expect("should clean up target");
 }
 
 #[cfg(any(unix, windows))]
 #[test]
 fn rejects_golden_parent_symlink() {
-    let root = unused_temp_path("golden_parent_symlink");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let outside = _temp.path().to_path_buf();
     let case_root = root.join("case");
@@ -997,8 +959,6 @@ fn rejects_golden_parent_symlink() {
     fs::write(outside_golden_root.join("index.html"), "<h1>stolen</h1>\n")
         .expect("should write outside golden");
     if symlink_directory(&outside, &golden_parent).is_err() {
-        fs::remove_dir_all(&root).expect("should clean up root");
-
         return;
     }
     fs::write(
@@ -1015,6 +975,5 @@ fn rejects_golden_parent_symlink() {
         "unexpected: {error}"
     );
 
-    fs::remove_dir_all(&root).expect("should clean up root");
     fs::remove_dir_all(&outside).expect("should clean up target");
 }

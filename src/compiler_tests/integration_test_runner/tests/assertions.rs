@@ -27,7 +27,6 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_tests::test_support::unused_temp_path;
 use crate::projects::settings::Config;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -318,7 +317,8 @@ fn structured_diagnostic_expectation(assertion: DiagnosticAssertion) -> FailureE
 
 #[test]
 fn structured_diagnostic_assertions_consume_compiler_identity_and_locations() {
-    let fixture_root = unused_temp_path("structured_diagnostic_paths");
+    let _tmp_fixture_root = tempfile::tempdir().expect("should create temp dir");
+    let fixture_root = _tmp_fixture_root.path().to_path_buf();
     let input_root = fixture_root.join("input");
     fs::create_dir_all(&input_root).expect("should create temporary fixture input directory");
     fs::write(input_root.join("main.moth"), "main").expect("should write primary source");
@@ -348,8 +348,6 @@ fn structured_diagnostic_assertions_consume_compiler_identity_and_locations() {
     );
 
     assert!(result.passed, "{:?}", result.failure_reason);
-
-    fs::remove_dir_all(&fixture_root).expect("should clean up temporary fixture root");
 }
 
 fn relative_structured_diagnostic_messages(scope: &str) -> CompilerMessages {
@@ -370,7 +368,8 @@ fn relative_structured_diagnostic_messages(scope: &str) -> CompilerMessages {
 
 #[test]
 fn structured_diagnostic_assertions_resolve_relative_scopes_under_input_root() {
-    let fixture_root = unused_temp_path("structured_relative_diagnostic_paths");
+    let _tmp_fixture_root = tempfile::tempdir().expect("should create temp dir");
+    let fixture_root = _tmp_fixture_root.path().to_path_buf();
     let input_root = fixture_root.join("input");
     fs::create_dir_all(input_root.join("nested"))
         .expect("should create temporary fixture input directory");
@@ -415,8 +414,6 @@ fn structured_diagnostic_assertions_resolve_relative_scopes_under_input_root() {
             result.failure_reason
         );
     }
-
-    fs::remove_dir_all(&fixture_root).expect("should clean up temporary fixture root");
 }
 
 #[test]
@@ -1361,7 +1358,8 @@ fn rendered_output_node_is_not_invoked_without_a_rendered_assertion() {
 
 #[test]
 fn strict_golden_validation_treats_crlf_and_lf_as_equivalent_for_text() {
-    let root = unused_temp_path("strict_golden_line_endings");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let golden_dir = root.join("golden");
     fs::create_dir_all(&golden_dir).expect("should create golden dir");
     fs::write(golden_dir.join("index.html"), "<p>a\r\nb</p>\r\n")
@@ -1375,13 +1373,12 @@ fn strict_golden_validation_treats_crlf_and_lf_as_equivalent_for_text() {
         mismatch.is_none(),
         "strict text golden checks should ignore line-ending-only differences"
     );
-
-    fs::remove_dir_all(&root).expect("should clean temp directory");
 }
 
 #[test]
 fn normalized_golden_validation_treats_crlf_and_lf_as_equivalent_for_text() {
-    let root = unused_temp_path("normalized_golden_line_endings");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let golden_dir = root.join("golden");
     fs::create_dir_all(&golden_dir).expect("should create golden dir");
     fs::write(golden_dir.join("index.html"), "moth_rhs_and_fn0\r\n")
@@ -1395,13 +1392,12 @@ fn normalized_golden_validation_treats_crlf_and_lf_as_equivalent_for_text() {
         mismatch.is_none(),
         "normalized golden checks should ignore counter and line-ending drift"
     );
-
-    fs::remove_dir_all(&root).expect("should clean temp directory");
 }
 
 #[test]
 fn nested_golden_validation_compares_relative_paths() {
-    let root = unused_temp_path("nested_golden_comparison");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let golden_dir = root.join("golden");
     let golden_file = golden_dir.join("nested").join("page.html");
     fs::create_dir_all(golden_file.parent().expect("nested parent should exist"))
@@ -1431,6 +1427,4 @@ fn nested_golden_validation_compares_relative_paths() {
         .expect("golden inventory should be discovered");
 
     assert!(validate_golden_outputs(&build_result, &golden).is_none());
-
-    fs::remove_dir_all(&root).expect("should clean temp directory");
 }

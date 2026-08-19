@@ -4,7 +4,6 @@ use super::{
     FileFingerprint, WatchScope, WatchSession, WatchTarget, collect_fingerprints, detect_changes,
     fingerprint_from_modified, should_ignore_path,
 };
-use crate::compiler_tests::test_support::unused_temp_path;
 use crate::projects::settings::{CONFIG_FILE_NAME, Config};
 use std::collections::HashMap;
 use std::fs;
@@ -116,7 +115,8 @@ fn directory_scope_without_config_watches_entry_directory() {
 
 #[test]
 fn scanner_only_scans_declared_watch_targets() {
-    let root = unused_temp_path("watch_scan");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let output_dir = root.join("dev");
     let src_dir = root.join("src");
     let unrelated_dir = root.join("target");
@@ -146,8 +146,6 @@ fn scanner_only_scans_declared_watch_targets() {
             .all(|path| !path.starts_with(&output_dir)),
         "scanner should ignore output directory files"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp test dir");
 }
 
 #[test]
@@ -224,7 +222,8 @@ fn exact_file_target_collects_single_fingerprint() {
 
 #[test]
 fn recursive_directory_target_collects_nested_files() {
-    let root = unused_temp_path("watch_recursive_directory");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let output_dir = root.join("dev");
     let src_dir = root.join("src");
     let nested_dir = src_dir.join("pages");
@@ -249,8 +248,6 @@ fn recursive_directory_target_collects_nested_files() {
     );
     assert!(fingerprints.keys().any(|path| path.ends_with("main.moth")));
     assert!(fingerprints.keys().any(|path| path.ends_with("about.moth")));
-
-    fs::remove_dir_all(&root).expect("should remove temp test dir");
 }
 
 #[test]

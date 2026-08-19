@@ -175,10 +175,10 @@ fn config_and_write_time_containment_share_canonical_classification() {
     use crate::build_system::output::manifest::validate_output_root_is_safe;
     use crate::compiler_frontend::symbols::string_interning::StringTable;
 
-    let project_root =
-        crate::compiler_tests::test_support::unused_temp_path("shared_output_containment");
-    let outside_root =
-        crate::compiler_tests::test_support::unused_temp_path("shared_output_outside");
+    let _project_temp = tempfile::tempdir().expect("should create project temp dir");
+    let project_root = _project_temp.path().to_path_buf();
+    let _outside_temp = tempfile::tempdir().expect("should create outside temp dir");
+    let outside_root = _outside_temp.path().to_path_buf();
     fs::create_dir_all(&project_root).expect("should create project root");
     fs::create_dir_all(&outside_root).expect("should create outside root");
     symlink(&outside_root, project_root.join("out")).expect("should create output symlink");
@@ -207,9 +207,6 @@ fn config_and_write_time_containment_share_canonical_classification() {
         )
         .is_err()
     );
-
-    fs::remove_dir_all(&project_root).expect("should remove project root");
-    fs::remove_dir_all(&outside_root).expect("should remove outside root");
 }
 
 // -------------------------

@@ -6,8 +6,8 @@
 WORK_ID: test-suite-honesty
 WORK_SOURCE: docs/roadmap/plans/test-suite-honesty-and-infrastructure-hardening-plan.md
 BASE_REVISION: f41f93a7a (post-TIR, post-benchmark-counters-timers)
-STATUS: active — third correction pass applied, under review
-CURRENT_SCOPE: Phase 0-3 third correction pass complete, awaiting re-review before Phase 4
+STATUS: active — fourth closeout pass per reviewer findings
+CURRENT_SCOPE: Phase 0-3 closeout complete (temp-path migration finished, benchmark typed seam, CWD guard test); awaiting Linux validation before Phase 4
 COMPLETED:
   Phase 0: baseline established (4314 unit tests, 0 ignored, 1699 integration cases correct,
     1851 backend executions); durable inventory at docs/roadmap/evidence/test_honesty_inventory.json;
@@ -16,9 +16,10 @@ COMPLETED:
   Phase 1: test_fs helpers with symlink_metadata; temp_dir→unused_temp_path rename;
     ~250 callers migrated to tempfile::tempdir(); hardcoded /tmp/ removed;
     Linux non-UTF-8 fixtures fixed; all negative exists() assertions migrated to
-    assert_path_missing; fixture discovery fail-closed; remaining ~200 unused_temp_path
-    uses are in helper functions needing tuple-return migration or genuine non-existence
-    contracts
+    assert_path_missing; fixture discovery fail-closed; created-workspace audit completed:
+    all remaining created-workspace fixtures migrated to tempfile::tempdir() with owned
+    cleanup; only 3 genuine uncreated-path contracts remain (validate_dangerous_project,
+    output_defaults, output_overrides); durable hard finding temp_dir_uncreated_paths marked resolved
   Phase 2: infrastructure_errors_for_tests() iterator; test_diagnostics helpers;
     assert_exact_infrastructure_error tightened to require exactly one error diagnostic;
     assert_output_rejection helper with typed OutputRejectionReason metadata;
@@ -26,27 +27,30 @@ COMPLETED:
     file_error_with_rejection_reason function; all file_error_messages calls in writer.rs
     and manifest.rs updated with specific reasons; all 26 broad is_err() assertions in
     build_orchestration_tests.rs migrated to assert_output_rejection with exact reasons;
-    benchmark seed tests use specific error message assertions (MOTH-INFRA-0001 for missing
-    file, MOTH-SYNTAX for invalid syntax); missing-file benchmark uses tempfile not
-    fabricated /definitely/does/not/exist.moth path
+    benchmark seed tests use structured FrontendBenchmarkError identity:
+    FrontendBenchmarkFailureKind enum (TimingSession, InvalidUtf8Path, PathValidation,
+    Bootstrap, Compilation) plus stable diagnostic_codes; missing-file and invalid-syntax
+    negative tests assert the typed kind and exact diagnostic code instead of rendered
+    substrings; rendered message preserved for CLI/tool output; missing-file benchmark uses
+    tempfile not fabricated /definitely/does/not/exist.moth path
   Phase 3: WarningBuilder StringId uses active string_table; CurrentDirGuard redesigned with
     Option<PathBuf> take pattern; CurrentDirGuard restore-failure injection seam;
     CurrentDirGuard Drop reports restore failure to stderr during unwinding;
     finish() handles None previous (returns Ok instead of panicking);
-    restore-failure regression tests: test_restore verifies error with mutex held,
-    finish() verifies no retry, unwind test explicitly restores CWD and asserts exact
-    panic payload; CaseExecutionResult constructors removed from production;
+    current_dir_guard_finish_returns_error_when_restore_fails calls finish() directly
+    under an injected restore that actually restores CWD then returns the synthetic error,
+    proving the exact returned error; obsolete test_restore seam removed; unwind test
+    explicitly restores CWD and asserts exact panic payload; CaseExecutionResult
+    constructors removed from production;
     all synthetic fixtures carry valid build_result or messages;
     ScopedEnvVar panic-safe env guard; surface_thread_panic replaces discarded joins
-NEXT_ACTION: re-review of third correction pass, then Phase 4 exact positive assertions
+NEXT_ACTION: fourth closeout pass complete; run Linux validation lane, then Phase 4
 VALIDATION: cargo fmt --check; cargo clippy -D warnings; cargo test --workspace (4314+17+643);
   cargo run -- tests --terse (1851/1851); cargo test --features timers (pass);
   cargo test --features detailed_timers (pass, 4316+17+643); just validate (pass);
   pre-existing benchmark_counters failure unchanged; Linux lane not run on macOS host
-AUDITS: third correction pass applied per reviewer's 6 remaining blockers
-BLOCKERS: Linux CI lane needed to verify Linux-only tests (macOS host cannot run them);
-  remaining ~200 unused_temp_path+create_dir_all patterns in helper functions needing
-  tuple-return migration
+AUDITS: fourth closeout pass applied per reviewer's 4 closeout tasks
+BLOCKERS: Linux CI lane needed to verify Linux-only tests (macOS host cannot run them)
 NOTES: Pre-existing benchmark_counters feature test failures are not caused by this work.
   Inventory finding mappings fixed: lossy_path_text_conversion → Phase 5 item 7,
   source_text_tests_false_confidence → Phase 4 items 3 and 7.

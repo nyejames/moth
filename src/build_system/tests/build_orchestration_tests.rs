@@ -147,7 +147,8 @@ fn build_project_calls_validate_project_config() {
 
 #[test]
 fn project_compilation_selects_only_modules_with_root_activity_as_entries() {
-    let root = unused_temp_path("project_compilation_entries");
+    let temp = tempfile::tempdir().expect("should create temp dir");
+    let root = temp.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(src.join("api")).expect("should create module directories");
     fs::write(
@@ -175,12 +176,13 @@ fn project_compilation_selects_only_modules_with_root_activity_as_entries() {
     assert_eq!(module_count.load(std::sync::atomic::Ordering::SeqCst), 2);
     assert_eq!(entry_count.load(std::sync::atomic::Ordering::SeqCst), 1);
 
-    fs::remove_dir_all(&root).expect("should remove temp dir");
+    let _ = temp;
 }
 
 #[test]
 fn diagnosed_module_prevents_project_compilation_from_reaching_backend() {
-    let root = unused_temp_path("diagnosed_project_compilation");
+    let temp = tempfile::tempdir().expect("should create temp dir");
+    let root = temp.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(src.join("broken")).expect("should create module directories");
     fs::write(
@@ -215,7 +217,7 @@ fn diagnosed_module_prevents_project_compilation_from_reaching_backend() {
         "backend must not receive a partial project compilation"
     );
 
-    fs::remove_dir_all(&root).expect("should remove temp dir");
+    let _ = temp;
 }
 
 #[test]
@@ -352,15 +354,14 @@ fn reserved_manifest_destination_is_rejected_before_emission() {
     assert_path_missing(&collision_root.join("index.html"));
     assert_path_missing(&collision_root.join(".moth_manifest"));
 
-    for (case_index, reserved_descendant) in [
+    for reserved_descendant in [
         PathBuf::from(".moth_manifest/child.js"),
         PathBuf::from(r".MOTH_MANIFEST\child.js"),
     ]
     .into_iter()
-    .enumerate()
     {
-        let descendant_root =
-            unused_temp_path(&format!("manifest_destination_descendant_{case_index}"));
+        let _descendant_temp = tempfile::tempdir().expect("should create descendant temp dir");
+        let descendant_root = _descendant_temp.path().to_path_buf();
         fs::create_dir_all(&descendant_root).expect("should create descendant root");
         let descendant_project = Project {
             output_files: vec![
@@ -384,7 +385,8 @@ fn reserved_manifest_destination_is_rejected_before_emission() {
         assert_output_rejection(&messages, "reserved-manifest-destination");
         assert_path_missing(&descendant_root.join("index.html"));
         assert_path_missing(&descendant_root.join(".moth_manifest"));
-        fs::remove_dir_all(&descendant_root).expect("should remove descendant root");
+
+        let _ = _descendant_temp;
     }
 
     let _temp = tempfile::tempdir().expect("should create temp dir");
@@ -980,7 +982,7 @@ fn config_validation_failure_returns_config_error_before_compilation() {
     let root = _temp.path().to_path_buf();
 
     // Invalid frontend syntax to prove it fails BEFORE frontend compilation
-    fs::write(root.join("main.moth"), "invalid syntax;;;;;").expect("should write source file");
+    fs::write(root.join("main.moth"), "invalid syntax;;").expect("should write source file");
     {
         let _cwd_guard = CurrentDirGuard::set_to(&root);
 
@@ -1049,7 +1051,8 @@ fn validated_output_settings_preserve_configured_profile_roots() {
 
 #[test]
 fn directory_frontend_skips_separator_normalized_output_roots() {
-    let root = unused_temp_path("stage0_separator_normalized_output_skip");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let normalized_dev_root = root.join("generated/site");
     fs::create_dir_all(&normalized_dev_root).expect("should create normalized output root");
     fs::write(
@@ -1080,8 +1083,6 @@ output_folder #= "generated\\release"
             .err()
             .map(|messages| rendered_error_messages(&messages))
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[cfg(unix)]
@@ -1089,7 +1090,8 @@ output_folder #= "generated\\release"
 fn directory_frontend_skips_symlink_ancestor_output_aliases() {
     use std::os::unix::fs::symlink;
 
-    let root = unused_temp_path("stage0_symlink_ancestor_output_alias_skip");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let physical_output_root = root.join("generated/site");
     fs::create_dir_all(&physical_output_root).expect("should create physical output root");
     symlink(root.join("generated"), root.join("preview"))
@@ -1122,8 +1124,6 @@ output_folder #= "generated\\release"
             .err()
             .map(|messages| rendered_error_messages(&messages))
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[cfg(unix)]
@@ -1131,7 +1131,8 @@ output_folder #= "generated\\release"
 fn directory_frontend_skips_symlink_aliases_to_output_descendants() {
     use std::os::unix::fs::symlink;
 
-    let root = unused_temp_path("stage0_symlink_output_descendant_skip");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let physical_output_root = root.join("generated/site");
     let physical_output_descendant = physical_output_root.join("nested");
     fs::create_dir_all(&physical_output_descendant)
@@ -1166,8 +1167,6 @@ output_folder #= "generated\\release"
             .err()
             .map(|messages| rendered_error_messages(&messages))
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[cfg(unix)]
@@ -1175,7 +1174,8 @@ output_folder #= "generated\\release"
 fn validated_output_settings_reject_canonical_root_aliases() {
     use std::os::unix::fs::symlink;
 
-    let root = unused_temp_path("output_canonical_aliases");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let entry_root = root.join("src");
     let shared_root = root.join("shared-output");
     fs::create_dir_all(&entry_root).expect("should create entry root");
@@ -1231,13 +1231,12 @@ fn validated_output_settings_reject_canonical_root_aliases() {
         rendered.contains("resolve to the same output root and must be distinct"),
         "canonical-alias rejection should explain the physical output-root conflict: {rendered}"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn build_directory_project_requires_artifact_root_in_configured_entry_root() {
-    let root = unused_temp_path("missing_homepage");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(src.join("about")).expect("should create about folder");
 
@@ -1264,13 +1263,12 @@ fn build_directory_project_requires_artifact_root_in_configured_entry_root() {
         messages.first_infrastructure_error_for_tests().is_none(),
         "missing homepage should stay as a typed config diagnostic"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn build_project_routes_invalid_page_url_style_through_typed_config_diagnostic() {
-    let root = unused_temp_path("invalid_page_url_style");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create source folder");
     fs::write(
@@ -1292,8 +1290,6 @@ fn build_project_routes_invalid_page_url_style_through_typed_config_diagnostic()
     };
     assert_has_config_error(&messages);
     assert_invalid_project_setting(&messages, "page_url_style", "slashy");
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 // -------------------------
@@ -1549,7 +1545,8 @@ fn symlinked_output_ancestor_escape_causes_zero_files_written() {
 fn symlink_alias_destinations_are_rejected_before_writing() {
     use std::os::unix::fs::symlink;
 
-    let root = unused_temp_path("symlink_alias_destinations");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let real = root.join("real");
     fs::create_dir_all(&real).expect("should create real output directory");
     symlink(&real, root.join("left")).expect("should create first alias");
@@ -1577,8 +1574,6 @@ fn symlink_alias_destinations_are_rejected_before_writing() {
     };
     assert_output_rejection(&messages, "canonical-destination-collision");
     assert_path_missing(&real.join("app.js"));
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
@@ -1711,8 +1706,9 @@ fn dangling_symlink_aliases_are_rejected_before_emission() {
 fn directory_output_root_symlink_escape_causes_zero_files_written() {
     use std::os::unix::fs::symlink;
 
-    for (case_name, target_name) in [("sibling", "outside"), ("entry", "src")] {
-        let root = unused_temp_path(&format!("directory_output_root_symlink_{case_name}"));
+    for (_case_name, target_name) in [("sibling", "outside"), ("entry", "src")] {
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let _temp8 = tempfile::tempdir().expect("should create temp dir");
         let outside = _temp8.path().to_path_buf();
         let entry_root = root.join("src");
@@ -1765,7 +1761,6 @@ fn directory_output_root_symlink_escape_causes_zero_files_written() {
                 .is_symlink()
         );
 
-        fs::remove_dir_all(&root).expect("should remove project root");
         fs::remove_dir_all(&outside).expect("should remove target root");
     }
 }
@@ -1802,7 +1797,8 @@ fn invalid_later_output_path_causes_zero_files_written() {
 
 #[test]
 fn empty_directory_output_setting_is_rejected() {
-    let root = unused_temp_path("empty_output_setting");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create source folder");
     fs::write(
@@ -1823,13 +1819,12 @@ fn empty_directory_output_setting_is_rejected() {
         panic!("empty dev_folder should fail build");
     };
     assert_has_config_error(&messages);
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn absolute_output_setting_is_rejected() {
-    let root = unused_temp_path("absolute_output_setting");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create source folder");
     fs::write(
@@ -1850,13 +1845,12 @@ fn absolute_output_setting_is_rejected() {
         panic!("absolute dev_folder should fail build");
     };
     assert_has_config_error(&messages);
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn output_folder_inside_entry_root_is_rejected() {
-    let root = unused_temp_path("output_inside_entry_root");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create source folder");
     fs::write(
@@ -1877,13 +1871,12 @@ fn output_folder_inside_entry_root_is_rejected() {
         panic!("output folder inside entry_root should fail build");
     };
     assert_has_config_error(&messages);
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn identical_dev_and_release_folders_are_rejected() {
-    let root = unused_temp_path("identical_dev_release");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create source folder");
     fs::write(
@@ -1904,13 +1897,12 @@ fn identical_dev_and_release_folders_are_rejected() {
         panic!("identical dev and release folders should fail build");
     };
     assert_has_config_error(&messages);
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn valid_distinct_output_folders_resolve_unchanged() {
-    let root = unused_temp_path("valid_output_folders");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create source folder");
     fs::write(
@@ -1936,13 +1928,12 @@ fn valid_distinct_output_folders_resolve_unchanged() {
             .output_root,
         root.join("dev")
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn first_dev_and_release_builds_create_independent_owned_manifests() {
-    let root = unused_temp_path("first_profile_manifests");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let source_root = root.join("src");
     fs::create_dir_all(&source_root).expect("should create source root");
     fs::write(
@@ -2000,8 +1991,6 @@ fn first_dev_and_release_builds_create_independent_owned_manifests() {
     let release_manifest = fs::read_to_string(root.join("release/.moth_manifest"))
         .expect("release manifest should exist after the first build");
     assert!(release_manifest.contains("# profile: release"));
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 use crate::compiler_tests::test_fs::{assert_directory, assert_path_missing};

@@ -1,8 +1,8 @@
 use crate::benchmarking::frontend::{
-    FrontendBenchmarkBuildProfile, FrontendBenchmarkOptions, run_frontend_benchmark,
+    FrontendBenchmarkBuildProfile, FrontendBenchmarkFailureKind, FrontendBenchmarkOptions,
+    run_frontend_benchmark,
 };
 use std::io::Write;
-use std::path::PathBuf;
 
 // Frontend benchmarks use the process-global timing and counter stores. Share
 // the facade-owned test lock with timing, instrumentation and build tests so
@@ -143,13 +143,15 @@ fn frontend_benchmark_fails_for_missing_file() {
 
     let result = run_frontend_benchmark(options);
     let error = result.expect_err("benchmark should fail for missing file");
-    assert!(
-        error.message.contains("MOTH-INFRA-0001"),
-        "missing-file benchmark should report an infrastructure error: {error}"
+    assert_eq!(
+        error.kind,
+        FrontendBenchmarkFailureKind::PathValidation,
+        "missing-file benchmark should fail at path validation"
     );
-    assert!(
-        error.message.contains("Path does not exist"),
-        "missing-file benchmark should report path-does-not-exist: {error}"
+    assert_eq!(
+        error.diagnostic_codes,
+        vec!["MOTH-INFRA-0001".to_owned()],
+        "missing-file benchmark should report an infrastructure diagnostic code"
     );
 }
 
@@ -164,7 +166,7 @@ fn frontend_benchmark_rejects_a_busy_raw_session_before_compilation() {
         crate::timing::start_benchmark_collection(true).expect("outer timing session should start");
 
     let result = run_frontend_benchmark(FrontendBenchmarkOptions {
-        entry_path: PathBuf::from("/definitely/does/not/exist.moth"),
+        entry_path: std::path::PathBuf::from("/definitely/does/not/exist.moth"),
         build_profile: FrontendBenchmarkBuildProfile::Dev,
     });
 
@@ -211,8 +213,17 @@ fn frontend_benchmark_fails_for_invalid_syntax() {
 
     let result = run_frontend_benchmark(options);
     let error = result.expect_err("benchmark should fail for invalid syntax");
+    assert_eq!(
+        error.kind,
+        FrontendBenchmarkFailureKind::Compilation,
+        "invalid-syntax benchmark should fail at compilation"
+    );
     assert!(
-        error.message.contains("MOTH-SYNTAX"),
-        "invalid-syntax benchmark should report a syntax diagnostic: {error}"
+        error
+            .diagnostic_codes
+            .iter()
+            .any(|code| code.starts_with("MOTH-SYNTAX")),
+        "invalid-syntax benchmark should report a syntax diagnostic code: {:?}",
+        error.diagnostic_codes
     );
 }

@@ -21,7 +21,6 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveSpec;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_tests::test_support::unused_temp_path;
 use crate::projects::dev_server::state::DevServerState;
 use crate::projects::dev_server::watch;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
@@ -663,7 +662,8 @@ fn project_build_executor_preserves_warnings_when_output_write_fails() {
 #[test]
 fn project_build_executor_writes_the_validated_directory_plan() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let root = unused_temp_path("project_executor_directory_plan");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let source_root = root.join("src");
     fs::create_dir_all(&source_root).expect("should create source root");
     fs::write(
@@ -711,15 +711,14 @@ fn project_build_executor_writes_the_validated_directory_plan() {
     );
     assert!(root.join("preview/index.html").exists());
     assert!(!root.join("dev/index.html").exists());
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[cfg(feature = "timers")]
 #[test]
 fn dev_cycle_records_build_and_write_and_drains_one_collection_per_build() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let root = unused_temp_path("dev_cycle_timing");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let source_root = root.join("src");
     fs::create_dir_all(&source_root).expect("should create source root");
     fs::write(root.join("config.moth"), "entry_root #= \"src\"\n").expect("should write config");
@@ -819,8 +818,6 @@ fn dev_cycle_records_build_and_write_and_drains_one_collection_per_build() {
             "cycle observations must not leak across builds"
         );
     }
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[cfg(feature = "timers")]

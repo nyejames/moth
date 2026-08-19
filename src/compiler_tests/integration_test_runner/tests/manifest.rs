@@ -6,7 +6,6 @@
 use super::super::fixture::load_test_suite_from_root;
 use super::super::manifest::parse_manifest_file;
 use super::super::{CaseRole, EXPECT_FILE_NAME, INPUT_DIR_NAME, MANIFEST_FILE_NAME};
-use crate::compiler_tests::test_support::unused_temp_path;
 use std::fs;
 use std::path::Path;
 
@@ -349,12 +348,12 @@ fn symlink_directory(target: &Path, link: &Path) -> std::io::Result<()> {
 fn rejects_manifest_fixture_symlink_escape() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
-    let outside = unused_temp_path("manifest_fixture_symlink_escape_target");
+    let _tmp_outside = tempfile::tempdir().expect("should create temp dir");
+    let outside = _tmp_outside.path().to_path_buf();
 
     write_success_fixture(&outside, "case");
     let link = root.join("link");
     if symlink_directory(&outside.join("case"), &link).is_err() {
-        fs::remove_dir_all(&outside).expect("should clean up target");
         return;
     }
     fs::write(
@@ -372,7 +371,6 @@ fn rejects_manifest_fixture_symlink_escape() {
     );
 
     fs::remove_dir_all(&root).expect("should clean up root");
-    fs::remove_dir_all(&outside).expect("should clean up target");
 }
 
 #[cfg(any(unix, windows))]
