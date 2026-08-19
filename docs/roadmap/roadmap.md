@@ -15,6 +15,7 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 
 ## Queued implementation chain
 
+- [New memory mangement design - documentation updates](./plans/final-memory-management-redesign-and-implementation-plan.md)
 - [Frontend module compilation ownership cleanup](./plans/frontend-module-compilation-ownership-cleanup-plan.md)
 - [Constant evaluation, static control-flow specialisation and type-system architecture](./plans/constant-folding-and-type-system-hot-path-optimization-plan.md)
 - [Path values and resource linking](./plans/path-values-and-resource-linking-plan.md)
