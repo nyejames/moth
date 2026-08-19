@@ -50,11 +50,13 @@ ryu = "1.0.23"
 
 pulldown-cmark = { version = "0.13.4", default-features = false, features = ["html"] }
 
+# The canonical integration runner ships in the binary (`moth tests`) and its Node rendered-output
+# harness needs an owned temporary workspace, so `tempfile` is a normal dependency rather than a
+# dev-dependency. Tests use the same crate.
+tempfile = "3"
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
-
-[dev-dependencies]
-tempfile = "3"
 
 [profile.dev]
 opt-level = 0

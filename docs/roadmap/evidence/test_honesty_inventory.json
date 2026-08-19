@@ -6,7 +6,7 @@
   "branch": "test-suite-honesty",
   "host_platform": "macOS",
   "summary": {
-    "unit_tests_passed": 4337,
+    "unit_tests_passed": 4373,
     "unit_tests_failed": 0,
     "unit_tests_ignored": 0,
     "integration_cases_correct": 1699,
@@ -74,8 +74,8 @@
       "code": "lossy_path_text_conversion",
       "severity": "review",
       "description": "to_string_lossy/from_utf8_lossy across ~30 files",
-      "disposition": "deferred to Phase 5 (item 7: Replace lossy process output and path conversion)",
-      "status": "open"
+      "disposition": "resolved in Phase 5 for every boundary finding 8 names: integration entry-path execution, the rendered-output harness paths and process output, golden text comparison, MOTH_TEST_THREADS and the module-discovery test helpers' file_name().unwrap_or_default(). The HTML-Wasm harness now resolves its artifacts through __dirname so no workspace path crosses a text boundary at all. Remaining to_string_lossy/from_utf8_lossy uses are failure-report rendering (xtask process output echo, path display), never assertion inputs",
+      "status": "resolved"
     },
     {
       "code": "weak_positive_assertions",
@@ -88,22 +88,22 @@
       "code": "golden_comparison_accepting_directories_as_empty_files",
       "severity": "review",
       "description": "Golden comparison accepts directory entries as empty golden files",
-      "disposition": "deferred to Phase 5",
-      "status": "open"
+      "disposition": "resolved in Phase 5: the golden comparison decides the artifact kind before reading content. A Directory or NotBuilt entry is a kind mismatch instead of empty bytes, text goldens require strict UTF-8 (invalid UTF-8 is a HarnessFailed, not a silent rewrite), and binary/wasm goldens compare bytes only. Regressions cover directory-vs-empty-file, an unbuilt path, invalid UTF-8, binary byte comparison and a duplicate-path artifact set",
+      "status": "resolved"
     },
     {
       "code": "html_wasm_baseline_broad_fragments",
       "severity": "review",
       "description": "HTML/Wasm baseline tests rely on broad fragment matching",
-      "disposition": "deferred to Phase 5",
-      "status": "open"
+      "disposition": "resolved in Phase 5: the HTML shell contract is now ordered, bounded and unique (html_shell_violation, one owner shared with the HTML builder's own shell tests), and the HTML-Wasm baseline derives its required exports from the emitted page.js (instance.exports.<name>) and checks each against the module's typed export kind, with an explicit ABI floor including moth_start. Duplicate exports and imports are rejected, and the page script include must appear exactly once inside the body",
+      "status": "resolved"
     },
     {
       "code": "node_runtime_harness_can_hang",
       "severity": "review",
       "description": "Node runtime harness tests can hang without timeout",
-      "disposition": "deferred to Phase 5",
-      "status": "open"
+      "disposition": "resolved in Phase 5: the harness owns a tempfile workspace whose removal failure is reported, runs Node under a 30s deadline with kill-and-reap, drains stdout/stderr on their own threads with a 4 MiB bound, decodes protocol output strictly, and parses only supported <script> shapes. Typed RenderHarnessError{kind,message} separates Artifact/Workspace/Spawn/Timeout/ExitStatus/OutputDecoding/OutputProtocol/ScriptShape/Cleanup",
+      "status": "resolved"
     },
     {
       "code": "fixture_discovery_fail_open",
@@ -244,6 +244,13 @@
       "description": "Build-system glue selectors matched path.contains(\"_moth/js/glue/\"), so a glue module emitted under an unexpected parent directory satisfied an assertion about the glue directory",
       "disposition": "fixed in the Phase 4 closeout: glue predicates use a shared GLUE_MODULE_PREFIX with starts_with, matching the already-anchored provider, canvas and runtime selectors, with a self-test proving a nested vendor/_moth/js/glue path does not match",
       "status": "resolved"
+    },
+    {
+      "code": "global_timing_collector_observed_flake",
+      "severity": "review",
+      "description": "frontend_benchmark_rejects_a_busy_raw_session_before_compilation failed once during Phase 5 validation and did not reproduce in 24 subsequent full-suite runs (including 6 at --test-threads=16)",
+      "disposition": "deferred to Phase 6 (deterministic timing and concurrency tests). Lead: xtask depends on moth with features=[\"timers\"], so `cargo test --workspace` unifies the timers feature on and the timing collector is live for the whole run. lock_instrumentation_tests serializes tests that own a session, but the collector is process-global: compiler work performed by any other concurrently running test records into whichever session is active. That makes the outer-session 'samples == 0' assertion, and the busy-collector precondition, dependent on what else happens to be running. Phase 6 should give the collector a scoped owner or serialize compiler work against an active session rather than only session starts",
+      "status": "open"
     }
   ],
   "infrastructure_added": [
@@ -258,6 +265,11 @@
     "src/compiler_tests/test_support.rs: assert_panics_with (panic-reason assertion), unused_temp_path absence verification",
     "xtask/src/test_fs.rs: assert_path_missing, assert_regular_file, assert_directory",
     "BuiltArtifactIndex + typed ArtifactIndexError in the integration assertion owner; validity and collision identity come from the canonical output_path_identity, so the harness applies the writer's destination policy instead of a second path taxonomy",
-    "BuiltOutputs index with at/exactly_one/exactly_one_path/none_matching plus html_text/js_text kind accessors, owned by build_system/tests/build_dependency_tests.rs and using the same canonical output_path_identity collision check"
+    "BuiltOutputs index with at/exactly_one/exactly_one_path/none_matching plus html_text/js_text kind accessors, owned by build_system/tests/build_dependency_tests.rs and using the same canonical output_path_identity collision check",
+    "assertions/node_harness.rs: HarnessWorkspace (owned tempfile workspace with reported cleanup), with_harness_workspace, run_node_script/run_node_script_within (bounded deadline, kill and reap, threaded bounded capture, strict stdout decoding) and typed RenderHarnessError/RenderHarnessErrorKind",
+    "assertions/html_scripts.rs: extract_executable_scripts, a supported-shape <script> parser that skips recognised data blocks and rejects external src, unknown types, execution-changing attributes and malformed or unterminated tags",
+    "assertions/artifacts.rs: html_shell_violation + HtmlShellViolation, the single ordered/unique document-shell contract shared with html_project's assert_has_basic_shell",
+    "assertions/wasm.rs: typed export map (BTreeMap<String, ExternalKind>) with duplicate rejection, duplicate import rejection and required_runtime_exports derived from the emitted bootstrap",
+    "tests/synthetic_build_results.rs: shared success-shaped BuildResult and TestCaseSpec fixtures for the assertion, rendered-output and wasm-baseline self-tests"
   ]
 }

@@ -5,7 +5,9 @@
 //! - required manifest-driven case ordering and case metadata
 //! - backend-specific expectation matrices from a shared input fixture
 
-mod assertions;
+// `assertions` is crate-visible because it owns the emitted-document shell contract that the
+// HTML builder's own tests consume, so the builder tests and the canonical suite cannot drift.
+pub(crate) mod assertions;
 mod errors;
 mod execution;
 mod expectations;

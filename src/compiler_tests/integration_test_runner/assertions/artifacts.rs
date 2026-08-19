@@ -290,10 +290,12 @@ fn validate_single_artifact_assertion(
                 };
 
                 for required_export in &assertion.must_export {
-                    if !exports.contains(required_export) {
+                    if !exports.contains_key(required_export) {
                         return Some(format!(
                             "Artifact '{}' missing required wasm export '{}'. Available exports: {:?}.",
-                            assertion.path, required_export, exports
+                            assertion.path,
+                            required_export,
+                            super::wasm::export_summary(&exports)
                         ));
                     }
                 }
@@ -333,7 +335,7 @@ fn validate_single_artifact_assertion(
     None
 }
 
-fn artifact_kind_name(kind: ArtifactKind) -> &'static str {
+pub(super) fn artifact_kind_name(kind: ArtifactKind) -> &'static str {
     match kind {
         ArtifactKind::Html => "html",
         ArtifactKind::Js => "js",
@@ -342,43 +344,152 @@ fn artifact_kind_name(kind: ArtifactKind) -> &'static str {
     }
 }
 
-/// Verifies the baseline HTML backend interop/output contract.
+/// The ordered structural markers `render_html_document_shell` emits for every page.
 ///
-/// WHAT: requires a built `index.html` HTML artifact for every HTML backend success case.
-/// WHY: replacing legacy path assertions still needs a deterministic minimum output guarantee.
-pub(super) fn validate_html_baseline_contract(index: &BuiltArtifactIndex<'_>) -> Option<String> {
-    let Some(index_html) = index.get("index.html") else {
-        return Some(
-            "html baseline contract expected 'index.html', but it was not produced.".to_string(),
-        );
-    };
+/// The shell writes each of these exactly once, in this order, so the contract can be ordered and
+/// bounded rather than "these fragments appear somewhere". `<html lang="` and `<body style="`
+/// include their always-emitted attribute so a marker cannot be satisfied by a different tag.
+const HTML_SHELL_MARKERS: [&str; 7] = [
+    "<!DOCTYPE html>",
+    "<html lang=\"",
+    "<head>",
+    "</head>",
+    "<body style=\"",
+    "</body>",
+    "</html>",
+];
 
-    let Some(html) = output_text_content(index_html, ArtifactKind::Html) else {
-        return Some(
-            "html baseline contract expected 'index.html' as an HTML artifact.".to_string(),
-        );
-    };
-
-    validate_html_document_structure(html, "html")
+/// How an emitted document deviates from the rendered HTML shell contract.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum HtmlShellViolation {
+    /// The document does not begin with the doctype.
+    MissingDoctypePrefix,
+    /// The document does not end with the closing html tag.
+    MissingClosingHtml,
+    /// A required structural marker is absent.
+    MissingMarker { marker: &'static str },
+    /// A structural marker the shell emits once appears several times.
+    RepeatedMarker {
+        marker: &'static str,
+        occurrences: usize,
+    },
+    /// A structural marker appears before the marker that must precede it.
+    OutOfOrderMarker {
+        marker: &'static str,
+        must_follow: &'static str,
+    },
 }
 
-pub(super) fn validate_html_document_structure(html: &str, baseline_name: &str) -> Option<String> {
-    for required_fragment in [
-        "<!DOCTYPE html>",
-        "<html",
-        "<head>",
-        "<body",
-        "</body>",
-        "</html>",
-    ] {
-        if !html.contains(required_fragment) {
-            return Some(format!(
-                "{baseline_name} baseline contract expected 'index.html' to contain '{required_fragment}'."
-            ));
+impl fmt::Display for HtmlShellViolation {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingDoctypePrefix => write!(
+                formatter,
+                "the document does not start with '{}'",
+                HTML_SHELL_MARKERS[0]
+            ),
+            Self::MissingClosingHtml => {
+                write!(formatter, "the document does not end with '</html>'")
+            }
+            Self::MissingMarker { marker } => {
+                write!(formatter, "the document is missing '{marker}'")
+            }
+            Self::RepeatedMarker {
+                marker,
+                occurrences,
+            } => write!(
+                formatter,
+                "the document contains '{marker}' {occurrences} times, but the shell emits it once"
+            ),
+            Self::OutOfOrderMarker {
+                marker,
+                must_follow,
+            } => write!(
+                formatter,
+                "the document places '{marker}' before '{must_follow}'"
+            ),
         }
+    }
+}
+
+/// Checks one emitted document against the ordered, bounded HTML shell contract.
+///
+/// WHAT: requires the doctype prefix, the closing html suffix, and every shell marker exactly
+///       once in document order.
+/// WHY: an unordered "contains" loop is satisfied by a comment, by markup inside a script and by
+///       a document whose head and body are inverted or duplicated, so it cannot claim to check
+///       document structure. This is the one owner of that claim: the integration HTML baselines
+///       and the HTML builder's own shell tests both consume it.
+pub(crate) fn html_shell_violation(html: &str) -> Option<HtmlShellViolation> {
+    if !html.starts_with(HTML_SHELL_MARKERS[0]) {
+        return Some(HtmlShellViolation::MissingDoctypePrefix);
+    }
+
+    if !html.trim_end().ends_with("</html>") {
+        return Some(HtmlShellViolation::MissingClosingHtml);
+    }
+
+    let mut previous: Option<(&'static str, usize)> = None;
+    for marker in HTML_SHELL_MARKERS {
+        let Some(position) = html.find(marker) else {
+            return Some(HtmlShellViolation::MissingMarker { marker });
+        };
+
+        let occurrences = count_occurrences(html, marker);
+        if occurrences > 1 {
+            return Some(HtmlShellViolation::RepeatedMarker {
+                marker,
+                occurrences,
+            });
+        }
+
+        if let Some((previous_marker, previous_position)) = previous
+            && position < previous_position
+        {
+            return Some(HtmlShellViolation::OutOfOrderMarker {
+                marker,
+                must_follow: previous_marker,
+            });
+        }
+        previous = Some((marker, position));
     }
 
     None
+}
+
+/// Verifies the baseline HTML backend interop/output contract.
+///
+/// WHAT: requires a built `index.html` HTML artifact that satisfies the document shell contract.
+/// WHY: replacing legacy path assertions still needs a deterministic minimum output guarantee.
+pub(super) fn validate_html_baseline_contract(index: &BuiltArtifactIndex<'_>) -> Option<String> {
+    validate_html_baseline_document(index, "html").err()
+}
+
+/// Shared `index.html` lookup and shell check for the HTML and HTML-Wasm baselines.
+///
+/// Returns the document text so the HTML-Wasm baseline can continue with its own contract.
+pub(crate) fn validate_html_baseline_document<'index>(
+    index: &BuiltArtifactIndex<'index>,
+    baseline_name: &str,
+) -> Result<&'index str, String> {
+    let Some(index_html) = index.get("index.html") else {
+        return Err(format!(
+            "{baseline_name} baseline contract expected 'index.html', but it was not produced."
+        ));
+    };
+
+    let Some(html) = output_text_content(index_html, ArtifactKind::Html) else {
+        return Err(format!(
+            "{baseline_name} baseline contract expected 'index.html' as an HTML artifact."
+        ));
+    };
+
+    match html_shell_violation(html) {
+        Some(violation) => Err(format!(
+            "{baseline_name} baseline contract expected 'index.html' to follow the document shell: {violation}."
+        )),
+        None => Ok(html),
+    }
 }
 
 pub(super) fn output_text_content(

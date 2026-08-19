@@ -338,12 +338,13 @@ fn has_unguarded_timer_only_field(content: &str) -> bool {
 
 /// Return whether direct `Instant` use belongs to an explicitly non-timer
 /// wall-clock owner. These clocks exist for user-facing elapsed messages,
-/// integration-test reporting, or the in-process benchmark harness; they do
-/// not feed the timing collector or its schema.
+/// integration-test reporting, subprocess deadlines, or the in-process
+/// benchmark harness; they do not feed the timing collector or its schema.
 fn is_allowed_wall_clock_source(relative: &str) -> bool {
     matches!(
         relative,
         "src/benchmarking/frontend.rs"
+            | "src/compiler_tests/integration_test_runner/assertions/node_harness.rs"
             | "src/compiler_tests/integration_test_runner/runner.rs"
             | "src/projects/cli.rs"
             | "src/projects/check.rs"

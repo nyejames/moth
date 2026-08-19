@@ -64,6 +64,21 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 #[cfg(test)]
 static SOURCE_READ_COUNTER_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// Names the final component of a discovered module-root directory.
+///
+/// WHY: `unwrap_or_default` turned a rootless or non-UTF-8 directory into an empty name, so a
+/// discovery defect could be compared against an authored name and silently mismatch or, worse,
+/// match another empty entry. An asserted path component fails loudly instead.
+#[track_caller]
+fn root_directory_name(path: &Path) -> &str {
+    let name = path
+        .file_name()
+        .unwrap_or_else(|| panic!("module root {path:?} should have a final component"));
+
+    name.to_str()
+        .unwrap_or_else(|| panic!("module root name {name:?} should be valid UTF-8"))
+}
+
 fn configured_resolver(config: &Config) -> ProjectPathResolver {
     configured_resolver_with_source_file_kinds(
         config,
@@ -1171,14 +1186,11 @@ fn source_tree_index_collects_one_scan_and_applies_skip_policy() {
     let root_directories = index
         .module_roots()
         .root_directories()
-        .map(|path| path.file_name().and_then(OsStr::to_str).unwrap_or_default())
+        .map(|path| root_directory_name(path.as_path()))
         .collect::<Vec<_>>();
     assert_eq!(
         root_directories[0],
-        canonical_entry_root
-            .file_name()
-            .and_then(OsStr::to_str)
-            .unwrap()
+        root_directory_name(&canonical_entry_root)
     );
     assert_eq!(root_directories[1], "nested");
 }
@@ -1336,7 +1348,7 @@ fn bounded_module_roots_for_single_file_indexes_nested_roots_with_ignored_direct
 
     let root_directories = module_roots
         .root_directories()
-        .map(|path| path.file_name().and_then(OsStr::to_str).unwrap_or_default())
+        .map(|path| root_directory_name(path.as_path()))
         .collect::<Vec<_>>();
     assert_eq!(root_directories.len(), 2);
     assert!(root_directories.contains(&"module"));

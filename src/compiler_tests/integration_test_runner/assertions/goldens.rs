@@ -215,6 +215,34 @@ pub(super) fn validate_golden_outputs(
             ));
         };
 
+        // The artifact kind decides the comparison before any content is read. A directory or an
+        // unbuilt entry is a kind mismatch, never an empty file: comparing them as empty bytes
+        // let an empty golden pass against a path that holds no file at all.
+        let produced = match output.file_kind() {
+            FileKind::Html(content) | FileKind::Js(content) => {
+                ProducedGolden::Text(content.as_str())
+            }
+            FileKind::Wasm(bytes) | FileKind::Bytes(bytes) => {
+                ProducedGolden::Binary(bytes.as_slice())
+            }
+            FileKind::Directory => {
+                return Some((
+                    format!(
+                        "Golden output '{relative}' expects a file artifact, but the build produced a directory at that path."
+                    ),
+                    FailureKind::StrictGoldenMismatch,
+                ));
+            }
+            FileKind::NotBuilt => {
+                return Some((
+                    format!(
+                        "Golden output '{relative}' expects a file artifact, but the build reported that path as not built."
+                    ),
+                    FailureKind::StrictGoldenMismatch,
+                ));
+            }
+        };
+
         let expected_bytes = match fs::read(&file.absolute_path) {
             Ok(bytes) => bytes,
             Err(error) => {
@@ -228,56 +256,65 @@ pub(super) fn validate_golden_outputs(
             }
         };
 
-        let actual_bytes = match output.file_kind() {
-            FileKind::Html(content) | FileKind::Js(content) => content.as_bytes().to_vec(),
-            FileKind::Wasm(bytes) | FileKind::Bytes(bytes) => bytes.clone(),
-            FileKind::Directory | FileKind::NotBuilt => Vec::new(),
-        };
-
-        // Text artifacts support normalized comparison; binary/wasm always use strict.
-        let is_text = matches!(output.file_kind(), FileKind::Html(_) | FileKind::Js(_));
-        if is_text {
-            let expected_str = String::from_utf8_lossy(&expected_bytes);
-            let actual_str = match output.file_kind() {
-                FileKind::Html(s) | FileKind::Js(s) => s.as_str(),
-                _ => unreachable!("is_text is true"),
-            };
-
-            if let Some(detail) = compare_text_golden(expected_str.as_ref(), actual_str, mode) {
-                let failure_kind = if mode == GoldenMode::Normalized {
-                    FailureKind::NormalizedSemanticMismatch
-                } else {
-                    FailureKind::StrictGoldenMismatch
+        match produced {
+            // Text artifacts support normalized comparison; binary and wasm always compare bytes.
+            ProducedGolden::Text(actual_text) => {
+                let expected_text = match std::str::from_utf8(&expected_bytes) {
+                    Ok(text) => text,
+                    Err(error) => {
+                        return Some((
+                            format!(
+                                "Golden output '{}' is not valid UTF-8 but '{relative}' is a text artifact: {error}",
+                                file.absolute_path.display()
+                            ),
+                            FailureKind::HarnessFailed,
+                        ));
+                    }
                 };
-                let context = if mode == GoldenMode::Normalized {
-                    "did not match after normalization"
-                } else {
-                    "did not match the produced artifact"
-                };
-                return Some((
-                    format!("Golden output '{relative}' {context}.\n{detail}"),
-                    failure_kind,
-                ));
+
+                if let Some(detail) = compare_text_golden(expected_text, actual_text, mode) {
+                    let failure_kind = if mode == GoldenMode::Normalized {
+                        FailureKind::NormalizedSemanticMismatch
+                    } else {
+                        FailureKind::StrictGoldenMismatch
+                    };
+                    let context = if mode == GoldenMode::Normalized {
+                        "did not match after normalization"
+                    } else {
+                        "did not match the produced artifact"
+                    };
+                    return Some((
+                        format!("Golden output '{relative}' {context}.\n{detail}"),
+                        failure_kind,
+                    ));
+                }
             }
-            continue;
-        }
 
-        if actual_bytes != expected_bytes {
-            let detail = format!(
-                "expected {} bytes, got {} bytes",
-                expected_bytes.len(),
-                actual_bytes.len()
-            );
-            return Some((
-                format!(
-                    "Golden output '{relative}' did not match the produced artifact ({detail})."
-                ),
-                FailureKind::StrictGoldenMismatch,
-            ));
+            ProducedGolden::Binary(actual_bytes) => {
+                if actual_bytes != expected_bytes.as_slice() {
+                    let detail = format!(
+                        "expected {} bytes, got {} bytes",
+                        expected_bytes.len(),
+                        actual_bytes.len()
+                    );
+                    return Some((
+                        format!(
+                            "Golden output '{relative}' did not match the produced artifact ({detail})."
+                        ),
+                        FailureKind::StrictGoldenMismatch,
+                    ));
+                }
+            }
         }
     }
 
     None
+}
+
+/// The produced artifact seen as the golden comparison sees it: text or bytes, never absence.
+enum ProducedGolden<'a> {
+    Text(&'a str),
+    Binary(&'a [u8]),
 }
 
 fn validate_expected_artifact_paths(

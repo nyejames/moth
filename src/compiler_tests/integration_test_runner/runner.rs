@@ -281,8 +281,18 @@ fn test_thread_count_from_env() -> Result<Option<usize>, TestRunnerError> {
         return Ok(None);
     };
 
-    let threads = raw.to_string_lossy().parse::<usize>().map_err(|_| {
-        TestRunnerError::options("MOTH_TEST_THREADS must be a positive integer".to_string())
+    // Lossy conversion would report a non-UTF-8 value as a malformed integer and hide what the
+    // environment actually held, so the encoding failure gets its own message.
+    let Some(text) = raw.to_str() else {
+        return Err(TestRunnerError::options(format!(
+            "MOTH_TEST_THREADS must be valid UTF-8, but it was {raw:?}"
+        )));
+    };
+
+    let threads = text.parse::<usize>().map_err(|_| {
+        TestRunnerError::options(format!(
+            "MOTH_TEST_THREADS must be a positive integer, but it was '{text}'"
+        ))
     })?;
 
     if threads == 0 {

@@ -6,8 +6,8 @@
 WORK_ID: test-suite-honesty
 WORK_SOURCE: docs/roadmap/plans/test-suite-honesty-and-infrastructure-hardening-plan.md
 BASE_REVISION: f41f93a7a (post-TIR, post-benchmark-counters-timers)
-STATUS: active — Phase 4 complete, ready for Phase 5
-CURRENT_SCOPE: Phase 4 exact positive assertions and typed artifact inventory, closed out against review (paused before Phase 5)
+STATUS: active — Phase 5 complete, ready for Phase 6
+CURRENT_SCOPE: Phase 5 golden, HTML, Wasm and runtime-harness hardening (paused before Phase 6)
 COMPLETED:
   Phase 0: baseline established (4314 unit tests, 0 ignored, 1699 integration cases correct,
     1851 backend executions); durable inventory at docs/roadmap/evidence/test_honesty_inventory.json;
@@ -97,9 +97,37 @@ COMPLETED:
     canvas and runtime selectors) with a nested-path regression; BuiltOutputs and its self-tests
     moved from the shared build_system/tests/mod.rs to their only consumer,
     build_system/tests/build_dependency_tests.rs
-NEXT_ACTION: run Phase 5 (golden kind/encoding contracts, HTML and Wasm baselines, Node harness
-  ownership, timeout and script parsing)
-VALIDATION: Phase 4 closeout — just validate (pass: clippy --workspace --all-targets --all-features
+  Phase 5: golden comparison decides artifact kind before reading content — Directory and
+    NotBuilt are kind mismatches instead of empty bytes, text goldens require strict UTF-8
+    (invalid UTF-8 is HarnessFailed), binary/wasm compare bytes only; regressions for
+    directory-vs-empty-file, unbuilt path, invalid UTF-8, binary bytes and duplicate paths;
+    HTML shell contract replaced with one ordered, bounded, exactly-once marker contract
+    (html_shell_violation + typed HtmlShellViolation) owned in the integration assertion module
+    and consumed by html_project's assert_has_basic_shell, deleting the duplicated fragment list;
+    HTML-Wasm baseline now derives its required exports from the emitted page.js
+    (instance.exports.<name> classified as Func or Memory) and checks each against the module's
+    typed export kind, with an explicit runtime ABI floor that includes moth_start, which the old
+    name-list baseline never required; collect_wasm_exports returns a typed name→kind map and
+    rejects duplicate export names, collect_wasm_imports rejects duplicate module.name identities;
+    the page script include must appear exactly once inside the body; Node harness moved to an
+    owned tempfile workspace (tempfile promoted to a normal dependency because the runner ships in
+    the binary) with reported cleanup failure and a documented bounded retry for the Windows
+    removal race; run_node_script enforces a 30s deadline with kill-and-reap, drains stdout and
+    stderr on their own threads under a 4 MiB bound, decodes protocol stdout strictly and describes
+    stderr for reports without letting a decode failure replace the real boundary; typed
+    RenderHarnessError{kind,message} with Artifact/Workspace/Spawn/Timeout/ExitStatus/
+    OutputDecoding/OutputProtocol/ScriptShape/Cleanup; permissive script scanning replaced by a
+    supported-shape parser (case-insensitive tags, quoted attribute values, data blocks skipped,
+    external src / unknown type / nomodule / async / malformed or unterminated tags rejected);
+    HTML-Wasm harness resolves artifacts through __dirname so no workspace path crosses a text
+    boundary; lossy conversions removed at the integration entry path, MOTH_TEST_THREADS and the
+    module-discovery test helpers; node_harness.rs added to the timers-erasure wall-clock allowlist
+    beside the other subprocess-deadline owners
+NEXT_ACTION: run Phase 6 (deterministic timing and concurrency tests)
+VALIDATION: Phase 5 — just validate (pass: clippy --workspace --all-targets --all-features
+  -D warnings clean; cargo test --workspace 4373+17+646, 0 failed, 0 ignored; integration
+  1851/1851; docs check clean; bench-ci preflight; timers-erasure-check clean).
+  Phase 4 closeout — just validate (pass: clippy --workspace --all-targets --all-features
   -D warnings clean; cargo test --workspace 4337+17+646, 0 failed, 0 ignored; integration
   1851/1851; docs check clean; bench-ci 60/60 preflight; timers-erasure-check clean).
   Phase 4 checkpoint — cargo fmt; cargo clippy --workspace --all-targets -D warnings (clean);
@@ -114,11 +142,25 @@ AUDITS: pre-Phase-4 review of the Phase 0-3 work (helper contracts, panic-reason
   xtask absence assertions); Phase 4 sweep of >=, non-empty, any and find_map survivors across
   src and xtask with a disposition for each; Phase 4 closeout review (artifact identity must reuse
   the canonical output-path policy, typed rejection self-tests, anchored path predicates, helper
-  ownership, just validate as the final gate)
-BLOCKERS: none (Phase 4 complete)
+  ownership, just validate as the final gate); Phase 5 sweep of to_string_lossy/from_utf8_lossy and
+  path unwrap_or_default across src and xtask, with every assertion-boundary use removed and the
+  remaining report-rendering uses dispositioned
+BLOCKERS: none (Phase 5 complete)
 NOTES: Pre-existing benchmark_counters feature test failures are not caused by this work.
   Inventory finding mappings fixed: lossy_path_text_conversion → Phase 5 item 7,
   source_text_tests_false_confidence → Phase 4 items 3 and 7.
+  Phase 5 carry-over for Phase 8: testing.mtf's "Runtime output assertions" section should record
+  the supported <script> shapes, the harness execution deadline and the harness failure classes.
+  Phase 5 observed one intermittent failure of the pre-existing timers-gated test
+  frontend_benchmark_rejects_a_busy_raw_session_before_compilation that did not reproduce in 24
+  later full-suite runs (6 of them at --test-threads=16). It is recorded as the open inventory
+  finding global_timing_collector_observed_flake with its lead for Phase 6: xtask depends on moth
+  with features=["timers"], so cargo test --workspace runs with the collector live, and the shared
+  instrumentation lock serializes session owners but not the compiler work other concurrent tests
+  record into the active process-global session.
+  The four inventory findings Phase 5 owned (golden_comparison_accepting_directories_as_empty_files,
+  html_wasm_baseline_broad_fragments, node_runtime_harness_can_hang, lossy_path_text_conversion)
+  are now marked resolved in docs/roadmap/evidence/test_honesty_inventory.json.
 ```
 
 ## Purpose

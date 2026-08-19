@@ -3,23 +3,35 @@
 //! WHAT: sequences success and failure checks against the canonical expectation model.
 //! WHY: each assertion family owns its checks while this module preserves their established
 //!      order and converts failures into runner results.
+//!
+//! Family owners: `artifacts` (artifact index, kinds, HTML shell contract), `diagnostics`,
+//! `goldens`, `warnings`, `wasm` (module structure and the HTML-Wasm runtime export contract),
+//! `rendered_output` (harness JavaScript, event protocol, rendered expectations), and its two
+//! supporting owners `html_scripts` (supported `<script>` shapes) and `node_harness` (owned
+//! temporary workspace, bounded Node execution, typed harness failures).
 
 mod artifacts;
 mod diagnostics;
 mod goldens;
+mod html_scripts;
+mod node_harness;
 mod rendered_output;
 mod warnings;
 mod wasm;
 
 #[cfg(test)]
-pub(crate) use artifacts::ArtifactIndexError;
+pub(crate) use artifacts::{ArtifactIndexError, HtmlShellViolation, html_shell_violation};
 pub(crate) use goldens::discover_golden_expectation;
+#[cfg(test)]
+pub(crate) use html_scripts::extract_executable_scripts;
+#[cfg(test)]
+pub(crate) use node_harness::{
+    RenderHarnessError, RenderHarnessErrorKind, run_node_script_within, with_harness_workspace,
+};
 #[cfg(test)]
 pub(crate) use rendered_output::execute_wasm_harness_for_test;
 #[cfg(test)]
-pub(crate) use rendered_output::{
-    RuntimeEvent, SlotOutput, extract_script_blocks, parse_harness_output,
-};
+pub(crate) use rendered_output::{RuntimeEvent, SlotOutput, parse_harness_output};
 
 #[cfg(test)]
 use super::GoldenMode;
