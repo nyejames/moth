@@ -29,7 +29,7 @@ use crate::compiler_frontend::public_call_summary::FunctionReturnAliasSummary;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
     assignment_target, function_node, make_test_variable, node, param, reference_expr, symbol,
-    test_location,
+    test_source_location,
 };
 use crate::compiler_frontend::tests::borrow_fixture_support::run_borrow_checker;
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
@@ -59,31 +59,35 @@ fn statement_terminator_and_value_facts_are_populated() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x.clone(),
-                    Expression::int(1, test_location(1), ValueMode::MutableOwned),
+                    Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
                 )),
-                test_location(1),
+                test_source_location(1),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     y.clone(),
-                    Expression::int(0, test_location(2), ValueMode::ImmutableOwned),
+                    Expression::int(0, test_source_location(2), ValueMode::ImmutableOwned),
                 )),
-                test_location(2),
+                test_source_location(2),
             ),
             node(
                 NodeKind::If(
-                    Expression::bool(true, test_location(3), ValueMode::ImmutableOwned),
+                    Expression::bool(true, test_source_location(3), ValueMode::ImmutableOwned),
                     vec![node(
                         NodeKind::Assignment {
                             target: assignment_target(
                                 x.clone(),
                                 DataType::Int,
                                 builtin_type_ids::INT,
-                                test_location(4),
+                                test_source_location(4),
                             ),
-                            value: Expression::int(2, test_location(4), ValueMode::ImmutableOwned),
+                            value: Expression::int(
+                                2,
+                                test_source_location(4),
+                                ValueMode::ImmutableOwned,
+                            ),
                         },
-                        test_location(4),
+                        test_source_location(4),
                     )],
                     Some(vec![node(
                         NodeKind::Assignment {
@@ -91,17 +95,21 @@ fn statement_terminator_and_value_facts_are_populated() {
                                 x.clone(),
                                 DataType::Int,
                                 builtin_type_ids::INT,
-                                test_location(5),
+                                test_source_location(5),
                             ),
-                            value: Expression::int(3, test_location(5), ValueMode::ImmutableOwned),
+                            value: Expression::int(
+                                3,
+                                test_source_location(5),
+                                ValueMode::ImmutableOwned,
+                            ),
                         },
-                        test_location(5),
+                        test_source_location(5),
                     )]),
                 ),
-                test_location(3),
+                test_source_location(3),
             ),
         ],
-        test_location(1),
+        test_source_location(1),
     );
 
     let hir = lower_hir(build_ast(vec![start_fn], entry_path), &mut string_table);
@@ -174,11 +182,11 @@ fn drop_statement_produces_statement_fact() {
         vec![node(
             NodeKind::VariableDeclaration(make_test_variable(
                 value,
-                Expression::int(1, test_location(1), ValueMode::MutableOwned),
+                Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
             )),
-            test_location(1),
+            test_source_location(1),
         )],
-        test_location(1),
+        test_source_location(1),
     );
 
     let mut hir = lower_hir(build_ast(vec![start_fn], entry_path), &mut string_table);
@@ -204,7 +212,7 @@ fn drop_statement_produces_statement_fact() {
     entry_block.statements.push(HirStatement {
         id: HirNodeId(next_statement_id),
         kind: HirStatementKind::Drop(drop_local),
-        location: test_location(2),
+        location: test_source_location(2),
     });
 
     let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
@@ -239,9 +247,9 @@ fn statement_entry_state_reflects_last_use_reborrow_window() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     data.clone(),
-                    Expression::int(7, test_location(1), ValueMode::MutableOwned),
+                    Expression::int(7, test_source_location(1), ValueMode::MutableOwned),
                 )),
-                test_location(1),
+                test_source_location(1),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
@@ -249,11 +257,11 @@ fn statement_entry_state_reflects_last_use_reborrow_window() {
                     Expression::reference(
                         data.clone(),
                         DataType::Int,
-                        test_location(2),
+                        test_source_location(2),
                         ValueMode::MutableReference,
                     ),
                 )),
-                test_location(2),
+                test_source_location(2),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
@@ -262,10 +270,10 @@ fn statement_entry_state_reflects_last_use_reborrow_window() {
                         first_ref,
                         DataType::Int,
                         builtin_type_ids::INT,
-                        test_location(3),
+                        test_source_location(3),
                     ),
                 )),
-                test_location(3),
+                test_source_location(3),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
@@ -273,14 +281,14 @@ fn statement_entry_state_reflects_last_use_reborrow_window() {
                     Expression::reference(
                         data,
                         DataType::Int,
-                        test_location(4),
+                        test_source_location(4),
                         ValueMode::MutableReference,
                     ),
                 )),
-                test_location(4),
+                test_source_location(4),
             ),
         ],
-        test_location(1),
+        test_source_location(1),
     );
 
     let hir = lower_hir(build_ast(vec![start_fn], entry_path), &mut string_table);
@@ -328,9 +336,9 @@ fn optional_assignment_transfer_keeps_source_state_and_records_advisory_fact() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     source.clone(),
-                    Expression::int(7, test_location(10), ValueMode::MutableOwned),
+                    Expression::int(7, test_source_location(10), ValueMode::MutableOwned),
                 )),
-                test_location(10),
+                test_source_location(10),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
@@ -338,21 +346,21 @@ fn optional_assignment_transfer_keeps_source_state_and_records_advisory_fact() {
                     Expression::reference(
                         source,
                         DataType::Int,
-                        test_location(11),
+                        test_source_location(11),
                         ValueMode::MutableOwned,
                     ),
                 )),
-                test_location(11),
+                test_source_location(11),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     sentinel,
-                    Expression::int(0, test_location(12), ValueMode::ImmutableOwned),
+                    Expression::int(0, test_source_location(12), ValueMode::ImmutableOwned),
                 )),
-                test_location(12),
+                test_source_location(12),
             ),
         ],
-        test_location(2),
+        test_source_location(2),
     );
 
     let hir = lower_hir(build_ast(vec![start_fn], entry_path), &mut string_table);
@@ -968,15 +976,15 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
                     input_name.clone(),
                     DataType::StringSlice,
                     builtin_type_ids::STRING,
-                    test_location(2),
+                    test_source_location(2),
                 ),
                 CallAccessMode::Shared,
-                test_location(2),
+                test_source_location(2),
             )],
             result_type_ids: vec![builtin_type_ids::STRING, builtin_type_ids::STRING],
             error_type_id: builtin_type_ids::STRING,
             handling: FallibleExpressionHandling::Propagate,
-            location: test_location(2),
+            location: test_source_location(2),
         },
         &mut expression_types,
     );
@@ -988,7 +996,7 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
                 DataType::StringSlice,
                 builtin_type_ids::STRING,
                 false,
-                test_location(1),
+                test_source_location(1),
             )],
             returns: vec![
                 ReturnSlot {
@@ -1013,9 +1021,9 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
         },
         vec![node(
             NodeKind::Return(vec![external_call]),
-            test_location(2),
+            test_source_location(2),
         )],
-        test_location(1),
+        test_source_location(1),
     );
     let caller = function_node(
         caller_name.clone(),
@@ -1048,11 +1056,11 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
                     argument_name.clone(),
                     Expression::string_slice(
                         string_table.intern("hello"),
-                        test_location(5),
+                        test_source_location(5),
                         ValueMode::MutableOwned,
                     ),
                 )),
-                test_location(5),
+                test_source_location(5),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
@@ -1064,43 +1072,43 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
                                 argument_name,
                                 DataType::StringSlice,
                                 builtin_type_ids::STRING,
-                                test_location(6),
+                                test_source_location(6),
                             ),
                             CallAccessMode::Shared,
-                            test_location(6),
+                            test_source_location(6),
                         )],
                         vec![builtin_type_ids::STRING, builtin_type_ids::STRING],
                         FallibleExpressionHandling::Propagate,
                         &mut expression_types,
-                        test_location(6),
+                        test_source_location(6),
                     ),
                 )),
-                test_location(6),
+                test_source_location(6),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     sentinel_name,
-                    Expression::int(0, test_location(7), ValueMode::ImmutableOwned),
+                    Expression::int(0, test_source_location(7), ValueMode::ImmutableOwned),
                 )),
-                test_location(7),
+                test_source_location(7),
             ),
             node(
                 NodeKind::Return(vec![
                     Expression::string_slice(
                         string_table.intern("done"),
-                        test_location(8),
+                        test_source_location(8),
                         ValueMode::ImmutableOwned,
                     ),
                     Expression::string_slice(
                         string_table.intern("done"),
-                        test_location(8),
+                        test_source_location(8),
                         ValueMode::ImmutableOwned,
                     ),
                 ]),
-                test_location(8),
+                test_source_location(8),
             ),
         ],
-        test_location(5),
+        test_source_location(5),
     );
     let start = function_node(
         start_name,
@@ -1109,7 +1117,7 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
             returns: vec![],
         },
         vec![],
-        test_location(9),
+        test_source_location(9),
     );
     let hir = lower_hir(
         build_ast(vec![unknown, caller, start], entry_path),

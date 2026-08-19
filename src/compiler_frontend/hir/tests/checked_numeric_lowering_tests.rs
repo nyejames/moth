@@ -11,6 +11,7 @@ use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::hir::expressions::HirExpressionKind;
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
+use crate::compiler_frontend::hir::hir_builder::{register_local, setup_builder};
 use crate::compiler_frontend::hir::ids::{FunctionId, LocalId};
 use crate::compiler_frontend::hir::numeric::{
     HirNumericOp, HirNumericOperands, NumericFailureMode,
@@ -18,12 +19,10 @@ use crate::compiler_frontend::hir::numeric::{
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
-use crate::compiler_frontend::hir::tests::hir_expression_lowering_tests::{
-    location, register_local, setup_builder,
-};
 use crate::compiler_frontend::hir::tests::symbol;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tests::ast_fixture_support::test_source_location;
 use crate::compiler_frontend::tests::type_id_fixture_support::{
     reference_expr, runtime_expr, runtime_operand_item, runtime_operator_item,
 };
@@ -64,7 +63,7 @@ fn set_current_function_return_type(
 #[test]
 fn checked_int_addition_lowers_to_int_add_numeric_op() {
     let mut string_table = StringTable::new();
-    let loc = location(1);
+    let loc = test_source_location(1);
     let x_name = symbol("x", &mut string_table);
     let x_ref = reference_expr(
         x_name.clone(),
@@ -117,7 +116,7 @@ fn checked_int_addition_lowers_to_int_add_numeric_op() {
 #[test]
 fn checked_int_subtraction_lowers_to_int_sub_numeric_op() {
     let mut string_table = StringTable::new();
-    let loc = location(1);
+    let loc = test_source_location(1);
     let expr = runtime_expr(
         vec![
             runtime_operand_item(int_expr(5, loc.clone())),
@@ -141,7 +140,7 @@ fn checked_int_subtraction_lowers_to_int_sub_numeric_op() {
 #[test]
 fn checked_regular_division_lowers_to_float_div_numeric_op() {
     let mut string_table = StringTable::new();
-    let loc = location(1);
+    let loc = test_source_location(1);
     let expr = runtime_expr(
         vec![
             runtime_operand_item(int_expr(5, loc.clone())),
@@ -194,7 +193,7 @@ fn checked_regular_division_lowers_to_float_div_numeric_op() {
 #[test]
 fn mixed_int_float_addition_converts_int_operand() {
     let mut string_table = StringTable::new();
-    let loc = location(1);
+    let loc = test_source_location(1);
     let expr = runtime_expr(
         vec![
             runtime_operand_item(int_expr(1, loc.clone())),
@@ -238,7 +237,7 @@ fn mixed_int_float_addition_converts_int_operand() {
 #[test]
 fn unary_int_negation_lowers_to_int_neg_numeric_op() {
     let mut string_table = StringTable::new();
-    let loc = location(1);
+    let loc = test_source_location(1);
     let x_name = symbol("x", &mut string_table);
     let x_ref = reference_expr(
         x_name.clone(),
@@ -279,7 +278,7 @@ fn unary_int_negation_lowers_to_int_neg_numeric_op() {
 #[test]
 fn numeric_failure_mode_is_return_error_for_builtin_error_function() {
     let mut string_table = StringTable::new();
-    let loc = location(1);
+    let loc = test_source_location(1);
     let fn_name = symbol("__test_fn_error", &mut string_table);
     let expr = runtime_expr(
         vec![
@@ -336,7 +335,7 @@ fn numeric_failure_mode_is_return_error_for_builtin_error_function() {
 #[test]
 fn numeric_failure_mode_is_trap_for_custom_error_function() {
     let mut string_table = StringTable::new();
-    let loc = location(1);
+    let loc = test_source_location(1);
     let fn_name = symbol("__test_fn_string_error", &mut string_table);
     let expr = runtime_expr(
         vec![
@@ -369,7 +368,7 @@ fn numeric_failure_mode_is_trap_for_custom_error_function() {
 #[test]
 fn numeric_failure_mode_is_trap_for_non_fallible_function() {
     let mut string_table = StringTable::new();
-    let loc = location(1);
+    let loc = test_source_location(1);
     let fn_name = symbol("__test_fn_non_fallible", &mut string_table);
     let expr = runtime_expr(
         vec![

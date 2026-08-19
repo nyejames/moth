@@ -130,6 +130,9 @@ pub fn assert_output_rejection(messages: &CompilerMessages, expected_reason: &st
 ///   come from compiler payload identity — this helper does not invent a
 ///   parallel reason taxonomy.
 #[track_caller]
+// Retained without a caller for the test-suite-honesty campaign: Phase 7 decides whether the
+// integration contract audit adopts reason-key assertions. If nothing adopts it, Phase 11 deletes
+// it. Do not add a token caller to retire this lint — see AUD-0001-F05.
 #[allow(dead_code)]
 pub fn assert_diagnostic_reason(
     messages: &CompilerMessages,
@@ -170,6 +173,9 @@ pub fn assert_diagnostic_reason(
 /// WHAT: returns a `BTreeMap` from code to occurrence count.
 /// WHY: useful for comparing multisets in tests that need exact cardinality.
 #[track_caller]
+// Retained without a caller for the test-suite-honesty campaign: Phase 7 decides whether the
+// exact-cardinality diagnostic contracts adopt this multiset. If nothing adopts it, Phase 11
+// deletes it. Do not add a token caller to retire this lint — see AUD-0001-F05.
 #[allow(dead_code)]
 pub fn error_code_counts(messages: &CompilerMessages) -> BTreeMap<String, usize> {
     let mut counts = BTreeMap::new();

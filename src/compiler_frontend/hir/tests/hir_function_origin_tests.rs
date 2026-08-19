@@ -20,11 +20,8 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tests::ast_fixture_support::test_source_location;
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
-
-fn location(line: i32) -> SourceLocation {
-    crate::compiler_frontend::hir::tests::hir_expression_lowering_tests::location(line)
-}
 
 fn node(kind: NodeKind, location: SourceLocation) -> AstNode {
     AstNode {
@@ -70,8 +67,8 @@ fn classifies_entry_start_and_normal_functions() {
 
     let ast = build_ast(
         vec![
-            function_node(entry_start, location(1)),
-            function_node(normal_fn.clone(), location(2)),
+            function_node(entry_start, test_source_location(1)),
+            function_node(normal_fn.clone(), test_source_location(2)),
         ],
         entry_path,
     );
@@ -124,8 +121,8 @@ fn lowers_exact_stable_origin_to_local_function_id() {
 
     let ast = build_ast(
         vec![
-            function_node(entry_start, location(1)),
-            function_node(normal_fn.clone(), location(2)),
+            function_node(entry_start, test_source_location(1)),
+            function_node(normal_fn.clone(), test_source_location(2)),
         ],
         entry_path,
     );
@@ -196,8 +193,8 @@ fn rejects_unused_concrete_origin_seed() {
 
     let ast = build_ast(
         vec![
-            function_node(entry_start, location(1)),
-            function_node(normal_fn.clone(), location(2)),
+            function_node(entry_start, test_source_location(1)),
+            function_node(normal_fn.clone(), test_source_location(2)),
         ],
         entry_path,
     );
@@ -250,8 +247,8 @@ fn hir_validation_rejects_two_origins_for_one_local_function() {
 
     let ast = build_ast(
         vec![
-            function_node(entry_start, location(1)),
-            function_node(normal_fn.clone(), location(2)),
+            function_node(entry_start, test_source_location(1)),
+            function_node(normal_fn.clone(), test_source_location(2)),
         ],
         entry_path.clone(),
     );

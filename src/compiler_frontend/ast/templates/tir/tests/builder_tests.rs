@@ -15,10 +15,6 @@ use crate::compiler_frontend::ast::templates::tir::ids::{
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
-fn empty_location() -> SourceLocation {
-    SourceLocation::default()
-}
-
 fn slot_occurrence_id(store: &TemplateIrStore, node_id: TemplateIrNodeId) -> SlotOccurrenceId {
     match &store
         .get_node(node_id)
@@ -110,7 +106,12 @@ fn push_text_node_stores_text_payload() {
     let text_id = string_table.intern("payload");
     let node_id = {
         let mut builder = TemplateIrBuilder::new(&mut store);
-        builder.push_text_node(text_id, 7, TemplateSegmentOrigin::Head, empty_location())
+        builder.push_text_node(
+            text_id,
+            7,
+            TemplateSegmentOrigin::Head,
+            SourceLocation::default(),
+        )
     };
 
     let node = store.get_node(node_id).expect("node should exist");
@@ -140,15 +141,16 @@ fn push_sequence_node_stores_children() {
             string_table.intern("a"),
             1,
             TemplateSegmentOrigin::Body,
-            empty_location(),
+            SourceLocation::default(),
         );
         let child_b = builder.push_text_node(
             string_table.intern("b"),
             1,
             TemplateSegmentOrigin::Body,
-            empty_location(),
+            SourceLocation::default(),
         );
-        let sequence_id = builder.push_sequence_node(vec![child_a, child_b], empty_location());
+        let sequence_id =
+            builder.push_sequence_node(vec![child_a, child_b], SourceLocation::default());
 
         (child_a, child_b, sequence_id)
     };
@@ -176,16 +178,17 @@ fn push_child_template_node_stores_child_id() {
             string_table.intern("child"),
             5,
             TemplateSegmentOrigin::Body,
-            empty_location(),
+            SourceLocation::default(),
         );
         let child_template_id = builder.finish_template(
             child_root,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::default(),
-            empty_location(),
+            SourceLocation::default(),
         );
-        let child_node_id = builder.push_child_template_node(child_template_id, empty_location());
+        let child_node_id =
+            builder.push_child_template_node(child_template_id, SourceLocation::default());
 
         (child_template_id, child_node_id)
     };
@@ -212,14 +215,14 @@ fn finish_template_stores_metadata() {
             string_table.intern("root"),
             4,
             TemplateSegmentOrigin::Body,
-            empty_location(),
+            SourceLocation::default(),
         );
         let template_id = builder.finish_template(
             root,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::default(),
-            empty_location(),
+            SourceLocation::default(),
         );
 
         (root, template_id)
@@ -246,14 +249,14 @@ fn builder_does_not_expose_mutable_store_vectors() {
             string_table.intern("x"),
             1,
             TemplateSegmentOrigin::Body,
-            empty_location(),
+            SourceLocation::default(),
         );
         builder.finish_template(
             root,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::default(),
-            empty_location(),
+            SourceLocation::default(),
         )
     };
 
@@ -271,7 +274,7 @@ fn push_slot_node_stores_placeholder_payload() {
     let mut store = TemplateIrStore::new();
     let node_id = {
         let mut builder = TemplateIrBuilder::new(&mut store);
-        builder.push_slot_node(SlotKey::Default, empty_location())
+        builder.push_slot_node(SlotKey::Default, SourceLocation::default())
     };
 
     let node = store.get_node(node_id).expect("slot node should exist");
@@ -297,17 +300,17 @@ fn push_insert_contribution_node_stores_child_template_id() {
             string_table.intern("contribution"),
             12,
             TemplateSegmentOrigin::Body,
-            empty_location(),
+            SourceLocation::default(),
         );
         let contribution_template_id = builder.finish_template(
             contribution_root,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::default(),
-            empty_location(),
+            SourceLocation::default(),
         );
-        let contribution_node_id =
-            builder.push_insert_contribution_node(contribution_template_id, empty_location());
+        let contribution_node_id = builder
+            .push_insert_contribution_node(contribution_template_id, SourceLocation::default());
 
         (contribution_template_id, contribution_node_id)
     };
@@ -339,7 +342,7 @@ fn push_dynamic_expression_node_stores_expression_payload() {
             expression.clone(),
             TemplateSegmentOrigin::Head,
             None,
-            empty_location(),
+            SourceLocation::default(),
         )
     };
 
@@ -369,9 +372,9 @@ fn slot_occurrence_ids_assigned_in_document_order() {
     let mut store = TemplateIrStore::new();
     let (id_a, id_b, id_c) = {
         let mut builder = TemplateIrBuilder::new(&mut store);
-        let id_a = builder.push_slot_node(SlotKey::Default, empty_location());
-        let id_b = builder.push_slot_node(SlotKey::Default, empty_location());
-        let id_c = builder.push_slot_node(SlotKey::Default, empty_location());
+        let id_a = builder.push_slot_node(SlotKey::Default, SourceLocation::default());
+        let id_b = builder.push_slot_node(SlotKey::Default, SourceLocation::default());
+        let id_c = builder.push_slot_node(SlotKey::Default, SourceLocation::default());
         (id_a, id_b, id_c)
     };
 
@@ -404,32 +407,32 @@ fn child_template_occurrence_ids_assigned_in_document_order() {
             string_table.intern("a"),
             1,
             TemplateSegmentOrigin::Body,
-            empty_location(),
+            SourceLocation::default(),
         );
         let template_a = builder.finish_template(
             root_a,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::default(),
-            empty_location(),
+            SourceLocation::default(),
         );
 
         let root_b = builder.push_text_node(
             string_table.intern("b"),
             1,
             TemplateSegmentOrigin::Body,
-            empty_location(),
+            SourceLocation::default(),
         );
         let template_b = builder.finish_template(
             root_b,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::default(),
-            empty_location(),
+            SourceLocation::default(),
         );
 
-        let id_a = builder.push_child_template_node(template_a, empty_location());
-        let id_b = builder.push_child_template_node(template_b, empty_location());
+        let id_a = builder.push_child_template_node(template_a, SourceLocation::default());
+        let id_b = builder.push_child_template_node(template_b, SourceLocation::default());
         (id_a, id_b)
     };
 
@@ -455,32 +458,32 @@ fn expression_site_ids_assigned_in_document_order() {
         let id_a = builder.push_dynamic_expression_node(
             Expression::string_slice(
                 string_table.intern("a"),
-                empty_location(),
+                SourceLocation::default(),
                 crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
             ),
             TemplateSegmentOrigin::Body,
             None,
-            empty_location(),
+            SourceLocation::default(),
         );
         let id_b = builder.push_dynamic_expression_node(
             Expression::string_slice(
                 string_table.intern("b"),
-                empty_location(),
+                SourceLocation::default(),
                 crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
             ),
             TemplateSegmentOrigin::Body,
             None,
-            empty_location(),
+            SourceLocation::default(),
         );
         let id_c = builder.push_dynamic_expression_node(
             Expression::string_slice(
                 string_table.intern("c"),
-                empty_location(),
+                SourceLocation::default(),
                 crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
             ),
             TemplateSegmentOrigin::Body,
             None,
-            empty_location(),
+            SourceLocation::default(),
         );
         (id_a, id_b, id_c)
     };
@@ -528,42 +531,43 @@ fn derived_root_preserves_existing_occurrence_and_site_ids() {
     let (root, first_template_id, slot_id, child_id, expr_id) = {
         let mut builder = TemplateIrBuilder::new(&mut store);
 
-        let slot_id = builder.push_slot_node(SlotKey::Default, empty_location());
+        let slot_id = builder.push_slot_node(SlotKey::Default, SourceLocation::default());
 
         let child_root = builder.push_text_node(
             string_table.intern("child"),
             5,
             TemplateSegmentOrigin::Body,
-            empty_location(),
+            SourceLocation::default(),
         );
         let child_template = builder.finish_template(
             child_root,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::default(),
-            empty_location(),
+            SourceLocation::default(),
         );
-        let child_id = builder.push_child_template_node(child_template, empty_location());
+        let child_id = builder.push_child_template_node(child_template, SourceLocation::default());
 
         let expr_id = builder.push_dynamic_expression_node(
             Expression::string_slice(
                 string_table.intern("expr"),
-                empty_location(),
+                SourceLocation::default(),
                 crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
             ),
             TemplateSegmentOrigin::Body,
             None,
-            empty_location(),
+            SourceLocation::default(),
         );
 
-        let root = builder.push_sequence_node(vec![slot_id, child_id, expr_id], empty_location());
+        let root =
+            builder.push_sequence_node(vec![slot_id, child_id, expr_id], SourceLocation::default());
 
         let first_template_id = builder.finish_template(
             root,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::default(),
-            empty_location(),
+            SourceLocation::default(),
         );
 
         (root, first_template_id, slot_id, child_id, expr_id)
@@ -580,7 +584,7 @@ fn derived_root_preserves_existing_occurrence_and_site_ids() {
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        empty_location(),
+        SourceLocation::default(),
     ));
 
     // Both templates point to the same root node: the derived root is shared,
@@ -645,126 +649,128 @@ fn newly_created_nodes_receive_fresh_ids_after_existing_allocations() {
 
         // ---- Round 1: one of each structural node family ----
 
-        let slot_first = builder.push_slot_node(SlotKey::Default, empty_location());
+        let slot_first = builder.push_slot_node(SlotKey::Default, SourceLocation::default());
 
         let child_root_a = builder.push_text_node(
             string_table.intern("a"),
             1,
             TemplateSegmentOrigin::Body,
-            empty_location(),
+            SourceLocation::default(),
         );
         let child_template_a = builder.finish_template(
             child_root_a,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::default(),
-            empty_location(),
+            SourceLocation::default(),
         );
-        let child_first = builder.push_child_template_node(child_template_a, empty_location());
+        let child_first =
+            builder.push_child_template_node(child_template_a, SourceLocation::default());
 
         let expr_first = builder.push_dynamic_expression_node(
             Expression::string_slice(
                 string_table.intern("e1"),
-                empty_location(),
+                SourceLocation::default(),
                 crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
             ),
             TemplateSegmentOrigin::Body,
             None,
-            empty_location(),
+            SourceLocation::default(),
         );
 
         let branch_body_a = builder.push_text_node(
             string_table.intern("ba"),
             2,
             TemplateSegmentOrigin::Body,
-            empty_location(),
+            SourceLocation::default(),
         );
         let branch_first = TemplateIrBranch::new(
             TemplateBranchSelector::Bool(Expression::bool(
                 true,
-                empty_location(),
+                SourceLocation::default(),
                 crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
             )),
             branch_body_a,
-            empty_location(),
+            SourceLocation::default(),
             builder.store.next_expression_site_id(),
         );
         let chain_first =
-            builder.push_branch_chain_node(vec![branch_first], None, empty_location());
+            builder.push_branch_chain_node(vec![branch_first], None, SourceLocation::default());
 
         let loop_body_a = builder.push_text_node(
             string_table.intern("la"),
             2,
             TemplateSegmentOrigin::Body,
-            empty_location(),
+            SourceLocation::default(),
         );
         let loop_first = builder.push_loop_node(
             TemplateLoopHeader::Conditional {
                 condition: Box::new(Expression::bool(
                     true,
-                    empty_location(),
+                    SourceLocation::default(),
                     crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
                 )),
             },
             loop_body_a,
             None,
-            empty_location(),
+            SourceLocation::default(),
         );
 
         // ---- Round 2: one of each again, continuing from round-1 counters ----
 
-        let slot_second = builder.push_slot_node(SlotKey::Default, empty_location());
+        let slot_second = builder.push_slot_node(SlotKey::Default, SourceLocation::default());
 
         let child_root_b = builder.push_text_node(
             string_table.intern("b"),
             1,
             TemplateSegmentOrigin::Body,
-            empty_location(),
+            SourceLocation::default(),
         );
         let child_template_b = builder.finish_template(
             child_root_b,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::default(),
-            empty_location(),
+            SourceLocation::default(),
         );
-        let child_second = builder.push_child_template_node(child_template_b, empty_location());
+        let child_second =
+            builder.push_child_template_node(child_template_b, SourceLocation::default());
 
         let expr_second = builder.push_dynamic_expression_node(
             Expression::string_slice(
                 string_table.intern("e2"),
-                empty_location(),
+                SourceLocation::default(),
                 crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
             ),
             TemplateSegmentOrigin::Body,
             None,
-            empty_location(),
+            SourceLocation::default(),
         );
 
         let branch_body_b = builder.push_text_node(
             string_table.intern("bb"),
             2,
             TemplateSegmentOrigin::Body,
-            empty_location(),
+            SourceLocation::default(),
         );
         let branch_second = TemplateIrBranch::new(
             TemplateBranchSelector::Bool(Expression::bool(
                 false,
-                empty_location(),
+                SourceLocation::default(),
                 crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
             )),
             branch_body_b,
-            empty_location(),
+            SourceLocation::default(),
             builder.store.next_expression_site_id(),
         );
         let chain_second =
-            builder.push_branch_chain_node(vec![branch_second], None, empty_location());
+            builder.push_branch_chain_node(vec![branch_second], None, SourceLocation::default());
 
         let loop_body_b = builder.push_text_node(
             string_table.intern("lb"),
             2,
             TemplateSegmentOrigin::Body,
-            empty_location(),
+            SourceLocation::default(),
         );
         let loop_second = builder.push_loop_node(
             TemplateLoopHeader::Range {
@@ -775,25 +781,25 @@ fn newly_created_nodes_receive_fresh_ids_after_existing_allocations() {
                 range: Box::new(RangeLoopSpec {
                     start: Expression::int(
                         0,
-                        empty_location(),
+                        SourceLocation::default(),
                         crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
                     ),
                     end: Expression::int(
                         10,
-                        empty_location(),
+                        SourceLocation::default(),
                         crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
                     ),
                     end_kind: crate::compiler_frontend::ast::ast_nodes::RangeEndKind::Exclusive,
                     step: Some(Expression::int(
                         1,
-                        empty_location(),
+                        SourceLocation::default(),
                         crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
                     )),
                 }),
             },
             loop_body_b,
             None,
-            empty_location(),
+            SourceLocation::default(),
         );
 
         let (range_start_second, range_end_second, range_step_second) =
@@ -847,38 +853,41 @@ fn branch_selector_site_ids_assigned_in_document_order() {
             string_table.intern("a"),
             1,
             TemplateSegmentOrigin::Body,
-            empty_location(),
+            SourceLocation::default(),
         );
         let body_b = builder.push_text_node(
             string_table.intern("b"),
             1,
             TemplateSegmentOrigin::Body,
-            empty_location(),
+            SourceLocation::default(),
         );
 
         let branch_a = TemplateIrBranch::new(
             TemplateBranchSelector::Bool(Expression::bool(
                 true,
-                empty_location(),
+                SourceLocation::default(),
                 crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
             )),
             body_a,
-            empty_location(),
+            SourceLocation::default(),
             builder.store.next_expression_site_id(),
         );
         let branch_b = TemplateIrBranch::new(
             TemplateBranchSelector::Bool(Expression::bool(
                 false,
-                empty_location(),
+                SourceLocation::default(),
                 crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
             )),
             body_b,
-            empty_location(),
+            SourceLocation::default(),
             builder.store.next_expression_site_id(),
         );
 
-        let chain_id =
-            builder.push_branch_chain_node(vec![branch_a, branch_b], None, empty_location());
+        let chain_id = builder.push_branch_chain_node(
+            vec![branch_a, branch_b],
+            None,
+            SourceLocation::default(),
+        );
 
         let chain = store.get_node(chain_id).expect("chain node");
         let branches = match &chain.kind {
@@ -906,26 +915,26 @@ fn loop_conditional_and_collection_headers_each_assign_one_expression_site() {
             string_table.intern("cond-body"),
             10,
             TemplateSegmentOrigin::Body,
-            empty_location(),
+            SourceLocation::default(),
         );
         let conditional_node_id = builder.push_loop_node(
             TemplateLoopHeader::Conditional {
                 condition: Box::new(Expression::bool(
                     true,
-                    empty_location(),
+                    SourceLocation::default(),
                     crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
                 )),
             },
             conditional_body,
             None,
-            empty_location(),
+            SourceLocation::default(),
         );
 
         let collection_body = builder.push_text_node(
             string_table.intern("coll-body"),
             10,
             TemplateSegmentOrigin::Body,
-            empty_location(),
+            SourceLocation::default(),
         );
         let collection_node_id = builder.push_loop_node(
             TemplateLoopHeader::Collection {
@@ -935,13 +944,13 @@ fn loop_conditional_and_collection_headers_each_assign_one_expression_site() {
                 }),
                 iterable: Box::new(Expression::string_slice(
                     string_table.intern("items"),
-                    empty_location(),
+                    SourceLocation::default(),
                     crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
                 )),
             },
             collection_body,
             None,
-            empty_location(),
+            SourceLocation::default(),
         );
 
         (conditional_node_id, collection_node_id)
@@ -991,7 +1000,7 @@ fn loop_range_header_assigns_start_end_and_optional_step_sites() {
             string_table.intern("step-body"),
             9,
             TemplateSegmentOrigin::Body,
-            empty_location(),
+            SourceLocation::default(),
         );
         let with_step_id = builder.push_loop_node(
             TemplateLoopHeader::Range {
@@ -1002,25 +1011,25 @@ fn loop_range_header_assigns_start_end_and_optional_step_sites() {
                 range: Box::new(RangeLoopSpec {
                     start: Expression::int(
                         0,
-                        empty_location(),
+                        SourceLocation::default(),
                         crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
                     ),
                     end: Expression::int(
                         10,
-                        empty_location(),
+                        SourceLocation::default(),
                         crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
                     ),
                     end_kind: crate::compiler_frontend::ast::ast_nodes::RangeEndKind::Exclusive,
                     step: Some(Expression::int(
                         2,
-                        empty_location(),
+                        SourceLocation::default(),
                         crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
                     )),
                 }),
             },
             with_step_body,
             None,
-            empty_location(),
+            SourceLocation::default(),
         );
 
         // Range without a step allocates start and end only; no step site.
@@ -1028,7 +1037,7 @@ fn loop_range_header_assigns_start_end_and_optional_step_sites() {
             string_table.intern("no-step-body"),
             11,
             TemplateSegmentOrigin::Body,
-            empty_location(),
+            SourceLocation::default(),
         );
         let without_step_id = builder.push_loop_node(
             TemplateLoopHeader::Range {
@@ -1039,12 +1048,12 @@ fn loop_range_header_assigns_start_end_and_optional_step_sites() {
                 range: Box::new(RangeLoopSpec {
                     start: Expression::int(
                         0,
-                        empty_location(),
+                        SourceLocation::default(),
                         crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
                     ),
                     end: Expression::int(
                         10,
-                        empty_location(),
+                        SourceLocation::default(),
                         crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
                     ),
                     end_kind: crate::compiler_frontend::ast::ast_nodes::RangeEndKind::Exclusive,
@@ -1053,7 +1062,7 @@ fn loop_range_header_assigns_start_end_and_optional_step_sites() {
             },
             without_step_body,
             None,
-            empty_location(),
+            SourceLocation::default(),
         );
 
         (with_step_id, without_step_id)
@@ -1105,12 +1114,12 @@ fn expression_sites_share_one_document_order_counter() {
         let expr_node = builder.push_dynamic_expression_node(
             Expression::string_slice(
                 string_table.intern("expr"),
-                empty_location(),
+                SourceLocation::default(),
                 crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
             ),
             TemplateSegmentOrigin::Body,
             None,
-            empty_location(),
+            SourceLocation::default(),
         );
 
         // Second: a branch chain with one branch selector (site 1).
@@ -1118,26 +1127,27 @@ fn expression_sites_share_one_document_order_counter() {
             string_table.intern("branch"),
             6,
             TemplateSegmentOrigin::Body,
-            empty_location(),
+            SourceLocation::default(),
         );
         let branch = TemplateIrBranch::new(
             TemplateBranchSelector::Bool(Expression::bool(
                 true,
-                empty_location(),
+                SourceLocation::default(),
                 crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
             )),
             branch_body,
-            empty_location(),
+            SourceLocation::default(),
             builder.store.next_expression_site_id(),
         );
-        let chain_node = builder.push_branch_chain_node(vec![branch], None, empty_location());
+        let chain_node =
+            builder.push_branch_chain_node(vec![branch], None, SourceLocation::default());
 
         // Third: a range loop with start (site 2), end (site 3), step (site 4).
         let loop_body = builder.push_text_node(
             string_table.intern("loop"),
             4,
             TemplateSegmentOrigin::Body,
-            empty_location(),
+            SourceLocation::default(),
         );
         let loop_node = builder.push_loop_node(
             TemplateLoopHeader::Range {
@@ -1148,25 +1158,25 @@ fn expression_sites_share_one_document_order_counter() {
                 range: Box::new(RangeLoopSpec {
                     start: Expression::int(
                         0,
-                        empty_location(),
+                        SourceLocation::default(),
                         crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
                     ),
                     end: Expression::int(
                         10,
-                        empty_location(),
+                        SourceLocation::default(),
                         crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
                     ),
                     end_kind: crate::compiler_frontend::ast::ast_nodes::RangeEndKind::Exclusive,
                     step: Some(Expression::int(
                         1,
-                        empty_location(),
+                        SourceLocation::default(),
                         crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
                     )),
                 }),
             },
             loop_body,
             None,
-            empty_location(),
+            SourceLocation::default(),
         );
 
         // Read back the site IDs.

@@ -40,7 +40,7 @@ use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
     assignment_target, fresh_success_returns, function_node, make_test_variable, node, param,
-    reference_expr, symbol, test_location,
+    reference_expr, symbol, test_source_location,
 };
 use crate::compiler_frontend::tests::borrow_fixture_support::{
     assert_borrow_error_kind, assert_infrastructure_error_contains,
@@ -106,7 +106,7 @@ fn public_call_summaries_cover_zero_parameter_and_parameter_effects() {
         reactive_parameter.clone(),
         builtin_type_ids::INT,
         false,
-        test_location(1),
+        test_source_location(1),
     );
     reactive_parameter_declaration.value.reactive_source = Some(ReactiveSource {
         path: reactive_parameter.clone(),
@@ -122,21 +122,21 @@ fn public_call_summaries_cover_zero_parameter_and_parameter_effects() {
                     DataType::Int,
                     builtin_type_ids::INT,
                     false,
-                    test_location(1),
+                    test_source_location(1),
                 ),
                 param(
                     mutable_parameter.clone(),
                     DataType::Int,
                     builtin_type_ids::INT,
                     true,
-                    test_location(1),
+                    test_source_location(1),
                 ),
                 param(
                     untouched_mutable_parameter,
                     DataType::Int,
                     builtin_type_ids::INT,
                     true,
-                    test_location(1),
+                    test_source_location(1),
                 ),
                 reactive_parameter_declaration,
             ],
@@ -148,13 +148,13 @@ fn public_call_summaries_cover_zero_parameter_and_parameter_effects() {
                     mutable_parameter,
                     DataType::Int,
                     builtin_type_ids::INT,
-                    test_location(2),
+                    test_source_location(2),
                 ),
-                value: Expression::int(2, test_location(2), ValueMode::ImmutableOwned),
+                value: Expression::int(2, test_source_location(2), ValueMode::ImmutableOwned),
             },
-            test_location(2),
+            test_source_location(2),
         )],
-        test_location(1),
+        test_source_location(1),
     );
 
     let start = function_node(
@@ -164,7 +164,7 @@ fn public_call_summaries_cover_zero_parameter_and_parameter_effects() {
             returns: vec![],
         },
         vec![],
-        test_location(3),
+        test_source_location(3),
     );
 
     let hir = lower_hir(
@@ -285,7 +285,7 @@ fn incomplete_public_call_summary_metadata_uses_infrastructure_lane() {
             returns: vec![],
         },
         vec![],
-        test_location(1),
+        test_source_location(1),
     );
 
     let mut hir = lower_hir(build_ast(vec![start], entry_path), &mut string_table);
@@ -318,12 +318,12 @@ fn public_call_summary_keeps_mutable_but_unwritten_call_path_read_only() {
                 DataType::Int,
                 builtin_type_ids::INT,
                 true,
-                test_location(1),
+                test_source_location(1),
             )],
             returns: vec![],
         },
         vec![],
-        test_location(1),
+        test_source_location(1),
     );
     let wrapper = function_node(
         wrapper_name,
@@ -333,7 +333,7 @@ fn public_call_summary_keeps_mutable_but_unwritten_call_path_read_only() {
                 DataType::Int,
                 builtin_type_ids::INT,
                 true,
-                test_location(2),
+                test_source_location(2),
             )],
             returns: vec![],
         },
@@ -345,17 +345,17 @@ fn public_call_summary_keeps_mutable_but_unwritten_call_path_read_only() {
                         parameter_name,
                         DataType::Int,
                         builtin_type_ids::INT,
-                        test_location(3),
+                        test_source_location(3),
                     ),
                     CallAccessMode::Mutable,
-                    test_location(3),
+                    test_source_location(3),
                 )],
                 vec![],
-                test_location(3),
+                test_source_location(3),
             ),
-            test_location(3),
+            test_source_location(3),
         )],
-        test_location(2),
+        test_source_location(2),
     );
     let start = function_node(
         start_name,
@@ -364,7 +364,7 @@ fn public_call_summary_keeps_mutable_but_unwritten_call_path_read_only() {
             returns: vec![],
         },
         vec![],
-        test_location(4),
+        test_source_location(4),
     );
 
     let hir = lower_hir(
@@ -571,12 +571,12 @@ fn immutable_shared_parameter_optional_transfer_remains_legal() {
                 DataType::Int,
                 builtin_type_ids::INT,
                 false,
-                test_location(1),
+                test_source_location(1),
             )],
             returns: vec![],
         },
         vec![],
-        test_location(1),
+        test_source_location(1),
     );
     let start = function_node(
         start_name,
@@ -588,9 +588,9 @@ fn immutable_shared_parameter_optional_transfer_remains_legal() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     value_name.clone(),
-                    Expression::int(1, test_location(2), ValueMode::ImmutableOwned),
+                    Expression::int(1, test_source_location(2), ValueMode::ImmutableOwned),
                 )),
-                test_location(2),
+                test_source_location(2),
             ),
             node(
                 function_call_node(
@@ -600,18 +600,18 @@ fn immutable_shared_parameter_optional_transfer_remains_legal() {
                             value_name,
                             DataType::Int,
                             builtin_type_ids::INT,
-                            test_location(3),
+                            test_source_location(3),
                         ),
                         CallAccessMode::Shared,
-                        test_location(3),
+                        test_source_location(3),
                     )],
                     vec![],
-                    test_location(3),
+                    test_source_location(3),
                 ),
-                test_location(3),
+                test_source_location(3),
             ),
         ],
-        test_location(2),
+        test_source_location(2),
     );
 
     let hir = lower_hir(
@@ -774,7 +774,7 @@ fn user_function_returning_param_alias_allows_caller_rebinding() {
                 DataType::Int,
                 builtin_type_ids::INT,
                 false,
-                test_location(1),
+                test_source_location(1),
             )],
             returns: vec![ReturnSlot {
                 value: DataType::Int,
@@ -788,11 +788,11 @@ fn user_function_returning_param_alias_allows_caller_rebinding() {
                 p,
                 DataType::Int,
                 builtin_type_ids::INT,
-                test_location(2),
+                test_source_location(2),
             )]),
-            test_location(2),
+            test_source_location(2),
         )],
-        test_location(1),
+        test_source_location(1),
     );
 
     let caller = function_node(
@@ -805,9 +805,9 @@ fn user_function_returning_param_alias_allows_caller_rebinding() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x.clone(),
-                    Expression::int(1, test_location(10), ValueMode::MutableOwned),
+                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
                 )),
-                test_location(10),
+                test_source_location(10),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
@@ -818,13 +818,13 @@ fn user_function_returning_param_alias_allows_caller_rebinding() {
                             x.clone(),
                             DataType::Int,
                             builtin_type_ids::INT,
-                            test_location(11),
+                            test_source_location(11),
                         )],
                         vec![builtin_type_ids::INT],
-                        test_location(11),
+                        test_source_location(11),
                     ),
                 )),
-                test_location(11),
+                test_source_location(11),
             ),
             node(
                 NodeKind::Assignment {
@@ -832,14 +832,14 @@ fn user_function_returning_param_alias_allows_caller_rebinding() {
                         x,
                         DataType::Int,
                         builtin_type_ids::INT,
-                        test_location(12),
+                        test_source_location(12),
                     ),
-                    value: Expression::int(2, test_location(12), ValueMode::ImmutableOwned),
+                    value: Expression::int(2, test_source_location(12), ValueMode::ImmutableOwned),
                 },
-                test_location(12),
+                test_source_location(12),
             ),
         ],
-        test_location(10),
+        test_source_location(10),
     );
 
     let hir = lower_hir(
@@ -899,14 +899,14 @@ fn fallible_alias_return_propagation_validates_success_alias_metadata() {
                     DataType::StringSlice,
                     builtin_type_ids::STRING,
                     false,
-                    test_location(20),
+                    test_source_location(20),
                 ),
                 param(
                     source_unused.clone(),
                     DataType::StringSlice,
                     builtin_type_ids::STRING,
                     false,
-                    test_location(20),
+                    test_source_location(20),
                 ),
             ],
             returns: vec![
@@ -929,11 +929,11 @@ fn fallible_alias_return_propagation_validates_success_alias_metadata() {
                 source_unused,
                 DataType::StringSlice,
                 builtin_type_ids::STRING,
-                test_location(21),
+                test_source_location(21),
             )]),
-            test_location(21),
+            test_source_location(21),
         )],
-        test_location(20),
+        test_source_location(20),
     );
 
     let mut expression_types = TypeEnvironment::new();
@@ -943,27 +943,27 @@ fn fallible_alias_return_propagation_validates_success_alias_metadata() {
             CallArgument::positional(
                 Expression::string_slice(
                     string_table.intern("unused"),
-                    test_location(30),
+                    test_source_location(30),
                     ValueMode::ImmutableOwned,
                 ),
                 CallAccessMode::Shared,
-                test_location(30),
+                test_source_location(30),
             ),
             CallArgument::positional(
                 reference_expr(
                     forward_param.clone(),
                     DataType::StringSlice,
                     builtin_type_ids::STRING,
-                    test_location(30),
+                    test_source_location(30),
                 ),
                 CallAccessMode::Shared,
-                test_location(30),
+                test_source_location(30),
             ),
         ],
         vec![builtin_type_ids::STRING],
         FallibleExpressionHandling::Propagate,
         &mut expression_types,
-        test_location(30),
+        test_source_location(30),
     );
 
     let forward = function_node(
@@ -974,7 +974,7 @@ fn fallible_alias_return_propagation_validates_success_alias_metadata() {
                 DataType::StringSlice,
                 builtin_type_ids::STRING,
                 false,
-                test_location(29),
+                test_source_location(29),
             )],
             returns: vec![
                 ReturnSlot {
@@ -993,9 +993,9 @@ fn fallible_alias_return_propagation_validates_success_alias_metadata() {
         },
         vec![node(
             NodeKind::Return(vec![propagated_call]),
-            test_location(30),
+            test_source_location(30),
         )],
-        test_location(29),
+        test_source_location(29),
     );
 
     let start = function_node(
@@ -1004,8 +1004,8 @@ fn fallible_alias_return_propagation_validates_success_alias_metadata() {
             parameters: vec![],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), test_location(40))],
-        test_location(40),
+        vec![node(NodeKind::Return(vec![]), test_source_location(40))],
+        test_source_location(40),
     );
 
     let hir = lower_hir(
@@ -1064,19 +1064,19 @@ fn fresh_user_return_does_not_alias_caller_roots() {
                 DataType::Int,
                 builtin_type_ids::INT,
                 false,
-                test_location(1),
+                test_source_location(1),
             )],
             returns: fresh_success_returns(vec![builtin_type_ids::INT]),
         },
         vec![node(
             NodeKind::Return(vec![Expression::int(
                 42,
-                test_location(2),
+                test_source_location(2),
                 ValueMode::ImmutableOwned,
             )]),
-            test_location(2),
+            test_source_location(2),
         )],
-        test_location(1),
+        test_source_location(1),
     );
 
     let caller = function_node(
@@ -1089,9 +1089,9 @@ fn fresh_user_return_does_not_alias_caller_roots() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x.clone(),
-                    Expression::int(1, test_location(10), ValueMode::MutableOwned),
+                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
                 )),
-                test_location(10),
+                test_source_location(10),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
@@ -1102,13 +1102,13 @@ fn fresh_user_return_does_not_alias_caller_roots() {
                             x.clone(),
                             DataType::Int,
                             builtin_type_ids::INT,
-                            test_location(11),
+                            test_source_location(11),
                         )],
                         vec![builtin_type_ids::INT],
-                        test_location(11),
+                        test_source_location(11),
                     ),
                 )),
-                test_location(11),
+                test_source_location(11),
             ),
             node(
                 NodeKind::Assignment {
@@ -1116,14 +1116,14 @@ fn fresh_user_return_does_not_alias_caller_roots() {
                         x,
                         DataType::Int,
                         builtin_type_ids::INT,
-                        test_location(12),
+                        test_source_location(12),
                     ),
-                    value: Expression::int(2, test_location(12), ValueMode::ImmutableOwned),
+                    value: Expression::int(2, test_source_location(12), ValueMode::ImmutableOwned),
                 },
-                test_location(12),
+                test_source_location(12),
             ),
         ],
-        test_location(10),
+        test_source_location(10),
     );
 
     let hir = lower_hir(
@@ -1181,7 +1181,7 @@ fn multi_return_fallible_external_retains_unknown_alias_summary() {
                 result_type_ids: vec![builtin_type_ids::INT, builtin_type_ids::INT],
                 error_type_id: builtin_type_ids::INT,
                 handling: FallibleExpressionHandling::Propagate,
-                location: test_location(2),
+                location: test_source_location(2),
             },
             &mut expression_types,
         );
@@ -1212,9 +1212,9 @@ fn multi_return_fallible_external_retains_unknown_alias_summary() {
         },
         vec![node(
             NodeKind::Return(vec![fallible_external_call]),
-            test_location(2),
+            test_source_location(2),
         )],
-        test_location(1),
+        test_source_location(1),
     );
     let forward_name = symbol("forward_imprecise_return", &mut string_table);
     let mut forward_expression_types = TypeEnvironment::new();
@@ -1224,7 +1224,7 @@ fn multi_return_fallible_external_retains_unknown_alias_summary() {
         vec![builtin_type_ids::INT, builtin_type_ids::INT],
         FallibleExpressionHandling::Propagate,
         &mut forward_expression_types,
-        test_location(3),
+        test_source_location(3),
     );
     let forward = function_node(
         forward_name.clone(),
@@ -1253,9 +1253,9 @@ fn multi_return_fallible_external_retains_unknown_alias_summary() {
         },
         vec![node(
             NodeKind::Return(vec![forwarded_call]),
-            test_location(3),
+            test_source_location(3),
         )],
-        test_location(3),
+        test_source_location(3),
     );
     let start = function_node(
         start_name,
@@ -1264,7 +1264,7 @@ fn multi_return_fallible_external_retains_unknown_alias_summary() {
             returns: vec![],
         },
         vec![],
-        test_location(3),
+        test_source_location(3),
     );
 
     let hir = lower_hir(
@@ -1478,7 +1478,7 @@ fn inferred_alias_return_from_parameter_reference_allows_caller_rebinding() {
                 DataType::Int,
                 builtin_type_ids::INT,
                 false,
-                test_location(1),
+                test_source_location(1),
             )],
             returns: fresh_success_returns(vec![builtin_type_ids::INT]),
         },
@@ -1486,21 +1486,26 @@ fn inferred_alias_return_from_parameter_reference_allows_caller_rebinding() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     q.clone(),
-                    reference_expr(p, DataType::Int, builtin_type_ids::INT, test_location(2)),
+                    reference_expr(
+                        p,
+                        DataType::Int,
+                        builtin_type_ids::INT,
+                        test_source_location(2),
+                    ),
                 )),
-                test_location(2),
+                test_source_location(2),
             ),
             node(
                 NodeKind::Return(vec![reference_expr(
                     q,
                     DataType::Int,
                     builtin_type_ids::INT,
-                    test_location(3),
+                    test_source_location(3),
                 )]),
-                test_location(3),
+                test_source_location(3),
             ),
         ],
-        test_location(1),
+        test_source_location(1),
     );
 
     let caller = function_node(
@@ -1513,9 +1518,9 @@ fn inferred_alias_return_from_parameter_reference_allows_caller_rebinding() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x.clone(),
-                    Expression::int(1, test_location(10), ValueMode::MutableOwned),
+                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
                 )),
-                test_location(10),
+                test_source_location(10),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
@@ -1526,13 +1531,13 @@ fn inferred_alias_return_from_parameter_reference_allows_caller_rebinding() {
                             x.clone(),
                             DataType::Int,
                             builtin_type_ids::INT,
-                            test_location(11),
+                            test_source_location(11),
                         )],
                         vec![builtin_type_ids::INT],
-                        test_location(11),
+                        test_source_location(11),
                     ),
                 )),
-                test_location(11),
+                test_source_location(11),
             ),
             node(
                 NodeKind::Assignment {
@@ -1540,14 +1545,14 @@ fn inferred_alias_return_from_parameter_reference_allows_caller_rebinding() {
                         x,
                         DataType::Int,
                         builtin_type_ids::INT,
-                        test_location(12),
+                        test_source_location(12),
                     ),
-                    value: Expression::int(2, test_location(12), ValueMode::ImmutableOwned),
+                    value: Expression::int(2, test_source_location(12), ValueMode::ImmutableOwned),
                 },
-                test_location(12),
+                test_source_location(12),
             ),
         ],
-        test_location(10),
+        test_source_location(10),
     );
 
     let hir = lower_hir(
@@ -1576,12 +1581,12 @@ fn mutable_user_argument_is_accepted_without_false_shared_conflict() {
                 DataType::Int,
                 builtin_type_ids::INT,
                 true,
-                test_location(1),
+                test_source_location(1),
             )],
             returns: vec![],
         },
         vec![],
-        test_location(1),
+        test_source_location(1),
     );
 
     let caller = function_node(
@@ -1594,25 +1599,30 @@ fn mutable_user_argument_is_accepted_without_false_shared_conflict() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x.clone(),
-                    Expression::int(1, test_location(10), ValueMode::MutableOwned),
+                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
                 )),
-                test_location(10),
+                test_source_location(10),
             ),
             node(
                 function_call_node(
                     mut_sink,
                     vec![CallArgument::positional(
-                        reference_expr(x, DataType::Int, builtin_type_ids::INT, test_location(11)),
+                        reference_expr(
+                            x,
+                            DataType::Int,
+                            builtin_type_ids::INT,
+                            test_source_location(11),
+                        ),
                         CallAccessMode::Shared,
-                        test_location(11),
+                        test_source_location(11),
                     )],
                     vec![],
-                    test_location(11),
+                    test_source_location(11),
                 ),
-                test_location(11),
+                test_source_location(11),
             ),
         ],
-        test_location(10),
+        test_source_location(10),
     );
 
     let hir = lower_hir(
@@ -1643,20 +1653,20 @@ fn mutable_user_call_with_fresh_mutable_arg_does_not_alias_existing_place_argume
                     DataType::Int,
                     builtin_type_ids::INT,
                     true,
-                    test_location(1),
+                    test_source_location(1),
                 ),
                 param(
                     b,
                     DataType::Int,
                     builtin_type_ids::INT,
                     true,
-                    test_location(1),
+                    test_source_location(1),
                 ),
             ],
             returns: vec![],
         },
         vec![],
-        test_location(1),
+        test_source_location(1),
     );
 
     let caller = function_node(
@@ -1669,9 +1679,9 @@ fn mutable_user_call_with_fresh_mutable_arg_does_not_alias_existing_place_argume
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x.clone(),
-                    Expression::int(1, test_location(10), ValueMode::MutableOwned),
+                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
                 )),
-                test_location(10),
+                test_source_location(10),
             ),
             node(
                 function_call_node(
@@ -1682,25 +1692,25 @@ fn mutable_user_call_with_fresh_mutable_arg_does_not_alias_existing_place_argume
                                 x,
                                 DataType::Int,
                                 builtin_type_ids::INT,
-                                test_location(11),
+                                test_source_location(11),
                             ),
                             CallAccessMode::Shared,
-                            test_location(11),
+                            test_source_location(11),
                         ),
                         CallArgument::positional(
-                            Expression::int(2, test_location(11), ValueMode::ImmutableOwned),
+                            Expression::int(2, test_source_location(11), ValueMode::ImmutableOwned),
                             CallAccessMode::Shared,
-                            test_location(11),
+                            test_source_location(11),
                         )
                         .with_passing_mode(CallPassingMode::FreshMutableValue),
                     ],
                     vec![],
-                    test_location(11),
+                    test_source_location(11),
                 ),
-                test_location(11),
+                test_source_location(11),
             ),
         ],
-        test_location(10),
+        test_source_location(10),
     );
 
     let hir = lower_hir(
@@ -1736,25 +1746,30 @@ fn host_mutable_parameter_requires_mutable_access() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x.clone(),
-                    Expression::int(1, test_location(1), ValueMode::ImmutableOwned),
+                    Expression::int(1, test_source_location(1), ValueMode::ImmutableOwned),
                 )),
-                test_location(1),
+                test_source_location(1),
             ),
             node(
                 host_function_call_node(
                     host_fn,
                     vec![CallArgument::positional(
-                        reference_expr(x, DataType::Int, builtin_type_ids::INT, test_location(2)),
+                        reference_expr(
+                            x,
+                            DataType::Int,
+                            builtin_type_ids::INT,
+                            test_source_location(2),
+                        ),
                         CallAccessMode::Shared,
-                        test_location(2),
+                        test_source_location(2),
                     )],
                     vec![],
-                    test_location(2),
+                    test_source_location(2),
                 ),
-                test_location(2),
+                test_source_location(2),
             ),
         ],
-        test_location(1),
+        test_source_location(1),
     );
 
     let hir = lower_hir(build_ast(vec![start], entry_path), &mut string_table);
@@ -1787,25 +1802,30 @@ fn host_mutable_parameter_accepts_mutable_local_argument() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x.clone(),
-                    Expression::int(1, test_location(1), ValueMode::MutableOwned),
+                    Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
                 )),
-                test_location(1),
+                test_source_location(1),
             ),
             node(
                 host_function_call_node(
                     host_fn,
                     vec![CallArgument::positional(
-                        reference_expr(x, DataType::Int, builtin_type_ids::INT, test_location(2)),
+                        reference_expr(
+                            x,
+                            DataType::Int,
+                            builtin_type_ids::INT,
+                            test_source_location(2),
+                        ),
                         CallAccessMode::Shared,
-                        test_location(2),
+                        test_source_location(2),
                     )],
                     vec![],
-                    test_location(2),
+                    test_source_location(2),
                 ),
-                test_location(2),
+                test_source_location(2),
             ),
         ],
-        test_location(1),
+        test_source_location(1),
     );
 
     let hir = lower_hir(build_ast(vec![start], entry_path), &mut string_table);
@@ -1837,25 +1857,30 @@ fn host_shared_parameter_is_shared_only() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x.clone(),
-                    Expression::int(1, test_location(1), ValueMode::ImmutableOwned),
+                    Expression::int(1, test_source_location(1), ValueMode::ImmutableOwned),
                 )),
-                test_location(1),
+                test_source_location(1),
             ),
             node(
                 host_function_call_node(
                     host_fn,
                     vec![CallArgument::positional(
-                        reference_expr(x, DataType::Int, builtin_type_ids::INT, test_location(2)),
+                        reference_expr(
+                            x,
+                            DataType::Int,
+                            builtin_type_ids::INT,
+                            test_source_location(2),
+                        ),
                         CallAccessMode::Shared,
-                        test_location(2),
+                        test_source_location(2),
                     )],
                     vec![],
-                    test_location(2),
+                    test_source_location(2),
                 ),
-                test_location(2),
+                test_source_location(2),
             ),
         ],
-        test_location(1),
+        test_source_location(1),
     );
 
     let hir = lower_hir(build_ast(vec![start], entry_path), &mut string_table);
@@ -1884,20 +1909,20 @@ fn two_mutable_args_to_same_root_are_rejected() {
                     DataType::Int,
                     builtin_type_ids::INT,
                     true,
-                    test_location(1),
+                    test_source_location(1),
                 ),
                 param(
                     b,
                     DataType::Int,
                     builtin_type_ids::INT,
                     true,
-                    test_location(1),
+                    test_source_location(1),
                 ),
             ],
             returns: vec![],
         },
         vec![],
-        test_location(1),
+        test_source_location(1),
     );
 
     let caller = function_node(
@@ -1910,9 +1935,9 @@ fn two_mutable_args_to_same_root_are_rejected() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x.clone(),
-                    Expression::int(1, test_location(10), ValueMode::MutableOwned),
+                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
                 )),
-                test_location(10),
+                test_source_location(10),
             ),
             node(
                 function_call_node(
@@ -1923,36 +1948,41 @@ fn two_mutable_args_to_same_root_are_rejected() {
                                 x.clone(),
                                 DataType::Int,
                                 builtin_type_ids::INT,
-                                test_location(11),
+                                test_source_location(11),
                             ),
                             CallAccessMode::Shared,
-                            test_location(11),
+                            test_source_location(11),
                         ),
                         CallArgument::positional(
                             reference_expr(
                                 x.clone(),
                                 DataType::Int,
                                 builtin_type_ids::INT,
-                                test_location(11),
+                                test_source_location(11),
                             ),
                             CallAccessMode::Shared,
-                            test_location(11),
+                            test_source_location(11),
                         ),
                     ],
                     vec![],
-                    test_location(11),
+                    test_source_location(11),
                 ),
-                test_location(11),
+                test_source_location(11),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     y,
-                    reference_expr(x, DataType::Int, builtin_type_ids::INT, test_location(12)),
+                    reference_expr(
+                        x,
+                        DataType::Int,
+                        builtin_type_ids::INT,
+                        test_source_location(12),
+                    ),
                 )),
-                test_location(12),
+                test_source_location(12),
             ),
         ],
-        test_location(10),
+        test_source_location(10),
     );
 
     let hir = lower_hir(
@@ -1984,20 +2014,20 @@ fn shared_then_mutable_args_to_same_root_are_rejected() {
                     DataType::Int,
                     builtin_type_ids::INT,
                     false,
-                    test_location(1),
+                    test_source_location(1),
                 ),
                 param(
                     mutate,
                     DataType::Int,
                     builtin_type_ids::INT,
                     true,
-                    test_location(1),
+                    test_source_location(1),
                 ),
             ],
             returns: vec![],
         },
         vec![],
-        test_location(1),
+        test_source_location(1),
     );
 
     let caller = function_node(
@@ -2010,9 +2040,9 @@ fn shared_then_mutable_args_to_same_root_are_rejected() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x.clone(),
-                    Expression::int(1, test_location(10), ValueMode::MutableOwned),
+                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
                 )),
-                test_location(10),
+                test_source_location(10),
             ),
             node(
                 function_call_node(
@@ -2023,29 +2053,29 @@ fn shared_then_mutable_args_to_same_root_are_rejected() {
                                 x.clone(),
                                 DataType::Int,
                                 builtin_type_ids::INT,
-                                test_location(11),
+                                test_source_location(11),
                             ),
                             CallAccessMode::Shared,
-                            test_location(11),
+                            test_source_location(11),
                         ),
                         CallArgument::positional(
                             reference_expr(
                                 x,
                                 DataType::Int,
                                 builtin_type_ids::INT,
-                                test_location(11),
+                                test_source_location(11),
                             ),
                             CallAccessMode::Shared,
-                            test_location(11),
+                            test_source_location(11),
                         ),
                     ],
                     vec![],
-                    test_location(11),
+                    test_source_location(11),
                 ),
-                test_location(11),
+                test_source_location(11),
             ),
         ],
-        test_location(10),
+        test_source_location(10),
     );
 
     let hir = lower_hir(
@@ -2091,13 +2121,13 @@ fn external_alias_args_result_stays_slot_backed_after_rebinding() {
                 original.clone(),
                 DataType::Int,
                 builtin_type_ids::INT,
-                test_location(11),
+                test_source_location(11),
             ),
             CallAccessMode::Shared,
-            test_location(11),
+            test_source_location(11),
         )],
         vec![builtin_type_ids::INT],
-        test_location(11),
+        test_source_location(11),
     );
 
     let start = function_node(
@@ -2110,13 +2140,13 @@ fn external_alias_args_result_stays_slot_backed_after_rebinding() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     original.clone(),
-                    Expression::int(1, test_location(10), ValueMode::MutableOwned),
+                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
                 )),
-                test_location(10),
+                test_source_location(10),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(returned.clone(), returned_call)),
-                test_location(11),
+                test_source_location(11),
             ),
             node(
                 NodeKind::Assignment {
@@ -2124,11 +2154,11 @@ fn external_alias_args_result_stays_slot_backed_after_rebinding() {
                         returned,
                         DataType::Int,
                         builtin_type_ids::INT,
-                        test_location(12),
+                        test_source_location(12),
                     ),
-                    value: Expression::int(2, test_location(12), ValueMode::ImmutableOwned),
+                    value: Expression::int(2, test_source_location(12), ValueMode::ImmutableOwned),
                 },
-                test_location(12),
+                test_source_location(12),
             ),
             node(
                 NodeKind::Assignment {
@@ -2136,14 +2166,14 @@ fn external_alias_args_result_stays_slot_backed_after_rebinding() {
                         original,
                         DataType::Int,
                         builtin_type_ids::INT,
-                        test_location(13),
+                        test_source_location(13),
                     ),
-                    value: Expression::int(3, test_location(13), ValueMode::ImmutableOwned),
+                    value: Expression::int(3, test_source_location(13), ValueMode::ImmutableOwned),
                 },
-                test_location(13),
+                test_source_location(13),
             ),
         ],
-        test_location(10),
+        test_source_location(10),
     );
 
     let hir = lower_hir(build_ast(vec![start], entry_path), &mut string_table);
@@ -2270,10 +2300,10 @@ fn unresolved_or_mismatched_host_signature_errors() {
             returns: vec![],
         },
         vec![node(
-            host_function_call_node(missing_host, vec![], vec![], test_location(1)),
-            test_location(1),
+            host_function_call_node(missing_host, vec![], vec![], test_source_location(1)),
+            test_source_location(1),
         )],
-        test_location(1),
+        test_source_location(1),
     );
 
     let start_mismatch = function_node(
@@ -2283,10 +2313,10 @@ fn unresolved_or_mismatched_host_signature_errors() {
             returns: vec![],
         },
         vec![node(
-            host_function_call_node(one_arg, vec![], vec![], test_location(2)),
-            test_location(2),
+            host_function_call_node(one_arg, vec![], vec![], test_source_location(2)),
+            test_source_location(2),
         )],
-        test_location(2),
+        test_source_location(2),
     );
 
     let hir = lower_hir(
@@ -2322,12 +2352,12 @@ fn mutable_user_parameter_rejects_immutable_argument_reused_after_call() {
                 DataType::Int,
                 builtin_type_ids::INT,
                 true,
-                test_location(1),
+                test_source_location(1),
             )],
             returns: vec![],
         },
         vec![],
-        test_location(1),
+        test_source_location(1),
     );
 
     let caller = function_node(
@@ -2340,9 +2370,9 @@ fn mutable_user_parameter_rejects_immutable_argument_reused_after_call() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x.clone(),
-                    Expression::int(1, test_location(10), ValueMode::ImmutableOwned),
+                    Expression::int(1, test_source_location(10), ValueMode::ImmutableOwned),
                 )),
-                test_location(10),
+                test_source_location(10),
             ),
             node(
                 function_call_node(
@@ -2352,25 +2382,30 @@ fn mutable_user_parameter_rejects_immutable_argument_reused_after_call() {
                             x.clone(),
                             DataType::Int,
                             builtin_type_ids::INT,
-                            test_location(11),
+                            test_source_location(11),
                         ),
                         CallAccessMode::Shared,
-                        test_location(11),
+                        test_source_location(11),
                     )],
                     vec![],
-                    test_location(11),
+                    test_source_location(11),
                 ),
-                test_location(11),
+                test_source_location(11),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     y,
-                    reference_expr(x, DataType::Int, builtin_type_ids::INT, test_location(12)),
+                    reference_expr(
+                        x,
+                        DataType::Int,
+                        builtin_type_ids::INT,
+                        test_source_location(12),
+                    ),
                 )),
-                test_location(12),
+                test_source_location(12),
             ),
         ],
-        test_location(10),
+        test_source_location(10),
     );
 
     let hir = lower_hir(
@@ -2406,25 +2441,30 @@ fn out_of_range_return_alias_metadata_is_reported_at_call_site() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x.clone(),
-                    Expression::int(1, test_location(10), ValueMode::MutableOwned),
+                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
                 )),
-                test_location(10),
+                test_source_location(10),
             ),
             node(
                 host_function_call_node(
                     bad_alias_host,
                     vec![CallArgument::positional(
-                        reference_expr(x, DataType::Int, builtin_type_ids::INT, test_location(11)),
+                        reference_expr(
+                            x,
+                            DataType::Int,
+                            builtin_type_ids::INT,
+                            test_source_location(11),
+                        ),
                         CallAccessMode::Shared,
-                        test_location(11),
+                        test_source_location(11),
                     )],
                     vec![],
-                    test_location(11),
+                    test_source_location(11),
                 ),
-                test_location(11),
+                test_source_location(11),
             ),
         ],
-        test_location(10),
+        test_source_location(10),
     );
 
     let hir = lower_hir(build_ast(vec![start], entry_path), &mut string_table);
@@ -2457,17 +2497,17 @@ fn same_line_mutable_call_then_reuse_uses_order_keys() {
                 DataType::Int,
                 builtin_type_ids::INT,
                 true,
-                test_location(1),
+                test_source_location(1),
             )],
             returns: vec![],
         },
         vec![],
-        test_location(1),
+        test_source_location(1),
     );
 
     // WHAT: both statements intentionally share one source line.
     // WHY: validates that borrow/move classification uses statement order keys, not line numbers.
-    let same_line = test_location(20);
+    let same_line = test_source_location(20);
     let caller = function_node(
         start_name,
         FunctionSignature {
@@ -2478,9 +2518,9 @@ fn same_line_mutable_call_then_reuse_uses_order_keys() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x.clone(),
-                    Expression::int(1, test_location(10), ValueMode::MutableOwned),
+                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
                 )),
-                test_location(10),
+                test_source_location(10),
             ),
             node(
                 function_call_node(
@@ -2508,7 +2548,7 @@ fn same_line_mutable_call_then_reuse_uses_order_keys() {
                 same_line,
             ),
         ],
-        test_location(10),
+        test_source_location(10),
     );
 
     let hir = lower_hir(
@@ -2541,7 +2581,7 @@ fn short_circuit_rhs_mutable_call_with_later_merge_use_borrows_instead_of_moving
                 DataType::Int,
                 builtin_type_ids::INT,
                 true,
-                test_location(1),
+                test_source_location(1),
             )],
             returns: fresh_success_returns(vec![builtin_type_ids::BOOL]),
         },
@@ -2552,7 +2592,7 @@ fn short_circuit_rhs_mutable_call_with_later_merge_use_borrows_instead_of_moving
                         param_calls.clone(),
                         DataType::Int,
                         builtin_type_ids::INT,
-                        test_location(2),
+                        test_source_location(2),
                     ),
                     value: Expression::runtime(
                         ExpressionRpn {
@@ -2561,38 +2601,38 @@ fn short_circuit_rhs_mutable_call_with_later_merge_use_borrows_instead_of_moving
                                     param_calls,
                                     DataType::Int,
                                     builtin_type_ids::INT,
-                                    test_location(2),
+                                    test_source_location(2),
                                     ValueMode::MutableOwned,
                                     crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
                                 )),
                                 ExpressionRpnItem::Operand(Expression::int(
                                     1,
-                                    test_location(2),
+                                    test_source_location(2),
                                     ValueMode::ImmutableOwned,
                                 )),
                                 ExpressionRpnItem::Operator {
                                     operator: Operator::Add,
-                                    location: test_location(2),
+                                    location: test_source_location(2),
                                 },
                             ],
                         },
                         DataType::Int,
-                        test_location(2),
+                        test_source_location(2),
                         ValueMode::MutableOwned,
                     ),
                 },
-                test_location(2),
+                test_source_location(2),
             ),
             node(
                 NodeKind::Return(vec![Expression::bool(
                     true,
-                    test_location(3),
+                    test_source_location(3),
                     ValueMode::ImmutableOwned,
                 )]),
-                test_location(3),
+                test_source_location(3),
             ),
         ],
-        test_location(1),
+        test_source_location(1),
     );
 
     let short_circuit_value = Expression::runtime(
@@ -2602,7 +2642,7 @@ fn short_circuit_rhs_mutable_call_with_later_merge_use_borrows_instead_of_moving
                     lhs.clone(),
                     DataType::Bool,
                     builtin_type_ids::BOOL,
-                    test_location(11),
+                    test_source_location(11),
                     ValueMode::ImmutableOwned,
                     crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
                 )),
@@ -2612,21 +2652,21 @@ fn short_circuit_rhs_mutable_call_with_later_merge_use_borrows_instead_of_moving
                         calls.clone(),
                         DataType::Int,
                         builtin_type_ids::INT,
-                        test_location(11),
+                        test_source_location(11),
                         ValueMode::MutableOwned,
                         crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
                     )],
                     vec![builtin_type_ids::BOOL],
-                    test_location(11),
+                    test_source_location(11),
                 )),
                 ExpressionRpnItem::Operator {
                     operator: Operator::And,
-                    location: test_location(11),
+                    location: test_source_location(11),
                 },
             ],
         },
         DataType::Bool,
-        test_location(11),
+        test_source_location(11),
         ValueMode::ImmutableOwned,
     );
 
@@ -2640,20 +2680,20 @@ fn short_circuit_rhs_mutable_call_with_later_merge_use_borrows_instead_of_moving
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     lhs,
-                    Expression::bool(false, test_location(10), ValueMode::ImmutableOwned),
+                    Expression::bool(false, test_source_location(10), ValueMode::ImmutableOwned),
                 )),
-                test_location(10),
+                test_source_location(10),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     calls.clone(),
-                    Expression::int(0, test_location(10), ValueMode::MutableOwned),
+                    Expression::int(0, test_source_location(10), ValueMode::MutableOwned),
                 )),
-                test_location(10),
+                test_source_location(10),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(value, short_circuit_value)),
-                test_location(11),
+                test_source_location(11),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
@@ -2661,14 +2701,14 @@ fn short_circuit_rhs_mutable_call_with_later_merge_use_borrows_instead_of_moving
                     Expression::reference(
                         calls,
                         DataType::Int,
-                        test_location(12),
+                        test_source_location(12),
                         ValueMode::ImmutableReference,
                     ),
                 )),
-                test_location(12),
+                test_source_location(12),
             ),
         ],
-        test_location(10),
+        test_source_location(10),
     );
 
     let hir = lower_hir(

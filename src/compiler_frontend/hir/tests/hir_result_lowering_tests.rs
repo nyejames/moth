@@ -22,7 +22,7 @@ use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    function_node, make_test_variable, node, test_location,
+    function_node, make_test_variable, node, test_source_location,
 };
 
 use crate::compiler_frontend::tests::type_id_fixture_support::{
@@ -39,7 +39,7 @@ fn statement_result_propagation_with_unit_success_lowers_to_explicit_error_edge(
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
     let can_fail_name = super::symbol("can_fail", &mut string_table);
-    let location = test_location(1);
+    let location = test_source_location(1);
 
     let can_fail_function = function_node(
         can_fail_name.clone(),
@@ -120,7 +120,7 @@ fn direct_return_result_propagation_lowers_to_explicit_success_and_error_edges()
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
     let can_fail_name = super::symbol("can_fail", &mut string_table);
     let forward_name = super::symbol("forward", &mut string_table);
-    let location = test_location(3);
+    let location = test_source_location(3);
 
     let can_fail_function = function_node(
         can_fail_name.clone(),
@@ -253,7 +253,7 @@ fn direct_return_result_propagation_allows_alias_success_return() {
     let source_input = super::symbol("input", &mut string_table);
     let forward_name = super::symbol("forward", &mut string_table);
     let forward_input = super::symbol("input", &mut string_table);
-    let location = test_location(4);
+    let location = test_source_location(4);
 
     let source_function = function_node(
         source_name.clone(),
@@ -384,7 +384,7 @@ fn declaration_result_propagation_assigns_unwrapped_success_on_success_edge() {
     let can_fail_name = super::symbol("can_fail", &mut string_table);
     let forward_name = super::symbol("forward", &mut string_table);
     let value_name = forward_name.join_str("value", &mut string_table);
-    let location = test_location(4);
+    let location = test_source_location(4);
 
     let can_fail_function = function_node(
         can_fail_name.clone(),
@@ -528,7 +528,7 @@ fn multi_bind_result_propagation_projects_tuple_slots_after_success_edge() {
     let forward_name = super::symbol("forward", &mut string_table);
     let first_id = forward_name.join_str("first", &mut string_table);
     let count_id = forward_name.join_str("count", &mut string_table);
-    let location = test_location(6);
+    let location = test_source_location(6);
 
     let pair_function = function_node(
         pair_name.clone(),
@@ -707,7 +707,7 @@ fn call_argument_result_propagation_lowers_before_outer_call() {
     let consume_input = consume_name.join_str("input", &mut string_table);
     let forward_name = super::symbol("forward", &mut string_table);
     let value_name = forward_name.join_str("value", &mut string_table);
-    let location = test_location(8);
+    let location = test_source_location(8);
 
     let can_fail_function = function_node(
         can_fail_name.clone(),
@@ -890,7 +890,7 @@ fn runtime_binary_result_propagation_lowers_before_operator() {
     let can_fail_name = super::symbol("can_fail", &mut string_table);
     let forward_name = super::symbol("forward", &mut string_table);
     let value_name = forward_name.join_str("value", &mut string_table);
-    let location = test_location(9);
+    let location = test_source_location(9);
 
     let can_fail_function = function_node(
         can_fail_name.clone(),
@@ -1030,7 +1030,7 @@ fn return_bang_lowers_to_explicit_error_terminator() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
     let can_fail_name = super::symbol("can_fail", &mut string_table);
-    let location = test_location(5);
+    let location = test_source_location(5);
 
     let can_fail_function = function_node(
         can_fail_name.clone(),
@@ -1087,7 +1087,7 @@ fn fallible_success_return_lowers_to_explicit_success_terminator() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
     let can_succeed_name = super::symbol("can_succeed", &mut string_table);
-    let location = test_location(7);
+    let location = test_source_location(7);
 
     let can_succeed_function = function_node(
         can_succeed_name.clone(),
@@ -1150,7 +1150,7 @@ fn statement_catch_handler_lowering_builds_explicit_result_branching() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
     let can_fail_name = super::symbol("can_fail", &mut string_table);
-    let location = test_location(10);
+    let location = test_source_location(10);
     let error_binding = start_name.join_str("err", &mut string_table);
 
     let can_fail_function = function_node(
@@ -1239,7 +1239,7 @@ fn multi_bind_lowering_projects_tuple_slots_from_single_rhs_call() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
     let pair_name = super::symbol("pair", &mut string_table);
-    let location = test_location(20);
+    let location = test_source_location(20);
 
     let pair_function = function_node(
         pair_name.clone(),

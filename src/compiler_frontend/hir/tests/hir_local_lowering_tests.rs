@@ -16,7 +16,7 @@ use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    assignment_target, function_node, make_test_variable, node, test_location,
+    assignment_target, function_node, make_test_variable, node, test_source_location,
 };
 
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -58,10 +58,10 @@ fn allocates_parameter_locals_and_binds_names() {
         NodeKind::Return(vec![reference_expr(
             x.clone(),
             builtin_type_ids::INT,
-            test_location(3),
+            test_source_location(3),
             ValueMode::ImmutableReference,
         )]),
-        test_location(3),
+        test_source_location(3),
     )];
 
     let start_function = function_node(
@@ -71,12 +71,12 @@ fn allocates_parameter_locals_and_binds_names() {
                 x,
                 builtin_type_ids::INT,
                 false,
-                test_location(2),
+                test_source_location(2),
             )],
             returns: fresh_success_returns(vec![builtin_type_ids::INT]),
         },
         body,
-        test_location(2),
+        test_source_location(2),
     );
 
     let ast = build_ast(vec![start_function], entry_path);
@@ -129,11 +129,11 @@ fn variable_declaration_emits_local_and_assign_statement() {
         vec![node(
             NodeKind::VariableDeclaration(make_test_variable(
                 x,
-                Expression::int(42, test_location(4), ValueMode::ImmutableOwned),
+                Expression::int(42, test_source_location(4), ValueMode::ImmutableOwned),
             )),
-            test_location(4),
+            test_source_location(4),
         )],
-        test_location(3),
+        test_source_location(3),
     );
 
     let ast = build_ast(vec![start_function], entry_path);
@@ -200,19 +200,19 @@ fn duplicate_local_declarations_in_same_scope_fail() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     var_name.clone(),
-                    Expression::int(1, test_location(2), ValueMode::ImmutableOwned),
+                    Expression::int(1, test_source_location(2), ValueMode::ImmutableOwned),
                 )),
-                test_location(2),
+                test_source_location(2),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     var_name.clone(),
-                    Expression::int(2, test_location(3), ValueMode::ImmutableOwned),
+                    Expression::int(2, test_source_location(3), ValueMode::ImmutableOwned),
                 )),
-                test_location(3),
+                test_source_location(3),
             ),
         ],
-        test_location(1),
+        test_source_location(1),
     );
 
     let ast = build_ast(vec![start_function], entry_path);
@@ -239,12 +239,12 @@ fn assignment_lowers_value_prelude_before_assign() {
         vec![node(
             NodeKind::Return(vec![Expression::int(
                 1,
-                test_location(1),
+                test_source_location(1),
                 ValueMode::ImmutableOwned,
             )]),
-            test_location(1),
+            test_source_location(1),
         )],
-        test_location(1),
+        test_source_location(1),
     );
 
     let assignment = node(
@@ -253,16 +253,16 @@ fn assignment_lowers_value_prelude_before_assign() {
                 x.clone(),
                 DataType::Int,
                 builtin_type_ids::INT,
-                test_location(5),
+                test_source_location(5),
             ),
             value: Expression::function_call(
                 helper,
                 vec![],
                 vec![builtin_type_ids::INT],
-                test_location(5),
+                test_source_location(5),
             ),
         },
-        test_location(5),
+        test_source_location(5),
     );
 
     let start_fn = function_node(
@@ -272,12 +272,12 @@ fn assignment_lowers_value_prelude_before_assign() {
                 x,
                 builtin_type_ids::INT,
                 true,
-                test_location(4),
+                test_source_location(4),
             )],
             returns: vec![],
         },
         vec![assignment],
-        test_location(4),
+        test_source_location(4),
     );
 
     let ast = build_ast(vec![helper_fn, start_fn], entry_path);
@@ -330,12 +330,12 @@ fn call_expression_statements_materialize_result_values() {
         vec![node(
             NodeKind::Return(vec![Expression::int(
                 9,
-                test_location(1),
+                test_source_location(1),
                 ValueMode::ImmutableOwned,
             )]),
-            test_location(1),
+            test_source_location(1),
         )],
-        test_location(1),
+        test_source_location(1),
     );
 
     let start_fn = function_node(
@@ -350,25 +350,25 @@ fn call_expression_statements_materialize_result_values() {
                     callee,
                     vec![],
                     vec![builtin_type_ids::INT],
-                    test_location(2),
+                    test_source_location(2),
                 )),
-                test_location(2),
+                test_source_location(2),
             ),
             node(
                 NodeKind::ExpressionStatement(Expression::host_function_call_with_arguments(
                     alloc_id,
                     vec![CallArgument::positional(
-                        Expression::int(1, test_location(3), ValueMode::ImmutableOwned),
+                        Expression::int(1, test_source_location(3), ValueMode::ImmutableOwned),
                         CallAccessMode::Shared,
-                        test_location(3),
+                        test_source_location(3),
                     )],
                     vec![builtin_type_ids::INT],
-                    test_location(3),
+                    test_source_location(3),
                 )),
-                test_location(3),
+                test_source_location(3),
             ),
         ],
-        test_location(2),
+        test_source_location(2),
     );
 
     let ast = build_ast(vec![callee_fn, start_fn], entry_path);
@@ -410,8 +410,8 @@ fn return_lowering_handles_zero_one_and_many_values() {
             parameters: vec![],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), test_location(1))],
-        test_location(1),
+        vec![node(NodeKind::Return(vec![]), test_source_location(1))],
+        test_source_location(1),
     );
 
     let one_fn = function_node(
@@ -423,12 +423,12 @@ fn return_lowering_handles_zero_one_and_many_values() {
         vec![node(
             NodeKind::Return(vec![Expression::int(
                 8,
-                test_location(2),
+                test_source_location(2),
                 ValueMode::ImmutableOwned,
             )]),
-            test_location(2),
+            test_source_location(2),
         )],
-        test_location(2),
+        test_source_location(2),
     );
 
     let many_fn = function_node(
@@ -439,12 +439,12 @@ fn return_lowering_handles_zero_one_and_many_values() {
         },
         vec![node(
             NodeKind::Return(vec![
-                Expression::int(1, test_location(3), ValueMode::ImmutableOwned),
-                Expression::bool(true, test_location(3), ValueMode::ImmutableOwned),
+                Expression::int(1, test_source_location(3), ValueMode::ImmutableOwned),
+                Expression::bool(true, test_source_location(3), ValueMode::ImmutableOwned),
             ]),
-            test_location(3),
+            test_source_location(3),
         )],
-        test_location(3),
+        test_source_location(3),
     );
 
     let ast = build_ast(vec![start_fn, one_fn, many_fn], entry_path);

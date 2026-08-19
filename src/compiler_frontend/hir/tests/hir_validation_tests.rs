@@ -39,16 +39,12 @@ use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::structs::{HirField, HirStruct};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
-use crate::compiler_frontend::hir::tests::hir_expression_lowering_tests::location;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tests::ast_fixture_support::test_source_location;
 use crate::compiler_frontend::tests::type_id_fixture_support::no_value_expr;
 
 use crate::compiler_frontend::value_mode::ValueMode;
-
-fn test_location(line: i32) -> SourceLocation {
-    location(line)
-}
 
 fn node(kind: NodeKind, location: SourceLocation) -> AstNode {
     AstNode {
@@ -101,8 +97,8 @@ fn minimal_lowered_hir_module() -> (StringTable, HirModule, TypeEnvironment) {
             parameters: vec![],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), test_location(1))],
-        test_location(1),
+        vec![node(NodeKind::Return(vec![]), test_source_location(1))],
+        test_source_location(1),
     );
 
     let ast = build_ast(vec![start_fn], entry_path);
@@ -134,7 +130,7 @@ fn validation_error_for_injected_local_type(
         ty: local_type_id,
         mutable: false,
         region: entry_block.region,
-        source_info: Some(test_location(20)),
+        source_info: Some(test_source_location(20)),
     });
 
     validate_module_for_tests(&module, &string_table, &type_environment)
@@ -218,8 +214,8 @@ fn valid_module_passes_explicit_validation() {
             parameters: vec![],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), test_location(1))],
-        test_location(1),
+        vec![node(NodeKind::Return(vec![]), test_source_location(1))],
+        test_source_location(1),
     );
 
     let ast = build_ast(vec![start_fn], entry_path);
@@ -232,7 +228,7 @@ fn valid_module_passes_explicit_validation() {
 #[test]
 fn validator_rejects_numeric_op_operand_shape_mismatch() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
-    let location = test_location(50);
+    let location = test_source_location(50);
     let entry_block_index = start_entry_block_index(&module);
     let entry_region = module.blocks[entry_block_index].region;
     let int_type = type_environment.builtins().int;
@@ -291,7 +287,7 @@ fn validator_rejects_numeric_op_operand_shape_mismatch() {
 #[test]
 fn validator_rejects_plain_numeric_binop() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
-    let location = test_location(51);
+    let location = test_source_location(51);
     let entry_block_index = start_entry_block_index(&module);
     let entry_region = module.blocks[entry_block_index].region;
     let int_type = type_environment.builtins().int;
@@ -391,7 +387,7 @@ fn append_expression_for_validation(
 #[test]
 fn validator_accepts_internal_string_append_with_scalar_chunk() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
-    let location = test_location(53);
+    let location = test_source_location(53);
     let string_type = type_environment.builtins().string;
     let expression = append_expression_for_validation(
         &mut module,
@@ -416,7 +412,7 @@ fn validator_accepts_internal_string_append_with_scalar_chunk() {
 #[test]
 fn validator_rejects_string_append_with_non_string_result() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
-    let location = test_location(54);
+    let location = test_source_location(54);
     let string_type = type_environment.builtins().string;
     let expression = append_expression_for_validation(
         &mut module,
@@ -446,7 +442,7 @@ fn validator_rejects_string_append_with_non_string_result() {
 #[test]
 fn validator_rejects_string_append_with_non_string_accumulator() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
-    let location = test_location(55);
+    let location = test_source_location(55);
     let expression = append_expression_for_validation(
         &mut module,
         &location,
@@ -475,7 +471,7 @@ fn validator_rejects_string_append_with_non_string_accumulator() {
 #[test]
 fn validator_rejects_plain_numeric_unary_op() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
-    let location = test_location(52);
+    let location = test_source_location(52);
     let entry_block_index = start_entry_block_index(&module);
     let entry_region = module.blocks[entry_block_index].region;
     let int_type = type_environment.builtins().int;
@@ -525,7 +521,7 @@ fn validator_rejects_plain_numeric_unary_op() {
 #[test]
 fn validator_rejects_plain_string_concatenation_binop() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
-    let location = test_location(53);
+    let location = test_source_location(53);
     let entry_block_index = start_entry_block_index(&module);
     let entry_region = module.blocks[entry_block_index].region;
     let string_type = type_environment.builtins().string;
@@ -637,7 +633,7 @@ fn inject_float_statement(
 #[test]
 fn validator_accepts_format_float_trap() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
-    let location = test_location(54);
+    let location = test_source_location(54);
     let string_type = type_environment.builtins().string;
 
     inject_float_statement(
@@ -665,7 +661,7 @@ fn validator_accepts_format_float_trap() {
 #[test]
 fn validator_accepts_validate_float_trap() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
-    let location = test_location(55);
+    let location = test_source_location(55);
     let float_type = type_environment.builtins().float;
 
     inject_float_statement(
@@ -693,7 +689,7 @@ fn validator_accepts_validate_float_trap() {
 #[test]
 fn validator_rejects_format_float_trap_with_non_string_result() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
-    let location = test_location(56);
+    let location = test_source_location(56);
     let float_type = type_environment.builtins().float;
 
     inject_float_statement(
@@ -728,7 +724,7 @@ fn validator_rejects_format_float_trap_with_non_string_result() {
 #[test]
 fn validator_accepts_format_float_return_error_with_carrier() {
     let (string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
-    let location = test_location(57);
+    let location = test_source_location(57);
     let string_type = type_environment.builtins().string;
     let int_type = type_environment.builtins().int;
     let carrier_type = type_environment.intern_fallible_carrier(string_type, int_type);
@@ -758,7 +754,7 @@ fn validator_accepts_format_float_return_error_with_carrier() {
 #[test]
 fn validator_rejects_format_float_return_error_without_carrier() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
-    let location = test_location(58);
+    let location = test_source_location(58);
     let string_type = type_environment.builtins().string;
 
     inject_float_statement(
@@ -792,7 +788,7 @@ fn validator_rejects_format_float_return_error_without_carrier() {
 #[test]
 fn validator_rejects_validate_float_return_error_without_carrier() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
-    let location = test_location(59);
+    let location = test_source_location(59);
     let float_type = type_environment.builtins().float;
 
     inject_float_statement(
@@ -834,8 +830,8 @@ fn validator_rejects_invalid_jump_target() {
             parameters: vec![],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), test_location(1))],
-        test_location(1),
+        vec![node(NodeKind::Return(vec![]), test_source_location(1))],
+        test_source_location(1),
     );
 
     let ast = build_ast(vec![start_fn], entry_path);
@@ -870,12 +866,12 @@ fn validator_rejects_non_literal_match_pattern() {
                 x.clone(),
                 builtin_type_ids::INT,
                 false,
-                test_location(2),
+                test_source_location(2),
             )],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), test_location(3))],
-        test_location(2),
+        vec![node(NodeKind::Return(vec![]), test_source_location(3))],
+        test_source_location(2),
     );
 
     let ast = build_ast(vec![start_fn], entry_path);
@@ -892,7 +888,7 @@ fn validator_rejects_non_literal_match_pattern() {
     let scrutinee_id = HirValueId(9000);
     let pattern_id = HirValueId(9001);
 
-    let value_location = test_location(20);
+    let value_location = test_source_location(20);
     module
         .side_table
         .map_value(&value_location, scrutinee_id, &value_location);
@@ -943,13 +939,13 @@ fn validator_rejects_missing_side_table_mappings() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_location(4), ValueMode::ImmutableOwned),
+                    Expression::int(1, test_source_location(4), ValueMode::ImmutableOwned),
                 )),
-                test_location(4),
+                test_source_location(4),
             ),
-            node(NodeKind::Return(vec![]), test_location(5)),
+            node(NodeKind::Return(vec![]), test_source_location(5)),
         ],
-        test_location(3),
+        test_source_location(3),
     );
 
     let ast = build_ast(vec![start_fn], entry_path);
@@ -974,8 +970,8 @@ fn validator_rejects_unresolved_generic_parameter_types() {
             parameters: vec![],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), test_location(1))],
-        test_location(1),
+        vec![node(NodeKind::Return(vec![]), test_source_location(1))],
+        test_source_location(1),
     );
 
     let ast = build_ast(vec![start_fn], entry_path);
@@ -996,7 +992,7 @@ fn validator_rejects_unresolved_generic_parameter_types() {
         ty: generic_type_id,
         mutable: false,
         region: entry_block.region,
-        source_info: Some(test_location(20)),
+        source_info: Some(test_source_location(20)),
     });
 
     let error = validate_module_for_tests(&module, &string_table, &type_environment)
@@ -1092,8 +1088,8 @@ fn validator_rejects_struct_field_type_containing_generic_parameter() {
             parameters: vec![],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), test_location(1))],
-        test_location(1),
+        vec![node(NodeKind::Return(vec![]), test_source_location(1))],
+        test_source_location(1),
     );
 
     let ast = build_ast(vec![start_fn], entry_path);
@@ -1152,12 +1148,12 @@ fn validator_rejects_function_parameter_type_containing_generic_parameter() {
                 value_name,
                 builtin_type_ids::INT,
                 false,
-                test_location(1),
+                test_source_location(1),
             )],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), test_location(2))],
-        test_location(1),
+        vec![node(NodeKind::Return(vec![]), test_source_location(2))],
+        test_source_location(1),
     );
 
     let ast = build_ast(vec![start_fn], entry_path);
@@ -1212,7 +1208,7 @@ fn validator_rejects_expression_type_containing_generic_parameter() {
     let entry_block = &mut module.blocks[entry_block_index];
     let value_id = HirValueId(9000);
     let statement_id = HirNodeId(9000);
-    let location = test_location(20);
+    let location = test_source_location(20);
     let expression = HirExpression {
         id: value_id,
         kind: HirExpressionKind::Int(1),
@@ -1247,12 +1243,12 @@ fn module_metadata_validation_rejects_invalid_doc_fragment_location() {
             parameters: vec![],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), test_location(1))],
-        test_location(1),
+        vec![node(NodeKind::Return(vec![]), test_source_location(1))],
+        test_source_location(1),
     );
 
     let mut ast = build_ast(vec![start_fn], entry_path);
-    let mut invalid_location = test_location(10);
+    let mut invalid_location = test_source_location(10);
     invalid_location.end_pos.line_number = 9;
     ast.doc_fragments.push(AstDocFragment {
         kind: AstDocFragmentKind::Doc,
@@ -1281,8 +1277,8 @@ fn validator_rejects_placeholder_terminator() {
             parameters: vec![],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), test_location(1))],
-        test_location(1),
+        vec![node(NodeKind::Return(vec![]), test_source_location(1))],
+        test_source_location(1),
     );
 
     let ast = build_ast(vec![start_fn], entry_path);
@@ -1312,8 +1308,8 @@ fn validator_rejects_region_cycle() {
             parameters: vec![],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), test_location(1))],
-        test_location(1),
+        vec![node(NodeKind::Return(vec![]), test_source_location(1))],
+        test_source_location(1),
     );
 
     let ast = build_ast(vec![start_fn], entry_path);
@@ -1339,8 +1335,8 @@ fn validator_rejects_missing_region_parent() {
             parameters: vec![],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), test_location(1))],
-        test_location(1),
+        vec![node(NodeKind::Return(vec![]), test_source_location(1))],
+        test_source_location(1),
     );
 
     let ast = build_ast(vec![start_fn], entry_path);
@@ -1367,8 +1363,8 @@ fn validator_rejects_cross_function_cfg_edges() {
             parameters: vec![],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), test_location(2))],
-        test_location(2),
+        vec![node(NodeKind::Return(vec![]), test_source_location(2))],
+        test_source_location(2),
     );
     let start = function_node(
         start_name,
@@ -1376,8 +1372,8 @@ fn validator_rejects_cross_function_cfg_edges() {
             parameters: vec![],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), test_location(1))],
-        test_location(1),
+        vec![node(NodeKind::Return(vec![]), test_source_location(1))],
+        test_source_location(1),
     );
 
     let ast = build_ast(vec![helper, start], entry_path);
@@ -1414,7 +1410,7 @@ fn lowering_errors_preserve_string_table_context() {
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
     let missing_function = super::symbol("missing_fn", &mut string_table);
 
-    let mut call_location = test_location(2);
+    let mut call_location = test_source_location(2);
     call_location.scope = entry_path.clone();
 
     let start_fn = function_node(
@@ -1433,9 +1429,9 @@ fn lowering_errors_preserve_string_table_context() {
                 )),
                 call_location.clone(),
             ),
-            node(NodeKind::Return(vec![]), test_location(3)),
+            node(NodeKind::Return(vec![]), test_source_location(3)),
         ],
-        test_location(1),
+        test_source_location(1),
     );
 
     let messages = lower_ast(build_ast(vec![start_fn], entry_path), &mut string_table)
@@ -1468,8 +1464,8 @@ fn hir_variant_construct_option_invalid_index_rejected() {
             parameters: vec![],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), test_location(1))],
-        test_location(1),
+        vec![node(NodeKind::Return(vec![]), test_source_location(1))],
+        test_source_location(1),
     );
 
     let ast = build_ast(vec![start_fn], entry_path);
@@ -1494,7 +1490,7 @@ fn hir_variant_construct_option_invalid_index_rejected() {
 
     let expr_id = HirValueId(9000);
     let stmt_id = HirNodeId(9000);
-    let location = test_location(10);
+    let location = test_source_location(10);
 
     let expression = HirExpression {
         id: expr_id,
@@ -1539,8 +1535,8 @@ fn hir_variant_construct_result_invalid_index_rejected() {
             parameters: vec![],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), test_location(1))],
-        test_location(1),
+        vec![node(NodeKind::Return(vec![]), test_source_location(1))],
+        test_source_location(1),
     );
 
     let ast = build_ast(vec![start_fn], entry_path);
@@ -1565,7 +1561,7 @@ fn hir_variant_construct_result_invalid_index_rejected() {
 
     let expr_id = HirValueId(9000);
     let stmt_id = HirNodeId(9000);
-    let location = test_location(10);
+    let location = test_source_location(10);
 
     let expression = HirExpression {
         id: expr_id,
@@ -1616,17 +1612,17 @@ fn hir_variant_construct_choice_wrong_field_name_rejected() {
                     id: InternedPath::from_single_str("message", &mut string_table),
                     value: no_value_expr(
                         builtin_type_ids::STRING,
-                        test_location(2),
+                        test_source_location(2),
                         ValueMode::ImmutableOwned,
                     ),
                 }],
             },
-            location: test_location(2),
+            location: test_source_location(2),
         },
         ChoiceVariant {
             id: err_name,
             payload: ChoiceVariantPayload::Unit,
-            location: test_location(2),
+            location: test_source_location(2),
         },
     ];
 
@@ -1637,12 +1633,12 @@ fn hir_variant_construct_choice_wrong_field_name_rejected() {
                 response_param,
                 builtin_type_ids::NONE,
                 false,
-                test_location(2),
+                test_source_location(2),
             )],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), test_location(3))],
-        test_location(1),
+        vec![node(NodeKind::Return(vec![]), test_source_location(3))],
+        test_source_location(1),
     );
 
     let ast = build_ast_with_choices(
@@ -1667,7 +1663,7 @@ fn hir_variant_construct_choice_wrong_field_name_rejected() {
 
     let expr_id = HirValueId(9000);
     let stmt_id = HirNodeId(9000);
-    let location = test_location(10);
+    let location = test_source_location(10);
 
     let expression = HirExpression {
         id: expr_id,
@@ -1729,17 +1725,17 @@ fn hir_variant_construct_choice_wrong_field_type_rejected() {
                     id: InternedPath::from_single_str("message", &mut string_table),
                     value: no_value_expr(
                         builtin_type_ids::STRING,
-                        test_location(2),
+                        test_source_location(2),
                         ValueMode::ImmutableOwned,
                     ),
                 }],
             },
-            location: test_location(2),
+            location: test_source_location(2),
         },
         ChoiceVariant {
             id: err_name,
             payload: ChoiceVariantPayload::Unit,
-            location: test_location(2),
+            location: test_source_location(2),
         },
     ];
 
@@ -1750,12 +1746,12 @@ fn hir_variant_construct_choice_wrong_field_type_rejected() {
                 response_param,
                 builtin_type_ids::NONE,
                 false,
-                test_location(2),
+                test_source_location(2),
             )],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), test_location(3))],
-        test_location(1),
+        vec![node(NodeKind::Return(vec![]), test_source_location(3))],
+        test_source_location(1),
     );
 
     let ast = build_ast_with_choices(
@@ -1781,7 +1777,7 @@ fn hir_variant_construct_choice_wrong_field_type_rejected() {
 
     let expr_id = HirValueId(9000);
     let stmt_id = HirNodeId(9000);
-    let location = test_location(10);
+    let location = test_source_location(10);
 
     let expression = HirExpression {
         id: expr_id,
@@ -1830,7 +1826,7 @@ fn hir_variant_construct_choice_wrong_field_type_rejected() {
 fn validator_rejects_collection_expression_with_non_collection_type() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let int_type = type_environment.builtins().int;
-    inject_collection_expression_statement(&mut module, int_type, test_location(20));
+    inject_collection_expression_statement(&mut module, int_type, test_source_location(20));
 
     let error = validate_module_for_tests(&module, &string_table, &type_environment)
         .expect_err("validator should reject Collection expression with non-collection type");
@@ -1847,7 +1843,11 @@ fn validator_accepts_collection_expression_with_growable_collection_type() {
     let (string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
     let int_type = type_environment.builtins().int;
     let growable_collection = type_environment.intern_collection(int_type, None);
-    inject_collection_expression_statement(&mut module, growable_collection, test_location(20));
+    inject_collection_expression_statement(
+        &mut module,
+        growable_collection,
+        test_source_location(20),
+    );
 
     validate_module_for_tests(&module, &string_table, &type_environment)
         .expect("validator should accept Collection expression with growable collection type");
@@ -1858,7 +1858,7 @@ fn validator_accepts_collection_expression_with_fixed_collection_type() {
     let (string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
     let int_type = type_environment.builtins().int;
     let fixed_collection = type_environment.intern_collection(int_type, Some(64));
-    inject_collection_expression_statement(&mut module, fixed_collection, test_location(20));
+    inject_collection_expression_statement(&mut module, fixed_collection, test_source_location(20));
 
     validate_module_for_tests(&module, &string_table, &type_environment)
         .expect("validator should accept Collection expression with fixed collection type");
@@ -1903,7 +1903,7 @@ fn inject_nonfinite_float_expression(
 fn validator_rejects_nonfinite_float_literal_infinity() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let float_type = type_environment.builtins().float;
-    let location = test_location(60);
+    let location = test_source_location(60);
 
     inject_nonfinite_float_expression(&mut module, float_type, f64::INFINITY, &location);
 
@@ -1922,7 +1922,7 @@ fn validator_rejects_nonfinite_float_literal_infinity() {
 fn validator_rejects_nonfinite_float_literal_nan() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let float_type = type_environment.builtins().float;
-    let location = test_location(61);
+    let location = test_source_location(61);
 
     inject_nonfinite_float_expression(&mut module, float_type, f64::NAN, &location);
 

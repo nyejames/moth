@@ -144,7 +144,8 @@ AUDITS: pre-Phase-4 review of the Phase 0-3 work (helper contracts, panic-reason
   the canonical output-path policy, typed rejection self-tests, anchored path predicates, helper
   ownership, just validate as the final gate); Phase 5 sweep of to_string_lossy/from_utf8_lossy and
   path unwrap_or_default across src and xtask, with every assertion-boundary use removed and the
-  remaining report-rendering uses dispositioned
+  remaining report-rendering uses dispositioned; AUD-0001 (Redundancy over tests.support) —
+  F01, F02 and F03 corrected on this branch, F04 routed to Phase 11 and F05 to Phase 7/11
 BLOCKERS: none (Phase 5 complete)
 NOTES: Pre-existing benchmark_counters feature test failures are not caused by this work.
   Inventory finding mappings fixed: lossy_path_text_conversion → Phase 5 item 7,
@@ -161,6 +162,15 @@ NOTES: Pre-existing benchmark_counters feature test failures are not caused by t
   The four inventory findings Phase 5 owned (golden_comparison_accepting_directories_as_empty_files,
   html_wasm_baseline_broad_fragments, node_runtime_harness_can_hang, lossy_path_text_conversion)
   are now marked resolved in docs/roadmap/evidence/test_honesty_inventory.json.
+  AUD-0001 test-support redundancy corrections landed alongside Phase 5 without changing any test
+  outcome (4373+17+646 unchanged): one canonical test_source_location replaces 23 zero-value
+  SourceLocation wrappers and 5 duplicated line-based builders; the seven HIR node constructors
+  both backends shared moved to compiler_frontend::tests::hir_fixture_support, with each backend's
+  build_type_environment and build_module documented as deliberately divergent; setup_builder,
+  register_local and runtime_template_expression moved from hir_expression_lowering_tests.rs to
+  hir_builder_test_support.rs and the three forwarding aliases were deleted. AUD-0001-F04 (Phase
+  11) and AUD-0001-F05 (Phase 7, then Phase 11) stay open because both depend on decisions this
+  plan owns.
 ```
 
 ## Purpose
@@ -912,6 +922,12 @@ Add regressions for:
 5. Audit `diagnostic_match = "contains"` reasons and warning-ignore usage.
 6. Add audit fields for weak-contract review without making valid smoke cases illegal.
 7. Recheck manifest ownership and primary contract coverage after changes.
+8. Decide the adopt-or-retire question for `assert_diagnostic_reason` and `error_code_counts`
+   in `src/compiler_tests/test_diagnostics.rs` (AUD-0001-F05). Both were added by Phase 2 and
+   still have zero callers and no self-tests. Adopt them only where a case genuinely owns a
+   reason-key or exact code-multiset contract. Never add a token caller to retire the lint —
+   that is implementation-shaped coverage. If nothing adopts them here, they carry a justified
+   suppression naming this decision until Phase 11 deletes them.
 
 ### Phase 8: Feature, platform and CI visibility
 
@@ -956,13 +972,28 @@ Delete the ledger file when its final entry closes, or retain an empty historica
 ### Phase 11: Final audit, pruning and roadmap release
 
 1. Rerun the repository search pass.
-2. Remove superseded helpers, duplicate tests and temporary migration adapters.
-3. Confirm every remaining smoke case is named honestly.
-4. Confirm every ignored test is owned and none was added by this plan.
-5. Run the complete validation matrix below.
-6. Audit changed production seams for minimality and non-test ownership.
-7. Update the roadmap capsule and mark this plan complete.
-8. Only then allow frontend module compilation ownership cleanup to become active.
+2. Remove superseded helpers, duplicate tests and temporary migration adapters. This includes
+   the two `test_diagnostics.rs` helpers from AUD-0001-F05 if Phase 7 did not adopt them, and
+   resolving the fixture-support name collision recorded below.
+3. Resolve AUD-0001-F04: `build_ast` and `reference_expr` each exist twice under
+   `src/compiler_frontend/tests/` with the same name and different semantics
+   (`hir_fixture_support` forwards to production lowering; `type_id_fixture_support` registers
+   types into a fresh `TypeEnvironment`, and its `reference_expr` fixes a different `ValueMode`
+   and `DataType`). Ten or more modules import both supports, so an import can silently select
+   the wrong fixture semantics and still compile. This is an honesty defect under
+   "fixture setup is observable": the fixture a test builds must be the one its author named.
+   Decide the TypeId-first migration question that this blocks, then either finish the
+   migration and delete the superseded helpers, or give the two shapes self-describing names
+   (for example `build_ast_from_production_lowering` and `build_ast_with_registered_types`).
+   Delete the bare `hir_fixture_support::build_ast` forward either way. A rename here must be
+   a pure rename: if a consumer turns out to have imported the other module's helper than its
+   author intended, that is a separate exposed defect for the ledger, not a silent fix.
+4. Confirm every remaining smoke case is named honestly.
+5. Confirm every ignored test is owned and none was added by this plan.
+6. Run the complete validation matrix below.
+7. Audit changed production seams for minimality and non-test ownership.
+8. Update the roadmap capsule and mark this plan complete.
+9. Only then allow frontend module compilation ownership cleanup to become active.
 
 ## Validation matrix
 
@@ -1042,6 +1073,7 @@ This plan is complete only when all of the following hold:
 - smoke and acceptance-only cases do not claim semantic ownership they do not prove
 - every ignored test is owned and no exposed failure was ignored
 - source-text tests are not sole semantic evidence
+- no two fixture-support helpers share a name with different fixture semantics
 - reports are atomic and identify completed runs
 - `test_honesty_inventory.json` has no hard findings and every review finding has a disposition
 - the exposed-failure ledger is empty after Patch B

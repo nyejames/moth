@@ -24,7 +24,7 @@ use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    function_node, make_test_variable, node, test_location,
+    function_node, make_test_variable, node, test_source_location,
 };
 use crate::compiler_frontend::tests::type_id_fixture_support::{
     param_with_type_id, reference_expr,
@@ -47,12 +47,12 @@ fn reactive_declaration_metadata_is_bound_to_local() {
         vec![node(
             NodeKind::VariableDeclaration(make_test_variable(
                 count_path.clone(),
-                Expression::int(1, test_location(2), ValueMode::MutableOwned)
+                Expression::int(1, test_source_location(2), ValueMode::MutableOwned)
                     .with_reactive_source(source),
             )),
-            test_location(2),
+            test_source_location(2),
         )],
-        test_location(1),
+        test_source_location(1),
     );
 
     let ast = build_ast(vec![start_function], entry_path);
@@ -84,7 +84,7 @@ fn reactive_parameter_metadata_is_bound_to_function_param() {
         count_path.clone(),
         builtin_type_ids::INT,
         false,
-        test_location(2),
+        test_source_location(2),
     );
     parameter.value.reactive_source = Some(reactive_source(
         count_path.clone(),
@@ -98,7 +98,7 @@ fn reactive_parameter_metadata_is_bound_to_function_param() {
             returns: vec![],
         },
         vec![],
-        test_location(1),
+        test_source_location(1),
     );
 
     let ast = build_ast(vec![start_function], entry_path);
@@ -128,7 +128,8 @@ fn reactive_template_dependency_metadata_is_bound_to_hir_value() {
     let count_path = super::symbol("count", &mut string_table);
     let view_path = super::symbol("view", &mut string_table);
     let count_source = reactive_source(count_path.clone(), ReactiveSourceKind::Declaration);
-    let template_metadata = metadata_with_subscription(count_source.clone(), test_location(4));
+    let template_metadata =
+        metadata_with_subscription(count_source.clone(), test_source_location(4));
 
     let start_function = function_node(
         start_name,
@@ -140,36 +141,36 @@ fn reactive_template_dependency_metadata_is_bound_to_hir_value() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     count_path.clone(),
-                    Expression::int(1, test_location(2), ValueMode::MutableOwned)
+                    Expression::int(1, test_source_location(2), ValueMode::MutableOwned)
                         .with_reactive_source(count_source),
                 )),
-                test_location(2),
+                test_source_location(2),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     view_path.clone(),
                     Expression::string_slice(
                         string_table.intern("<p>count</p>"),
-                        test_location(3),
+                        test_source_location(3),
                         ValueMode::ImmutableOwned,
                     ),
                 )),
-                test_location(3),
+                test_source_location(3),
             ),
             node(
                 NodeKind::PushStartRuntimeFragment(
                     reference_expr(
                         view_path,
                         builtin_type_ids::STRING,
-                        test_location(4),
+                        test_source_location(4),
                         ValueMode::ImmutableReference,
                     )
                     .with_reactive_template_metadata(template_metadata),
                 ),
-                test_location(4),
+                test_source_location(4),
             ),
         ],
-        test_location(1),
+        test_source_location(1),
     );
 
     let ast = build_ast(vec![start_function], entry_path);
@@ -200,13 +201,14 @@ fn reachability_records_reactive_runtime_fragment_and_external_sinks() {
     let count_path = super::symbol("count", &mut string_table);
     let view_path = super::symbol("view", &mut string_table);
     let count_source = reactive_source(count_path.clone(), ReactiveSourceKind::Declaration);
-    let template_metadata = metadata_with_subscription(count_source.clone(), test_location(5));
+    let template_metadata =
+        metadata_with_subscription(count_source.clone(), test_source_location(5));
 
     let reactive_view_reference = || {
         reference_expr(
             view_path.clone(),
             builtin_type_ids::STRING,
-            test_location(5),
+            test_source_location(5),
             ValueMode::ImmutableReference,
         )
         .with_reactive_template_metadata(template_metadata.clone())
@@ -222,25 +224,25 @@ fn reachability_records_reactive_runtime_fragment_and_external_sinks() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     count_path,
-                    Expression::int(1, test_location(2), ValueMode::MutableOwned)
+                    Expression::int(1, test_source_location(2), ValueMode::MutableOwned)
                         .with_reactive_source(count_source),
                 )),
-                test_location(2),
+                test_source_location(2),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     view_path.clone(),
                     Expression::string_slice(
                         string_table.intern("<p>count</p>"),
-                        test_location(3),
+                        test_source_location(3),
                         ValueMode::ImmutableOwned,
                     ),
                 )),
-                test_location(3),
+                test_source_location(3),
             ),
             node(
                 NodeKind::PushStartRuntimeFragment(reactive_view_reference()),
-                test_location(5),
+                test_source_location(5),
             ),
             node(
                 NodeKind::ExpressionStatement(Expression::host_function_call_with_arguments(
@@ -248,15 +250,15 @@ fn reachability_records_reactive_runtime_fragment_and_external_sinks() {
                     vec![CallArgument::positional(
                         reactive_view_reference(),
                         CallAccessMode::Shared,
-                        test_location(6),
+                        test_source_location(6),
                     )],
                     vec![],
-                    test_location(6),
+                    test_source_location(6),
                 )),
-                test_location(6),
+                test_source_location(6),
             ),
         ],
-        test_location(1),
+        test_source_location(1),
     );
 
     let ast = build_ast(vec![start_function], entry_path);

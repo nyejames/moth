@@ -61,10 +61,6 @@ use crate::projects::settings::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-fn empty_location() -> SourceLocation {
-    SourceLocation::default()
-}
-
 fn fold_context<'a>(string_table: &'a mut StringTable) -> TirFoldContext<'a> {
     TirFoldContext {
         string_table,
@@ -75,14 +71,14 @@ fn fold_context<'a>(string_table: &'a mut StringTable) -> TirFoldContext<'a> {
 }
 
 fn bool_expression(value: bool) -> Expression {
-    Expression::bool(value, empty_location(), ValueMode::ImmutableOwned)
+    Expression::bool(value, SourceLocation::default(), ValueMode::ImmutableOwned)
 }
 
 /// Builds a runtime (non-const) string reference expression.
 fn runtime_string_expression() -> Expression {
     Expression::new(
         ExpressionKind::Reference(InternedPath::new()),
-        empty_location(),
+        SourceLocation::default(),
         builtin_type_ids::STRING,
         DataType::StringSlice,
         ValueMode::ImmutableOwned,
@@ -100,15 +96,15 @@ fn build_text_template(
         text_id,
         text.len(),
         TemplateSegmentOrigin::Body,
-        empty_location(),
+        SourceLocation::default(),
     );
-    let root = builder.push_sequence_node(vec![text_node], empty_location());
+    let root = builder.push_sequence_node(vec![text_node], SourceLocation::default());
     builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::empty(),
-        empty_location(),
+        SourceLocation::default(),
     )
 }
 
@@ -126,23 +122,25 @@ fn build_slot_wrapper_template(
         before_id,
         before.len(),
         TemplateSegmentOrigin::Body,
-        empty_location(),
+        SourceLocation::default(),
     );
-    let slot_node = builder.push_slot_node(SlotKey::Default, empty_location());
+    let slot_node = builder.push_slot_node(SlotKey::Default, SourceLocation::default());
     let after_node = builder.push_text_node(
         after_id,
         after.len(),
         TemplateSegmentOrigin::Body,
-        empty_location(),
+        SourceLocation::default(),
     );
-    let root =
-        builder.push_sequence_node(vec![before_node, slot_node, after_node], empty_location());
+    let root = builder.push_sequence_node(
+        vec![before_node, slot_node, after_node],
+        SourceLocation::default(),
+    );
     builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::empty(),
-        empty_location(),
+        SourceLocation::default(),
     )
 }
 
@@ -161,26 +159,26 @@ fn build_two_slot_wrapper_template(
         before_id,
         "before".len(),
         TemplateSegmentOrigin::Body,
-        empty_location(),
+        SourceLocation::default(),
     );
-    let default_slot = builder.push_slot_node(SlotKey::Default, empty_location());
-    let named_slot = builder.push_slot_node(named_key.clone(), empty_location());
+    let default_slot = builder.push_slot_node(SlotKey::Default, SourceLocation::default());
+    let named_slot = builder.push_slot_node(named_key.clone(), SourceLocation::default());
     let after_node = builder.push_text_node(
         after_id,
         "after".len(),
         TemplateSegmentOrigin::Body,
-        empty_location(),
+        SourceLocation::default(),
     );
     let root = builder.push_sequence_node(
         vec![before_node, default_slot, named_slot, after_node],
-        empty_location(),
+        SourceLocation::default(),
     );
     let template_id = builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::empty(),
-        empty_location(),
+        SourceLocation::default(),
     );
     let named_occurrence_id = match &store
         .get_node(named_slot)
@@ -204,15 +202,15 @@ fn build_expression_wrapper_template_with_expression(
         expression,
         TemplateSegmentOrigin::Body,
         None,
-        empty_location(),
+        SourceLocation::default(),
     );
-    let root = builder.push_sequence_node(vec![dynamic_node], empty_location());
+    let root = builder.push_sequence_node(vec![dynamic_node], SourceLocation::default());
     let template_id = builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::empty(),
-        empty_location(),
+        SourceLocation::default(),
     );
     let site_id = match &store
         .get_node(dynamic_node)
@@ -237,15 +235,15 @@ fn build_false_no_else_branch_template(
         body_text,
         "hidden".len(),
         TemplateSegmentOrigin::Body,
-        empty_location(),
+        SourceLocation::default(),
     );
     let branch = TemplateIrBranch::new(
         TemplateBranchSelector::Bool(bool_expression(false)),
         body_node,
-        empty_location(),
+        SourceLocation::default(),
         builder.store.next_expression_site_id(),
     );
-    let root = builder.push_branch_chain_node(vec![branch], None, empty_location());
+    let root = builder.push_branch_chain_node(vec![branch], None, SourceLocation::default());
     builder.finish_template(
         root,
         Style::default(),
@@ -254,7 +252,7 @@ fn build_false_no_else_branch_template(
             has_control_flow: true,
             ..TemplateIrSummary::empty()
         },
-        empty_location(),
+        SourceLocation::default(),
     )
 }
 
@@ -328,15 +326,15 @@ fn build_wrapper_context_fixture(
                 TemplateTirPhase::Composed,
                 empty_overlay,
             ),
-            empty_location(),
+            SourceLocation::default(),
         );
-        let root = builder.push_sequence_node(vec![child_node], empty_location());
+        let root = builder.push_sequence_node(vec![child_node], SourceLocation::default());
         let parent = builder.finish_template(
             root,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::empty(),
-            empty_location(),
+            SourceLocation::default(),
         );
 
         let wrapper_ref = TemplateWrapperReference::new(
@@ -386,15 +384,15 @@ fn build_expression_wrapper_fixture(
                 TemplateTirPhase::Composed,
                 empty_overlay,
             ),
-            empty_location(),
+            SourceLocation::default(),
         );
-        let root = builder.push_sequence_node(vec![child_node], empty_location());
+        let root = builder.push_sequence_node(vec![child_node], SourceLocation::default());
         let parent = builder.finish_template(
             root,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::empty(),
-            empty_location(),
+            SourceLocation::default(),
         );
 
         let wrapper_expression_overlay_id = tir
@@ -486,15 +484,15 @@ fn build_slot_resolution_wrapper_fixture(
                 TemplateTirPhase::Composed,
                 empty_overlay,
             ),
-            empty_location(),
+            SourceLocation::default(),
         );
-        let root = builder.push_sequence_node(vec![child_node], empty_location());
+        let root = builder.push_sequence_node(vec![child_node], SourceLocation::default());
         let parent = builder.finish_template(
             root,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::empty(),
-            empty_location(),
+            SourceLocation::default(),
         );
 
         let slot_overlay_id = tir
@@ -578,12 +576,12 @@ fn build_nested_virtual_wrapper_fixture(string_table: &mut StringTable) -> Wrapp
             builder.push_dynamic_expression_node(
                 Expression::string_slice(
                     outer_expression,
-                    empty_location(),
+                    SourceLocation::default(),
                     ValueMode::ImmutableOwned,
                 ),
                 TemplateSegmentOrigin::Body,
                 None,
-                empty_location(),
+                SourceLocation::default(),
             )
         };
         let (outer_wrapper_template_id, nested_child_node) = {
@@ -594,26 +592,26 @@ fn build_nested_virtual_wrapper_fixture(string_table: &mut StringTable) -> Wrapp
                     TemplateTirPhase::Composed,
                     empty_context,
                 ),
-                empty_location(),
+                SourceLocation::default(),
             );
-            let slot_node = builder.push_slot_node(SlotKey::Default, empty_location());
+            let slot_node = builder.push_slot_node(SlotKey::Default, SourceLocation::default());
             let after_text = string_table.intern("outer-after");
             let after_node = builder.push_text_node(
                 after_text,
                 "outer-after".len(),
                 TemplateSegmentOrigin::Body,
-                empty_location(),
+                SourceLocation::default(),
             );
             let root = builder.push_sequence_node(
                 vec![outer_dynamic_node, nested_child_node, slot_node, after_node],
-                empty_location(),
+                SourceLocation::default(),
             );
             let template_id = builder.finish_template(
                 root,
                 Style::default(),
                 TemplateType::String,
                 TemplateIrSummary::empty(),
-                empty_location(),
+                SourceLocation::default(),
             );
             (template_id, nested_child_node)
         };
@@ -626,15 +624,16 @@ fn build_nested_virtual_wrapper_fixture(string_table: &mut StringTable) -> Wrapp
                     TemplateTirPhase::Composed,
                     empty_context,
                 ),
-                empty_location(),
+                SourceLocation::default(),
             );
-            let root = builder.push_sequence_node(vec![parent_child_node], empty_location());
+            let root =
+                builder.push_sequence_node(vec![parent_child_node], SourceLocation::default());
             builder.finish_template(
                 root,
                 Style::default(),
                 TemplateType::String,
                 TemplateIrSummary::empty(),
-                empty_location(),
+                SourceLocation::default(),
             )
         };
 
@@ -708,7 +707,7 @@ fn build_nested_virtual_wrapper_fixture(string_table: &mut StringTable) -> Wrapp
                 outer_expression_site_id,
                 Box::new(Expression::string_slice(
                     string_table.intern("outer-overlay"),
-                    empty_location(),
+                    SourceLocation::default(),
                     ValueMode::ImmutableOwned,
                 )),
             )],
@@ -950,15 +949,15 @@ fn wrapper_context_fold_applies_inherited_wrapper_set_innermost_to_outermost() {
                 TemplateTirPhase::Composed,
                 TemplateViewContext::default(),
             ),
-            empty_location(),
+            SourceLocation::default(),
         );
-        let root = builder.push_sequence_node(vec![child_node], empty_location());
+        let root = builder.push_sequence_node(vec![child_node], SourceLocation::default());
         let parent = builder.finish_template(
             root,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::empty(),
-            empty_location(),
+            SourceLocation::default(),
         );
 
         let inner_ref = TemplateWrapperReference::new(
@@ -1122,7 +1121,11 @@ fn prepared_fold_applies_wrapper_expression_overlay() {
     let wrapper_text = string_table.intern("wrapper-overlay");
     let (fixture, _) = build_expression_wrapper_fixture(
         &mut string_table,
-        Expression::string_slice(wrapper_text, empty_location(), ValueMode::ImmutableOwned),
+        Expression::string_slice(
+            wrapper_text,
+            SourceLocation::default(),
+            ValueMode::ImmutableOwned,
+        ),
         None,
     );
     let emission = fold_fixture(&fixture, &mut string_table);
@@ -1147,7 +1150,7 @@ fn preparation_classifies_outer_override_by_const_vs_runtime_expression() {
         runtime_string_expression(),
         Some(Expression::string_slice(
             outer_text,
-            empty_location(),
+            SourceLocation::default(),
             ValueMode::ImmutableOwned,
         )),
     );
@@ -1169,7 +1172,11 @@ fn preparation_classifies_outer_override_by_const_vs_runtime_expression() {
     let wrapper_text = string_table.intern("wrapper-local");
     let (runtime_outer_fixture, _) = build_expression_wrapper_fixture(
         &mut string_table,
-        Expression::string_slice(wrapper_text, empty_location(), ValueMode::ImmutableOwned),
+        Expression::string_slice(
+            wrapper_text,
+            SourceLocation::default(),
+            ValueMode::ImmutableOwned,
+        ),
         Some(runtime_string_expression()),
     );
 
@@ -1226,7 +1233,11 @@ fn preparation_ignores_runtime_referenced_wrapper_expression_overlay() {
     let wrapper_text = string_table.intern("wrapper-overlay");
     let (fixture, site_id) = build_expression_wrapper_fixture(
         &mut string_table,
-        Expression::string_slice(wrapper_text, empty_location(), ValueMode::ImmutableOwned),
+        Expression::string_slice(
+            wrapper_text,
+            SourceLocation::default(),
+            ValueMode::ImmutableOwned,
+        ),
         None,
     );
     let runtime_context = {
@@ -1320,7 +1331,7 @@ fn preparation_falls_back_for_runtime_non_injected_slot_source() {
     {
         let mut tir = fixture.store.borrow_mut();
         let slot_plan_id = tir.push_slot_plan(TemplateSlotPlan {
-            location: empty_location(),
+            location: SourceLocation::default(),
             contribution_sources: Vec::new(),
             slot_sites: Vec::new(),
         });
@@ -1503,15 +1514,15 @@ fn preparation_terminates_for_cyclic_nested_wrapper_contexts() {
                     TemplateTirPhase::Composed,
                     empty_overlay,
                 ),
-                empty_location(),
+                SourceLocation::default(),
             );
-            let root = builder.push_sequence_node(vec![child], empty_location());
+            let root = builder.push_sequence_node(vec![child], SourceLocation::default());
             builder.finish_template(
                 root,
                 Style::default(),
                 TemplateType::String,
                 TemplateIrSummary::empty(),
-                empty_location(),
+                SourceLocation::default(),
             )
         };
 
@@ -1523,15 +1534,15 @@ fn preparation_terminates_for_cyclic_nested_wrapper_contexts() {
                     TemplateTirPhase::Composed,
                     empty_overlay,
                 ),
-                empty_location(),
+                SourceLocation::default(),
             );
-            let root = builder.push_sequence_node(vec![child], empty_location());
+            let root = builder.push_sequence_node(vec![child], SourceLocation::default());
             builder.finish_template(
                 root,
                 Style::default(),
                 TemplateType::String,
                 TemplateIrSummary::empty(),
-                empty_location(),
+                SourceLocation::default(),
             )
         };
 

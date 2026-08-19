@@ -10,7 +10,7 @@ use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::datatypes::{DataType, builtin_type_ids};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    assignment_target, function_node, make_test_variable, node, symbol, test_location,
+    assignment_target, function_node, make_test_variable, node, symbol, test_source_location,
 };
 use crate::compiler_frontend::tests::borrow_fixture_support::run_borrow_checker;
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
@@ -34,11 +34,11 @@ fn emits_advisory_return_drop_sites() {
         vec![node(
             NodeKind::VariableDeclaration(make_test_variable(
                 value,
-                Expression::int(1, test_location(1), ValueMode::MutableOwned),
+                Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
             )),
-            test_location(1),
+            test_source_location(1),
         )],
-        test_location(1),
+        test_source_location(1),
     );
 
     let hir = lower_hir(build_ast(vec![start_fn], entry_path), &mut string_table);
@@ -83,24 +83,28 @@ fn emits_advisory_break_and_region_exit_drop_sites() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x.clone(),
-                    Expression::int(1, test_location(1), ValueMode::MutableOwned),
+                    Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
                 )),
-                test_location(1),
+                test_source_location(1),
             ),
             node(
                 NodeKind::If(
-                    Expression::bool(true, test_location(2), ValueMode::ImmutableOwned),
+                    Expression::bool(true, test_source_location(2), ValueMode::ImmutableOwned),
                     vec![node(
                         NodeKind::Assignment {
                             target: assignment_target(
                                 x.clone(),
                                 DataType::Int,
                                 builtin_type_ids::INT,
-                                test_location(3),
+                                test_source_location(3),
                             ),
-                            value: Expression::int(2, test_location(3), ValueMode::ImmutableOwned),
+                            value: Expression::int(
+                                2,
+                                test_source_location(3),
+                                ValueMode::ImmutableOwned,
+                            ),
                         },
-                        test_location(3),
+                        test_source_location(3),
                     )],
                     Some(vec![node(
                         NodeKind::Assignment {
@@ -108,24 +112,28 @@ fn emits_advisory_break_and_region_exit_drop_sites() {
                                 x,
                                 DataType::Int,
                                 builtin_type_ids::INT,
-                                test_location(4),
+                                test_source_location(4),
                             ),
-                            value: Expression::int(3, test_location(4), ValueMode::ImmutableOwned),
+                            value: Expression::int(
+                                3,
+                                test_source_location(4),
+                                ValueMode::ImmutableOwned,
+                            ),
                         },
-                        test_location(4),
+                        test_source_location(4),
                     )]),
                 ),
-                test_location(2),
+                test_source_location(2),
             ),
             node(
                 NodeKind::WhileLoop(
-                    Expression::bool(true, test_location(5), ValueMode::ImmutableOwned),
-                    vec![node(NodeKind::Break, test_location(6))],
+                    Expression::bool(true, test_source_location(5), ValueMode::ImmutableOwned),
+                    vec![node(NodeKind::Break, test_source_location(6))],
                 ),
-                test_location(5),
+                test_source_location(5),
             ),
         ],
-        test_location(1),
+        test_source_location(1),
     );
 
     let hir = lower_hir(build_ast(vec![start_fn], entry_path), &mut string_table);

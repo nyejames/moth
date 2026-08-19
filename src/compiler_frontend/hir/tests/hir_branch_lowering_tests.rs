@@ -25,7 +25,7 @@ use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    function_node, make_test_variable, node, test_location,
+    function_node, make_test_variable, node, test_source_location,
 };
 
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -91,23 +91,23 @@ fn lowers_if_to_then_else_merge_blocks() {
 
     let if_node = node(
         NodeKind::If(
-            Expression::bool(true, test_location(2), ValueMode::ImmutableOwned),
+            Expression::bool(true, test_source_location(2), ValueMode::ImmutableOwned),
             vec![node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_location(2), ValueMode::ImmutableOwned),
+                    Expression::int(1, test_source_location(2), ValueMode::ImmutableOwned),
                 )),
-                test_location(2),
+                test_source_location(2),
             )],
             Some(vec![node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     y,
-                    Expression::int(2, test_location(3), ValueMode::ImmutableOwned),
+                    Expression::int(2, test_source_location(3), ValueMode::ImmutableOwned),
                 )),
-                test_location(3),
+                test_source_location(3),
             )]),
         ),
-        test_location(2),
+        test_source_location(2),
     );
 
     let start_fn = function_node(
@@ -117,7 +117,7 @@ fn lowers_if_to_then_else_merge_blocks() {
             returns: vec![],
         },
         vec![if_node],
-        test_location(1),
+        test_source_location(1),
     );
 
     let ast = build_ast(vec![start_fn], entry_path);
@@ -151,7 +151,7 @@ fn short_circuit_and_keeps_rhs_call_off_always_run_path() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
     let rhs_name = super::symbol("rhs_and", &mut string_table);
-    let location = test_location(30);
+    let location = test_source_location(30);
 
     let rhs_fn = function_node(
         rhs_name.clone(),
@@ -279,7 +279,7 @@ fn short_circuit_or_keeps_rhs_call_off_true_short_path() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
     let rhs_name = super::symbol("rhs_or", &mut string_table);
-    let location = test_location(40);
+    let location = test_source_location(40);
 
     let rhs_fn = function_node(
         rhs_name.clone(),
@@ -400,7 +400,7 @@ fn short_circuit_place_rhs_materializes_copy_before_merge_assignment() {
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
     let lhs_name = super::symbol("lhs", &mut string_table);
     let rhs_name = super::symbol("rhs", &mut string_table);
-    let location = test_location(60);
+    let location = test_source_location(60);
 
     let condition = runtime_expr(
         vec![
@@ -501,7 +501,7 @@ fn value_if_then_place_materializes_copy_before_hidden_result_assignment() {
     let left_name = super::symbol("left", &mut string_table);
     let right_name = super::symbol("right", &mut string_table);
     let result_name = super::symbol("result", &mut string_table);
-    let location = test_location(70);
+    let location = test_source_location(70);
 
     let then_body = vec![node(
         NodeKind::ThenValue(ProducedValues {
@@ -625,27 +625,27 @@ fn non_unit_function_with_terminal_if_does_not_report_fallthrough() {
         },
         vec![node(
             NodeKind::If(
-                Expression::bool(true, test_location(8), ValueMode::ImmutableOwned),
+                Expression::bool(true, test_source_location(8), ValueMode::ImmutableOwned),
                 vec![node(
                     NodeKind::Return(vec![Expression::int(
                         1,
-                        test_location(8),
+                        test_source_location(8),
                         ValueMode::ImmutableOwned,
                     )]),
-                    test_location(8),
+                    test_source_location(8),
                 )],
                 Some(vec![node(
                     NodeKind::Return(vec![Expression::int(
                         2,
-                        test_location(9),
+                        test_source_location(9),
                         ValueMode::ImmutableOwned,
                     )]),
-                    test_location(9),
+                    test_source_location(9),
                 )]),
             ),
-            test_location(8),
+            test_source_location(8),
         )],
-        test_location(7),
+        test_source_location(7),
     );
 
     let start_fn = function_node(
@@ -655,7 +655,7 @@ fn non_unit_function_with_terminal_if_does_not_report_fallthrough() {
             returns: vec![],
         },
         vec![],
-        test_location(1),
+        test_source_location(1),
     );
 
     let ast = build_ast(vec![start_fn, chooser_fn], entry_path);

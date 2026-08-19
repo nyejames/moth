@@ -17,7 +17,7 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
     assignment_target, function_node, make_test_variable, node, reference_expr, symbol,
-    test_location,
+    test_source_location,
 };
 use crate::compiler_frontend::tests::borrow_fixture_support::run_borrow_checker;
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
@@ -46,9 +46,9 @@ fn frontend_check_borrows_propagates_failures() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x.clone(),
-                    Expression::int(1, test_location(1), ValueMode::MutableOwned),
+                    Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
                 )),
-                test_location(1),
+                test_source_location(1),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
@@ -56,21 +56,26 @@ fn frontend_check_borrows_propagates_failures() {
                     Expression::reference(
                         x.clone(),
                         DataType::Int,
-                        test_location(2),
+                        test_source_location(2),
                         ValueMode::MutableReference,
                     ),
                 )),
-                test_location(2),
+                test_source_location(2),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     z,
-                    reference_expr(x, DataType::Int, builtin_type_ids::INT, test_location(3)),
+                    reference_expr(
+                        x,
+                        DataType::Int,
+                        builtin_type_ids::INT,
+                        test_source_location(3),
+                    ),
                 )),
-                test_location(3),
+                test_source_location(3),
             ),
         ],
-        test_location(1),
+        test_source_location(1),
     );
 
     let hir = lower_hir(build_ast(vec![start_fn], entry_path), &mut string_table);
@@ -113,9 +118,9 @@ fn successful_borrow_report_can_be_stored_on_module() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     counter.clone(),
-                    Expression::int(0, test_location(1), ValueMode::MutableOwned),
+                    Expression::int(0, test_source_location(1), ValueMode::MutableOwned),
                 )),
-                test_location(1),
+                test_source_location(1),
             ),
             node(
                 NodeKind::Assignment {
@@ -123,14 +128,14 @@ fn successful_borrow_report_can_be_stored_on_module() {
                         counter.clone(),
                         DataType::Int,
                         builtin_type_ids::INT,
-                        test_location(2),
+                        test_source_location(2),
                     ),
-                    value: Expression::int(1, test_location(2), ValueMode::ImmutableOwned),
+                    value: Expression::int(1, test_source_location(2), ValueMode::ImmutableOwned),
                 },
-                test_location(2),
+                test_source_location(2),
             ),
         ],
-        test_location(1),
+        test_source_location(1),
     );
 
     let hir = lower_hir(build_ast(vec![start_fn], entry_path), &mut string_table);

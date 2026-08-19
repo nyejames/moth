@@ -18,14 +18,11 @@ use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tests::ast_fixture_support::test_source_location;
 use crate::compiler_frontend::tests::type_id_fixture_support::{
     loop_binding_with_type_id as loop_binding, reference_expr,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
-
-fn test_location(line: i32) -> SourceLocation {
-    super::hir_expression_lowering_tests::location(line)
-}
 
 fn node(kind: NodeKind, location: SourceLocation) -> AstNode {
     AstNode {
@@ -118,7 +115,7 @@ fn collection_literal(location: SourceLocation) -> Expression {
 fn lowers_range_loop_with_new_syntax() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
-    let location = test_location(2);
+    let location = test_source_location(2);
 
     let range_loop = node(
         NodeKind::RangeLoop {
@@ -148,7 +145,7 @@ fn lowers_range_loop_with_new_syntax() {
             returns: vec![],
         },
         vec![range_loop],
-        test_location(1),
+        test_source_location(1),
     );
 
     let (module, _type_environment) =
@@ -187,7 +184,7 @@ fn lowers_range_loop_with_new_syntax() {
 fn lowers_range_loop_without_user_bindings() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
-    let location = test_location(6);
+    let location = test_source_location(6);
 
     let range_loop = node(
         NodeKind::RangeLoop {
@@ -213,7 +210,7 @@ fn lowers_range_loop_without_user_bindings() {
             returns: vec![],
         },
         vec![range_loop],
-        test_location(5),
+        test_source_location(5),
     );
 
     let (module, _type_environment) =
@@ -237,7 +234,7 @@ fn lowers_range_loop_without_user_bindings() {
 fn lowers_range_loop_with_index_binding() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
-    let location = test_location(10);
+    let location = test_source_location(10);
 
     let range_loop = node(
         NodeKind::RangeLoop {
@@ -271,7 +268,7 @@ fn lowers_range_loop_with_index_binding() {
             returns: vec![],
         },
         vec![range_loop],
-        test_location(9),
+        test_source_location(9),
     );
 
     let (module, _type_environment) =
@@ -323,7 +320,7 @@ fn lowers_range_loop_with_index_binding() {
 fn preserves_runtime_zero_step_guard_for_dynamic_step() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
-    let location = test_location(20);
+    let location = test_source_location(20);
 
     let step_symbol = super::symbol("step", &mut string_table);
     let step_decl = node(
@@ -367,7 +364,7 @@ fn preserves_runtime_zero_step_guard_for_dynamic_step() {
             returns: vec![],
         },
         vec![step_decl, range_loop],
-        test_location(19),
+        test_source_location(19),
     );
 
     let (module, _type_environment) =
@@ -391,7 +388,7 @@ fn preserves_runtime_zero_step_guard_for_dynamic_step() {
 fn range_loop_nested_if_body_routes_tail_to_step_block() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
-    let location = test_location(24);
+    let location = test_source_location(24);
 
     let branch_value = super::symbol("branch_value", &mut string_table);
     let tail_value = super::symbol("tail_value", &mut string_table);
@@ -445,7 +442,7 @@ fn range_loop_nested_if_body_routes_tail_to_step_block() {
             returns: vec![],
         },
         vec![range_loop],
-        test_location(23),
+        test_source_location(23),
     );
 
     let (module, _type_environment) =
@@ -509,7 +506,7 @@ fn range_loop_nested_if_body_routes_tail_to_step_block() {
 fn lowers_collection_loop_to_explicit_cfg() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
-    let location = test_location(30);
+    let location = test_source_location(30);
 
     let collection_loop = node(
         NodeKind::CollectionLoop {
@@ -534,7 +531,7 @@ fn lowers_collection_loop_to_explicit_cfg() {
             returns: vec![],
         },
         vec![collection_loop],
-        test_location(29),
+        test_source_location(29),
     );
 
     let (module, _type_environment) =
@@ -579,7 +576,7 @@ fn lowers_collection_loop_to_explicit_cfg() {
 fn lowers_collection_loop_without_user_bindings() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
-    let location = test_location(35);
+    let location = test_source_location(35);
 
     let collection_loop = node(
         NodeKind::CollectionLoop {
@@ -600,7 +597,7 @@ fn lowers_collection_loop_without_user_bindings() {
             returns: vec![],
         },
         vec![collection_loop],
-        test_location(34),
+        test_source_location(34),
     );
 
     let (module, _type_environment) =
@@ -631,7 +628,7 @@ fn lowers_collection_loop_without_user_bindings() {
 fn lowers_collection_loop_item_binding_from_indexed_place() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
-    let location = test_location(40);
+    let location = test_source_location(40);
 
     let collection_loop = node(
         NodeKind::CollectionLoop {
@@ -656,7 +653,7 @@ fn lowers_collection_loop_item_binding_from_indexed_place() {
             returns: vec![],
         },
         vec![collection_loop],
-        test_location(39),
+        test_source_location(39),
     );
 
     let (module, _type_environment) =
@@ -704,7 +701,7 @@ fn lowers_collection_loop_item_binding_from_indexed_place() {
 fn lowers_collection_loop_optional_index_binding() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
-    let location = test_location(50);
+    let location = test_source_location(50);
 
     let collection_loop = node(
         NodeKind::CollectionLoop {
@@ -733,7 +730,7 @@ fn lowers_collection_loop_optional_index_binding() {
             returns: vec![],
         },
         vec![collection_loop],
-        test_location(49),
+        test_source_location(49),
     );
 
     let (module, _type_environment) =
@@ -788,7 +785,7 @@ fn lowers_collection_loop_optional_index_binding() {
 fn lowers_range_loop_user_bindings_as_immutable_locals() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
-    let location = test_location(55);
+    let location = test_source_location(55);
 
     let range_loop = node(
         NodeKind::RangeLoop {
@@ -822,7 +819,7 @@ fn lowers_range_loop_user_bindings_as_immutable_locals() {
             returns: vec![],
         },
         vec![range_loop],
-        test_location(54),
+        test_source_location(54),
     );
 
     let (module, _type_environment) =
@@ -846,7 +843,7 @@ fn lowers_range_loop_user_bindings_as_immutable_locals() {
 fn lowers_collection_loop_user_bindings_as_immutable_locals() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
-    let location = test_location(56);
+    let location = test_source_location(56);
 
     let collection_loop = node(
         NodeKind::CollectionLoop {
@@ -875,7 +872,7 @@ fn lowers_collection_loop_user_bindings_as_immutable_locals() {
             returns: vec![],
         },
         vec![collection_loop],
-        test_location(55),
+        test_source_location(55),
     );
 
     let (module, _type_environment) =
@@ -907,7 +904,7 @@ fn lowers_collection_loop_user_bindings_as_immutable_locals() {
 fn break_targets_exit_block_in_collection_loop() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
-    let location = test_location(60);
+    let location = test_source_location(60);
 
     let collection_loop = node(
         NodeKind::CollectionLoop {
@@ -939,7 +936,7 @@ fn break_targets_exit_block_in_collection_loop() {
             returns: vec![],
         },
         vec![collection_loop],
-        test_location(59),
+        test_source_location(59),
     );
 
     let (module, _type_environment) =
@@ -982,7 +979,7 @@ fn break_targets_exit_block_in_collection_loop() {
 fn direct_break_in_collection_loop_does_not_leave_unreachable_step_block() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
-    let location = test_location(65);
+    let location = test_source_location(65);
 
     let collection_loop = node(
         NodeKind::CollectionLoop {
@@ -1007,7 +1004,7 @@ fn direct_break_in_collection_loop_does_not_leave_unreachable_step_block() {
             returns: vec![],
         },
         vec![collection_loop],
-        test_location(64),
+        test_source_location(64),
     );
 
     let (module, _type_environment) =
@@ -1021,7 +1018,7 @@ fn direct_break_in_collection_loop_does_not_leave_unreachable_step_block() {
 fn direct_break_in_range_loop_does_not_leave_unreachable_step_block() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
-    let location = test_location(66);
+    let location = test_source_location(66);
 
     let range_loop = node(
         NodeKind::RangeLoop {
@@ -1051,7 +1048,7 @@ fn direct_break_in_range_loop_does_not_leave_unreachable_step_block() {
             returns: vec![],
         },
         vec![range_loop],
-        test_location(65),
+        test_source_location(65),
     );
 
     let (module, _type_environment) =
@@ -1065,7 +1062,7 @@ fn direct_break_in_range_loop_does_not_leave_unreachable_step_block() {
 fn continue_targets_step_block_in_collection_loop() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
-    let location = test_location(70);
+    let location = test_source_location(70);
 
     let collection_loop = node(
         NodeKind::CollectionLoop {
@@ -1090,7 +1087,7 @@ fn continue_targets_step_block_in_collection_loop() {
             returns: vec![],
         },
         vec![collection_loop],
-        test_location(69),
+        test_source_location(69),
     );
 
     let (module, _type_environment) =
@@ -1127,7 +1124,7 @@ fn continue_targets_step_block_in_collection_loop() {
 fn nested_loop_targets_remain_correct() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
-    let location = test_location(80);
+    let location = test_source_location(80);
 
     let inner_loop = node(
         NodeKind::CollectionLoop {
@@ -1168,7 +1165,7 @@ fn nested_loop_targets_remain_correct() {
             returns: vec![],
         },
         vec![outer_loop],
-        test_location(79),
+        test_source_location(79),
     );
 
     let (module, _type_environment) =

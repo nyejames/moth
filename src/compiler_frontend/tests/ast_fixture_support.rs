@@ -39,10 +39,6 @@ pub(crate) fn test_source_location(line: i32) -> SourceLocation {
     }
 }
 
-pub(crate) fn test_location(line: i32) -> SourceLocation {
-    test_source_location(line)
-}
-
 pub(crate) fn node(kind: NodeKind, location: SourceLocation) -> AstNode {
     AstNode {
         kind,
