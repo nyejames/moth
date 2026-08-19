@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-08-19T00:38:39Z",
+  "generated_at": "2026-08-19T12:00:00Z",
   "work_id": "test-suite-honesty",
   "base_revision": "f41f93a7a",
   "branch": "test-suite-honesty",
   "host_platform": "macOS",
   "summary": {
-    "unit_tests_passed": 4314,
+    "unit_tests_passed": 4329,
     "unit_tests_failed": 0,
     "unit_tests_ignored": 0,
     "integration_cases_correct": 1699,
@@ -81,8 +81,8 @@
       "code": "weak_positive_assertions",
       "severity": "review",
       "description": "Tests use >= or > assertions where exact counts are needed",
-      "disposition": "deferred to Phase 4",
-      "status": "open"
+      "disposition": "fixed in Phase 4: BuiltArtifactIndex (integration) and BuiltOutputs (build-system tests) replace first-match find_map with unique-path lookup and exactly-one selectors; reachable-dependency test asserts the exact emitted path set plus the lowered dependency body and its call site; JS glue, runtime-module and canvas tests assert exactly-one glue/canvas/runtime artifacts at exact paths and that the page imports the module actually emitted; frontend pipeline tests assert exact function-origin multisets and side-table coverage instead of functions_analyzed >= N; borrow-checker pipeline test asserts statement/terminator fact sets equal the lowered statements/blocks and an exact snapshot count; source-package benchmark warning test asserts an exact warning multiset; HIR local lowering tests assert exact authored locals and exactly one assignment to the authored local",
+      "status": "resolved"
     },
     {
       "code": "golden_comparison_accepting_directories_as_empty_files",
@@ -158,8 +158,8 @@
       "code": "source_text_tests_false_confidence",
       "severity": "review",
       "description": "Tests comparing source text create false confidence",
-      "disposition": "deferred to Phase 4 (item 3: Strengthen reachable dependency, JS glue, runtime asset and frontend pipeline tests; item 7: Review every >=, non-empty, any and find_map result)",
-      "status": "open"
+      "disposition": "reviewed in Phase 4: the diagnostics include_str! check is not sole evidence \u2014 failure_message_contains_uses_structured_render_output and failure_message_contains_includes_rendered_label_text own the behavior. Renamed to diagnostics_source_does_not_name_the_removed_legacy_error_conversion and documented as a source-text reintroduction tripwire, not behavior evidence; scheduled to move into the structured architecture audit in Phase 8 along with the timers erasure source check",
+      "status": "documented"
     },
     {
       "code": "stale_partial_machine_readable_reports",
@@ -209,6 +209,34 @@
       "description": "Integration fixture/expectation loading and runner harness failures travelled as String, forcing negative self-tests to match error identity by prose substrings (fragile; could match the fixture path)",
       "disposition": "fixed: added FixtureLoadError{kind,message} (Filesystem/Manifest/ExpectationParse/ExpectationContract/FixtureContract/PathBoundary) across fixture.rs, expectations.rs, manifest.rs and golden discovery; added TestRunnerError with Options/SuitePolicy/InventoryReport/TriageReport/Selection/ThreadPool/Fixture kinds across run_all_test_cases/run_loaded_suite/options.validate/report persistence/selection/thread-pool/env parsing; migrated all negative self-tests in runner.rs, manifest.rs, expectations.rs, fixture.rs to assert error.kind while retaining message prose checks; CLI reads error.message for display",
       "status": "resolved"
+    },
+    {
+      "code": "first_match_artifact_selection",
+      "severity": "hard",
+      "description": "find_output_file returned the first matching artifact and collect_built_artifact_paths accepted duplicate normalized paths, so every later assertion inspected one artifact of an ambiguous set",
+      "disposition": "fixed in Phase 4: BuiltArtifactIndex is built once in validate_success_result before any success assertion and consumed by the HTML/HTML-Wasm baselines, artifact assertions, absence checks, goldens and rendered-output harnesses; construction rejects duplicate normalized paths, case-only portability aliases and non-UTF-8 relative paths, and an ambiguous set fails the case as FailureKind::HarnessFailed; regressions cover duplicates, aliases, separator normalization, NotBuilt entries and non-UTF-8 paths",
+      "status": "resolved"
+    },
+    {
+      "code": "unused_temp_path_unverified_absence",
+      "severity": "review",
+      "description": "unused_temp_path promised a nonexistent path without proving it; PID reuse after an interrupted run could return a stale node",
+      "disposition": "fixed in the pre-Phase-4 review pass: the helper verifies absence with symlink_metadata before returning",
+      "status": "resolved"
+    },
+    {
+      "code": "panic_assertions_without_reason",
+      "severity": "review",
+      "description": "Helper self-tests and timers conflict tests asserted only catch_unwind(...).is_err(), so an unrelated panic satisfied them",
+      "disposition": "fixed in the pre-Phase-4 review pass: assert_panics_with requires the panic payload to contain the intended message; migrated test_fs, test_diagnostics, timers conflict tests and the new BuiltOutputs self-tests",
+      "status": "resolved"
+    },
+    {
+      "code": "xtask_negative_exists_assertions",
+      "severity": "hard",
+      "description": "Phase 1's absence migration covered only the compiler crate; 14 negative Path::exists assertions remained in xtask tests",
+      "disposition": "fixed in the pre-Phase-4 review pass: added xtask/src/test_fs.rs (assert_path_missing/assert_regular_file/assert_directory with a dangling-symlink regression) and migrated bench_history and benchmark_workspace call sites",
+      "status": "resolved"
     }
   ],
   "infrastructure_added": [
@@ -219,6 +247,10 @@
     "surface_thread_panic helper in timing/tests/enabled_tests.rs",
     "CurrentDirGuard::finish() with Option<PathBuf> take pattern",
     "CurrentDirGuard restore-failure injection seam (test_restore, with_restore_override, RestoreFn type)",
-    "CurrentDirGuard Drop reports restore failure to stderr during unwinding"
+    "CurrentDirGuard Drop reports restore failure to stderr during unwinding",
+    "src/compiler_tests/test_support.rs: assert_panics_with (panic-reason assertion), unused_temp_path absence verification",
+    "xtask/src/test_fs.rs: assert_path_missing, assert_regular_file, assert_directory",
+    "BuiltArtifactIndex + ArtifactIndexError in the integration assertion owner",
+    "BuiltOutputs index with at/exactly_one/exactly_one_path/none_matching plus html_text/js_text kind accessors in build_system tests"
   ]
 }

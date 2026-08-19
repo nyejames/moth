@@ -6,11 +6,13 @@
 //!      remain shared in the artifact owner.
 
 use super::super::ArtifactKind;
-use crate::build_system::build::BuildResult;
+use super::artifacts::BuiltArtifactIndex;
 use wasmparser::{Imports, Parser, Payload};
 
-pub(super) fn validate_html_wasm_baseline_contract(build_result: &BuildResult) -> Option<String> {
-    let Some(index_html) = super::artifacts::find_output_file(build_result, "index.html") else {
+pub(super) fn validate_html_wasm_baseline_contract(
+    index: &BuiltArtifactIndex<'_>,
+) -> Option<String> {
+    let Some(index_html) = index.get("index.html") else {
         return Some(
             "html_wasm baseline contract expected 'index.html', but it was not produced."
                 .to_string(),
@@ -47,7 +49,7 @@ pub(super) fn validate_html_wasm_baseline_contract(build_result: &BuildResult) -
         );
     }
 
-    let Some(page_js) = super::artifacts::find_output_file(build_result, "page.js") else {
+    let Some(page_js) = index.get("page.js") else {
         return Some(
             "html_wasm baseline contract expected 'page.js', but it was not produced.".to_string(),
         );
@@ -71,7 +73,7 @@ pub(super) fn validate_html_wasm_baseline_contract(build_result: &BuildResult) -
         }
     }
 
-    let Some(page_wasm) = super::artifacts::find_output_file(build_result, "page.wasm") else {
+    let Some(page_wasm) = index.get("page.wasm") else {
         return Some(
             "html_wasm baseline contract expected 'page.wasm', but it was not produced."
                 .to_string(),

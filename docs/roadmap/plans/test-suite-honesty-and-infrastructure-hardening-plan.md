@@ -6,8 +6,8 @@
 WORK_ID: test-suite-honesty
 WORK_SOURCE: docs/roadmap/plans/test-suite-honesty-and-infrastructure-hardening-plan.md
 BASE_REVISION: f41f93a7a (post-TIR, post-benchmark-counters-timers)
-STATUS: active — Phase 2 completion pass complete, ready for Phase 4
-CURRENT_SCOPE: Phase 2 completion pass (typed fixture/expectation/runner error seams, Stage-0 seed exactness, containment-test rejection, busy-benchmark owned entry); awaiting Phase 4
+STATUS: active — Phase 4 complete, ready for Phase 5
+CURRENT_SCOPE: Phase 4 exact positive assertions and typed artifact inventory (paused for review before Phase 5)
 COMPLETED:
   Phase 0: baseline established (4314 unit tests, 0 ignored, 1699 integration cases correct,
     1851 backend executions); durable inventory at docs/roadmap/evidence/test_honesty_inventory.json;
@@ -58,18 +58,45 @@ COMPLETED:
     constructors removed from production;
     all synthetic fixtures carry valid build_result or messages;
     ScopedEnvVar panic-safe env guard; surface_thread_panic replaces discarded joins
-NEXT_ACTION: Phase 2 completion pass closed the reviewer's fixture/harness typed-error,
-  Stage-0 seed, containment-test and busy-benchmark gaps; ready for Phase 4
-VALIDATION: cargo fmt --check; cargo clippy -D warnings; cargo test --workspace (4314+17+643);
+  Pre-Phase-4 review pass: unused_temp_path now proves its non-existence contract with
+    symlink_metadata; assert_panics_with added so helper self-tests prove the panic reason
+    instead of accepting any panic (test_fs, test_diagnostics, timers conflict tests);
+    assert_output_rejection and assert_diagnostic_reason panic on a missing reason instead of
+    comparing a "<none>" placeholder; xtask gained its own test_fs owner and 14 negative
+    Path::exists assertions in bench_history/benchmark_workspace were migrated to
+    assert_path_missing; added read_utf8 invalid-UTF-8 and read_bytes missing-file regressions
+  Phase 4: BuiltArtifactIndex (integration assertions) built once in validate_success_result
+    before any success assertion and consumed by the HTML and HTML-Wasm baselines, artifact
+    assertions, absence checks, goldens and both rendered-output harnesses; construction rejects
+    duplicate normalized paths, case-only portability aliases and non-UTF-8 relative paths, and an
+    ambiguous artifact set fails the case as HarnessFailed; find_output_file and
+    collect_built_artifact_paths deleted; artifact absence now normalizes the authored path;
+    BuiltOutputs index added for build-system tests (at/exactly_one/exactly_one_path/
+    none_matching plus html_text/js_text kind accessors) with its own self-tests;
+    reachable-dependency test asserts the exact emitted path set plus the lowered dependency body
+    and its call site; JS glue, runtime-module and canvas tests assert exactly-one glue/canvas
+    artifacts, the exact runtime module path, and that the page imports the module actually
+    emitted; frontend pipeline tests assert exact function-origin multisets and borrow-summary
+    coverage instead of functions_analyzed >= N; borrow-checker pipeline test asserts
+    statement/terminator fact sets equal the lowered statements/blocks with an exact snapshot
+    count; source-package benchmark warning test asserts an exact warning multiset; HIR local
+    lowering tests assert exact authored locals and exactly one assignment to the authored local;
+    the diagnostics include_str! ban renamed to state it is a source-text tripwire, not behavior
+    evidence (behavior owners named in its doc comment), pending the Phase 8 audit move
+NEXT_ACTION: run Phase 5 (golden kind/encoding contracts, HTML and Wasm baselines, Node harness
+  ownership, timeout and script parsing)
+VALIDATION: Phase 4 — cargo fmt; cargo clippy --workspace --all-targets -D warnings (clean);
+  cargo test --workspace (4329+17+646); cargo run -- tests --terse (1851/1851).
+  Earlier phases: cargo fmt --check; cargo clippy -D warnings; cargo test --workspace (4314+17+643);
   cargo run -- tests --terse (1851/1851); cargo test --features timers (pass);
   cargo test --features detailed_timers (pass, 4316+17+643); just validate (pass);
   pre-existing benchmark_counters failure unchanged; Linux lane passed via GitHub Actions
   validate-linux (4324 unit tests incl. Linux-only non-UTF-8 filesystem identity tests,
   1851/1851 integration cases)
-AUDITS: Phase 2 completion pass per reviewer's second gate (typed fixture/expectation/runner
-  error seams, Stage-0 seed exactness, containment-test rejection, busy-benchmark owned entry,
-  is_err/expect_err survivor classification)
-BLOCKERS: none (Phase 2 completion pass complete)
+AUDITS: pre-Phase-4 review of the Phase 0-3 work (helper contracts, panic-reason assertions,
+  xtask absence assertions); Phase 4 sweep of >=, non-empty, any and find_map survivors across
+  src and xtask with a disposition for each
+BLOCKERS: none (Phase 4 complete)
 NOTES: Pre-existing benchmark_counters feature test failures are not caused by this work.
   Inventory finding mappings fixed: lossy_path_text_conversion → Phase 5 item 7,
   source_text_tests_false_confidence → Phase 4 items 3 and 7.

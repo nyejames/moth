@@ -4,10 +4,10 @@
 //! WHY: assertion regressions can silently weaken the suite without changing compilation.
 
 use super::super::assertions::{
-    RuntimeEvent, SlotOutput, compare_text_golden, discover_golden_expectation,
-    execute_wasm_harness_for_test, extract_script_blocks, normalize_text_for_comparison,
-    parse_harness_output, validate_failure_result, validate_golden_outputs,
-    validate_rendered_output_fragments, validate_success_result,
+    RuntimeEvent, SlotOutput, build_artifact_index_reason, compare_text_golden,
+    discover_golden_expectation, execute_wasm_harness_for_test, extract_script_blocks,
+    normalize_text_for_comparison, parse_harness_output, validate_failure_result,
+    validate_golden_outputs, validate_rendered_output_fragments, validate_success_result,
 };
 use super::super::types::{
     DiagnosticAssertion, ExactWarningExpectation, GoldenExpectation, RenderedOutputExpectation,
@@ -160,13 +160,23 @@ fn failure_message_contains_includes_rendered_label_text() {
     assert!(result.passed, "{:?}", result.failure_reason);
 }
 
+/// Source-text architecture ban, not behavior evidence.
+///
+/// WHAT: checks that the diagnostic assertion owner does not reintroduce the removed legacy
+///       error conversion by name.
+/// WHY: the behavior this protects — failure-message assertions reading typed render-boundary
+///      output — is owned by `failure_message_contains_uses_structured_render_output` and
+///      `failure_message_contains_includes_rendered_label_text` above. Text matching cannot
+///      prove that behavior: an alias, a reformat or an equivalent reimplementation would all
+///      pass. This ban is kept only as a cheap reintroduction tripwire and is scheduled to move
+///      into the owned structured architecture audit.
 #[test]
-fn failure_message_contains_stays_on_typed_render_output() {
+fn diagnostics_source_does_not_name_the_removed_legacy_error_conversion() {
     let removed_conversion_name = ["to", "_", "legacy", "_", "error"].concat();
 
     assert!(
         !DIAGNOSTICS_SOURCE.contains(&removed_conversion_name),
-        "failure message assertions must stay on typed render-boundary output",
+        "the removed legacy error conversion must not be reintroduced by name",
     );
 }
 
@@ -1427,4 +1437,175 @@ fn nested_golden_validation_compares_relative_paths() {
         .expect("golden inventory should be discovered");
 
     assert!(validate_golden_outputs(&build_result, &golden).is_none());
+}
+
+// --- Built-artifact index identity contracts ------------------------------------------------
+//
+// Every success assertion reads artifacts through one index. These tests own the index's
+// construction contract: an ambiguous artifact set must be rejected before any assertion
+// consumes it, because a first-match lookup would otherwise inspect one artifact and ignore
+// the rest.
+
+#[test]
+fn artifact_index_rejects_duplicate_normalized_paths() {
+    let build_result = build_result_with_output_files(vec![
+        (
+            PathBuf::from("index.html"),
+            FileKind::Html(VALID_HTML.to_owned()),
+        ),
+        (
+            PathBuf::from("index.html"),
+            FileKind::Html(
+                "<!DOCTYPE html><html><head></head><body>second</body></html>".to_owned(),
+            ),
+        ),
+    ]);
+
+    let reason = build_artifact_index_reason(&build_result)
+        .expect("two artifacts at one path must be rejected");
+    assert!(
+        reason.contains("more than one artifact at 'index.html'"),
+        "duplicate rejection must name the duplicated path: {reason}"
+    );
+}
+
+#[test]
+fn artifact_index_rejects_paths_that_differ_only_by_case() {
+    let build_result = build_result_with_output_files(vec![
+        (
+            PathBuf::from("assets/Page.js"),
+            FileKind::Js("// first".to_owned()),
+        ),
+        (
+            PathBuf::from("assets/page.js"),
+            FileKind::Js("// second".to_owned()),
+        ),
+    ]);
+
+    let reason = build_artifact_index_reason(&build_result)
+        .expect("case-aliasing artifacts must be rejected");
+    assert!(
+        reason.contains("differ only by case"),
+        "alias rejection must name the portability contract: {reason}"
+    );
+    assert!(
+        reason.contains("assets/Page.js") && reason.contains("assets/page.js"),
+        "alias rejection must name both aliasing paths: {reason}"
+    );
+}
+
+#[test]
+fn artifact_index_accepts_distinct_paths_with_separator_differences() {
+    // Windows-style separators normalize to the portable form; that is normalization, not
+    // aliasing, and must not be rejected.
+    let build_result = build_result_with_output_files(vec![
+        (
+            PathBuf::from("assets").join("one.js"),
+            FileKind::Js("// one".to_owned()),
+        ),
+        (
+            PathBuf::from("assets").join("two.js"),
+            FileKind::Js("// two".to_owned()),
+        ),
+    ]);
+
+    assert_eq!(build_artifact_index_reason(&build_result), None);
+}
+
+#[test]
+fn artifact_index_ignores_not_built_outputs() {
+    // A NotBuilt entry is a decision not to emit, not an artifact, so it can share a path
+    // with nothing and must not create a duplicate.
+    let build_result = build_result_with_output_files(vec![
+        (PathBuf::from("index.html"), FileKind::NotBuilt),
+        (
+            PathBuf::from("index.html"),
+            FileKind::Html(VALID_HTML.to_owned()),
+        ),
+    ]);
+
+    assert_eq!(build_artifact_index_reason(&build_result), None);
+}
+
+#[test]
+#[cfg(unix)]
+fn artifact_index_rejects_non_utf8_artifact_paths() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    let invalid_name = OsString::from_vec(vec![b'b', b'a', 0xff, b'd', b'.', b'j', b's']);
+    let build_result = build_result_with_output_files(vec![(
+        PathBuf::from(invalid_name),
+        FileKind::Js("// invalid".to_owned()),
+    )]);
+
+    let reason = build_artifact_index_reason(&build_result)
+        .expect("a non-UTF-8 artifact path must be rejected, not lossily replaced");
+    assert!(
+        reason.contains("is not valid UTF-8"),
+        "non-UTF-8 rejection must name the encoding contract: {reason}"
+    );
+}
+
+#[test]
+fn duplicate_artifact_paths_fail_the_case_as_a_harness_failure() {
+    let expectation = acceptance_only_expectation();
+    let case = success_test_case(BackendId::Html, expectation.clone());
+    let build_result = build_result_with_output_files(vec![
+        (
+            PathBuf::from("index.html"),
+            FileKind::Html(VALID_HTML.to_owned()),
+        ),
+        (
+            PathBuf::from("index.html"),
+            FileKind::Html(VALID_HTML.to_owned()),
+        ),
+    ]);
+
+    let result = validate_success_result(&case, build_result, &expectation);
+
+    assert!(!result.passed, "an ambiguous artifact set cannot pass");
+    assert_eq!(
+        result.failure_kind,
+        Some(FailureKind::HarnessFailed),
+        "artifact ambiguity is a harness fact, not an expectation violation"
+    );
+    assert!(
+        result
+            .failure_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("Artifact inventory is ambiguous")),
+        "failure must explain the ambiguity: {:?}",
+        result.failure_reason
+    );
+}
+
+#[test]
+fn artifact_absence_contract_normalizes_the_authored_path() {
+    // The authored path is normalized before lookup, so a Windows-style authored path cannot
+    // silently miss an artifact the build really produced.
+    let expectation = absence_expectation(vec!["assets\\page.js".to_string()]);
+    let case = absence_test_case(expectation.clone());
+    let build_result = build_result_with_output_files(vec![
+        (
+            PathBuf::from("index.html"),
+            FileKind::Html(VALID_HTML.to_owned()),
+        ),
+        (
+            PathBuf::from("assets").join("page.js"),
+            FileKind::Js("// page".to_owned()),
+        ),
+    ]);
+
+    let result = validate_success_result(&case, build_result, &expectation);
+
+    assert!(!result.passed, "the forbidden artifact was produced");
+    assert!(
+        result
+            .failure_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("to not exist")),
+        "failure must report the absence violation: {:?}",
+        result.failure_reason
+    );
 }

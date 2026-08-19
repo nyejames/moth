@@ -23,9 +23,30 @@ use crate::compiler_frontend::value_mode::ValueMode;
 
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
 use crate::compiler_frontend::hir::hir_builder::{build_ast, lower_ast};
+
 use crate::compiler_frontend::tests::type_id_fixture_support::{
     fresh_success_returns, param_with_type_id, reference_expr,
 };
+
+/// The authored (non-generated) local names a block owns, in declaration order.
+///
+/// WHAT: filters out lowering temporaries, which are an implementation detail of HIR
+///       construction rather than part of a declaration's contract.
+/// WHY: `!locals.is_empty()` passes for a lowering that emitted only a temporary and dropped
+///      the authored binding entirely.
+fn authored_local_names(
+    module: &crate::compiler_frontend::hir::module::HirModule,
+    block: &crate::compiler_frontend::hir::blocks::HirBlock,
+    string_table: &StringTable,
+) -> Vec<String> {
+    block
+        .locals
+        .iter()
+        .filter_map(|local| module.side_table.resolve_local_name(local.id, string_table))
+        .filter(|name| !name.starts_with("__hir_tmp_"))
+        .map(str::to_string)
+        .collect()
+}
 
 #[test]
 fn allocates_parameter_locals_and_binds_names() {
@@ -68,8 +89,23 @@ fn allocates_parameter_locals_and_binds_names() {
         .0 as usize];
     assert_eq!(start_fn.params.len(), 1);
 
+    // The function declares exactly one parameter and no other bindings, so the entry block
+    // owns exactly one local. A non-empty check would also pass if lowering invented extras.
     let entry_block = &module.blocks[start_fn.entry.0 as usize];
-    assert!(!entry_block.locals.is_empty());
+    assert_eq!(
+        authored_local_names(&module, entry_block, &string_table),
+        vec!["x".to_string()],
+        "the entry block should own exactly the declared parameter besides lowering temporaries"
+    );
+    assert_eq!(
+        entry_block
+            .locals
+            .iter()
+            .filter(|local| local.id == start_fn.params[0])
+            .count(),
+        1,
+        "the parameter should be declared once in the entry block"
+    );
     assert_eq!(
         module
             .side_table
@@ -110,12 +146,41 @@ fn variable_declaration_emits_local_and_assign_statement() {
         .0 as usize];
     let entry_block = &module.blocks[start_fn.entry.0 as usize];
 
-    assert!(!entry_block.locals.is_empty());
-    assert!(
-        entry_block
-            .statements
-            .iter()
-            .any(|statement| matches!(statement.kind, HirStatementKind::Assign { .. }))
+    // One declaration lowers to exactly one local and exactly one assignment. `any` would also
+    // pass for a lowering that emitted the assignment twice.
+    assert_eq!(
+        authored_local_names(&module, entry_block, &string_table),
+        vec!["x".to_string()],
+        "one declaration should lower to exactly one authored local"
+    );
+    // Lowering also assigns through a temporary, so the contract is exactly one assignment
+    // whose target is the authored local — not "some assignment exists".
+    let declared_local = entry_block
+        .locals
+        .iter()
+        .find(|local| {
+            module
+                .side_table
+                .resolve_local_name(local.id, &string_table)
+                == Some("x")
+        })
+        .expect("the authored local should be declared");
+    let assignments_to_x = entry_block
+        .statements
+        .iter()
+        .filter(|statement| {
+            matches!(
+                statement.kind,
+                HirStatementKind::Assign {
+                    target: crate::compiler_frontend::hir::places::HirPlace::Local(local),
+                    ..
+                } if local == declared_local.id
+            )
+        })
+        .count();
+    assert_eq!(
+        assignments_to_x, 1,
+        "one initialised declaration should lower to one assignment to that local"
     );
 }
 

@@ -6,7 +6,7 @@
 //!      JavaScript structure or create a second execution path.
 
 use super::super::{ArtifactKind, FailureKind};
-use crate::build_system::build::BuildResult;
+use super::artifacts::BuiltArtifactIndex;
 use crate::compiler_tests::integration_test_runner::types::RenderedOutputExpectation;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -15,11 +15,10 @@ use std::time::Duration;
 static RENDER_HARNESS_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub(super) fn validate_rendered_output(
-    build_result: &BuildResult,
+    index: &BuiltArtifactIndex<'_>,
     expectation: &RenderedOutputExpectation,
 ) -> Option<(String, FailureKind)> {
-    let Some(index_html_file) = super::artifacts::find_output_file(build_result, "index.html")
-    else {
+    let Some(index_html_file) = index.get("index.html") else {
         return Some((
             "rendered_output assertion requires 'index.html', but it was not produced.".to_string(),
             FailureKind::HarnessFailed,
@@ -49,10 +48,10 @@ pub(super) fn validate_rendered_output(
 /// WHY: HTML-Wasm backend tests must observe runtime semantics such as content-based String
 ///       equality; Wasm validity and lowering-shape assertions alone cannot prove that behavior.
 pub(super) fn validate_wasm_rendered_output(
-    build_result: &BuildResult,
+    index: &BuiltArtifactIndex<'_>,
     expectation: &RenderedOutputExpectation,
 ) -> Option<(String, FailureKind)> {
-    let Some(page_js_file) = super::artifacts::find_output_file(build_result, "page.js") else {
+    let Some(page_js_file) = index.get("page.js") else {
         return Some((
             "rendered_output assertion for HTML-Wasm requires 'page.js', but it was not produced."
                 .to_string(),
@@ -68,7 +67,7 @@ pub(super) fn validate_wasm_rendered_output(
         ));
     };
 
-    let Some(page_wasm_file) = super::artifacts::find_output_file(build_result, "page.wasm") else {
+    let Some(page_wasm_file) = index.get("page.wasm") else {
         return Some((
             "rendered_output assertion for HTML-Wasm requires 'page.wasm', but it was not produced."
                 .to_string(),

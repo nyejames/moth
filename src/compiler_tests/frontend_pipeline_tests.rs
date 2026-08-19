@@ -12,7 +12,8 @@ use crate::compiler_frontend::headers::parse_file_headers::{
     BoundModuleHeaders, HeaderParseOptions, bind_module_headers, prepare_file_from_tokens,
     prepare_header_syntax,
 };
-use crate::compiler_frontend::hir::functions::HirFunctionOriginLookup;
+use crate::compiler_frontend::hir::functions::{HirFunctionOrigin, HirFunctionOriginLookup};
+use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::style_directives::{
@@ -232,17 +233,78 @@ impl FrontendProject {
             .hir_module
     }
 
-    fn borrow_checked_hir(&mut self) -> BorrowCheckReport {
+    /// Lower to HIR and borrow-check it, returning both so tests can assert the exact
+    /// relationship between the module and the facts derived from it.
+    fn borrow_checked_hir(&mut self) -> (HirModule, BorrowCheckReport) {
         let hir = self.hir();
-
-        assert!(
-            !hir.functions.is_empty(),
-            "pipeline smoke test should produce at least one HIR function"
-        );
-
-        self.frontend
+        let report = self
+            .frontend
             .check_borrows(&hir)
-            .expect("borrow checking should succeed")
+            .expect("borrow checking should succeed");
+        (hir, report)
+    }
+}
+
+/// The multiset of function origins in a lowered module, sorted for comparison.
+fn function_origins(hir: &HirModule) -> Vec<HirFunctionOrigin> {
+    let mut origins = hir
+        .functions
+        .iter()
+        .map(|function| {
+            *hir.function_origins
+                .get(&function.id)
+                .unwrap_or_else(|| panic!("function {:?} has no recorded origin", function.id))
+        })
+        .collect::<Vec<_>>();
+    origins.sort_by_key(|origin| match origin {
+        HirFunctionOrigin::EntryStart => 0,
+        HirFunctionOrigin::Normal => 1,
+    });
+    origins
+}
+
+/// Assert the borrow report's side tables describe exactly the module that was checked.
+///
+/// WHAT: requires one summary per lowered function, no summary for a function that does not
+///       exist, and statement facts keyed only by statements of this module.
+/// WHY: `!statement_facts.is_empty()` passes for a report about a different module, or a report
+///      that covered one function and skipped the rest.
+#[track_caller]
+fn assert_report_describes_module(hir: &HirModule, report: &BorrowCheckReport) {
+    assert_eq!(
+        report.stats.functions_analyzed,
+        hir.functions.len(),
+        "every lowered function must be analyzed"
+    );
+
+    let mut summarized = report
+        .analysis
+        .function_summaries
+        .keys()
+        .copied()
+        .collect::<Vec<_>>();
+    summarized.sort_by_key(|id| format!("{id:?}"));
+    let mut lowered = hir
+        .functions
+        .iter()
+        .map(|function| function.id)
+        .collect::<Vec<_>>();
+    lowered.sort_by_key(|id| format!("{id:?}"));
+    assert_eq!(
+        summarized, lowered,
+        "borrow summaries must cover exactly the lowered functions"
+    );
+
+    let module_statement_ids = hir
+        .blocks
+        .iter()
+        .flat_map(|block| block.statements.iter().map(|statement| statement.id))
+        .collect::<std::collections::HashSet<_>>();
+    for fact_id in report.analysis.statement_facts.keys() {
+        assert!(
+            module_statement_ids.contains(fact_id),
+            "statement fact {fact_id:?} does not belong to the checked module"
+        );
     }
 }
 
@@ -257,10 +319,36 @@ fn compiles_single_file_program_through_borrow_check() {
         StyleDirectiveRegistry::built_ins(),
     );
 
-    let report = project.borrow_checked_hir();
+    let (hir, report) = project.borrow_checked_hir();
 
-    assert!(report.stats.functions_analyzed >= 1);
-    assert!(!report.analysis.statement_facts.is_empty());
+    // A program whose only executable code is at module root lowers to exactly one function:
+    // the implicit entry start. An inequality would also accept a lowering that invented
+    // extra functions or dropped the loop body into one.
+    assert_eq!(
+        function_origins(&hir),
+        vec![HirFunctionOrigin::EntryStart],
+        "module-root-only code lowers to exactly the implicit entry start"
+    );
+    assert_report_describes_module(&hir, &report);
+
+    // Every statement of the entry block is reachable by construction, so each one must carry
+    // a borrow fact.
+    let entry_block = hir
+        .blocks
+        .iter()
+        .find(|block| block.id == hir.functions[0].entry)
+        .expect("the entry function's block should exist");
+    assert!(
+        !entry_block.statements.is_empty(),
+        "the entry block should contain the lowered module-root statements"
+    );
+    for statement in &entry_block.statements {
+        assert!(
+            report.analysis.statement_fact(statement.id).is_some(),
+            "entry-block statement {:?} has no borrow fact",
+            statement.id
+        );
+    }
 }
 
 #[test]
@@ -280,10 +368,36 @@ fn compiles_multi_file_dependency_program_through_borrow_check() {
         StyleDirectiveRegistry::built_ins(),
     );
 
-    let report = project.borrow_checked_hir();
+    let (hir, report) = project.borrow_checked_hir();
 
-    assert!(report.stats.functions_analyzed >= 2);
-    assert!(!report.analysis.value_facts.is_empty());
+    // The imported helper lowers beside the implicit entry start: exactly two functions, one
+    // of each origin. `>= 2` would also accept a lowering that duplicated the helper.
+    assert_eq!(
+        function_origins(&hir),
+        vec![HirFunctionOrigin::EntryStart, HirFunctionOrigin::Normal],
+        "a two-file program lowers the entry start plus the imported helper"
+    );
+    assert_report_describes_module(&hir, &report);
+
+    // The lowered helper is the imported `add|left Int, right Int|`, not just "some function":
+    // it takes exactly the two declared parameters and carries a stable exported origin.
+    let helper = hir
+        .functions
+        .iter()
+        .find(|function| hir.function_origins.get(&function.id) == Some(&HirFunctionOrigin::Normal))
+        .expect("the imported helper should lower to a Normal function");
+    assert_eq!(
+        helper.params.len(),
+        2,
+        "the imported helper declares two parameters"
+    );
+    // The origin side tables stay empty here because this pipeline harness lowers with an
+    // empty `HirFunctionOriginLookup`; stable-origin joins are owned by the build-system
+    // tests that run the real lookup.
+    assert!(
+        report.analysis.function_summaries.contains_key(&helper.id),
+        "the imported helper must carry its own borrow summary"
+    );
 }
 
 #[test]

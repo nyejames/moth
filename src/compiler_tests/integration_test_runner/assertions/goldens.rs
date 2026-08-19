@@ -5,7 +5,8 @@
 
 use super::super::FailureKind;
 use super::super::types::{GoldenExpectation, GoldenFile, GoldenFileInventory, GoldenMode};
-use crate::build_system::build::{BuildResult, FileKind};
+use super::artifacts::BuiltArtifactIndex;
+use crate::build_system::build::FileKind;
 use crate::compiler_frontend::utilities::basic::portable_path_text;
 use crate::compiler_tests::integration_test_runner::errors::FixtureLoadError;
 use std::fs;
@@ -179,7 +180,7 @@ fn golden_mode_label(mode: GoldenMode) -> &'static str {
 }
 
 pub(super) fn validate_golden_outputs(
-    build_result: &BuildResult,
+    index: &BuiltArtifactIndex<'_>,
     golden: &GoldenExpectation,
 ) -> Option<(String, FailureKind)> {
     if golden.inventory.is_empty() {
@@ -200,14 +201,14 @@ pub(super) fn validate_golden_outputs(
         .map(|file| file.relative_path.clone())
         .collect::<Vec<_>>();
 
-    if let Some(reason) = validate_expected_artifact_paths(build_result, &expected_paths) {
+    if let Some(reason) = validate_expected_artifact_paths(index, &expected_paths) {
         return Some((reason, FailureKind::StrictGoldenMismatch));
     }
 
     for file in &golden.inventory.files {
         let relative = &file.relative_path;
 
-        let Some(output) = super::artifacts::find_output_file(build_result, relative) else {
+        let Some(output) = index.get(relative) else {
             return Some((
                 format!("Golden output '{relative}' was not produced."),
                 FailureKind::StrictGoldenMismatch,
@@ -280,10 +281,10 @@ pub(super) fn validate_golden_outputs(
 }
 
 fn validate_expected_artifact_paths(
-    build_result: &BuildResult,
+    index: &BuiltArtifactIndex<'_>,
     expected_paths: &[String],
 ) -> Option<String> {
-    let actual_paths = super::artifacts::collect_built_artifact_paths(build_result);
+    let actual_paths = index.paths();
 
     let mut expected = expected_paths
         .iter()

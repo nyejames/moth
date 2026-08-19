@@ -115,17 +115,18 @@ fn frontend_benchmark_retains_source_package_warning() {
 
     let report = run_frontend_benchmark(options)
         .expect("source-package warning should remain a successful benchmark");
-    assert!(
-        report.warning_count >= 1,
-        "source-package warning should be retained by the frontend benchmark"
+    // The fixture authors exactly one duplicated match arm, so exactly one warning is
+    // contractual. `>= 1` plus `any` would also pass if the benchmark leaked warnings from the
+    // project root, or emitted the duplicate-arm warning twice.
+    assert_eq!(
+        report.warning_codes,
+        vec!["MOTH-RULE-0022".to_string()],
+        "the source-package warning multiset must be exactly the duplicated match arm"
     );
-    assert!(
-        report
-            .warning_codes
-            .iter()
-            .any(|code| code == "MOTH-RULE-0022"),
-        "source-package warning code should be retained: {:?}",
-        report.warning_codes
+    assert_eq!(
+        report.warning_count,
+        report.warning_codes.len(),
+        "the reported warning count must match the retained codes"
     );
 }
 

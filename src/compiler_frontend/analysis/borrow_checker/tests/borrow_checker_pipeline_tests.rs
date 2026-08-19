@@ -163,37 +163,58 @@ fn successful_borrow_report_can_be_stored_on_module() {
         },
     };
 
-    assert!(module.executable.borrow_analysis.stats.functions_analyzed >= 1);
-    assert!(
-        module
-            .executable
-            .borrow_analysis
-            .analysis
-            .total_state_snapshots()
-            >= 1
+    // This module is authored above with exactly one function and two statements, so the
+    // borrow facts have an exact expected shape. `>= 1` and `!is_empty()` would also pass for
+    // a run that analyzed one statement and silently skipped the other.
+    let hir = &module.executable.hir;
+    let analysis = &module.executable.borrow_analysis.analysis;
+
+    assert_eq!(
+        module.executable.borrow_analysis.stats.functions_analyzed,
+        hir.functions.len(),
+        "every lowered function must be analyzed"
     );
-    assert!(
-        !module
-            .executable
-            .borrow_analysis
-            .analysis
-            .statement_facts
-            .is_empty()
+    assert_eq!(hir.functions.len(), 1, "the fixture declares one function");
+
+    let mut statement_ids = hir
+        .blocks
+        .iter()
+        .flat_map(|block| block.statements.iter().map(|statement| statement.id))
+        .collect::<Vec<_>>();
+    statement_ids.sort_by_key(|id| format!("{id:?}"));
+    let mut statement_fact_ids = analysis.statement_facts.keys().copied().collect::<Vec<_>>();
+    statement_fact_ids.sort_by_key(|id| format!("{id:?}"));
+    assert_eq!(
+        statement_fact_ids, statement_ids,
+        "statement facts must cover exactly the lowered statements"
     );
-    assert!(
-        !module
-            .executable
-            .borrow_analysis
-            .analysis
-            .terminator_facts
-            .is_empty()
+
+    let mut block_ids = hir.blocks.iter().map(|block| block.id).collect::<Vec<_>>();
+    block_ids.sort_by_key(|id| format!("{id:?}"));
+    let mut terminator_fact_ids = analysis
+        .terminator_facts
+        .keys()
+        .copied()
+        .collect::<Vec<_>>();
+    terminator_fact_ids.sort_by_key(|id| format!("{id:?}"));
+    assert_eq!(
+        terminator_fact_ids, block_ids,
+        "terminator facts must cover exactly the lowered blocks"
     );
+
+    // Every block contributes an entry and an exit snapshot, plus one snapshot per statement.
+    assert_eq!(
+        analysis.total_state_snapshots(),
+        block_ids.len() * 2 + statement_ids.len(),
+        "state snapshots must cover every block boundary and statement"
+    );
+
+    // Value identities are assigned inside expressions and are not enumerable from the block
+    // list, so this owner asserts only that the declaration and assignment produced facts.
+    // Exact value-fact identity is owned by the borrow-checker unit tests that construct
+    // values directly.
     assert!(
-        !module
-            .executable
-            .borrow_analysis
-            .analysis
-            .value_facts
-            .is_empty()
+        !analysis.value_facts.is_empty(),
+        "a declaration and an assignment should both produce value facts"
     );
 }
