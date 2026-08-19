@@ -162,20 +162,28 @@ fn frontend_benchmark_fails_for_missing_file() {
 #[test]
 fn frontend_benchmark_rejects_a_busy_raw_session_before_compilation() {
     let _guard = benchmark_test_guard();
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let entry_path = _temp.path().join("entry.moth");
+    std::fs::write(&entry_path, "value = 1\n").expect("should write valid entry");
+
     let outer =
         crate::timing::start_benchmark_collection(true).expect("outer timing session should start");
 
     let result = run_frontend_benchmark(FrontendBenchmarkOptions {
-        entry_path: std::path::PathBuf::from("/definitely/does/not/exist.moth"),
+        entry_path,
         build_profile: FrontendBenchmarkBuildProfile::Dev,
     });
 
     let error = result.expect_err("busy raw benchmark should fail before compiler work");
-    assert!(
-        error
-            .to_string()
-            .contains("Could not start frontend benchmark timing session"),
+    assert_eq!(
+        error.kind,
+        FrontendBenchmarkFailureKind::TimingSession,
         "busy raw-session failures must identify the tooling boundary: {error}"
+    );
+    assert!(
+        error.diagnostic_codes.is_empty(),
+        "timing-session rejection precedes any path or compiler diagnostics: {:?}",
+        error.diagnostic_codes
     );
 
     let outer_snapshot = outer.finish();

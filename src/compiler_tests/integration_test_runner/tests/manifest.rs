@@ -9,10 +9,19 @@ use super::super::{CaseRole, EXPECT_FILE_NAME, INPUT_DIR_NAME, MANIFEST_FILE_NAM
 use std::fs;
 use std::path::Path;
 
+fn assert_manifest_kind(error: &super::super::errors::FixtureLoadError) {
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::Manifest,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
+}
+
 fn parse_manifest_source(
     _name: &str,
     source: &str,
-) -> Result<Vec<super::super::ManifestCaseSpec>, String> {
+) -> Result<Vec<super::super::ManifestCaseSpec>, super::super::errors::FixtureLoadError> {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
@@ -49,8 +58,9 @@ fn rejects_manifest_case_without_tags() {
     let Err(error) = load_test_suite_from_root(&root) else {
         panic!("manifest missing tags should be rejected");
     };
+    assert_manifest_kind(&error);
     assert!(
-        error.contains("missing required tags"),
+        error.message.contains("missing required tags"),
         "unexpected: {error}"
     );
 }
@@ -71,9 +81,10 @@ fn rejects_manifest_case_with_unknown_role() {
     let Err(error) = load_test_suite_from_root(&root) else {
         panic!("unknown manifest role should be rejected");
     };
-    assert!(error.contains("case"), "unexpected: {error}");
-    assert!(error.contains("unknown"), "unexpected: {error}");
-    assert!(error.contains("role"), "unexpected: {error}");
+    assert_manifest_kind(&error);
+    assert!(error.message.contains("case"), "unexpected: {error}");
+    assert!(error.message.contains("unknown"), "unexpected: {error}");
+    assert!(error.message.contains("role"), "unexpected: {error}");
 }
 
 #[test]
@@ -126,9 +137,9 @@ fn rejects_manifest_case_with_empty_contract() {
     let Err(error) = load_test_suite_from_root(&root) else {
         panic!("empty manifest contract should be rejected");
     };
-    assert!(error.contains("case"), "unexpected: {error}");
-    assert!(error.contains("empty"), "unexpected: {error}");
-    assert!(error.contains("contract"), "unexpected: {error}");
+    assert!(error.message.contains("case"), "unexpected: {error}");
+    assert!(error.message.contains("empty"), "unexpected: {error}");
+    assert!(error.message.contains("contract"), "unexpected: {error}");
 }
 
 #[test]
@@ -238,8 +249,9 @@ fn manifest_must_declare_every_fixture_directory() {
     let Err(error) = load_test_suite_from_root(&root) else {
         panic!("manifest should reject undeclared fixtures");
     };
+    assert_manifest_kind(&error);
     assert!(
-        error.contains("undeclared fixtures"),
+        error.message.contains("undeclared fixtures"),
         "unexpected error: {error}"
     );
 }
@@ -263,8 +275,12 @@ fn rejects_unsafe_manifest_case_paths() {
         let Err(error) = result else {
             panic!("unsafe manifest path should be rejected: {unsafe_path}");
         };
-        assert!(error.contains("invalid path"), "unexpected: {error}");
-        assert!(error.contains(unsafe_path), "unexpected: {error}");
+        assert_manifest_kind(&error);
+        assert!(
+            error.message.contains("invalid path"),
+            "unexpected: {error}"
+        );
+        assert!(error.message.contains(unsafe_path), "unexpected: {error}");
     }
 }
 
@@ -294,8 +310,9 @@ fn rejects_whitespace_padded_manifest_metadata() {
         let Err(error) = result else {
             panic!("padded manifest metadata should be rejected: {field}");
         };
+        assert_manifest_kind(&error);
         assert!(
-            error.contains("leading or trailing whitespace"),
+            error.message.contains("leading or trailing whitespace"),
             "unexpected: {error}"
         );
     }
@@ -310,8 +327,9 @@ fn rejects_duplicate_manifest_tags() {
     let Err(error) = result else {
         panic!("duplicate manifest tags should be rejected");
     };
+    assert_manifest_kind(&error);
     assert!(
-        error.contains("duplicate tag 'coverage'"),
+        error.message.contains("duplicate tag 'coverage'"),
         "unexpected: {error}"
     );
 }
@@ -365,8 +383,13 @@ fn rejects_manifest_fixture_symlink_escape() {
     let Err(error) = load_test_suite_from_root(&root) else {
         panic!("fixture symlink escaping the suite root should be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::PathBoundary,
+        "symlink escape should be a path-boundary rejection: {error}"
+    );
     assert!(
-        error.contains("case") && error.contains("outside"),
+        error.message.contains("case") && error.message.contains("outside"),
         "unexpected: {error}"
     );
 
@@ -395,15 +418,16 @@ fn rejects_duplicate_canonical_fixture_root_through_in_suite_alias() {
     let Err(error) = load_test_suite_from_root(&root) else {
         panic!("duplicate canonical fixture root should be rejected");
     };
+    assert_manifest_kind(&error);
     assert!(
-        error.contains("primary_case")
-            && error.contains("case_a")
-            && error.contains("alias_case")
-            && error.contains("alias"),
+        error.message.contains("primary_case")
+            && error.message.contains("case_a")
+            && error.message.contains("alias_case")
+            && error.message.contains("alias"),
         "error must retain both conflicting case ids and authored paths: {error}"
     );
     assert!(
-        error.contains("duplicate canonical fixture root"),
+        error.message.contains("duplicate canonical fixture root"),
         "unexpected: {error}"
     );
 

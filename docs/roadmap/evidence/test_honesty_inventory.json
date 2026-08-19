@@ -45,8 +45,8 @@
     {
       "code": "broad_iserr_assertions",
       "severity": "review",
-      "description": "Broad is_err()/error_count()>0 assertions accept wrong failure at multi-lane boundaries",
-      "disposition": "fixed: all 26 broad is_err() assertions in build_orchestration_tests.rs migrated to assert_output_rejection with typed OutputRejectionReason metadata; benchmark seed tests use specific error message assertions; typed reason seam added to production writer via OutputRejectionReason enum and file_error_with_rejection_reason",
+      "description": "Broad is_err()/error_count()>0 assertions accept wrong failure at multi-lane boundaries; String-only transport in integration fixture/expectation/runner forced substring error identity",
+      "disposition": "fixed: all 26 build_orchestration is_err() assertions migrated to assert_output_rejection; benchmark errors carry typed FrontendBenchmarkFailureKind + diagnostic_codes; fixture/expectation loading returns FixtureLoadError{kind,message} (Filesystem/Manifest/ExpectationParse/ExpectationContract/FixtureContract/PathBoundary); runner returns TestRunnerError with Options/SuitePolicy/InventoryReport/TriageReport/Selection/ThreadPool/Fixture kinds; negative self-tests assert error.kind; compile_project_frontend broad is_err() seeds made exact; containment test uses assert_output_rejection; busy benchmark test uses owned entry + TimingSession kind",
       "status": "resolved"
     },
     {
@@ -67,7 +67,7 @@
       "code": "current_dir_restoration_failures_discarded",
       "severity": "hard",
       "description": "CurrentDirGuard::Drop discarded restoration failures",
-      "disposition": "fixed: Option<PathBuf> take pattern prevents double-restore; finish() returns Result; Drop panics on restore failure (non-unwinding) or reports to stderr (unwinding); restore-failure injection seam with test_restore; regression tests for both finish-error and unwind-report paths",
+      "disposition": "fixed: Option<PathBuf> take pattern prevents double-restore; finish() returns Result; Drop panics on restore failure (non-unwinding) or reports to stderr (unwinding); restore-failure injection seam; regression tests for both finish-error and unwind-report paths; obsolete test_restore seam removed in favor of finish() called directly under an injected restore that actually restores CWD then returns the synthetic error",
       "status": "resolved"
     },
     {
@@ -201,6 +201,13 @@
       "severity": "review",
       "description": "assert_exact_infrastructure_error only checked infrastructure error count, not total error count",
       "disposition": "fixed: now requires exactly one error diagnostic overall, and that error must be the expected infrastructure type",
+      "status": "resolved"
+    },
+    {
+      "code": "string_transport_typed_error_seams",
+      "severity": "hard",
+      "description": "Integration fixture/expectation loading and runner harness failures travelled as String, forcing negative self-tests to match error identity by prose substrings (fragile; could match the fixture path)",
+      "disposition": "fixed: added FixtureLoadError{kind,message} (Filesystem/Manifest/ExpectationParse/ExpectationContract/FixtureContract/PathBoundary) across fixture.rs, expectations.rs, manifest.rs and golden discovery; added TestRunnerError with Options/SuitePolicy/InventoryReport/TriageReport/Selection/ThreadPool/Fixture kinds across run_all_test_cases/run_loaded_suite/options.validate/report persistence/selection/thread-pool/env parsing; migrated all negative self-tests in runner.rs, manifest.rs, expectations.rs, fixture.rs to assert error.kind while retaining message prose checks; CLI reads error.message for display",
       "status": "resolved"
     }
   ],

@@ -6,6 +6,7 @@
 //! - backend-specific expectation matrices from a shared input fixture
 
 mod assertions;
+mod errors;
 mod execution;
 mod expectations;
 mod fixture;

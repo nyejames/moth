@@ -139,7 +139,7 @@ pub fn start_cli() -> process::ExitCode {
                             if terse {
                                 println!(
                                     "Tests failed to run: {}",
-                                    compact_whitespace(&error)
+                                    compact_whitespace(&error.message)
                                 );
                             } else {
                                 say!(Red "Failed to run integration tests:");
@@ -626,7 +626,7 @@ fn parse_tests_command(args: &[String]) -> Result<Command, String> {
         }
     }
 
-    options.validate()?;
+    options.validate().map_err(|error| error.to_string())?;
 
     Ok(Command::CompilerTests { options })
 }

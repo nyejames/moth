@@ -160,9 +160,14 @@ fn failed_directory_preparation_keeps_unfinished_module_metadata_out_of_completi
         &mut BuilderSurface::with_mandatory_core(),
         &mut string_table,
     );
-    assert!(
-        result.is_err(),
-        "malformed Stage 0 input should fail preparation"
+    let Err(messages) = result else {
+        panic!("malformed Stage 0 input should fail preparation");
+    };
+    assert_has_diagnostic_code(&messages, "MOTH-SYNTAX-0019");
+    assert_eq!(
+        messages.error_count(),
+        1,
+        "malformed Stage 0 input should produce exactly the syntax diagnostic"
     );
 
     let snapshot = timing_session.finish();
@@ -2024,8 +2029,9 @@ fn single_file_rejects_wrong_extension() {
         &mut string_table,
     );
 
-    assert!(result.is_err(), "expected Err for wrong extension");
-    let messages = result.err().expect("checked above");
+    let Err(messages) = result else {
+        panic!("expected Err for wrong extension");
+    };
     let diagnostic = messages
         .error_diagnostics()
         .next()
@@ -2090,11 +2096,9 @@ fn single_file_rejects_optional_core_package_not_exposed_by_builder() {
         &mut string_table,
     );
 
-    assert!(
-        result.is_err(),
-        "optional core package should require builder opt-in"
-    );
-    let messages = result.err().expect("checked above");
+    let Err(messages) = result else {
+        panic!("optional core package should require builder opt-in");
+    };
     let diagnostic = messages
         .error_diagnostics()
         .next()
@@ -2487,8 +2491,9 @@ fn directory_project_rejects_missing_entry_root() {
         &mut string_table,
     );
 
-    assert!(result.is_err(), "expected Err for missing entry root");
-    let messages = result.err().expect("checked above");
+    let Err(messages) = result else {
+        panic!("expected Err for missing entry root");
+    };
     assert!(
         messages.error_diagnostics().any(|diagnostic| {
             matches!(
@@ -2809,11 +2814,9 @@ fn single_file_rejects_source_package_moth_folder_collision() {
         &mut string_table,
     );
 
-    assert!(
-        result.is_err(),
-        "single-file build should reject source-backed package .moth/folder collision"
-    );
-    let messages = result.err().expect("checked above");
+    let Err(messages) = result else {
+        panic!("single-file build should reject source-backed package .moth/folder collision");
+    };
 
     assert!(
         messages.error_diagnostics().any(|diagnostic| {

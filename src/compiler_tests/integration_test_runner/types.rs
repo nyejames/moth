@@ -23,23 +23,33 @@ pub(crate) struct TestRunnerOptions {
 }
 
 impl TestRunnerOptions {
-    pub(crate) fn validate(&self) -> Result<(), String> {
+    pub(crate) fn validate(
+        &self,
+    ) -> Result<(), crate::compiler_tests::integration_test_runner::errors::TestRunnerError> {
         if self.audit && (self.has_selection_filters() || self.list) {
-            return Err(String::from(
-                "Tests command --audit cannot be combined with --case, --tag, --contract, --backend, or --list.",
-            ));
+            return Err(
+                crate::compiler_tests::integration_test_runner::errors::TestRunnerError::options(
+                    String::from(
+                        "Tests command --audit cannot be combined with --case, --tag, --contract, --backend, or --list.",
+                    ),
+                ),
+            );
         }
 
         if self.terse && self.list {
-            return Err(String::from(
-                "Tests command --terse cannot be combined with --list.",
-            ));
+            return Err(
+                crate::compiler_tests::integration_test_runner::errors::TestRunnerError::options(
+                    String::from("Tests command --terse cannot be combined with --list."),
+                ),
+            );
         }
 
         if self.terse && self.audit {
-            return Err(String::from(
-                "Tests command --terse cannot be combined with --audit.",
-            ));
+            return Err(
+                crate::compiler_tests::integration_test_runner::errors::TestRunnerError::options(
+                    String::from("Tests command --terse cannot be combined with --audit."),
+                ),
+            );
         }
 
         Ok(())

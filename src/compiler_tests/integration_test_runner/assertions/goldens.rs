@@ -7,6 +7,7 @@ use super::super::FailureKind;
 use super::super::types::{GoldenExpectation, GoldenFile, GoldenFileInventory, GoldenMode};
 use crate::build_system::build::{BuildResult, FileKind};
 use crate::compiler_frontend::utilities::basic::portable_path_text;
+use crate::compiler_tests::integration_test_runner::errors::FixtureLoadError;
 use std::fs;
 use std::path::Path;
 
@@ -14,16 +15,16 @@ use std::path::Path;
 pub(crate) fn discover_golden_expectation(
     golden_dir: &Path,
     authored_mode: Option<GoldenMode>,
-) -> Result<GoldenExpectation, String> {
+) -> Result<GoldenExpectation, FixtureLoadError> {
     let inventory = discover_golden_files(golden_dir)?;
 
     if inventory.is_empty() {
         if let Some(mode) = authored_mode {
-            return Err(format!(
+            return Err(FixtureLoadError::fixture_contract(format!(
                 "Golden directory '{}' has golden_mode = \"{}\" but contains no golden files.",
                 golden_dir.display(),
                 golden_mode_label(mode)
-            ));
+            )));
         }
 
         return Ok(GoldenExpectation {
@@ -45,7 +46,7 @@ pub(crate) fn discover_golden_expectation(
 ///      silently treated as absent. Symlink entries are rejected so a golden tree
 ///      cannot follow an authored link outside its owning backend or inventory the same
 ///      file twice.
-fn discover_golden_files(root: &Path) -> Result<GoldenFileInventory, String> {
+fn discover_golden_files(root: &Path) -> Result<GoldenFileInventory, FixtureLoadError> {
     // The direct golden parent (e.g. case/golden) must not be a symlink. Without
     // this guard, a symlinked parent whose target contains the backend directory
     // would bypass the backend-root symlink rejection below and let outside files
@@ -55,18 +56,18 @@ fn discover_golden_files(root: &Path) -> Result<GoldenFileInventory, String> {
     if let Some(parent) = root.parent() {
         match fs::symlink_metadata(parent) {
             Ok(parent_metadata) if parent_metadata.file_type().is_symlink() => {
-                return Err(format!(
+                return Err(FixtureLoadError::filesystem(format!(
                     "Golden parent '{}' is a symlink. Golden trees must live inside the owning fixture.",
                     parent.display()
-                ));
+                )));
             }
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => {
-                return Err(format!(
+                return Err(FixtureLoadError::filesystem(format!(
                     "Failed to inspect golden parent '{}': {error}",
                     parent.display()
-                ));
+                )));
             }
         }
     }
@@ -77,25 +78,25 @@ fn discover_golden_files(root: &Path) -> Result<GoldenFileInventory, String> {
             return Ok(GoldenFileInventory::default());
         }
         Err(error) => {
-            return Err(format!(
+            return Err(FixtureLoadError::filesystem(format!(
                 "Failed to inspect golden directory '{}': {error}",
                 root.display()
-            ));
+            )));
         }
     };
 
     if root_metadata.file_type().is_symlink() {
-        return Err(format!(
+        return Err(FixtureLoadError::filesystem(format!(
             "Golden path '{}' is a symlink. Golden trees must contain only regular files and directories.",
             root.display()
-        ));
+        )));
     }
 
     if !root_metadata.is_dir() {
-        return Err(format!(
+        return Err(FixtureLoadError::filesystem(format!(
             "Golden path '{}' exists but is not a directory.",
             root.display()
-        ));
+        )));
     }
 
     let mut files = Vec::new();
@@ -109,21 +110,21 @@ fn visit_golden_directory(
     directory: &Path,
     root: &Path,
     files: &mut Vec<GoldenFile>,
-) -> Result<(), String> {
+) -> Result<(), FixtureLoadError> {
     let entries = fs::read_dir(directory).map_err(|error| {
-        format!(
+        FixtureLoadError::filesystem(format!(
             "Failed to read golden directory '{}': {error}",
             directory.display()
-        )
+        ))
     })?;
 
     let mut paths = Vec::new();
     for entry in entries {
         let entry = entry.map_err(|error| {
-            format!(
+            FixtureLoadError::filesystem(format!(
                 "Failed to read an entry in golden directory '{}': {error}",
                 directory.display()
-            )
+            ))
         })?;
         paths.push(entry.path());
     }
@@ -131,18 +132,18 @@ fn visit_golden_directory(
 
     for path in paths {
         let entry_metadata = fs::symlink_metadata(&path).map_err(|error| {
-            format!(
+            FixtureLoadError::filesystem(format!(
                 "Failed to inspect golden entry '{}': {error}",
                 path.display()
-            )
+            ))
         })?;
 
         if entry_metadata.file_type().is_symlink() {
-            return Err(format!(
+            return Err(FixtureLoadError::filesystem(format!(
                 "Golden directory '{}' contains a symlink entry '{}'. Golden trees must contain only regular files and directories.",
                 root.display(),
                 path.display()
-            ));
+            )));
         }
 
         if entry_metadata.is_dir() {
@@ -155,11 +156,11 @@ fn visit_golden_directory(
         }
 
         let relative_path = path.strip_prefix(root).map_err(|error| {
-            format!(
+            FixtureLoadError::filesystem(format!(
                 "Failed to make golden entry '{}' relative to '{}': {error}",
                 path.display(),
                 root.display()
-            )
+            ))
         })?;
         files.push(GoldenFile {
             relative_path: portable_path_text(relative_path),

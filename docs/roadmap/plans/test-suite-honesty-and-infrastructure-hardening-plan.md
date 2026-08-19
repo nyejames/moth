@@ -6,8 +6,8 @@
 WORK_ID: test-suite-honesty
 WORK_SOURCE: docs/roadmap/plans/test-suite-honesty-and-infrastructure-hardening-plan.md
 BASE_REVISION: f41f93a7a (post-TIR, post-benchmark-counters-timers)
-STATUS: active — Phase 0-3 closeout complete and Linux lane passed, ready for Phase 4
-CURRENT_SCOPE: Phase 0-3 closeout complete (temp-path migration, benchmark typed seam, CWD guard test, Linux validation); awaiting Phase 4
+STATUS: active — Phase 2 completion pass complete, ready for Phase 4
+CURRENT_SCOPE: Phase 2 completion pass (typed fixture/expectation/runner error seams, Stage-0 seed exactness, containment-test rejection, busy-benchmark owned entry); awaiting Phase 4
 COMPLETED:
   Phase 0: baseline established (4314 unit tests, 0 ignored, 1699 integration cases correct,
     1851 backend executions); durable inventory at docs/roadmap/evidence/test_honesty_inventory.json;
@@ -32,7 +32,21 @@ COMPLETED:
     Bootstrap, Compilation) plus stable diagnostic_codes; missing-file and invalid-syntax
     negative tests assert the typed kind and exact diagnostic code instead of rendered
     substrings; rendered message preserved for CLI/tool output; missing-file benchmark uses
-    tempfile not fabricated /definitely/does/not/exist.moth path
+    tempfile not fabricated /definitely/does/not/exist.moth path; busy raw-session benchmark
+    test uses a valid owned tempfile entry and asserts FrontendBenchmarkFailureKind::TimingSession
+    with empty diagnostic_codes instead of a fabricated /definitely/does/not/exist.moth path;
+    typed error seams for integration fixture/expectation loading and runner harness failures:
+    FixtureLoadError{kind,message} (Filesystem/Manifest/ExpectationParse/ExpectationContract/
+    FixtureContract/PathBoundary) threaded through fixture.rs, expectations.rs, manifest.rs and
+    golden discovery; TestRunnerError with Options/SuitePolicy/InventoryReport/TriageReport/
+    Selection/ThreadPool/Fixture kinds across run_all_test_cases/run_loaded_suite/options.validate/
+    report persistence/selection/thread-pool/env parsing; negative self-tests in runner.rs,
+    manifest.rs, expectations.rs, fixture.rs assert error.kind alongside message prose;
+    CLI reads error.message for display; all broad is_err() seeds in compile_project_frontend_tests.rs
+    (incl. the named Stage 0 false-positive seed) converted to let-Err-unwrap with exact diagnostics
+    (Stage 0 seed asserts MOTH-SYNTAX-0019 and error_count 1);
+    config_and_write_time_containment_share_canonical_classification uses assert_output_rejection
+    with "output-root-not-inside-project"
   Phase 3: WarningBuilder StringId uses active string_table; CurrentDirGuard redesigned with
     Option<PathBuf> take pattern; CurrentDirGuard restore-failure injection seam;
     CurrentDirGuard Drop reports restore failure to stderr during unwinding;
@@ -44,16 +58,18 @@ COMPLETED:
     constructors removed from production;
     all synthetic fixtures carry valid build_result or messages;
     ScopedEnvVar panic-safe env guard; surface_thread_panic replaces discarded joins
-NEXT_ACTION: Linux validation lane run and passed (4324 tests incl. Linux-only non-UTF-8);
-  Phase 0-3 closeout complete, ready for Phase 4
+NEXT_ACTION: Phase 2 completion pass closed the reviewer's fixture/harness typed-error,
+  Stage-0 seed, containment-test and busy-benchmark gaps; ready for Phase 4
 VALIDATION: cargo fmt --check; cargo clippy -D warnings; cargo test --workspace (4314+17+643);
   cargo run -- tests --terse (1851/1851); cargo test --features timers (pass);
   cargo test --features detailed_timers (pass, 4316+17+643); just validate (pass);
   pre-existing benchmark_counters failure unchanged; Linux lane passed via GitHub Actions
   validate-linux (4324 unit tests incl. Linux-only non-UTF-8 filesystem identity tests,
   1851/1851 integration cases)
-AUDITS: fourth closeout pass applied per reviewer's 4 closeout tasks
-BLOCKERS: none (all four closeout tasks complete)
+AUDITS: Phase 2 completion pass per reviewer's second gate (typed fixture/expectation/runner
+  error seams, Stage-0 seed exactness, containment-test rejection, busy-benchmark owned entry,
+  is_err/expect_err survivor classification)
+BLOCKERS: none (Phase 2 completion pass complete)
 NOTES: Pre-existing benchmark_counters feature test failures are not caused by this work.
   Inventory finding mappings fixed: lossy_path_text_conversion → Phase 5 item 7,
   source_text_tests_false_confidence → Phase 4 items 3 and 7.

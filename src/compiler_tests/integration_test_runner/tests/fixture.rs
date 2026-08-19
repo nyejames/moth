@@ -30,8 +30,14 @@ fn rejects_failure_fixture_without_diagnostic_codes() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("fixture should be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::FixtureContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("diagnostic_codes"),
+        error.message.contains("diagnostic_codes"),
         "unexpected error: {error}"
     );
 }
@@ -68,11 +74,17 @@ fn rejects_canonical_fixture_without_expectation_before_execution() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("fixture without an expectation file should be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::Filesystem,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("Canonical case 'case'")
-            && error.contains("missing required expectation file")
-            && error.contains(&case_root.display().to_string())
-            && error.contains(&expected_path.display().to_string()),
+        error.message.contains("Canonical case 'case'")
+            && error.message.contains("missing required expectation file")
+            && error.message.contains(&case_root.display().to_string())
+            && error.message.contains(&expected_path.display().to_string()),
         "unexpected error: {error}"
     );
 }
@@ -98,8 +110,14 @@ fn rejects_acceptance_only_fixture_with_golden_artifacts() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("acceptance-only fixture with golden artifacts should be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::FixtureContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("acceptance_only") && error.contains("golden artifacts"),
+        error.message.contains("acceptance_only") && error.message.contains("golden artifacts"),
         "unexpected error: {error}"
     );
 }
@@ -195,8 +213,14 @@ fn explicit_golden_mode_without_files_is_rejected() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("explicit golden mode without files should be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::FixtureContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("golden_mode") && error.contains("no golden files"),
+        error.message.contains("golden_mode") && error.message.contains("no golden files"),
         "{error}"
     );
 }
@@ -539,8 +563,15 @@ fn rejects_failure_fixture_with_authored_golden_mode() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("a failure backend with authored golden_mode must be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::FixtureContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("mode = \"failure\"") && error.contains("must not author 'golden_mode'"),
+        error.message.contains("mode = \"failure\"")
+            && error.message.contains("must not author 'golden_mode'"),
         "unexpected error: {error}"
     );
 }
@@ -565,8 +596,14 @@ fn rejects_failure_fixture_with_discovered_file_backed_golden() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("a failure backend with discovered golden files must be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::FixtureContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("mode = \"failure\"") && error.contains("golden artifacts"),
+        error.message.contains("mode = \"failure\"") && error.message.contains("golden artifacts"),
         "unexpected error: {error}"
     );
 }
@@ -606,9 +643,17 @@ fn rejects_baseline_only_success_fixture() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("baseline-only success fixture should be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::FixtureContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("html")
-            && error.contains("must author at least one accepted success contract"),
+        error.message.contains("html")
+            && error
+                .message
+                .contains("must author at least one accepted success contract"),
         "unexpected error: {error}"
     );
 }
@@ -630,8 +675,16 @@ fn default_forbidden_warnings_do_not_satisfy_success_completeness() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("default warnings = forbid should not satisfy completeness");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::FixtureContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("warnings = \"exact\" with warning_codes"),
+        error
+            .message
+            .contains("warnings = \"exact\" with warning_codes"),
         "unexpected error: {error}"
     );
 }
@@ -666,7 +719,16 @@ fn rejects_unsafe_configured_entries() {
         let Err(error) = load_canonical_case_specs(&case_root, None) else {
             panic!("unsafe configured entry should be rejected: {entry}");
         };
-        assert!(error.contains("invalid entry"), "unexpected: {error}");
+        assert_eq!(
+            error.kind,
+            super::super::errors::FixtureLoadErrorKind::PathBoundary,
+            "unexpected kind: {:?} ({error})",
+            error.kind
+        );
+        assert!(
+            error.message.contains("invalid entry"),
+            "unexpected: {error}"
+        );
     }
 }
 
@@ -764,8 +826,14 @@ fn rejects_input_directory_symlink_escape() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("input directory symlink escaping the fixture should be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::PathBoundary,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("input directory") && error.contains("outside"),
+        error.message.contains("input directory") && error.message.contains("outside"),
         "unexpected: {error}"
     );
 
@@ -798,8 +866,14 @@ fn rejects_entry_symlink_escape() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("entry symlink escaping the input directory should be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::PathBoundary,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("entry 'escape.mtf'") && error.contains("outside"),
+        error.message.contains("entry 'escape.mtf'") && error.message.contains("outside"),
         "unexpected: {error}"
     );
 
@@ -836,7 +910,13 @@ fn rejects_contained_golden_file_symlink() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("contained golden file symlink should be rejected");
     };
-    assert!(error.contains("symlink"), "unexpected: {error}");
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::Filesystem,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
+    assert!(error.message.contains("symlink"), "unexpected: {error}");
 }
 
 #[cfg(any(unix, windows))]
@@ -867,7 +947,13 @@ fn rejects_escaping_golden_file_symlink() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("escaping golden file symlink should be rejected");
     };
-    assert!(error.contains("symlink"), "unexpected: {error}");
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::Filesystem,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
+    assert!(error.message.contains("symlink"), "unexpected: {error}");
 
     fs::remove_dir_all(&outside).expect("should clean up target");
 }
@@ -900,7 +986,13 @@ fn rejects_golden_directory_symlink() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("golden directory symlink should be rejected");
     };
-    assert!(error.contains("symlink"), "unexpected: {error}");
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::Filesystem,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
+    assert!(error.message.contains("symlink"), "unexpected: {error}");
 
     fs::remove_dir_all(&outside).expect("should clean up target");
 }
@@ -933,8 +1025,14 @@ fn rejects_backend_golden_root_symlink() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("backend golden root symlink should be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::Filesystem,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("Golden path") && error.contains("symlink"),
+        error.message.contains("Golden path") && error.message.contains("symlink"),
         "unexpected: {error}"
     );
 
@@ -970,8 +1068,14 @@ fn rejects_golden_parent_symlink() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("golden parent symlink should be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::Filesystem,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("Golden parent") && error.contains("symlink"),
+        error.message.contains("Golden parent") && error.message.contains("symlink"),
         "unexpected: {error}"
     );
 

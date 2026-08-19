@@ -174,6 +174,7 @@ fn config_and_write_time_containment_share_canonical_classification() {
     use super::super::policy::validate_output_folder_containment;
     use crate::build_system::output::manifest::validate_output_root_is_safe;
     use crate::compiler_frontend::symbols::string_interning::StringTable;
+    use crate::compiler_tests::test_diagnostics::assert_output_rejection;
 
     let _project_temp = tempfile::tempdir().expect("should create project temp dir");
     let project_root = _project_temp.path().to_path_buf();
@@ -198,15 +199,14 @@ fn config_and_write_time_containment_share_canonical_classification() {
         ),
         expected
     );
-    assert!(
-        validate_output_root_is_safe(
-            &folder.resolved_path,
-            &project_root,
-            Some(&project_root.join("src")),
-            &StringTable::new(),
-        )
-        .is_err()
-    );
+    let messages = validate_output_root_is_safe(
+        &folder.resolved_path,
+        &project_root,
+        Some(&project_root.join("src")),
+        &StringTable::new(),
+    )
+    .expect_err("symlink output root should be rejected");
+    assert_output_rejection(&messages, "output-root-not-inside-project");
 }
 
 // -------------------------

@@ -3,6 +3,7 @@
 //! WHAT: protects audit persistence and pre-execution hard-policy rejection.
 //! WHY: policy failures must be observable without compiling or executing a case.
 
+use super::super::errors::TestRunnerErrorKind;
 use super::super::runner::run_loaded_suite;
 use super::super::types::GoldenExpectation;
 use super::super::{
@@ -82,6 +83,12 @@ fn audit_writes_hard_findings_before_returning_failure() {
 
     assert!(result.is_err());
     assert!(!callback_called.load(Ordering::SeqCst));
+    let error = result.expect_err("audit should fail on a hard finding");
+    assert_eq!(
+        error.kind,
+        TestRunnerErrorKind::SuitePolicy,
+        "audit should fail at suite policy: {error}"
+    );
     let report = fs::read_to_string(&report_path).expect("audit should write its report");
     let report_json: serde_json::Value =
         serde_json::from_str(&report).expect("audit report should be valid JSON");
@@ -111,6 +118,12 @@ fn normal_and_list_execution_reject_hard_findings_before_callback() {
 
         assert!(result.is_err());
         assert!(!callback_called.load(Ordering::SeqCst));
+        let error = result.expect_err("hard findings should reject the run");
+        assert_eq!(
+            error.kind,
+            TestRunnerErrorKind::SuitePolicy,
+            "normal/list runs should fail at suite policy: {error}"
+        );
     }
 }
 
@@ -236,8 +249,16 @@ fn triage_report_write_failure_returns_error() {
     );
 
     let error = result.expect_err("triage report write failure should be returned");
+    assert_eq!(
+        error.kind,
+        TestRunnerErrorKind::TriageReport,
+        "unexpected error kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("Failed to create triage report directory"),
+        error
+            .message
+            .contains("Failed to create triage report directory"),
         "unexpected error: {error}"
     );
 }
@@ -262,6 +283,12 @@ fn terse_with_list_rejected_before_callback() {
 
     assert!(result.is_err());
     assert!(!callback_called.load(Ordering::SeqCst));
+    let error = result.expect_err("--terse + --list should be rejected");
+    assert_eq!(
+        error.kind,
+        TestRunnerErrorKind::Options,
+        "terse+list should fail option validation: {error}"
+    );
 }
 
 #[test]
@@ -284,4 +311,10 @@ fn terse_with_audit_rejected_before_callback() {
 
     assert!(result.is_err());
     assert!(!callback_called.load(Ordering::SeqCst));
+    let error = result.expect_err("--terse + --audit should be rejected");
+    assert_eq!(
+        error.kind,
+        TestRunnerErrorKind::Options,
+        "terse+audit should fail option validation: {error}"
+    );
 }

@@ -68,8 +68,14 @@ fn diagnostic_codes_reject_a_blank_identity_entry() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("a blank diagnostic-code identity must be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("empty 'diagnostic_codes' entry"),
+        error.message.contains("empty 'diagnostic_codes' entry"),
         "unexpected error: {error}"
     );
 }
@@ -195,7 +201,16 @@ fn repeated_structured_diagnostic_code_requires_explicit_valid_unique_occurrence
         let Err(error) = load_canonical_case_specs(&case_root, None) else {
             panic!("invalid occurrence selection should be rejected: {name}");
         };
-        assert!(error.contains(expected_error), "unexpected error: {error}");
+        assert_eq!(
+            error.kind,
+            super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+            "unexpected kind: {:?} ({error})",
+            error.kind
+        );
+        assert!(
+            error.message.contains(expected_error),
+            "unexpected error: {error}"
+        );
     }
 }
 
@@ -228,7 +243,16 @@ fn structured_diagnostic_assertions_reject_absent_duplicate_and_empty_selectors(
         let Err(error) = load_canonical_case_specs(&case_root, None) else {
             panic!("invalid structured selector should be rejected: {name}");
         };
-        assert!(error.contains(expected_error), "unexpected error: {error}");
+        assert_eq!(
+            error.kind,
+            super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+            "unexpected kind: {:?} ({error})",
+            error.kind
+        );
+        assert!(
+            error.message.contains(expected_error),
+            "unexpected error: {error}"
+        );
     }
 }
 
@@ -267,7 +291,16 @@ fn structured_diagnostic_assertions_validate_reason_location_and_count_shape() {
         let Err(error) = load_canonical_case_specs(&case_root, None) else {
             panic!("invalid structured assertion shape should be rejected: {name}");
         };
-        assert!(error.contains(expected_error), "unexpected error: {error}");
+        assert_eq!(
+            error.kind,
+            super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+            "unexpected kind: {:?} ({error})",
+            error.kind
+        );
+        assert!(
+            error.message.contains(expected_error),
+            "unexpected error: {error}"
+        );
     }
 }
 
@@ -297,7 +330,16 @@ fn structured_secondary_labels_require_occurrence_and_location_fact() {
         let Err(error) = load_canonical_case_specs(&case_root, None) else {
             panic!("invalid secondary-label assertion should be rejected: {name}");
         };
-        assert!(error.contains(expected_error), "unexpected error: {error}");
+        assert_eq!(
+            error.kind,
+            super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+            "unexpected kind: {:?} ({error})",
+            error.kind
+        );
+        assert!(
+            error.message.contains(expected_error),
+            "unexpected error: {error}"
+        );
     }
 }
 
@@ -321,8 +363,14 @@ fn structured_diagnostic_assertions_are_failure_only() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("structured assertions on a success backend should be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::FixtureContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("failure-only") && error.contains("diagnostic_assertions"),
+        error.message.contains("failure-only") && error.message.contains("diagnostic_assertions"),
         "unexpected error: {error}"
     );
 }
@@ -357,8 +405,14 @@ fn exact_warning_codes_reject_an_authored_empty_multiset() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("an authored empty warning-code list must not satisfy success completeness");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("warnings = \"exact\"") && error.contains("empty"),
+        error.message.contains("warnings = \"exact\"") && error.message.contains("empty"),
         "unexpected error: {error}"
     );
 }
@@ -373,8 +427,14 @@ fn exact_warning_codes_reject_a_blank_identity_entry() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("a blank warning-code identity must be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("empty 'warning_codes' entry"),
+        error.message.contains("empty 'warning_codes' entry"),
         "unexpected error: {error}"
     );
 }
@@ -401,8 +461,14 @@ fn removed_warning_count_spelling_is_rejected() {
         let Err(error) = load_canonical_case_specs(&case_root, None) else {
             panic!("the removed warning_count spelling should be rejected");
         };
+        assert_eq!(
+            error.kind,
+            super::super::errors::FixtureLoadErrorKind::ExpectationParse,
+            "unexpected kind: {:?} ({error})",
+            error.kind
+        );
         assert!(
-            error.contains("warning_count") && error.contains("unknown field"),
+            error.message.contains("warning_count") && error.message.contains("unknown field"),
             "unexpected error: {error}"
         );
     }
@@ -418,8 +484,14 @@ fn exact_warning_expectations_require_warning_codes() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("exact warnings without a code list should be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("warning_codes") && error.contains("warnings = \"exact\""),
+        error.message.contains("warning_codes") && error.message.contains("warnings = \"exact\""),
         "unexpected error: {error}"
     );
 }
@@ -437,8 +509,15 @@ fn ignore_and_forbid_reject_warning_identity_fields() {
         let Err(error) = load_canonical_case_specs(&case_root, None) else {
             panic!("{mode} warnings with identity fields should be rejected");
         };
+        assert_eq!(
+            error.kind,
+            super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+            "unexpected kind: {:?} ({error})",
+            error.kind
+        );
         assert!(
-            error.contains("warning_codes") && error.contains("warnings != \"exact\""),
+            error.message.contains("warning_codes")
+                && error.message.contains("warnings != \"exact\""),
             "unexpected error for {mode}: {error}"
         );
     }
@@ -499,8 +578,14 @@ fn exact_diagnostic_match_rejects_authored_reason() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("exact matching with a reason should be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("diagnostic_match_reason") && error.contains("exact"),
+        error.message.contains("diagnostic_match_reason") && error.message.contains("exact"),
         "unexpected error: {error}"
     );
 }
@@ -515,8 +600,14 @@ fn diagnostic_match_fields_are_failure_only() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("diagnostic_match should be rejected on success expectations");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::FixtureContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("failure-only") && error.contains("diagnostic_match"),
+        error.message.contains("failure-only") && error.message.contains("diagnostic_match"),
         "unexpected error: {error}"
     );
 }
@@ -531,10 +622,16 @@ fn rejects_unknown_success_contract_value_with_backend_context() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("unknown success_contract should be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("success_contract")
-            && error.contains("typecheck_only")
-            && error.contains("[backends.html]"),
+        error.message.contains("success_contract")
+            && error.message.contains("typecheck_only")
+            && error.message.contains("[backends.html]"),
         "unexpected error: {error}"
     );
 }
@@ -549,8 +646,14 @@ fn rejects_acceptance_only_on_failure_backend() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("acceptance_only on a failure backend should be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("mode = \"failure\"") && error.contains("success_contract"),
+        error.message.contains("mode = \"failure\"") && error.message.contains("success_contract"),
         "unexpected error: {error}"
     );
 }
@@ -581,8 +684,14 @@ fn rejects_acceptance_only_mixed_with_success_assertions() {
         let Err(error) = load_canonical_case_specs(&case_root, None) else {
             panic!("acceptance-only mixed with {name} should be rejected");
         };
+        assert_eq!(
+            error.kind,
+            super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+            "unexpected kind: {:?} ({error})",
+            error.kind
+        );
         assert!(
-            error.contains("acceptance_only") && error.contains("must not combine"),
+            error.message.contains("acceptance_only") && error.message.contains("must not combine"),
             "unexpected error for {name}: {error}"
         );
     }
@@ -601,8 +710,14 @@ fn rejects_removed_success_contract_spelling() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("the removed success contract spelling should be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains(&removed_contract) && error.contains("acceptance_only"),
+        error.message.contains(&removed_contract) && error.message.contains("acceptance_only"),
         "unexpected error: {error}"
     );
 }
@@ -617,8 +732,14 @@ fn rejects_acceptance_only_with_authored_expected_warning() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("acceptance-only with an authored expected warning should be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("acceptance_only") && error.contains("expected-warning"),
+        error.message.contains("acceptance_only") && error.message.contains("expected-warning"),
         "unexpected error: {error}"
     );
 }
@@ -640,7 +761,16 @@ fn rejects_error_type_expectation_key() {
     let Err(error) = parse_expectation_file(&case_root.join(EXPECT_FILE_NAME)) else {
         panic!("error_type key should be rejected");
     };
-    assert!(error.contains("unknown field"), "unexpected error: {error}");
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationParse,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
+    assert!(
+        error.message.contains("unknown field"),
+        "unexpected error: {error}"
+    );
 }
 
 #[test]
@@ -660,8 +790,14 @@ fn rejects_legacy_top_level_expectation_contract() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("legacy fixture should be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("[backends.<id>]"),
+        error.message.contains("[backends.<id>]"),
         "unexpected error: {error}"
     );
 }
@@ -683,7 +819,16 @@ fn rejects_backend_panic_expectation_key() {
     let Err(error) = parse_expectation_file(&case_root.join(EXPECT_FILE_NAME)) else {
         panic!("panic key should be rejected");
     };
-    assert!(error.contains("unknown field"), "unexpected error: {error}");
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationParse,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
+    assert!(
+        error.message.contains("unknown field"),
+        "unexpected error: {error}"
+    );
 }
 
 #[test]
@@ -703,7 +848,16 @@ fn rejects_top_level_panic_expectation_key() {
     let Err(error) = parse_expectation_file(&case_root.join(EXPECT_FILE_NAME)) else {
         panic!("panic key should be rejected");
     };
-    assert!(error.contains("unknown field"), "unexpected error: {error}");
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationParse,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
+    assert!(
+        error.message.contains("unknown field"),
+        "unexpected error: {error}"
+    );
 }
 
 #[test]
@@ -723,8 +877,14 @@ fn rejects_unknown_backend_matrix_key() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("fixture should be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("Unsupported backend 'wasm'"),
+        error.message.contains("Unsupported backend 'wasm'"),
         "unexpected error: {error}"
     );
 }
@@ -768,8 +928,14 @@ fn rejects_unknown_golden_mode() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("unknown golden_mode should be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("golden_mode") && error.contains("fuzzy"),
+        error.message.contains("golden_mode") && error.message.contains("fuzzy"),
         "unexpected error: {error}"
     );
 }
@@ -868,8 +1034,14 @@ fn rejects_exact_output_combined_with_each_other_rendered_form() {
         let Err(error) = load_canonical_case_specs(&case_root, None) else {
             panic!("exact output combined with {field} should be rejected");
         };
-        assert!(error.contains("rendered_output_exact"), "{error}");
-        assert!(error.contains("must not combine"), "{error}");
+        assert_eq!(
+            error.kind,
+            super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+            "unexpected kind: {:?} ({error})",
+            error.kind
+        );
+        assert!(error.message.contains("rendered_output_exact"), "{error}");
+        assert!(error.message.contains("must not combine"), "{error}");
     }
 }
 
@@ -904,10 +1076,17 @@ fn rejects_each_new_rendered_form_in_acceptance_only_and_failure_modes() {
             let Err(error) = load_canonical_case_specs(&case_root, None) else {
                 panic!("{field} should be rejected in {mode_label} mode");
             };
+            assert_eq!(
+                error.kind,
+                super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+                "unexpected kind: {:?} ({error})",
+                error.kind
+            );
             // Both lanes reject the rendered form: acceptance_only cannot combine
             // with rendered-output assertions, and failure mode forbids them.
             assert!(
-                error.contains("rendered_output") || error.contains("rendered-output"),
+                error.message.contains("rendered_output")
+                    || error.message.contains("rendered-output"),
                 "unexpected error: {error}"
             );
         }
@@ -958,7 +1137,16 @@ fn rejects_invalid_ordered_and_exactly_once_authored_lists() {
         let Err(error) = load_canonical_case_specs(&case_root, None) else {
             panic!("{field} should be rejected");
         };
-        assert!(error.contains(expected_error), "unexpected error: {error}");
+        assert_eq!(
+            error.kind,
+            super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+            "unexpected kind: {:?} ({error})",
+            error.kind
+        );
+        assert!(
+            error.message.contains(expected_error),
+            "unexpected error: {error}"
+        );
     }
 }
 
@@ -979,8 +1167,14 @@ fn rejects_rendered_output_in_failure_mode() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("rendered_output_contains in failure mode should be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("rendered_output_contains"),
+        error.message.contains("rendered_output_contains"),
         "unexpected error: {error}"
     );
 }
@@ -1002,7 +1196,16 @@ fn rejects_normalized_contains_on_wasm_artifact() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("normalized_contains on wasm should be rejected");
     };
-    assert!(error.contains("text-only"), "unexpected error: {error}");
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
+    assert!(
+        error.message.contains("text-only"),
+        "unexpected error: {error}"
+    );
 }
 
 #[test]
@@ -1050,8 +1253,14 @@ fn rejects_artifacts_must_not_exist_in_failure_mode() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("artifacts_must_not_exist in failure mode should be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("artifacts_must_not_exist"),
+        error.message.contains("artifacts_must_not_exist"),
         "unexpected error: {error}"
     );
 }
@@ -1073,8 +1282,14 @@ fn rejects_empty_artifacts_must_not_exist_entry() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("empty artifacts_must_not_exist entry should be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("empty") && error.contains("artifacts_must_not_exist"),
+        error.message.contains("empty") && error.message.contains("artifacts_must_not_exist"),
         "unexpected error: {error}"
     );
 }
