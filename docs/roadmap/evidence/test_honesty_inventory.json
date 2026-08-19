@@ -88,21 +88,21 @@
       "code": "golden_comparison_accepting_directories_as_empty_files",
       "severity": "review",
       "description": "Golden comparison accepts directory entries as empty golden files",
-      "disposition": "resolved in Phase 5: the golden comparison decides the artifact kind before reading content. A Directory or NotBuilt entry is a kind mismatch instead of empty bytes, text goldens require strict UTF-8 (invalid UTF-8 is a HarnessFailed, not a silent rewrite), and binary/wasm goldens compare bytes only. Regressions cover directory-vs-empty-file, an unbuilt path, invalid UTF-8, binary byte comparison and a duplicate-path artifact set",
+      "disposition": "resolved in Phase 5: the golden comparison decides the artifact kind before reading content. A Directory or NotBuilt entry is a kind mismatch instead of empty bytes, text goldens require strict UTF-8 (invalid UTF-8 is a HarnessFailed, not a silent rewrite), and binary/wasm goldens compare bytes only. Phase 5 closeout: the expected artifact kind is owned by the authored golden's own extension (GoldenFile.expected_kind), so a cross-kind match is rejected before content is read and identical bytes emitted as a different artifact kind cannot satisfy the golden. Regressions cover directory-vs-empty-file, an unbuilt path, invalid UTF-8, binary byte comparison, a duplicate-path artifact set, a JS golden against generic bytes, a wasm golden against generic bytes, an HTML golden produced as JavaScript outside the universal index.html baseline path, and a binary golden that must still match generic bytes",
       "status": "resolved"
     },
     {
       "code": "html_wasm_baseline_broad_fragments",
       "severity": "review",
       "description": "HTML/Wasm baseline tests rely on broad fragment matching",
-      "disposition": "resolved in Phase 5: the HTML shell contract is now ordered, bounded and unique (html_shell_violation, one owner shared with the HTML builder's own shell tests), and the HTML-Wasm baseline derives its required exports from the emitted page.js (instance.exports.<name>) and checks each against the module's typed export kind, with an explicit ABI floor including moth_start. Duplicate exports and imports are rejected, and the page script include must appear exactly once inside the body",
+      "disposition": "resolved in Phase 5: the HTML shell contract is now ordered, bounded and unique (html_shell_violation, one owner shared with the HTML builder's own shell tests), and the HTML-Wasm baseline derives its required exports from the emitted page.js (instance.exports.<name>) and checks each against the module's typed export kind, with an explicit ABI floor including moth_start. Duplicate exports and imports are rejected, and the page script include must appear exactly once inside the body. Phase 5 closeout: the shell contract is structural rather than a raw substring count. Script and style content is opaque payload the shell inserts, so marker-like text such as a JavaScript string spelling '</body>' no longer counts as a second element, while a marker repeated in real markup is still rejected",
       "status": "resolved"
     },
     {
       "code": "node_runtime_harness_can_hang",
       "severity": "review",
       "description": "Node runtime harness tests can hang without timeout",
-      "disposition": "resolved in Phase 5: the harness owns a tempfile workspace whose removal failure is reported, runs Node under a 30s deadline with kill-and-reap, drains stdout/stderr on their own threads with a 4 MiB bound, decodes protocol output strictly, and parses only supported <script> shapes. Typed RenderHarnessError{kind,message} separates Artifact/Workspace/Spawn/Timeout/ExitStatus/OutputDecoding/OutputProtocol/ScriptShape/Cleanup",
+      "disposition": "resolved in Phase 5: the harness owns a tempfile workspace whose removal failure is reported, runs Node under a 30s deadline with kill-and-reap, drains stdout/stderr on their own threads with a 4 MiB bound, decodes protocol output strictly, and parses only supported <script> shapes. Typed RenderHarnessError{kind,message} separates Artifact/Workspace/Spawn/Timeout/ExitStatus/OutputDecoding/OutputProtocol/ScriptShape/Cleanup. Phase 5 closeout: both capture threads are joined before any result is inspected so no failure path drops a live thread; termination always attempts the reap and reports the kill and wait outcomes separately; type=\"module\" is rejected rather than executed under classic semantics because the harness materializes no glue, provider or runtime module and no import map; nameless or malformed attribute tokens fail closed instead of being skipped; and every failure class now has a focused self-test, including Artifact (missing and wrong-kind), Workspace (write collision) and Spawn (a nonexistent interpreter through the process owner's executable seam, not a PATH mutation)",
       "status": "resolved"
     },
     {

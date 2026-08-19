@@ -225,6 +225,12 @@ impl GoldenFileInventory {
 pub(crate) struct GoldenFile {
     pub relative_path: String,
     pub absolute_path: PathBuf,
+    /// The artifact kind this golden claims, decided by the authored golden's own extension.
+    ///
+    /// The expected kind is owned by the authored file, never inferred from whatever the backend
+    /// produced: inferring it would let `page.wasm` be satisfied by a generic byte artifact and a
+    /// `.js` golden by anything whose bytes happened to match.
+    pub expected_kind: ArtifactKind,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

@@ -14,6 +14,9 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
+/// The interpreter the production harness runs.
+const NODE_EXECUTABLE: &str = "node";
+
 /// Wall-clock budget for one Node harness process.
 ///
 /// This is deadlock protection, not synchronization: a well-behaved page finishes in
@@ -268,7 +271,31 @@ pub(crate) fn run_node_script_within(
     working_directory: &Path,
     timeout: Duration,
 ) -> Result<NodeRunOutput, RenderHarnessError> {
-    let mut child = Command::new("node")
+    run_script_with_executable(NODE_EXECUTABLE, script_path, working_directory, timeout)
+}
+
+/// Runs one script under a caller-chosen interpreter.
+///
+/// The executable is a parameter so the spawn boundary can be proved with an interpreter that
+/// certainly does not exist, without mutating the process-global `PATH` every other test shares.
+/// Production callers always use `run_node_script`.
+#[cfg(test)]
+pub(crate) fn run_script_with_executable_for_test(
+    executable: &str,
+    script_path: &Path,
+    working_directory: &Path,
+    timeout: Duration,
+) -> Result<NodeRunOutput, RenderHarnessError> {
+    run_script_with_executable(executable, script_path, working_directory, timeout)
+}
+
+fn run_script_with_executable(
+    executable: &str,
+    script_path: &Path,
+    working_directory: &Path,
+    timeout: Duration,
+) -> Result<NodeRunOutput, RenderHarnessError> {
+    let mut child = Command::new(executable)
         .arg(script_path)
         .current_dir(working_directory)
         .stdin(Stdio::null())
@@ -277,29 +304,52 @@ pub(crate) fn run_node_script_within(
         .spawn()
         .map_err(|error| {
             RenderHarnessError::spawn(format!(
-                "rendered_output: failed to invoke Node: {error}. \
-                 Ensure 'node' is on PATH to use rendered-output assertions."
+                "rendered_output: failed to invoke '{executable}': {error}. \
+                 Ensure '{NODE_EXECUTABLE}' is on PATH to use rendered-output assertions."
             ))
         })?;
 
-    let stdout_pipe = child.stdout.take().ok_or_else(|| {
-        RenderHarnessError::output_decoding(
-            "rendered_output: Node stdout pipe was not captured".to_owned(),
-        )
-    })?;
-    let stderr_pipe = child.stderr.take().ok_or_else(|| {
-        RenderHarnessError::output_decoding(
-            "rendered_output: Node stderr pipe was not captured".to_owned(),
-        )
-    })?;
+    // Both pipes were requested, so a missing one is impossible in practice; if it ever happens
+    // the child is still killed and reaped rather than left running behind the returned error.
+    let (Some(stdout_pipe), Some(stderr_pipe)) = (child.stdout.take(), child.stderr.take()) else {
+        let termination = terminate(&mut child);
+        return Err(RenderHarnessError::output_decoding(format!(
+            "rendered_output: a Node output pipe was not captured.{}",
+            render_termination_suffix(termination)
+        )));
+    };
 
     let stdout_capture = std::thread::spawn(move || capture_stream(stdout_pipe));
     let stderr_capture = std::thread::spawn(move || capture_stream(stderr_pipe));
 
     let exit = wait_for_exit(&mut child, timeout);
 
-    let stdout = join_capture(stdout_capture, "stdout")?;
-    let stderr = join_capture(stderr_capture, "stderr")?;
+    // Both handles are consumed before any of these results is inspected. Returning on the
+    // stdout result first would drop the stderr handle unjoined, leaving a live capture thread
+    // behind on exactly the failure paths this harness exists to report.
+    let stdout_result = join_capture(stdout_capture, "stdout");
+    let stderr_result = join_capture(stderr_capture, "stderr");
+
+    let stderr = match stderr_result {
+        Ok(captured) => captured,
+        // Stderr is only ever diagnostic context for another failure. When something else already
+        // failed, saying why the context is missing keeps that boundary as the reported one; when
+        // nothing else failed, the capture failure is the only thing to report.
+        Err(stderr_error) => {
+            let another_boundary_failed = stdout_result.is_err()
+                || exit.is_err()
+                || exit.as_ref().is_ok_and(|status| !status.success());
+            if !another_boundary_failed {
+                return Err(stderr_error);
+            }
+
+            CapturedStream {
+                bytes: format!("<stderr could not be captured: {}>", stderr_error.message)
+                    .into_bytes(),
+                truncated: false,
+            }
+        }
+    };
 
     // Stderr is diagnostic context attached to a failure, never asserted output, so it is
     // described rather than decoded strictly. Replacing a timeout with a stderr-decoding failure
@@ -327,7 +377,7 @@ pub(crate) fn run_node_script_within(
 
     // Stdout carries the harness event protocol, so it is decoded strictly.
     Ok(NodeRunOutput {
-        stdout: decode_stream(&stdout, "stdout")?,
+        stdout: decode_stream(&stdout_result?, "stdout")?,
     })
 }
 
@@ -364,17 +414,36 @@ fn wait_for_exit(
     }
 }
 
-/// Kills the child and reaps it so no zombie process outlives the case.
-fn terminate(child: &mut Child) -> Result<(), std::io::Error> {
-    child.kill()?;
-    child.wait()?;
-    Ok(())
+/// What happened while killing and reaping the child.
+///
+/// Both steps are recorded because they fail independently: a child that exits between the final
+/// `try_wait` and the `kill` makes the kill fail while the reap still succeeds, so a failed kill
+/// must never skip the reap or the harness would claim "kill-and-reap" while leaving a zombie.
+struct TerminationOutcome {
+    kill: Option<std::io::Error>,
+    wait: Option<std::io::Error>,
 }
 
-fn render_termination_suffix(termination: Result<(), std::io::Error>) -> String {
-    match termination {
-        Ok(()) => String::new(),
-        Err(error) => format!(" Killing the Node process also failed: {error}."),
+/// Kills the child and reaps it, attempting the reap whatever the kill did.
+fn terminate(child: &mut Child) -> TerminationOutcome {
+    let kill = child.kill().err();
+    let wait = child.wait().err();
+
+    TerminationOutcome { kill, wait }
+}
+
+fn render_termination_suffix(termination: TerminationOutcome) -> String {
+    match (termination.kill, termination.wait) {
+        (None, None) => String::new(),
+        (Some(kill), None) => format!(
+            " Killing the Node process failed ({kill}), but it was reaped, so it had already \
+             exited."
+        ),
+        (None, Some(wait)) => format!(" Reaping the killed Node process failed: {wait}."),
+        (Some(kill), Some(wait)) => format!(
+            " Killing the Node process failed ({kill}) and reaping it also failed ({wait}), so it \
+             may outlive this case."
+        ),
     }
 }
 

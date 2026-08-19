@@ -4,7 +4,9 @@
 //! WHY: fixture validation and comparison must consume the same deterministic file set.
 
 use super::super::FailureKind;
-use super::super::types::{GoldenExpectation, GoldenFile, GoldenFileInventory, GoldenMode};
+use super::super::types::{
+    ArtifactKind, GoldenExpectation, GoldenFile, GoldenFileInventory, GoldenMode,
+};
 use super::artifacts::BuiltArtifactIndex;
 use crate::build_system::build::FileKind;
 use crate::compiler_frontend::utilities::basic::portable_path_text;
@@ -163,13 +165,35 @@ fn visit_golden_directory(
                 root.display()
             ))
         })?;
+        let relative_text = portable_path_text(relative_path);
         files.push(GoldenFile {
-            relative_path: portable_path_text(relative_path),
+            expected_kind: golden_artifact_kind(&relative_text),
+            relative_path: relative_text,
             absolute_path: path,
         });
     }
 
     Ok(())
+}
+
+/// The artifact kind an authored golden file claims.
+///
+/// WHAT: maps the golden's own extension to the artifact kind the build must produce at that path.
+/// WHY: the expected kind has to be owned by the authored fixture. Reading it from the produced
+///      artifact instead would make the check circular: a `page.wasm` golden would be satisfied by
+///      a generic byte artifact, and a `.js` golden by any artifact whose bytes matched. Every
+///      other extension is a byte artifact, which is what the writer emits for non-text output.
+fn golden_artifact_kind(relative_path: &str) -> ArtifactKind {
+    let extension = relative_path
+        .rsplit_once('.')
+        .map(|(_, extension)| extension.to_ascii_lowercase());
+
+    match extension.as_deref() {
+        Some("html") => ArtifactKind::Html,
+        Some("js") => ArtifactKind::Js,
+        Some("wasm") => ArtifactKind::Wasm,
+        _ => ArtifactKind::Binary,
+    }
 }
 
 fn golden_mode_label(mode: GoldenMode) -> &'static str {
@@ -215,17 +239,19 @@ pub(super) fn validate_golden_outputs(
             ));
         };
 
-        // The artifact kind decides the comparison before any content is read. A directory or an
-        // unbuilt entry is a kind mismatch, never an empty file: comparing them as empty bytes
-        // let an empty golden pass against a path that holds no file at all.
-        let produced = match output.file_kind() {
-            FileKind::Html(content) | FileKind::Js(content) => {
-                ProducedGolden::Text(content.as_str())
-            }
-            FileKind::Wasm(bytes) | FileKind::Bytes(bytes) => {
+        // The authored golden's artifact kind decides the comparison before any content is read.
+        // A directory or an unbuilt entry is a kind mismatch, never an empty file: comparing them
+        // as empty bytes let an empty golden pass against a path that holds no file at all. A
+        // produced kind the golden did not claim is a mismatch too, so identical bytes emitted as
+        // a different artifact kind cannot satisfy the golden.
+        let produced = match (file.expected_kind, output.file_kind()) {
+            (ArtifactKind::Html, FileKind::Html(content))
+            | (ArtifactKind::Js, FileKind::Js(content)) => ProducedGolden::Text(content.as_str()),
+            (ArtifactKind::Wasm, FileKind::Wasm(bytes))
+            | (ArtifactKind::Binary, FileKind::Bytes(bytes)) => {
                 ProducedGolden::Binary(bytes.as_slice())
             }
-            FileKind::Directory => {
+            (_, FileKind::Directory) => {
                 return Some((
                     format!(
                         "Golden output '{relative}' expects a file artifact, but the build produced a directory at that path."
@@ -233,10 +259,20 @@ pub(super) fn validate_golden_outputs(
                     FailureKind::StrictGoldenMismatch,
                 ));
             }
-            FileKind::NotBuilt => {
+            (_, FileKind::NotBuilt) => {
                 return Some((
                     format!(
                         "Golden output '{relative}' expects a file artifact, but the build reported that path as not built."
+                    ),
+                    FailureKind::StrictGoldenMismatch,
+                ));
+            }
+            (expected_kind, produced_kind) => {
+                return Some((
+                    format!(
+                        "Golden output '{relative}' expects a {} artifact, but the build produced a {} artifact at that path.",
+                        super::artifacts::artifact_kind_name(expected_kind),
+                        produced_file_kind_name(produced_kind)
                     ),
                     FailureKind::StrictGoldenMismatch,
                 ));
@@ -315,6 +351,18 @@ pub(super) fn validate_golden_outputs(
 enum ProducedGolden<'a> {
     Text(&'a str),
     Binary(&'a [u8]),
+}
+
+/// Names the produced file kind for a golden kind-mismatch report.
+fn produced_file_kind_name(kind: &FileKind) -> &'static str {
+    match kind {
+        FileKind::Html(_) => "html",
+        FileKind::Js(_) => "js",
+        FileKind::Wasm(_) => "wasm",
+        FileKind::Bytes(_) => "binary",
+        FileKind::Directory => "directory",
+        FileKind::NotBuilt => "not-built",
+    }
 }
 
 fn validate_expected_artifact_paths(

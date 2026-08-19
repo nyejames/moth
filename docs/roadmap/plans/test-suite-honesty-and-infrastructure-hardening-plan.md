@@ -6,7 +6,7 @@
 WORK_ID: test-suite-honesty
 WORK_SOURCE: docs/roadmap/plans/test-suite-honesty-and-infrastructure-hardening-plan.md
 BASE_REVISION: f41f93a7a (post-TIR, post-benchmark-counters-timers)
-STATUS: active — Phase 5 complete, ready for Phase 6
+STATUS: active — Phase 5 complete (closeout corrections applied), ready for Phase 6
 CURRENT_SCOPE: Phase 5 golden, HTML, Wasm and runtime-harness hardening (paused before Phase 6)
 COMPLETED:
   Phase 0: baseline established (4314 unit tests, 0 ignored, 1699 integration cases correct,
@@ -123,8 +123,33 @@ COMPLETED:
     boundary; lossy conversions removed at the integration entry path, MOTH_TEST_THREADS and the
     module-discovery test helpers; node_harness.rs added to the timers-erasure wall-clock allowlist
     beside the other subprocess-deadline owners
+  Phase 5 closeout (review response): `type="module"` is rejected as an unsupported script shape
+    instead of being executed as a classic script — the harness materializes no emitted glue,
+    provider or runtime module and no import map, so it cannot run the module graph the HTML
+    backend emits when bundle_import_preamble is present; an execution-level regression drives
+    validate_success_result with a module page and asserts HarnessFailed naming the module shape,
+    beside the extraction-level rejections; goldens own their expected artifact kind
+    (GoldenFile.expected_kind, decided by the authored golden's extension) and a cross-kind match
+    is rejected before content is read, with regressions for a JS golden against generic bytes, a
+    wasm golden against generic bytes, an HTML golden produced as JavaScript outside the universal
+    index.html path, and a binary golden that must still match generic bytes; both Node capture
+    threads are joined before any result is inspected, so no failure path drops a live thread, and
+    a stderr-capture failure never replaces the boundary that actually failed; terminate() always
+    attempts the reap even when kill() fails (the child exiting between the final try_wait and the
+    kill) and reports the kill and wait outcomes separately; focused self-tests added for the three
+    remaining harness failure classes — Artifact (missing artifact and wrong artifact kind through
+    a test-only artifact-requirement seam), Workspace (a write blocked by a directory of the same
+    name) and Spawn (a nonexistent interpreter through the process owner's executable parameter,
+    never a PATH mutation); the script parser fails closed on nameless or malformed attribute
+    tokens instead of skipping them; the HTML shell contract is structural — script and style
+    content is the opaque payload the shell inserts, so a JavaScript string spelling `</body>` is
+    no longer counted as a second closing-body element, while a marker repeated in real markup is
+    still rejected
 NEXT_ACTION: run Phase 6 (deterministic timing and concurrency tests)
-VALIDATION: Phase 5 — just validate (pass: clippy --workspace --all-targets --all-features
+VALIDATION: Phase 5 closeout — just validate (pass: clippy --workspace --all-targets
+  --all-features -D warnings clean; cargo test --workspace 4386+17+646, 0 failed, 0 ignored;
+  integration 1851/1851; docs check clean; bench-ci preflight; timers-erasure-check clean).
+  Phase 5 — just validate (pass: clippy --workspace --all-targets --all-features
   -D warnings clean; cargo test --workspace 4373+17+646, 0 failed, 0 ignored; integration
   1851/1851; docs check clean; bench-ci preflight; timers-erasure-check clean).
   Phase 4 closeout — just validate (pass: clippy --workspace --all-targets --all-features
@@ -151,7 +176,9 @@ NOTES: Pre-existing benchmark_counters feature test failures are not caused by t
   Inventory finding mappings fixed: lossy_path_text_conversion → Phase 5 item 7,
   source_text_tests_false_confidence → Phase 4 items 3 and 7.
   Phase 5 carry-over for Phase 8: testing.mtf's "Runtime output assertions" section should record
-  the supported <script> shapes, the harness execution deadline and the harness failure classes.
+  the supported <script> shapes (including that `type="module"` is deliberately unsupported until
+  the harness can materialize and execute the emitted module graph), the harness execution
+  deadline, the harness failure classes and the golden expected-artifact-kind contract.
   Phase 5 observed one intermittent failure of the pre-existing timers-gated test
   frontend_benchmark_rejects_a_busy_raw_session_before_compilation that did not reproduce in 24
   later full-suite runs (6 of them at --test-threads=16). It is recorded as the open inventory

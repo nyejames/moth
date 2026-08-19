@@ -87,6 +87,24 @@ pub(crate) fn execute_wasm_harness_for_test(
     run_wasm_harness_in(directory)
 }
 
+/// Test-only view of the artifact-requirement boundary.
+///
+/// The harness reaches this boundary only through a full build, where the universal baselines
+/// reject a missing or mis-kinded `index.html` first, so the boundary itself is exercised here
+/// directly. Index construction is test setup: an ambiguous set has its own owner and cannot be
+/// what this seam reports.
+#[cfg(test)]
+pub(crate) fn required_text_artifact_for_test(
+    build_result: &crate::build_system::build::BuildResult,
+    relative_path: &str,
+    kind: ArtifactKind,
+) -> Result<(), RenderHarnessError> {
+    let index = BuiltArtifactIndex::build(build_result)
+        .expect("the artifact-boundary seam needs an unambiguous artifact set");
+
+    required_text_artifact(&index, relative_path, kind).map(|_| ())
+}
+
 fn required_artifact<'index>(
     index: &BuiltArtifactIndex<'index>,
     relative_path: &str,

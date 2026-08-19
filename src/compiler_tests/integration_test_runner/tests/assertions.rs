@@ -1409,6 +1409,34 @@ fn html_shell_contract_rejects_an_inverted_head_and_body() {
     );
 }
 
+#[test]
+fn html_shell_contract_ignores_marker_text_inside_script_and_style_content() {
+    // The shell inserts script sources and the core stylesheet as opaque payloads. A JavaScript
+    // string that happens to spell `</body>` is a string, not a second closing-body element, and
+    // rejecting the document for it would fail a page whose structure is correct.
+    let with_marker_like_payload = VALID_HTML.replace(
+        "  </body>",
+        "<style>/* <head> */</style>\n<script>const text = \"</body>\";</script>\n  </body>",
+    );
+
+    assert_eq!(html_shell_violation(&with_marker_like_payload), None);
+}
+
+#[test]
+fn html_shell_contract_still_rejects_a_marker_repeated_in_markup() {
+    // The opaque-content allowance must not extend to real markup: a second closing-body element
+    // outside any script or style is still a structural violation.
+    let duplicated_body_close = VALID_HTML.replace("  </body>", "  </body>\n  </body>");
+
+    assert_eq!(
+        html_shell_violation(&duplicated_body_close),
+        Some(HtmlShellViolation::RepeatedMarker {
+            marker: "</body>",
+            occurrences: 2,
+        })
+    );
+}
+
 // --- Golden artifact kind and encoding contracts ---------------------------------------------
 //
 // A golden names a file. Comparing a directory or an unbuilt path as empty bytes let an empty
@@ -1525,4 +1553,84 @@ fn golden_validation_rejects_an_ambiguous_artifact_set_before_comparing() {
         reason.contains("Artifact inventory is ambiguous"),
         "{reason}"
     );
+}
+
+#[test]
+fn golden_validation_rejects_a_js_golden_satisfied_by_generic_bytes() {
+    // Identical bytes emitted as a generic byte artifact are not the JavaScript artifact the
+    // golden names. Deciding the comparison from the produced kind let this pass.
+    let root = tempfile::tempdir().expect("should create temp dir");
+    let golden_dir = root.path().join("golden");
+    let golden = golden_expectation_with(&golden_dir, "page.js", "console.log(1);", None);
+
+    let build_result = build_result_with_output_files(vec![(
+        PathBuf::from("page.js"),
+        FileKind::Bytes(b"console.log(1);".to_vec()),
+    )]);
+
+    let (reason, kind) = validate_golden_outputs(&build_result, &golden)
+        .expect("a byte artifact cannot satisfy a JavaScript golden");
+    assert_eq!(kind, FailureKind::StrictGoldenMismatch);
+    assert!(
+        reason.contains("expects a js artifact") && reason.contains("binary artifact"),
+        "{reason}"
+    );
+}
+
+#[test]
+fn golden_validation_rejects_a_wasm_golden_satisfied_by_generic_bytes() {
+    let root = tempfile::tempdir().expect("should create temp dir");
+    let golden_dir = root.path().join("golden");
+    let golden = golden_expectation_with(&golden_dir, "page.wasm", [0x00, 0x61, 0x73, 0x6d], None);
+
+    let build_result = build_result_with_output_files(vec![(
+        PathBuf::from("page.wasm"),
+        FileKind::Bytes(vec![0x00, 0x61, 0x73, 0x6d]),
+    )]);
+
+    let (reason, kind) = validate_golden_outputs(&build_result, &golden)
+        .expect("a byte artifact cannot satisfy a wasm golden");
+    assert_eq!(kind, FailureKind::StrictGoldenMismatch);
+    assert!(
+        reason.contains("expects a wasm artifact") && reason.contains("binary artifact"),
+        "{reason}"
+    );
+}
+
+#[test]
+fn golden_validation_rejects_an_html_golden_produced_as_javascript() {
+    // The golden lives outside the universal `index.html` baseline path, so nothing else would
+    // have noticed that the build emitted the wrong artifact kind at this destination.
+    let root = tempfile::tempdir().expect("should create temp dir");
+    let golden_dir = root.path().join("golden");
+    let golden = golden_expectation_with(&golden_dir, "fragment.html", "<p>a</p>", None);
+
+    let build_result = build_result_with_output_files(vec![(
+        PathBuf::from("fragment.html"),
+        FileKind::Js("<p>a</p>".to_owned()),
+    )]);
+
+    let (reason, kind) = validate_golden_outputs(&build_result, &golden)
+        .expect("a JavaScript artifact cannot satisfy an HTML golden");
+    assert_eq!(kind, FailureKind::StrictGoldenMismatch);
+    assert!(
+        reason.contains("expects a html artifact") && reason.contains("js artifact"),
+        "{reason}"
+    );
+}
+
+#[test]
+fn golden_validation_accepts_a_binary_golden_produced_as_bytes() {
+    // The mismatch checks above must not make every byte artifact unmatchable: a golden with no
+    // text or wasm extension claims exactly the writer's generic byte artifact.
+    let root = tempfile::tempdir().expect("should create temp dir");
+    let golden_dir = root.path().join("golden");
+    let golden = golden_expectation_with(&golden_dir, "logo.png", [0x89, 0x50, 0x4e, 0x47], None);
+
+    let build_result = build_result_with_output_files(vec![(
+        PathBuf::from("logo.png"),
+        FileKind::Bytes(vec![0x89, 0x50, 0x4e, 0x47]),
+    )]);
+
+    assert!(validate_golden_outputs(&build_result, &golden).is_none());
 }

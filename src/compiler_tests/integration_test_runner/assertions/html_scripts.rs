@@ -10,13 +10,21 @@
 //!
 //! Supported shapes:
 //! - `<script>` with no `type`, executed as classic script source
-//! - `<script type="module">`, `type="text/javascript"` and `type="application/javascript"`
+//! - `<script type="text/javascript">` and `<script type="application/javascript">`
 //!
 //! Recognised but not executed (browsers do not run these as JavaScript either):
 //! - `<script type="importmap">`, `type="application/json"`, `type="speculationrules"`
 //!
-//! Everything else — an external `src`, an unknown `type`, an execution-changing attribute, an
-//! unterminated tag or an unterminated attribute value — is rejected.
+//! Deliberately unsupported:
+//! - `<script type="module">`. The harness concatenates the inline sources it extracts into one
+//!   classic script in a workspace that holds no emitted glue, provider or runtime module and no
+//!   import map, so it cannot resolve a module specifier, apply module scope or preserve module
+//!   evaluation order. Executing a module block through that model would let a case claim runtime
+//!   evidence the harness never produced, which is exactly what this owner exists to prevent.
+//!
+//! Everything else — an external `src`, an unknown `type`, an execution-changing attribute, a
+//! nameless or malformed attribute token, an unterminated tag or an unterminated attribute
+//! value — is rejected.
 //!
 //! Scripts run in document order. `defer` is inert on an inline script, so it is ignored;
 //! `async` and `nomodule` are not, so they are rejected rather than silently overridden.
@@ -24,7 +32,13 @@
 use super::node_harness::RenderHarnessError;
 
 /// `type` values the harness executes as JavaScript.
-const EXECUTABLE_SCRIPT_TYPES: [&str; 3] = ["module", "text/javascript", "application/javascript"];
+///
+/// Classic script types only: the harness has no module graph, so `module` is rejected by
+/// `MODULE_SCRIPT_TYPE` rather than executed under classic semantics.
+const EXECUTABLE_SCRIPT_TYPES: [&str; 2] = ["text/javascript", "application/javascript"];
+
+/// The module `type` the harness recognises but refuses to execute.
+const MODULE_SCRIPT_TYPE: &str = "module";
 
 /// `type` values that mark a data block the harness deliberately skips.
 const DATA_SCRIPT_TYPES: [&str; 3] = ["importmap", "application/json", "speculationrules"];
@@ -93,6 +107,16 @@ pub(crate) fn extract_executable_scripts(html: &str) -> Result<Vec<String>, Rend
             None => push_non_empty(&mut scripts, body),
             Some(script_type) => {
                 let normalized = script_type.trim().to_ascii_lowercase();
+                if normalized == MODULE_SCRIPT_TYPE {
+                    return Err(RenderHarnessError::script_shape(format!(
+                        "rendered_output: the emitted HTML contains a '<script \
+                         type=\"{MODULE_SCRIPT_TYPE}\">' block. The harness executes inline \
+                         sources as one classic script and materializes no emitted glue, provider \
+                         or runtime module and no import map, so it cannot run module semantics. \
+                         Executing it anyway would claim runtime evidence the harness never \
+                         produced."
+                    )));
+                }
                 if EXECUTABLE_SCRIPT_TYPES.contains(&normalized.as_str()) {
                     push_non_empty(&mut scripts, body);
                 } else if !DATA_SCRIPT_TYPES.contains(&normalized.as_str()) {
@@ -208,10 +232,16 @@ fn parse_open_tag(html: &str, tag_start: usize) -> Result<ScriptOpenTag, RenderH
             cursor += 1;
         }
 
-        // A lone `/` or `=` with no name would otherwise leave the cursor parked forever.
+        // A nameless attribute token — a stray `=`, or a `/` that does not close the tag — is a
+        // shape whose browser error recovery the harness does not reproduce. Skipping it would
+        // silently accept a tag the harness only half understands, so it fails closed. The valid
+        // self-closing `/>` was already returned above.
         if cursor == name_start {
-            cursor += 1;
-            continue;
+            let token = &html[name_start..name_start + 1];
+            return Err(RenderHarnessError::script_shape(format!(
+                "rendered_output: the emitted HTML has a malformed attribute token '{token}' in \
+                 the '<script' tag at byte {tag_start}. The harness parses only named attributes."
+            )));
         }
 
         let name = html[name_start..cursor].to_ascii_lowercase();
@@ -271,7 +301,14 @@ fn parse_open_tag(html: &str, tag_start: usize) -> Result<ScriptOpenTag, RenderH
 /// ASCII-case-insensitive substring search returning a byte offset.
 ///
 /// The needle is ASCII, so every returned offset lands on a character boundary.
-fn find_ascii_case_insensitive(haystack: &str, needle: &str, from: usize) -> Option<usize> {
+///
+/// Shared with the HTML shell contract in `artifacts`, which needs the same case-insensitive
+/// element scan to tell structural markup from opaque script and style payloads.
+pub(super) fn find_ascii_case_insensitive(
+    haystack: &str,
+    needle: &str,
+    from: usize,
+) -> Option<usize> {
     let haystack = haystack.as_bytes();
     let needle = needle.as_bytes();
 

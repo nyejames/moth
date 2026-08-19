@@ -412,30 +412,43 @@ impl fmt::Display for HtmlShellViolation {
     }
 }
 
+/// Elements whose content the shell inserts verbatim and never parses as markup.
+///
+/// `<script>` carries the page bundle and any import map; `<style>` carries the core CSS. Their
+/// text is a payload, so `"</body>"` inside a JavaScript string literal is a string, not a second
+/// closing-body element.
+const OPAQUE_ELEMENTS: [&str; 2] = ["script", "style"];
+
 /// Checks one emitted document against the ordered, bounded HTML shell contract.
 ///
 /// WHAT: requires the doctype prefix, the closing html suffix, and every shell marker exactly
-///       once in document order.
+///       once in document order, counting only markers in structural markup.
 /// WHY: an unordered "contains" loop is satisfied by a comment, by markup inside a script and by
-///       a document whose head and body are inverted or duplicated, so it cannot claim to check
-///       document structure. This is the one owner of that claim: the integration HTML baselines
-///       and the HTML builder's own shell tests both consume it.
+///      a document whose head and body are inverted or duplicated, so it cannot claim to check
+///      document structure. Counting raw substrings across the whole document has the opposite
+///      failure: the shell inserts body HTML, script sources, import maps and head fragments as
+///      opaque payloads, so a page whose generated JavaScript merely contains the text `</body>`
+///      would be rejected for a structure it does not have. Script and style content is therefore
+///      removed before the markers are located. This is the one owner of that claim: the
+///      integration HTML baselines and the HTML builder's own shell tests both consume it.
 pub(crate) fn html_shell_violation(html: &str) -> Option<HtmlShellViolation> {
-    if !html.starts_with(HTML_SHELL_MARKERS[0]) {
+    let structural = structural_shell_markup(html);
+
+    if !structural.starts_with(HTML_SHELL_MARKERS[0]) {
         return Some(HtmlShellViolation::MissingDoctypePrefix);
     }
 
-    if !html.trim_end().ends_with("</html>") {
+    if !structural.trim_end().ends_with("</html>") {
         return Some(HtmlShellViolation::MissingClosingHtml);
     }
 
     let mut previous: Option<(&'static str, usize)> = None;
     for marker in HTML_SHELL_MARKERS {
-        let Some(position) = html.find(marker) else {
+        let Some(position) = structural.find(marker) else {
             return Some(HtmlShellViolation::MissingMarker { marker });
         };
 
-        let occurrences = count_occurrences(html, marker);
+        let occurrences = count_occurrences(&structural, marker);
         if occurrences > 1 {
             return Some(HtmlShellViolation::RepeatedMarker {
                 marker,
@@ -455,6 +468,65 @@ pub(crate) fn html_shell_violation(html: &str) -> Option<HtmlShellViolation> {
     }
 
     None
+}
+
+/// Returns the document with every opaque element's content removed.
+///
+/// The element's own tags are kept so the shell's ordering and the elements' own positions stay
+/// intact; only the bytes between them are dropped, because those bytes are a payload the shell
+/// inserted rather than markup it emitted. An unterminated opaque element leaves the remainder of
+/// the document untouched: the script-shape owner rejects such a document anyway, and guessing
+/// where the element ends would drop real markup.
+fn structural_shell_markup(html: &str) -> String {
+    let mut structural = html.to_owned();
+    for element in OPAQUE_ELEMENTS {
+        structural = strip_element_content(&structural, element);
+    }
+
+    structural
+}
+
+fn strip_element_content(html: &str, element: &str) -> String {
+    let open_needle = format!("<{element}");
+    let close_needle = format!("</{element}");
+
+    let mut structural = String::with_capacity(html.len());
+    let mut offset = 0usize;
+
+    while let Some(tag_start) =
+        super::html_scripts::find_ascii_case_insensitive(html, &open_needle, offset)
+    {
+        let after_name = tag_start + open_needle.len();
+
+        // `<styles>` and `<scriptish>` are different elements, so the name must end here.
+        let ends_name = matches!(
+            html.as_bytes().get(after_name).copied(),
+            Some(byte) if byte.is_ascii_whitespace() || byte == b'>' || byte == b'/'
+        );
+        if !ends_name {
+            structural.push_str(&html[offset..after_name]);
+            offset = after_name;
+            continue;
+        }
+
+        let (Some(open_tag_end), Some(close_start)) = (
+            html[after_name..].find('>').map(|end| after_name + end),
+            super::html_scripts::find_ascii_case_insensitive(html, &close_needle, after_name),
+        ) else {
+            break;
+        };
+
+        let content_start = open_tag_end + 1;
+        if close_start < content_start {
+            break;
+        }
+
+        structural.push_str(&html[offset..content_start]);
+        offset = close_start;
+    }
+
+    structural.push_str(&html[offset..]);
+    structural
 }
 
 /// Verifies the baseline HTML backend interop/output contract.
