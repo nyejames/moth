@@ -90,7 +90,7 @@ pub fn read_utf8(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
+    use crate::compiler_tests::test_support::assert_panics_with;
 
     #[test]
     fn assert_path_missing_accepts_nonexistent_path() {
@@ -104,10 +104,9 @@ mod tests {
         let dir = tempfile::tempdir().expect("should create temp dir");
         let file = dir.path().join("exists.txt");
         std::fs::write(&file, b"data").expect("should write file");
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        assert_panics_with("expected no filesystem node at", || {
             assert_path_missing(&file);
-        }));
-        assert!(result.is_err(), "should panic for an existing file");
+        });
     }
 
     #[test]
@@ -123,10 +122,9 @@ mod tests {
         let dir = tempfile::tempdir().expect("should create temp dir");
         let subdir = dir.path().join("subdir");
         std::fs::create_dir(&subdir).expect("should create directory");
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        assert_panics_with("expected a regular file at", || {
             assert_regular_file(&subdir);
-        }));
-        assert!(result.is_err(), "should panic for a directory");
+        });
     }
 
     #[test]
@@ -140,10 +138,9 @@ mod tests {
         let dir = tempfile::tempdir().expect("should create temp dir");
         let file = dir.path().join("file.txt");
         std::fs::write(&file, b"data").expect("should write file");
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        assert_panics_with("expected a directory at", || {
             assert_directory(&file);
-        }));
-        assert!(result.is_err(), "should panic for a regular file");
+        });
     }
 
     #[test]
@@ -172,13 +169,12 @@ mod tests {
         symlink(&target, &link).expect("should create symlink");
 
         // A dangling symlink is NOT missing — it exists as a symlink node.
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        assert_panics_with("expected no filesystem node at", || {
             assert_path_missing(&link);
-        }));
-        assert!(
-            result.is_err(),
-            "dangling symlink must not be treated as missing"
-        );
+        });
+
+        // The link target itself really is absent, so the distinction is meaningful.
+        assert_path_missing(&target);
 
         // The symlink itself is a symlink.
         assert_symlink(&link);
@@ -194,13 +190,9 @@ mod tests {
         let link = dir.path().join("link.txt");
         symlink(&target, &link).expect("should create symlink");
 
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        assert_panics_with("expected a regular file at", || {
             assert_regular_file(&link);
-        }));
-        assert!(
-            result.is_err(),
-            "symlink must not satisfy assert_regular_file"
-        );
+        });
     }
 
     #[test]
@@ -213,12 +205,29 @@ mod tests {
         let link = dir.path().join("link_dir");
         symlink(&target, &link).expect("should create symlink");
 
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        assert_panics_with("expected a directory at", || {
             assert_directory(&link);
-        }));
-        assert!(result.is_err(), "symlink must not satisfy assert_directory");
+        });
     }
 
-    // Ensure the TempDir is not optimized away.
-    fn _keep_tempdir_alive(_dir: TempDir) {}
+    #[test]
+    fn read_utf8_rejects_invalid_utf8_bytes() {
+        let dir = tempfile::tempdir().expect("should create temp dir");
+        let file = dir.path().join("invalid.txt");
+        std::fs::write(&file, [0x66, 0x6f, 0xff, 0x6f]).expect("should write file");
+
+        assert_panics_with("is not valid UTF-8", || {
+            read_utf8(&file);
+        });
+    }
+
+    #[test]
+    fn read_bytes_reports_the_path_when_the_file_is_missing() {
+        let dir = tempfile::tempdir().expect("should create temp dir");
+        let missing = dir.path().join("absent.bin");
+
+        assert_panics_with("failed to read bytes at", || {
+            read_bytes(&missing);
+        });
+    }
 }

@@ -43,6 +43,8 @@ mod frontend_bench;
 mod mode;
 mod process_runner;
 mod profile;
+#[cfg(test)]
+mod test_fs;
 mod timers_erasure_check;
 
 use bench::run_benchmarks;

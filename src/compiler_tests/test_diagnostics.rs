@@ -96,16 +96,24 @@ pub fn assert_output_rejection(messages: &CompilerMessages, expected_reason: &st
 
     let payloads: Vec<_> = messages.infrastructure_error_payloads_for_tests().collect();
     let payload = &payloads[0];
-    let actual_reason = match payload {
-        crate::compiler_frontend::compiler_messages::DiagnosticPayload::InfrastructureError {
-            metadata,
-            ..
-        } => metadata
-            .get(&CompilerErrorMetadataKey::OutputRejectionReason)
-            .map(|s| s.as_str())
-            .unwrap_or("<none>"),
-        _ => "<none>",
+    let crate::compiler_frontend::compiler_messages::DiagnosticPayload::InfrastructureError {
+        metadata,
+        ..
+    } = payload
+    else {
+        panic!("infrastructure error payload was not an InfrastructureError: {payload:?}");
     };
+    // An absent reason is a defect in the production seam, not a reason value to compare
+    // against: without it the test would silently degrade to "some File error happened".
+    let actual_reason = metadata
+        .get(&CompilerErrorMetadataKey::OutputRejectionReason)
+        .map(|reason| reason.as_str())
+        .unwrap_or_else(|| {
+            panic!(
+                "infrastructure error carries no OutputRejectionReason metadata, so the \
+                 rejection contract '{expected_reason}' cannot be proved; metadata: {metadata:?}"
+            )
+        });
     assert_eq!(
         actual_reason, expected_reason,
         "output rejection reason mismatch: expected '{expected_reason}', got '{actual_reason}'"
@@ -142,7 +150,14 @@ pub fn assert_diagnostic_reason(
 
     let diagnostic = matching[occurrence - 1];
     let identity = diagnostic.identity();
-    let actual_reason = identity.reason_key.unwrap_or("<none>");
+    // A payload with no reason key cannot satisfy a reason contract. Comparing a placeholder
+    // string would let `expected_reason = "<none>"` pass against an unclassified diagnostic.
+    let actual_reason = identity.reason_key.unwrap_or_else(|| {
+        panic!(
+            "diagnostic '{code}' occurrence {occurrence} carries no reason key, so reason \
+             '{expected_reason}' cannot be proved"
+        )
+    });
     assert_eq!(
         actual_reason, expected_reason,
         "diagnostic '{code}' occurrence {occurrence} has reason '{actual_reason}', \
@@ -177,6 +192,7 @@ mod tests {
         RuleDiagnosticKind,
     };
     use crate::compiler_frontend::symbols::string_interning::StringTable;
+    use crate::compiler_tests::test_support::assert_panics_with;
 
     fn messages_with_errors(
         diagnostics: Vec<CompilerDiagnostic>,
@@ -206,10 +222,9 @@ mod tests {
             DiagnosticPayload::None,
         );
         let messages = messages_with_errors(vec![diagnostic], table);
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        assert_panics_with("diagnostic codes must match exactly", || {
             assert_exact_diagnostic_codes(&messages, &["MOTH-RULE-0001", "MOTH-RULE-0001"]);
-        }));
-        assert!(result.is_err(), "should panic for wrong count");
+        });
     }
 
     #[test]
@@ -235,10 +250,9 @@ mod tests {
             },
         );
         let messages = messages_with_errors(vec![diagnostic], table);
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        assert_panics_with("expected no infrastructure errors", || {
             assert_no_infrastructure_errors(&messages);
-        }));
-        assert!(result.is_err(), "should panic for an infrastructure error");
+        });
     }
 
     #[test]
@@ -281,13 +295,9 @@ mod tests {
             DiagnosticPayload::None,
         );
         let messages = messages_with_errors(vec![infra_diagnostic, rule_diagnostic], table);
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        assert_panics_with("expected exactly one error diagnostic overall", || {
             assert_exact_infrastructure_error(&messages, &ErrorType::File);
-        }));
-        assert!(
-            result.is_err(),
-            "should panic when an additional non-infrastructure error is present"
-        );
+        });
     }
 
     #[test]
@@ -318,9 +328,8 @@ mod tests {
             },
         );
         let messages = messages_with_errors(vec![diagnostic1, diagnostic2], table);
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        assert_panics_with("expected exactly one error diagnostic overall", || {
             assert_exact_infrastructure_error(&messages, &ErrorType::File);
-        }));
-        assert!(result.is_err(), "should panic for two infra errors");
+        });
     }
 }

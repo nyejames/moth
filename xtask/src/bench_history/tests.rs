@@ -4,6 +4,7 @@ use crate::bench_types::{
     BenchmarkComparison, BenchmarkMeasurementIdentity, BenchmarkSystem, GitRevision, SuiteStats,
     calculate_group_stats,
 };
+use crate::test_fs::assert_path_missing;
 use std::fs;
 use std::sync::Mutex;
 use tempfile::tempdir;
@@ -330,7 +331,7 @@ fn append_rejects_dirty_record() {
     let error =
         append_local_run(&path, &record).expect_err("a dirty record must not enter normal history");
     assert!(error.contains("clean and committed"));
-    assert!(!path.exists());
+    assert_path_missing(&path);
 }
 
 #[test]
@@ -343,7 +344,7 @@ fn append_rejects_unknown_revision_record() {
     let error = append_local_run(&path, &record)
         .expect_err("an unknown-revision record must not enter normal history");
     assert!(error.contains("clean and committed"));
-    assert!(!path.exists());
+    assert_path_missing(&path);
 }
 
 #[test]
@@ -430,7 +431,7 @@ fn current_append_rejects_legacy_or_incomplete_records() {
 
     let error = append_local_run(&path, &record).expect_err("protocol zero must not append");
     assert!(error.contains("legacy protocol"));
-    assert!(!path.exists());
+    assert_path_missing(&path);
 }
 
 #[test]
@@ -443,7 +444,7 @@ fn current_append_rejects_a_different_timing_schema() {
     let error = append_local_run(&path, &record)
         .expect_err("new records must use the current timing schema");
     assert!(error.contains("incompatible current timing schema"));
-    assert!(!path.exists());
+    assert_path_missing(&path);
 }
 
 #[test]
@@ -456,7 +457,7 @@ fn current_history_rejects_obsolete_timing_metric_names() {
     let error = append_local_run(&path, &record)
         .expect_err("current history must reject provisional timing names");
     assert!(error.contains("unknown timing schema metric 'ast_ms'"));
-    assert!(!path.exists());
+    assert_path_missing(&path);
 
     let invalid_line = serde_json::to_string(&record).expect("record should serialize");
     fs::write(&path, invalid_line).expect("invalid history fixture should be written");
@@ -478,7 +479,7 @@ fn current_history_rejects_empty_timing_evidence_on_append_and_read() {
     let error = append_local_run(&path, &record)
         .expect_err("current history must reject empty timing evidence");
     assert!(error.contains("no metrics"), "unexpected error: {error}");
-    assert!(!path.exists());
+    assert_path_missing(&path);
 
     let invalid_line = serde_json::to_string(&record).expect("record should serialize");
     fs::write(&path, invalid_line).expect("invalid history fixture should be written");
@@ -506,7 +507,7 @@ fn current_history_rejects_missing_command_total_on_append_and_read() {
         error.contains("command.check.total"),
         "unexpected error: {error}"
     );
-    assert!(!path.exists());
+    assert_path_missing(&path);
 
     let invalid_line = serde_json::to_string(&record).expect("record should serialize");
     fs::write(&path, invalid_line).expect("invalid history fixture should be written");
@@ -530,10 +531,8 @@ fn assert_non_finite_append_rejected(
     let error = append_local_run(&path, &record)
         .expect_err("non-finite current history values must not append");
     assert!(error.contains("finite"), "{field}: {error}");
-    assert!(
-        !path.exists(),
-        "{field}: malformed history must not create a file"
-    );
+    // Absence must be `NotFound`, not a metadata failure that merely looks absent.
+    assert_path_missing(&path);
 }
 
 #[test]

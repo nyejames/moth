@@ -5,6 +5,7 @@
 //! WHY:  the enabled expansion must mirror the disabled one for control flow
 //!       while adding collector evidence.
 
+use crate::compiler_tests::test_support::assert_panics_with;
 use crate::timing::{
     TimingCommandKind, TimingMetric, TimingMetricAggregate, start_benchmark_collection,
     start_raw_benchmark_collection,
@@ -1035,11 +1036,14 @@ fn conflicting_module_registration_panics_without_mutating_the_record() {
     );
     let first_key = crate::timing::register_timing_module(boundary, 0, "", 1, 512);
 
-    let conflict = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        crate::timing::register_timing_module(boundary, 0, "", 2, 2048)
-    }));
-
-    assert!(conflict.is_err(), "conflicting metadata must be rejected");
+    // The exact rejection message proves the source-fact conflict was detected,
+    // not some unrelated panic inside registration.
+    assert_panics_with(
+        "timing module registration changed source file count",
+        || {
+            crate::timing::register_timing_module(boundary, 0, "", 2, 2048);
+        },
+    );
     let snapshot = session.finish();
 
     assert_eq!(snapshot.modules.len(), 1);
@@ -1061,13 +1065,13 @@ fn staged_module_registration_finalizes_source_facts_once() {
     crate::timing::finalize_timing_module_source_facts(key, 2, 1024);
     crate::timing::finalize_timing_module_source_facts(key, 2, 1024);
 
-    let conflict = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        crate::timing::finalize_timing_module_source_facts(key, 3, 2048)
-    }));
-
-    assert!(
-        conflict.is_err(),
-        "conflicting finalization must be rejected"
+    // The exact rejection message proves the re-finalization conflict was
+    // detected, not some unrelated panic inside finalization.
+    assert_panics_with(
+        "timing module finalization changed source file count",
+        || {
+            crate::timing::finalize_timing_module_source_facts(key, 3, 2048);
+        },
     );
     let snapshot = session.finish();
     assert_eq!(snapshot.modules[0].source_file_count, 2);
