@@ -36,7 +36,11 @@ This is a solo hobby project so LLMs have become vital for keeping momentum goin
 
 The speed up from LLMs in terms of actual features hasn't been that large (I would estimate around 2 - 3x max). This is because good LLM code still requires a lot of auditing and occasional redirecting when it gets confused or it becomes clear that the original brief was not the right approach or not specific enough.
 
+There is plenty of pre-alpha "good enough" scaffold code in this codebase that I've flagged to return to later and improve by hand.
+When the time comes for hardening and optimising, I suspect the gains from using agents will decline further.
+
 A lot of the time I would be writing the code myself is now spent staring at diffs and writing plans and documentation.
+All the architecture, code organisation and design decisions around this language and compiler are all me and always will be. 
 
 ---
 
@@ -142,6 +146,14 @@ Its very easy to unintentionally steer an LLM towards the solution you prefer ra
 One of the more powerful uses of these tools is sanity checking an idea or reviewing code. They often avoid the tough truth unless you're asking for it explicitly or deliberately requesting actionable feedback. What you ask for and how you ask for it can dramatically change what it focuses on in its reponse. 
 
 Its important to remember you need to be able to let go of ideas. Recognising your bad design is just as important as pushing back on the agent when it gets things wrong or doesn't *see the vision*.
+
+In this compiler I've made many design calls based on my own experience and intuition that LLMs are consistently confused by. But by sticking to those decisions knowing they are ambitious has got this project a lot further than if GPT was making design calls. One major example is constant folding happening at the AST stage (and in some narrow cases before that), so expressions are flattened before they even get to the HIR. I had to write the detailed compiler documentation because large language models struggle with unusual compiler design choices like this, particularly when it comes to architecture. 
+
+Moth's memory management strategy has been a pain to try and document clearly enough to avoid agents pulling it back towards all the regular boring stuff every other language does. This is what consumes most of my time, spamming all my ideas into an LLM and getting them to organise it into documents that are slightly readable and don't get the technical details wrong.
+
+And even though the tests in this codebase are pretty much all written by AI, I have to constantly stamp by foot down on LLMs adding redundant tests or putting them in the same files as production code (which is a hard no-no in this codebase). But there's no way I'm going back to writing all the tests by hand again.
+
+Adding skills, detailed documentation and a carefully written AGENTS.md doesn't fix everything. Reviewing is essential, and realising they will drift towards a boring mean is important.
 
 <div align="center">
 
