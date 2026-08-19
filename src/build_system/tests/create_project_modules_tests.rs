@@ -1820,7 +1820,8 @@ fn rejects_config_plain_and_mutable_bindings() {
     // `config_plain_project_rejected` and `config_mutable_key_rejected` cases cover the
     // user-visible rejection; this unit retains the typed reason for both binding modes.
     for (operator, label) in [("=", "plain"), ("~=", "mutable")] {
-        let root = unused_temp_path(&format!("config_{label}_binding_rejected"));
+        let _temp1 = tempfile::tempdir().expect("should create temp dir");
+        let root = _temp1.path().to_path_buf();
         fs::create_dir_all(&root).expect("should create root dir");
         let config_path = root.join(settings::CONFIG_FILE_NAME);
 
@@ -1916,7 +1917,8 @@ fn accepts_config_type_declarations() {
     ];
 
     for (case_name, source) in cases {
-        let root = unused_temp_path(&format!("config_{case_name}_accepted"));
+        let _temp2 = tempfile::tempdir().expect("should create temp dir");
+        let root = _temp2.path().to_path_buf();
         fs::create_dir_all(&root).expect("should create root dir");
         let config_path = root.join(settings::CONFIG_FILE_NAME);
 

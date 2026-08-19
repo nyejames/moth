@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-08-19T00:30:00Z",
+  "generated_at": "2026-08-19T00:38:39Z",
   "work_id": "test-suite-honesty",
   "base_revision": "f41f93a7a",
   "branch": "test-suite-honesty",
@@ -9,13 +9,14 @@
     "unit_tests_passed": 4314,
     "unit_tests_failed": 0,
     "unit_tests_ignored": 0,
-    "integration_cases_correct": 1851,
+    "integration_cases_correct": 1699,
     "integration_backend_executions": 1851,
     "feature_lanes": {
       "default": "pass",
       "timers": "pass",
       "benchmark_counters": "pre-existing failure: const_required_construction_preparation_is_reused_by_folding",
-      "timers+benchmark_counters": "pre-existing failures: 4 tests"
+      "timers+benchmark_counters": "pre-existing failures: 4 tests",
+      "detailed_timers": "pass (4316+17+643)"
     },
     "linux_lane": "not run on host (macOS); Linux-only tests require CI or Linux host"
   },
@@ -24,8 +25,8 @@
       "code": "temp_dir_uncreated_paths",
       "severity": "hard",
       "description": "test_support::temp_dir returned uncreated paths; callers had to create_dir_all manually",
-      "disposition": "fixed: renamed to unused_temp_path with non-existence contract; ~240 callers migrated to tempfile::tempdir() with owned cleanup; remaining uses are genuine non-existence contracts or helper functions needing tuple-return migration",
-      "status": "resolved"
+      "disposition": "fixed: renamed to unused_temp_path with non-existence contract; ~240 callers migrated to tempfile::tempdir() with owned cleanup; remaining ~229 uses still follow unused_temp_path+create_dir_all pattern and need migration to tempfile::tempdir() or tuple-return helper changes",
+      "status": "in_progress"
     },
     {
       "code": "hardcoded_tmp_paths",
@@ -45,8 +46,8 @@
       "code": "broad_iserr_assertions",
       "severity": "review",
       "description": "Broad is_err()/error_count()>0 assertions accept wrong failure at multi-lane boundaries",
-      "disposition": "partially fixed: single_file_rejects_missing_file uses assert_exact_infrastructure_error; remaining broad is_err() in build_orchestration_tests and benchmark seeds need exact diagnostic migration as Phase 2 follow-up",
-      "status": "in_progress"
+      "disposition": "fixed: all 26 broad is_err() assertions in build_orchestration_tests.rs migrated to assert_output_rejection with typed OutputRejectionReason metadata; benchmark seed tests use specific error message assertions; typed reason seam added to production writer via OutputRejectionReason enum and file_error_with_rejection_reason",
+      "status": "resolved"
     },
     {
       "code": "infrastructure_error_inspection_missing_later_errors",
@@ -73,7 +74,7 @@
       "code": "lossy_path_text_conversion",
       "severity": "review",
       "description": "to_string_lossy/from_utf8_lossy across ~30 files",
-      "disposition": "deferred to Phase 4",
+      "disposition": "deferred to Phase 5 (item 7: Replace lossy process output and path conversion)",
       "status": "open"
     },
     {
@@ -157,7 +158,7 @@
       "code": "source_text_tests_false_confidence",
       "severity": "review",
       "description": "Tests comparing source text create false confidence",
-      "disposition": "deferred to Phase 4",
+      "disposition": "deferred to Phase 4 (item 3: Strengthen reachable dependency, JS glue, runtime asset and frontend pipeline tests; item 7: Review every >=, non-empty, any and find_map result)",
       "status": "open"
     },
     {

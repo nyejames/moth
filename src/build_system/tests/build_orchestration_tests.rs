@@ -18,6 +18,9 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticCategory, DiagnosticPayload, InvalidConfigReason,
 };
 use crate::compiler_frontend::utilities::basic::normalize_path;
+use crate::compiler_tests::test_diagnostics::{
+    assert_no_infrastructure_errors, assert_output_rejection,
+};
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use crate::projects::settings::Config;
 use std::fs;
@@ -202,10 +205,10 @@ fn diagnosed_module_prevents_project_compilation_from_reaching_backend() {
         &[],
     );
 
-    assert!(
-        result.is_err(),
-        "diagnosed module should fail project compilation"
-    );
+    let Err(messages) = result else {
+        panic!("diagnosed module should fail project compilation");
+    };
+    assert_no_infrastructure_errors(&messages);
     assert!(validated.load(std::sync::atomic::Ordering::SeqCst));
     assert!(
         !built.load(std::sync::atomic::Ordering::SeqCst),
@@ -311,7 +314,10 @@ fn write_project_outputs_rejects_invalid_paths() {
 
     for project in invalid_projects {
         let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
-        assert!(result.is_err(), "invalid output path should be rejected");
+        let Err(messages) = result else {
+            panic!("invalid output path should be rejected");
+        };
+        assert_output_rejection(&messages, "invalid-relative-output-path");
     }
 }
 
@@ -335,13 +341,14 @@ fn reserved_manifest_destination_is_rejected_before_emission() {
         cleanup_policy: html_cleanup_policy(),
         warnings: vec![],
     };
-    assert!(
-        write_project_outputs(
-            &collision_project,
-            &always_write_options(collision_root.clone(), None)
-        )
-        .is_err()
+    let result = write_project_outputs(
+        &collision_project,
+        &always_write_options(collision_root.clone(), None),
     );
+    let Err(messages) = result else {
+        panic!("reserved manifest destination should be rejected");
+    };
+    assert_output_rejection(&messages, "reserved-manifest-destination");
     assert_path_missing(&collision_root.join("index.html"));
     assert_path_missing(&collision_root.join(".moth_manifest"));
 
@@ -367,13 +374,14 @@ fn reserved_manifest_destination_is_rejected_before_emission() {
             cleanup_policy: html_cleanup_policy(),
             warnings: vec![],
         };
-        assert!(
-            write_project_outputs(
-                &descendant_project,
-                &always_write_options(descendant_root.clone(), None)
-            )
-            .is_err()
+        let result = write_project_outputs(
+            &descendant_project,
+            &always_write_options(descendant_root.clone(), None),
         );
+        let Err(messages) = result else {
+            panic!("reserved manifest descendant should be rejected");
+        };
+        assert_output_rejection(&messages, "reserved-manifest-destination");
         assert_path_missing(&descendant_root.join("index.html"));
         assert_path_missing(&descendant_root.join(".moth_manifest"));
         fs::remove_dir_all(&descendant_root).expect("should remove descendant root");
@@ -390,13 +398,14 @@ fn reserved_manifest_destination_is_rejected_before_emission() {
         )],
         Some(PathBuf::from("index.html")),
     );
-    assert!(
-        write_project_outputs(
-            &project,
-            &always_write_options(directory_root.clone(), None)
-        )
-        .is_err()
+    let result = write_project_outputs(
+        &project,
+        &always_write_options(directory_root.clone(), None),
     );
+    let Err(messages) = result else {
+        panic!("reserved manifest directory should be rejected");
+    };
+    assert_output_rejection(&messages, "manifest-not-regular-file");
     assert_path_missing(&directory_root.join("index.html"));
     assert_directory(&directory_root.join(".moth_manifest"));
 }
@@ -406,13 +415,15 @@ fn reserved_manifest_destination_is_rejected_before_emission() {
 fn manifest_symlink_destinations_are_rejected_before_emission() {
     use std::os::unix::fs::symlink;
 
-    for (case_name, target_kind) in ["inside", "outside", "dangling"]
+    for (_case_name, target_kind) in ["inside", "outside", "dangling"]
         .into_iter()
         .map(|case_name| (case_name, case_name))
     {
-        let root = unused_temp_path(&format!("manifest_symlink_{case_name}"));
+        let _temp1 = tempfile::tempdir().expect("should create temp dir");
+        let root = _temp1.path().to_path_buf();
         fs::create_dir_all(&root).expect("should create symlink test root");
-        let outside = unused_temp_path(&format!("manifest_symlink_target_{case_name}"));
+        let _temp2 = tempfile::tempdir().expect("should create temp dir");
+        let outside = _temp2.path().to_path_buf();
         if target_kind == "outside" {
             fs::create_dir_all(&outside).expect("should create outside symlink target root");
         }
@@ -434,9 +445,11 @@ fn manifest_symlink_destinations_are_rejected_before_emission() {
             )],
             Some(PathBuf::from("index.html")),
         );
-        assert!(
-            write_project_outputs(&project, &always_write_options(root.clone(), None)).is_err()
-        );
+        let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
+        let Err(messages) = result else {
+            panic!("manifest symlink destination should be rejected");
+        };
+        assert_output_rejection(&messages, "manifest-not-regular-file");
         assert_path_missing(&root.join("index.html"));
         assert!(
             fs::symlink_metadata(root.join(".moth_manifest"))
@@ -480,7 +493,8 @@ fn output_alias_to_manifest_destination_is_rejected_before_emission() {
             String::from("existing literal-backslash child"),
         ),
     ] {
-        let root = unused_temp_path(&format!("output_alias_manifest_{case_name}"));
+        let _temp3 = tempfile::tempdir().expect("should create temp dir");
+        let root = _temp3.path().to_path_buf();
         fs::create_dir_all(&root).expect("should create output root");
         let target = root.join(&target_path);
         if let Some(parent) = target.parent() {
@@ -505,10 +519,18 @@ fn output_alias_to_manifest_destination_is_rejected_before_emission() {
             cleanup_policy: html_cleanup_policy(),
             warnings: vec![],
         };
-        assert!(
-            write_project_outputs(&project, &always_write_options(root.clone(), None)).is_err(),
-            "case-variant manifest aliases must be rejected before emission: {case_name}"
-        );
+        let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
+        let Err(messages) = result else {
+            panic!("case-variant manifest aliases must be rejected before emission: {case_name}");
+        };
+        let expected_reason = match case_name {
+            "exact_case_variant" | "descendant_case_variant" => {
+                "reserved-manifest-destination-canonical"
+            }
+            "descendant_literal_backslash" => "non-lossless-canonical-path",
+            _ => unreachable!("unexpected case: {case_name}"),
+        };
+        assert_output_rejection(&messages, expected_reason);
         assert_path_missing(&root.join("index.html"));
         assert_eq!(
             fs::read(&target).expect("case-variant target should remain unchanged"),
@@ -554,7 +576,8 @@ fn non_portable_canonical_aliases_are_rejected_before_emission() {
             ],
         ),
     ] {
-        let root = unused_temp_path(&format!("non_portable_canonical_alias_{case_name}"));
+        let _temp4 = tempfile::tempdir().expect("should create temp dir");
+        let root = _temp4.path().to_path_buf();
         fs::create_dir_all(&root).expect("should create output root");
         let target = root.join(&target_path);
         fs::write(&target, "target unchanged").expect("should create non-portable target");
@@ -582,10 +605,11 @@ fn non_portable_canonical_aliases_are_rejected_before_emission() {
             cleanup_policy: html_cleanup_policy(),
             warnings: vec![],
         };
-        assert!(
-            write_project_outputs(&project, &always_write_options(root.clone(), None)).is_err(),
-            "non-portable canonical aliases must be rejected before emission: {case_name}"
-        );
+        let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
+        let Err(messages) = result else {
+            panic!("non-portable canonical aliases must be rejected before emission: {case_name}");
+        };
+        assert_output_rejection(&messages, "non-lossless-canonical-path");
         assert_path_missing(&root.join("index.html"));
         assert_eq!(
             fs::read(&target).expect("non-portable target should remain unchanged"),
@@ -625,10 +649,11 @@ fn invalid_utf8_authored_output_path_is_rejected_before_emission() {
         warnings: vec![],
     };
 
-    assert!(
-        write_project_outputs(&project, &always_write_options(root.clone(), None)).is_err(),
-        "invalid UTF-8 output paths must be rejected before emission"
-    );
+    let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
+    let Err(messages) = result else {
+        panic!("invalid UTF-8 output paths must be rejected before emission");
+    };
+    assert_output_rejection(&messages, "invalid-relative-output-path");
     assert_path_missing(&root.join("index.html"));
     assert_path_missing(&root.join("safe-�-file.js"));
     assert_path_missing(&root.join(BUILD_MANIFEST_FILENAME));
@@ -671,10 +696,11 @@ fn canonical_case_collisions_are_rejected_before_emission() {
         warnings: vec![],
     };
 
-    assert!(
-        write_project_outputs(&project, &always_write_options(root.clone(), None)).is_err(),
-        "canonical case-only aliases must be rejected before emission"
-    );
+    let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
+    let Err(messages) = result else {
+        panic!("canonical case-only aliases must be rejected before emission");
+    };
+    assert_output_rejection(&messages, "canonical-destination-collision");
     assert_path_missing(&root.join("index.html"));
     assert_eq!(
         fs::read(&lower_target).expect("lower target should remain unchanged"),
@@ -697,8 +723,10 @@ fn hard_linked_outputs_are_rejected_before_emission() {
         "output_to_outside",
         "directory_to_outside",
     ] {
-        let root = unused_temp_path(&format!("hard_link_output_{case_name}"));
-        let outside = unused_temp_path(&format!("hard_link_target_{case_name}"));
+        let _temp5 = tempfile::tempdir().expect("should create temp dir");
+        let root = _temp5.path().to_path_buf();
+        let _temp6 = tempfile::tempdir().expect("should create temp dir");
+        let outside = _temp6.path().to_path_buf();
         fs::create_dir_all(&root).expect("should create output root");
         fs::create_dir_all(&outside).expect("should create outside root");
         let manifest_path = root.join(".moth_manifest");
@@ -743,10 +771,17 @@ fn hard_linked_outputs_are_rejected_before_emission() {
             warnings: vec![],
         };
 
-        assert!(
-            write_project_outputs(&project, &always_write_options(root.clone(), None)).is_err(),
-            "hard-linked destinations must be rejected before emission: {case_name}"
-        );
+        let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
+        let Err(messages) = result else {
+            panic!("hard-linked destinations must be rejected before emission: {case_name}");
+        };
+        let expected_reason = match case_name {
+            "manifest_to_outside" => "manifest-hard-linked",
+            "directory_to_outside" => "directory-destination-exists-as-non-directory",
+            "output_to_manifest" | "output_to_outside" => "hard-linked-destination",
+            _ => unreachable!("unexpected case: {case_name}"),
+        };
+        assert_output_rejection(&messages, expected_reason);
         assert_path_missing(&root.join("index.html"));
         match case_name {
             "output_to_manifest" => {
@@ -810,10 +845,11 @@ fn file_output_to_existing_directory_is_rejected_before_emission() {
         warnings: vec![],
     };
 
-    assert!(
-        write_project_outputs(&project, &always_write_options(root.clone(), None)).is_err(),
-        "file outputs must reject existing directories before emission"
-    );
+    let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
+    let Err(messages) = result else {
+        panic!("file outputs must reject existing directories before emission");
+    };
+    assert_output_rejection(&messages, "file-destination-exists-as-non-file");
     assert_path_missing(&root.join("index.html"));
     assert_directory(&root.join("occupied"));
     assert_path_missing(&root.join(BUILD_MANIFEST_FILENAME));
@@ -1220,8 +1256,9 @@ fn build_directory_project_requires_artifact_root_in_configured_entry_root() {
         &[],
     );
 
-    assert!(result.is_err(), "missing root homepage should fail");
-    let messages = result.err().expect("expected missing homepage error");
+    let Err(messages) = result else {
+        panic!("missing root homepage should fail");
+    };
     assert_has_config_error(&messages);
     assert!(
         messages.first_infrastructure_error_for_tests().is_none(),
@@ -1285,7 +1322,10 @@ fn duplicate_output_destination_causes_zero_files_written() {
     };
 
     let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
-    assert!(result.is_err(), "duplicate output path should be rejected");
+    let Err(messages) = result else {
+        panic!("duplicate output path should be rejected");
+    };
+    assert_output_rejection(&messages, "duplicate-destination");
 
     assert_path_missing(&root.join("index.html"));
 }
@@ -1312,10 +1352,10 @@ fn windows_ambiguous_output_aliases_fail_before_emission() {
     };
 
     let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
-    assert!(
-        result.is_err(),
-        "Windows-normalized output aliases must fail during preflight"
-    );
+    let Err(messages) = result else {
+        panic!("Windows-normalized output aliases must fail during preflight");
+    };
+    assert_output_rejection(&messages, "invalid-relative-output-path");
     assert_path_missing(&root.join("page.js"));
     assert_path_missing(&root.join("page.js."));
 }
@@ -1342,7 +1382,10 @@ fn file_ancestor_conflict_causes_zero_files_written() {
     };
 
     let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
-    assert!(result.is_err(), "a file cannot contain a child output");
+    let Err(messages) = result else {
+        panic!("a file cannot contain a child output");
+    };
+    assert_output_rejection(&messages, "file-ancestor-conflict");
     assert_path_missing(&root.join("assets"));
 }
 
@@ -1351,8 +1394,9 @@ fn file_ancestor_conflict_uses_component_boundaries_before_emission() {
     let output_paths = ["assets", "assets-keep.js", "assets/chunk.js"];
     let input_orders = [[0, 1, 2], [1, 2, 0], [2, 0, 1]];
 
-    for (case_index, order) in input_orders.into_iter().enumerate() {
-        let root = unused_temp_path(&format!("file_ancestor_component_{case_index}"));
+    for order in input_orders {
+        let _temp7 = tempfile::tempdir().expect("should create temp dir");
+        let root = _temp7.path().to_path_buf();
         fs::create_dir_all(&root).expect("should create temp root");
         let output_files = order
             .into_iter()
@@ -1371,10 +1415,10 @@ fn file_ancestor_conflict_uses_component_boundaries_before_emission() {
         };
 
         let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
-        assert!(
-            result.is_err(),
-            "a file ancestor must be rejected regardless of lexical sibling ordering"
-        );
+        let Err(messages) = result else {
+            panic!("a file ancestor must be rejected regardless of lexical sibling ordering");
+        };
+        assert_output_rejection(&messages, "file-ancestor-conflict");
         assert!(
             fs::read_dir(&root)
                 .expect("output root should remain readable")
@@ -1433,10 +1477,10 @@ fn file_and_directory_same_destination_is_rejected_before_writing() {
     };
 
     let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
-    assert!(
-        result.is_err(),
-        "a file and directory cannot claim one destination"
-    );
+    let Err(messages) = result else {
+        panic!("a file and directory cannot claim one destination");
+    };
+    assert_output_rejection(&messages, "duplicate-destination");
     assert_path_missing(&root.join("assets"));
 }
 
@@ -1462,10 +1506,10 @@ fn case_only_output_collision_causes_zero_files_written() {
     };
 
     let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
-    assert!(
-        result.is_err(),
-        "case-only output collisions must be rejected"
-    );
+    let Err(messages) = result else {
+        panic!("case-only output collisions must be rejected");
+    };
+    assert_output_rejection(&messages, "duplicate-destination");
     assert_path_missing(&root.join("Pages"));
     assert_path_missing(&root.join("pages"));
 }
@@ -1493,10 +1537,10 @@ fn symlinked_output_ancestor_escape_causes_zero_files_written() {
     };
 
     let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
-    assert!(
-        result.is_err(),
-        "symlink escapes must be rejected before writes"
-    );
+    let Err(messages) = result else {
+        panic!("symlink escapes must be rejected before writes");
+    };
+    assert_output_rejection(&messages, "escapes-output-root");
     assert_path_missing(&outside.join("escape.js"));
 }
 
@@ -1528,10 +1572,10 @@ fn symlink_alias_destinations_are_rejected_before_writing() {
     };
 
     let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
-    assert!(
-        result.is_err(),
-        "distinct relative paths that alias one canonical file must be rejected"
-    );
+    let Err(messages) = result else {
+        panic!("distinct relative paths that alias one canonical file must be rejected");
+    };
+    assert_output_rejection(&messages, "canonical-destination-collision");
     assert_path_missing(&real.join("app.js"));
 
     fs::remove_dir_all(&root).expect("should remove temp root");
@@ -1594,10 +1638,10 @@ fn symlink_alias_file_ancestor_conflict_is_rejected_before_writing() {
     };
 
     let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
-    assert!(
-        result.is_err(),
-        "a symlinked path below a canonical file ancestor must fail preflight"
-    );
+    let Err(messages) = result else {
+        panic!("a symlinked path below a canonical file ancestor must fail preflight");
+    };
+    assert_output_rejection(&messages, "dangling-symlink-in-destination");
     assert_eq!(
         fs::read(&real_file).expect("existing file should remain"),
         b"existing"
@@ -1629,7 +1673,10 @@ fn dangling_symlink_aliases_are_rejected_before_emission() {
         warnings: vec![],
     };
     let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
-    assert!(result.is_err());
+    let Err(messages) = result else {
+        panic!("dangling symlink should be rejected");
+    };
+    assert_output_rejection(&messages, "dangling-symlink-in-destination");
     assert_path_missing(&root.join("real/app.js"));
 
     let _temp = tempfile::tempdir().expect("should create temp dir");
@@ -1652,7 +1699,10 @@ fn dangling_symlink_aliases_are_rejected_before_emission() {
         warnings: vec![],
     };
     let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
-    assert!(result.is_err());
+    let Err(messages) = result else {
+        panic!("dangling symlink directory should be rejected");
+    };
+    assert_output_rejection(&messages, "dangling-symlink-in-destination");
     assert_path_missing(&root.join("real"));
 }
 
@@ -1663,7 +1713,8 @@ fn directory_output_root_symlink_escape_causes_zero_files_written() {
 
     for (case_name, target_name) in [("sibling", "outside"), ("entry", "src")] {
         let root = unused_temp_path(&format!("directory_output_root_symlink_{case_name}"));
-        let outside = unused_temp_path(&format!("directory_output_root_target_{case_name}"));
+        let _temp8 = tempfile::tempdir().expect("should create temp dir");
+        let outside = _temp8.path().to_path_buf();
         let entry_root = root.join("src");
         let output_root = root.join("dev");
         fs::create_dir_all(&entry_root).expect("should create entry root");
@@ -1699,10 +1750,12 @@ fn directory_output_root_symlink_escape_causes_zero_files_written() {
         };
 
         let result = write_project_outputs(&project, &options);
-        assert!(
-            result.is_err(),
-            "directory output roots must reject symlink targets outside their validated boundary"
-        );
+        let Err(messages) = result else {
+            panic!(
+                "directory output roots must reject symlink targets outside their validated boundary"
+            );
+        };
+        assert_output_rejection(&messages, "output-root-not-inside-project");
         assert_path_missing(&outside.join("index.html"));
         assert_path_missing(&entry_root.join("index.html"));
         assert!(
@@ -1739,7 +1792,10 @@ fn invalid_later_output_path_causes_zero_files_written() {
     };
 
     let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
-    assert!(result.is_err(), "invalid later path should be rejected");
+    let Err(messages) = result else {
+        panic!("invalid later path should be rejected");
+    };
+    assert_output_rejection(&messages, "invalid-relative-output-path");
 
     assert_path_missing(&root.join("index.html"));
 }

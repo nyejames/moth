@@ -60,8 +60,9 @@ impl CurrentDirGuard {
     ///   `Drop` cannot return errors, so the normal path must use `finish()` when the
     ///   caller cares about restore success.
     fn finish(mut self) -> Result<(), std::io::Error> {
-        let previous = self.previous.take().expect("previous should be set");
-        restore_directory(&previous, &self.restore_override)?;
+        if let Some(previous) = self.previous.take() {
+            restore_directory(&previous, &self.restore_override)?;
+        }
         Ok(())
     }
 

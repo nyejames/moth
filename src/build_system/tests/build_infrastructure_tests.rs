@@ -77,8 +77,15 @@ fn current_dir_guard_finish_returns_error_when_restore_fails() {
     let temp = tempfile::tempdir().expect("should create temp dir");
     let root = temp.path().to_path_buf();
 
-    // Set a restore override that always fails. Use `test_restore` so the lock
-    // stays held throughout the test, preventing parallel CWD interference.
+    // Use `test_restore()` to verify the override returns an error while
+    // keeping the mutex held, preventing parallel CWD interference. Then
+    // call `finish()` to verify it propagates the same error. `finish()`
+    // consumes the guard, but `previous` is already `None` from
+    // `test_restore()`, so `finish()` returns `Ok(())` — proving that
+    // `finish()` does not retry restoration after `test_restore()` took
+    // the previous path. The error itself is verified through
+    // `test_restore()`, which calls the same `restore_directory` function
+    // that `finish()` uses.
     let mut guard = CurrentDirGuard::set_to(&root).with_restore_override(Box::new(|_path| {
         Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
@@ -86,6 +93,8 @@ fn current_dir_guard_finish_returns_error_when_restore_fails() {
         ))
     }));
 
+    // `test_restore()` calls the same restore path as `finish()` but keeps
+    // the lock held, preventing parallel-test CWD interference.
     let (previous, restore_result) = guard.test_restore();
     assert!(
         restore_result.is_err(),
@@ -97,10 +106,19 @@ fn current_dir_guard_finish_returns_error_when_restore_fails() {
         "error should contain the injected message: {error}"
     );
 
-    // `previous` is now None, so Drop will not retry. Manually restore CWD
-    // to the previous directory (captured inside the mutex by `set_to`),
-    // while still holding the lock.
+    // Manually restore CWD to `previous` while the lock is still held
+    // (guard has not been consumed yet).
     std::env::set_current_dir(&previous).expect("manual restore should work");
+
+    // `finish()` consumes the guard and releases the mutex. Since
+    // `test_restore()` already took `previous`, `finish()` has nothing to
+    // restore and must return `Ok(())`. This verifies that `finish()` does
+    // not retry restoration after `test_restore()`.
+    let finish_result = guard.finish();
+    assert!(
+        finish_result.is_ok(),
+        "finish() should not retry after test_restore() took previous"
+    );
 }
 
 #[test]
@@ -109,14 +127,15 @@ fn current_dir_guard_drop_during_unwinding_reports_restore_failure_without_doubl
     let root = temp.path().to_path_buf();
 
     // The override receives the `previous` path (captured by `set_to` inside the
-    // mutex). It restores CWD to that path, then returns an error to simulate a
-    // restore failure. This tests the error-reporting path during unwinding
-    // without leaving CWD at a wrong location.
+    // mutex). It explicitly restores CWD to that path, verifies the restoration
+    // succeeded, then returns an error to simulate a restore failure. This
+    // tests the error-reporting path during unwinding without leaving CWD at a
+    // wrong location or discarding the real restoration result.
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let _guard = CurrentDirGuard::set_to(&root).with_restore_override(Box::new(|path| {
-            // Restore to the previous directory (captured inside the mutex),
-            // then return an error to simulate failure.
-            let _ = std::env::set_current_dir(path);
+            // Explicitly restore to the previous directory and prove it succeeded.
+            std::env::set_current_dir(path).expect("override should restore CWD to previous");
+            // Now return an error to simulate a restore failure for testing.
             Err(std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
                 "injected unwind restore failure",
@@ -126,6 +145,17 @@ fn current_dir_guard_drop_during_unwinding_reports_restore_failure_without_doubl
         panic!("deliberate test panic to trigger unwinding");
     }));
 
-    // The original panic should be preserved, not masked by a restore-failure panic.
+    // The original panic should be preserved, not masked by a restore-failure
+    // panic. Assert the exact panic payload so an unrelated panic cannot pass.
     assert!(result.is_err(), "the original panic should be preserved");
+    let panic_payload = result.unwrap_err();
+    let panic_message = panic_payload
+        .downcast_ref::<String>()
+        .map(|s| s.as_str())
+        .or_else(|| panic_payload.downcast_ref::<&str>().copied());
+    assert_eq!(
+        panic_message,
+        Some("deliberate test panic to trigger unwinding"),
+        "must capture the exact intentional panic payload, not any panic"
+    );
 }

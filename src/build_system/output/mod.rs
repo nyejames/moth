@@ -10,6 +10,7 @@ mod orchestrator;
 mod output_path;
 mod policy;
 mod writer;
+pub(crate) use writer::OutputRejectionReason;
 
 #[cfg(test)]
 mod tests;

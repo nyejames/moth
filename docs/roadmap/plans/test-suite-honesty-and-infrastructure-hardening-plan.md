@@ -6,48 +6,50 @@
 WORK_ID: test-suite-honesty
 WORK_SOURCE: docs/roadmap/plans/test-suite-honesty-and-infrastructure-hardening-plan.md
 BASE_REVISION: f41f93a7a (post-TIR, post-benchmark-counters-timers)
-STATUS: active — second correction pass applied, under review
-CURRENT_SCOPE: Phase 0-3 second correction pass complete, awaiting re-review before Phase 4
+STATUS: active — third correction pass applied, under review
+CURRENT_SCOPE: Phase 0-3 third correction pass complete, awaiting re-review before Phase 4
 COMPLETED:
-  Phase 0: baseline established (4314 unit tests, 0 ignored, 1851 integration cases correct);
-    durable inventory at docs/roadmap/evidence/test_honesty_inventory.json with 26 findings
-    and dispositions; feature lane mapping documented (timers pass, benchmark_counters
-    pre-existing failure); stale CFG timer language fixed (now references frontend module
-    compilation ownership cleanup)
-  Phase 1: test_fs helpers (assert_path_missing, assert_regular_file, assert_directory,
-    assert_symlink, read_bytes, read_utf8) with symlink_metadata;
-    temp_dir→unused_temp_path rename; ~240 callers migrated to tempfile::tempdir();
-    hardcoded /tmp/ removed; Linux non-UTF-8 fixtures fixed;
-    all negative exists() assertions in build_orchestration_tests, build_cleanup_tests,
-    check_tests, and cli_tests migrated to assert_path_missing;
-    fixture discovery fail-closed with symlink_metadata and non-UTF-8 rejection
+  Phase 0: baseline established (4314 unit tests, 0 ignored, 1699 integration cases correct,
+    1851 backend executions); durable inventory at docs/roadmap/evidence/test_honesty_inventory.json;
+    feature lane mapping documented (default pass, timers pass, detailed_timers pass,
+    benchmark_counters pre-existing failure); stale CFG timer language fixed
+  Phase 1: test_fs helpers with symlink_metadata; temp_dir→unused_temp_path rename;
+    ~250 callers migrated to tempfile::tempdir(); hardcoded /tmp/ removed;
+    Linux non-UTF-8 fixtures fixed; all negative exists() assertions migrated to
+    assert_path_missing; fixture discovery fail-closed; remaining ~200 unused_temp_path
+    uses are in helper functions needing tuple-return migration or genuine non-existence
+    contracts
   Phase 2: infrastructure_errors_for_tests() iterator; test_diagnostics helpers;
-    assert_exact_infrastructure_error tightened to require exactly one error diagnostic
-    overall (not just one infrastructure error);
-    single_file_rejects_missing_file uses assert_exact_infrastructure_error;
-    remaining broad is_err() in build_orchestration_tests noted as Phase 2 follow-up
+    assert_exact_infrastructure_error tightened to require exactly one error diagnostic;
+    assert_output_rejection helper with typed OutputRejectionReason metadata;
+    OutputRejectionReason enum (29 variants) added to production writer as typed reason seam;
+    file_error_with_rejection_reason function; all file_error_messages calls in writer.rs
+    and manifest.rs updated with specific reasons; all 26 broad is_err() assertions in
+    build_orchestration_tests.rs migrated to assert_output_rejection with exact reasons;
+    benchmark seed tests use specific error message assertions (MOTH-INFRA-0001 for missing
+    file, MOTH-SYNTAX for invalid syntax); missing-file benchmark uses tempfile not
+    fabricated /definitely/does/not/exist.moth path
   Phase 3: WarningBuilder StringId uses active string_table; CurrentDirGuard redesigned with
-    Option<PathBuf> take pattern; CurrentDirGuard restore-failure injection seam
-    (test_restore, with_restore_override, RestoreFn type);
+    Option<PathBuf> take pattern; CurrentDirGuard restore-failure injection seam;
     CurrentDirGuard Drop reports restore failure to stderr during unwinding;
-    restore-failure regression tests (finish-returns-error and unwind-reports-without-double-panic);
-    CaseExecutionResult constructors removed from production; all synthetic fixtures now
-    carry valid build_result or messages; runner tests use panic_if_called callback;
-    triage test uses valid messages with FailureKind::ExpectationViolation;
-    terse_reporting uses valid BuildResult and CompilerMessages in all fixtures;
+    finish() handles None previous (returns Ok instead of panicking);
+    restore-failure regression tests: test_restore verifies error with mutex held,
+    finish() verifies no retry, unwind test explicitly restores CWD and asserts exact
+    panic payload; CaseExecutionResult constructors removed from production;
+    all synthetic fixtures carry valid build_result or messages;
     ScopedEnvVar panic-safe env guard; surface_thread_panic replaces discarded joins
-NEXT_ACTION: re-review of second correction pass, then Phase 4 exact positive assertions
+NEXT_ACTION: re-review of third correction pass, then Phase 4 exact positive assertions
 VALIDATION: cargo fmt --check; cargo clippy -D warnings; cargo test --workspace (4314+17+643);
   cargo run -- tests --terse (1851/1851); cargo test --features timers (pass);
+  cargo test --features detailed_timers (pass, 4316+17+643); just validate (pass);
   pre-existing benchmark_counters failure unchanged; Linux lane not run on macOS host
-AUDITS: second correction pass applied per reviewer's 10 closeout items
+AUDITS: third correction pass applied per reviewer's 6 remaining blockers
 BLOCKERS: Linux CI lane needed to verify Linux-only tests (macOS host cannot run them);
-  remaining broad is_err() in build_orchestration_tests need exact diagnostic migration
+  remaining ~200 unused_temp_path+create_dir_all patterns in helper functions needing
+  tuple-return migration
 NOTES: Pre-existing benchmark_counters feature test failures are not caused by this work.
-  Remaining unused_temp_path uses are genuine non-existence contracts or helper functions
-  needing tuple-return migration. Remaining broad is_err() assertions in
-  build_orchestration_tests (write_project_outputs patterns) need exact diagnostic
-  migration as Phase 2 follow-up.
+  Inventory finding mappings fixed: lossy_path_text_conversion → Phase 5 item 7,
+  source_text_tests_false_confidence → Phase 4 items 3 and 7.
 ```
 
 ## Purpose

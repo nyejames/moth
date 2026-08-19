@@ -185,7 +185,8 @@ fn check_rejects_symlinked_directory_output_roots_before_frontend_work() {
     ] {
         let root = unused_temp_path(&format!("check_output_symlink_{case_name}"));
         let source_root = root.join("src");
-        let outside = unused_temp_path(&format!("check_output_symlink_target_{case_name}"));
+        let _temp1 = tempfile::tempdir().expect("should create temp dir");
+        let outside = _temp1.path().to_path_buf();
         fs::create_dir_all(&source_root).expect("should create source root");
         fs::create_dir_all(&outside).expect("should create outside root");
         let output_root = root.join("dev");

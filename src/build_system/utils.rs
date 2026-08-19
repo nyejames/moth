@@ -3,7 +3,9 @@
 //! WHAT: small one-liner wrappers that appear in multiple build-system modules.
 //! WHY: avoids duplicating the same helper in every file that touches filesystem paths.
 
-use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_messages::compiler_errors::{
+    CompilerError, CompilerMessages,
+};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use std::fs;
@@ -46,4 +48,29 @@ pub(crate) fn file_error_messages(
     string_table: &StringTable,
 ) -> CompilerMessages {
     CompilerMessages::file_error(path, msg, string_table)
+}
+
+/// Like `file_error_messages`, but also sets a typed rejection reason as metadata.
+///
+/// WHAT: creates a file-error `CompilerMessages` with the `OutputRejectionReason`
+/// metadata key set, so tests can assert the exact rejection contract.
+/// WHY: all writer rejections share `ErrorType::File`; the typed reason seam
+/// lets tests distinguish between distinct safety contracts.
+pub(crate) fn file_error_with_rejection_reason(
+    path: &Path,
+    msg: impl Into<String>,
+    reason: crate::build_system::output::OutputRejectionReason,
+    string_table: &StringTable,
+) -> CompilerMessages {
+    use crate::compiler_frontend::compiler_errors::CompilerErrorMetadataKey;
+    use std::collections::HashMap;
+
+    let mut error_string_table = string_table.clone();
+    let mut metadata = HashMap::new();
+    metadata.insert(
+        CompilerErrorMetadataKey::OutputRejectionReason,
+        reason.as_metadata_value().to_string(),
+    );
+    let error = CompilerError::new_file_error(path, msg, metadata, &mut error_string_table);
+    CompilerMessages::from_error(error, error_string_table)
 }

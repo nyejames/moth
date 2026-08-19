@@ -133,13 +133,24 @@ fn frontend_benchmark_retains_source_package_warning() {
 fn frontend_benchmark_fails_for_missing_file() {
     let _guard = benchmark_test_guard();
 
+    let temp_dir = tempfile::tempdir().expect("should create temp dir");
+    let missing_file = temp_dir.path().join("does_not_exist.moth");
+
     let options = FrontendBenchmarkOptions {
-        entry_path: PathBuf::from("/definitely/does/not/exist.moth"),
+        entry_path: missing_file,
         build_profile: FrontendBenchmarkBuildProfile::Dev,
     };
 
     let result = run_frontend_benchmark(options);
-    assert!(result.is_err(), "benchmark should fail for missing file");
+    let error = result.expect_err("benchmark should fail for missing file");
+    assert!(
+        error.message.contains("MOTH-INFRA-0001"),
+        "missing-file benchmark should report an infrastructure error: {error}"
+    );
+    assert!(
+        error.message.contains("Path does not exist"),
+        "missing-file benchmark should report path-does-not-exist: {error}"
+    );
 }
 
 /// A frontend benchmark must acquire its raw session before path validation or
@@ -199,5 +210,9 @@ fn frontend_benchmark_fails_for_invalid_syntax() {
     };
 
     let result = run_frontend_benchmark(options);
-    assert!(result.is_err(), "benchmark should fail for invalid syntax");
+    let error = result.expect_err("benchmark should fail for invalid syntax");
+    assert!(
+        error.message.contains("MOTH-SYNTAX"),
+        "invalid-syntax benchmark should report a syntax diagnostic: {error}"
+    );
 }

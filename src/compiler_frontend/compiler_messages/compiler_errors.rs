@@ -267,6 +267,19 @@ impl CompilerMessages {
         })
     }
 
+    /// Test-only: iterate over all infrastructure-error payloads, returning the
+    /// full `DiagnosticPayload::InfrastructureError` variant for metadata access.
+    #[cfg(test)]
+    pub(crate) fn infrastructure_error_payloads_for_tests(
+        &self,
+    ) -> impl Iterator<Item = &DiagnosticPayload> {
+        self.error_diagnostics()
+            .filter_map(|diagnostic| match &diagnostic.payload {
+                DiagnosticPayload::InfrastructureError { .. } => Some(&diagnostic.payload),
+                _ => None,
+            })
+    }
+
     /// Iterate over diagnostics with `Warning` severity.
     pub(crate) fn warnings(&self) -> impl Iterator<Item = &CompilerDiagnostic> {
         self.diagnostics
@@ -481,6 +494,7 @@ impl CompilerMessages {
 #[derive(Debug, Eq, Hash, PartialEq, Clone)]
 pub enum CompilerErrorMetadataKey {
     CompilationStage,
+    OutputRejectionReason,
 
     // Optional guidance for direct internal/tooling error rendering.
     PrimarySuggestion,

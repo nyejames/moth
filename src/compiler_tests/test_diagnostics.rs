@@ -6,7 +6,9 @@
 //!   infrastructure error type or authored reason so an unrelated error
 //!   cannot satisfy the intended contract.
 
-use crate::compiler_frontend::compiler_errors::{CompilerMessages, ErrorType};
+use crate::compiler_frontend::compiler_errors::{
+    CompilerErrorMetadataKey, CompilerMessages, ErrorType,
+};
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use std::collections::BTreeMap;
 
@@ -75,6 +77,38 @@ pub fn assert_exact_infrastructure_error(messages: &CompilerMessages, expected_t
     assert_eq!(
         infra_errors[0].0, expected_type,
         "infrastructure error type mismatch"
+    );
+}
+
+/// Assert that `messages` contains exactly one error diagnostic, that it is
+/// an infrastructure error of type `File`, and that it carries the expected
+/// `OutputRejectionReason` metadata value.
+///
+/// WHAT: extracts the `OutputRejectionReason` metadata from the infrastructure
+///   error payload and compares it against the expected reason string.
+/// WHY: all output-writer rejections share `ErrorType::File`. The typed reason
+///   seam distinguishes between distinct safety contracts (invalid path,
+///   duplicate destination, symlink escape, etc.) so a test for one contract
+///   cannot pass when a different contract is violated.
+#[track_caller]
+pub fn assert_output_rejection(messages: &CompilerMessages, expected_reason: &str) {
+    assert_exact_infrastructure_error(messages, &ErrorType::File);
+
+    let payloads: Vec<_> = messages.infrastructure_error_payloads_for_tests().collect();
+    let payload = &payloads[0];
+    let actual_reason = match payload {
+        crate::compiler_frontend::compiler_messages::DiagnosticPayload::InfrastructureError {
+            metadata,
+            ..
+        } => metadata
+            .get(&CompilerErrorMetadataKey::OutputRejectionReason)
+            .map(|s| s.as_str())
+            .unwrap_or("<none>"),
+        _ => "<none>",
+    };
+    assert_eq!(
+        actual_reason, expected_reason,
+        "output rejection reason mismatch: expected '{expected_reason}', got '{actual_reason}'"
     );
 }
 

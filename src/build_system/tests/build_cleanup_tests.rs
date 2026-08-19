@@ -721,8 +721,9 @@ fn read_v4_recovery_retains_known_owner_after_extension_metadata_damage() {
         ),
     ];
 
-    for (case_name, manifest_text, reason) in cases {
-        let root = unused_temp_path(&format!("cleanup_owner_recovery_{case_name}"));
+    for (_case_name, manifest_text, reason) in cases {
+        let _temp1 = tempfile::tempdir().expect("should create temp dir");
+        let root = _temp1.path().to_path_buf();
         fs::create_dir_all(&root).expect("should create temp root");
         fs::write(root.join(BUILD_MANIFEST_FILENAME), manifest_text)
             .expect("should write damaged v4 manifest");
@@ -1290,8 +1291,9 @@ fn stale_cleanup_ignores_reserved_manifest_paths() {
         ),
     ];
 
-    for (case_name, stale_path, filesystem_path) in cases {
-        let root = unused_temp_path(&format!("cleanup_reserved_manifest_{case_name}"));
+    for (_case_name, stale_path, filesystem_path) in cases {
+        let _temp2 = tempfile::tempdir().expect("should create temp dir");
+        let root = _temp2.path().to_path_buf();
         fs::create_dir_all(&root).expect("should create temp root");
         if let Some(parent) = filesystem_path.parent()
             && parent != Path::new("")
