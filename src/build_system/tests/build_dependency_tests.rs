@@ -4,8 +4,10 @@
 
 use super::*;
 use crate::build_system::build::{ProjectBuilder, build_project};
-use crate::compiler_frontend::utilities::basic::normalize_path;
+use crate::build_system::output::output_path_identity;
+use crate::compiler_frontend::utilities::basic::{normalize_path, portable_path_text};
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 
 /// The registered runtime module's exact emitted path.
@@ -13,6 +15,319 @@ use std::fs;
 /// Tests look this up exactly rather than matching a path suffix, so a runtime module emitted
 /// under an unexpected directory is a failure rather than a silent pass.
 const RUNTIME_MODULE_PATH: &str = "_moth/js/runtime/moth-runtime.js";
+
+/// The generated glue directory, anchored at the output root.
+///
+/// Predicates use this as a prefix rather than a substring, so a glue module emitted under some
+/// other parent directory cannot satisfy an assertion about the glue directory.
+const GLUE_MODULE_PREFIX: &str = "_moth/js/glue/";
+
+/// One unique, normalized view of the artifacts a build produced.
+///
+/// WHAT: indexes every emitted `OutputFile` by its portable relative path and offers
+///       cardinality-proving selectors.
+/// WHY: `output_files.iter().find_map(..)` returns the first match, so a build that emitted
+///      two glue modules, two HTML pages or a duplicate path would still satisfy an assertion
+///      about "the" artifact. These selectors prove exactly-one before returning anything, and
+///      `paths()` makes the whole emitted set assertable instead of merely non-empty.
+struct BuiltOutputs<'a> {
+    by_path: BTreeMap<String, &'a OutputFile>,
+}
+
+impl<'a> BuiltOutputs<'a> {
+    /// Index a project's outputs, failing on any path the output writer would not accept and on
+    /// any two artifacts that share one canonical output-path identity.
+    ///
+    /// Validity and collision identity come from `output_path_identity`, so these tests apply
+    /// the production destination policy rather than a second, almost-equivalent one.
+    #[track_caller]
+    fn index(project: &'a Project) -> Self {
+        let mut by_path: BTreeMap<String, &'a OutputFile> = BTreeMap::new();
+        let mut spelling_by_identity = HashMap::new();
+
+        for output in &project.output_files {
+            if matches!(output.file_kind(), FileKind::NotBuilt) {
+                continue;
+            }
+
+            let relative_path = output.relative_output_path();
+            let identity = match output_path_identity(relative_path) {
+                Ok(identity) => identity,
+                Err(reason) => panic!(
+                    "the build emitted {relative_path:?}, which the output writer would reject \
+                     as an invalid portable destination ({reason:?})"
+                ),
+            };
+
+            let spelling = portable_path_text(relative_path);
+            if let Some(existing) = spelling_by_identity.insert(identity, spelling.clone()) {
+                assert_ne!(
+                    existing, spelling,
+                    "the build emitted more than one artifact at '{spelling}'"
+                );
+                panic!(
+                    "the build emitted '{existing}' and '{spelling}', which share one output \
+                     path identity and collide on case-insensitive filesystems"
+                );
+            }
+
+            // Two spellings sharing one identity were rejected above, so this never displaces.
+            by_path.insert(spelling, output);
+        }
+
+        Self { by_path }
+    }
+
+    /// Every emitted artifact path, in portable sorted order.
+    fn paths(&self) -> Vec<&str> {
+        self.by_path.keys().map(String::as_str).collect()
+    }
+
+    /// The artifact at exactly this portable path.
+    #[track_caller]
+    fn at(&self, path: &str) -> &'a OutputFile {
+        match self.by_path.get(path) {
+            Some(output) => output,
+            None => panic!(
+                "expected an artifact at '{path}', but the build emitted {:?}",
+                self.paths()
+            ),
+        }
+    }
+
+    /// The single artifact whose portable path satisfies `predicate`.
+    ///
+    /// Panics when zero or more than one artifact matches, so a test about "the glue module"
+    /// cannot pass while a second glue module is also being emitted.
+    #[track_caller]
+    fn exactly_one(&self, description: &str, predicate: impl Fn(&str) -> bool) -> &'a OutputFile {
+        let matches = self
+            .by_path
+            .iter()
+            .filter(|(path, _)| predicate(path))
+            .collect::<Vec<_>>();
+        match matches.as_slice() {
+            [(_, output)] => output,
+            [] => panic!(
+                "expected exactly one {description}, but the build emitted {:?}",
+                self.paths()
+            ),
+            several => panic!(
+                "expected exactly one {description}, but {} matched: {:?}",
+                several.len(),
+                several.iter().map(|(path, _)| path).collect::<Vec<_>>()
+            ),
+        }
+    }
+
+    /// The portable path of the single artifact satisfying `predicate`.
+    #[track_caller]
+    fn exactly_one_path(&self, description: &str, predicate: impl Fn(&str) -> bool) -> &str {
+        let matches = self
+            .by_path
+            .keys()
+            .filter(|path| predicate(path))
+            .collect::<Vec<_>>();
+        match matches.as_slice() {
+            [path] => path.as_str(),
+            [] => panic!(
+                "expected exactly one {description}, but the build emitted {:?}",
+                self.paths()
+            ),
+            several => panic!(
+                "expected exactly one {description}, but {} matched: {several:?}",
+                several.len()
+            ),
+        }
+    }
+
+    /// Assert that no emitted artifact path satisfies `predicate`.
+    #[track_caller]
+    fn none_matching(&self, description: &str, predicate: impl Fn(&str) -> bool) {
+        let matches = self
+            .by_path
+            .keys()
+            .filter(|path| predicate(path))
+            .collect::<Vec<_>>();
+        assert!(
+            matches.is_empty(),
+            "expected no {description}, but found {matches:?}"
+        );
+    }
+}
+
+/// A stable name for an artifact kind, for failure messages.
+fn file_kind_name(kind: &FileKind) -> &'static str {
+    match kind {
+        FileKind::NotBuilt => "not-built",
+        FileKind::Wasm(_) => "wasm",
+        FileKind::Bytes(_) => "bytes",
+        FileKind::Js(_) => "js",
+        FileKind::Html(_) => "html",
+        FileKind::Directory => "directory",
+    }
+}
+
+/// The HTML text of an artifact, proving its kind.
+#[track_caller]
+fn html_text(output: &OutputFile) -> &str {
+    match output.file_kind() {
+        FileKind::Html(html) => html.as_str(),
+        other => panic!(
+            "expected an HTML artifact at {:?}, found a {} artifact",
+            output.relative_output_path(),
+            file_kind_name(other)
+        ),
+    }
+}
+
+/// The JavaScript text of an artifact, proving its kind.
+#[track_caller]
+fn js_text(output: &OutputFile) -> &str {
+    match output.file_kind() {
+        FileKind::Js(source) => source.as_str(),
+        other => panic!(
+            "expected a JS artifact at {:?}, found a {} artifact",
+            output.relative_output_path(),
+            file_kind_name(other)
+        ),
+    }
+}
+
+mod built_outputs_tests {
+    use super::*;
+    use crate::compiler_tests::test_support::assert_panics_with;
+
+    fn project_with(files: Vec<(&str, FileKind)>) -> Project {
+        Project {
+            output_files: files
+                .into_iter()
+                .map(|(path, kind)| OutputFile::new(PathBuf::from(path), kind))
+                .collect(),
+            entry_page_rel: None,
+            cleanup_policy: CleanupPolicy::html(),
+            warnings: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn index_rejects_duplicate_artifact_paths() {
+        let project = project_with(vec![
+            ("index.html", FileKind::Html("first".to_owned())),
+            ("index.html", FileKind::Html("second".to_owned())),
+        ]);
+
+        assert_panics_with("more than one artifact at 'index.html'", || {
+            BuiltOutputs::index(&project);
+        });
+    }
+
+    #[test]
+    fn index_rejects_artifact_paths_that_differ_only_by_ascii_case() {
+        let project = project_with(vec![
+            ("assets/Page.js", FileKind::Js("// first".to_owned())),
+            ("assets/page.js", FileKind::Js("// second".to_owned())),
+        ]);
+
+        assert_panics_with("share one output path identity", || {
+            BuiltOutputs::index(&project);
+        });
+    }
+
+    #[test]
+    fn index_keeps_non_ascii_case_differences_distinct() {
+        // The canonical output-path identity folds ASCII case only, so these are two
+        // destinations in production and must be two entries here.
+        let project = project_with(vec![
+            ("Å.js", FileKind::Js("// upper".to_owned())),
+            ("å.js", FileKind::Js("// lower".to_owned())),
+        ]);
+
+        assert_eq!(BuiltOutputs::index(&project).paths().len(), 2);
+    }
+
+    #[test]
+    fn index_rejects_paths_the_output_writer_would_reject() {
+        let project = project_with(vec![(
+            "assets/../page.js",
+            FileKind::Js("// escaped".to_owned()),
+        )]);
+
+        assert_panics_with(
+            "invalid portable destination (ParentDirectorySegment)",
+            || {
+                BuiltOutputs::index(&project);
+            },
+        );
+    }
+
+    #[test]
+    fn index_skips_not_built_entries() {
+        let project = project_with(vec![
+            ("index.html", FileKind::NotBuilt),
+            ("page.js", FileKind::Js("// page".to_owned())),
+        ]);
+
+        assert_eq!(BuiltOutputs::index(&project).paths(), vec!["page.js"]);
+    }
+
+    #[test]
+    fn exactly_one_rejects_multiple_matches() {
+        let project = project_with(vec![
+            ("_moth/js/glue/a.js", FileKind::Js("// a".to_owned())),
+            ("_moth/js/glue/b.js", FileKind::Js("// b".to_owned())),
+        ]);
+        let outputs = BuiltOutputs::index(&project);
+
+        assert_panics_with("expected exactly one glue module, but 2 matched", || {
+            outputs.exactly_one("glue module", |path| path.starts_with(GLUE_MODULE_PREFIX));
+        });
+    }
+
+    #[test]
+    fn exactly_one_rejects_no_match() {
+        let project = project_with(vec![("index.html", FileKind::Html(String::new()))]);
+        let outputs = BuiltOutputs::index(&project);
+
+        assert_panics_with("expected exactly one glue module", || {
+            outputs.exactly_one("glue module", |path| path.starts_with(GLUE_MODULE_PREFIX));
+        });
+    }
+
+    #[test]
+    fn glue_predicates_are_anchored_at_the_output_root() {
+        // A nested directory that merely contains the glue path is not the glue directory.
+        let project = project_with(vec![(
+            "vendor/_moth/js/glue/a.js",
+            FileKind::Js("// vendored".to_owned()),
+        )]);
+        let outputs = BuiltOutputs::index(&project);
+
+        outputs.none_matching("generated glue module", |path| {
+            path.starts_with(GLUE_MODULE_PREFIX)
+        });
+    }
+
+    #[test]
+    fn at_reports_the_emitted_set_when_a_path_is_missing() {
+        let project = project_with(vec![("main.html", FileKind::Html(String::new()))]);
+        let outputs = BuiltOutputs::index(&project);
+
+        assert_panics_with("expected an artifact at 'index.html'", || {
+            outputs.at("index.html");
+        });
+    }
+
+    #[test]
+    fn html_text_rejects_a_js_artifact() {
+        let project = project_with(vec![("page.js", FileKind::Js("// page".to_owned()))]);
+        let outputs = BuiltOutputs::index(&project);
+
+        assert_panics_with("expected an HTML artifact", || {
+            html_text(outputs.at("page.js"));
+        });
+    }
+}
 
 #[test]
 fn build_single_file_project_includes_reachable_dependency_files() {
@@ -90,7 +405,7 @@ fn build_html_project_local_js_import_emits_generated_glue() {
     // Exactly one glue module: a second one would mean the page imports from one module while
     // this assertion inspects another.
     let glue = js_text(outputs.exactly_one("generated glue module", |path| {
-        path.contains("_moth/js/glue/")
+        path.starts_with(GLUE_MODULE_PREFIX)
     }));
     assert!(glue.contains("import { draw as __moth_external_fn"));
     assert!(glue.contains("return __moth_external_fn"));
@@ -99,7 +414,7 @@ fn build_html_project_local_js_import_emits_generated_glue() {
     // under the glue directory.
     let glue_path = outputs
         .exactly_one_path("generated glue module", |path| {
-            path.contains("_moth/js/glue/")
+            path.starts_with(GLUE_MODULE_PREFIX)
         })
         .to_owned();
     assert!(
@@ -253,7 +568,7 @@ fn build_html_project_unreachable_provider_js_import_does_not_emit_runtime_artif
 
     let outputs = BuiltOutputs::index(&result.project);
     outputs.none_matching("generated glue module", |path| {
-        path.contains("_moth/js/glue/")
+        path.starts_with(GLUE_MODULE_PREFIX)
     });
     outputs.none_matching("runtime module", |path| {
         path.starts_with("_moth/js/runtime/")
@@ -307,7 +622,7 @@ fn build_html_project_unreachable_html_canvas_helper_dependency_does_not_emit_ru
         path.starts_with("_moth/js/canvas-")
     });
     outputs.none_matching("generated glue module", |path| {
-        path.contains("_moth/js/glue/")
+        path.starts_with(GLUE_MODULE_PREFIX)
     });
     outputs.none_matching("runtime module", |path| {
         path.starts_with("_moth/js/runtime/")
@@ -350,7 +665,7 @@ fn build_html_project_web_canvas_emits_builtin_js_asset_and_glue() {
     assert!(canvas_asset.contains("export function imageDataSetPixel"));
 
     let glue = js_text(outputs.exactly_one("generated glue module", |path| {
-        path.contains("_moth/js/glue/")
+        path.starts_with(GLUE_MODULE_PREFIX)
     }));
     assert!(glue.contains("getCanvas as __moth_external_fn"));
     assert!(glue.contains("fillRect as __moth_external_fn"));
@@ -407,7 +722,7 @@ fn build_html_project_html_canvas_helper_emits_builtin_js_asset_and_glue() {
     assert!(canvas_asset.contains("export function context2d"));
 
     let glue = js_text(outputs.exactly_one("generated glue module", |path| {
-        path.contains("_moth/js/glue/")
+        path.starts_with(GLUE_MODULE_PREFIX)
     }));
     assert!(glue.contains("getCanvas as __moth_external_fn"));
     assert!(glue.contains("context2d as __moth_external_fn"));

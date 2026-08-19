@@ -4,7 +4,7 @@
 //! WHY: assertion regressions can silently weaken the suite without changing compilation.
 
 use super::super::assertions::{
-    RuntimeEvent, SlotOutput, build_artifact_index_reason, compare_text_golden,
+    ArtifactIndexError, RuntimeEvent, SlotOutput, build_artifact_index_error, compare_text_golden,
     discover_golden_expectation, execute_wasm_harness_for_test, extract_script_blocks,
     normalize_text_for_comparison, parse_harness_output, validate_failure_result,
     validate_golden_outputs, validate_rendered_output_fragments, validate_success_result,
@@ -24,6 +24,7 @@ use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerMessag
 use crate::compiler_frontend::compiler_messages::source_location::{CharPosition, SourceLocation};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticLabel, DiagnosticLabelMessage, InvalidAssignmentTargetReason,
+    InvalidOutputFolderReason,
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -1444,7 +1445,17 @@ fn nested_golden_validation_compares_relative_paths() {
 // Every success assertion reads artifacts through one index. These tests own the index's
 // construction contract: an ambiguous artifact set must be rejected before any assertion
 // consumes it, because a first-match lookup would otherwise inspect one artifact and ignore
-// the rest.
+// the rest. Rejections are identified by their variant, not by their wording; one separate
+// test owns the rendered text.
+
+/// Rejects and returns the typed reason, so each test names the variant it is about.
+#[track_caller]
+fn artifact_index_rejection(build_result: &BuildResult, why: &str) -> ArtifactIndexError {
+    match build_artifact_index_error(build_result) {
+        Some(error) => error,
+        None => panic!("{why}"),
+    }
+}
 
 #[test]
 fn artifact_index_rejects_duplicate_normalized_paths() {
@@ -1461,16 +1472,16 @@ fn artifact_index_rejects_duplicate_normalized_paths() {
         ),
     ]);
 
-    let reason = build_artifact_index_reason(&build_result)
-        .expect("two artifacts at one path must be rejected");
-    assert!(
-        reason.contains("more than one artifact at 'index.html'"),
-        "duplicate rejection must name the duplicated path: {reason}"
-    );
+    let error =
+        artifact_index_rejection(&build_result, "two artifacts at one path must be rejected");
+    let ArtifactIndexError::DuplicatePath { path } = error else {
+        panic!("a repeated spelling is a duplicate path, not {error:?}");
+    };
+    assert_eq!(path, "index.html");
 }
 
 #[test]
-fn artifact_index_rejects_paths_that_differ_only_by_case() {
+fn artifact_index_rejects_paths_that_differ_only_by_ascii_case() {
     let build_result = build_result_with_output_files(vec![
         (
             PathBuf::from("assets/Page.js"),
@@ -1482,16 +1493,67 @@ fn artifact_index_rejects_paths_that_differ_only_by_case() {
         ),
     ]);
 
-    let reason = build_artifact_index_reason(&build_result)
-        .expect("case-aliasing artifacts must be rejected");
+    let error = artifact_index_rejection(&build_result, "case-aliasing artifacts must be rejected");
+    let ArtifactIndexError::PortabilityAlias { first, second } = error else {
+        panic!("two spellings of one output identity are an alias, not {error:?}");
+    };
+    assert_eq!(first, "assets/Page.js");
+    assert_eq!(second, "assets/page.js");
+}
+
+#[test]
+fn artifact_index_keeps_non_ascii_case_differences_distinct() {
+    // The canonical output-path identity folds ASCII case only, so the harness must not apply
+    // broader Unicode folding and reject a pair production treats as two destinations.
+    let build_result = build_result_with_output_files(vec![
+        (PathBuf::from("Å.js"), FileKind::Js("// upper".to_owned())),
+        (PathBuf::from("å.js"), FileKind::Js("// lower".to_owned())),
+    ]);
+
     assert!(
-        reason.contains("differ only by case"),
-        "alias rejection must name the portability contract: {reason}"
+        build_artifact_index_error(&build_result).is_none(),
+        "non-ASCII case differences are distinct output destinations"
     );
-    assert!(
-        reason.contains("assets/Page.js") && reason.contains("assets/page.js"),
-        "alias rejection must name both aliasing paths: {reason}"
+}
+
+#[test]
+fn artifact_index_rejects_paths_the_output_writer_would_reject() {
+    // The writer refuses parent segments in a relative output path. The harness must refuse the
+    // same destinations instead of indexing something that could never be emitted.
+    let build_result = build_result_with_output_files(vec![(
+        PathBuf::from("assets/../page.js"),
+        FileKind::Js("// escaped".to_owned()),
+    )]);
+
+    let error = artifact_index_rejection(
+        &build_result,
+        "an artifact path the writer rejects must not be indexed",
     );
+    let ArtifactIndexError::InvalidOutputPath { path, reason } = error else {
+        panic!("a parent segment is an invalid output path, not {error:?}");
+    };
+    assert_eq!(path, "assets/../page.js");
+    assert_eq!(reason, InvalidOutputFolderReason::ParentDirectorySegment);
+}
+
+#[test]
+fn artifact_index_rejects_reserved_device_artifact_names() {
+    // `CON.js` cannot be written on Windows, so a build that emits it is not portable and the
+    // harness must not silently accept it on Unix.
+    let build_result = build_result_with_output_files(vec![(
+        PathBuf::from("CON.js"),
+        FileKind::Js("// reserved".to_owned()),
+    )]);
+
+    let error = artifact_index_rejection(
+        &build_result,
+        "a reserved device basename must not be indexed",
+    );
+    let ArtifactIndexError::InvalidOutputPath { path, reason } = error else {
+        panic!("a reserved device name is an invalid output path, not {error:?}");
+    };
+    assert_eq!(path, "CON.js");
+    assert_eq!(reason, InvalidOutputFolderReason::InvalidPathComponent);
 }
 
 #[test]
@@ -1509,7 +1571,7 @@ fn artifact_index_accepts_distinct_paths_with_separator_differences() {
         ),
     ]);
 
-    assert_eq!(build_artifact_index_reason(&build_result), None);
+    assert!(build_artifact_index_error(&build_result).is_none());
 }
 
 #[test]
@@ -1524,7 +1586,7 @@ fn artifact_index_ignores_not_built_outputs() {
         ),
     ]);
 
-    assert_eq!(build_artifact_index_reason(&build_result), None);
+    assert!(build_artifact_index_error(&build_result).is_none());
 }
 
 #[test]
@@ -1539,11 +1601,47 @@ fn artifact_index_rejects_non_utf8_artifact_paths() {
         FileKind::Js("// invalid".to_owned()),
     )]);
 
-    let reason = build_artifact_index_reason(&build_result)
-        .expect("a non-UTF-8 artifact path must be rejected, not lossily replaced");
+    let error = artifact_index_rejection(
+        &build_result,
+        "a non-UTF-8 artifact path must be rejected, not lossily replaced",
+    );
     assert!(
-        reason.contains("is not valid UTF-8"),
-        "non-UTF-8 rejection must name the encoding contract: {reason}"
+        matches!(error, ArtifactIndexError::NonUtf8Path { .. }),
+        "a non-UTF-8 path is an encoding rejection, not {error:?}"
+    );
+}
+
+#[test]
+fn artifact_index_rejections_name_the_offending_paths() {
+    // The variants above carry the identity; this test owns the operator-facing wording, so a
+    // reworded message cannot silently make every other rejection test unreadable.
+    let duplicate = ArtifactIndexError::DuplicatePath {
+        path: "index.html".to_owned(),
+    }
+    .to_string();
+    assert!(
+        duplicate.contains("more than one artifact at 'index.html'"),
+        "duplicate rejection must name the duplicated path: {duplicate}"
+    );
+
+    let alias = ArtifactIndexError::PortabilityAlias {
+        first: "assets/Page.js".to_owned(),
+        second: "assets/page.js".to_owned(),
+    }
+    .to_string();
+    assert!(
+        alias.contains("assets/Page.js") && alias.contains("assets/page.js"),
+        "alias rejection must name both spellings: {alias}"
+    );
+
+    let invalid = ArtifactIndexError::InvalidOutputPath {
+        path: "assets/../page.js".to_owned(),
+        reason: InvalidOutputFolderReason::ParentDirectorySegment,
+    }
+    .to_string();
+    assert!(
+        invalid.contains("assets/../page.js") && invalid.contains("ParentDirectorySegment"),
+        "invalid-destination rejection must name the path and the writer's reason: {invalid}"
     );
 }
 

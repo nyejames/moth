@@ -6,7 +6,7 @@
   "branch": "test-suite-honesty",
   "host_platform": "macOS",
   "summary": {
-    "unit_tests_passed": 4329,
+    "unit_tests_passed": 4337,
     "unit_tests_failed": 0,
     "unit_tests_ignored": 0,
     "integration_cases_correct": 1699,
@@ -214,7 +214,7 @@
       "code": "first_match_artifact_selection",
       "severity": "hard",
       "description": "find_output_file returned the first matching artifact and collect_built_artifact_paths accepted duplicate normalized paths, so every later assertion inspected one artifact of an ambiguous set",
-      "disposition": "fixed in Phase 4: BuiltArtifactIndex is built once in validate_success_result before any success assertion and consumed by the HTML/HTML-Wasm baselines, artifact assertions, absence checks, goldens and rendered-output harnesses; construction rejects duplicate normalized paths, case-only portability aliases and non-UTF-8 relative paths, and an ambiguous set fails the case as FailureKind::HarnessFailed; regressions cover duplicates, aliases, separator normalization, NotBuilt entries and non-UTF-8 paths",
+      "disposition": "fixed in Phase 4: BuiltArtifactIndex is built once in validate_success_result before any success assertion and consumed by the HTML/HTML-Wasm baselines, artifact assertions, absence checks, goldens and rendered-output harnesses; validity and collision identity come from the canonical output_path_identity used by the output writer, so the harness rejects exactly the destinations production rejects and folds ASCII case only; an ambiguous or invalid set fails the case as FailureKind::HarnessFailed; self-tests match the typed ArtifactIndexError variants (with one separate test owning the rendered wording) and cover duplicates, ASCII case aliases, non-ASCII case distinctness, parent segments, reserved device basenames, separator normalization, NotBuilt entries and non-UTF-8 paths",
       "status": "resolved"
     },
     {
@@ -237,6 +237,13 @@
       "description": "Phase 1's absence migration covered only the compiler crate; 14 negative Path::exists assertions remained in xtask tests",
       "disposition": "fixed in the pre-Phase-4 review pass: added xtask/src/test_fs.rs (assert_path_missing/assert_regular_file/assert_directory with a dangling-symlink regression) and migrated bench_history and benchmark_workspace call sites",
       "status": "resolved"
+    },
+    {
+      "code": "unanchored_output_path_predicates",
+      "severity": "review",
+      "description": "Build-system glue selectors matched path.contains(\"_moth/js/glue/\"), so a glue module emitted under an unexpected parent directory satisfied an assertion about the glue directory",
+      "disposition": "fixed in the Phase 4 closeout: glue predicates use a shared GLUE_MODULE_PREFIX with starts_with, matching the already-anchored provider, canvas and runtime selectors, with a self-test proving a nested vendor/_moth/js/glue path does not match",
+      "status": "resolved"
     }
   ],
   "infrastructure_added": [
@@ -246,11 +253,11 @@
     "ScopedEnvVar guard in xtask bench_history/tests.rs",
     "surface_thread_panic helper in timing/tests/enabled_tests.rs",
     "CurrentDirGuard::finish() with Option<PathBuf> take pattern",
-    "CurrentDirGuard restore-failure injection seam (test_restore, with_restore_override, RestoreFn type)",
+    "CurrentDirGuard restore-failure injection seam (with_restore_override, RestoreFn type)",
     "CurrentDirGuard Drop reports restore failure to stderr during unwinding",
     "src/compiler_tests/test_support.rs: assert_panics_with (panic-reason assertion), unused_temp_path absence verification",
     "xtask/src/test_fs.rs: assert_path_missing, assert_regular_file, assert_directory",
-    "BuiltArtifactIndex + ArtifactIndexError in the integration assertion owner",
-    "BuiltOutputs index with at/exactly_one/exactly_one_path/none_matching plus html_text/js_text kind accessors in build_system tests"
+    "BuiltArtifactIndex + typed ArtifactIndexError in the integration assertion owner; validity and collision identity come from the canonical output_path_identity, so the harness applies the writer's destination policy instead of a second path taxonomy",
+    "BuiltOutputs index with at/exactly_one/exactly_one_path/none_matching plus html_text/js_text kind accessors, owned by build_system/tests/build_dependency_tests.rs and using the same canonical output_path_identity collision check"
   ]
 }

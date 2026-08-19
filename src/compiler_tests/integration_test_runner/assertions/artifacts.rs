@@ -7,14 +7,16 @@
 
 use super::super::{ArtifactAssertion, ArtifactKind};
 use crate::build_system::build::{BuildResult, FileKind, OutputFile};
+use crate::build_system::output::output_path_identity;
+use crate::compiler_frontend::compiler_messages::InvalidOutputFolderReason;
 use crate::compiler_frontend::utilities::basic::portable_path_text;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 
 /// One normalized, unique view of the artifacts a build actually produced.
 ///
 /// WHAT: maps every built artifact's portable relative path to its `OutputFile`, rejecting
-///       duplicate paths, portability aliases and paths that are not valid UTF-8.
+///       invalid output destinations, duplicate paths and portability aliases.
 /// WHY: first-match lookup silently inspects one of several artifacts claiming the same path,
 ///      so every later assertion would read the winner and ignore the rest. Building the index
 ///      once, before any success assertion runs, makes path identity a proved precondition
@@ -28,14 +30,20 @@ pub(super) struct BuiltArtifactIndex<'a> {
 /// These are harness-level facts about the produced output set, not expectation violations:
 /// no authored expectation can be evaluated honestly against an ambiguous artifact set.
 #[derive(Debug)]
-pub(super) enum ArtifactIndexError {
-    /// Two built artifacts normalize to the same portable path.
+pub(crate) enum ArtifactIndexError {
+    /// Two built artifacts share one canonical output-path identity and one spelling.
     DuplicatePath { path: String },
-    /// Two built artifacts differ only by case, so they collide on case-insensitive hosts.
+    /// Two built artifacts spell one canonical output-path identity differently, so they
+    /// collide on hosts that fold case.
     PortabilityAlias { first: String, second: String },
     /// A relative output path is not valid UTF-8, so it cannot be compared with an
     /// authored expectation without lossy replacement.
     NonUtf8Path { path: String },
+    /// A relative output path is not a destination the output writer would accept.
+    InvalidOutputPath {
+        path: String,
+        reason: InvalidOutputFolderReason,
+    },
 }
 
 impl fmt::Display for ArtifactIndexError {
@@ -48,13 +56,18 @@ impl fmt::Display for ArtifactIndexError {
             ),
             Self::PortabilityAlias { first, second } => write!(
                 formatter,
-                "the build produced artifacts '{first}' and '{second}', which differ only by \
-                 case and collide on case-insensitive filesystems"
+                "the build produced artifacts '{first}' and '{second}', which share one output \
+                 path identity and collide on case-insensitive filesystems"
             ),
             Self::NonUtf8Path { path } => write!(
                 formatter,
                 "the build produced an artifact whose relative path {path} is not valid UTF-8, \
                  so it cannot be matched against an authored expectation"
+            ),
+            Self::InvalidOutputPath { path, reason } => write!(
+                formatter,
+                "the build produced an artifact at '{path}', which the output writer would \
+                 reject as an invalid portable destination ({reason:?})"
             ),
         }
     }
@@ -62,12 +75,16 @@ impl fmt::Display for ArtifactIndexError {
 
 impl<'a> BuiltArtifactIndex<'a> {
     /// Build the index, or explain why the produced artifact set is ambiguous.
+    ///
+    /// Validity and collision identity come from `output_path_identity`, the same canonical
+    /// output-path policy the writer enforces, so the harness cannot accept a destination the
+    /// writer would reject or fold case differently than production does. `portable_path_text`
+    /// is used only for lookup keys, sorted display and failure reporting.
     pub(super) fn build(build_result: &'a BuildResult) -> Result<Self, ArtifactIndexError> {
         let mut by_path: BTreeMap<String, &'a OutputFile> = BTreeMap::new();
-        // Portability aliasing is decided on the case-folded path, which is why it needs its
-        // own map: `Page.js` and `page.js` are distinct keys in `by_path` but one file on a
-        // case-insensitive host.
-        let mut by_folded_path: BTreeMap<String, String> = BTreeMap::new();
+        // `Page.js` and `page.js` are distinct spellings but one canonical identity, so
+        // collisions are decided on the identity and reported with the spellings.
+        let mut spelling_by_identity = HashMap::new();
 
         for output in &build_result.project.output_files {
             if matches!(output.file_kind(), FileKind::NotBuilt) {
@@ -75,27 +92,36 @@ impl<'a> BuiltArtifactIndex<'a> {
             }
 
             let relative_path = output.relative_output_path();
-            if relative_path.to_str().is_none() {
-                return Err(ArtifactIndexError::NonUtf8Path {
-                    path: format!("{relative_path:?}"),
+            let identity = match output_path_identity(relative_path) {
+                Ok(identity) => identity,
+                Err(InvalidOutputFolderReason::NonUtf8) => {
+                    return Err(ArtifactIndexError::NonUtf8Path {
+                        path: format!("{relative_path:?}"),
+                    });
+                }
+                Err(reason) => {
+                    return Err(ArtifactIndexError::InvalidOutputPath {
+                        path: portable_path_text(relative_path),
+                        reason,
+                    });
+                }
+            };
+
+            let spelling = portable_path_text(relative_path);
+            if let Some(existing) = spelling_by_identity.insert(identity, spelling.clone()) {
+                return Err(if existing == spelling {
+                    ArtifactIndexError::DuplicatePath { path: spelling }
+                } else {
+                    ArtifactIndexError::PortabilityAlias {
+                        first: existing,
+                        second: spelling,
+                    }
                 });
             }
 
-            let normalized = portable_path_text(relative_path);
-
-            if let Some(existing) =
-                by_folded_path.insert(normalized.to_lowercase(), normalized.clone())
-                && existing != normalized
-            {
-                return Err(ArtifactIndexError::PortabilityAlias {
-                    first: existing,
-                    second: normalized,
-                });
-            }
-
-            if by_path.insert(normalized.clone(), output).is_some() {
-                return Err(ArtifactIndexError::DuplicatePath { path: normalized });
-            }
+            // Two spellings sharing one identity were rejected above, so this insert never
+            // displaces an entry.
+            by_path.insert(spelling, output);
         }
 
         Ok(Self { by_path })

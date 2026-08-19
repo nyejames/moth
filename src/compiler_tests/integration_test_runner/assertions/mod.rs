@@ -11,6 +11,8 @@ mod rendered_output;
 mod warnings;
 mod wasm;
 
+#[cfg(test)]
+pub(crate) use artifacts::ArtifactIndexError;
 pub(crate) use goldens::discover_golden_expectation;
 #[cfg(test)]
 pub(crate) use rendered_output::execute_wasm_harness_for_test;
@@ -124,11 +126,12 @@ pub(crate) fn validate_golden_outputs(
 }
 
 /// Test-only view of the artifact index construction contract.
+///
+/// The typed error is handed back unchanged so self-tests identify a rejection by its variant
+/// rather than by matching prose.
 #[cfg(test)]
-pub(crate) fn build_artifact_index_reason(build_result: &BuildResult) -> Option<String> {
-    artifacts::BuiltArtifactIndex::build(build_result)
-        .err()
-        .map(|error| error.to_string())
+pub(crate) fn build_artifact_index_error(build_result: &BuildResult) -> Option<ArtifactIndexError> {
+    artifacts::BuiltArtifactIndex::build(build_result).err()
 }
 
 #[cfg(test)]

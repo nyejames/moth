@@ -7,7 +7,7 @@ WORK_ID: test-suite-honesty
 WORK_SOURCE: docs/roadmap/plans/test-suite-honesty-and-infrastructure-hardening-plan.md
 BASE_REVISION: f41f93a7a (post-TIR, post-benchmark-counters-timers)
 STATUS: active — Phase 4 complete, ready for Phase 5
-CURRENT_SCOPE: Phase 4 exact positive assertions and typed artifact inventory (paused for review before Phase 5)
+CURRENT_SCOPE: Phase 4 exact positive assertions and typed artifact inventory, closed out against review (paused before Phase 5)
 COMPLETED:
   Phase 0: baseline established (4314 unit tests, 0 ignored, 1699 integration cases correct,
     1851 backend executions); durable inventory at docs/roadmap/evidence/test_honesty_inventory.json;
@@ -83,9 +83,26 @@ COMPLETED:
     lowering tests assert exact authored locals and exactly one assignment to the authored local;
     the diagnostics include_str! ban renamed to state it is a source-text tripwire, not behavior
     evidence (behavior owners named in its doc comment), pending the Phase 8 audit move
+  Phase 4 closeout (review response): both artifact indexes now derive validity and collision
+    identity from the canonical output_path_identity instead of a harness-local path taxonomy, so
+    the harness rejects exactly the destinations the output writer rejects (parent segments,
+    reserved device basenames, invalid components) and folds ASCII case only, matching production
+    rather than Unicode-folding distinct destinations together; BuiltOutputs gained the same
+    canonical collision check including case aliases, which it previously lacked entirely;
+    ArtifactIndexError gained an InvalidOutputPath variant carrying the writer's reason; the
+    index self-tests match typed variants instead of message substrings, with one separate test
+    owning the rendered wording; new regressions cover an ASCII case alias, a non-ASCII pair that
+    must stay distinct, a parent segment and a reserved device basename in both indexes; glue
+    selectors anchored with a shared GLUE_MODULE_PREFIX and starts_with (matching the provider,
+    canvas and runtime selectors) with a nested-path regression; BuiltOutputs and its self-tests
+    moved from the shared build_system/tests/mod.rs to their only consumer,
+    build_system/tests/build_dependency_tests.rs
 NEXT_ACTION: run Phase 5 (golden kind/encoding contracts, HTML and Wasm baselines, Node harness
   ownership, timeout and script parsing)
-VALIDATION: Phase 4 — cargo fmt; cargo clippy --workspace --all-targets -D warnings (clean);
+VALIDATION: Phase 4 closeout — just validate (pass: clippy --workspace --all-targets --all-features
+  -D warnings clean; cargo test --workspace 4337+17+646, 0 failed, 0 ignored; integration
+  1851/1851; docs check clean; bench-ci 60/60 preflight; timers-erasure-check clean).
+  Phase 4 checkpoint — cargo fmt; cargo clippy --workspace --all-targets -D warnings (clean);
   cargo test --workspace (4329+17+646); cargo run -- tests --terse (1851/1851).
   Earlier phases: cargo fmt --check; cargo clippy -D warnings; cargo test --workspace (4314+17+643);
   cargo run -- tests --terse (1851/1851); cargo test --features timers (pass);
@@ -95,7 +112,9 @@ VALIDATION: Phase 4 — cargo fmt; cargo clippy --workspace --all-targets -D war
   1851/1851 integration cases)
 AUDITS: pre-Phase-4 review of the Phase 0-3 work (helper contracts, panic-reason assertions,
   xtask absence assertions); Phase 4 sweep of >=, non-empty, any and find_map survivors across
-  src and xtask with a disposition for each
+  src and xtask with a disposition for each; Phase 4 closeout review (artifact identity must reuse
+  the canonical output-path policy, typed rejection self-tests, anchored path predicates, helper
+  ownership, just validate as the final gate)
 BLOCKERS: none (Phase 4 complete)
 NOTES: Pre-existing benchmark_counters feature test failures are not caused by this work.
   Inventory finding mappings fixed: lossy_path_text_conversion → Phase 5 item 7,
