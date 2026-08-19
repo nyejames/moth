@@ -42,6 +42,11 @@ When the time comes for hardening and optimising, I suspect the gains from using
 A lot of the time I would be writing the code myself is now spent staring at diffs and writing plans and documentation.
 All the architecture, code organisation and design decisions around this language and compiler are all me and always will be. 
 
+<div align="center">
+    <img src="./docs/assets/iceland-nostalgia.webp" width="500px" border="3" alt="A road in Iceland streching into the distance"/>
+</br>
+
+
 ---
 
 ### "good" agent generated code
@@ -146,6 +151,10 @@ Its very easy to unintentionally steer an LLM towards the solution you prefer ra
 One of the more powerful uses of these tools is sanity checking an idea or reviewing code. They often avoid the tough truth unless you're asking for it explicitly or deliberately requesting actionable feedback. What you ask for and how you ask for it can dramatically change what it focuses on in its reponse. 
 
 Its important to remember you need to be able to let go of ideas. Recognising your bad design is just as important as pushing back on the agent when it gets things wrong or doesn't *see the vision*.
+
+<div align="center">
+    <img src="./docs/assets/Here.jpg" width="500px" border="3" alt="A tree in a field in Gloucestershire"/>
+</br>
 
 In this compiler I've made many design calls based on my own experience and intuition that LLMs are consistently confused by. But by sticking to those decisions knowing they are ambitious has got this project a lot further than if GPT was making design calls. One major example is constant folding happening at the AST stage (and in some narrow cases before that), so expressions are flattened before they even get to the HIR. I had to write the detailed compiler documentation because large language models struggle with unusual compiler design choices like this, particularly when it comes to architecture. 
 
