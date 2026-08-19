@@ -33,16 +33,20 @@ fn frontend_benchmark_runs_for_simple_file() {
 
     let report = run_frontend_benchmark(options).expect("benchmark should succeed");
 
-    assert!(report.total_ms > 0.0, "total time should be positive");
+    // `total_ms` is a wall-clock measurement, so its value proves nothing about the work done:
+    // on a coarse clock a real compile can still measure zero. The report's contract is that the
+    // number is a usable measurement, and the stage rows below are the evidence of work.
+    assert!(
+        report.total_ms.is_finite() && report.total_ms >= 0.0,
+        "total time must be a usable measurement: {}",
+        report.total_ms
+    );
     assert_eq!(report.warning_count, 0);
     assert!(report.warning_codes.is_empty());
 
     // Stage timings are collected when `timers` is enabled.
     #[cfg(feature = "timers")]
-    assert!(
-        !report.stages.is_empty(),
-        "stage timings should be collected when timers is enabled"
-    );
+    assert_frontend_stage_rows(&report);
 
     // Counters additionally require `benchmark_counters`.
     #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
@@ -50,6 +54,59 @@ fn frontend_benchmark_runs_for_simple_file() {
         !report.counters.is_empty(),
         "counters should be collected when timers and benchmark_counters are enabled"
     );
+}
+
+/// Assert the stage rows a successful single-file frontend benchmark must report.
+///
+/// WHAT: every row names a schema metric exactly once with a usable duration, and the frontend
+///       spine a single-file dev build always runs is present.
+/// WHY: a non-empty stage list also passes when the collector reports one unrelated row or the
+///      same row twice. Naming the required stages makes the report evidence that the frontend
+///      actually ran, without depending on how long any stage took.
+#[cfg(feature = "timers")]
+fn assert_frontend_stage_rows(report: &crate::benchmarking::FrontendBenchmarkReport) {
+    use crate::benchmarking::{
+        TIMING_FRONTEND_AST_TOTAL_NAME, TIMING_FRONTEND_HIR_NAME, TIMING_FRONTEND_PREPARE_NAME,
+        TIMING_SCHEMA_METRIC_NAMES,
+    };
+
+    let mut reported: Vec<&str> = report
+        .stages
+        .iter()
+        .map(|stage| stage.name.as_str())
+        .collect();
+    reported.sort_unstable();
+    let mut unique = reported.clone();
+    unique.dedup();
+    assert_eq!(
+        unique, reported,
+        "each stage must be aggregated into one row: {reported:?}"
+    );
+
+    for stage in &report.stages {
+        assert!(
+            TIMING_SCHEMA_METRIC_NAMES.contains(&stage.name.as_str()),
+            "stage '{}' is not a name in the timing schema",
+            stage.name
+        );
+        assert!(
+            stage.duration_ms.is_finite() && stage.duration_ms >= 0.0,
+            "stage '{}' must report a usable duration: {}",
+            stage.name,
+            stage.duration_ms
+        );
+    }
+
+    for required in [
+        TIMING_FRONTEND_PREPARE_NAME,
+        TIMING_FRONTEND_AST_TOTAL_NAME,
+        TIMING_FRONTEND_HIR_NAME,
+    ] {
+        assert!(
+            reported.contains(&required),
+            "a single-file frontend benchmark must report '{required}': {reported:?}"
+        );
+    }
 }
 
 #[test]
@@ -156,49 +213,76 @@ fn frontend_benchmark_fails_for_missing_file() {
     );
 }
 
-/// A frontend benchmark must acquire its raw session before path validation or
-/// compiler setup, otherwise an outer caller-owned snapshot could receive its
-/// observations.
+/// A frontend benchmark must acquire its raw session before it validates the entry path,
+/// otherwise an outer caller-owned snapshot could receive its observations.
+///
+/// The evidence is the typed failure boundary, not the outer snapshot's sample counts: the
+/// collector is process-global, so compiler work in any other concurrently running test also
+/// records into the active session and a "no samples" assertion would depend on what else the
+/// suite happens to be running. A missing entry path discriminates the two orderings directly —
+/// path validation first would report `PathValidation` with an infrastructure diagnostic.
 #[cfg(feature = "timers")]
 #[test]
-fn frontend_benchmark_rejects_a_busy_raw_session_before_compilation() {
+fn frontend_benchmark_rejects_a_busy_raw_session_before_path_validation() {
     let _guard = benchmark_test_guard();
-    let _temp = tempfile::tempdir().expect("should create temp dir");
-    let entry_path = _temp.path().join("entry.moth");
-    std::fs::write(&entry_path, "value = 1\n").expect("should write valid entry");
+    let temp_dir = tempfile::tempdir().expect("should create temp dir");
+    let missing_entry = temp_dir.path().join("does_not_exist.moth");
 
     let outer =
         crate::timing::start_benchmark_collection(true).expect("outer timing session should start");
 
-    let result = run_frontend_benchmark(FrontendBenchmarkOptions {
-        entry_path,
+    let error = run_frontend_benchmark(FrontendBenchmarkOptions {
+        entry_path: missing_entry,
         build_profile: FrontendBenchmarkBuildProfile::Dev,
-    });
+    })
+    .expect_err("busy raw benchmark should fail before the entry path is validated");
+    drop(outer);
 
-    let error = result.expect_err("busy raw benchmark should fail before compiler work");
     assert_eq!(
         error.kind,
         FrontendBenchmarkFailureKind::TimingSession,
-        "busy raw-session failures must identify the tooling boundary: {error}"
+        "the busy collector must be reported before path validation: {error}"
     );
     assert!(
         error.diagnostic_codes.is_empty(),
-        "timing-session rejection precedes any path or compiler diagnostics: {:?}",
+        "timing-session rejection precedes the missing-file diagnostic: {:?}",
         error.diagnostic_codes
     );
+}
 
-    let outer_snapshot = outer.finish();
-    #[cfg(feature = "benchmark_counters")]
-    let counters_empty = outer_snapshot.counters.is_empty();
-    #[cfg(not(feature = "benchmark_counters"))]
-    let counters_empty = true;
+/// A frontend benchmark must acquire its raw session before any compiler work, otherwise the
+/// compile it runs would be recorded into an outer caller-owned snapshot.
+///
+/// Invalid source discriminates the ordering: compiling first would report `Compilation` with a
+/// syntax diagnostic, which is what `frontend_benchmark_fails_for_invalid_syntax` proves happens
+/// when the collector is free.
+#[cfg(feature = "timers")]
+#[test]
+fn frontend_benchmark_rejects_a_busy_raw_session_before_compilation() {
+    let _guard = benchmark_test_guard();
+    let temp_dir = tempfile::tempdir().expect("should create temp dir");
+    let entry_path = temp_dir.path().join("bad.moth");
+    std::fs::write(&entry_path, "!!! invalid syntax !!!\n").expect("should write invalid entry");
+
+    let outer =
+        crate::timing::start_benchmark_collection(true).expect("outer timing session should start");
+
+    let error = run_frontend_benchmark(FrontendBenchmarkOptions {
+        entry_path,
+        build_profile: FrontendBenchmarkBuildProfile::Dev,
+    })
+    .expect_err("busy raw benchmark should fail before compiler work");
+    drop(outer);
+
+    assert_eq!(
+        error.kind,
+        FrontendBenchmarkFailureKind::TimingSession,
+        "the busy collector must be reported before compilation: {error}"
+    );
     assert!(
-        outer_snapshot
-            .timings
-            .iter()
-            .all(|aggregate| aggregate.samples == 0)
-            && counters_empty,
-        "the rejected benchmark must not record path or compiler work into the outer session"
+        error.diagnostic_codes.is_empty(),
+        "timing-session rejection precedes any syntax diagnostic: {:?}",
+        error.diagnostic_codes
     );
 }
 

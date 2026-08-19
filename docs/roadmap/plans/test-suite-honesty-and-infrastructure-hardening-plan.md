@@ -6,8 +6,8 @@
 WORK_ID: test-suite-honesty
 WORK_SOURCE: docs/roadmap/plans/test-suite-honesty-and-infrastructure-hardening-plan.md
 BASE_REVISION: f41f93a7a (post-TIR, post-benchmark-counters-timers)
-STATUS: active — Phase 5 complete (closeout corrections applied), ready for Phase 6
-CURRENT_SCOPE: Phase 5 golden, HTML, Wasm and runtime-harness hardening (paused before Phase 6)
+STATUS: active — Phase 6 complete, ready for Phase 7
+CURRENT_SCOPE: Phase 6 deterministic timing and concurrency tests (paused before Phase 7)
 COMPLETED:
   Phase 0: baseline established (4314 unit tests, 0 ignored, 1699 integration cases correct,
     1851 backend executions); durable inventory at docs/roadmap/evidence/test_honesty_inventory.json;
@@ -145,8 +145,56 @@ COMPLETED:
     content is the opaque payload the shell inserts, so a JavaScript string spelling `</body>` is
     no longer counted as a second closing-body element, while a marker repeated in real markup is
     still rejected
-NEXT_ACTION: run Phase 6 (deterministic timing and concurrency tests)
-VALIDATION: Phase 5 closeout — just validate (pass: clippy --workspace --all-targets
+  Phase 6: the collector drain-synchronization seam is a condition variable instead of three
+    atomics plus a 1,000,000-iteration yield loop — pause_record_admission_for_test publishes one
+    RecordAdmissionState (paused / admission_reached / session_deactivated) under a mutex, the
+    targeted recorder parks on Condvar::wait instead of spinning, and the two test waits
+    (wait_for_paused_record_admission_for_test, wait_for_session_deactivation_for_test) use a 30s
+    wall-clock deadline purely as deadlock protection and return the observed state, so a timeout
+    names what it gave up on; wait_for_timing_flag deleted; surface_thread_panic moved from the
+    timing tests to compiler_tests::test_support beside a new await_worker_completion that
+    receives a worker's completion signal and then joins it, so a worker panic is the reported
+    cause instead of a receive timeout; the dev-server SSE and partial-request tests now own
+    their server threads (both handles were previously dropped) and the SSE registration wait is
+    a bounded deadline reporting the observed client count instead of a fixed 20x10ms poll;
+    WatchSession::drop reports a panicked polling worker instead of discarding the join;
+    write_project_outputs returns a typed OutputWriteSummary (Written / SkippedUnchanged /
+    DirectoryCreated per authored relative path, looked up through the canonical
+    output_path_identity) and both filesystem-timestamp tests assert that outcome with their 30ms
+    sleeps removed; the build command reports emitted artifacts instead of planned ones, so a
+    NotBuilt entry is no longer counted as a built file, with a focused CLI regression;
+    the two renderer-boundary tests dropped their 5ms "simulate renderer work" sleeps, because the
+    scripted duration handed to the renderer is the ordering evidence and the sleep changed
+    nothing; frontend_benchmark_runs_for_simple_file no longer asserts total_ms > 0 (a
+    clock-resolution claim) and instead requires a usable measurement plus exactly-once
+    schema-named stage rows including the frontend spine; the observed busy-raw-session flake is
+    fixed by replacing the process-global "outer snapshot has zero samples" proxy with two
+    deterministic ordering tests (a missing entry path must fail as TimingSession rather than
+    PathValidation; invalid source must fail as TimingSession rather than Compilation);
+    xtask gained a stress mode with a `just stress [repeats]` recipe that runs the unit and
+    integration suites at one thread, default parallelism and 16 threads, repeats each lane and
+    reports every lane's outcome instead of stopping at the first failure;
+    sse_tests.rs joined node_harness.rs on the timers-erasure wall-clock allowlist as a
+    cross-thread test-deadline owner;
+    create_project_modules_tests' private SOURCE_READ_COUNTER_TEST_LOCK now delegates to the one
+    facade-owned instrumentation lock, because two of its holders also open a collection session
+    and a private lock left them racing the collector's other owners — that removes the
+    CollectorBusy failure of synthetic_traversal_prepares_retained_clauses_without_a_token_rescan
+    from the timers+benchmark_counters lane, leaving one genuine pre-existing failure there
+NEXT_ACTION: run Phase 7 (integration contract honesty)
+VALIDATION: Phase 6 — just validate (pass: clippy --workspace --all-targets --all-features
+  -D warnings clean; cargo test --workspace 4388+17+658, 0 failed, 0 ignored; integration
+  1851/1851; docs check clean; bench-ci 60/60 preflight; timers-erasure-check clean).
+  Phase 6 stress — just stress 1 (six lanes: unit and integration at 1, default and 16 threads,
+  all pass).
+  Phase 6 feature lanes — detailed_timers pass (4390+17+658); benchmark_counters and
+  timers+benchmark_counters each fail only
+  const_required_construction_preparation_is_reused_by_folding (a genuine pre-existing
+  counter-behaviour defect), stable across three consecutive timers+benchmark_counters runs after
+  the source-read lock fix. Phase 0 recorded four failures in that lane; two were observed here
+  before the fix and one after, so the race-dependent members of that set need re-measuring when
+  Phase 8 makes the lane an executed gate.
+  Phase 5 closeout — just validate (pass: clippy --workspace --all-targets
   --all-features -D warnings clean; cargo test --workspace 4386+17+646, 0 failed, 0 ignored;
   integration 1851/1851; docs check clean; bench-ci preflight; timers-erasure-check clean).
   Phase 5 — just validate (pass: clippy --workspace --all-targets --all-features
@@ -163,32 +211,64 @@ VALIDATION: Phase 5 closeout — just validate (pass: clippy --workspace --all-t
   pre-existing benchmark_counters failure unchanged; Linux lane passed via GitHub Actions
   validate-linux (4324 unit tests incl. Linux-only non-UTF-8 filesystem identity tests,
   1851/1851 integration cases)
-AUDITS: pre-Phase-4 review of the Phase 0-3 work (helper contracts, panic-reason assertions,
-  xtask absence assertions); Phase 4 sweep of >=, non-empty, any and find_map survivors across
+AUDITS: Phase 6 sweep of every thread::sleep, yield_now, spin_loop, Instant::now,
+  SystemTime::now and filesystem-timestamp read across src and xtask, with a disposition for each
+  survivor (recorded under NOTES); pre-Phase-4 review of the Phase 0-3 work (helper contracts,
+  panic-reason assertions, xtask absence assertions); Phase 4 sweep of >=, non-empty, any and find_map survivors across
   src and xtask with a disposition for each; Phase 4 closeout review (artifact identity must reuse
   the canonical output-path policy, typed rejection self-tests, anchored path predicates, helper
   ownership, just validate as the final gate); Phase 5 sweep of to_string_lossy/from_utf8_lossy and
   path unwrap_or_default across src and xtask, with every assertion-boundary use removed and the
   remaining report-rendering uses dispositioned; AUD-0001 (Redundancy over tests.support) —
   F01, F02 and F03 corrected on this branch, F04 routed to Phase 11 and F05 to Phase 7/11
-BLOCKERS: none (Phase 5 complete)
-NOTES: Pre-existing benchmark_counters feature test failures are not caused by this work.
+BLOCKERS: none (Phase 6 complete)
+NOTES: Phase 6 timing-and-clock sweep dispositions. Remaining sleeps: node_harness workspace
+  removal retry and exit poll (subprocess deadline owners, documented in Phase 5),
+  dev_server/watch.rs poll interval (production polling backend, not a test) and the SSE
+  registration wait (bounded deadline as deadlock protection, reports the observed client
+  count — the handler registers after writing headers, so no in-process signal exists without
+  changing production ordering). Remaining spin: runtime::wait_for_records, the production drain
+  barrier bounded by the admitted-recorder count. Remaining wall-clock reads: check.rs, cli.rs,
+  build_loop.rs, timing guard.rs, benchmarking/frontend.rs, integration runner.rs,
+  xtask process_runner.rs and profile/runner.rs all measure the thing they report;
+  dev_server/error_page.rs, xtask bench_system.rs, bench_time.rs and profile/artifacts.rs render
+  timestamps or non-security ids; test_support::unused_temp_path mixes the clock into a name but
+  proves non-existence with symlink_metadata, so uniqueness never rests on the clock; the
+  Instant::now() values in timing and erasure tests are inputs to the API under test and the
+  assertions compare exact recorded durations or monotonic ordering, not elapsed magnitudes.
+  Remaining filesystem-timestamp reads: dev_server/watch.rs fingerprints are production change
+  detection, and watch_tests sets modification times explicitly with fs::FileTimes rather than
+  waiting for the clock to advance. xtask benchmark_execution success tests keep
+  total_duration_ms > 0.0 as a narrow restatement of validate_total_duration, whose own test owns
+  the zero, negative, NaN and infinite rejections.
+  Pre-existing benchmark_counters feature test failures are not caused by this work.
   Inventory finding mappings fixed: lossy_path_text_conversion → Phase 5 item 7,
   source_text_tests_false_confidence → Phase 4 items 3 and 7.
+  Phase 6 carry-over for Phase 8: testing.mtf should record the concurrency-test policy this
+  phase established (condition variables or channels for expected transitions, a bounded
+  wall-clock deadline only as deadlock protection, a deadline failure that names the observed
+  state, and every spawned worker joined so its panic is the reported cause), and validation.mtf
+  should list `just stress [repeats]` beside the thread and repetition gates.
   Phase 5 carry-over for Phase 8: testing.mtf's "Runtime output assertions" section should record
   the supported <script> shapes (including that `type="module"` is deliberately unsupported until
   the harness can materialize and execute the emitted module graph), the harness execution
   deadline, the harness failure classes and the golden expected-artifact-kind contract.
-  Phase 5 observed one intermittent failure of the pre-existing timers-gated test
-  frontend_benchmark_rejects_a_busy_raw_session_before_compilation that did not reproduce in 24
-  later full-suite runs (6 of them at --test-threads=16). It is recorded as the open inventory
-  finding global_timing_collector_observed_flake with its lead for Phase 6: xtask depends on moth
-  with features=["timers"], so cargo test --workspace runs with the collector live, and the shared
-  instrumentation lock serializes session owners but not the compiler work other concurrent tests
-  record into the active process-global session.
+  The intermittent failure of frontend_benchmark_rejects_a_busy_raw_session_before_compilation
+  that Phase 5 observed reproduced on the first Phase 6 baseline run and is now fixed. The cause
+  was the test's evidence, not the compiler: xtask depends on moth with features=["timers"], so
+  cargo test --workspace runs with the collector live, and the shared instrumentation lock
+  serializes session owners but not the compiler work other concurrent tests record into the
+  active process-global session — so the outer session's "every aggregate has zero samples"
+  assertion depended on what else the suite happened to be running. Phase 6 replaced that proxy
+  with typed ordering evidence that needs no process-global quiet, and left the collector
+  process-global because cross-thread recording is its production contract (see
+  parallel_timing_records_sum_into_one_atomic_slot).
   The four inventory findings Phase 5 owned (golden_comparison_accepting_directories_as_empty_files,
   html_wasm_baseline_broad_fragments, node_runtime_harness_can_hang, lossy_path_text_conversion)
   are now marked resolved in docs/roadmap/evidence/test_honesty_inventory.json.
+  The three inventory findings Phase 6 owned (timing_concurrency_tests_machine_speed,
+  filesystem_timestamp_tests, global_timing_collector_observed_flake) are now marked resolved in
+  the same file.
   AUD-0001 test-support redundancy corrections landed alongside Phase 5 without changing any test
   outcome (4373+17+646 unchanged): one canonical test_source_location replaces 23 zero-value
   SourceLocation wrappers and 5 duplicated line-based builders; the seven HIR node constructors

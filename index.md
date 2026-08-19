@@ -173,7 +173,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 - [integration fixtures](tests/cases/): expect.toml backend matrices.
 - [subsystem unit tests](src/): `*/tests` and module tests throughout src/.
 - [in-process compiler benchmark API](src/benchmarking/): for xtask/dev tooling.
-- [benchmark/report/check/profile tooling](xtask/)
+- [benchmark/report/check/profile tooling](xtask/), including the [repeat and thread-count stress lanes](xtask/src/stress.rs).
 - [perf cases/data/summaries](benchmarks/): local-data ignored.
 
 ## Docs

@@ -6,7 +6,7 @@
   "branch": "test-suite-honesty",
   "host_platform": "macOS",
   "summary": {
-    "unit_tests_passed": 4373,
+    "unit_tests_passed": 4388,
     "unit_tests_failed": 0,
     "unit_tests_ignored": 0,
     "integration_cases_correct": 1699,
@@ -15,8 +15,8 @@
       "default": "pass",
       "timers": "pass",
       "benchmark_counters": "pre-existing failure: const_required_construction_preparation_is_reused_by_folding",
-      "timers+benchmark_counters": "pre-existing failures: 4 tests",
-      "detailed_timers": "pass (4316+17+643)"
+      "timers+benchmark_counters": "pre-existing failure: const_required_construction_preparation_is_reused_by_folding. Phase 6 also removed a CollectorBusy failure of synthetic_traversal_prepares_retained_clauses_without_a_token_rescan by giving the source-read counter tests the shared instrumentation lock. Phase 0 recorded four failures in this lane; two were observed on this machine before the fix and one after, so the race-dependent members of that set need re-measuring in Phase 8",
+      "detailed_timers": "pass (4390+17+658)"
     },
     "linux_lane": "passed via GitHub Actions validate-linux (4324 unit tests incl. Linux-only non-UTF-8 filesystem identity tests, 1851/1851 integration cases)"
   },
@@ -116,8 +116,8 @@
       "code": "timing_concurrency_tests_machine_speed",
       "severity": "review",
       "description": "Timing/concurrency tests depend on machine speed",
-      "disposition": "deferred to Phase 6",
-      "status": "open"
+      "disposition": "resolved in Phase 6: the collector drain seam is a condition variable with a bounded deadline used only as deadlock protection, and its waits report the observed state; wait_for_timing_flag's 1,000,000-iteration yield loop is deleted, the dev-server SSE and partial-request tests own and join their server threads, and the SSE registration wait is a bounded deadline that names the observed client count",
+      "status": "resolved"
     },
     {
       "code": "feature_gated_tests_not_executed",
@@ -130,8 +130,8 @@
       "code": "filesystem_timestamp_tests",
       "severity": "review",
       "description": "Tests rely on filesystem timestamps",
-      "disposition": "deferred to Phase 6",
-      "status": "open"
+      "disposition": "resolved in Phase 6: write_project_outputs returns a typed OutputWriteSummary and the two skip-unchanged tests assert Written / SkippedUnchanged directly, so both 30ms sleeps and both modification-time comparisons are gone; the remaining timestamp reads are the dev-server watch fingerprints, whose tests set modification times explicitly",
+      "status": "resolved"
     },
     {
       "code": "monolithic_ci_steps",
@@ -249,8 +249,8 @@
       "code": "global_timing_collector_observed_flake",
       "severity": "review",
       "description": "frontend_benchmark_rejects_a_busy_raw_session_before_compilation failed once during Phase 5 validation and did not reproduce in 24 subsequent full-suite runs (including 6 at --test-threads=16)",
-      "disposition": "deferred to Phase 6 (deterministic timing and concurrency tests). Lead: xtask depends on moth with features=[\"timers\"], so `cargo test --workspace` unifies the timers feature on and the timing collector is live for the whole run. lock_instrumentation_tests serializes tests that own a session, but the collector is process-global: compiler work performed by any other concurrently running test records into whichever session is active. That makes the outer-session 'samples == 0' assertion, and the busy-collector precondition, dependent on what else happens to be running. Phase 6 should give the collector a scoped owner or serialize compiler work against an active session rather than only session starts",
-      "status": "open"
+      "disposition": "resolved in Phase 6: the flake reproduced on the Phase 6 baseline run and was the test's evidence, not the compiler. The outer-session 'every aggregate has zero samples' proxy is replaced by two deterministic ordering tests \u2014 a missing entry path must fail as TimingSession rather than PathValidation, and invalid source must fail as TimingSession rather than Compilation \u2014 neither of which depends on the process-global collector being quiet. The collector stays process-global because cross-thread recording is its production contract",
+      "status": "resolved"
     }
   ],
   "infrastructure_added": [

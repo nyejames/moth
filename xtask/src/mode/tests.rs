@@ -168,3 +168,62 @@ fn parse_args_bench_profile_error() {
     ])));
     assert!(error.contains("Unknown argument"));
 }
+
+// ----------------------------
+//  parse_args: stress
+// ----------------------------
+
+#[test]
+fn parse_args_stress_defaults_to_the_owned_repeat_count() {
+    assert_eq!(
+        unwrap_mode(BenchmarkMode::parse_args(&args(&["stress"]))),
+        BenchmarkMode::Stress {
+            repeats: crate::stress::DEFAULT_STRESS_REPEATS
+        }
+    );
+}
+
+#[test]
+fn parse_args_stress_accepts_an_explicit_repeat_count() {
+    assert_eq!(
+        unwrap_mode(BenchmarkMode::parse_args(&args(&[
+            "stress",
+            "--repeats",
+            "7"
+        ]))),
+        BenchmarkMode::Stress { repeats: 7 }
+    );
+}
+
+#[test]
+fn parse_args_stress_rejects_a_non_positive_or_unparsable_repeat_count() {
+    for value in ["0", "-1", "many", ""] {
+        let error = unwrap_error(BenchmarkMode::parse_args(&args(&[
+            "stress",
+            "--repeats",
+            value,
+        ])));
+        assert_eq!(
+            error,
+            format!("--repeats must be a positive integer, got '{value}'")
+        );
+    }
+}
+
+#[test]
+fn parse_args_stress_rejects_a_missing_value_and_unknown_arguments() {
+    assert_eq!(
+        unwrap_error(BenchmarkMode::parse_args(&args(&["stress", "--repeats"]))),
+        "--repeats requires a value."
+    );
+    assert_eq!(
+        unwrap_error(BenchmarkMode::parse_args(&args(&["stress", "--forever"]))),
+        "Mode 'stress' accepts only '--repeats <n>'."
+    );
+}
+
+#[test]
+fn top_level_usage_lists_stress() {
+    assert!(TOP_LEVEL_USAGE.contains("stress"));
+    assert!(TOP_LEVEL_USAGE.contains("--repeats <n>; default 3"));
+}

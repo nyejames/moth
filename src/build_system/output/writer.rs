@@ -501,9 +501,79 @@ fn inspect_hard_link_count(path: &Path, metadata: &fs::Metadata) -> std::io::Res
     }
 }
 
-#[cfg(test)]
-#[path = "tests/writer_tests.rs"]
-mod tests;
+/// What one prepared destination did on disk.
+///
+/// WHAT: the emission result for a single output destination.
+/// WHY: `SkipUnchanged` mode is only observable through the writer. Inferring it from filesystem
+/// timestamps depends on the filesystem's timestamp resolution, so a rewrite can look identical
+/// to a skip. The writer already knows which branch it took, so it reports it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OutputWriteOutcome {
+    /// Content was written to the destination.
+    Written,
+    /// `SkipUnchanged` found identical existing content and left the file untouched.
+    SkippedUnchanged,
+    /// An explicit directory destination exists after emission.
+    DirectoryCreated,
+}
+
+/// What one authored output path did on disk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct OutputDestinationOutcome {
+    /// The project-relative path the build authored for this artifact.
+    pub(crate) relative_path: PathBuf,
+    pub(crate) outcome: OutputWriteOutcome,
+}
+
+/// The emission result for every prepared destination, in preparation order.
+///
+/// Destinations are named by their authored relative path rather than the canonical filesystem
+/// destination, because the relative path is the identity the caller chose and the canonical one
+/// resolves symlinks the caller never wrote.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct OutputWriteSummary {
+    destinations: Vec<OutputDestinationOutcome>,
+}
+
+impl OutputWriteSummary {
+    /// The outcome recorded for one project-relative output path.
+    ///
+    /// Lookup uses the canonical output-path identity, so a caller finds the destination the
+    /// writer would have collided with, not a different spelling of the same path.
+    #[cfg(test)]
+    pub(crate) fn outcome_for(&self, relative_path: &Path) -> Option<OutputWriteOutcome> {
+        let identity = output_path_identity(relative_path).ok()?;
+        self.destinations
+            .iter()
+            .find(|destination| {
+                output_path_identity(&destination.relative_path)
+                    .is_ok_and(|candidate| candidate == identity)
+            })
+            .map(|destination| destination.outcome)
+    }
+
+    /// How many destinations this write actually created on disk.
+    ///
+    /// Skipped-unchanged destinations are already correct on disk but were not emitted by this
+    /// write, so they are not counted.
+    pub(crate) fn emitted_count(&self) -> usize {
+        self.destinations
+            .iter()
+            .filter(|destination| {
+                matches!(
+                    destination.outcome,
+                    OutputWriteOutcome::Written | OutputWriteOutcome::DirectoryCreated
+                )
+            })
+            .count()
+    }
+
+    /// Every destination this write considered, in preparation order.
+    #[cfg(test)]
+    pub(crate) fn destinations(&self) -> &[OutputDestinationOutcome] {
+        &self.destinations
+    }
+}
 
 /// Emit only the destinations prepared by [`prepare_output_write`].
 pub(crate) fn emit_prepared_output_files(
@@ -511,34 +581,46 @@ pub(crate) fn emit_prepared_output_files(
     prepared_write: &PreparedOutputWrite,
     write_mode: WriteMode,
     string_table: &StringTable,
-) -> Result<(), CompilerMessages> {
+) -> Result<OutputWriteSummary, CompilerMessages> {
+    let mut destinations = Vec::with_capacity(prepared_write.destinations.len());
+
     for prepared_destination in &prepared_write.destinations {
         let output_file = &project.output_files[prepared_destination.output_file_index];
         let destination = &prepared_destination.destination;
 
-        match output_file.file_kind() {
-            FileKind::NotBuilt => {}
-            FileKind::Directory => fs::create_dir_all(destination).map_err(|error| {
-                file_error_with_rejection_reason(
-                    destination,
-                    format!(
-                        "Failed to create output directory '{}': {error}",
-                        destination.display()
-                    ),
-                    OutputRejectionReason::DirectoryCreationFailed,
-                    string_table,
-                )
-            })?,
+        let outcome = match output_file.file_kind() {
+            // `prepare_output_write` drops `NotBuilt` artifacts, so no prepared destination
+            // carries one.
+            FileKind::NotBuilt => continue,
+            FileKind::Directory => {
+                fs::create_dir_all(destination).map_err(|error| {
+                    file_error_with_rejection_reason(
+                        destination,
+                        format!(
+                            "Failed to create output directory '{}': {error}",
+                            destination.display()
+                        ),
+                        OutputRejectionReason::DirectoryCreationFailed,
+                        string_table,
+                    )
+                })?;
+                OutputWriteOutcome::DirectoryCreated
+            }
             FileKind::Js(content) | FileKind::Html(content) => {
-                write_string_output(destination, content, write_mode, string_table)?;
+                write_string_output(destination, content, write_mode, string_table)?
             }
             FileKind::Wasm(bytes) | FileKind::Bytes(bytes) => {
-                write_bytes_output(destination, bytes, write_mode, string_table)?;
+                write_bytes_output(destination, bytes, write_mode, string_table)?
             }
-        }
+        };
+
+        destinations.push(OutputDestinationOutcome {
+            relative_path: prepared_destination.relative_path.clone(),
+            outcome,
+        });
     }
 
-    Ok(())
+    Ok(OutputWriteSummary { destinations })
 }
 
 fn create_parent_dir_if_needed(
@@ -567,7 +649,7 @@ fn write_string_output(
     content: &str,
     write_mode: WriteMode,
     string_table: &StringTable,
-) -> Result<(), CompilerMessages> {
+) -> Result<OutputWriteOutcome, CompilerMessages> {
     write_bytes_output(destination, content.as_bytes(), write_mode, string_table)
 }
 
@@ -576,11 +658,11 @@ fn write_bytes_output(
     content: &[u8],
     write_mode: WriteMode,
     string_table: &StringTable,
-) -> Result<(), CompilerMessages> {
+) -> Result<OutputWriteOutcome, CompilerMessages> {
     create_parent_dir_if_needed(destination, string_table)?;
 
     if should_skip_unchanged_write(destination, content, write_mode) {
-        return Ok(());
+        return Ok(OutputWriteOutcome::SkippedUnchanged);
     }
 
     fs::write(destination, content).map_err(|error| {
@@ -593,5 +675,11 @@ fn write_bytes_output(
             OutputRejectionReason::FileWriteFailed,
             string_table,
         )
-    })
+    })?;
+
+    Ok(OutputWriteOutcome::Written)
 }
+
+#[cfg(test)]
+#[path = "tests/writer_tests.rs"]
+mod tests;

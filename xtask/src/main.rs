@@ -19,6 +19,7 @@
 //! - `bench-frontend`       - Run the focused frontend benchmark suite and record
 //! - `bench-validate`       - Preflight every benchmark case without measurements
 //! - `bench-profile`        - Run Samply-backed profiling on benchmark cases
+//! - `stress`               - Repeat the unit and integration suites across thread counts
 
 mod bench;
 mod bench_ci;
@@ -43,6 +44,7 @@ mod frontend_bench;
 mod mode;
 mod process_runner;
 mod profile;
+mod stress;
 #[cfg(test)]
 mod test_fs;
 mod timers_erasure_check;
@@ -56,6 +58,7 @@ use frontend_bench::run_frontend_benchmarks;
 use mode::{BenchmarkMode, ModeParseResult, TOP_LEVEL_USAGE};
 use std::env;
 use std::process;
+use stress::run_stress_matrix;
 use timers_erasure_check::run_timers_erasure_check;
 
 fn main() {
@@ -112,6 +115,9 @@ fn main() {
         }
         BenchmarkMode::BenchValidate => {
             exit_with_result(validate_all_benchmarks());
+        }
+        BenchmarkMode::Stress { repeats } => {
+            exit_with_result(run_stress_matrix(repeats));
         }
         BenchmarkMode::TimersErasureCheck => {
             exit_with_result(run_timers_erasure_check());

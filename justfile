@@ -56,6 +56,10 @@ bench-validate:
 timers-erasure-check:
     cargo run --package xtask --bin xtask -- timers-erasure-check
 
+# Repeat the unit and integration suites at one, default and 16 threads.
+stress repeats="3":
+    cargo run --package xtask --bin xtask -- stress --repeats {{repeats}}
+
 profile filter="terse":
     cargo run --package xtask --bin xtask -- bench-profile --filter {{filter}}
 

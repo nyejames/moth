@@ -5,7 +5,7 @@
 //! WHY:  the enabled expansion must mirror the disabled one for control flow
 //!       while adding collector evidence.
 
-use crate::compiler_tests::test_support::assert_panics_with;
+use crate::compiler_tests::test_support::{assert_panics_with, surface_thread_panic};
 use crate::timing::{
     TimingCommandKind, TimingMetric, TimingMetricAggregate, start_benchmark_collection,
     start_raw_benchmark_collection,
@@ -29,33 +29,6 @@ fn timings_named(
         .iter()
         .filter(|aggregate| aggregate.metric == metric && aggregate.samples > 0)
         .collect()
-}
-
-fn wait_for_timing_flag(mut observed: impl FnMut() -> bool) -> bool {
-    for _ in 0..1_000_000 {
-        if observed() {
-            return true;
-        }
-        std::thread::yield_now();
-    }
-    false
-}
-
-/// Join a spawned thread and surface its panic instead of discarding it.
-///
-/// WHAT: joins the handle and prints any panic payload to stderr before returning.
-/// WHY: `let _ = handle.join()` silently discards a worker panic. In failure
-///   paths where the test is about to panic anyway, the worker's panic must
-///   still be visible so the root cause is not hidden.
-fn surface_thread_panic<T>(name: &str, handle: std::thread::JoinHandle<T>) {
-    if let Err(panic_payload) = handle.join() {
-        let msg = panic_payload
-            .downcast_ref::<String>()
-            .cloned()
-            .or_else(|| panic_payload.downcast_ref::<&str>().map(|s| s.to_string()))
-            .unwrap_or_else(|| format!("{panic_payload:?}"));
-        eprintln!("worker thread '{name}' panicked: {msg}");
-    }
 }
 
 #[test]
@@ -263,22 +236,23 @@ fn admitted_attribution_policy_survives_session_drain() {
             context,
         );
     });
-    if !wait_for_timing_flag(|| {
-        crate::timing::enabled::runtime::record_admission_reached_for_test()
-    }) {
+    if let Err(observed) =
+        crate::timing::enabled::runtime::wait_for_paused_record_admission_for_test()
+    {
         pause.release();
         surface_thread_panic("recorder", recorder);
-        panic!("the recorder should pause after admission");
+        panic!("the recorder should pause after admission; observed {observed}");
     }
 
     let finisher = std::thread::spawn(move || timing_session.finish());
-    if !wait_for_timing_flag(|| {
-        crate::timing::enabled::runtime::record_session_deactivated_for_test()
-    }) {
+    if let Err(observed) = crate::timing::enabled::runtime::wait_for_session_deactivation_for_test()
+    {
         pause.release();
         surface_thread_panic("recorder", recorder);
         surface_thread_panic("finisher", finisher);
-        panic!("session finish should deactivate the fast-path bits before waiting");
+        panic!(
+            "session finish should deactivate the fast-path bits before waiting; observed {observed}"
+        );
     }
 
     pause.release();
@@ -332,13 +306,13 @@ fn attributed_duration_context_uses_admitted_session_policy() {
             }
         )
     });
-    if !wait_for_timing_flag(|| {
-        crate::timing::enabled::runtime::record_admission_reached_for_test()
-    }) {
+    if let Err(observed) =
+        crate::timing::enabled::runtime::wait_for_paused_record_admission_for_test()
+    {
         pause.release();
         surface_thread_panic("recorder", recorder);
         let _ = timing_session.finish();
-        panic!("the direct-duration recorder should pause after admission");
+        panic!("the direct-duration recorder should pause after admission; observed {observed}");
     }
     let context_ran_before_admission = context_receiver.try_recv().is_ok();
 
@@ -348,13 +322,14 @@ fn attributed_duration_context_uses_admitted_session_policy() {
             .send(timing_session.finish())
             .expect("the finish receiver should remain available");
     });
-    if !wait_for_timing_flag(|| {
-        crate::timing::enabled::runtime::record_session_deactivated_for_test()
-    }) {
+    if let Err(observed) = crate::timing::enabled::runtime::wait_for_session_deactivation_for_test()
+    {
         pause.release();
         surface_thread_panic("recorder", recorder);
         surface_thread_panic("finisher", finisher);
-        panic!("session finish should deactivate the fast-path bits before waiting");
+        panic!(
+            "session finish should deactivate the fast-path bits before waiting; observed {observed}"
+        );
     }
     assert!(
         matches!(
@@ -427,13 +402,13 @@ fn admitted_attribution_survives_session_drain() {
             Some(crate::timing::TimingContext::for_module(module)),
         )
     });
-    if !wait_for_timing_flag(|| {
-        crate::timing::enabled::runtime::record_admission_reached_for_test()
-    }) {
+    if let Err(observed) =
+        crate::timing::enabled::runtime::wait_for_paused_record_admission_for_test()
+    {
         pause.release();
         surface_thread_panic("recorder", recorder);
         let _ = timing_session.finish();
-        panic!("the recorder should pause after admission");
+        panic!("the recorder should pause after admission; observed {observed}");
     }
 
     let (finish_sender, finish_receiver) = std::sync::mpsc::channel();
@@ -442,13 +417,14 @@ fn admitted_attribution_survives_session_drain() {
             .send(timing_session.finish())
             .expect("the finish receiver should remain available");
     });
-    if !wait_for_timing_flag(|| {
-        crate::timing::enabled::runtime::record_session_deactivated_for_test()
-    }) {
+    if let Err(observed) = crate::timing::enabled::runtime::wait_for_session_deactivation_for_test()
+    {
         pause.release();
         surface_thread_panic("recorder", recorder);
         surface_thread_panic("finisher", finisher);
-        panic!("session finish should deactivate the fast-path bits before waiting");
+        panic!(
+            "session finish should deactivate the fast-path bits before waiting; observed {observed}"
+        );
     }
     assert!(
         matches!(

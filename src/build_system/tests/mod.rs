@@ -7,8 +7,8 @@ use crate::build_system::build::{
     BackendBuilder, FileKind, ModuleRootActivity, OutputFile, Project,
 };
 use crate::build_system::output::{
-    BuilderKind, CleanupPolicy, OutputOwner, OutputPlan, SingleFileOutputPlan, WriteMode,
-    WriteOptions, write_project_outputs as write_project_outputs_with_table,
+    BuilderKind, CleanupPolicy, OutputOwner, OutputPlan, OutputWriteSummary, SingleFileOutputPlan,
+    WriteMode, WriteOptions, write_project_outputs as write_project_outputs_with_table,
 };
 use crate::builder_surface::BuilderSurface;
 use crate::compiler_frontend::Flag;
@@ -155,7 +155,7 @@ fn module_root_activity_html_policy_requires_any_root_activity() {
 fn write_project_outputs(
     project: &Project,
     options: &WriteOptions,
-) -> Result<(), CompilerMessages> {
+) -> Result<OutputWriteSummary, CompilerMessages> {
     write_project_outputs_with_table(project, options, &StringTable::default())
 }
 

@@ -7,7 +7,9 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::projects::html_project::style_directives::html_project_style_directives;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::SystemTime;
+use std::sync::mpsc::Receiver;
+use std::thread::JoinHandle;
+use std::time::{Duration, SystemTime};
 
 /// Includes the HTML project builder directives in the test directives
 pub fn frontend_test_style_directives() -> StyleDirectiveRegistry {
@@ -82,4 +84,79 @@ pub fn assert_panics_with(expected_fragment: &str, body: impl FnOnce() + std::pa
         message.contains(expected_fragment),
         "panic message {message:?} does not contain expected fragment {expected_fragment:?}"
     );
+}
+
+// ---------------------------------------------------------------------------
+//  Worker-thread failure surfacing
+// ---------------------------------------------------------------------------
+//
+// A test that spawns a worker must never lose that worker's panic. Dropping the
+// join handle, or joining with `let _ =`, turns a real worker failure into a
+// timeout or a missing signal, which reports the wrong cause.
+
+/// Bounded deadlock protection for cross-thread waits with no contractual bound of their own.
+///
+/// A test that is waiting only because another thread has not got there yet uses this: the
+/// deadline stops a stalled worker from hanging the suite and is never the thing being proven.
+/// A test whose contract *is* a time bound passes that bound explicitly instead.
+pub const WORKER_COMPLETION_DEADLINE: Duration = Duration::from_secs(30);
+
+/// Render a captured panic payload as text.
+fn panic_payload_text(payload: &(dyn std::any::Any + Send)) -> String {
+    payload
+        .downcast_ref::<String>()
+        .cloned()
+        .or_else(|| {
+            payload
+                .downcast_ref::<&str>()
+                .map(|text| (*text).to_owned())
+        })
+        .unwrap_or_else(|| String::from("<non-string panic payload>"))
+}
+
+/// Join a worker thread and print its panic instead of discarding it.
+///
+/// WHAT: joins the handle and reports any panic payload to stderr.
+/// WHY: `let _ = handle.join()` silently discards a worker panic. On failure
+///      paths where the test is about to panic for its own reason, the worker's
+///      panic must still be visible so the root cause is not hidden.
+pub fn surface_thread_panic<T>(name: &str, handle: JoinHandle<T>) {
+    if let Err(payload) = handle.join() {
+        eprintln!(
+            "worker thread '{name}' panicked: {}",
+            panic_payload_text(payload.as_ref())
+        );
+    }
+}
+
+/// Wait for a worker's completion signal within `deadline`, then join it.
+///
+/// WHAT: receives one completion signal, then joins the worker and re-raises its panic as this
+///       test's failure.
+/// WHY: a worker that panics before signalling would otherwise surface only as a receive
+///      timeout, hiding the assertion that actually failed. Joining after a timeout reports the
+///      worker's own reason when it has one, and names the timeout when it does not. The caller
+///      chooses `deadline` because for some tests the bound is the contract, not just deadlock
+///      protection.
+#[track_caller]
+pub fn await_worker_completion<T>(
+    name: &str,
+    signal: &Receiver<()>,
+    worker: JoinHandle<T>,
+    deadline: Duration,
+) -> T {
+    let signalled = signal.recv_timeout(deadline);
+
+    match worker.join() {
+        Ok(value) => {
+            signalled.unwrap_or_else(|error| {
+                panic!("worker thread '{name}' finished without signalling completion: {error}")
+            });
+            value
+        }
+        Err(payload) => panic!(
+            "worker thread '{name}' panicked: {}",
+            panic_payload_text(payload.as_ref())
+        ),
+    }
 }

@@ -8,7 +8,9 @@ use crate::build_system::build::{FileKind, OutputFile, Project, ProjectBuilder, 
 #[cfg(unix)]
 use crate::build_system::output::ValidatedOutputPlan;
 use crate::build_system::output::manifest::BUILD_MANIFEST_FILENAME;
-use crate::build_system::output::{BuilderKind, OutputOwner, OutputPlan};
+use crate::build_system::output::{
+    BuilderKind, OutputDestinationOutcome, OutputOwner, OutputPlan, OutputWriteOutcome,
+};
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::render::{
@@ -24,9 +26,7 @@ use crate::compiler_tests::test_diagnostics::{
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use crate::projects::settings::Config;
 use std::fs;
-use std::path::PathBuf;
-use std::thread;
-use std::time::Duration;
+use std::path::{Path, PathBuf};
 
 fn rendered_error_messages(messages: &CompilerMessages) -> Vec<String> {
     let context = DiagnosticRenderContext::new(&messages.string_table);
@@ -248,8 +248,26 @@ fn write_project_outputs_writes_all_supported_artifacts_and_skips_not_built() {
         warnings: vec![],
     };
 
-    write_project_outputs(&project, &always_write_options(root.clone(), None))
+    let summary = write_project_outputs(&project, &always_write_options(root.clone(), None))
         .expect("writer should succeed");
+
+    // The reported destinations are the writer's own account of what it emitted, in preparation
+    // order. The `NotBuilt` entry is deliberately absent rather than reported as an empty write.
+    let emitted = |path: &str, outcome: OutputWriteOutcome| OutputDestinationOutcome {
+        relative_path: PathBuf::from(path),
+        outcome,
+    };
+    assert_eq!(
+        summary.destinations(),
+        &[
+            emitted("assets", OutputWriteOutcome::DirectoryCreated),
+            emitted("scripts/app.js", OutputWriteOutcome::Written),
+            emitted("index.html", OutputWriteOutcome::Written),
+            emitted("assets/logo.png", OutputWriteOutcome::Written),
+            emitted("bin/app.wasm", OutputWriteOutcome::Written),
+        ]
+    );
+    assert_eq!(summary.emitted_count(), 5);
 
     assert_directory(&root.join("assets"));
     assert_eq!(
@@ -857,8 +875,13 @@ fn file_output_to_existing_directory_is_rejected_before_emission() {
     assert_path_missing(&root.join(BUILD_MANIFEST_FILENAME));
 }
 
+/// Skip-unchanged mode must leave an identical destination untouched.
+///
+/// The evidence is the writer's own outcome, not a modification time: filesystems with
+/// second-granularity timestamps report the same value after a rewrite, so an mtime comparison
+/// passes whether or not the file was skipped.
 #[test]
-fn skip_unchanged_mode_preserves_existing_output_mtime() {
+fn skip_unchanged_mode_reports_an_identical_destination_as_skipped() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
@@ -871,20 +894,24 @@ fn skip_unchanged_mode_preserves_existing_output_mtime() {
     );
     let options = skip_unchanged_options(root.clone(), None);
 
-    write_project_outputs(&project, &options).expect("first write should succeed");
-    let first_modified = fs::metadata(root.join("index.html"))
-        .expect("output file should exist")
-        .modified()
-        .expect("metadata should include modified time");
+    let first = write_project_outputs(&project, &options).expect("first write should succeed");
+    assert_eq!(
+        first.outcome_for(Path::new("index.html")),
+        Some(OutputWriteOutcome::Written),
+        "the first write has nothing to compare against and must emit the file"
+    );
 
-    thread::sleep(Duration::from_millis(30));
-    write_project_outputs(&project, &options).expect("second write should succeed");
-    let second_modified = fs::metadata(root.join("index.html"))
-        .expect("output file should exist")
-        .modified()
-        .expect("metadata should include modified time");
-
-    assert_eq!(first_modified, second_modified);
+    let second = write_project_outputs(&project, &options).expect("second write should succeed");
+    assert_eq!(
+        second.outcome_for(Path::new("index.html")),
+        Some(OutputWriteOutcome::SkippedUnchanged),
+        "identical content must be skipped rather than rewritten"
+    );
+    assert_eq!(
+        second.emitted_count(),
+        0,
+        "an unchanged project emits no artifact; the manifest is cleanup's own concern"
+    );
 }
 
 #[test]
@@ -915,12 +942,6 @@ fn skip_unchanged_mode_still_cleans_stale_manifest_tracked_outputs() {
     )
     .expect("initial write should succeed");
 
-    let index_modified = fs::metadata(output_root.join("index.html"))
-        .expect("index should exist")
-        .modified()
-        .expect("metadata should include modified time");
-
-    thread::sleep(Duration::from_millis(30));
     let follow_up_project = html_project(
         vec![OutputFile::new(
             PathBuf::from("index.html"),
@@ -928,17 +949,17 @@ fn skip_unchanged_mode_still_cleans_stale_manifest_tracked_outputs() {
         )],
         Some(PathBuf::from("index.html")),
     );
-    write_project_outputs(
+    let follow_up = write_project_outputs(
         &follow_up_project,
         &skip_unchanged_options(output_root.clone(), Some(project_dir.clone())),
     )
     .expect("follow-up write should succeed");
 
-    let updated_index_modified = fs::metadata(output_root.join("index.html"))
-        .expect("index should still exist")
-        .modified()
-        .expect("metadata should include modified time");
-    assert_eq!(index_modified, updated_index_modified);
+    assert_eq!(
+        follow_up.outcome_for(Path::new("index.html")),
+        Some(OutputWriteOutcome::SkippedUnchanged),
+        "the retained page keeps its existing content"
+    );
     assert_path_missing(&output_root.join("about/index.html"));
 }
 

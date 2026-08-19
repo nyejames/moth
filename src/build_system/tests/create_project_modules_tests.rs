@@ -61,8 +61,15 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 /// WHY: source-read counting uses one global atomic and one global tracked-prefix slot. Parallel
 /// test execution would otherwise let one test's reset/prefix overwrite another's mid-snapshot, so
 /// every test that asserts on per-path read counts holds this lock for its whole window.
+///
+/// It delegates to the one facade-owned instrumentation lock because two of these tests also open
+/// a timing collection session. A private lock would serialize them against each other but not
+/// against the collector's other owners, so their session start could find the collector busy.
+/// One fence also means there is no lock ordering to get wrong.
 #[cfg(test)]
-static SOURCE_READ_COUNTER_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+fn lock_source_read_counter_tests() -> std::sync::MutexGuard<'static, ()> {
+    crate::timing::lock_instrumentation_tests()
+}
 
 /// Names the final component of a discovered module-root directory.
 ///
@@ -620,9 +627,7 @@ fn synthetic_rebinding_makes_file_and_shell_identities_discovery_order_independe
 
 #[test]
 fn synthetic_preparation_reuses_complete_outputs_for_one_final_header_pass() {
-    let _test_guard = SOURCE_READ_COUNTER_TEST_LOCK
-        .lock()
-        .expect("source read counter test lock poisoned");
+    let _test_guard = lock_source_read_counter_tests();
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
@@ -773,9 +778,7 @@ fn synthetic_preparation_reuses_complete_outputs_for_one_final_header_pass() {
 
 #[test]
 fn synthetic_diagnosed_preparation_is_not_consumed_again() {
-    let _test_guard = SOURCE_READ_COUNTER_TEST_LOCK
-        .lock()
-        .expect("source read counter test lock poisoned");
+    let _test_guard = lock_source_read_counter_tests();
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
@@ -4279,9 +4282,7 @@ fn stage0_reuses_scanned_moth_source_when_assembling_input_files() {
     .expect("config should parse");
     let resolver = configured_resolver(&config);
 
-    let _counter_guard = SOURCE_READ_COUNTER_TEST_LOCK
-        .lock()
-        .expect("source read counter test lock poisoned");
+    let _counter_guard = lock_source_read_counter_tests();
     let canonical_root = fs::canonicalize(&root).expect("test root should canonicalize");
     super::source_loading::reset_source_read_count_for_test(&canonical_root);
     let modules = discover_modules_for_test(&config, &resolver, &style_directives)
@@ -4346,9 +4347,7 @@ fn project_source_ids_are_prepared_into_owned_inputs_without_a_retained_store() 
         .source_id_for_canonical_path(&entry_path)
         .expect("entry should have a dense source ID");
 
-    let _counter_guard = SOURCE_READ_COUNTER_TEST_LOCK
-        .lock()
-        .expect("source read counter test lock poisoned");
+    let _counter_guard = lock_source_read_counter_tests();
     super::source_loading::reset_source_read_count_for_test(&project_root);
 
     let first = match super::source_discovery::prepare_owned_source_input(
@@ -4730,9 +4729,7 @@ fn canonical_multi_entry_discovery_is_deterministic_and_reads_each_source_once()
     .expect("config should parse");
     let resolver = configured_resolver(&config);
 
-    let _counter_guard = SOURCE_READ_COUNTER_TEST_LOCK
-        .lock()
-        .expect("source read counter test lock poisoned");
+    let _counter_guard = lock_source_read_counter_tests();
     let canonical_root = fs::canonicalize(&root).expect("test root should canonicalize");
     super::source_loading::reset_source_read_count_for_test(&canonical_root);
 
@@ -4889,9 +4886,7 @@ fn canonical_provider_discovery_reads_and_tokenizes_each_source_once() {
         &calls,
     ))));
 
-    let _counter_guard = SOURCE_READ_COUNTER_TEST_LOCK
-        .lock()
-        .expect("source read counter test lock poisoned");
+    let _counter_guard = lock_source_read_counter_tests();
     let canonical_root = fs::canonicalize(&root).expect("test root should canonicalize");
     super::source_loading::reset_source_read_count_for_test(&canonical_root);
 

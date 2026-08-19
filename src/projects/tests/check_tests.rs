@@ -482,9 +482,10 @@ fn check_command_total_excludes_renderer_work() {
         super::CheckOptions::default(),
         scripted_duration,
         |outcome, duration| {
-            // Simulate renderer work after capture. The scripted duration must
-            // remain the recorded total regardless of this work.
-            std::thread::sleep(Duration::from_millis(5));
+            // The renderer receiving the captured duration is the ordering evidence: capture
+            // already happened. Sleeping here would add wall-clock time to the test without
+            // strengthening that, because the recorded total is the scripted value, not a
+            // measurement of this callback.
             assert_eq!(duration, scripted_duration);
             assert!(
                 !outcome.messages.has_errors(),

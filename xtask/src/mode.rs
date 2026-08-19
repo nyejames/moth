@@ -5,6 +5,7 @@
 //!      and replaces raw string matching with a descriptive enum.
 
 use crate::profile::{ProfileOptions, ProfileParseResult, parse_profile_args};
+use crate::stress::DEFAULT_STRESS_REPEATS;
 
 pub(crate) const TOP_LEVEL_USAGE: &str = "\
 Usage: xtask <mode> [options]
@@ -18,6 +19,8 @@ Modes:
   bench-frontend       Run the focused frontend benchmark suite and record
   bench-validate       Validate all benchmark cases compile without errors
   bench-profile        Run Samply-backed profiling (use --help for options)
+  stress               Repeat the unit and integration suites across thread counts
+                       (use --repeats <n>; default 3)
   timers-erasure-check Build a no-timer release binary and verify zero-cost erasure";
 
 /// Distinguishes the supported xtask benchmark modes.
@@ -48,6 +51,8 @@ pub enum BenchmarkMode {
     BenchProfile(ProfileOptions),
     /// Prove that a no-timer release binary contains no timer-only markers.
     TimersErasureCheck,
+    /// Repeat the unit and integration suites across the stress thread counts.
+    Stress { repeats: u32 },
 }
 
 /// Result of parsing the full xtask command line.
@@ -102,6 +107,13 @@ impl BenchmarkMode {
             return ModeParseResult::Mode(mode);
         }
 
+        if mode_str == "stress" {
+            return match parse_stress_repeats(&args[1..]) {
+                Ok(repeats) => ModeParseResult::Mode(BenchmarkMode::Stress { repeats }),
+                Err(error) => ModeParseResult::Error(error),
+            };
+        }
+
         // bench-profile: variable arguments parsed by the profile module.
         if mode_str == "bench-profile" {
             let remaining: Vec<&str> = args[1..].iter().map(|s| s.as_str()).collect();
@@ -116,6 +128,20 @@ impl BenchmarkMode {
         }
 
         ModeParseResult::Error(format!("Unknown mode '{}'", mode_str))
+    }
+}
+
+/// Parse the optional `--repeats <n>` argument for the stress mode.
+fn parse_stress_repeats(args: &[String]) -> Result<u32, String> {
+    match args {
+        [] => Ok(DEFAULT_STRESS_REPEATS),
+        [flag, value] if flag == "--repeats" => value
+            .parse::<u32>()
+            .ok()
+            .filter(|repeats| *repeats > 0)
+            .ok_or_else(|| format!("--repeats must be a positive integer, got '{value}'")),
+        [flag] if flag == "--repeats" => Err("--repeats requires a value.".to_string()),
+        _ => Err("Mode 'stress' accepts only '--repeats <n>'.".to_string()),
     }
 }
 
