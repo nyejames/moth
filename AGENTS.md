@@ -61,16 +61,18 @@ Core contracts:
 - Missing optional ownership or transfer proof falls back conservatively without rejecting legal source. Missing mandatory topology proof is a source diagnostic, not a GC fallback.
 - Backends do not reparse source, reconstruct imports, infer source semantics or reconsider borrow and lifetime legality.
 
-## Coding and workflow
+## Rules before writing a patch
 
-- Prefer readable, modular, explicit code with descriptive names, narrow helpers, context structs and concise WHAT/WHY comments. Prefer data-oriented design over object-oriented patterns.
 - Moth is pre-release. Do not preserve old APIs through compatibility wrappers, forwarding shims, parallel structs, legacy entry points or fallback paths.
+- Deletion over addition. Boring over clever. Does the code you're about to write need to exist at all? If not, skip it. Be proactive about cleaning up and removing code that no longer needs to exist after you've made changes.
 - Keep one current implementation path. Thread API changes through every owner and delete the old path.
 - Fix root causes. Remove transitional duplication, stale helpers, dead code, obsolete comments, superseded fixtures and cleanup debt in the owning change.
-- Before adding a helper, pass, type, registry, validator, module or test abstraction, search the current owner, adjacent stages, backend paths and tests. Share only identical behaviour with a clear owner.
+- Prefer readable, modular, explicit code with descriptive names, narrow helpers, context structs and concise WHAT/WHY comments. 
+- Prefer data-oriented design over object-oriented patterns.
+- Before adding a helper, pass, type, registry, validator, module or test abstraction, search the current owner, adjacent stages, backend paths and tests. Share only identical behaviour with a clear owner. Reuse existing utilities. Look before you write; don't re-implement what's a few files over.
 - Do not move shared logic into a broad utility module unless it is genuinely shared and ownership remains clear.
 - Do not claim validation commands were run when they were not.
-- Use `/tmp` for temporary snippets and artefacts that should be untracked by git.
+- Use `./tmp` for temporary snippets and artefacts that should be untracked by git.
 
 Required workflow:
 1. Route and read the required project material and canonical authorities for the task.
