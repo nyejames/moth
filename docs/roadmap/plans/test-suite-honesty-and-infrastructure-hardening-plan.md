@@ -6,8 +6,8 @@
 WORK_ID: test-suite-honesty
 WORK_SOURCE: docs/roadmap/plans/test-suite-honesty-and-infrastructure-hardening-plan.md
 BASE_REVISION: f41f93a7a (post-TIR, post-benchmark-counters-timers)
-STATUS: active — fourth closeout pass per reviewer findings
-CURRENT_SCOPE: Phase 0-3 closeout complete (temp-path migration finished, benchmark typed seam, CWD guard test); awaiting Linux validation before Phase 4
+STATUS: active — Phase 0-3 closeout complete and Linux lane passed, ready for Phase 4
+CURRENT_SCOPE: Phase 0-3 closeout complete (temp-path migration, benchmark typed seam, CWD guard test, Linux validation); awaiting Phase 4
 COMPLETED:
   Phase 0: baseline established (4314 unit tests, 0 ignored, 1699 integration cases correct,
     1851 backend executions); durable inventory at docs/roadmap/evidence/test_honesty_inventory.json;
@@ -44,13 +44,16 @@ COMPLETED:
     constructors removed from production;
     all synthetic fixtures carry valid build_result or messages;
     ScopedEnvVar panic-safe env guard; surface_thread_panic replaces discarded joins
-NEXT_ACTION: fourth closeout pass complete; run Linux validation lane, then Phase 4
+NEXT_ACTION: Linux validation lane run and passed (4324 tests incl. Linux-only non-UTF-8);
+  Phase 0-3 closeout complete, ready for Phase 4
 VALIDATION: cargo fmt --check; cargo clippy -D warnings; cargo test --workspace (4314+17+643);
   cargo run -- tests --terse (1851/1851); cargo test --features timers (pass);
   cargo test --features detailed_timers (pass, 4316+17+643); just validate (pass);
-  pre-existing benchmark_counters failure unchanged; Linux lane not run on macOS host
+  pre-existing benchmark_counters failure unchanged; Linux lane passed via GitHub Actions
+  validate-linux (4324 unit tests incl. Linux-only non-UTF-8 filesystem identity tests,
+  1851/1851 integration cases)
 AUDITS: fourth closeout pass applied per reviewer's 4 closeout tasks
-BLOCKERS: Linux CI lane needed to verify Linux-only tests (macOS host cannot run them)
+BLOCKERS: none (all four closeout tasks complete)
 NOTES: Pre-existing benchmark_counters feature test failures are not caused by this work.
   Inventory finding mappings fixed: lossy_path_text_conversion → Phase 5 item 7,
   source_text_tests_false_confidence → Phase 4 items 3 and 7.

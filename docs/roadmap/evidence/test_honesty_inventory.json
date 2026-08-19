@@ -18,7 +18,7 @@
       "timers+benchmark_counters": "pre-existing failures: 4 tests",
       "detailed_timers": "pass (4316+17+643)"
     },
-    "linux_lane": "not run on host (macOS); Linux-only tests require CI or Linux host"
+    "linux_lane": "passed via GitHub Actions validate-linux (4324 unit tests incl. Linux-only non-UTF-8 filesystem identity tests, 1851/1851 integration cases)"
   },
   "findings": [
     {
