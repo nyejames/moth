@@ -149,13 +149,15 @@ role = "primary"
 id = "borrow_checker_basic_variables"
 path = "borrow_checker_basic_variables"
 tags = ["integration", "borrows"]
-role = "smoke"
+contract = "language.bindings.implicit_shared_borrowing_acceptance"
+role = "boundary"
 
 [[case]]
 id = "borrow_checker_function_calls"
 path = "borrow_checker_function_calls"
-tags = ["integration", "borrows"]
-role = "smoke"
+tags = ["integration", "borrows", "functions"]
+contract = "language.functions.explicit_tilde_argument_acceptance"
+role = "primary"
 
 [[case]]
 id = "borrow_checker_loop_break_with_alias"
@@ -259,7 +261,8 @@ role = "primary"
 id = "borrow_checker_string_memory"
 path = "borrow_checker_string_memory"
 tags = ["integration", "borrows"]
-role = "smoke"
+contract = "language.bindings.implicit_shared_borrowing_acceptance"
+role = "boundary"
 
 [[case]]
 id = "mutable_alias_blocks_later_source_access"
@@ -314,7 +317,8 @@ role = "primary"
 id = "choice_basic_declaration_and_use"
 path = "choice_basic_declaration_and_use"
 tags = ["integration", "language", "choices"]
-role = "smoke"
+contract = "language.choices.match_value_flow"
+role = "boundary"
 
 [[case]]
 id = "choice_qualified_unit_variant_function_template_call"
@@ -1965,7 +1969,8 @@ role = "primary"
 id = "choice_dependency_visibility_exported"
 path = "choice_dependency_visibility_exported"
 tags = ["integration", "language", "choices"]
-role = "smoke"
+contract = "language.choices.cross_file_runtime_dispatch"
+role = "boundary"
 
 [[case]]
 id = "choice_match_exhaustive_success"
@@ -2558,8 +2563,9 @@ role = "boundary"
 [[case]]
 id = "commas"
 path = "commas"
-tags = ["integration", "language"]
-role = "smoke"
+tags = ["integration", "language", "templates"]
+contract = "language.templates.trailing_comma_in_arguments_acceptance"
+role = "primary"
 
 [[case]]
 id = "comparison_and_logical"
@@ -2578,8 +2584,9 @@ role = "boundary"
 [[case]]
 id = "complex_borrowing_scenarios"
 path = "complex_borrowing_scenarios"
-tags = ["integration", "borrows"]
-role = "smoke"
+tags = ["integration", "borrows", "control-flow"]
+contract = "language.bindings.scoped_alias_does_not_block_later_access"
+role = "boundary"
 
 [[case]]
 id = "missing_nested_dependency_symbol_rejected"
@@ -3565,7 +3572,8 @@ role = "primary"
 id = "immutable_alias_while_borrowed"
 path = "immutable_alias_while_borrowed"
 tags = ["integration", "borrows"]
-role = "smoke"
+contract = "language.bindings.implicit_shared_borrowing_acceptance"
+role = "boundary"
 
 [[case]]
 id = "immutable_mutation_attempt"
@@ -4333,8 +4341,9 @@ role = "primary"
 [[case]]
 id = "mixed_numeric_literals"
 path = "mixed_numeric_literals"
-tags = ["integration","language"]
-role = "smoke"
+tags = ["integration", "language"]
+contract = "language.floats.literals_and_arithmetic"
+role = "boundary"
 
 [[case]]
 id = "modulus_operator"
@@ -4374,8 +4383,9 @@ role = "primary"
 [[case]]
 id = "multi_bind_optional_slots"
 path = "multi_bind_optional_slots"
-tags = ["integration", "results"]
-role = "smoke"
+tags = ["integration", "results", "optionals"]
+contract = "language.functions.multi_return_binding_acceptance"
+role = "boundary"
 
 [[case]]
 id = "multi_bind_plain_multi_return"
@@ -4479,7 +4489,8 @@ role = "primary"
 id = "nested_borrowing_patterns"
 path = "nested_borrowing_patterns"
 tags = ["integration", "borrows"]
-role = "smoke"
+contract = "language.bindings.alias_final_use_allows_mutable_rebinding"
+role = "boundary"
 
 [[case]]
 id = "none_declaration_success"
@@ -7040,8 +7051,9 @@ role = "backend"
 [[case]]
 id = "white_space"
 path = "white_space"
-tags = ["integration","language"]
-role = "smoke"
+tags = ["integration", "language", "syntax"]
+contract = "language.syntax.declaration_trailing_whitespace_acceptance"
+role = "primary"
 
 [[case]]
 id = "int_promotion_to_float_declaration"

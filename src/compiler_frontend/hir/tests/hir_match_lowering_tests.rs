@@ -26,17 +26,17 @@ use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    function_node, make_test_variable, node, test_location,
+    function_node, make_test_variable, node, test_source_location,
 };
 
 use crate::compiler_frontend::tests::type_id_fixture_support::{
-    choice_type_id, fresh_success_returns, param_with_type_id, reference_expr,
+    choice_type_id, fresh_success_returns, inferred_type_reference_expr, param_with_type_id,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 
 use crate::compiler_frontend::hir::hir_builder::{
-    HirTestChoiceDefinition, assert_no_placeholder_terminators, build_ast, build_ast_with_choices,
-    lower_ast,
+    HirTestChoiceDefinition, assert_no_placeholder_terminators, build_ast_with_choices,
+    build_ast_with_registered_types, lower_ast,
 };
 
 #[test]
@@ -53,47 +53,47 @@ fn non_unit_function_with_terminal_match_default_does_not_report_fallthrough() {
                 x.clone(),
                 builtin_type_ids::INT,
                 false,
-                test_location(10),
+                test_source_location(10),
             )],
             returns: fresh_success_returns(vec![builtin_type_ids::INT]),
         },
         vec![node(
             NodeKind::Match {
-                scrutinee: reference_expr(
+                scrutinee: inferred_type_reference_expr(
                     x,
                     builtin_type_ids::INT,
-                    test_location(11),
+                    test_source_location(11),
                     ValueMode::ImmutableReference,
                 ),
                 arms: vec![MatchArm {
                     pattern: MatchPattern::Literal(Expression::int(
                         1,
-                        test_location(11),
+                        test_source_location(11),
                         ValueMode::ImmutableOwned,
                     )),
                     guard: None,
                     body: vec![node(
                         NodeKind::Return(vec![Expression::int(
                             1,
-                            test_location(11),
+                            test_source_location(11),
                             ValueMode::ImmutableOwned,
                         )]),
-                        test_location(11),
+                        test_source_location(11),
                     )],
                 }],
                 default: Some(vec![node(
                     NodeKind::Return(vec![Expression::int(
                         2,
-                        test_location(12),
+                        test_source_location(12),
                         ValueMode::ImmutableOwned,
                     )]),
-                    test_location(12),
+                    test_source_location(12),
                 )]),
                 exhaustiveness: MatchExhaustiveness::HasDefault,
             },
-            test_location(11),
+            test_source_location(11),
         )],
-        test_location(10),
+        test_source_location(10),
     );
 
     let start_fn = function_node(
@@ -103,10 +103,10 @@ fn non_unit_function_with_terminal_match_default_does_not_report_fallthrough() {
             returns: vec![],
         },
         vec![],
-        test_location(1),
+        test_source_location(1),
     );
 
-    let ast = build_ast(vec![start_fn, chooser_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn, chooser_fn], entry_path);
     let (module, _type_environment) = lower_ast(ast, &mut string_table)
         .expect("all-terminal match arms should not trigger fallthrough");
 
@@ -132,12 +132,12 @@ fn non_unit_function_with_exhaustive_choice_match_returns_on_all_arms() {
         ChoiceVariant {
             id: ready_name,
             payload: ChoiceVariantPayload::Unit,
-            location: test_location(20),
+            location: test_source_location(20),
         },
         ChoiceVariant {
             id: busy_name,
             payload: ChoiceVariantPayload::Unit,
-            location: test_location(20),
+            location: test_source_location(20),
         },
     ];
 
@@ -150,16 +150,16 @@ fn non_unit_function_with_exhaustive_choice_match_returns_on_all_arms() {
                 status_local.clone(),
                 status_type_id,
                 false,
-                test_location(20),
+                test_source_location(20),
             )],
             returns: fresh_success_returns(vec![builtin_type_ids::INT]),
         },
         vec![node(
             NodeKind::Match {
-                scrutinee: reference_expr(
+                scrutinee: inferred_type_reference_expr(
                     status_local,
                     status_type_id,
-                    test_location(21),
+                    test_source_location(21),
                     ValueMode::ImmutableReference,
                 ),
                 arms: vec![
@@ -168,16 +168,16 @@ fn non_unit_function_with_exhaustive_choice_match_returns_on_all_arms() {
                             nominal_path: status_path.clone(),
                             tag: 0,
                             captures: vec![],
-                            location: test_location(22),
+                            location: test_source_location(22),
                         },
                         guard: None,
                         body: vec![node(
                             NodeKind::Return(vec![Expression::int(
                                 1,
-                                test_location(22),
+                                test_source_location(22),
                                 ValueMode::ImmutableOwned,
                             )]),
-                            test_location(22),
+                            test_source_location(22),
                         )],
                     },
                     MatchArm {
@@ -185,25 +185,25 @@ fn non_unit_function_with_exhaustive_choice_match_returns_on_all_arms() {
                             nominal_path: status_path.clone(),
                             tag: 1,
                             captures: vec![],
-                            location: test_location(23),
+                            location: test_source_location(23),
                         },
                         guard: None,
                         body: vec![node(
                             NodeKind::Return(vec![Expression::int(
                                 2,
-                                test_location(23),
+                                test_source_location(23),
                                 ValueMode::ImmutableOwned,
                             )]),
-                            test_location(23),
+                            test_source_location(23),
                         )],
                     },
                 ],
                 default: None,
                 exhaustiveness: MatchExhaustiveness::ExhaustiveChoice,
             },
-            test_location(21),
+            test_source_location(21),
         )],
-        test_location(20),
+        test_source_location(20),
     );
 
     let start_fn = function_node(
@@ -213,7 +213,7 @@ fn non_unit_function_with_exhaustive_choice_match_returns_on_all_arms() {
             returns: vec![],
         },
         vec![],
-        test_location(1),
+        test_source_location(1),
     );
 
     let ast = build_ast_with_choices(
@@ -249,57 +249,57 @@ fn lowers_match_with_literal_arms_and_explicit_default_wildcard() {
 
     let match_node = node(
         NodeKind::Match {
-            scrutinee: reference_expr(
+            scrutinee: inferred_type_reference_expr(
                 x.clone(),
                 builtin_type_ids::INT,
-                test_location(3),
+                test_source_location(3),
                 ValueMode::ImmutableReference,
             ),
             arms: vec![
                 MatchArm {
                     pattern: MatchPattern::Literal(Expression::int(
                         1,
-                        test_location(3),
+                        test_source_location(3),
                         ValueMode::ImmutableOwned,
                     )),
                     guard: None,
                     body: vec![node(
                         NodeKind::ExpressionStatement(Expression::int(
                             9,
-                            test_location(3),
+                            test_source_location(3),
                             ValueMode::ImmutableOwned,
                         )),
-                        test_location(3),
+                        test_source_location(3),
                     )],
                 },
                 MatchArm {
                     pattern: MatchPattern::Literal(Expression::int(
                         2,
-                        test_location(3),
+                        test_source_location(3),
                         ValueMode::ImmutableOwned,
                     )),
                     guard: None,
                     body: vec![node(
                         NodeKind::ExpressionStatement(Expression::int(
                             8,
-                            test_location(3),
+                            test_source_location(3),
                             ValueMode::ImmutableOwned,
                         )),
-                        test_location(3),
+                        test_source_location(3),
                     )],
                 },
             ],
             default: Some(vec![node(
                 NodeKind::ExpressionStatement(Expression::int(
                     0,
-                    test_location(3),
+                    test_source_location(3),
                     ValueMode::ImmutableOwned,
                 )),
-                test_location(3),
+                test_source_location(3),
             )]),
             exhaustiveness: MatchExhaustiveness::HasDefault,
         },
-        test_location(3),
+        test_source_location(3),
     );
 
     let start_fn = function_node(
@@ -309,15 +309,15 @@ fn lowers_match_with_literal_arms_and_explicit_default_wildcard() {
                 x,
                 builtin_type_ids::INT,
                 false,
-                test_location(2),
+                test_source_location(2),
             )],
             returns: vec![],
         },
         vec![match_node],
-        test_location(2),
+        test_source_location(2),
     );
 
-    let ast = build_ast(vec![start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
 
@@ -346,43 +346,43 @@ fn lowers_match_with_guarded_arm_into_hir_guard_expression() {
 
     let match_node = node(
         NodeKind::Match {
-            scrutinee: reference_expr(
+            scrutinee: inferred_type_reference_expr(
                 x.clone(),
                 builtin_type_ids::INT,
-                test_location(3),
+                test_source_location(3),
                 ValueMode::ImmutableReference,
             ),
             arms: vec![MatchArm {
                 pattern: MatchPattern::Literal(Expression::int(
                     1,
-                    test_location(3),
+                    test_source_location(3),
                     ValueMode::ImmutableOwned,
                 )),
                 guard: Some(Expression::bool(
                     true,
-                    test_location(3),
+                    test_source_location(3),
                     ValueMode::ImmutableOwned,
                 )),
                 body: vec![node(
                     NodeKind::ExpressionStatement(Expression::int(
                         9,
-                        test_location(3),
+                        test_source_location(3),
                         ValueMode::ImmutableOwned,
                     )),
-                    test_location(3),
+                    test_source_location(3),
                 )],
             }],
             default: Some(vec![node(
                 NodeKind::ExpressionStatement(Expression::int(
                     8,
-                    test_location(4),
+                    test_source_location(4),
                     ValueMode::ImmutableOwned,
                 )),
-                test_location(4),
+                test_source_location(4),
             )]),
             exhaustiveness: MatchExhaustiveness::HasDefault,
         },
-        test_location(3),
+        test_source_location(3),
     );
 
     let start_fn = function_node(
@@ -392,15 +392,15 @@ fn lowers_match_with_guarded_arm_into_hir_guard_expression() {
                 x,
                 builtin_type_ids::INT,
                 false,
-                test_location(2),
+                test_source_location(2),
             )],
             returns: vec![],
         },
         vec![match_node],
-        test_location(2),
+        test_source_location(2),
     );
 
-    let ast = build_ast(vec![start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
     let start = &module.functions[module
@@ -432,18 +432,18 @@ fn match_guard_rejects_lowering_when_guard_emits_prelude_statements() {
     let guarded_arm = MatchArm {
         pattern: MatchPattern::Literal(Expression::int(
             1,
-            test_location(3),
+            test_source_location(3),
             ValueMode::ImmutableOwned,
         )),
         guard: Some(Expression::host_function_call(
             crate::compiler_frontend::external_packages::ExternalFunctionId::IoLine,
             vec![Expression::bool(
                 true,
-                test_location(3),
+                test_source_location(3),
                 ValueMode::ImmutableOwned,
             )],
             vec![builtin_type_ids::NONE],
-            test_location(3),
+            test_source_location(3),
         )),
         body: vec![],
     };
@@ -455,28 +455,28 @@ fn match_guard_rejects_lowering_when_guard_emits_prelude_statements() {
                 x.clone(),
                 builtin_type_ids::INT,
                 false,
-                test_location(2),
+                test_source_location(2),
             )],
             returns: vec![],
         },
         vec![node(
             NodeKind::Match {
-                scrutinee: reference_expr(
+                scrutinee: inferred_type_reference_expr(
                     x,
                     builtin_type_ids::INT,
-                    test_location(3),
+                    test_source_location(3),
                     ValueMode::ImmutableReference,
                 ),
                 arms: vec![guarded_arm],
                 default: Some(vec![]),
                 exhaustiveness: MatchExhaustiveness::HasDefault,
             },
-            test_location(3),
+            test_source_location(3),
         )],
-        test_location(2),
+        test_source_location(2),
     );
 
-    let ast = build_ast(vec![start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let err = lower_ast(ast, &mut string_table)
         .expect_err("guard expressions with preludes should fail HIR lowering");
 
@@ -503,23 +503,23 @@ fn match_rejects_non_literal_pattern_expressions() {
                 x.clone(),
                 builtin_type_ids::INT,
                 false,
-                test_location(2),
+                test_source_location(2),
             )],
             returns: vec![],
         },
         vec![node(
             NodeKind::Match {
-                scrutinee: reference_expr(
+                scrutinee: inferred_type_reference_expr(
                     x.clone(),
                     builtin_type_ids::INT,
-                    test_location(3),
+                    test_source_location(3),
                     ValueMode::ImmutableReference,
                 ),
                 arms: vec![MatchArm {
-                    pattern: MatchPattern::Literal(reference_expr(
+                    pattern: MatchPattern::Literal(inferred_type_reference_expr(
                         x,
                         builtin_type_ids::INT,
-                        test_location(3),
+                        test_source_location(3),
                         ValueMode::ImmutableReference,
                     )),
                     guard: None,
@@ -528,12 +528,12 @@ fn match_rejects_non_literal_pattern_expressions() {
                 default: Some(vec![]),
                 exhaustiveness: MatchExhaustiveness::HasDefault,
             },
-            test_location(3),
+            test_source_location(3),
         )],
-        test_location(2),
+        test_source_location(2),
     );
 
-    let ast = build_ast(vec![start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let err = lower_ast(ast, &mut string_table)
         .expect_err("non-literal match pattern should fail HIR lowering");
 
@@ -558,11 +558,11 @@ fn break_outside_loop_reports_hir_transformation_error() {
             parameters: vec![],
             returns: vec![],
         },
-        vec![node(NodeKind::Break, test_location(2))],
-        test_location(1),
+        vec![node(NodeKind::Break, test_source_location(2))],
+        test_source_location(1),
     );
 
-    let ast = build_ast(vec![start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let err = lower_ast(ast, &mut string_table).expect_err("break outside loop should fail");
     let (error_type, message, _location) = err
         .first_infrastructure_error_for_tests()
@@ -582,11 +582,11 @@ fn continue_outside_loop_reports_hir_transformation_error() {
             parameters: vec![],
             returns: vec![],
         },
-        vec![node(NodeKind::Continue, test_location(2))],
-        test_location(1),
+        vec![node(NodeKind::Continue, test_source_location(2))],
+        test_source_location(1),
     );
 
-    let ast = build_ast(vec![start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let err = lower_ast(ast, &mut string_table).expect_err("continue outside loop should fail");
     let (error_type, message, _location) = err
         .first_infrastructure_error_for_tests()
@@ -607,12 +607,12 @@ fn top_level_return_reports_hir_transformation_error() {
             returns: vec![],
         },
         vec![],
-        test_location(1),
+        test_source_location(1),
     );
 
-    let top_level_return = node(NodeKind::Return(vec![]), test_location(2));
+    let top_level_return = node(NodeKind::Return(vec![]), test_source_location(2));
 
-    let ast = build_ast(vec![start_fn, top_level_return], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn, top_level_return], entry_path);
     let err = lower_ast(ast, &mut string_table).expect_err("top-level return should fail");
 
     let (error_type, message, _location) = err
@@ -634,10 +634,10 @@ fn unit_implicit_return_lowers_to_return_terminator() {
             returns: vec![],
         },
         vec![],
-        test_location(1),
+        test_source_location(1),
     );
 
-    let ast = build_ast(vec![start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("unit fallthrough should succeed");
     let start = &module.functions[module
@@ -654,8 +654,8 @@ fn side_table_maps_statement_and_terminator_locations() {
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
     let x = super::symbol("x", &mut string_table);
 
-    let decl_loc = test_location(4);
-    let ret_loc = test_location(5);
+    let decl_loc = test_source_location(4);
+    let ret_loc = test_source_location(5);
 
     let start_fn = function_node(
         start_name,
@@ -673,10 +673,10 @@ fn side_table_maps_statement_and_terminator_locations() {
             ),
             node(NodeKind::Return(vec![]), ret_loc.clone()),
         ],
-        test_location(3),
+        test_source_location(3),
     );
 
-    let ast = build_ast(vec![start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
 
@@ -695,39 +695,39 @@ fn lowers_relational_pattern_to_hir_relational() {
 
     let match_node = node(
         NodeKind::Match {
-            scrutinee: reference_expr(
+            scrutinee: inferred_type_reference_expr(
                 x.clone(),
                 builtin_type_ids::INT,
-                test_location(3),
+                test_source_location(3),
                 ValueMode::ImmutableReference,
             ),
             arms: vec![MatchArm {
                 pattern: MatchPattern::Relational {
                     op: RelationalPatternOp::LessThan,
-                    value: Expression::int(10, test_location(3), ValueMode::ImmutableOwned),
-                    location: test_location(3),
+                    value: Expression::int(10, test_source_location(3), ValueMode::ImmutableOwned),
+                    location: test_source_location(3),
                 },
                 guard: None,
                 body: vec![node(
                     NodeKind::ExpressionStatement(Expression::int(
                         9,
-                        test_location(3),
+                        test_source_location(3),
                         ValueMode::ImmutableOwned,
                     )),
-                    test_location(3),
+                    test_source_location(3),
                 )],
             }],
             default: Some(vec![node(
                 NodeKind::ExpressionStatement(Expression::int(
                     8,
-                    test_location(4),
+                    test_source_location(4),
                     ValueMode::ImmutableOwned,
                 )),
-                test_location(4),
+                test_source_location(4),
             )]),
             exhaustiveness: MatchExhaustiveness::HasDefault,
         },
-        test_location(3),
+        test_source_location(3),
     );
 
     let start_fn = function_node(
@@ -737,15 +737,15 @@ fn lowers_relational_pattern_to_hir_relational() {
                 x,
                 builtin_type_ids::INT,
                 false,
-                test_location(2),
+                test_source_location(2),
             )],
             returns: vec![],
         },
         vec![match_node],
-        test_location(2),
+        test_source_location(2),
     );
 
-    let ast = build_ast(vec![start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
 
@@ -789,43 +789,43 @@ fn lowers_guarded_relational_pattern_preserving_guard_separation() {
 
     let match_node = node(
         NodeKind::Match {
-            scrutinee: reference_expr(
+            scrutinee: inferred_type_reference_expr(
                 x.clone(),
                 builtin_type_ids::INT,
-                test_location(3),
+                test_source_location(3),
                 ValueMode::ImmutableReference,
             ),
             arms: vec![MatchArm {
                 pattern: MatchPattern::Relational {
                     op: RelationalPatternOp::LessThan,
-                    value: Expression::int(10, test_location(3), ValueMode::ImmutableOwned),
-                    location: test_location(3),
+                    value: Expression::int(10, test_source_location(3), ValueMode::ImmutableOwned),
+                    location: test_source_location(3),
                 },
                 guard: Some(Expression::bool(
                     true,
-                    test_location(3),
+                    test_source_location(3),
                     ValueMode::ImmutableOwned,
                 )),
                 body: vec![node(
                     NodeKind::ExpressionStatement(Expression::int(
                         9,
-                        test_location(3),
+                        test_source_location(3),
                         ValueMode::ImmutableOwned,
                     )),
-                    test_location(3),
+                    test_source_location(3),
                 )],
             }],
             default: Some(vec![node(
                 NodeKind::ExpressionStatement(Expression::int(
                     8,
-                    test_location(4),
+                    test_source_location(4),
                     ValueMode::ImmutableOwned,
                 )),
-                test_location(4),
+                test_source_location(4),
             )]),
             exhaustiveness: MatchExhaustiveness::HasDefault,
         },
-        test_location(3),
+        test_source_location(3),
     );
 
     let start_fn = function_node(
@@ -835,15 +835,15 @@ fn lowers_guarded_relational_pattern_preserving_guard_separation() {
                 x,
                 builtin_type_ids::INT,
                 false,
-                test_location(2),
+                test_source_location(2),
             )],
             returns: vec![],
         },
         vec![match_node],
-        test_location(2),
+        test_source_location(2),
     );
 
-    let ast = build_ast(vec![start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
 
@@ -887,12 +887,12 @@ fn lowers_choice_match_arms_to_hir_choice_variant_patterns() {
         ChoiceVariant {
             id: ready_name,
             payload: ChoiceVariantPayload::Unit,
-            location: test_location(2),
+            location: test_source_location(2),
         },
         ChoiceVariant {
             id: busy_name,
             payload: ChoiceVariantPayload::Unit,
-            location: test_location(2),
+            location: test_source_location(2),
         },
     ];
 
@@ -900,10 +900,10 @@ fn lowers_choice_match_arms_to_hir_choice_variant_patterns() {
 
     let match_node = node(
         NodeKind::Match {
-            scrutinee: reference_expr(
+            scrutinee: inferred_type_reference_expr(
                 status_local.clone(),
                 status_type_id,
-                test_location(3),
+                test_source_location(3),
                 ValueMode::ImmutableOwned,
             ),
             arms: vec![
@@ -912,16 +912,16 @@ fn lowers_choice_match_arms_to_hir_choice_variant_patterns() {
                         nominal_path: status_path.clone(),
                         tag: 0,
                         captures: vec![],
-                        location: test_location(4),
+                        location: test_source_location(4),
                     },
                     guard: None,
                     body: vec![node(
                         NodeKind::ExpressionStatement(Expression::int(
                             1,
-                            test_location(4),
+                            test_source_location(4),
                             ValueMode::ImmutableOwned,
                         )),
-                        test_location(4),
+                        test_source_location(4),
                     )],
                 },
                 MatchArm {
@@ -929,23 +929,23 @@ fn lowers_choice_match_arms_to_hir_choice_variant_patterns() {
                         nominal_path: status_path.clone(),
                         tag: 1,
                         captures: vec![],
-                        location: test_location(5),
+                        location: test_source_location(5),
                     },
                     guard: None,
                     body: vec![node(
                         NodeKind::ExpressionStatement(Expression::int(
                             2,
-                            test_location(5),
+                            test_source_location(5),
                             ValueMode::ImmutableOwned,
                         )),
-                        test_location(5),
+                        test_source_location(5),
                     )],
                 },
             ],
             default: None,
             exhaustiveness: MatchExhaustiveness::ExhaustiveChoice,
         },
-        test_location(3),
+        test_source_location(3),
     );
 
     let start_fn = function_node(
@@ -955,12 +955,12 @@ fn lowers_choice_match_arms_to_hir_choice_variant_patterns() {
                 status_local,
                 status_type_id,
                 false,
-                test_location(2),
+                test_source_location(2),
             )],
             returns: vec![],
         },
         vec![match_node],
-        test_location(2),
+        test_source_location(2),
     );
 
     let ast = build_ast_with_choices(
@@ -1030,10 +1030,10 @@ fn lowers_option_present_capture_to_payload_assignment() {
 
     let match_node = node(
         NodeKind::Match {
-            scrutinee: reference_expr(
+            scrutinee: inferred_type_reference_expr(
                 maybe_name.clone(),
                 option_int_type_id,
-                test_location(2),
+                test_source_location(2),
                 ValueMode::ImmutableReference,
             ),
             arms: vec![MatchArm {
@@ -1041,31 +1041,31 @@ fn lowers_option_present_capture_to_payload_assignment() {
                     name: capture_name,
                     binding_path: capture_path.clone(),
                     inner_type_id: builtin_type_ids::INT,
-                    location: test_location(3),
-                    binding_location: test_location(3),
+                    location: test_source_location(3),
+                    binding_location: test_source_location(3),
                 },
                 guard: None,
                 body: vec![node(
-                    NodeKind::ExpressionStatement(reference_expr(
+                    NodeKind::ExpressionStatement(inferred_type_reference_expr(
                         capture_path,
                         builtin_type_ids::INT,
-                        test_location(3),
+                        test_source_location(3),
                         ValueMode::ImmutableReference,
                     )),
-                    test_location(3),
+                    test_source_location(3),
                 )],
             }],
             default: Some(vec![node(
                 NodeKind::ExpressionStatement(Expression::int(
                     0,
-                    test_location(4),
+                    test_source_location(4),
                     ValueMode::ImmutableOwned,
                 )),
-                test_location(4),
+                test_source_location(4),
             )]),
             exhaustiveness: MatchExhaustiveness::HasDefault,
         },
-        test_location(2),
+        test_source_location(2),
     );
 
     let start_fn = function_node(
@@ -1075,15 +1075,15 @@ fn lowers_option_present_capture_to_payload_assignment() {
                 maybe_name,
                 option_int_type_id,
                 false,
-                test_location(1),
+                test_source_location(1),
             )],
             returns: vec![],
         },
         vec![match_node],
-        test_location(1),
+        test_source_location(1),
     );
 
-    let mut ast = build_ast(vec![start_fn], entry_path);
+    let mut ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let registered_option_type_id = ast.type_environment.intern_option(builtin_type_ids::INT);
     assert_eq!(
         registered_option_type_id, option_int_type_id,

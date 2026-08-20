@@ -8,7 +8,7 @@ use crate::timing_scope;
 
 use super::manifest::{OutputCleanupFinalization, finalize_output_cleanup, prepare_output_cleanup};
 use super::policy::OutputPlan;
-use super::writer::{emit_prepared_output_files, prepare_output_write};
+use super::writer::{OutputWriteSummary, emit_prepared_output_files, prepare_output_write};
 use crate::build_system::build::Project;
 use crate::build_system::utils::file_error_messages;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
@@ -34,11 +34,14 @@ pub(crate) struct WriteOptions {
 /// Artifact paths are explicit and must already include any desired extension. The complete
 /// output plan carries the output root, cleanup safety boundary and manifest owner; callers do
 /// not reconstruct those facts from config after compilation.
+///
+/// Returns what each prepared destination did on disk, so callers report emitted artifacts
+/// instead of planned ones and never infer a skipped write from a filesystem timestamp.
 pub(crate) fn write_project_outputs(
     project: &Project,
     options: &WriteOptions,
     string_table: &StringTable,
-) -> Result<(), CompilerMessages> {
+) -> Result<OutputWriteSummary, CompilerMessages> {
     timing_scope!(
         timing_guard_output_write_total,
         crate::timing::TimingMetric::OutputWriteTotal
@@ -52,7 +55,7 @@ fn write_project_outputs_inner(
     project: &Project,
     options: &WriteOptions,
     string_table: &StringTable,
-) -> Result<(), CompilerMessages> {
+) -> Result<OutputWriteSummary, CompilerMessages> {
     // ---------------------------------------
     //  Preflight the complete output batch
     // ---------------------------------------
@@ -96,7 +99,8 @@ fn write_project_outputs_inner(
     //  Emit individual output files
     // ---------------------------------------
 
-    emit_prepared_output_files(project, &prepared_write, options.write_mode, string_table)?;
+    let write_summary =
+        emit_prepared_output_files(project, &prepared_write, options.write_mode, string_table)?;
 
     // ---------------------------------------
     //  Finalize cleanup and write manifest
@@ -116,5 +120,5 @@ fn write_project_outputs_inner(
     };
     finalize_output_cleanup(&cleanup_state, &finalization)?;
 
-    Ok(())
+    Ok(write_summary)
 }

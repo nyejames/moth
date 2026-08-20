@@ -1,6 +1,7 @@
 [backends.html]
 mode = "success"
-warnings = "ignore"
+warnings = "exact"
+warning_codes = ["MOTH-IMPORT-0003"]
 
 [[backends.html.artifact_assertions]]
 path = "index.html"

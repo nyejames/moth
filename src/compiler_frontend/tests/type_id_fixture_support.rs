@@ -124,7 +124,11 @@ pub(crate) fn loop_binding_with_type_id(
 // Expression helpers
 // ---------------------------------------------------------------------------
 
-pub(crate) fn reference_expr(
+/// A reference expression whose diagnostic type is fixed to `DataType::Inferred`.
+///
+/// The caller supplies the `ValueMode`. Named for the type it fixes so it cannot be confused
+/// with `ast_fixture_support::immutable_reference_expr`, which fixes the mode instead.
+pub(crate) fn inferred_type_reference_expr(
     name: InternedPath,
     type_id: TypeId,
     location: SourceLocation,
@@ -580,7 +584,17 @@ pub(crate) fn choice_type_id(
     type_id
 }
 
-pub(crate) fn build_ast(nodes: Vec<AstNode>, entry_path: InternedPath) -> Ast {
+/// Builds an `Ast` after registering every struct and choice definition its nodes mention.
+///
+/// WHAT: the single AST fixture constructor. It walks `nodes` for struct and choice definitions
+///       and registers them in a fresh `TypeEnvironment` before construction.
+/// WHY:  named for what it does rather than `build_ast_with_registered_types`, because HIR lowering resolves frontend
+///       `TypeId`s during declaration registration and a fixture that skipped that step would
+///       fail for reasons that have nothing to do with the test's subject.
+pub(crate) fn build_ast_with_registered_types(
+    nodes: Vec<AstNode>,
+    entry_path: InternedPath,
+) -> Ast {
     build_ast_with_choices(nodes, entry_path, vec![])
 }
 

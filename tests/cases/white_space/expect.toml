@@ -1,4 +1,4 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-success_contract = "acceptance_only"
+rendered_output_exact = "white_space first=123 second=123 third=123"

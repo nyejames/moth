@@ -19,14 +19,18 @@ use crate::compiler_frontend::module_metadata::ModuleDocFragmentKind;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    function_node, make_test_variable, node, test_location,
+    function_node, make_test_variable, node, test_source_location,
 };
 use crate::compiler_frontend::tests::hir_fixture_support::raw_template_expression_for_hir_invariant;
 
 use crate::compiler_frontend::value_mode::ValueMode;
 
-use crate::compiler_frontend::hir::hir_builder::{build_ast, lower_ast, lower_ast_with_metadata};
-use crate::compiler_frontend::tests::type_id_fixture_support::{no_value_expr, reference_expr};
+use crate::compiler_frontend::hir::hir_builder::{
+    build_ast_with_registered_types, lower_ast, lower_ast_with_metadata,
+};
+use crate::compiler_frontend::tests::type_id_fixture_support::{
+    inferred_type_reference_expr, no_value_expr,
+};
 
 #[test]
 fn registers_declarations_and_resolves_start_function() {
@@ -43,12 +47,12 @@ fn registers_declarations_and_resolves_start_function() {
                 field_name,
                 no_value_expr(
                     builtin_type_ids::INT,
-                    test_location(1),
+                    test_source_location(1),
                     ValueMode::ImmutableOwned,
                 ),
             )],
         ),
-        test_location(1),
+        test_source_location(1),
     );
 
     let start_function = function_node(
@@ -58,10 +62,10 @@ fn registers_declarations_and_resolves_start_function() {
             returns: vec![],
         },
         vec![],
-        test_location(2),
+        test_source_location(2),
     );
 
-    let ast = build_ast(vec![struct_node, start_function], entry_path);
+    let ast = build_ast_with_registered_types(vec![struct_node, start_function], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
 
@@ -96,9 +100,9 @@ fn api_only_root_roles_lower_without_implicit_start() {
                 returns: vec![],
             },
             vec![],
-            test_location(1),
+            test_source_location(1),
         );
-        let mut ast = build_ast(vec![declaration], entry_path);
+        let mut ast = build_ast_with_registered_types(vec![declaration], entry_path);
         ast.root_role = root_role;
 
         let (module, _type_environment) =
@@ -128,16 +132,16 @@ fn lowers_module_constants_into_hir_const_pool() {
             returns: vec![],
         },
         vec![],
-        test_location(1),
+        test_source_location(1),
     );
 
-    let mut ast = build_ast(vec![start_function], entry_path);
+    let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
     let const_name = super::symbol("SITE_NAME", &mut string_table);
     ast.module_constants.push(make_test_variable(
         const_name,
         Expression::string_slice(
             string_table.intern("Moth"),
-            test_location(1),
+            test_source_location(1),
             ValueMode::ImmutableOwned,
         ),
     ));
@@ -167,21 +171,21 @@ fn start_function_can_reference_module_constant() {
             returns: vec![],
         },
         vec![node(
-            NodeKind::ExpressionStatement(reference_expr(
+            NodeKind::ExpressionStatement(inferred_type_reference_expr(
                 third_const.clone(),
                 builtin_type_ids::INT,
-                test_location(2),
+                test_source_location(2),
                 ValueMode::ImmutableReference,
             )),
-            test_location(2),
+            test_source_location(2),
         )],
-        test_location(1),
+        test_source_location(1),
     );
 
-    let mut ast = build_ast(vec![start_function], entry_path);
+    let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
     ast.module_constants.push(make_test_variable(
         third_const,
-        Expression::int(3, test_location(1), ValueMode::ImmutableOwned),
+        Expression::int(3, test_source_location(1), ValueMode::ImmutableOwned),
     ));
 
     let (module, _type_environment) = lower_ast(ast, &mut string_table)
@@ -215,16 +219,16 @@ fn rejects_unmaterialized_template_constants_in_hir_module_constant_lowering() {
             returns: vec![],
         },
         vec![],
-        test_location(1),
+        test_source_location(1),
     );
 
     let (template_constant, _template_registry) = raw_template_expression_for_hir_invariant(
         TemplateType::String,
-        test_location(2),
+        test_source_location(2),
         ValueMode::ImmutableOwned,
     );
 
-    let mut ast = build_ast(vec![start_function], entry_path);
+    let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
     ast.module_constants.push(make_test_variable(
         super::symbol("WRAPPER", &mut string_table),
         template_constant,
@@ -252,25 +256,25 @@ fn rejects_nested_unmaterialized_template_constants_in_hir_module_constant_lower
             returns: vec![],
         },
         vec![],
-        test_location(1),
+        test_source_location(1),
     );
 
     let (template_constant, _template_registry) = raw_template_expression_for_hir_invariant(
         TemplateType::String,
-        test_location(2),
+        test_source_location(2),
         ValueMode::ImmutableOwned,
     );
 
     let page_const_name = super::symbol("PAGE", &mut string_table);
     let body_field = page_const_name.append(string_table.intern("body"));
 
-    let mut ast = build_ast(vec![start_function], entry_path);
+    let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
     ast.module_constants.push(make_test_variable(
         page_const_name,
         Expression::struct_instance(
             super::symbol("Page", &mut string_table),
             vec![make_test_variable(body_field, template_constant)],
-            test_location(2),
+            test_source_location(2),
             ValueMode::ImmutableOwned,
             true,
             None,
@@ -304,7 +308,7 @@ fn lowers_struct_module_constant_into_record_with_ordered_fields() {
                     x_field.clone(),
                     no_value_expr(
                         builtin_type_ids::INT,
-                        test_location(1),
+                        test_source_location(1),
                         ValueMode::ImmutableOwned,
                     ),
                 ),
@@ -312,13 +316,13 @@ fn lowers_struct_module_constant_into_record_with_ordered_fields() {
                     y_field.clone(),
                     no_value_expr(
                         builtin_type_ids::INT,
-                        test_location(1),
+                        test_source_location(1),
                         ValueMode::ImmutableOwned,
                     ),
                 ),
             ],
         ),
-        test_location(1),
+        test_source_location(1),
     );
 
     let start_function = function_node(
@@ -328,10 +332,10 @@ fn lowers_struct_module_constant_into_record_with_ordered_fields() {
             returns: vec![],
         },
         vec![],
-        test_location(2),
+        test_source_location(2),
     );
 
-    let mut ast = build_ast(vec![struct_node, start_function], entry_path);
+    let mut ast = build_ast_with_registered_types(vec![struct_node, start_function], entry_path);
     let const_name = super::symbol("POINT", &mut string_table);
 
     ast.module_constants.push(make_test_variable(
@@ -341,14 +345,14 @@ fn lowers_struct_module_constant_into_record_with_ordered_fields() {
             vec![
                 make_test_variable(
                     x_field,
-                    Expression::int(5, test_location(2), ValueMode::ImmutableOwned),
+                    Expression::int(5, test_source_location(2), ValueMode::ImmutableOwned),
                 ),
                 make_test_variable(
                     y_field,
-                    Expression::int(99, test_location(2), ValueMode::ImmutableOwned),
+                    Expression::int(99, test_source_location(2), ValueMode::ImmutableOwned),
                 ),
             ],
-            test_location(2),
+            test_source_location(2),
             ValueMode::ImmutableOwned,
             true,
             None,
@@ -397,20 +401,20 @@ fn extracts_ast_doc_fragments_into_module_metadata() {
             returns: vec![],
         },
         vec![],
-        test_location(1),
+        test_source_location(1),
     );
 
-    let mut ast = build_ast(vec![start_function], entry_path);
+    let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
     ast.doc_fragments = vec![
         AstDocFragment {
             kind: AstDocFragmentKind::Doc,
             value: first_doc,
-            location: test_location(4),
+            location: test_source_location(4),
         },
         AstDocFragment {
             kind: AstDocFragmentKind::Doc,
             value: second_doc,
-            location: test_location(7),
+            location: test_source_location(7),
         },
     ];
 

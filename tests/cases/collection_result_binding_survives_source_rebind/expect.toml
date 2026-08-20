@@ -1,4 +1,4 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = "returned=3 stored=4\n"
+rendered_output_exact = "returned=3 stored=4"

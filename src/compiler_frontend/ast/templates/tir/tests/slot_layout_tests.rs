@@ -17,10 +17,6 @@ use crate::compiler_frontend::ast::templates::template::{SlotKey, Style, Templat
 use crate::compiler_frontend::compiler_messages::source_location::CharPosition;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
-fn empty_location() -> SourceLocation {
-    SourceLocation::default()
-}
-
 fn location_at_line(line_number: i32) -> SourceLocation {
     SourceLocation {
         start_pos: CharPosition {
@@ -44,7 +40,7 @@ fn finish_string_template(
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        empty_location(),
+        SourceLocation::default(),
     )
 }
 
@@ -76,14 +72,14 @@ fn layout_rejects_a_missing_child_template() {
             reference,
             occurrence_id,
         },
-        empty_location(),
+        SourceLocation::default(),
     ));
     let parent = store.push_template(TemplateIr::new(
         child_node,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::empty(),
-        empty_location(),
+        SourceLocation::default(),
     ));
 
     let error =
@@ -104,7 +100,7 @@ fn layout_rejects_a_child_template_with_a_missing_root() {
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::empty(),
-        empty_location(),
+        SourceLocation::default(),
     ));
     let reference = TemplateTirChildReference::new(
         child_template,
@@ -117,14 +113,14 @@ fn layout_rejects_a_child_template_with_a_missing_root() {
             reference,
             occurrence_id,
         },
-        empty_location(),
+        SourceLocation::default(),
     ));
     let parent = store.push_template(TemplateIr::new(
         child_node,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::empty(),
-        empty_location(),
+        SourceLocation::default(),
     ));
 
     let error = collect_tir_slot_layout(&store, parent).expect_err("missing child root must fail");
@@ -140,7 +136,7 @@ fn layout_rejects_a_node_cycle() {
     let mut store = TemplateIrStore::new();
     let sequence = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Sequence { children: vec![] },
-        empty_location(),
+        SourceLocation::default(),
     ));
     MalformedTirStore::new(&mut store).set_node_kind(
         sequence,
@@ -153,7 +149,7 @@ fn layout_rejects_a_node_cycle() {
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::empty(),
-        empty_location(),
+        SourceLocation::default(),
     ));
 
     let error = collect_tir_slot_layout(&store, template).expect_err("node cycle must fail");
@@ -169,14 +165,14 @@ fn layout_rejects_a_template_cycle() {
     let mut store = TemplateIrStore::new();
     let child_node = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Sequence { children: vec![] },
-        empty_location(),
+        SourceLocation::default(),
     ));
     let first = store.push_template(TemplateIr::new(
         child_node,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::empty(),
-        empty_location(),
+        SourceLocation::default(),
     ));
     let reference = TemplateTirChildReference::new(
         first,
@@ -189,7 +185,7 @@ fn layout_rejects_a_template_cycle() {
             reference,
             occurrence_id,
         },
-        empty_location(),
+        SourceLocation::default(),
     ));
     MalformedTirStore::new(&mut store).set_template_root(first, cycle_node);
 
@@ -210,7 +206,7 @@ fn layout_records_unique_keys_every_occurrence_and_node_location() {
     let second_location = location_at_line(7);
     let first = builder.push_slot_node(SlotKey::Default, first_location.clone());
     let second = builder.push_slot_node(SlotKey::Default, second_location.clone());
-    let root = builder.push_sequence_node(vec![first, second], empty_location());
+    let root = builder.push_sequence_node(vec![first, second], SourceLocation::default());
     let template_id = finish_string_template(&mut builder, root);
 
     let layout = collect_tir_slot_layout(&store, template_id).expect("legal layout");
@@ -237,11 +233,11 @@ fn layout_allows_shared_child_templates_as_a_dag() {
     let mut store = TemplateIrStore::new();
     let mut builder = TemplateIrBuilder::new(&mut store);
 
-    let child_slot = builder.push_slot_node(SlotKey::Default, empty_location());
+    let child_slot = builder.push_slot_node(SlotKey::Default, SourceLocation::default());
     let child_template = finish_string_template(&mut builder, child_slot);
-    let first_ref = builder.push_child_template_node(child_template, empty_location());
-    let second_ref = builder.push_child_template_node(child_template, empty_location());
-    let root = builder.push_sequence_node(vec![first_ref, second_ref], empty_location());
+    let first_ref = builder.push_child_template_node(child_template, SourceLocation::default());
+    let second_ref = builder.push_child_template_node(child_template, SourceLocation::default());
+    let root = builder.push_sequence_node(vec![first_ref, second_ref], SourceLocation::default());
     let parent = finish_string_template(&mut builder, root);
 
     let layout = collect_tir_slot_layout(&store, parent).expect("shared child is a DAG");

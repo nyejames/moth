@@ -3,4 +3,4 @@ entry = "."
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = "receiver_method_aliasing_borrow_after_mutable_call first=10\nreceiver_method_aliasing_borrow_after_mutable_call second=20\n\n"
+rendered_output_exact = "receiver_method_aliasing_borrow_after_mutable_call first=10\nreceiver_method_aliasing_borrow_after_mutable_call second=20"

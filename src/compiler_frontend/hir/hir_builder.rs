@@ -76,8 +76,10 @@ pub(super) struct LoopTargets {
 mod hir_builder_test_support;
 #[cfg(test)]
 pub(crate) use hir_builder_test_support::{
-    HirTestChoiceDefinition, assert_no_placeholder_terminators, build_ast, build_ast_with_choices,
-    lower_ast, lower_ast_with_metadata, validate_module_for_tests,
+    HirTestChoiceDefinition, assert_no_placeholder_terminators, build_ast_with_choices,
+    build_ast_with_registered_types, expressions_to_owned_render_node, lower_ast,
+    lower_ast_with_metadata, register_local, runtime_template_expression, setup_builder,
+    validate_module_for_tests,
 };
 // -------------------
 // HIR Builder Context

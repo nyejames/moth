@@ -1,4 +1,4 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-success_contract = "acceptance_only"
+rendered_output_exact = "multi_bind_optional_slots name=absent count=absent"

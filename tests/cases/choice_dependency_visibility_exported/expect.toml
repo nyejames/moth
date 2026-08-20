@@ -1,4 +1,4 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-success_contract = "acceptance_only"
+rendered_output_exact = "choice_dependency_visibility_exported label=ready"

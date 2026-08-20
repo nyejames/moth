@@ -14,7 +14,7 @@ use super::super::{
     PublicInterfaceDraftBuilder, PublicInterfaceDraftBuilderInput,
 };
 use super::test_support::{
-    choice_origin, constant_origin, immutable, module_origin, nominal_origins_map, register_struct,
+    choice_origin, constant_origin, module_origin, nominal_origins_map, register_struct,
     struct_origin,
 };
 use crate::compiler_frontend::ast::AstPublicInterfaceProjectionInput;
@@ -42,6 +42,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
+use crate::compiler_frontend::value_mode::ValueMode;
 
 use rustc_hash::FxHashMap;
 use std::rc::Rc;
@@ -49,10 +50,6 @@ use std::rc::Rc;
 // ---------------------------------------------------------------------------
 //  Shared helpers
 // ---------------------------------------------------------------------------
-
-fn default_location() -> SourceLocation {
-    SourceLocation::default()
-}
 
 /// Build a constant declaration root whose path is the single-component public name.
 fn constant_root(
@@ -129,7 +126,7 @@ fn constant_record_owns_scalar_int_folded_value() {
     let value_path = InternedPath::from_single_str("value", &mut string_table);
     let module_constants = vec![Declaration {
         id: value_path,
-        value: Expression::int(42, default_location(), immutable()),
+        value: Expression::int(42, SourceLocation::default(), ValueMode::ImmutableOwned),
     }];
 
     let root = constant_root("value", int_id, &mut string_table);
@@ -161,11 +158,11 @@ fn constant_record_owns_scalar_bool_and_char_folded_values() {
     let char_path = InternedPath::from_single_str("letter", &mut string_table);
     let bool_decl = Declaration {
         id: bool_path,
-        value: Expression::bool(true, default_location(), immutable()),
+        value: Expression::bool(true, SourceLocation::default(), ValueMode::ImmutableOwned),
     };
     let char_decl = Declaration {
         id: char_path,
-        value: Expression::char('A', default_location(), immutable()),
+        value: Expression::char('A', SourceLocation::default(), ValueMode::ImmutableOwned),
     };
     let module_constants = vec![bool_decl, char_decl];
 
@@ -202,7 +199,7 @@ fn constant_record_owns_scalar_float_folded_value() {
     let value_path = InternedPath::from_single_str("pi", &mut string_table);
     let module_constants = vec![Declaration {
         id: value_path,
-        value: Expression::float(3.5, default_location(), immutable()),
+        value: Expression::float(3.5, SourceLocation::default(), ValueMode::ImmutableOwned),
     }];
 
     let root = constant_root("pi", float_id, &mut string_table);
@@ -234,7 +231,7 @@ fn constant_record_preserves_negative_zero_exact_bits() {
     let value_path = InternedPath::from_single_str("zero", &mut string_table);
     let module_constants = vec![Declaration {
         id: value_path,
-        value: Expression::float(-0.0, default_location(), immutable()),
+        value: Expression::float(-0.0, SourceLocation::default(), ValueMode::ImmutableOwned),
     }];
 
     let root = constant_root("zero", float_id, &mut string_table);
@@ -275,7 +272,11 @@ fn join_rejects_non_finite_float_value_as_internal_invariant() {
     let module_constants = vec![Declaration {
         id: value_path,
         // The AST constructor accepts any f64; projection must reject non-finite input.
-        value: Expression::float(f64::NAN, default_location(), immutable()),
+        value: Expression::float(
+            f64::NAN,
+            SourceLocation::default(),
+            ValueMode::ImmutableOwned,
+        ),
     }];
 
     let root = constant_root("bad", float_id, &mut string_table);
@@ -306,7 +307,11 @@ fn constant_record_owns_folded_template_string_value() {
     let value_path = InternedPath::from_single_str("heading", &mut string_table);
     let module_constants = vec![Declaration {
         id: value_path,
-        value: Expression::string_slice(folded_text, default_location(), immutable()),
+        value: Expression::string_slice(
+            folded_text,
+            SourceLocation::default(),
+            ValueMode::ImmutableOwned,
+        ),
     }];
 
     let root = constant_root("heading", string_id, &mut string_table);
@@ -347,12 +352,12 @@ fn constant_record_owns_const_record_with_ordered_field_names_and_values() {
             FieldDefinition {
                 name: title_path,
                 type_id: string_id,
-                location: default_location(),
+                location: SourceLocation::default(),
             },
             FieldDefinition {
                 name: year_path,
                 type_id: int_id,
-                location: default_location(),
+                location: SourceLocation::default(),
             },
         ]),
         None,
@@ -362,19 +367,23 @@ fn constant_record_owns_const_record_with_ordered_field_names_and_values() {
     let fields = vec![
         Declaration {
             id: InternedPath::from_single_str("title", &mut string_table),
-            value: Expression::string_slice(title_text, default_location(), immutable()),
+            value: Expression::string_slice(
+                title_text,
+                SourceLocation::default(),
+                ValueMode::ImmutableOwned,
+            ),
         },
         Declaration {
             id: InternedPath::from_single_str("year", &mut string_table),
-            value: Expression::int(2026, default_location(), immutable()),
+            value: Expression::int(2026, SourceLocation::default(), ValueMode::ImmutableOwned),
         },
     ];
 
     let struct_instance = Expression::struct_instance(
         struct_path,
         fields,
-        default_location(),
-        immutable(),
+        SourceLocation::default(),
+        ValueMode::ImmutableOwned,
         true,
         None,
         struct_type_id,
@@ -435,7 +444,7 @@ fn constant_record_owns_recursive_const_record_fields() {
         Box::new([FieldDefinition {
             name: inner_field_path,
             type_id: none_id,
-            location: default_location(),
+            location: SourceLocation::default(),
         }]),
         None,
     );
@@ -446,20 +455,20 @@ fn constant_record_owns_recursive_const_record_fields() {
         Box::new([FieldDefinition {
             name: depth_path,
             type_id: int_id,
-            location: default_location(),
+            location: SourceLocation::default(),
         }]),
         None,
     );
 
     let inner_fields = vec![Declaration {
         id: InternedPath::from_single_str("depth", &mut string_table),
-        value: Expression::int(7, default_location(), immutable()),
+        value: Expression::int(7, SourceLocation::default(), ValueMode::ImmutableOwned),
     }];
     let inner_instance = Expression::struct_instance(
         inner_path,
         inner_fields,
-        default_location(),
-        immutable(),
+        SourceLocation::default(),
+        ValueMode::ImmutableOwned,
         true,
         None,
         inner_type_id,
@@ -472,8 +481,8 @@ fn constant_record_owns_recursive_const_record_fields() {
     let outer_instance = Expression::struct_instance(
         outer_path,
         outer_fields,
-        default_location(),
-        immutable(),
+        SourceLocation::default(),
+        ValueMode::ImmutableOwned,
         true,
         None,
         outer_type_id,
@@ -527,13 +536,13 @@ fn constant_record_owns_choice_with_stable_variant_name() {
             name: string_table.intern("Active"),
             tag: 0,
             payload: ChoiceVariantPayloadDefinition::Unit,
-            location: default_location(),
+            location: SourceLocation::default(),
         },
         ChoiceVariantDefinition {
             name: string_table.intern("Inactive"),
             tag: 1,
             payload: ChoiceVariantPayloadDefinition::Unit,
-            location: default_location(),
+            location: SourceLocation::default(),
         },
     ]);
     let (_, choice_type_id) = env.register_nominal_choice(ChoiceTypeDefinition {
@@ -549,8 +558,8 @@ fn constant_record_owns_choice_with_stable_variant_name() {
         fields: vec![],
         diagnostic_type: DataType::Inferred,
         type_id: choice_type_id,
-        location: default_location(),
-        value_mode: immutable(),
+        location: SourceLocation::default(),
+        value_mode: ValueMode::ImmutableOwned,
     });
 
     let value_path = InternedPath::from_single_str("state", &mut string_table);
@@ -595,17 +604,17 @@ fn constant_record_owns_collection_of_folded_values() {
     let mut env = TypeEnvironment::new();
 
     let items = vec![
-        Expression::int(10, default_location(), immutable()),
-        Expression::int(20, default_location(), immutable()),
-        Expression::int(30, default_location(), immutable()),
+        Expression::int(10, SourceLocation::default(), ValueMode::ImmutableOwned),
+        Expression::int(20, SourceLocation::default(), ValueMode::ImmutableOwned),
+        Expression::int(30, SourceLocation::default(), ValueMode::ImmutableOwned),
     ];
     let collection_type_id = env.intern_collection(env.builtins().int, None);
     let collection_expr = Expression::new(
         ExpressionKind::Collection(items),
-        default_location(),
+        SourceLocation::default(),
         collection_type_id,
         DataType::Inferred,
-        immutable(),
+        ValueMode::ImmutableOwned,
     );
 
     let value_path = InternedPath::from_single_str("scores", &mut string_table);
@@ -649,7 +658,7 @@ fn constant_record_owns_option_some_value() {
     let int_id = env.builtins().int;
     let option_type_id = env.intern_option(int_id);
 
-    let inner = Expression::int(42, default_location(), immutable());
+    let inner = Expression::int(42, SourceLocation::default(), ValueMode::ImmutableOwned);
     let coerced = Expression::coerced(inner, option_type_id);
 
     let value_path = InternedPath::from_single_str("maybe_value", &mut string_table);
@@ -690,7 +699,7 @@ fn constant_record_owns_nested_option_some_value() {
     let inner_option_id = env.intern_option(int_id);
     let outer_option_id = env.intern_option(inner_option_id);
 
-    let inner = Expression::int(7, default_location(), immutable());
+    let inner = Expression::int(7, SourceLocation::default(), ValueMode::ImmutableOwned);
     let inner_option = Expression::coerced(inner, inner_option_id);
     let outer_option = Expression::coerced(inner_option, outer_option_id);
 
@@ -737,8 +746,12 @@ fn constant_record_projects_option_none_value() {
     // `none` for `Int?`. The const classifier currently rejects a standalone `none` as a
     // module constant initializer, so this exercises the projection arm directly through the
     // builder boundary rather than the full parser path.
-    let none_expr =
-        Expression::option_none_with_type_id(int_id, DataType::Int, &mut env, default_location());
+    let none_expr = Expression::option_none_with_type_id(
+        int_id,
+        DataType::Int,
+        &mut env,
+        SourceLocation::default(),
+    );
 
     let value_path = InternedPath::from_single_str("absent", &mut string_table);
     let module_constants = vec![Declaration {
@@ -785,11 +798,11 @@ fn join_allows_two_module_constants_sharing_a_leaf_name_with_distinct_paths() {
     let module_constants = vec![
         Declaration {
             id: public_path.clone(),
-            value: Expression::int(1, default_location(), immutable()),
+            value: Expression::int(1, SourceLocation::default(), ValueMode::ImmutableOwned),
         },
         Declaration {
             id: private_path,
-            value: Expression::int(2, default_location(), immutable()),
+            value: Expression::int(2, SourceLocation::default(), ValueMode::ImmutableOwned),
         },
     ];
 
@@ -855,12 +868,12 @@ fn join_rejects_duplicate_module_constant_defining_paths() {
     let dup_path = InternedPath::from_single_str("dup", &mut string_table);
     let decl = Declaration {
         id: dup_path,
-        value: Expression::int(1, default_location(), immutable()),
+        value: Expression::int(1, SourceLocation::default(), ValueMode::ImmutableOwned),
     };
     let duplicate_path = InternedPath::from_single_str("dup", &mut string_table);
     let duplicate = Declaration {
         id: duplicate_path,
-        value: Expression::int(2, default_location(), immutable()),
+        value: Expression::int(2, SourceLocation::default(), ValueMode::ImmutableOwned),
     };
     let module_constants = vec![decl, duplicate];
 
@@ -919,10 +932,10 @@ fn join_rejects_unsupported_expression_shape_in_folded_value() {
             "other_constant",
             &mut string_table,
         )),
-        default_location(),
+        SourceLocation::default(),
         int_id,
         DataType::Int,
-        immutable(),
+        ValueMode::ImmutableOwned,
     );
 
     let value_path = InternedPath::from_single_str("bad", &mut string_table);

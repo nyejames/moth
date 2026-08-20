@@ -1,4 +1,4 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-success_contract = "acceptance_only"
+rendered_output_exact = "immutable_alias_while_borrowed first=important data second=important data result=important data"

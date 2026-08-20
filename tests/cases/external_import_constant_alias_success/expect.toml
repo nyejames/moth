@@ -1,4 +1,5 @@
 [backends.html]
 mode = "success"
-warnings = "ignore"
+warnings = "exact"
+warning_codes = ["MOTH-IMPORT-0003"]
 rendered_output_contains = ["3.141592653589793"]

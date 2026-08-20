@@ -1,4 +1,4 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-success_contract = "acceptance_only"
+rendered_output_exact = "complex_borrowing_scenarios welcome=Bob welcome status=Bob is active scope=Bob has score 100 final_name=Bob final_score=110"

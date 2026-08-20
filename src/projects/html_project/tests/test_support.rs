@@ -32,6 +32,7 @@ use crate::compiler_frontend::paths::rendered_path_usage::RenderedPathUsage;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
+use crate::compiler_tests::integration_test_runner::assertions::html_shell_violation;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -280,13 +281,14 @@ pub(crate) fn expect_bytes_output<'a>(
         .expect("expected binary output artifact")
 }
 
-/// Assert the basic full-document shell contract shared by all HTML builder outputs.
+/// Assert the full-document shell contract shared by all HTML builder outputs.
+///
+/// The contract itself is owned by `html_shell_violation`, which the integration HTML baselines
+/// also consume, so the builder's own tests and the canonical suite cannot drift apart.
+#[track_caller]
 pub(crate) fn assert_has_basic_shell(html: &str) {
-    for required_fragment in ["<!DOCTYPE html>", "<head>", "<body", "</body>", "</html>"] {
-        assert!(
-            html.contains(required_fragment),
-            "expected HTML output to contain '{required_fragment}'"
-        );
+    if let Some(violation) = html_shell_violation(html) {
+        panic!("emitted HTML violates the document shell contract: {violation}\n{html}");
     }
 }
 

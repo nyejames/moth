@@ -43,10 +43,6 @@ use crate::compiler_frontend::value_mode::ValueMode;
 //  Test helpers
 // -------------------------
 
-fn empty_location() -> SourceLocation {
-    SourceLocation::default()
-}
-
 fn bool_expression() -> Expression {
     Expression {
         kind: ExpressionKind::Bool(true),
@@ -54,7 +50,7 @@ fn bool_expression() -> Expression {
         diagnostic_type: DataType::Bool,
         function_receiver: None,
         value_mode: ValueMode::ImmutableOwned,
-        location: empty_location(),
+        location: SourceLocation::default(),
         reactive_source: None,
         reactive_template: None,
         const_record_state: ConstRecordState::RuntimeValue,
@@ -75,14 +71,14 @@ fn build_template_with_dynamic_expression(
         bool_expression(),
         TemplateSegmentOrigin::Body,
         None,
-        empty_location(),
+        SourceLocation::default(),
     );
     let template_id = builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        empty_location(),
+        SourceLocation::default(),
     );
     (template_id, root)
 }
@@ -90,13 +86,13 @@ fn build_template_with_dynamic_expression(
 /// Builds a single empty template inside `store` and returns its `TemplateIrId`.
 fn build_empty_template(store: &mut super::super::store::TemplateIrStore) -> TemplateIrId {
     let mut builder = TemplateIrBuilder::new(store);
-    let root = builder.push_sequence_node(vec![], empty_location());
+    let root = builder.push_sequence_node(vec![], SourceLocation::default());
     builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        empty_location(),
+        SourceLocation::default(),
     )
 }
 
@@ -113,15 +109,15 @@ fn build_template_with_text_child(
         text_string_id,
         5,
         crate::compiler_frontend::ast::templates::template::TemplateSegmentOrigin::Body,
-        empty_location(),
+        SourceLocation::default(),
     );
-    let root = builder.push_sequence_node(vec![text_node], empty_location());
+    let root = builder.push_sequence_node(vec![text_node], SourceLocation::default());
     builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        empty_location(),
+        SourceLocation::default(),
     )
 }
 
@@ -1117,13 +1113,13 @@ fn build_template_with_slot(
         crate::compiler_frontend::ast::templates::template::SlotKey::Default,
         slot_location,
     );
-    let root = builder.push_sequence_node(vec![slot_node], empty_location());
+    let root = builder.push_sequence_node(vec![slot_node], SourceLocation::default());
     let template_id = builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        empty_location(),
+        SourceLocation::default(),
     );
     let occurrence_id = {
         let node = store.get_node(slot_node).expect("slot node should exist");
@@ -1153,7 +1149,7 @@ fn build_template_with_child_template(
     let mut builder = TemplateIrBuilder::new(store);
 
     // Build the child template first so the parent can reference it.
-    let child_root = builder.push_sequence_node(vec![], empty_location());
+    let child_root = builder.push_sequence_node(vec![], SourceLocation::default());
     let child_template_id = builder.finish_template(
         child_root,
         Style::default(),
@@ -1163,13 +1159,13 @@ fn build_template_with_child_template(
     );
 
     let child_node = builder.push_child_template_node(child_template_id, child_occurrence_location);
-    let root = builder.push_sequence_node(vec![child_node], empty_location());
+    let root = builder.push_sequence_node(vec![child_node], SourceLocation::default());
     let parent_template_id = builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        empty_location(),
+        SourceLocation::default(),
     );
 
     let occurrence_id = {
@@ -1196,13 +1192,13 @@ fn build_template_with_dynamic_expression_at(
         None,
         expression_location,
     );
-    let root = builder.push_sequence_node(vec![expr_node], empty_location());
+    let root = builder.push_sequence_node(vec![expr_node], SourceLocation::default());
     let template_id = builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        empty_location(),
+        SourceLocation::default(),
     );
     let site_id = {
         let node = store
@@ -1247,8 +1243,8 @@ fn build_template_with_branch_chain(
 
     let mut builder = TemplateIrBuilder::new(store);
 
-    let branch_body = builder.push_sequence_node(vec![], empty_location());
-    let fallback_body = builder.push_sequence_node(vec![], empty_location());
+    let branch_body = builder.push_sequence_node(vec![], SourceLocation::default());
+    let fallback_body = builder.push_sequence_node(vec![], SourceLocation::default());
 
     let branch = super::super::node::TemplateIrBranch::new(
         TemplateBranchSelector::Bool(bool_expression_with_location(&branch_location)),
@@ -1257,13 +1253,17 @@ fn build_template_with_branch_chain(
         builder.store.next_expression_site_id(),
     );
 
-    let root = builder.push_branch_chain_node(vec![branch], Some(fallback_body), empty_location());
+    let root = builder.push_branch_chain_node(
+        vec![branch],
+        Some(fallback_body),
+        SourceLocation::default(),
+    );
     let template_id = builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        empty_location(),
+        SourceLocation::default(),
     );
 
     let site_id = {
@@ -1289,7 +1289,7 @@ fn build_template_with_conditional_loop(
     use crate::compiler_frontend::ast::templates::template_control_flow::TemplateLoopHeader;
 
     let mut builder = TemplateIrBuilder::new(store);
-    let body = builder.push_sequence_node(vec![], empty_location());
+    let body = builder.push_sequence_node(vec![], SourceLocation::default());
     let root = builder.push_loop_node(
         TemplateLoopHeader::Conditional {
             condition: Box::new(bool_expression_with_location(&loop_location)),
@@ -1303,7 +1303,7 @@ fn build_template_with_conditional_loop(
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        empty_location(),
+        SourceLocation::default(),
     );
 
     let site_id = {
@@ -1460,7 +1460,8 @@ fn source_location_lookup_does_not_cross_into_child_template() {
                 crate::compiler_frontend::ast::templates::template::SlotKey::Default,
                 location_at(31, 6),
             );
-            let child_root = builder.push_sequence_node(vec![child_slot_node], empty_location());
+            let child_root =
+                builder.push_sequence_node(vec![child_slot_node], SourceLocation::default());
             let child_template_id = builder.finish_template(
                 child_root,
                 Style::default(),
@@ -1471,13 +1472,14 @@ fn source_location_lookup_does_not_cross_into_child_template() {
 
             let parent_child_node =
                 builder.push_child_template_node(child_template_id, location_at(9, 20));
-            let parent_root = builder.push_sequence_node(vec![parent_child_node], empty_location());
+            let parent_root =
+                builder.push_sequence_node(vec![parent_child_node], SourceLocation::default());
             let parent_template_id = builder.finish_template(
                 parent_root,
                 Style::default(),
                 TemplateType::String,
                 TemplateIrSummary::default(),
-                empty_location(),
+                SourceLocation::default(),
             );
 
             (parent_template_id, child_template_id, child_slot_node)

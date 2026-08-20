@@ -26,8 +26,6 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
-use crate::compiler_frontend::value_mode::ValueMode;
 
 use rustc_hash::FxHashMap;
 
@@ -156,14 +154,6 @@ pub(crate) fn receiver_entry(
         receiver_mutable: false,
         signature,
     }
-}
-
-pub(crate) fn default_location() -> SourceLocation {
-    SourceLocation::default()
-}
-
-pub(crate) fn immutable() -> ValueMode {
-    ValueMode::ImmutableOwned
 }
 
 // ---------------------------------------------------------------------------

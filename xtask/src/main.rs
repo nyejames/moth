@@ -19,6 +19,11 @@
 //! - `bench-frontend`       - Run the focused frontend benchmark suite and record
 //! - `bench-validate`       - Preflight every benchmark case without measurements
 //! - `bench-profile`        - Run Samply-backed profiling on benchmark cases
+//! - `stress`               - Repeat the unit and integration suites across thread counts
+//! - `feature-matrix`       - Run every curated feature lane and report the outcome table
+//! - `feature-lane-check`   - Check feature-lane coverage and write the coverage report
+//! - `source-audit`         - Apply the broad-source architecture bans and write their report
+//! - `honesty-audit`        - Classify the test-honesty findings and write the canonical inventory
 
 mod bench;
 mod bench_ci;
@@ -39,10 +44,19 @@ mod benchmark_status;
 mod benchmark_suite;
 mod benchmark_workspace;
 mod compiler_binary;
+mod feature_matrix;
 mod frontend_bench;
+mod honesty_audit;
 mod mode;
 mod process_runner;
 mod profile;
+mod report_file;
+mod rust_scanner;
+mod source_audit;
+mod source_tree;
+mod stress;
+#[cfg(test)]
+mod test_fs;
 mod timers_erasure_check;
 
 use bench::run_benchmarks;
@@ -50,10 +64,14 @@ use bench_ci::run_bench_ci;
 use bench_report::run_benchmark_report;
 use bench_types::{BenchmarkRecording, BenchmarkRunPolicy, BenchmarkSelection};
 use bench_validate::validate_all_benchmarks;
+use feature_matrix::{run_feature_lane_check, run_feature_matrix};
 use frontend_bench::run_frontend_benchmarks;
+use honesty_audit::run_honesty_audit;
 use mode::{BenchmarkMode, ModeParseResult, TOP_LEVEL_USAGE};
+use source_audit::run_source_audit;
 use std::env;
 use std::process;
+use stress::run_stress_matrix;
 use timers_erasure_check::run_timers_erasure_check;
 
 fn main() {
@@ -111,8 +129,23 @@ fn main() {
         BenchmarkMode::BenchValidate => {
             exit_with_result(validate_all_benchmarks());
         }
+        BenchmarkMode::Stress { repeats } => {
+            exit_with_result(run_stress_matrix(repeats));
+        }
         BenchmarkMode::TimersErasureCheck => {
             exit_with_result(run_timers_erasure_check());
+        }
+        BenchmarkMode::FeatureMatrix => {
+            exit_with_result(run_feature_matrix());
+        }
+        BenchmarkMode::FeatureLaneCheck => {
+            exit_with_result(run_feature_lane_check());
+        }
+        BenchmarkMode::SourceAudit => {
+            exit_with_result(run_source_audit());
+        }
+        BenchmarkMode::HonestyAudit { update_evidence } => {
+            exit_with_result(run_honesty_audit(update_evidence));
         }
     }
 }

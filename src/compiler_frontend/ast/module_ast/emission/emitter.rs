@@ -31,7 +31,7 @@ use crate::compiler_frontend::ast::statements::functions::{
 use crate::compiler_frontend::ast::statements::terminality::{
     terminality_policy_for_signature, validate_function_body_terminality,
 };
-use crate::compiler_frontend::ast::templates::create_template_node::ConstRequiredTemplateConstruction;
+use crate::compiler_frontend::ast::templates::create_template_node::PreparedTemplateConstruction;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template_folding::{
@@ -1072,7 +1072,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         template_tokens: &mut FileTokens,
         context: &ScopeContext,
         string_table: &mut StringTable,
-    ) -> Result<ConstRequiredTemplateConstruction, CompilerMessages> {
+    ) -> Result<PreparedTemplateConstruction, CompilerMessages> {
         let mut type_interner = AstTypeInterner::new(
             &mut self.environment.type_environment,
             &mut self.compatibility_cache,
@@ -1093,11 +1093,11 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
 
     fn fold_const_template(
         &mut self,
-        construction: ConstRequiredTemplateConstruction,
+        construction: PreparedTemplateConstruction,
         context: &ScopeContext,
         string_table: &mut StringTable,
     ) -> Result<FoldedConstTemplateResult, CompilerMessages> {
-        let ConstRequiredTemplateConstruction {
+        let PreparedTemplateConstruction {
             template,
             preparation,
         } = construction;

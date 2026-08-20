@@ -2573,6 +2573,18 @@ fn entry_runtime_fragment_count_accumulates_across_multiple_runtime_templates() 
 }
 
 #[test]
+fn entry_runtime_fragment_count_ignores_assigned_templates() {
+    let headers = parse_single_file_headers(
+        "buffer ~= [:initial content]\nbuffer = [:updated content]\n[:fragment]\n",
+    );
+
+    assert_eq!(
+        headers.entry_runtime_fragment_count, 1,
+        "only the direct top-level template should count as an entry runtime fragment"
+    );
+}
+
+#[test]
 fn entry_runtime_fragment_count_is_zero_when_parsed_as_non_entry_file() {
     // An imported root with only declarations reports runtime fragment count 0.
     // WHY: only the active module root contributes runtime fragments.

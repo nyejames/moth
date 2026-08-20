@@ -6,21 +6,28 @@
 use super::super::fixture::load_test_suite_from_root;
 use super::super::manifest::parse_manifest_file;
 use super::super::{CaseRole, EXPECT_FILE_NAME, INPUT_DIR_NAME, MANIFEST_FILE_NAME};
-use crate::compiler_tests::test_support::temp_dir;
 use std::fs;
 use std::path::Path;
 
+fn assert_manifest_kind(error: &super::super::errors::FixtureLoadError) {
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::Manifest,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
+}
+
 fn parse_manifest_source(
-    name: &str,
+    _name: &str,
     source: &str,
-) -> Result<Vec<super::super::ManifestCaseSpec>, String> {
-    let root = temp_dir(name);
-    fs::create_dir_all(&root).expect("should create manifest test root");
+) -> Result<Vec<super::super::ManifestCaseSpec>, super::super::errors::FixtureLoadError> {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let path = root.join(MANIFEST_FILE_NAME);
     fs::write(&path, source).expect("should write manifest");
-    let result = parse_manifest_file(&path);
-    fs::remove_dir_all(&root).expect("should clean up manifest test root");
-    result
+    parse_manifest_file(&path)
 }
 
 fn write_success_fixture(root: &Path, case_name: &str) {
@@ -37,8 +44,9 @@ fn write_success_fixture(root: &Path, case_name: &str) {
 
 #[test]
 fn rejects_manifest_case_without_tags() {
-    let root = temp_dir("manifest_missing_tags");
-    fs::create_dir_all(&root).expect("should create root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     write_success_fixture(&root, "case");
 
     fs::write(
@@ -50,18 +58,18 @@ fn rejects_manifest_case_without_tags() {
     let Err(error) = load_test_suite_from_root(&root) else {
         panic!("manifest missing tags should be rejected");
     };
+    assert_manifest_kind(&error);
     assert!(
-        error.contains("missing required tags"),
+        error.message.contains("missing required tags"),
         "unexpected: {error}"
     );
-
-    fs::remove_dir_all(&root).expect("should clean up temp fixture root");
 }
 
 #[test]
 fn rejects_manifest_case_with_unknown_role() {
-    let root = temp_dir("manifest_unknown_role");
-    fs::create_dir_all(&root).expect("should create root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     write_success_fixture(&root, "case");
 
     fs::write(
@@ -73,11 +81,10 @@ fn rejects_manifest_case_with_unknown_role() {
     let Err(error) = load_test_suite_from_root(&root) else {
         panic!("unknown manifest role should be rejected");
     };
-    assert!(error.contains("case"), "unexpected: {error}");
-    assert!(error.contains("unknown"), "unexpected: {error}");
-    assert!(error.contains("role"), "unexpected: {error}");
-
-    fs::remove_dir_all(&root).expect("should clean up temp fixture root");
+    assert_manifest_kind(&error);
+    assert!(error.message.contains("case"), "unexpected: {error}");
+    assert!(error.message.contains("unknown"), "unexpected: {error}");
+    assert!(error.message.contains("role"), "unexpected: {error}");
 }
 
 #[test]
@@ -97,8 +104,9 @@ fn parses_every_supported_manifest_role() {
 
 #[test]
 fn retains_primary_manifest_case_without_contract_for_policy_evaluation() {
-    let root = temp_dir("manifest_primary_without_contract");
-    fs::create_dir_all(&root).expect("should create root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     write_success_fixture(&root, "case");
 
     fs::write(
@@ -111,14 +119,13 @@ fn retains_primary_manifest_case_without_contract_for_policy_evaluation() {
         .expect("cross-case primary policy should be evaluated after loading");
     assert_eq!(suite.cases[0].role, Some(CaseRole::Primary));
     assert_eq!(suite.cases[0].contract, None);
-
-    fs::remove_dir_all(&root).expect("should clean up temp fixture root");
 }
 
 #[test]
 fn rejects_manifest_case_with_empty_contract() {
-    let root = temp_dir("manifest_empty_contract");
-    fs::create_dir_all(&root).expect("should create root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     write_success_fixture(&root, "case");
 
     fs::write(
@@ -130,17 +137,16 @@ fn rejects_manifest_case_with_empty_contract() {
     let Err(error) = load_test_suite_from_root(&root) else {
         panic!("empty manifest contract should be rejected");
     };
-    assert!(error.contains("case"), "unexpected: {error}");
-    assert!(error.contains("empty"), "unexpected: {error}");
-    assert!(error.contains("contract"), "unexpected: {error}");
-
-    fs::remove_dir_all(&root).expect("should clean up temp fixture root");
+    assert!(error.message.contains("case"), "unexpected: {error}");
+    assert!(error.message.contains("empty"), "unexpected: {error}");
+    assert!(error.message.contains("contract"), "unexpected: {error}");
 }
 
 #[test]
 fn retains_duplicate_primary_contracts_for_policy_evaluation() {
-    let root = temp_dir("manifest_duplicate_primary_contract");
-    fs::create_dir_all(&root).expect("should create root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     write_success_fixture(&root, "case_a");
     write_success_fixture(&root, "case_b");
 
@@ -155,14 +161,13 @@ fn retains_duplicate_primary_contracts_for_policy_evaluation() {
     assert_eq!(suite.cases.len(), 2);
     assert_eq!(suite.cases[0].contract, Some("language.example".to_owned()));
     assert_eq!(suite.cases[1].contract, Some("language.example".to_owned()));
-
-    fs::remove_dir_all(&root).expect("should clean up temp fixture root");
 }
 
 #[test]
 fn permits_shared_contracts_for_distinct_non_primary_roles() {
-    let root = temp_dir("manifest_shared_non_primary_contract");
-    fs::create_dir_all(&root).expect("should create root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     write_success_fixture(&root, "case_a");
     write_success_fixture(&root, "case_b");
 
@@ -177,14 +182,13 @@ fn permits_shared_contracts_for_distinct_non_primary_roles() {
     assert_eq!(suite.cases.len(), 2);
     assert_eq!(suite.cases[0].role, Some(CaseRole::Boundary));
     assert_eq!(suite.cases[1].role, Some(CaseRole::Backend));
-
-    fs::remove_dir_all(&root).expect("should clean up temp fixture root");
 }
 
 #[test]
 fn retains_unclassified_manifest_metadata_as_optional() {
-    let root = temp_dir("manifest_unclassified_metadata");
-    fs::create_dir_all(&root).expect("should create root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     write_success_fixture(&root, "case");
 
     fs::write(
@@ -199,14 +203,12 @@ fn retains_unclassified_manifest_metadata_as_optional() {
     assert_eq!(case.tags, vec!["coverage"]);
     assert_eq!(case.contract, None);
     assert_eq!(case.role, None);
-
-    fs::remove_dir_all(&root).expect("should clean up temp fixture root");
 }
 
 #[test]
 fn manifest_order_is_preserved() {
-    let root = temp_dir("manifest_order");
-    fs::create_dir_all(&root).expect("should create root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
 
     write_success_fixture(&root, "case_a");
     write_success_fixture(&root, "case_b");
@@ -228,14 +230,12 @@ fn manifest_order_is_preserved() {
         names,
         vec!["case_b [html]", "case_a [html]", "case_c [html]"]
     );
-
-    fs::remove_dir_all(&root).expect("should clean up temp fixture root");
 }
 
 #[test]
 fn manifest_must_declare_every_fixture_directory() {
-    let root = temp_dir("manifest_authoritative");
-    fs::create_dir_all(&root).expect("should create root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
 
     write_success_fixture(&root, "case_a");
     write_success_fixture(&root, "case_b");
@@ -249,12 +249,11 @@ fn manifest_must_declare_every_fixture_directory() {
     let Err(error) = load_test_suite_from_root(&root) else {
         panic!("manifest should reject undeclared fixtures");
     };
+    assert_manifest_kind(&error);
     assert!(
-        error.contains("undeclared fixtures"),
+        error.message.contains("undeclared fixtures"),
         "unexpected error: {error}"
     );
-
-    fs::remove_dir_all(&root).expect("should clean up temp fixture root");
 }
 
 #[test]
@@ -276,8 +275,12 @@ fn rejects_unsafe_manifest_case_paths() {
         let Err(error) = result else {
             panic!("unsafe manifest path should be rejected: {unsafe_path}");
         };
-        assert!(error.contains("invalid path"), "unexpected: {error}");
-        assert!(error.contains(unsafe_path), "unexpected: {error}");
+        assert_manifest_kind(&error);
+        assert!(
+            error.message.contains("invalid path"),
+            "unexpected: {error}"
+        );
+        assert!(error.message.contains(unsafe_path), "unexpected: {error}");
     }
 }
 
@@ -307,8 +310,9 @@ fn rejects_whitespace_padded_manifest_metadata() {
         let Err(error) = result else {
             panic!("padded manifest metadata should be rejected: {field}");
         };
+        assert_manifest_kind(&error);
         assert!(
-            error.contains("leading or trailing whitespace"),
+            error.message.contains("leading or trailing whitespace"),
             "unexpected: {error}"
         );
     }
@@ -323,16 +327,18 @@ fn rejects_duplicate_manifest_tags() {
     let Err(error) = result else {
         panic!("duplicate manifest tags should be rejected");
     };
+    assert_manifest_kind(&error);
     assert!(
-        error.contains("duplicate tag 'coverage'"),
+        error.message.contains("duplicate tag 'coverage'"),
         "unexpected: {error}"
     );
 }
 
 #[test]
 fn accepts_nested_manifest_path_and_preserves_metadata_order() {
-    let root = temp_dir("manifest_nested_path");
-    fs::create_dir_all(&root).expect("should create root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     write_success_fixture(&root, "nested/case");
     fs::write(
         root.join(MANIFEST_FILE_NAME),
@@ -343,8 +349,6 @@ fn accepts_nested_manifest_path_and_preserves_metadata_order() {
     let suite = load_test_suite_from_root(&root).expect("nested manifest path should load");
     assert_eq!(suite.cases[0].manifest_relative_path, "nested/case");
     assert_eq!(suite.cases[0].tags, vec!["zeta", "alpha"]);
-
-    fs::remove_dir_all(&root).expect("should clean up temp fixture root");
 }
 
 #[cfg(unix)]
@@ -360,14 +364,14 @@ fn symlink_directory(target: &Path, link: &Path) -> std::io::Result<()> {
 #[cfg(any(unix, windows))]
 #[test]
 fn rejects_manifest_fixture_symlink_escape() {
-    let root = temp_dir("manifest_fixture_symlink_escape");
-    let outside = temp_dir("manifest_fixture_symlink_escape_target");
-    fs::create_dir_all(&root).expect("should create root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    let _tmp_outside = tempfile::tempdir().expect("should create temp dir");
+    let outside = _tmp_outside.path().to_path_buf();
+
     write_success_fixture(&outside, "case");
     let link = root.join("link");
     if symlink_directory(&outside.join("case"), &link).is_err() {
-        fs::remove_dir_all(&root).expect("should clean up root");
-        fs::remove_dir_all(&outside).expect("should clean up target");
         return;
     }
     fs::write(
@@ -379,25 +383,29 @@ fn rejects_manifest_fixture_symlink_escape() {
     let Err(error) = load_test_suite_from_root(&root) else {
         panic!("fixture symlink escaping the suite root should be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::PathBoundary,
+        "symlink escape should be a path-boundary rejection: {error}"
+    );
     assert!(
-        error.contains("case") && error.contains("outside"),
+        error.message.contains("case") && error.message.contains("outside"),
         "unexpected: {error}"
     );
 
     fs::remove_dir_all(&root).expect("should clean up root");
-    fs::remove_dir_all(&outside).expect("should clean up target");
 }
 
 #[cfg(any(unix, windows))]
 #[test]
 fn rejects_duplicate_canonical_fixture_root_through_in_suite_alias() {
-    let root = temp_dir("manifest_duplicate_canonical_root");
-    fs::create_dir_all(&root).expect("should create root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     write_success_fixture(&root, "case_a");
 
     let alias = root.join("alias");
     if symlink_directory(&root.join("case_a"), &alias).is_err() {
-        fs::remove_dir_all(&root).expect("should clean up root");
         return;
     }
 
@@ -410,15 +418,16 @@ fn rejects_duplicate_canonical_fixture_root_through_in_suite_alias() {
     let Err(error) = load_test_suite_from_root(&root) else {
         panic!("duplicate canonical fixture root should be rejected");
     };
+    assert_manifest_kind(&error);
     assert!(
-        error.contains("primary_case")
-            && error.contains("case_a")
-            && error.contains("alias_case")
-            && error.contains("alias"),
+        error.message.contains("primary_case")
+            && error.message.contains("case_a")
+            && error.message.contains("alias_case")
+            && error.message.contains("alias"),
         "error must retain both conflicting case ids and authored paths: {error}"
     );
     assert!(
-        error.contains("duplicate canonical fixture root"),
+        error.message.contains("duplicate canonical fixture root"),
         "unexpected: {error}"
     );
 

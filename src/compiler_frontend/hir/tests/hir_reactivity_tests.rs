@@ -13,7 +13,7 @@ use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::templates::template::ReactiveSubscription;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
-use crate::compiler_frontend::hir::hir_builder::{build_ast, lower_ast};
+use crate::compiler_frontend::hir::hir_builder::{build_ast_with_registered_types, lower_ast};
 use crate::compiler_frontend::hir::ids::LocalId;
 use crate::compiler_frontend::hir::reachability::{
     HirReachability, ReachableReactiveSinkKind, collect_module_function_link_facts,
@@ -24,10 +24,10 @@ use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    function_node, make_test_variable, node, test_location,
+    function_node, make_test_variable, node, test_source_location,
 };
 use crate::compiler_frontend::tests::type_id_fixture_support::{
-    param_with_type_id, reference_expr,
+    inferred_type_reference_expr, param_with_type_id,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -47,15 +47,15 @@ fn reactive_declaration_metadata_is_bound_to_local() {
         vec![node(
             NodeKind::VariableDeclaration(make_test_variable(
                 count_path.clone(),
-                Expression::int(1, test_location(2), ValueMode::MutableOwned)
+                Expression::int(1, test_source_location(2), ValueMode::MutableOwned)
                     .with_reactive_source(source),
             )),
-            test_location(2),
+            test_source_location(2),
         )],
-        test_location(1),
+        test_source_location(1),
     );
 
-    let ast = build_ast(vec![start_function], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_function], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should preserve source metadata");
 
@@ -84,7 +84,7 @@ fn reactive_parameter_metadata_is_bound_to_function_param() {
         count_path.clone(),
         builtin_type_ids::INT,
         false,
-        test_location(2),
+        test_source_location(2),
     );
     parameter.value.reactive_source = Some(reactive_source(
         count_path.clone(),
@@ -98,10 +98,10 @@ fn reactive_parameter_metadata_is_bound_to_function_param() {
             returns: vec![],
         },
         vec![],
-        test_location(1),
+        test_source_location(1),
     );
 
-    let ast = build_ast(vec![start_function], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_function], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should preserve parameter metadata");
 
@@ -128,7 +128,8 @@ fn reactive_template_dependency_metadata_is_bound_to_hir_value() {
     let count_path = super::symbol("count", &mut string_table);
     let view_path = super::symbol("view", &mut string_table);
     let count_source = reactive_source(count_path.clone(), ReactiveSourceKind::Declaration);
-    let template_metadata = metadata_with_subscription(count_source.clone(), test_location(4));
+    let template_metadata =
+        metadata_with_subscription(count_source.clone(), test_source_location(4));
 
     let start_function = function_node(
         start_name,
@@ -140,39 +141,39 @@ fn reactive_template_dependency_metadata_is_bound_to_hir_value() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     count_path.clone(),
-                    Expression::int(1, test_location(2), ValueMode::MutableOwned)
+                    Expression::int(1, test_source_location(2), ValueMode::MutableOwned)
                         .with_reactive_source(count_source),
                 )),
-                test_location(2),
+                test_source_location(2),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     view_path.clone(),
                     Expression::string_slice(
                         string_table.intern("<p>count</p>"),
-                        test_location(3),
+                        test_source_location(3),
                         ValueMode::ImmutableOwned,
                     ),
                 )),
-                test_location(3),
+                test_source_location(3),
             ),
             node(
                 NodeKind::PushStartRuntimeFragment(
-                    reference_expr(
+                    inferred_type_reference_expr(
                         view_path,
                         builtin_type_ids::STRING,
-                        test_location(4),
+                        test_source_location(4),
                         ValueMode::ImmutableReference,
                     )
                     .with_reactive_template_metadata(template_metadata),
                 ),
-                test_location(4),
+                test_source_location(4),
             ),
         ],
-        test_location(1),
+        test_source_location(1),
     );
 
-    let ast = build_ast(vec![start_function], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_function], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should preserve template metadata");
 
@@ -200,13 +201,14 @@ fn reachability_records_reactive_runtime_fragment_and_external_sinks() {
     let count_path = super::symbol("count", &mut string_table);
     let view_path = super::symbol("view", &mut string_table);
     let count_source = reactive_source(count_path.clone(), ReactiveSourceKind::Declaration);
-    let template_metadata = metadata_with_subscription(count_source.clone(), test_location(5));
+    let template_metadata =
+        metadata_with_subscription(count_source.clone(), test_source_location(5));
 
     let reactive_view_reference = || {
-        reference_expr(
+        inferred_type_reference_expr(
             view_path.clone(),
             builtin_type_ids::STRING,
-            test_location(5),
+            test_source_location(5),
             ValueMode::ImmutableReference,
         )
         .with_reactive_template_metadata(template_metadata.clone())
@@ -222,25 +224,25 @@ fn reachability_records_reactive_runtime_fragment_and_external_sinks() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     count_path,
-                    Expression::int(1, test_location(2), ValueMode::MutableOwned)
+                    Expression::int(1, test_source_location(2), ValueMode::MutableOwned)
                         .with_reactive_source(count_source),
                 )),
-                test_location(2),
+                test_source_location(2),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     view_path.clone(),
                     Expression::string_slice(
                         string_table.intern("<p>count</p>"),
-                        test_location(3),
+                        test_source_location(3),
                         ValueMode::ImmutableOwned,
                     ),
                 )),
-                test_location(3),
+                test_source_location(3),
             ),
             node(
                 NodeKind::PushStartRuntimeFragment(reactive_view_reference()),
-                test_location(5),
+                test_source_location(5),
             ),
             node(
                 NodeKind::ExpressionStatement(Expression::host_function_call_with_arguments(
@@ -248,18 +250,18 @@ fn reachability_records_reactive_runtime_fragment_and_external_sinks() {
                     vec![CallArgument::positional(
                         reactive_view_reference(),
                         CallAccessMode::Shared,
-                        test_location(6),
+                        test_source_location(6),
                     )],
                     vec![],
-                    test_location(6),
+                    test_source_location(6),
                 )),
-                test_location(6),
+                test_source_location(6),
             ),
         ],
-        test_location(1),
+        test_source_location(1),
     );
 
-    let ast = build_ast(vec![start_function], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_function], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should preserve sink metadata");
     let reachability = collect_test_reachability(

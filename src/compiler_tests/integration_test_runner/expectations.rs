@@ -16,6 +16,7 @@ use super::{
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_messages::is_well_formed_reason_key;
 use crate::compiler_frontend::utilities::basic::portable_path_text;
+use crate::compiler_tests::integration_test_runner::errors::FixtureLoadError;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -121,35 +122,37 @@ struct ArtifactAssertionToml {
     must_import: Vec<String>,
 }
 
-pub(crate) fn parse_expectation_file(path: &Path) -> Result<ParsedExpectationFile, String> {
+pub(crate) fn parse_expectation_file(
+    path: &Path,
+) -> Result<ParsedExpectationFile, FixtureLoadError> {
     let source = fs::read_to_string(path).map_err(|error| {
-        format!(
+        FixtureLoadError::expectation_parse(format!(
             "Failed to read expectation file '{}': {error}",
             path.display()
-        )
+        ))
     })?;
 
     let parsed: ExpectationToml = toml::from_str(&source).map_err(|error| {
-        format!(
+        FixtureLoadError::expectation_parse(format!(
             "Failed to parse expectation file '{}' as TOML: {error}",
             path.display()
-        )
+        ))
     })?;
 
     if let Some(builder) = &parsed.builder
         && builder != "html"
     {
-        return Err(format!(
+        return Err(FixtureLoadError::expectation_contract(format!(
             "Expectation file '{}' only supports builder = \"html\" right now",
             path.display()
-        ));
+        )));
     }
 
     if parsed.backends.is_empty() {
-        return Err(format!(
+        return Err(FixtureLoadError::expectation_contract(format!(
             "Expectation file '{}' must declare at least one '[backends.<id>]' section. Legacy top-level mode/flags/error fields are no longer supported.",
             path.display()
-        ));
+        )));
     }
 
     parse_matrix_expectation_file(path, parsed)
@@ -158,7 +161,7 @@ pub(crate) fn parse_expectation_file(path: &Path) -> Result<ParsedExpectationFil
 fn parse_matrix_expectation_file(
     path: &Path,
     parsed: ExpectationToml,
-) -> Result<ParsedExpectationFile, String> {
+) -> Result<ParsedExpectationFile, FixtureLoadError> {
     // In matrix mode, all mode/outcome keys must be declared inside explicit
     // backend sections so each backend can evolve independently.
     if parsed.mode.is_some()
@@ -168,20 +171,20 @@ fn parse_matrix_expectation_file(
         || !parsed.message_contains.is_empty()
         || !parsed.artifact_assertions.is_empty()
     {
-        return Err(format!(
+        return Err(FixtureLoadError::expectation_contract(format!(
             "Expectation file '{}' uses backend matrix mode and must keep mode/warnings/flags/error/artifact keys inside '[backends.<id>]'.",
             path.display()
-        ));
+        )));
     }
 
     let mut backend_expectations = Vec::new();
     for (backend_key, backend_expectation) in parsed.backends {
         let backend_id = BackendId::parse(&backend_key).map_err(|error| {
-            format!(
+            FixtureLoadError::expectation_contract(format!(
                 "Expectation file '{}' has invalid backend key '{}': {error}",
                 path.display(),
                 backend_key
-            )
+            ))
         })?;
         let context = format!("[backends.{}]", backend_id.as_str());
         let warnings = parse_warning_expectation(
@@ -225,11 +228,11 @@ fn parse_matrix_expectation_file(
         }
 
         if backend_expectation.mode == ExpectationMode::Failure && success_contract.is_some() {
-            return Err(format!(
+            return Err(FixtureLoadError::expectation_contract(format!(
                 "Expectation file '{}' {} uses mode = \"failure\" and must not set 'success_contract'.",
                 path.display(),
                 context
-            ));
+            )));
         }
 
         let golden_mode =
@@ -253,24 +256,24 @@ fn parse_matrix_expectation_file(
                 || !diagnostic_assertions.is_empty()
                 || has_authored_expected_warning)
         {
-            return Err(format!(
+            return Err(FixtureLoadError::expectation_contract(format!(
                 "Expectation file '{}' {} declares success_contract = \"acceptance_only\" and must not combine it with artifact assertions, golden_mode, rendered-output assertions, artifact-absence assertions, or an authored expected-warning contract.",
                 path.display(),
                 context
-            ));
+            )));
         }
 
         // rendered_output_* is only valid for success mode; validate here so the
         // error message can reference the backend context.
         if backend_expectation.mode == ExpectationMode::Failure && rendered_output.is_present() {
-            return Err(format!(
+            return Err(FixtureLoadError::expectation_contract(format!(
                 "Expectation file '{}' {} uses mode = \"failure\" and must not set \
                  'rendered_output_exact', 'rendered_output_contains', \
                  'rendered_output_not_contains', 'rendered_output_contains_in_order', or \
                  'rendered_output_contains_exactly_once'.",
                 path.display(),
                 context
-            ));
+            )));
         }
 
         // artifacts_must_not_exist is a success-only negative contract.
@@ -279,12 +282,12 @@ fn parse_matrix_expectation_file(
         if backend_expectation.mode == ExpectationMode::Failure
             && !backend_expectation.artifacts_must_not_exist.is_empty()
         {
-            return Err(format!(
+            return Err(FixtureLoadError::expectation_contract(format!(
                 "Expectation file '{}' {} uses mode = \"failure\" and must not set \
                  'artifacts_must_not_exist'.",
                 path.display(),
                 context
-            ));
+            )));
         }
 
         let artifacts_must_not_exist = parse_artifacts_must_not_exist(
@@ -322,7 +325,7 @@ fn parse_diagnostic_assertions(
     context: &str,
     authored_codes: &[String],
     assertions: &[DiagnosticAssertionToml],
-) -> Result<Vec<DiagnosticAssertion>, String> {
+) -> Result<Vec<DiagnosticAssertion>, FixtureLoadError> {
     let mut authored_code_counts = BTreeMap::new();
     for code in authored_codes {
         *authored_code_counts.entry(code.as_str()).or_insert(0) += 1;
@@ -334,62 +337,62 @@ fn parse_diagnostic_assertions(
     for (index, assertion) in assertions.iter().enumerate() {
         let assertion_label = diagnostic_assertion_label(context, index);
         if assertion.code.trim().is_empty() {
-            return Err(format!(
+            return Err(FixtureLoadError::expectation_contract(format!(
                 "Expectation file '{}' {} requires a non-empty 'code'.",
                 path.display(),
                 assertion_label
-            ));
+            )));
         }
 
         let Some(&authored_count) = authored_code_counts.get(assertion.code.as_str()) else {
-            return Err(format!(
+            return Err(FixtureLoadError::expectation_contract(format!(
                 "Expectation file '{}' {} names diagnostic code '{}' which is absent from 'diagnostic_codes'.",
                 path.display(),
                 assertion_label,
                 assertion.code
-            ));
+            )));
         };
 
         let occurrence = match assertion.occurrence {
             Some(0) => {
-                return Err(format!(
+                return Err(FixtureLoadError::expectation_contract(format!(
                     "Expectation file '{}' {} must use a one-based 'occurrence'.",
                     path.display(),
                     assertion_label
-                ));
+                )));
             }
             Some(occurrence) => occurrence,
             None if authored_count == 1 => 1,
             None => {
-                return Err(format!(
+                return Err(FixtureLoadError::expectation_contract(format!(
                     "Expectation file '{}' {} must author 'occurrence' because diagnostic code '{}' appears {} times in 'diagnostic_codes'.",
                     path.display(),
                     assertion_label,
                     assertion.code,
                     authored_count
-                ));
+                )));
             }
         };
 
         if occurrence > authored_count {
-            return Err(format!(
+            return Err(FixtureLoadError::expectation_contract(format!(
                 "Expectation file '{}' {} selects occurrence {} of diagnostic code '{}', but 'diagnostic_codes' contains it {} time(s).",
                 path.display(),
                 assertion_label,
                 occurrence,
                 assertion.code,
                 authored_count
-            ));
+            )));
         }
 
         if !selectors.insert((assertion.code.clone(), occurrence)) {
-            return Err(format!(
+            return Err(FixtureLoadError::expectation_contract(format!(
                 "Expectation file '{}' {} duplicates diagnostic code '{}' occurrence {}.",
                 path.display(),
                 assertion_label,
                 assertion.code,
                 occurrence
-            ));
+            )));
         }
 
         validate_diagnostic_assertion_fields(path, &assertion_label, assertion)?;
@@ -403,24 +406,24 @@ fn parse_diagnostic_assertions(
             || assertion.count.is_some()
             || !secondary_labels.is_empty();
         if !has_structured_fact {
-            return Err(format!(
+            return Err(FixtureLoadError::expectation_contract(format!(
                 "Expectation file '{}' {} must assert at least one structured diagnostic fact besides its selector.",
                 path.display(),
                 assertion_label
-            ));
+            )));
         }
 
         if let Some(count) = assertion.count
             && count != authored_count
         {
-            return Err(format!(
+            return Err(FixtureLoadError::expectation_contract(format!(
                 "Expectation file '{}' {} sets 'count = {}' for diagnostic code '{}', but 'diagnostic_codes' contains it {} time(s).",
                 path.display(),
                 assertion_label,
                 count,
                 assertion.code,
                 authored_count
-            ));
+            )));
         }
 
         parsed_assertions.push(DiagnosticAssertion {
@@ -450,23 +453,23 @@ fn validate_diagnostic_assertion_fields(
     path: &Path,
     assertion_label: &str,
     assertion: &DiagnosticAssertionToml,
-) -> Result<(), String> {
+) -> Result<(), FixtureLoadError> {
     if let Some(reason) = &assertion.reason {
         if reason.trim().is_empty() {
-            return Err(format!(
+            return Err(FixtureLoadError::expectation_contract(format!(
                 "Expectation file '{}' {} requires a non-empty 'reason'.",
                 path.display(),
                 assertion_label
-            ));
+            )));
         }
 
         if !is_well_formed_reason_key(reason) {
-            return Err(format!(
+            return Err(FixtureLoadError::expectation_contract(format!(
                 "Expectation file '{}' {} has invalid 'reason' '{}'; expected a qualified lowercase snake-case key.",
                 path.display(),
                 assertion_label,
                 reason
-            ));
+            )));
         }
     }
 
@@ -482,25 +485,25 @@ fn parse_secondary_label_assertions(
     path: &Path,
     diagnostic_assertion_label: &str,
     assertions: &[SecondaryLabelAssertionToml],
-) -> Result<Vec<SecondaryLabelAssertion>, String> {
+) -> Result<Vec<SecondaryLabelAssertion>, FixtureLoadError> {
     let mut parsed_assertions = Vec::with_capacity(assertions.len());
 
     for (index, assertion) in assertions.iter().enumerate() {
         let assertion_label = format!("{diagnostic_assertion_label}.secondary_labels[{index}]");
         let occurrence = match assertion.occurrence {
             None => {
-                return Err(format!(
+                return Err(FixtureLoadError::expectation_contract(format!(
                     "Expectation file '{}' {} requires a one-based 'occurrence'.",
                     path.display(),
                     assertion_label
-                ));
+                )));
             }
             Some(0) => {
-                return Err(format!(
+                return Err(FixtureLoadError::expectation_contract(format!(
                     "Expectation file '{}' {} must use a one-based 'occurrence'.",
                     path.display(),
                     assertion_label
-                ));
+                )));
             }
             Some(occurrence) => occurrence,
         };
@@ -511,11 +514,11 @@ fn parse_secondary_label_assertions(
         validate_positive_diagnostic_number(path, &assertion_label, "column", assertion.column)?;
 
         if assertion.path.is_none() && assertion.line.is_none() && assertion.column.is_none() {
-            return Err(format!(
+            return Err(FixtureLoadError::expectation_contract(format!(
                 "Expectation file '{}' {} must assert at least one secondary-label location fact ('path', 'line', or 'column').",
                 path.display(),
                 assertion_label
-            ));
+            )));
         }
 
         parsed_assertions.push(SecondaryLabelAssertion {
@@ -533,26 +536,26 @@ fn validate_diagnostic_path(
     expectation_path: &Path,
     assertion_label: &str,
     expected_path: Option<&str>,
-) -> Result<(), String> {
+) -> Result<(), FixtureLoadError> {
     let Some(expected_path) = expected_path else {
         return Ok(());
     };
 
     if expected_path.trim().is_empty() {
-        return Err(format!(
+        return Err(FixtureLoadError::expectation_contract(format!(
             "Expectation file '{}' {} requires a non-empty 'path'.",
             expectation_path.display(),
             assertion_label
-        ));
+        )));
     }
 
     let field_name = format!("{assertion_label} 'path'");
     validate_relative_path(expected_path, &field_name, CurrentDirectoryRule::Forbid).map_err(
         |error| {
-            format!(
+            FixtureLoadError::expectation_contract(format!(
                 "Expectation file '{}': {error}.",
                 expectation_path.display()
-            )
+            ))
         },
     )
 }
@@ -562,14 +565,14 @@ fn validate_positive_diagnostic_number(
     assertion_label: &str,
     field_name: &str,
     value: Option<usize>,
-) -> Result<(), String> {
+) -> Result<(), FixtureLoadError> {
     if value == Some(0) {
-        return Err(format!(
+        return Err(FixtureLoadError::expectation_contract(format!(
             "Expectation file '{}' {} requires a positive '{}' value.",
             path.display(),
             assertion_label,
             field_name
-        ));
+        )));
     }
 
     Ok(())
@@ -579,18 +582,18 @@ fn parse_artifact_assertions(
     path: &Path,
     context: &str,
     assertions: &[ArtifactAssertionToml],
-) -> Result<Vec<ArtifactAssertion>, String> {
+) -> Result<Vec<ArtifactAssertion>, FixtureLoadError> {
     let mut parsed_assertions = Vec::with_capacity(assertions.len());
 
     for (index, assertion) in assertions.iter().enumerate() {
         let assertion_label = artifact_assertion_label(context, index);
 
         if assertion.path.trim().is_empty() {
-            return Err(format!(
+            return Err(FixtureLoadError::expectation_contract(format!(
                 "Expectation file '{}' {} requires a non-empty 'path'.",
                 path.display(),
                 assertion_label
-            ));
+            )));
         }
 
         let kind = parse_artifact_kind(path, &assertion.kind, &assertion_label)?;
@@ -627,7 +630,7 @@ fn validate_artifact_assertion_fields(
     path: &Path,
     assertion_label: &str,
     assertion: &ArtifactAssertionToml,
-) -> Result<(), String> {
+) -> Result<(), FixtureLoadError> {
     for (field_name, values) in [
         ("must_contain", &assertion.must_contain),
         ("must_not_contain", &assertion.must_not_contain),
@@ -655,18 +658,18 @@ fn validate_artifact_assertion_shape(
     assertion_label: &str,
     kind: ArtifactKind,
     assertion: &ArtifactAssertionToml,
-) -> Result<(), String> {
+) -> Result<(), FixtureLoadError> {
     match kind {
         ArtifactKind::Html | ArtifactKind::Js => {
             if assertion.validate_wasm
                 || !assertion.must_export.is_empty()
                 || !assertion.must_import.is_empty()
             {
-                return Err(format!(
+                return Err(FixtureLoadError::expectation_contract(format!(
                     "Expectation file '{}' {} uses wasm-only fields on a text artifact assertion.",
                     path.display(),
                     assertion_label
-                ));
+                )));
             }
             if assertion.must_contain.is_empty()
                 && assertion.must_not_contain.is_empty()
@@ -675,13 +678,13 @@ fn validate_artifact_assertion_shape(
                 && assertion.normalized_contains.is_empty()
                 && assertion.normalized_not_contains.is_empty()
             {
-                return Err(format!(
+                return Err(FixtureLoadError::expectation_contract(format!(
                     "Expectation file '{}' {} must define at least one of 'must_contain', \
                      'must_not_contain', 'must_contain_in_order', 'must_contain_exactly_once', \
                      'normalized_contains', or 'normalized_not_contains' for text artifacts.",
                     path.display(),
                     assertion_label
-                ));
+                )));
             }
         }
         ArtifactKind::Wasm => {
@@ -692,21 +695,21 @@ fn validate_artifact_assertion_shape(
                 || !assertion.normalized_contains.is_empty()
                 || !assertion.normalized_not_contains.is_empty()
             {
-                return Err(format!(
+                return Err(FixtureLoadError::expectation_contract(format!(
                     "Expectation file '{}' {} uses text-only fields on a wasm artifact assertion.",
                     path.display(),
                     assertion_label
-                ));
+                )));
             }
             if !assertion.validate_wasm
                 && assertion.must_export.is_empty()
                 && assertion.must_import.is_empty()
             {
-                return Err(format!(
+                return Err(FixtureLoadError::expectation_contract(format!(
                     "Expectation file '{}' {} must enable 'validate_wasm' or require imports/exports for wasm assertions.",
                     path.display(),
                     assertion_label
-                ));
+                )));
             }
         }
         ArtifactKind::Binary => {
@@ -720,11 +723,11 @@ fn validate_artifact_assertion_shape(
                 || !assertion.must_export.is_empty()
                 || !assertion.must_import.is_empty()
             {
-                return Err(format!(
+                return Err(FixtureLoadError::expectation_contract(format!(
                     "Expectation file '{}' {} uses text-only or wasm-only fields on a binary artifact assertion.",
                     path.display(),
                     assertion_label
-                ));
+                )));
             }
         }
     }
@@ -737,15 +740,15 @@ fn validate_artifact_strings(
     assertion_label: &str,
     field_name: &str,
     values: &[String],
-) -> Result<(), String> {
+) -> Result<(), FixtureLoadError> {
     for value in values {
         if value.is_empty() {
-            return Err(format!(
+            return Err(FixtureLoadError::expectation_contract(format!(
                 "Expectation file '{}' {} contains an empty '{}' value.",
                 path.display(),
                 assertion_label,
                 field_name
-            ));
+            )));
         }
     }
 
@@ -756,17 +759,17 @@ fn parse_golden_mode(
     path: &Path,
     context: &str,
     raw: Option<&str>,
-) -> Result<Option<GoldenMode>, String> {
+) -> Result<Option<GoldenMode>, FixtureLoadError> {
     match raw {
         None => Ok(None),
         Some("strict") => Ok(Some(GoldenMode::Strict)),
         Some("normalized") => Ok(Some(GoldenMode::Normalized)),
-        Some(other) => Err(format!(
+        Some(other) => Err(FixtureLoadError::expectation_contract(format!(
             "Expectation file '{}' {} has unsupported golden_mode '{other}'. \
              Supported values: \"strict\", \"normalized\".",
             path.display(),
             context
-        )),
+        ))),
     }
 }
 
@@ -774,15 +777,15 @@ fn parse_success_contract(
     path: &Path,
     context: &str,
     raw: Option<&str>,
-) -> Result<Option<SuccessContract>, String> {
+) -> Result<Option<SuccessContract>, FixtureLoadError> {
     match raw {
         None => Ok(None),
         Some("acceptance_only") => Ok(Some(SuccessContract::AcceptanceOnly)),
-        Some(other) => Err(format!(
+        Some(other) => Err(FixtureLoadError::expectation_contract(format!(
             "Expectation file '{}' {} has unsupported success_contract '{other}'. Supported values: \"acceptance_only\".",
             path.display(),
             context
-        )),
+        ))),
     }
 }
 
@@ -790,17 +793,17 @@ fn parse_diagnostic_match_mode(
     path: &Path,
     context: &str,
     raw: Option<&str>,
-) -> Result<Option<DiagnosticMatchMode>, String> {
+) -> Result<Option<DiagnosticMatchMode>, FixtureLoadError> {
     match raw {
         None => Ok(None),
         Some("exact") => Ok(Some(DiagnosticMatchMode::Exact)),
         Some("contains") => Ok(Some(DiagnosticMatchMode::Contains)),
-        Some(other) => Err(format!(
+        Some(other) => Err(FixtureLoadError::expectation_contract(format!(
             "Expectation file '{}' {} has unsupported diagnostic_match '{}'. Supported values: \"exact\", \"contains\".",
             path.display(),
             context,
             other
-        )),
+        ))),
     }
 }
 
@@ -809,13 +812,13 @@ fn validate_exact_diagnostic_match_reason(
     context: &str,
     mode: DiagnosticMatchMode,
     reason: Option<&str>,
-) -> Result<(), String> {
+) -> Result<(), FixtureLoadError> {
     if mode == DiagnosticMatchMode::Exact && reason.is_some() {
-        return Err(format!(
+        return Err(FixtureLoadError::expectation_contract(format!(
             "Expectation file '{}' {} uses diagnostic_match = \"exact\" and must not set 'diagnostic_match_reason'.",
             path.display(),
             context
-        ));
+        )));
     }
 
     Ok(())
@@ -829,18 +832,18 @@ fn parse_rendered_output_expectation(
     not_contains: Vec<String>,
     contains_in_order: Option<Vec<String>>,
     contains_exactly_once: Option<Vec<String>>,
-) -> Result<RenderedOutputExpectation, String> {
+) -> Result<RenderedOutputExpectation, FixtureLoadError> {
     if exact.is_some()
         && (!contains.is_empty()
             || !not_contains.is_empty()
             || contains_in_order.is_some()
             || contains_exactly_once.is_some())
     {
-        return Err(format!(
+        return Err(FixtureLoadError::expectation_contract(format!(
             "Expectation file '{}' {} sets 'rendered_output_exact' and must not combine it with any other rendered-output assertion field.",
             path.display(),
             context
-        ));
+        )));
     }
 
     validate_rendered_output_strings(path, context, "rendered_output_contains", &contains)?;
@@ -849,11 +852,11 @@ fn parse_rendered_output_expectation(
     let contains_in_order_was_authored = contains_in_order.is_some();
     let contains_in_order = contains_in_order.unwrap_or_default();
     if contains_in_order_was_authored && contains_in_order.len() < 2 {
-        return Err(format!(
+        return Err(FixtureLoadError::expectation_contract(format!(
             "Expectation file '{}' {} requires 'rendered_output_contains_in_order' to contain at least two entries.",
             path.display(),
             context
-        ));
+        )));
     }
     validate_rendered_output_strings(
         path,
@@ -865,11 +868,11 @@ fn parse_rendered_output_expectation(
     let contains_exactly_once_was_authored = contains_exactly_once.is_some();
     let contains_exactly_once = contains_exactly_once.unwrap_or_default();
     if contains_exactly_once_was_authored && contains_exactly_once.is_empty() {
-        return Err(format!(
+        return Err(FixtureLoadError::expectation_contract(format!(
             "Expectation file '{}' {} requires 'rendered_output_contains_exactly_once' to contain at least one entry.",
             path.display(),
             context
-        ));
+        )));
     }
     validate_rendered_output_strings(
         path,
@@ -881,12 +884,12 @@ fn parse_rendered_output_expectation(
     let mut authored_exactly_once = BTreeSet::new();
     for fragment in &contains_exactly_once {
         if !authored_exactly_once.insert(fragment) {
-            return Err(format!(
+            return Err(FixtureLoadError::expectation_contract(format!(
                 "Expectation file '{}' {} contains duplicate 'rendered_output_contains_exactly_once' value '{}'.",
                 path.display(),
                 context,
                 fragment
-            ));
+            )));
         }
     }
 
@@ -904,14 +907,14 @@ fn validate_rendered_output_strings(
     context: &str,
     field_name: &str,
     values: &[String],
-) -> Result<(), String> {
+) -> Result<(), FixtureLoadError> {
     for value in values {
         if value.is_empty() {
-            return Err(format!(
+            return Err(FixtureLoadError::expectation_contract(format!(
                 "Expectation file '{}' {} contains an empty '{field_name}' value.",
                 path.display(),
                 context
-            ));
+            )));
         }
     }
     Ok(())
@@ -921,18 +924,18 @@ fn parse_artifact_kind(
     path: &Path,
     raw_kind: &str,
     assertion_label: &str,
-) -> Result<ArtifactKind, String> {
+) -> Result<ArtifactKind, FixtureLoadError> {
     match raw_kind {
         "html" => Ok(ArtifactKind::Html),
         "js" => Ok(ArtifactKind::Js),
         "wasm" => Ok(ArtifactKind::Wasm),
         "binary" => Ok(ArtifactKind::Binary),
-        other => Err(format!(
+        other => Err(FixtureLoadError::expectation_contract(format!(
             "Expectation file '{}' {} has unsupported artifact kind '{}'.",
             path.display(),
             assertion_label,
             other
-        )),
+        ))),
     }
 }
 
@@ -941,7 +944,7 @@ pub(crate) fn parse_warning_expectation(
     warning_codes: Option<Vec<String>>,
     path: &Path,
     context: &str,
-) -> Result<WarningExpectation, String> {
+) -> Result<WarningExpectation, FixtureLoadError> {
     let context_prefix = if context.is_empty() {
         String::new()
     } else {
@@ -949,49 +952,49 @@ pub(crate) fn parse_warning_expectation(
     };
 
     let Some(mode) = warnings_mode else {
-        return Err(format!(
+        return Err(FixtureLoadError::expectation_contract(format!(
             "Expectation file '{}' {}is missing required key 'warnings'.",
             path.display(),
             context_prefix
-        ));
+        )));
     };
 
     match mode {
         "ignore" => {
             if warning_codes.is_some() {
-                return Err(format!(
+                return Err(FixtureLoadError::expectation_contract(format!(
                     "Expectation file '{}' {}sets 'warning_codes' but warnings != \"exact\".",
                     path.display(),
                     context_prefix
-                ));
+                )));
             }
             Ok(WarningExpectation::Ignore)
         }
         "forbid" => {
             if warning_codes.is_some() {
-                return Err(format!(
+                return Err(FixtureLoadError::expectation_contract(format!(
                     "Expectation file '{}' {}sets 'warning_codes' but warnings != \"exact\".",
                     path.display(),
                     context_prefix
-                ));
+                )));
             }
             Ok(WarningExpectation::Forbid)
         }
         "exact" => {
             let Some(expected_codes) = warning_codes else {
-                return Err(format!(
+                return Err(FixtureLoadError::expectation_contract(format!(
                     "Expectation file '{}' {}uses warnings = \"exact\" but must author 'warning_codes'.",
                     path.display(),
                     context_prefix
-                ));
+                )));
             };
 
             if expected_codes.is_empty() {
-                return Err(format!(
+                return Err(FixtureLoadError::expectation_contract(format!(
                     "Expectation file '{}' {}uses warnings = \"exact\" with an empty 'warning_codes' list; an exact warning contract must contain at least one warning identity.",
                     path.display(),
                     context_prefix
-                ));
+                )));
             }
 
             validate_code_identities(path, context, "warning_codes", &expected_codes)?;
@@ -1000,11 +1003,11 @@ pub(crate) fn parse_warning_expectation(
                 expected_codes,
             }))
         }
-        other => Err(format!(
+        other => Err(FixtureLoadError::expectation_contract(format!(
             "Expectation file '{}' {}has unsupported warnings mode '{other}'.",
             path.display(),
             context_prefix
-        )),
+        ))),
     }
 }
 
@@ -1012,7 +1015,7 @@ pub(crate) fn parse_case_flags(
     flag_names: &[String],
     path: &Path,
     context: &str,
-) -> Result<Vec<Flag>, String> {
+) -> Result<Vec<Flag>, FixtureLoadError> {
     let mut flags = Vec::with_capacity(flag_names.len());
     for flag_name in flag_names {
         let parsed = match flag_name.as_str() {
@@ -1020,18 +1023,18 @@ pub(crate) fn parse_case_flags(
             "html_wasm" => Flag::HtmlWasm,
             other => {
                 if context.is_empty() {
-                    return Err(format!(
+                    return Err(FixtureLoadError::expectation_contract(format!(
                         "Expectation file '{}' has unsupported flag '{}'.",
                         path.display(),
                         other
-                    ));
+                    )));
                 }
-                return Err(format!(
+                return Err(FixtureLoadError::expectation_contract(format!(
                     "Expectation file '{}' {} has unsupported flag '{}'.",
                     path.display(),
                     context,
                     other
-                ));
+                )));
             }
         };
         flags.push(parsed);
@@ -1048,15 +1051,15 @@ fn parse_artifacts_must_not_exist(
     path: &Path,
     context: &str,
     raw_paths: &[String],
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<String>, FixtureLoadError> {
     let mut normalized = Vec::with_capacity(raw_paths.len());
     for raw_path in raw_paths {
         if raw_path.trim().is_empty() {
-            return Err(format!(
+            return Err(FixtureLoadError::expectation_contract(format!(
                 "Expectation file '{}' {} contains an empty 'artifacts_must_not_exist' entry.",
                 path.display(),
                 context
-            ));
+            )));
         }
         normalized.push(portable_path_text(raw_path));
     }
@@ -1075,7 +1078,7 @@ fn validate_code_identities(
     context: &str,
     field_name: &str,
     codes: &[String],
-) -> Result<(), String> {
+) -> Result<(), FixtureLoadError> {
     let context_prefix = if context.is_empty() {
         String::new()
     } else {
@@ -1084,11 +1087,11 @@ fn validate_code_identities(
 
     for code in codes {
         if code.trim().is_empty() {
-            return Err(format!(
+            return Err(FixtureLoadError::expectation_contract(format!(
                 "Expectation file '{}' {}contains an empty '{field_name}' entry.",
                 path.display(),
                 context_prefix
-            ));
+            )));
         }
     }
 

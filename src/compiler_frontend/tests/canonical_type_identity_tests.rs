@@ -165,10 +165,6 @@ fn no_variants() -> Box<[ChoiceVariantDefinition]> {
     Box::new([])
 }
 
-fn location() -> SourceLocation {
-    SourceLocation::default()
-}
-
 /// Registers a struct in the environment and returns its `NominalTypeId` and `TypeId`.
 fn register_struct(
     env: &mut TypeEnvironment,
@@ -229,7 +225,7 @@ fn register_single_param_list(
         parameters: vec![GenericParameter {
             id: TypeParameterId(0),
             name: string_table.intern("T"),
-            location: location(),
+            location: SourceLocation::default(),
             trait_bounds: Vec::new(),
         }],
     };
@@ -1201,7 +1197,7 @@ fn exported_generic_parameter_identity_is_equal_across_distinct_generic_paramete
         parameters: vec![GenericParameter {
             id: TypeParameterId(0),
             name: string_table.intern("T"),
-            location: location(),
+            location: SourceLocation::default(),
             trait_bounds: Vec::new(),
         }],
     };

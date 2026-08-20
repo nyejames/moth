@@ -12,10 +12,10 @@ use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::compiler_messages::source_location::{CharPosition, SourceLocation};
 use crate::compiler_frontend::hir::const_facts::HirConstFacts;
-use crate::compiler_frontend::hir::hir_builder::{build_ast, lower_ast};
+use crate::compiler_frontend::hir::hir_builder::{build_ast_with_registered_types, lower_ast};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tests::ast_fixture_support::{function_node, test_location};
+use crate::compiler_frontend::tests::ast_fixture_support::{function_node, test_source_location};
 
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -31,10 +31,10 @@ fn projects_ast_const_facts_into_hir_metadata() {
             returns: vec![],
         },
         vec![],
-        test_location(1),
+        test_source_location(1),
     );
 
-    let mut ast = build_ast(vec![start_function], entry_path.clone());
+    let mut ast = build_ast_with_registered_types(vec![start_function], entry_path.clone());
 
     let explicit_path = InternedPath::from_single_str("site_name", &mut string_table);
     let private_path = InternedPath::from_single_str("page_title", &mut string_table);
@@ -48,10 +48,10 @@ fn projects_ast_const_facts_into_hir_metadata() {
             value_kind: ConstFactValueKind::Literal,
             resolved_expression: Expression::string_slice(
                 string_table.intern("Moth"),
-                test_location(2),
+                test_source_location(2),
                 ValueMode::ImmutableOwned,
             ),
-            location: test_location(2),
+            location: test_source_location(2),
         },
     );
 
@@ -62,8 +62,12 @@ fn projects_ast_const_facts_into_hir_metadata() {
             scope: ConstBindingScope::PrivateTopLevel,
             source: ConstBindingSource::InferredImmutable,
             value_kind: ConstFactValueKind::Literal,
-            resolved_expression: Expression::int(42, test_location(3), ValueMode::ImmutableOwned),
-            location: test_location(3),
+            resolved_expression: Expression::int(
+                42,
+                test_source_location(3),
+                ValueMode::ImmutableOwned,
+            ),
+            location: test_source_location(3),
         },
     );
 
@@ -81,7 +85,7 @@ fn projects_ast_const_facts_into_hir_metadata() {
     assert_eq!(explicit.scope, ConstBindingScope::ExplicitTopLevel);
     assert_eq!(explicit.source, ConstBindingSource::ExplicitHash);
     assert_eq!(explicit.value_kind, ConstFactValueKind::Literal);
-    assert_eq!(explicit.location, test_location(2));
+    assert_eq!(explicit.location, test_source_location(2));
 
     let private = module
         .const_facts
@@ -92,7 +96,7 @@ fn projects_ast_const_facts_into_hir_metadata() {
     assert_eq!(private.scope, ConstBindingScope::PrivateTopLevel);
     assert_eq!(private.source, ConstBindingSource::InferredImmutable);
     assert_eq!(private.value_kind, ConstFactValueKind::Literal);
-    assert_eq!(private.location, test_location(3));
+    assert_eq!(private.location, test_source_location(3));
 }
 
 #[test]
@@ -107,10 +111,10 @@ fn empty_ast_const_facts_produces_empty_hir_const_facts() {
             returns: vec![],
         },
         vec![],
-        test_location(1),
+        test_source_location(1),
     );
 
-    let ast = build_ast(vec![start_function], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_function], entry_path);
 
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");

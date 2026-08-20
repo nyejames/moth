@@ -2,6 +2,7 @@
 //!
 //! WHAT: runs the integration test suite and renders results.
 
+use crate::compiler_tests::integration_test_runner::errors::TestRunnerError;
 use crate::compiler_tests::integration_test_runner::{
     BackendId, CaseExecutionResult, FailureTriageEntry, SummaryCounts, TestCaseSpec,
     TestRunnerOptions, TestSuiteSpec,
@@ -15,7 +16,7 @@ use super::{SEPARATOR_LINE_LENGTH, execution, fixture, reporting};
 /// Runs or lists the selected cases from the `tests/cases` directory.
 pub(crate) fn run_all_test_cases(
     options: TestRunnerOptions,
-) -> Result<super::IntegrationRunSummary, String> {
+) -> Result<super::IntegrationRunSummary, TestRunnerError> {
     options.validate()?;
 
     let suite = fixture::load_test_suite()?;
@@ -34,7 +35,7 @@ pub(crate) fn run_loaded_suite<F>(
     execute_case: F,
     inventory_report_path: &str,
     triage_report_path: &str,
-) -> Result<super::IntegrationRunSummary, String>
+) -> Result<super::IntegrationRunSummary, TestRunnerError>
 where
     F: Fn(&TestCaseSpec) -> CaseExecutionResult + Send + Sync,
 {
@@ -45,12 +46,20 @@ where
     let policy_evaluation = super::policy::evaluate_suite(&suite);
 
     if options.audit {
+        // Audit compiles no case, so it has no runner thread count to report. Reading one here
+        // would put a number in the report that describes nothing this run did.
+        let run = reporting::RunIdentity::started("tests --audit", None);
+        reporting::write_started_suite_inventory_report(inventory_report_path, &run)
+            .map_err(TestRunnerError::inventory_report)?;
+
         let report = reporting::build_suite_inventory_report(
             &suite.cases,
             &policy_evaluation,
-            reporting::discover_repository_commit(),
+            &run,
+            reporting::discover_repository_revision(),
         );
-        reporting::write_suite_inventory_report(inventory_report_path, &report)?;
+        reporting::write_suite_inventory_report(inventory_report_path, &report)
+            .map_err(TestRunnerError::inventory_report)?;
         println!(
             "Wrote integration suite inventory to {} ({} cases, {} backend executions).",
             inventory_report_path,
@@ -59,14 +68,18 @@ where
         );
 
         if policy_evaluation.has_hard_findings() {
-            return Err(super::policy::format_hard_findings(&policy_evaluation));
+            return Err(TestRunnerError::suite_policy(
+                super::policy::format_hard_findings(&policy_evaluation),
+            ));
         }
 
         return Ok(SummaryCounts::default().into());
     }
 
     if policy_evaluation.has_hard_findings() {
-        return Err(super::policy::format_hard_findings(&policy_evaluation));
+        return Err(TestRunnerError::suite_policy(
+            super::policy::format_hard_findings(&policy_evaluation),
+        ));
     }
 
     let cases = select_cases(suite.cases, &options);
@@ -77,20 +90,33 @@ where
     }
 
     if cases.is_empty() && options.has_selection_filters() {
-        return Err(String::from(
+        return Err(TestRunnerError::selection(String::from(
             "No integration test cases matched the requested selection filters.",
-        ));
+        )));
     }
 
     if !options.terse {
         println!("Running Moth test cases...\n");
     }
+
+    // The previous run's triage report is replaced before execution starts. Execution is the long
+    // part of a run, so this is the window where an interrupted process would otherwise leave a
+    // passing report standing as if it described this run.
+    let configured_thread_count = test_thread_count_from_env()?;
+    let run = reporting::RunIdentity::started("tests", configured_thread_count);
+    reporting::write_started_failure_triage_report(triage_report_path, &run)
+        .map_err(TestRunnerError::triage_report)?;
+
     let timer = std::time::Instant::now();
-    let mut indexed_results = if let Some(thread_count) = test_thread_count_from_env()? {
+    let mut indexed_results = if let Some(thread_count) = configured_thread_count {
         let pool = rayon::ThreadPoolBuilder::new()
             .num_threads(thread_count)
             .build()
-            .map_err(|error| format!("Failed to create test runner thread pool: {error}"))?;
+            .map_err(|error| {
+                TestRunnerError::thread_pool(format!(
+                    "Failed to create test runner thread pool: {error}"
+                ))
+            })?;
 
         pool.install(|| {
             cases
@@ -149,9 +175,11 @@ where
     // A report failure must leave the command with only its infrastructure error.
     reporting::write_failure_triage_report(
         triage_report_path,
+        &run,
         total_summary,
         &failure_triage_entries,
-    )?;
+    )
+    .map_err(TestRunnerError::triage_report)?;
 
     if options.terse {
         let terse_lines = reporting::format_terse_run_output(
@@ -265,18 +293,29 @@ pub(crate) fn select_cases(
         .collect()
 }
 
-fn test_thread_count_from_env() -> Result<Option<usize>, String> {
+fn test_thread_count_from_env() -> Result<Option<usize>, TestRunnerError> {
     let Some(raw) = std::env::var_os("MOTH_TEST_THREADS") else {
         return Ok(None);
     };
 
-    let threads = raw
-        .to_string_lossy()
-        .parse::<usize>()
-        .map_err(|_| "MOTH_TEST_THREADS must be a positive integer".to_string())?;
+    // Lossy conversion would report a non-UTF-8 value as a malformed integer and hide what the
+    // environment actually held, so the encoding failure gets its own message.
+    let Some(text) = raw.to_str() else {
+        return Err(TestRunnerError::options(format!(
+            "MOTH_TEST_THREADS must be valid UTF-8, but it was {raw:?}"
+        )));
+    };
+
+    let threads = text.parse::<usize>().map_err(|_| {
+        TestRunnerError::options(format!(
+            "MOTH_TEST_THREADS must be a positive integer, but it was '{text}'"
+        ))
+    })?;
 
     if threads == 0 {
-        return Err("MOTH_TEST_THREADS must be greater than 0".to_string());
+        return Err(TestRunnerError::options(
+            "MOTH_TEST_THREADS must be greater than 0".to_string(),
+        ));
     }
 
     Ok(Some(threads))

@@ -4,6 +4,7 @@
 use super::run_check_for_tests;
 use super::{execute_check, format_terse_summary_line};
 use crate::build_system::build::{ProjectBuilder, build_project};
+#[cfg(feature = "timers")]
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::render::{
@@ -14,7 +15,7 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidConfigReason, InvalidOutputFolderReason,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_tests::test_support::temp_dir;
+use crate::compiler_tests::test_fs::assert_path_missing;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 #[cfg(feature = "timers")]
 use crate::timing::{TimingMetric, start_benchmark_collection};
@@ -26,8 +27,9 @@ use std::time::Duration;
 
 #[test]
 fn check_compiles_single_file_without_writing_artifacts() {
-    let root = temp_dir("single_file");
-    fs::create_dir_all(&root).expect("should create temp root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let entry_file = root.join("main.moth");
     fs::write(&entry_file, "value = 1\n").expect("should write source file");
 
@@ -50,8 +52,6 @@ fn check_compiles_single_file_without_writing_artifacts() {
         1,
         "check should not write output artifacts to the source folder"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 /// Check records its bootstrap and frontend boundaries in owner order.
@@ -59,8 +59,9 @@ fn check_compiles_single_file_without_writing_artifacts() {
 #[test]
 fn successful_check_finishes_bootstrap_before_frontend() {
     let _test_guard = crate::timing::lock_instrumentation_tests();
-    let root = temp_dir("check_timer_stage_boundaries");
-    fs::create_dir_all(&root).expect("should create temporary project root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let entry_file = root.join("main.moth");
     fs::write(&entry_file, "value = 1\n").expect("should write source file");
 
@@ -80,8 +81,6 @@ fn successful_check_finishes_bootstrap_before_frontend() {
             TimingMetric::BuildFrontendTotal,
         ],
     );
-
-    fs::remove_dir_all(&root).expect("should remove temporary project root");
 }
 
 /// Config AST stages use their dedicated v1 identities and finish in owner order.
@@ -89,7 +88,8 @@ fn successful_check_finishes_bootstrap_before_frontend() {
 #[test]
 fn config_ast_timers_use_dedicated_identities() {
     let _test_guard = crate::timing::lock_instrumentation_tests();
-    let root = temp_dir("check_config_timer_stage_boundaries");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let source_root = root.join("src");
     fs::create_dir_all(&source_root).expect("should create source root");
     fs::write(root.join("config.moth"), "entry_root #= \"src\"\n")
@@ -110,8 +110,6 @@ fn config_ast_timers_use_dedicated_identities() {
             TimingMetric::ConfigAstFinalise,
         ],
     );
-
-    fs::remove_dir_all(&root).expect("should remove temporary project root");
 }
 
 #[cfg(feature = "timers")]
@@ -137,7 +135,8 @@ fn assert_timing_sequence(
 
 #[test]
 fn check_retains_source_package_warning() {
-    let root = temp_dir("check_source_package_warning");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let package = root.join("src/warnpkg");
     let src = root.join("src");
     fs::create_dir_all(&package).expect("should create package root");
@@ -162,8 +161,6 @@ fn check_retains_source_package_warning() {
         outcome.messages.warning_count() >= 1,
         "check should retain the source-package warning"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[cfg(unix)]
@@ -171,7 +168,7 @@ fn check_retains_source_package_warning() {
 fn check_rejects_symlinked_directory_output_roots_before_frontend_work() {
     use std::os::unix::fs::symlink;
 
-    for (case_name, target_name, expected_reason) in [
+    for (_case_name, target_name, expected_reason) in [
         (
             "sibling",
             "outside",
@@ -183,9 +180,11 @@ fn check_rejects_symlinked_directory_output_roots_before_frontend_work() {
             InvalidOutputFolderReason::InsideOrEqualToEntryRoot,
         ),
     ] {
-        let root = temp_dir(&format!("check_output_symlink_{case_name}"));
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let source_root = root.join("src");
-        let outside = temp_dir(&format!("check_output_symlink_target_{case_name}"));
+        let _temp1 = tempfile::tempdir().expect("should create temp dir");
+        let outside = _temp1.path().to_path_buf();
         fs::create_dir_all(&source_root).expect("should create source root");
         fs::create_dir_all(&outside).expect("should create outside root");
         let output_root = root.join("dev");
@@ -219,10 +218,9 @@ fn check_rejects_symlinked_directory_output_roots_before_frontend_work() {
                 } if *reason == expected_reason
             )
         }));
-        assert!(!outside.join("index.html").exists());
-        assert!(!source_root.join("index.html").exists());
+        assert_path_missing(&outside.join("index.html"));
+        assert_path_missing(&source_root.join("index.html"));
 
-        fs::remove_dir_all(&root).expect("should remove project root");
         fs::remove_dir_all(&outside).expect("should remove target root");
     }
 }
@@ -234,11 +232,12 @@ type DiagnosticIdentityRow = (&'static str, Option<&'static str>, String, i32);
 ///
 /// WHAT: returns an unmanaged temp project root containing only the authored source file.
 /// WHY: the parity test reuses one project shape for both `execute_check` and `build_project`.
-fn write_page_project(prefix: &str, source: &str) -> PathBuf {
-    let root = temp_dir(prefix);
-    fs::create_dir_all(&root).expect("should create temp project root");
+fn write_page_project(_prefix: &str, source: &str) -> (tempfile::TempDir, PathBuf) {
+    let temp = tempfile::tempdir().expect("should create temp dir");
+    let root = temp.path().to_path_buf();
+
     fs::write(root.join("@page.moth"), source).expect("should write @page.moth source");
-    root
+    (temp, root)
 }
 
 /// Collect ordered frontend diagnostic identity rows for parity comparison.
@@ -294,7 +293,8 @@ if value is:
 
 [:pattern_unreachable_after_duplicate_literal_warning result=[result]]
 ";
-    let warning_root = write_page_project("check_build_parity_warning", warning_source);
+    let (_warning_temp, warning_root) =
+        write_page_project("check_build_parity_warning", warning_source);
 
     let check_warning_outcome = execute_check(
         warning_root
@@ -308,18 +308,9 @@ if value is:
 
     // `check` is a no-artifact overlay: it must not create dev/release/index.html and must leave
     // the project root holding only the authored source file.
-    assert!(
-        !warning_root.join("dev").exists(),
-        "check should not create dev output artifacts"
-    );
-    assert!(
-        !warning_root.join("release").exists(),
-        "check should not create release output artifacts"
-    );
-    assert!(
-        !warning_root.join("index.html").exists(),
-        "check should not emit backend output artifacts"
-    );
+    assert_path_missing(&warning_root.join("dev"));
+    assert_path_missing(&warning_root.join("release"));
+    assert_path_missing(&warning_root.join("index.html"));
     assert_eq!(
         fs::read_dir(&warning_root)
             .expect("should read warning project root")
@@ -377,7 +368,7 @@ increment |value ~Int|:
 count ~= 0
 increment(count)
 ";
-    let error_root = write_page_project("check_build_parity_error", error_source);
+    let (_error_temp, error_root) = write_page_project("check_build_parity_error", error_source);
 
     let check_error_outcome = execute_check(
         error_root
@@ -439,8 +430,9 @@ fn terse_summary_line_matches_clean_success_contract() {
 #[test]
 fn run_check_records_command_check_total() {
     let _test_guard = crate::timing::lock_instrumentation_tests();
-    let root = temp_dir("check_run_check_timer");
-    fs::create_dir_all(&root).expect("should create temporary project root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let entry_file = root.join("main.moth");
     fs::write(&entry_file, "value = 1\n").expect("should write source file");
 
@@ -463,8 +455,6 @@ fn run_check_records_command_check_total() {
         .find(|observation| observation.metric.descriptor().stable_name == "command.check.total")
         .expect("command.check.total must be recorded");
     assert_eq!(command_total.samples, 1);
-
-    fs::remove_dir_all(&root).expect("should remove temporary project root");
 }
 
 /// Boundary regression: a scripted check duration is recorded before rendering and
@@ -492,9 +482,10 @@ fn check_command_total_excludes_renderer_work() {
         super::CheckOptions::default(),
         scripted_duration,
         |outcome, duration| {
-            // Simulate renderer work after capture. The scripted duration must
-            // remain the recorded total regardless of this work.
-            std::thread::sleep(Duration::from_millis(5));
+            // The renderer receiving the captured duration is the ordering evidence: capture
+            // already happened. Sleeping here would add wall-clock time to the test without
+            // strengthening that, because the recorded total is the scripted value, not a
+            // measurement of this callback.
             assert_eq!(duration, scripted_duration);
             assert!(
                 !outcome.messages.has_errors(),

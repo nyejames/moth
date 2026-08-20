@@ -5,6 +5,7 @@
 //!      and replaces raw string matching with a descriptive enum.
 
 use crate::profile::{ProfileOptions, ProfileParseResult, parse_profile_args};
+use crate::stress::DEFAULT_STRESS_REPEATS;
 
 pub(crate) const TOP_LEVEL_USAGE: &str = "\
 Usage: xtask <mode> [options]
@@ -18,7 +19,14 @@ Modes:
   bench-frontend       Run the focused frontend benchmark suite and record
   bench-validate       Validate all benchmark cases compile without errors
   bench-profile        Run Samply-backed profiling (use --help for options)
-  timers-erasure-check Build a no-timer release binary and verify zero-cost erasure";
+  stress               Repeat the unit and integration suites across thread counts
+                       (use --repeats <n>; default 3)
+  timers-erasure-check Build a no-timer release binary and verify zero-cost erasure
+  feature-matrix       Run every curated feature lane and report the outcome table
+  feature-lane-check   Check feature-lane coverage and write the coverage report
+  source-audit         Apply the broad-source architecture bans and write their report
+  honesty-audit        Classify the test-honesty findings and write the canonical inventory
+                       (use --update-evidence to refresh the tracked durable copy)";
 
 /// Distinguishes the supported xtask benchmark modes.
 ///
@@ -48,6 +56,19 @@ pub enum BenchmarkMode {
     BenchProfile(ProfileOptions),
     /// Prove that a no-timer release binary contains no timer-only markers.
     TimersErasureCheck,
+    /// Run every curated feature lane and report the complete outcome table.
+    FeatureMatrix,
+    /// Check feature-lane coverage without running a lane.
+    FeatureLaneCheck,
+    /// Apply the broad-source architecture bans across the workspace.
+    SourceAudit,
+    /// Classify the test-honesty findings and write the canonical honesty inventory.
+    ///
+    /// `update_evidence` additionally replaces the tracked durable copy. It is off by default so
+    /// a CI gate, which must not modify the checkout, is the same command a developer runs.
+    HonestyAudit { update_evidence: bool },
+    /// Repeat the unit and integration suites across the stress thread counts.
+    Stress { repeats: u32 },
 }
 
 /// Result of parsing the full xtask command line.
@@ -89,6 +110,9 @@ impl BenchmarkMode {
             "bench-frontend-check" => Some(BenchmarkMode::BenchFrontendCheck),
             "bench-validate" => Some(BenchmarkMode::BenchValidate),
             "timers-erasure-check" => Some(BenchmarkMode::TimersErasureCheck),
+            "feature-matrix" => Some(BenchmarkMode::FeatureMatrix),
+            "feature-lane-check" => Some(BenchmarkMode::FeatureLaneCheck),
+            "source-audit" => Some(BenchmarkMode::SourceAudit),
             _ => None,
         };
 
@@ -100,6 +124,22 @@ impl BenchmarkMode {
                 ));
             }
             return ModeParseResult::Mode(mode);
+        }
+
+        if mode_str == "honesty-audit" {
+            return match parse_honesty_audit_flags(&args[1..]) {
+                Ok(update_evidence) => {
+                    ModeParseResult::Mode(BenchmarkMode::HonestyAudit { update_evidence })
+                }
+                Err(error) => ModeParseResult::Error(error),
+            };
+        }
+
+        if mode_str == "stress" {
+            return match parse_stress_repeats(&args[1..]) {
+                Ok(repeats) => ModeParseResult::Mode(BenchmarkMode::Stress { repeats }),
+                Err(error) => ModeParseResult::Error(error),
+            };
         }
 
         // bench-profile: variable arguments parsed by the profile module.
@@ -116,6 +156,29 @@ impl BenchmarkMode {
         }
 
         ModeParseResult::Error(format!("Unknown mode '{}'", mode_str))
+    }
+}
+
+/// Parse the optional `--update-evidence` flag for the honesty audit mode.
+fn parse_honesty_audit_flags(args: &[String]) -> Result<bool, String> {
+    match args {
+        [] => Ok(false),
+        [flag] if flag == "--update-evidence" => Ok(true),
+        _ => Err("Mode 'honesty-audit' accepts only '--update-evidence'.".to_string()),
+    }
+}
+
+/// Parse the optional `--repeats <n>` argument for the stress mode.
+fn parse_stress_repeats(args: &[String]) -> Result<u32, String> {
+    match args {
+        [] => Ok(DEFAULT_STRESS_REPEATS),
+        [flag, value] if flag == "--repeats" => value
+            .parse::<u32>()
+            .ok()
+            .filter(|repeats| *repeats > 0)
+            .ok_or_else(|| format!("--repeats must be a positive integer, got '{value}'")),
+        [flag] if flag == "--repeats" => Err("--repeats requires a value.".to_string()),
+        _ => Err("Mode 'stress' accepts only '--repeats <n>'.".to_string()),
     }
 }
 

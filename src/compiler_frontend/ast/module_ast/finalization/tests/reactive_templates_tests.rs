@@ -47,7 +47,7 @@ use crate::compiler_frontend::external_packages::ExternalFunctionId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    function_node, node, symbol, test_location,
+    function_node, node, symbol, test_source_location,
 };
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -90,7 +90,7 @@ fn no_value_declaration(
     Declaration {
         id: path,
         value: Expression::no_value_with_type_id(
-            test_location(1),
+            test_source_location(1),
             data_type,
             type_id,
             ValueMode::ImmutableReference,
@@ -107,7 +107,7 @@ fn reference_expression(
         path,
         data_type,
         type_id,
-        test_location(1),
+        test_source_location(1),
         ValueMode::ImmutableReference,
         ConstRecordState::RuntimeValue,
     )
@@ -127,7 +127,7 @@ fn template_with_subscription(store: &mut TemplateIrStore, source: ReactiveSourc
         Some(ReactiveSubscription {
             source,
             type_id: builtin_type_ids::INT,
-            location: test_location(2),
+            location: test_source_location(2),
         }),
     )
 }
@@ -139,7 +139,7 @@ fn template_expression_from_tir(
     expression: Expression,
     reactive_subscription: Option<ReactiveSubscription>,
 ) -> Expression {
-    let location = test_location(2);
+    let location = test_source_location(2);
     let site_id = store.next_expression_site_id();
     let root = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::DynamicExpression {
@@ -209,7 +209,7 @@ fn call_expression(function_path: InternedPath, arguments: Vec<CallArgument>) ->
         arguments,
         vec![builtin_type_ids::STRING],
         &mut type_environment,
-        test_location(3),
+        test_source_location(3),
     )
 }
 
@@ -248,7 +248,7 @@ fn propagates_metadata_from_a_template() {
     );
     let mut ast = vec![node(
         NodeKind::ExpressionStatement(expression),
-        test_location(1),
+        test_source_location(1),
     )];
 
     propagate_reactive_template_metadata_in_ast(&mut ast, &mut store)
@@ -269,7 +269,7 @@ fn propagates_metadata_from_a_template() {
 fn annotates_linear_tir_root_metadata_through_overlay() {
     let mut strings = StringTable::new();
     let count_path = symbol("count", &mut strings);
-    let location = test_location(2);
+    let location = test_source_location(2);
     let mut store = TemplateIrStore::new();
 
     let source_expression = template_with_subscription(
@@ -325,13 +325,13 @@ fn runtime_string_operations_do_not_inherit_nested_template_metadata() {
         },
         DataType::StringSlice,
         builtin_type_ids::STRING,
-        test_location(1),
+        test_source_location(1),
         ValueMode::ImmutableOwned,
     );
 
     let mut ast = vec![node(
         NodeKind::ExpressionStatement(runtime_expression),
-        test_location(1),
+        test_source_location(1),
     )];
     propagate_reactive_template_metadata_in_ast(&mut ast, &mut store)
         .expect("reactive template metadata propagation should succeed");
@@ -353,7 +353,7 @@ fn plain_string_expression_does_not_gain_template_metadata() {
     );
     let mut ast = vec![node(
         NodeKind::ExpressionStatement(expression),
-        test_location(1),
+        test_source_location(1),
     )];
 
     propagate_reactive_template_metadata_in_ast(&mut ast, &mut store)
@@ -393,7 +393,7 @@ fn rebases_reactive_parameter_subscription_to_call_argument_source() {
             &mut store,
             reactive_source(parameter_path, ReactiveSourceKind::Parameter),
         )]),
-        test_location(2),
+        test_source_location(2),
     )];
 
     let mut argument =
@@ -405,17 +405,22 @@ fn rebases_reactive_parameter_subscription_to_call_argument_source() {
     argument.reactive_template = None;
 
     let mut ast = vec![
-        function_node(function_path.clone(), signature, body, test_location(1)),
+        function_node(
+            function_path.clone(),
+            signature,
+            body,
+            test_source_location(1),
+        ),
         node(
             NodeKind::ExpressionStatement(call_expression(
                 function_path,
                 vec![CallArgument::positional(
                     argument,
                     CallAccessMode::Shared,
-                    test_location(3),
+                    test_source_location(3),
                 )],
             )),
-            test_location(3),
+            test_source_location(3),
         ),
     ];
 
@@ -447,7 +452,7 @@ fn substitutes_string_parameter_template_value_from_call_argument() {
     parameter.value.reactive_template =
         Some(ReactiveTemplateMetadata::from_template_value_parameter(
             parameter_path.clone(),
-            test_location(1),
+            test_source_location(1),
         ));
 
     let mut inserted_parameter = reference_expression(
@@ -465,7 +470,7 @@ fn substitutes_string_parameter_template_value_from_call_argument() {
     };
     let body = vec![node(
         NodeKind::Return(vec![wrapper_template]),
-        test_location(2),
+        test_source_location(2),
     )];
 
     let argument_template = template_with_subscription(
@@ -474,17 +479,22 @@ fn substitutes_string_parameter_template_value_from_call_argument() {
     );
 
     let mut ast = vec![
-        function_node(function_path.clone(), signature, body, test_location(1)),
+        function_node(
+            function_path.clone(),
+            signature,
+            body,
+            test_source_location(1),
+        ),
         node(
             NodeKind::ExpressionStatement(call_expression(
                 function_path,
                 vec![CallArgument::positional(
                     argument_template,
                     CallAccessMode::Shared,
-                    test_location(3),
+                    test_source_location(3),
                 )],
             )),
-            test_location(3),
+            test_source_location(3),
         ),
     ];
 
@@ -522,7 +532,7 @@ fn references_use_metadata_computed_for_prior_declarations() {
             &mut store,
             reactive_source(parameter_path, ReactiveSourceKind::Parameter),
         )]),
-        test_location(2),
+        test_source_location(2),
     )];
 
     let argument = reference_expression(count_path.clone(), DataType::Int, builtin_type_ids::INT)
@@ -537,21 +547,24 @@ fn references_use_metadata_computed_for_prior_declarations() {
             vec![CallArgument::positional(
                 argument,
                 CallAccessMode::Shared,
-                test_location(3),
+                test_source_location(3),
             )],
         ),
     };
 
     let mut ast = vec![
-        function_node(function_path, signature, body, test_location(1)),
-        node(NodeKind::VariableDeclaration(declaration), test_location(3)),
+        function_node(function_path, signature, body, test_source_location(1)),
+        node(
+            NodeKind::VariableDeclaration(declaration),
+            test_source_location(3),
+        ),
         node(
             NodeKind::ExpressionStatement(reference_expression(
                 view_path,
                 DataType::StringSlice,
                 builtin_type_ids::STRING,
             )),
-            test_location(4),
+            test_source_location(4),
         ),
     ];
 
@@ -577,7 +590,7 @@ fn references_use_metadata_computed_for_prior_declarations() {
 fn annotates_branch_body_tir_root_metadata() {
     let mut string_table = StringTable::new();
     let count_path = symbol("count", &mut string_table);
-    let location = test_location(2);
+    let location = test_source_location(2);
     let mut store = TemplateIrStore::new();
 
     let body_expression = template_with_subscription(
@@ -636,7 +649,7 @@ fn annotates_branch_body_tir_root_metadata() {
 fn annotates_fallback_body_tir_root_metadata() {
     let mut string_table = StringTable::new();
     let fallback_path = symbol("fallback_count", &mut string_table);
-    let location = test_location(2);
+    let location = test_source_location(2);
     let mut store = TemplateIrStore::new();
 
     let branch_body_node = store.push_node(TemplateIrNode::new(
@@ -704,7 +717,7 @@ fn annotates_fallback_body_tir_root_metadata() {
 fn annotates_loop_body_tir_root_metadata() {
     let mut string_table = StringTable::new();
     let count_path = symbol("count", &mut string_table);
-    let location = test_location(2);
+    let location = test_source_location(2);
     let mut store = TemplateIrStore::new();
 
     let body_expression = template_with_subscription(
@@ -763,7 +776,7 @@ fn annotates_branch_selector_and_body_through_one_root_overlay() {
     let mut string_table = StringTable::new();
     let count_path = symbol("count", &mut string_table);
     let show_path = symbol("show", &mut string_table);
-    let location = test_location(2);
+    let location = test_source_location(2);
     let mut store = TemplateIrStore::new();
 
     let show_template = template_with_subscription(
@@ -813,7 +826,7 @@ fn annotates_branch_selector_and_body_through_one_root_overlay() {
     let mut ast = vec![
         node(
             NodeKind::VariableDeclaration(show_declaration),
-            test_location(1),
+            test_source_location(1),
         ),
         node(
             NodeKind::ExpressionStatement(Expression::template(
@@ -857,7 +870,7 @@ fn option_capture_body_uses_scrutinee_reactive_metadata() {
     let optional_path = symbol("optional", &mut string_table);
     let capture_path = symbol("captured", &mut string_table);
     let capture_name = string_table.intern("captured");
-    let location = test_location(2);
+    let location = test_source_location(2);
     let mut store = TemplateIrStore::new();
 
     let optional_declaration = Declaration {
@@ -917,7 +930,7 @@ fn option_capture_body_uses_scrutinee_reactive_metadata() {
     let mut ast = vec![
         node(
             NodeKind::VariableDeclaration(optional_declaration),
-            test_location(1),
+            test_source_location(1),
         ),
         node(
             NodeKind::ExpressionStatement(Expression::template(
@@ -954,7 +967,7 @@ fn annotates_existing_effective_expression_override_instead_of_structural_payloa
     let mut string_table = StringTable::new();
     let count_path = symbol("count", &mut string_table);
     let show_path = symbol("show", &mut string_table);
-    let location = test_location(2);
+    let location = test_source_location(2);
     let mut store = TemplateIrStore::new();
 
     let show_declaration = Declaration {
@@ -1017,7 +1030,7 @@ fn annotates_existing_effective_expression_override_instead_of_structural_payloa
     let mut ast = vec![
         node(
             NodeKind::VariableDeclaration(show_declaration),
-            test_location(1),
+            test_source_location(1),
         ),
         node(
             NodeKind::ExpressionStatement(Expression::template(
@@ -1050,7 +1063,7 @@ fn annotates_existing_child_expression_override() {
     let mut string_table = StringTable::new();
     let count_path = symbol("count", &mut string_table);
     let show_path = symbol("show", &mut string_table);
-    let location = test_location(2);
+    let location = test_source_location(2);
     let mut store = TemplateIrStore::new();
 
     let show_declaration = Declaration {
@@ -1134,7 +1147,7 @@ fn annotates_existing_child_expression_override() {
     let mut ast = vec![
         node(
             NodeKind::VariableDeclaration(show_declaration),
-            test_location(1),
+            test_source_location(1),
         ),
         node(
             NodeKind::ExpressionStatement(Expression::template(
@@ -1183,7 +1196,7 @@ fn sink_operand_expressions_keep_reactive_template_metadata() {
     let mut ast = vec![
         node(
             NodeKind::PushStartRuntimeFragment(fragment_template),
-            test_location(1),
+            test_source_location(1),
         ),
         node(
             NodeKind::ExpressionStatement({
@@ -1193,14 +1206,14 @@ fn sink_operand_expressions_keep_reactive_template_metadata() {
                     vec![CallArgument::positional(
                         host_call_template,
                         CallAccessMode::Shared,
-                        test_location(2),
+                        test_source_location(2),
                     )],
                     Vec::new(),
                     &mut type_environment,
-                    test_location(2),
+                    test_source_location(2),
                 )
             }),
-            test_location(2),
+            test_source_location(2),
         ),
     ];
 
@@ -1226,7 +1239,7 @@ fn sink_operand_expressions_keep_reactive_template_metadata() {
 fn propagates_metadata_through_runtime_slot_site_render_piece() {
     let mut strings = StringTable::new();
     let source_path = symbol("count", &mut strings);
-    let location = test_location(2);
+    let location = test_source_location(2);
     let mut store = TemplateIrStore::new();
 
     let inner_expression = template_with_subscription(
@@ -1300,7 +1313,7 @@ fn propagates_metadata_through_runtime_slot_site_render_piece() {
 #[test]
 fn reactive_annotation_rejects_missing_root_template() {
     let mut store = TemplateIrStore::new();
-    let location = test_location(2);
+    let location = test_source_location(2);
     let template = template_with_reference(
         TemplateTirReference {
             root: TemplateIrId::new(99),
@@ -1323,7 +1336,7 @@ fn reactive_annotation_rejects_missing_root_template() {
 #[test]
 fn reactive_annotation_rejects_missing_root_view_context() {
     let mut store = TemplateIrStore::new();
-    let location = test_location(2);
+    let location = test_source_location(2);
     let root = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Sequence {
             children: Vec::new(),
@@ -1362,7 +1375,7 @@ fn reactive_annotation_rejects_missing_root_view_context() {
 #[test]
 fn reactive_annotation_rejects_missing_expression_overlay() {
     let mut store = TemplateIrStore::new();
-    let location = test_location(2);
+    let location = test_source_location(2);
     let root = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Sequence {
             children: Vec::new(),

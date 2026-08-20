@@ -12,18 +12,15 @@ use crate::compiler_frontend::value_mode::ValueMode;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-fn empty_location() -> SourceLocation {
-    SourceLocation::default()
-}
-
 #[test]
 fn finish_consumes_the_construction_context_and_records_real_depth() {
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut string_table = StringTable::new();
-    let mut construction = TemplateConstructionContext::new(Rc::clone(&store), empty_location());
+    let mut construction =
+        TemplateConstructionContext::new(Rc::clone(&store), SourceLocation::default());
 
     let body_text = string_table.intern("leaf");
-    construction.record_text(body_text, 4, empty_location());
+    construction.record_text(body_text, 4, SourceLocation::default());
     let body_id = *construction
         .root_children()
         .first()
@@ -31,7 +28,7 @@ fn finish_consumes_the_construction_context_and_records_real_depth() {
 
     let selector = TemplateBranchSelector::Bool(Expression::bool(
         true,
-        empty_location(),
+        SourceLocation::default(),
         ValueMode::ImmutableOwned,
     ));
     let selector_site_id = construction.next_expression_site_id();
@@ -39,11 +36,11 @@ fn finish_consumes_the_construction_context_and_records_real_depth() {
         vec![TemplateIrBranch::new(
             selector,
             body_id,
-            empty_location(),
+            SourceLocation::default(),
             selector_site_id,
         )],
         None,
-        empty_location(),
+        SourceLocation::default(),
     );
 
     assert!(construction.control_flow_node_id().is_some());

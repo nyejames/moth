@@ -1336,7 +1336,7 @@ impl FrontendModuleBuildContext<'_> {
             // projection input carries the resolved receiver-method catalog and public type-root
             // table that step 4 joins with the pre-AST `DirectExportSeed` to build the post-AST
             // `CallableSeed` table, the one receiver and callable identity owner.
-            let module_ast_build = self.build_ast(
+            let module_ast_build = self.build_ast_with_registered_types(
                 &mut compiler,
                 sorted,
                 entry_file_path,
@@ -1735,7 +1735,7 @@ impl FrontendModuleBuildContext<'_> {
     // The timing context is a cfg-gated parameter that disappears from
     // no-timer builds; bundling it would add a context struct for one field.
     #[allow(clippy::too_many_arguments)]
-    fn build_ast(
+    fn build_ast_with_registered_types(
         &self,
         compiler: &mut CompilerFrontend,
         sorted: SortedHeaders,

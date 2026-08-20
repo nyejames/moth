@@ -1,3 +1,7 @@
+-- A unit-variant choice value declared with an explicit type flows through a
+-- function argument and return, then reaches an exhaustive match that names the
+-- variant. The observed variant is the evidence that the value survived the call.
+
 Status :: Ready, Busy, Offline;
 
 pass_status |status Status| -> Status:
@@ -6,3 +10,12 @@ pass_status |status Status| -> Status:
 
 selected Status = Status::Busy
 echoed = pass_status(selected)
+
+label ~= "unset"
+if echoed is:
+    Ready => label = "ready"
+    Busy => label = "busy"
+    Offline => label = "offline"
+;
+
+[:choice_basic_declaration_and_use label=[label]]

@@ -168,3 +168,115 @@ fn parse_args_bench_profile_error() {
     ])));
     assert!(error.contains("Unknown argument"));
 }
+
+// ----------------------------
+//  parse_args: stress
+// ----------------------------
+
+#[test]
+fn parse_args_stress_defaults_to_the_owned_repeat_count() {
+    assert_eq!(
+        unwrap_mode(BenchmarkMode::parse_args(&args(&["stress"]))),
+        BenchmarkMode::Stress {
+            repeats: crate::stress::DEFAULT_STRESS_REPEATS
+        }
+    );
+}
+
+#[test]
+fn parse_args_stress_accepts_an_explicit_repeat_count() {
+    assert_eq!(
+        unwrap_mode(BenchmarkMode::parse_args(&args(&[
+            "stress",
+            "--repeats",
+            "7"
+        ]))),
+        BenchmarkMode::Stress { repeats: 7 }
+    );
+}
+
+#[test]
+fn parse_args_stress_rejects_a_non_positive_or_unparsable_repeat_count() {
+    for value in ["0", "-1", "many", ""] {
+        let error = unwrap_error(BenchmarkMode::parse_args(&args(&[
+            "stress",
+            "--repeats",
+            value,
+        ])));
+        assert_eq!(
+            error,
+            format!("--repeats must be a positive integer, got '{value}'")
+        );
+    }
+}
+
+#[test]
+fn parse_args_stress_rejects_a_missing_value_and_unknown_arguments() {
+    assert_eq!(
+        unwrap_error(BenchmarkMode::parse_args(&args(&["stress", "--repeats"]))),
+        "--repeats requires a value."
+    );
+    assert_eq!(
+        unwrap_error(BenchmarkMode::parse_args(&args(&["stress", "--forever"]))),
+        "Mode 'stress' accepts only '--repeats <n>'."
+    );
+}
+
+#[test]
+fn top_level_usage_lists_stress() {
+    assert!(TOP_LEVEL_USAGE.contains("stress"));
+    assert!(TOP_LEVEL_USAGE.contains("--repeats <n>; default 3"));
+}
+
+// ----------------------------
+//  parse_args: honesty-audit
+// ----------------------------
+
+/// The CI gate runs the audit without arguments, and must not modify the checkout.
+#[test]
+fn parse_args_honesty_audit_leaves_the_tracked_evidence_alone_by_default() {
+    assert_eq!(
+        unwrap_mode(BenchmarkMode::parse_args(&args(&["honesty-audit"]))),
+        BenchmarkMode::HonestyAudit {
+            update_evidence: false
+        }
+    );
+}
+
+#[test]
+fn parse_args_honesty_audit_accepts_the_evidence_refresh_flag() {
+    assert_eq!(
+        unwrap_mode(BenchmarkMode::parse_args(&args(&[
+            "honesty-audit",
+            "--update-evidence"
+        ]))),
+        BenchmarkMode::HonestyAudit {
+            update_evidence: true
+        }
+    );
+}
+
+#[test]
+fn parse_args_honesty_audit_rejects_anything_else() {
+    for rejected in [
+        vec!["honesty-audit", "--update"],
+        vec!["honesty-audit", "--update-evidence", "extra"],
+        vec!["honesty-audit", "--update-evidence", "--update-evidence"],
+    ] {
+        let error = unwrap_error(BenchmarkMode::parse_args(&args(&rejected)));
+        assert!(
+            error.contains("--update-evidence"),
+            "unexpected error for {rejected:?}: {error}"
+        );
+    }
+}
+
+#[test]
+fn top_level_usage_lists_every_audit_mode() {
+    for mode in ["honesty-audit", "source-audit", "feature-lane-check"] {
+        assert!(
+            TOP_LEVEL_USAGE.contains(mode),
+            "usage does not mention '{mode}', so nobody running `xtask` learns it exists"
+        );
+    }
+}

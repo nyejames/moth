@@ -12,11 +12,48 @@
 
 pub(crate) mod timing;
 
+/// Features the running binary was built with, in declaration order.
+///
+/// WHAT: the enabled Cargo features of this compiled `moth` library, as names.
+/// WHY:  a machine-readable report that does not name its build configuration cannot be told
+///       apart from one produced by a differently configured run of the same command. This is
+///       public because `xtask` links this library and its reports describe the same build.
+pub const ENABLED_FEATURES: &[&str] = &[
+    #[cfg(feature = "timers")]
+    "timers",
+    #[cfg(feature = "detailed_timers")]
+    "detailed_timers",
+    #[cfg(feature = "benchmark_counters")]
+    "benchmark_counters",
+    #[cfg(feature = "checked_blocks")]
+    "checked_blocks",
+    #[cfg(feature = "async_blocks")]
+    "async_blocks",
+    #[cfg(feature = "show_tokens")]
+    "show_tokens",
+    #[cfg(feature = "show_headers")]
+    "show_headers",
+    #[cfg(feature = "show_ast")]
+    "show_ast",
+    #[cfg(feature = "show_eval")]
+    "show_eval",
+    #[cfg(feature = "show_hir")]
+    "show_hir",
+    #[cfg(feature = "show_codegen")]
+    "show_codegen",
+    #[cfg(feature = "show_borrow_checker")]
+    "show_borrow_checker",
+];
+
 mod compiler_tests {
     #[cfg(test)]
     mod frontend_pipeline_tests;
     pub(crate) mod integration_test_runner; // For running all integration tests and report back the results
 
+    #[cfg(test)]
+    pub mod test_diagnostics;
+    #[cfg(test)]
+    pub mod test_fs;
     #[cfg(test)]
     pub mod test_support;
 }

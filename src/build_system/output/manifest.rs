@@ -7,7 +7,9 @@
 
 use crate::build_system::build_profile::BuildProfile;
 use crate::build_system::output::{BuilderKind, CleanupPolicy, OutputOwner};
-use crate::build_system::utils::{file_error_messages, should_skip_unchanged_write};
+use crate::build_system::utils::{
+    file_error_messages, file_error_with_rejection_reason, should_skip_unchanged_write,
+};
 use crate::compiler_frontend::compiler_errors::{CompilerMessages, SourceLocation};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidConfigReason, InvalidOutputFolderReason,
@@ -260,9 +262,10 @@ pub(crate) fn validate_relative_output_path(
         .to_str()
         .is_some_and(|path| path.contains(['\r', '\n']))
     {
-        return Err(file_error_messages(
+        return Err(file_error_with_rejection_reason(
             relative_output_path,
             "Output paths cannot contain line-break characters.",
+            super::writer::OutputRejectionReason::InvalidRelativeOutputPath,
             string_table,
         ));
     }
@@ -287,7 +290,12 @@ pub(crate) fn validate_relative_output_path(
                 "Output path must only contain normal portable path components."
             }
         };
-        file_error_messages(relative_output_path, message, string_table)
+        file_error_with_rejection_reason(
+            relative_output_path,
+            message,
+            super::writer::OutputRejectionReason::InvalidRelativeOutputPath,
+            string_table,
+        )
     })
 }
 
@@ -304,21 +312,23 @@ pub(crate) fn validate_output_root_is_safe(
     // WHAT: Canonicalize the output root, falling back to the nearest existing ancestor.
     // WHY: Symlinks or relative segments could disguise a dangerous target path.
     let canonical_root = canonicalize_output_path(output_root).map_err(|_| {
-        file_error_messages(
+        file_error_with_rejection_reason(
             output_root,
             "Build output root contains a dangling symlink component and cannot be used safely.",
+            super::writer::OutputRejectionReason::OutputRootDanglingSymlink,
             string_table,
         )
     })?;
 
     if is_dangerous_system_path(&canonical_root) {
-        return Err(file_error_messages(
+        return Err(file_error_with_rejection_reason(
             output_root,
             format!(
                 "Refusing to use '{}' as the build output root because it is a protected system path. \
                  Configure a project-relative output folder in config.moth.",
                 output_root.display()
             ),
+            super::writer::OutputRejectionReason::OutputRootDangerousSystemPath,
             string_table,
         ));
     }
@@ -346,7 +356,12 @@ pub(crate) fn validate_output_root_is_safe(
                 _ => "Directory build output root failed canonical containment validation."
                     .to_owned(),
             };
-            return Err(file_error_messages(output_root, message, string_table));
+            return Err(file_error_with_rejection_reason(
+                output_root,
+                message,
+                super::writer::OutputRejectionReason::OutputRootNotInsideProject,
+                string_table,
+            ));
         }
 
         return Ok(());
@@ -355,9 +370,10 @@ pub(crate) fn validate_output_root_is_safe(
     // WHAT: Verify a single-file output root is near the project directory.
     // WHY: An output root in a completely unrelated location is likely a misconfiguration.
     let canonical_project = canonicalize_output_path(project_root).map_err(|_| {
-        file_error_messages(
+        file_error_with_rejection_reason(
             project_root,
             "Project root contains a dangling symlink component and cannot validate output safety.",
+            super::writer::OutputRejectionReason::OutputRootInspectionFailed,
             string_table,
         )
     })?;
@@ -367,7 +383,7 @@ pub(crate) fn validate_output_root_is_safe(
     let is_sibling_of_project = canonical_root.starts_with(project_parent);
 
     if !is_inside_project && !is_sibling_of_project {
-        return Err(file_error_messages(
+        return Err(file_error_with_rejection_reason(
             output_root,
             format!(
                 "Build output root '{}' is not inside or adjacent to the project directory '{}'. \
@@ -376,6 +392,7 @@ pub(crate) fn validate_output_root_is_safe(
                 output_root.display(),
                 project_root.display()
             ),
+            super::writer::OutputRejectionReason::OutputRootNotAdjacentToProject,
             string_table,
         ));
     }

@@ -4,13 +4,16 @@
 //! WHY: tests need direct access to internal builder state without widening the production API.
 
 use crate::compiler_frontend::ast::ast_nodes::{Declaration, SourceLocation};
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::templates::{
+    OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
+};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, FieldDefinition,
     StructTypeDefinition,
 };
-use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId as FrontendTypeId};
+use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId, TypeId as FrontendTypeId};
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariantPayload;
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
 use crate::compiler_frontend::hir::functions::HirFunction;
@@ -21,14 +24,17 @@ use crate::compiler_frontend::hir::ids::{
 };
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::structs::{HirField, HirStruct};
+use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::value_mode::ValueMode;
 
 // Re-export TypeId-first AST construction helpers from the bridge module so existing
 // HIR test imports continue to work without mentioning parse-era type syntax.
 pub(crate) use crate::compiler_frontend::tests::type_id_fixture_support::{
-    HirTestChoiceDefinition, assert_no_placeholder_terminators, build_ast, build_ast_with_choices,
-    lower_ast, lower_ast_with_metadata,
+    HirTestChoiceDefinition, assert_no_placeholder_terminators, build_ast_with_choices,
+    build_ast_with_registered_types, lower_ast, lower_ast_with_metadata,
 };
 
 pub(crate) fn validate_module_for_tests(
@@ -314,4 +320,108 @@ impl<'a> HirBuilder<'a> {
         let (_, type_id) = self.type_environment.register_nominal_choice(definition);
         type_id
     }
+}
+
+// ---------------------------------------------------------------------------
+//  Shared HIR expression fixtures
+//
+//  These are consumed by several sibling HIR test modules, so they are owned here rather than
+//  by whichever test module needed them first.
+// ---------------------------------------------------------------------------
+
+pub(crate) fn setup_builder(string_table: &'_ mut StringTable) -> HirBuilder<'_> {
+    let test_function_name = InternedPath::from_single_str("__expr_test_fn", string_table);
+    let mut builder = HirBuilder::new(
+        string_table,
+        PathStringFormatConfig::default(),
+        crate::compiler_frontend::datatypes::environment::TypeEnvironment::new(),
+        crate::compiler_frontend::hir::functions::HirFunctionOriginLookup::default(),
+    );
+
+    let region = RegionId(0);
+    let function_id = FunctionId(0);
+    let block = HirBlock {
+        id: BlockId(0),
+        region,
+        locals: vec![],
+        statements: vec![],
+        terminator: HirTerminator::Uninitialized,
+    };
+
+    builder.test_push_block(block);
+    builder.test_set_current_region(region);
+    builder.test_set_current_block(BlockId(0));
+    builder.test_register_function_name(test_function_name, function_id);
+    builder.test_set_current_function(function_id);
+    builder.module.start_function = Some(function_id);
+
+    builder
+}
+
+pub(crate) fn register_local(
+    builder: &mut HirBuilder<'_>,
+    name: InternedPath,
+    local_id: LocalId,
+    type_id: TypeId,
+    location: SourceLocation,
+) {
+    let ty = type_id;
+    builder.test_register_local_in_block(
+        HirLocal {
+            id: local_id,
+            ty,
+            mutable: true,
+            region: RegionId(0),
+            source_info: Some(location),
+        },
+        name,
+    );
+}
+
+/// Builds the neutral render node used by HIR expression fixtures.
+///
+/// WHAT: maps literal strings to `Text`, maps other expressions to
+///       `DynamicExpression`, and preserves their source locations.
+/// WHY: HIR tests should construct the owned AST/HIR boundary they consume.
+pub(crate) fn expressions_to_owned_render_node(
+    expressions: &[Expression],
+    string_table: &StringTable,
+) -> OwnedRuntimeTemplateNode {
+    let children: Vec<OwnedRuntimeTemplateNode> = expressions
+        .iter()
+        .map(|expression| expression_to_owned_node(expression, string_table))
+        .collect();
+
+    OwnedRuntimeTemplateNode::Sequence { children }
+}
+
+fn expression_to_owned_node(
+    expression: &Expression,
+    _string_table: &StringTable,
+) -> OwnedRuntimeTemplateNode {
+    match &expression.kind {
+        ExpressionKind::StringSlice(text) => OwnedRuntimeTemplateNode::Text {
+            text: *text,
+            reactive_subscription: None,
+            location: expression.location.to_owned(),
+        },
+        _ => OwnedRuntimeTemplateNode::DynamicExpression {
+            expression: Box::new(expression.clone()),
+            reactive_subscription: None,
+        },
+    }
+}
+
+pub(crate) fn runtime_template_expression(
+    location: SourceLocation,
+    content: Vec<Expression>,
+    string_table: &StringTable,
+) -> Expression {
+    let body = expressions_to_owned_render_node(&content, string_table);
+    let handoff = OwnedRuntimeTemplateHandoff {
+        body: OwnedRuntimeTemplateBody::Render(body),
+        location: location.clone(),
+    };
+
+    Expression::runtime_template_handoff(handoff, ValueMode::ImmutableOwned)
 }

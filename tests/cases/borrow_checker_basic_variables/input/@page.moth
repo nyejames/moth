@@ -1,18 +1,14 @@
--- Test file: Basic variable operations that should pass borrow checker
--- Tests requirement 7.1: borrow checker integration with variable system
+-- Shared aliases of one immutable binding all stay readable, and a mutable
+-- binding rebinds from its own previous value. Each alias and the rebound
+-- counter is named and independently observable in one top-level output event.
 
--- Simple variable declaration and assignment
 data = "test data"
 
--- Immutable variable usage (should be fine)
 result = data
-
--- Mutable variable declaration
-counter ~= 0
-
--- Mutable variable mutation (should be fine)
-counter = counter + 1
-
--- Multiple immutable references (should be allowed)
 ref1 = data
 ref2 = data
+
+counter ~= 0
+counter = counter + 1
+
+[:borrow_checker_basic_variables result=[result] ref1=[ref1] ref2=[ref2] counter=[counter]]

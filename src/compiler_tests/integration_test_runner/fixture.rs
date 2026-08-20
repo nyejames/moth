@@ -16,29 +16,48 @@ use super::{
 };
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::utilities::basic::portable_path_text;
+use crate::compiler_tests::integration_test_runner::errors::FixtureLoadError;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub(super) fn load_test_suite() -> Result<TestSuiteSpec, String> {
+pub(super) fn load_test_suite() -> Result<TestSuiteSpec, FixtureLoadError> {
     load_test_suite_from_root(Path::new(CANONICAL_TESTS_PATH))
 }
 
-pub(crate) fn load_test_suite_from_root(root: &Path) -> Result<TestSuiteSpec, String> {
+pub(crate) fn load_test_suite_from_root(root: &Path) -> Result<TestSuiteSpec, FixtureLoadError> {
     let canonical_suite_root = fs::canonicalize(root).map_err(|error| {
-        format!(
+        FixtureLoadError::filesystem(format!(
             "Failed to resolve canonical integration test root '{}': {error}",
             root.display()
-        )
+        ))
     })?;
     let mut cases = Vec::new();
     let manifest_path = canonical_suite_root.join(MANIFEST_FILE_NAME);
-    if !manifest_path.is_file() {
-        return Err(format!(
-            "Canonical integration root '{}' must define '{}'.",
-            canonical_suite_root.display(),
-            MANIFEST_FILE_NAME
-        ));
+    // Use symlink_metadata to distinguish absence from IO errors so metadata
+    // failures do not masquerade as a missing manifest.
+    match std::fs::symlink_metadata(&manifest_path) {
+        Ok(metadata) if metadata.is_file() => {}
+        Ok(_) => {
+            return Err(FixtureLoadError::manifest(format!(
+                "Canonical integration root '{}' has '{}' but it is not a regular file.",
+                canonical_suite_root.display(),
+                MANIFEST_FILE_NAME
+            )));
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err(FixtureLoadError::manifest(format!(
+                "Canonical integration root '{}' must define '{}'.",
+                canonical_suite_root.display(),
+                MANIFEST_FILE_NAME
+            )));
+        }
+        Err(error) => {
+            return Err(FixtureLoadError::manifest(format!(
+                "Failed to read metadata for manifest '{}': {error}",
+                manifest_path.display()
+            )));
+        }
     }
 
     let manifest_cases = super::manifest::parse_manifest_file(&manifest_path)?;
@@ -67,11 +86,11 @@ fn validate_canonical_fixture_root_uniqueness(
     manifest_path: &Path,
     manifest_cases: &[ManifestCaseSpec],
     canonical_fixture_roots: &[PathBuf],
-) -> Result<(), String> {
+) -> Result<(), FixtureLoadError> {
     let mut seen_roots: HashMap<&Path, &ManifestCaseSpec> = HashMap::new();
     for (manifest_case, canonical_root) in manifest_cases.iter().zip(canonical_fixture_roots) {
         if let Some(existing_case) = seen_roots.get(canonical_root.as_path()) {
-            return Err(format!(
+            return Err(FixtureLoadError::manifest(format!(
                 "Manifest '{}' has a duplicate canonical fixture root: case '{}' path '{}' and case '{}' path '{}' both resolve to '{}'. Each fixture must have a unique canonical path.",
                 manifest_path.display(),
                 existing_case.id,
@@ -79,7 +98,7 @@ fn validate_canonical_fixture_root_uniqueness(
                 manifest_case.id,
                 manifest_case.path.display(),
                 canonical_root.display()
-            ));
+            )));
         }
         seen_roots.insert(canonical_root.as_path(), manifest_case);
     }
@@ -90,7 +109,7 @@ fn validate_canonical_fixture_root_uniqueness(
 fn validate_manifest_authoritativeness(
     canonical_suite_root: &Path,
     canonical_fixture_roots: &[PathBuf],
-) -> Result<(), String> {
+) -> Result<(), FixtureLoadError> {
     let declared_paths = canonical_fixture_roots
         .iter()
         .cloned()
@@ -100,10 +119,10 @@ fn validate_manifest_authoritativeness(
     let mut undeclared_fixtures = Vec::new();
     for discovered_root in discovered_roots {
         let canonical_discovered = fs::canonicalize(&discovered_root).map_err(|error| {
-            format!(
+            FixtureLoadError::manifest(format!(
                 "Failed to resolve discovered canonical fixture '{}': {error}",
                 discovered_root.display()
-            )
+            ))
         })?;
         ensure_strictly_inside(
             &canonical_discovered,
@@ -128,10 +147,10 @@ fn validate_manifest_authoritativeness(
             })
             .collect::<Vec<_>>()
             .join(", ");
-        return Err(format!(
+        return Err(FixtureLoadError::manifest(format!(
             "Manifest '{}' must list every canonical case; found undeclared fixtures: {preview}.",
             canonical_suite_root.join(MANIFEST_FILE_NAME).display()
-        ));
+        )));
     }
 
     Ok(())
@@ -141,15 +160,15 @@ fn resolve_declared_fixture_root(
     canonical_suite_root: &Path,
     manifest_path: &Path,
     manifest_case: &ManifestCaseSpec,
-) -> Result<PathBuf, String> {
+) -> Result<PathBuf, FixtureLoadError> {
     let declared_path = canonical_suite_root.join(&manifest_case.path);
     let canonical_fixture_root = fs::canonicalize(&declared_path).map_err(|error| {
-        format!(
+        FixtureLoadError::filesystem(format!(
             "Manifest '{}' case '{}' path '{}' could not be resolved: {error}.",
             manifest_path.display(),
             manifest_case.id,
             manifest_case.path.display()
-        )
+        ))
     })?;
     ensure_strictly_inside(
         &canonical_fixture_root,
@@ -163,31 +182,63 @@ fn resolve_declared_fixture_root(
     Ok(canonical_fixture_root)
 }
 
-fn discover_canonical_fixture_roots(root: &Path) -> Result<Vec<PathBuf>, String> {
+fn discover_canonical_fixture_roots(root: &Path) -> Result<Vec<PathBuf>, FixtureLoadError> {
     let entries = fs::read_dir(root).map_err(|error| {
-        format!(
+        FixtureLoadError::filesystem(format!(
             "Failed to read canonical test root '{}': {error}",
             root.display()
-        )
+        ))
     })?;
 
     let mut discovered_dirs = Vec::new();
     for entry in entries {
-        let entry = entry.map_err(|error| format!("Failed to read test entry: {error}"))?;
+        let entry = entry.map_err(|error| {
+            FixtureLoadError::filesystem(format!("Failed to read test entry: {error}"))
+        })?;
         let path = entry.path();
-        if !path.is_dir() {
+
+        // Use symlink_metadata to distinguish NotFound (a legitimate skip) from
+        // other IO errors (which must surface as failures, not silent skips).
+        let metadata = match std::fs::symlink_metadata(&path) {
+            Ok(m) => m,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(FixtureLoadError::filesystem(format!(
+                    "Failed to read metadata for fixture entry '{}': {error}",
+                    path.display()
+                )));
+            }
+        };
+        if !metadata.is_dir() {
             continue;
         }
 
+        // Non-UTF-8 fixture identities cannot be declared in the manifest, so they
+        // are a fixture-discovery error, not a silent skip.
         let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-            continue;
+            return Err(FixtureLoadError::filesystem(format!(
+                "Fixture directory '{}' has a non-UTF-8 name; fixture identities must be UTF-8",
+                path.display()
+            )));
         };
 
         if matches!(name, "success" | "failure") {
             continue;
         }
 
-        if !path.join(INPUT_DIR_NAME).is_dir() {
+        // Check for the input directory using the same metadata-based approach.
+        let input_dir = path.join(INPUT_DIR_NAME);
+        let input_metadata = match std::fs::symlink_metadata(&input_dir) {
+            Ok(m) => m,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(FixtureLoadError::filesystem(format!(
+                    "Failed to read metadata for input dir '{}': {error}",
+                    input_dir.display()
+                )));
+            }
+        };
+        if !input_metadata.is_dir() {
             continue;
         }
 
@@ -202,12 +253,12 @@ fn discover_canonical_fixture_roots(root: &Path) -> Result<Vec<PathBuf>, String>
 pub(crate) fn load_canonical_case_specs(
     fixture_root: &Path,
     manifest_case: Option<ManifestCaseSpec>,
-) -> Result<Vec<TestCaseSpec>, String> {
+) -> Result<Vec<TestCaseSpec>, FixtureLoadError> {
     let canonical_fixture_root = fs::canonicalize(fixture_root).map_err(|error| {
-        format!(
+        FixtureLoadError::filesystem(format!(
             "Failed to resolve canonical fixture '{}': {error}",
             fixture_root.display()
-        )
+        ))
     })?;
     load_canonical_case_specs_at(&canonical_fixture_root, manifest_case)
 }
@@ -215,14 +266,14 @@ pub(crate) fn load_canonical_case_specs(
 fn load_canonical_case_specs_at(
     fixture_root: &Path,
     manifest_case: Option<ManifestCaseSpec>,
-) -> Result<Vec<TestCaseSpec>, String> {
+) -> Result<Vec<TestCaseSpec>, FixtureLoadError> {
     let input_path = fixture_root.join(INPUT_DIR_NAME);
     let input_root = fs::canonicalize(&input_path).map_err(|error| {
-        format!(
+        FixtureLoadError::filesystem(format!(
             "Canonical fixture '{}' could not resolve '{}': {error}",
             fixture_root.display(),
             INPUT_DIR_NAME
-        )
+        ))
     })?;
     ensure_strictly_inside(
         &input_root,
@@ -230,27 +281,50 @@ fn load_canonical_case_specs_at(
         &format!("fixture '{}' input directory", fixture_root.display()),
     )?;
     if !input_root.is_dir() {
-        return Err(format!(
+        return Err(FixtureLoadError::filesystem(format!(
             "Canonical fixture '{}' is missing '{}', or it is not a directory",
             fixture_root.display(),
             INPUT_DIR_NAME
-        ));
+        )));
     }
 
     let expect_path = fixture_root.join(EXPECT_FILE_NAME);
 
-    if !expect_path.is_file() {
-        let case_name = manifest_case
-            .as_ref()
-            .map(|case| case.id.as_str())
-            .or_else(|| fixture_root.file_name().and_then(|name| name.to_str()))
-            .unwrap_or("unnamed_case");
-        return Err(format!(
-            "Canonical case '{}' at fixture '{}' is missing required expectation file '{}'.",
-            case_name,
-            fixture_root.display(),
-            expect_path.display()
-        ));
+    // Use symlink_metadata to distinguish absence from IO errors.
+    match std::fs::symlink_metadata(&expect_path) {
+        Ok(metadata) if metadata.is_file() => {}
+        Ok(_) => {
+            let case_name = manifest_case
+                .as_ref()
+                .map(|case| case.id.as_str())
+                .or_else(|| fixture_root.file_name().and_then(|name| name.to_str()))
+                .unwrap_or("unnamed_case");
+            return Err(FixtureLoadError::filesystem(format!(
+                "Canonical case '{}' at fixture '{}' has '{}' but it is not a regular file.",
+                case_name,
+                fixture_root.display(),
+                EXPECT_FILE_NAME
+            )));
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let case_name = manifest_case
+                .as_ref()
+                .map(|case| case.id.as_str())
+                .or_else(|| fixture_root.file_name().and_then(|name| name.to_str()))
+                .unwrap_or("unnamed_case");
+            return Err(FixtureLoadError::filesystem(format!(
+                "Canonical case '{}' at fixture '{}' is missing required expectation file '{}'.",
+                case_name,
+                fixture_root.display(),
+                expect_path.display()
+            )));
+        }
+        Err(error) => {
+            return Err(FixtureLoadError::filesystem(format!(
+                "Failed to read metadata for expectation file '{}': {error}",
+                expect_path.display()
+            )));
+        }
     }
 
     let parsed_expectation = super::expectations::parse_expectation_file(&expect_path)?;
@@ -368,12 +442,12 @@ fn validate_fixture_contract(
     fixture_root: &Path,
     expectation: &ParsedExpectationFile,
     golden_expectations: &[GoldenExpectation],
-) -> Result<(), String> {
+) -> Result<(), FixtureLoadError> {
     if expectation.backend_expectations.is_empty() {
-        return Err(format!(
+        return Err(FixtureLoadError::fixture_contract(format!(
             "Fixture '{}' does not define any backend expectations.",
             fixture_root.display()
-        ));
+        )));
     }
 
     for (backend_expectation, golden) in expectation
@@ -386,55 +460,55 @@ fn validate_fixture_contract(
         match backend_expectation.mode {
             ExpectationMode::Failure => {
                 if backend_expectation.diagnostic_codes.is_empty() {
-                    return Err(format!(
+                    return Err(FixtureLoadError::fixture_contract(format!(
                         "Fixture '{}' backend '{}' uses mode = \"failure\" but is missing required 'diagnostic_codes'.",
                         fixture_root.display(),
                         backend_expectation.backend_id.as_str()
-                    ));
+                    )));
                 }
                 if !backend_expectation.artifact_assertions.is_empty() {
-                    return Err(format!(
+                    return Err(FixtureLoadError::fixture_contract(format!(
                         "Fixture '{}' backend '{}' uses mode = \"failure\" and must not define artifact assertions.",
                         fixture_root.display(),
                         backend_expectation.backend_id.as_str()
-                    ));
+                    )));
                 }
                 // Failure backends never produce artifacts, so an authored golden_mode or any
                 // discovered file-backed golden is invalid. Reject before constructing
                 // ExpectedOutcome so the audit inventory cannot silently report the golden as
                 // absent while golden files linger on disk.
                 if backend_expectation.golden_mode.is_some() {
-                    return Err(format!(
+                    return Err(FixtureLoadError::fixture_contract(format!(
                         "Fixture '{}' backend '{}' uses mode = \"failure\" and must not author 'golden_mode'.",
                         fixture_root.display(),
                         backend_expectation.backend_id.as_str()
-                    ));
+                    )));
                 }
                 if has_golden_files {
-                    return Err(format!(
+                    return Err(FixtureLoadError::fixture_contract(format!(
                         "Fixture '{}' backend '{}' uses mode = \"failure\" but has golden artifacts in '{}'.",
                         fixture_root.display(),
                         backend_expectation.backend_id.as_str(),
                         golden_dir_for_backend(fixture_root, backend_expectation.backend_id)
                             .display()
-                    ));
+                    )));
                 }
             }
             ExpectationMode::Success => {
                 if backend_expectation.success_contract == Some(SuccessContract::AcceptanceOnly)
                     && has_golden_files
                 {
-                    return Err(format!(
+                    return Err(FixtureLoadError::fixture_contract(format!(
                         "Fixture '{}' backend '{}' declares success_contract = \"acceptance_only\" but has golden artifacts in '{}'.",
                         fixture_root.display(),
                         backend_expectation.backend_id.as_str(),
                         golden_dir_for_backend(fixture_root, backend_expectation.backend_id)
                             .display()
-                    ));
+                    )));
                 }
 
                 if !has_authored_success_contract(backend_expectation, golden) {
-                    return Err(format!(
+                    return Err(FixtureLoadError::fixture_contract(format!(
                         "Fixture '{}' backend '{}' uses mode = \"success\" and must author at least one accepted success contract: \
                          success_contract = \"acceptance_only\", artifact assertions, a non-empty '{}' directory, \
                          rendered-output assertions, artifact-absence assertions, or warnings = \"exact\" with warning_codes.",
@@ -442,7 +516,7 @@ fn validate_fixture_contract(
                         backend_expectation.backend_id.as_str(),
                         golden_dir_for_backend(fixture_root, backend_expectation.backend_id)
                             .display()
-                    ));
+                    )));
                 }
                 if !backend_expectation.message_contains.is_empty()
                     || !backend_expectation.diagnostic_codes.is_empty()
@@ -450,11 +524,11 @@ fn validate_fixture_contract(
                     || backend_expectation.diagnostic_match.is_some()
                     || backend_expectation.diagnostic_match_reason.is_some()
                 {
-                    return Err(format!(
+                    return Err(FixtureLoadError::fixture_contract(format!(
                         "Fixture '{}' backend '{}' uses mode = \"success\" and must not set failure-only keys ('diagnostic_codes'/'diagnostic_assertions'/'message_contains'/'diagnostic_match'/'diagnostic_match_reason').",
                         fixture_root.display(),
                         backend_expectation.backend_id.as_str()
-                    ));
+                    )));
                 }
             }
         }
@@ -479,7 +553,7 @@ fn resolve_case_entry_path(
     fixture_root: &Path,
     input_root: &Path,
     configured_entry: Option<&str>,
-) -> Result<PathBuf, String> {
+) -> Result<PathBuf, FixtureLoadError> {
     if let Some(entry) = configured_entry {
         validate_relative_path(
             entry,
@@ -487,11 +561,11 @@ fn resolve_case_entry_path(
             CurrentDirectoryRule::AllowExactSentinel,
         )
         .map_err(|error| {
-            format!(
+            FixtureLoadError::path_boundary(format!(
                 "Fixture '{}' has an invalid entry '{}': {error}.",
                 fixture_root.display(),
                 entry
-            )
+            ))
         })?;
 
         if entry == "." {
@@ -506,25 +580,25 @@ fn resolve_case_entry_path(
         return canonicalize_contained_entry(fixture_root, input_root, "@page.moth");
     }
 
-    Err(format!(
+    Err(FixtureLoadError::path_boundary(format!(
         "Could not determine canonical test entry for '{}'. Add 'entry = ...' to '{}' or provide @page.moth.",
         input_root.display(),
         EXPECT_FILE_NAME
-    ))
+    )))
 }
 
 fn canonicalize_contained_entry(
     fixture_root: &Path,
     input_root: &Path,
     authored_entry: &str,
-) -> Result<PathBuf, String> {
+) -> Result<PathBuf, FixtureLoadError> {
     let entry_path = input_root.join(authored_entry);
     let canonical_entry = fs::canonicalize(&entry_path).map_err(|error| {
-        format!(
+        FixtureLoadError::path_boundary(format!(
             "Fixture '{}' entry '{}' could not be resolved: {error}.",
             fixture_root.display(),
             authored_entry
-        )
+        ))
     })?;
     ensure_strictly_inside(
         &canonical_entry,
@@ -538,16 +612,16 @@ fn canonicalize_contained_entry(
     Ok(canonical_entry)
 }
 
-fn ensure_strictly_inside(path: &Path, root: &Path, context: &str) -> Result<(), String> {
+fn ensure_strictly_inside(path: &Path, root: &Path, context: &str) -> Result<(), FixtureLoadError> {
     let is_strictly_inside = path
         .strip_prefix(root)
         .is_ok_and(|relative| !relative.as_os_str().is_empty());
     if !is_strictly_inside {
-        return Err(format!(
+        return Err(FixtureLoadError::path_boundary(format!(
             "{context} resolves to '{}' outside the required root '{}'.",
             path.display(),
             root.display()
-        ));
+        )));
     }
     Ok(())
 }

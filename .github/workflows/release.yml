@@ -14,6 +14,9 @@ env:
 
 jobs:
   validate:
+    # Deliberately the fail-fast recipe rather than the split gates. The split gates report every
+    # family independently on every push to main; a tag build only needs to know whether this
+    # revision is releasable, and stopping at the first failure answers that sooner.
     name: Validate before release
     runs-on: ubuntu-latest
     timeout-minutes: 45

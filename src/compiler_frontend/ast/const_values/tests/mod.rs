@@ -30,10 +30,6 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
 
-fn empty_location() -> SourceLocation {
-    SourceLocation::default()
-}
-
 fn make_resolver<'a>(
     string_table: &'a mut StringTable,
     store: &mut TemplateIrStore,
@@ -71,7 +67,7 @@ fn operator_item(operator: Operator) -> ExpressionRpnItem {
 fn literal_int_resolves_as_const() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
-    let expression = Expression::int(42, empty_location(), ValueMode::ImmutableOwned);
+    let expression = Expression::int(42, SourceLocation::default(), ValueMode::ImmutableOwned);
     let env = ConstValueEnvironment::default();
     let mut resolver = make_resolver(&mut string_table, &mut store);
 
@@ -87,8 +83,11 @@ fn literal_string_resolves_as_const() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
     let string_id = string_table.intern("hello");
-    let expression =
-        Expression::string_slice(string_id, empty_location(), ValueMode::ImmutableOwned);
+    let expression = Expression::string_slice(
+        string_id,
+        SourceLocation::default(),
+        ValueMode::ImmutableOwned,
+    );
     let env = ConstValueEnvironment::default();
     let mut resolver = make_resolver(&mut string_table, &mut store);
 
@@ -111,12 +110,12 @@ fn folded_arithmetic_resolves_to_literal() {
         items: vec![
             rvalue_item(Expression::int(
                 1,
-                empty_location(),
+                SourceLocation::default(),
                 ValueMode::ImmutableOwned,
             )),
             rvalue_item(Expression::int(
                 2,
-                empty_location(),
+                SourceLocation::default(),
                 ValueMode::ImmutableOwned,
             )),
             operator_item(Operator::Add),
@@ -126,7 +125,7 @@ fn folded_arithmetic_resolves_to_literal() {
         rpn,
         DataType::Int,
         builtin_type_ids::INT,
-        empty_location(),
+        SourceLocation::default(),
         ValueMode::ImmutableOwned,
     );
 
@@ -149,12 +148,12 @@ fn folded_arithmetic_with_reference_substitution_resolves() {
             rvalue_item(Expression::reference(
                 InternedPath::from_single_str("x", &mut string_table),
                 DataType::Int,
-                empty_location(),
+                SourceLocation::default(),
                 ValueMode::ImmutableReference,
             )),
             rvalue_item(Expression::int(
                 5,
-                empty_location(),
+                SourceLocation::default(),
                 ValueMode::ImmutableOwned,
             )),
             operator_item(Operator::Multiply),
@@ -164,13 +163,13 @@ fn folded_arithmetic_with_reference_substitution_resolves() {
         rpn,
         DataType::Int,
         builtin_type_ids::INT,
-        empty_location(),
+        SourceLocation::default(),
         ValueMode::ImmutableOwned,
     );
 
     let env = make_environment_with(
         "x",
-        Expression::int(3, empty_location(), ValueMode::ImmutableOwned),
+        Expression::int(3, SourceLocation::default(), ValueMode::ImmutableOwned),
         &mut string_table,
     );
     let mut resolver = make_resolver(&mut string_table, &mut store);
@@ -189,7 +188,7 @@ fn folded_arithmetic_with_coerced_reference_substitution_resolves() {
     let reference = Expression::reference(
         InternedPath::from_single_str("x", &mut string_table),
         DataType::Int,
-        empty_location(),
+        SourceLocation::default(),
         ValueMode::ImmutableReference,
     );
     let rpn = ExpressionRpn {
@@ -197,7 +196,7 @@ fn folded_arithmetic_with_coerced_reference_substitution_resolves() {
             rvalue_item(Expression::coerced(reference, builtin_type_ids::INT)),
             rvalue_item(Expression::int(
                 2,
-                empty_location(),
+                SourceLocation::default(),
                 ValueMode::ImmutableOwned,
             )),
             operator_item(Operator::Add),
@@ -207,13 +206,13 @@ fn folded_arithmetic_with_coerced_reference_substitution_resolves() {
         rpn,
         DataType::Int,
         builtin_type_ids::INT,
-        empty_location(),
+        SourceLocation::default(),
         ValueMode::ImmutableOwned,
     );
 
     let env = make_environment_with(
         "x",
-        Expression::int(40, empty_location(), ValueMode::ImmutableOwned),
+        Expression::int(40, SourceLocation::default(), ValueMode::ImmutableOwned),
         &mut string_table,
     );
     let mut resolver = make_resolver(&mut string_table, &mut store);
@@ -238,14 +237,14 @@ fn reference_to_known_const_resolves() {
         path.clone(),
         DataType::Float,
         builtin_type_ids::FLOAT,
-        empty_location(),
+        SourceLocation::default(),
         ValueMode::ImmutableReference,
         crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
     );
 
     let env = make_environment_with(
         "ratio",
-        Expression::float(2.71, empty_location(), ValueMode::ImmutableOwned),
+        Expression::float(2.71, SourceLocation::default(), ValueMode::ImmutableOwned),
         &mut string_table,
     );
     let mut resolver = make_resolver(&mut string_table, &mut store);
@@ -272,7 +271,7 @@ fn unresolved_reference_fails() {
         path,
         DataType::Int,
         builtin_type_ids::INT,
-        empty_location(),
+        SourceLocation::default(),
         ValueMode::ImmutableReference,
         crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
     );
@@ -299,7 +298,7 @@ fn function_call_fails_const_resolution() {
         InternedPath::from_single_str("foo", &mut string_table),
         vec![],
         vec![builtin_type_ids::INT],
-        empty_location(),
+        SourceLocation::default(),
     );
 
     let env = ConstValueEnvironment::default();
@@ -322,7 +321,7 @@ fn mutable_declaration_fails_private_const_resolution() {
     let mut store = TemplateIrStore::new();
     let declaration = Declaration {
         id: InternedPath::from_single_str("value", &mut string_table),
-        value: Expression::int(1, empty_location(), ValueMode::MutableOwned),
+        value: Expression::int(1, SourceLocation::default(), ValueMode::MutableOwned),
     };
 
     let env = ConstValueEnvironment::default();
@@ -341,7 +340,7 @@ fn explicit_top_level_constant_ignores_value_mode() {
     let mut store = TemplateIrStore::new();
     let declaration = Declaration {
         id: InternedPath::from_single_str("value", &mut string_table),
-        value: Expression::int(1, empty_location(), ValueMode::MutableOwned),
+        value: Expression::int(1, SourceLocation::default(), ValueMode::MutableOwned),
     };
 
     let env = ConstValueEnvironment::default();
@@ -388,7 +387,7 @@ fn fact_value_kind_from_runtime_is_non_const() {
 fn coerced_expression_resolves_inner_value() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
-    let inner = Expression::int(7, empty_location(), ValueMode::ImmutableOwned);
+    let inner = Expression::int(7, SourceLocation::default(), ValueMode::ImmutableOwned);
     let coerced = Expression::coerced(inner, builtin_type_ids::FLOAT);
 
     let env = ConstValueEnvironment::default();
@@ -415,12 +414,12 @@ fn runtime_rpn_with_unresolved_reference_fails() {
             rvalue_item(Expression::reference(
                 InternedPath::from_single_str("missing", &mut string_table),
                 DataType::Int,
-                empty_location(),
+                SourceLocation::default(),
                 ValueMode::ImmutableReference,
             )),
             rvalue_item(Expression::int(
                 2,
-                empty_location(),
+                SourceLocation::default(),
                 ValueMode::ImmutableOwned,
             )),
             operator_item(Operator::Add),
@@ -430,7 +429,7 @@ fn runtime_rpn_with_unresolved_reference_fails() {
         rpn,
         DataType::Int,
         builtin_type_ids::INT,
-        empty_location(),
+        SourceLocation::default(),
         ValueMode::ImmutableOwned,
     );
 
@@ -454,7 +453,7 @@ fn body_local_immutable_literal_resolves() {
     let mut store = TemplateIrStore::new();
     let declaration = Declaration {
         id: InternedPath::from_single_str("local", &mut string_table),
-        value: Expression::int(99, empty_location(), ValueMode::ImmutableOwned),
+        value: Expression::int(99, SourceLocation::default(), ValueMode::ImmutableOwned),
     };
 
     let env = ConstValueEnvironment::default();
@@ -478,7 +477,7 @@ fn body_local_mutable_declaration_fails() {
     let mut store = TemplateIrStore::new();
     let declaration = Declaration {
         id: InternedPath::from_single_str("local", &mut string_table),
-        value: Expression::int(99, empty_location(), ValueMode::MutableOwned),
+        value: Expression::int(99, SourceLocation::default(), ValueMode::MutableOwned),
     };
 
     let env = ConstValueEnvironment::default();

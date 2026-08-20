@@ -28,12 +28,8 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
 
-fn empty_location() -> SourceLocation {
-    SourceLocation::default()
-}
-
 fn bool_expression(value: bool) -> Expression {
-    Expression::bool(value, empty_location(), ValueMode::ImmutableOwned)
+    Expression::bool(value, SourceLocation::default(), ValueMode::ImmutableOwned)
 }
 
 fn text_node(
@@ -48,7 +44,7 @@ fn text_node(
         text_id,
         byte_len,
         TemplateSegmentOrigin::Body,
-        empty_location(),
+        SourceLocation::default(),
     )
 }
 
@@ -65,11 +61,11 @@ fn copied_branch_and_loop_expression_sites_are_independent() {
         vec![TemplateIrBranch::new(
             TemplateBranchSelector::Bool(bool_expression(true)),
             branch_body,
-            empty_location(),
+            SourceLocation::default(),
             selector_site,
         )],
         None,
-        empty_location(),
+        SourceLocation::default(),
     );
     let loop_root = builder.push_loop_node(
         TemplateLoopHeader::Conditional {
@@ -77,15 +73,16 @@ fn copied_branch_and_loop_expression_sites_are_independent() {
         },
         loop_body,
         None,
-        empty_location(),
+        SourceLocation::default(),
     );
-    let source_root = builder.push_sequence_node(vec![branch_root, loop_root], empty_location());
+    let source_root =
+        builder.push_sequence_node(vec![branch_root, loop_root], SourceLocation::default());
     let _template = builder.finish_template(
         source_root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        empty_location(),
+        SourceLocation::default(),
     );
 
     let source_selector = match &store
@@ -175,14 +172,14 @@ fn copied_child_remaps_retained_expression_and_slot_context() {
             text,
             "source".len(),
             TemplateSegmentOrigin::Body,
-            empty_location(),
+            SourceLocation::default(),
         );
         builder.finish_template(
             text_node,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::empty(),
-            empty_location(),
+            SourceLocation::default(),
         )
     };
 
@@ -198,10 +195,10 @@ fn copied_child_remaps_retained_expression_and_slot_context() {
                     reactive_subscription: None,
                     site_id: expression_site,
                 },
-                empty_location(),
+                SourceLocation::default(),
             ));
-        let slot = builder.push_slot_node(SlotKey::Default, empty_location());
-        let root = builder.push_sequence_node(vec![expression, slot], empty_location());
+        let slot = builder.push_slot_node(SlotKey::Default, SourceLocation::default());
+        let root = builder.push_sequence_node(vec![expression, slot], SourceLocation::default());
         let slot_occurrence = match &builder.store.get_node(slot).expect("slot exists").kind {
             TemplateIrNodeKind::Slot { placeholder } => placeholder.occurrence_id,
             other => panic!("expected slot node, got {other:?}"),
@@ -211,7 +208,7 @@ fn copied_child_remaps_retained_expression_and_slot_context() {
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::empty(),
-            empty_location(),
+            SourceLocation::default(),
         );
         (child_template, expression_site, slot_occurrence)
     };
@@ -223,7 +220,7 @@ fn copied_child_remaps_retained_expression_and_slot_context() {
                     source_expression_site,
                     Box::new(Expression::bool(
                         false,
-                        empty_location(),
+                        SourceLocation::default(),
                         ValueMode::ImmutableOwned,
                     )),
                 )],
@@ -254,7 +251,7 @@ fn copied_child_remaps_retained_expression_and_slot_context() {
             ),
             occurrence_id: child_occurrence,
         },
-        empty_location(),
+        SourceLocation::default(),
     ));
 
     let mut copy_state = TirCopyState::new();

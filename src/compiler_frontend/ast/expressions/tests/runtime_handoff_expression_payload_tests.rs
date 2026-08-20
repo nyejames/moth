@@ -14,12 +14,8 @@ use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
 
-fn test_location() -> SourceLocation {
-    SourceLocation::default()
-}
-
 fn empty_runtime_template_handoff() -> OwnedRuntimeTemplateHandoff {
-    let location = test_location();
+    let location = SourceLocation::default();
     OwnedRuntimeTemplateHandoff {
         body: OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Sequence {
             children: Vec::new(),
@@ -29,7 +25,7 @@ fn empty_runtime_template_handoff() -> OwnedRuntimeTemplateHandoff {
 }
 
 fn empty_runtime_slot_application_handoff() -> OwnedRuntimeSlotApplicationHandoff {
-    let location = test_location();
+    let location = SourceLocation::default();
     OwnedRuntimeSlotApplicationHandoff {
         wrapper: OwnedRuntimeTemplateNode::Sequence {
             children: Vec::new(),

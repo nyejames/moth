@@ -21,7 +21,9 @@ use crate::compiler_frontend::compiler_messages::{
     TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::DataType;
-use crate::compiler_frontend::tests::ast_fixture_support::{start_function_body, test_location};
+use crate::compiler_frontend::tests::ast_fixture_support::{
+    start_function_body, test_source_location,
+};
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
@@ -397,10 +399,10 @@ fn parses_negative_match_arm_with_multiline_boolean_guard() {
 fn guarded_literal_coverage_only_tracks_unguarded_duplicates() {
     let literal = MatchPattern::Literal(Expression::int(
         2,
-        test_location(1),
+        test_source_location(1),
         ValueMode::ImmutableOwned,
     ));
-    let guard = Expression::bool(true, test_location(2), ValueMode::ImmutableOwned);
+    let guard = Expression::bool(true, test_source_location(2), ValueMode::ImmutableOwned);
 
     let mut guarded_then_unguarded = MatchArmCoverageTracker::default();
     assert!(

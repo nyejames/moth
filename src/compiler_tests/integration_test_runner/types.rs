@@ -23,23 +23,33 @@ pub(crate) struct TestRunnerOptions {
 }
 
 impl TestRunnerOptions {
-    pub(crate) fn validate(&self) -> Result<(), String> {
+    pub(crate) fn validate(
+        &self,
+    ) -> Result<(), crate::compiler_tests::integration_test_runner::errors::TestRunnerError> {
         if self.audit && (self.has_selection_filters() || self.list) {
-            return Err(String::from(
-                "Tests command --audit cannot be combined with --case, --tag, --contract, --backend, or --list.",
-            ));
+            return Err(
+                crate::compiler_tests::integration_test_runner::errors::TestRunnerError::options(
+                    String::from(
+                        "Tests command --audit cannot be combined with --case, --tag, --contract, --backend, or --list.",
+                    ),
+                ),
+            );
         }
 
         if self.terse && self.list {
-            return Err(String::from(
-                "Tests command --terse cannot be combined with --list.",
-            ));
+            return Err(
+                crate::compiler_tests::integration_test_runner::errors::TestRunnerError::options(
+                    String::from("Tests command --terse cannot be combined with --list."),
+                ),
+            );
         }
 
         if self.terse && self.audit {
-            return Err(String::from(
-                "Tests command --terse cannot be combined with --audit.",
-            ));
+            return Err(
+                crate::compiler_tests::integration_test_runner::errors::TestRunnerError::options(
+                    String::from("Tests command --terse cannot be combined with --audit."),
+                ),
+            );
         }
 
         Ok(())
@@ -215,6 +225,12 @@ impl GoldenFileInventory {
 pub(crate) struct GoldenFile {
     pub relative_path: String,
     pub absolute_path: PathBuf,
+    /// The artifact kind this golden claims, decided by the authored golden's own extension.
+    ///
+    /// The expected kind is owned by the authored file, never inferred from whatever the backend
+    /// produced: inferring it would let `page.wasm` be satisfied by a generic byte artifact and a
+    /// `.js` golden by anything whose bytes happened to match.
+    pub expected_kind: ArtifactKind,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -377,6 +393,8 @@ pub(crate) struct FailureTriageEntry {
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct FailureTriageReport {
+    pub schema_version: u32,
+    pub run: super::reporting::RunIdentity,
     pub total_tests: usize,
     pub incorrect_results: usize,
     pub failures: Vec<FailureTriageEntry>,

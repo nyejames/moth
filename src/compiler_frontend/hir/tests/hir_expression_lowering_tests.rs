@@ -40,14 +40,16 @@ use crate::compiler_frontend::datatypes::ids::{
 };
 use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, ChoiceVariantPayload};
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalFunctionId};
-use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
+use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{
     HirExpressionKind, HirMapOp, HirVariantCarrier, OPTION_SOME_VARIANT_INDEX, ValueKind,
 };
-use crate::compiler_frontend::hir::hir_builder::HirBuilder;
+use crate::compiler_frontend::hir::hir_builder::{
+    expressions_to_owned_render_node, register_local, runtime_template_expression, setup_builder,
+};
 use crate::compiler_frontend::hir::hir_side_table::HirLocalOriginKind;
 use crate::compiler_frontend::hir::ids::{
-    BlockId, ChoiceId, FieldId, FunctionId, LocalId, RegionId, StructId,
+    BlockId, ChoiceId, FieldId, FunctionId, LocalId, StructId,
 };
 use crate::compiler_frontend::hir::numeric::NumericFailureMode;
 use crate::compiler_frontend::hir::operators::{HirBinOp, HirUnaryOp};
@@ -58,81 +60,18 @@ use crate::compiler_frontend::hir::reactivity::{
 };
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
-use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tests::ast_fixture_support::test_source_location;
 use crate::compiler_frontend::tests::hir_fixture_support::raw_template_expression_for_hir_invariant;
 use crate::compiler_frontend::tests::type_id_fixture_support::{
     choice_construct_expr, const_record_reference_expr, field_access_node, handled_result_expr,
-    option_none_expr, reference_expr, result_carrier_type_id, runtime_expr, runtime_operand_item,
-    runtime_operator_item,
+    inferred_type_reference_expr, option_none_expr, result_carrier_type_id, runtime_expr,
+    runtime_operand_item, runtime_operator_item,
 };
-use crate::compiler_frontend::tokenizer::tokens::{CharPosition, SourceLocation};
+use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
-
-pub(crate) fn setup_builder(string_table: &'_ mut StringTable) -> HirBuilder<'_> {
-    let test_function_name = InternedPath::from_single_str("__expr_test_fn", string_table);
-    let mut builder = HirBuilder::new(
-        string_table,
-        PathStringFormatConfig::default(),
-        crate::compiler_frontend::datatypes::environment::TypeEnvironment::new(),
-        crate::compiler_frontend::hir::functions::HirFunctionOriginLookup::default(),
-    );
-
-    let region = RegionId(0);
-    let function_id = FunctionId(0);
-    let block = HirBlock {
-        id: BlockId(0),
-        region,
-        locals: vec![],
-        statements: vec![],
-        terminator: HirTerminator::Uninitialized,
-    };
-
-    builder.test_push_block(block);
-    builder.test_set_current_region(region);
-    builder.test_set_current_block(BlockId(0));
-    builder.test_register_function_name(test_function_name, function_id);
-    builder.test_set_current_function(function_id);
-    builder.module.start_function = Some(function_id);
-
-    builder
-}
-
-pub(crate) fn location(line: i32) -> SourceLocation {
-    SourceLocation {
-        scope: InternedPath::new(),
-        start_pos: CharPosition {
-            line_number: line,
-            char_column: 0,
-        },
-        end_pos: CharPosition {
-            line_number: line,
-            char_column: 120, // Arbitrary number
-        },
-    }
-}
-
-pub(crate) fn register_local(
-    builder: &mut HirBuilder<'_>,
-    name: InternedPath,
-    local_id: LocalId,
-    type_id: TypeId,
-    location: SourceLocation,
-) {
-    let ty = type_id;
-    builder.test_register_local_in_block(
-        HirLocal {
-            id: local_id,
-            ty,
-            mutable: true,
-            region: RegionId(0),
-            source_info: Some(location),
-        },
-        name,
-    );
-}
 
 fn field_symbol(
     parent: &InternedPath,
@@ -140,40 +79,6 @@ fn field_symbol(
     string_table: &mut StringTable,
 ) -> InternedPath {
     parent.append(string_table.intern(field_name))
-}
-
-/// Builds the neutral render node used by HIR expression fixtures.
-///
-/// WHAT: maps literal strings to `Text`, maps other expressions to
-///       `DynamicExpression`, and preserves their source locations.
-/// WHY: HIR tests should construct the owned AST/HIR boundary they consume.
-fn expressions_to_owned_render_node(
-    expressions: &[Expression],
-    string_table: &StringTable,
-) -> OwnedRuntimeTemplateNode {
-    let children: Vec<OwnedRuntimeTemplateNode> = expressions
-        .iter()
-        .map(|expression| expression_to_owned_node(expression, string_table))
-        .collect();
-
-    OwnedRuntimeTemplateNode::Sequence { children }
-}
-
-fn expression_to_owned_node(
-    expression: &Expression,
-    _string_table: &StringTable,
-) -> OwnedRuntimeTemplateNode {
-    match &expression.kind {
-        ExpressionKind::StringSlice(text) => OwnedRuntimeTemplateNode::Text {
-            text: *text,
-            reactive_subscription: None,
-            location: expression.location.to_owned(),
-        },
-        _ => OwnedRuntimeTemplateNode::DynamicExpression {
-            expression: Box::new(expression.clone()),
-            reactive_subscription: None,
-        },
-    }
 }
 
 /// Builds the aggregate-wrapper node for a loop's owning head wrapper.
@@ -201,20 +106,6 @@ fn text_aggregate_wrapper_node(
             },
         ],
     }
-}
-
-pub(crate) fn runtime_template_expression(
-    location: SourceLocation,
-    content: Vec<Expression>,
-    string_table: &StringTable,
-) -> Expression {
-    let body = expressions_to_owned_render_node(&content, string_table);
-    let handoff = OwnedRuntimeTemplateHandoff {
-        body: OwnedRuntimeTemplateBody::Render(body),
-        location: location.clone(),
-    };
-
-    Expression::runtime_template_handoff(handoff, ValueMode::ImmutableOwned)
 }
 
 fn runtime_template_bool_if_expression(
@@ -400,7 +291,7 @@ fn runtime_template_slot_placeholder_materializes_as_no_output_owned_node() {
     let mut string_table = StringTable::new();
     let before = string_table.intern("before ");
     let after = string_table.intern("after");
-    let location = location(1);
+    let location = test_source_location(1);
 
     let handoff = OwnedRuntimeTemplateHandoff {
         body: OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Sequence {
@@ -456,7 +347,7 @@ fn runtime_template_slot_placeholder_materializes_as_no_output_owned_node() {
 fn escaped_slot_insert_helpers_fail_when_they_reach_hir_runtime_lowering() {
     let mut string_table = StringTable::new();
     let body_slot = string_table.intern("body");
-    let location = location(2);
+    let location = test_source_location(2);
     let mut builder = setup_builder(&mut string_table);
 
     let (helper, _helper_registry) = raw_template_expression_for_hir_invariant(
@@ -480,7 +371,7 @@ fn escaped_slot_insert_helpers_fail_when_they_reach_hir_runtime_lowering() {
 fn escaped_slot_definition_helpers_fail_when_they_reach_hir_runtime_lowering() {
     let mut string_table = StringTable::new();
     let body_slot = string_table.intern("body");
-    let location = location(2);
+    let location = test_source_location(2);
     let mut builder = setup_builder(&mut string_table);
 
     let (helper, _helper_registry) = raw_template_expression_for_hir_invariant(
@@ -503,7 +394,7 @@ fn escaped_slot_definition_helpers_fail_when_they_reach_hir_runtime_lowering() {
 #[test]
 fn runtime_template_without_handoff_reports_compiler_bug() {
     let mut string_table = StringTable::new();
-    let location = location(2);
+    let location = test_source_location(2);
     let mut builder = setup_builder(&mut string_table);
     let (template, _template_registry) = raw_template_expression_for_hir_invariant(
         TemplateType::StringFunction,
@@ -525,7 +416,7 @@ fn runtime_template_without_handoff_reports_compiler_bug() {
 #[test]
 fn top_level_loop_control_handoff_reports_compiler_bug() {
     let mut string_table = StringTable::new();
-    let location = location(2);
+    let location = test_source_location(2);
     let mut builder = setup_builder(&mut string_table);
     let handoff = OwnedRuntimeTemplateHandoff {
         body: OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::LoopControl {
@@ -553,7 +444,7 @@ fn top_level_loop_control_handoff_reports_compiler_bug() {
 fn lowers_primitive_literals() {
     let mut string_table = StringTable::new();
     let text = string_table.intern("hello");
-    let location = location(1);
+    let location = test_source_location(1);
     let mut builder = setup_builder(&mut string_table);
 
     let int_lowered = builder
@@ -625,7 +516,7 @@ fn lowers_primitive_literals() {
 fn lowers_reference_to_registered_local() {
     let mut string_table = StringTable::new();
     let x = super::symbol("x", &mut string_table);
-    let location = location(2);
+    let location = test_source_location(2);
     let mut builder = setup_builder(&mut string_table);
 
     register_local(
@@ -636,7 +527,7 @@ fn lowers_reference_to_registered_local() {
         location.clone(),
     );
 
-    let expr = reference_expr(
+    let expr = inferred_type_reference_expr(
         x,
         builtin_type_ids::INT,
         location.clone(),
@@ -658,7 +549,7 @@ fn lowers_reference_to_registered_local() {
 fn lowers_reference_to_module_constant_when_local_is_missing() {
     let mut string_table = StringTable::new();
     let third_const = super::symbol("third_const", &mut string_table);
-    let location = location(3);
+    let location = test_source_location(3);
     let mut builder = setup_builder(&mut string_table);
 
     builder.test_register_module_constant(
@@ -666,7 +557,7 @@ fn lowers_reference_to_module_constant_when_local_is_missing() {
         Expression::int(3, location.clone(), ValueMode::ImmutableOwned),
     );
 
-    let expr = reference_expr(
+    let expr = inferred_type_reference_expr(
         third_const,
         builtin_type_ids::INT,
         location.clone(),
@@ -686,12 +577,12 @@ fn rejects_cyclic_module_constant_dependencies() {
     let mut string_table = StringTable::new();
     let const_a = super::symbol("const_a", &mut string_table);
     let const_b = super::symbol("const_b", &mut string_table);
-    let location = location(4);
+    let location = test_source_location(4);
     let mut builder = setup_builder(&mut string_table);
 
     builder.test_register_module_constant(
         const_a.clone(),
-        reference_expr(
+        inferred_type_reference_expr(
             const_b.clone(),
             builtin_type_ids::INT,
             location.clone(),
@@ -700,7 +591,7 @@ fn rejects_cyclic_module_constant_dependencies() {
     );
     builder.test_register_module_constant(
         const_b.clone(),
-        reference_expr(
+        inferred_type_reference_expr(
             const_a.clone(),
             builtin_type_ids::INT,
             location.clone(),
@@ -709,7 +600,7 @@ fn rejects_cyclic_module_constant_dependencies() {
     );
 
     let err = builder
-        .lower_expression(&reference_expr(
+        .lower_expression(&inferred_type_reference_expr(
             const_a,
             builtin_type_ids::INT,
             location.clone(),
@@ -726,7 +617,7 @@ fn lowers_runtime_rpn_arithmetic_stack_correctly() {
     let mut string_table = StringTable::new();
     let x = super::symbol("x", &mut string_table);
     let y = super::symbol("y", &mut string_table);
-    let location = location(3);
+    let location = test_source_location(3);
     let mut builder = setup_builder(&mut string_table);
 
     register_local(
@@ -745,7 +636,7 @@ fn lowers_runtime_rpn_arithmetic_stack_correctly() {
     );
 
     let items = vec![
-        runtime_operand_item(reference_expr(
+        runtime_operand_item(inferred_type_reference_expr(
             x,
             builtin_type_ids::INT,
             location.clone(),
@@ -756,7 +647,7 @@ fn lowers_runtime_rpn_arithmetic_stack_correctly() {
             location.clone(),
             ValueMode::ImmutableOwned,
         )),
-        runtime_operand_item(reference_expr(
+        runtime_operand_item(inferred_type_reference_expr(
             y,
             builtin_type_ids::INT,
             location.clone(),
@@ -790,7 +681,7 @@ fn lowers_runtime_rpn_arithmetic_stack_correctly() {
 #[test]
 fn runtime_division_subexpression_infers_float_type_in_hir() {
     let mut string_table = StringTable::new();
-    let location = location(3);
+    let location = test_source_location(3);
     let mut builder = setup_builder(&mut string_table);
     let expected_float = builtin_type_ids::FLOAT;
 
@@ -837,7 +728,7 @@ fn runtime_division_subexpression_infers_float_type_in_hir() {
 #[test]
 fn runtime_integer_division_lowers_to_hir_int_div_with_int_type() {
     let mut string_table = StringTable::new();
-    let location = location(3);
+    let location = test_source_location(3);
     let mut builder = setup_builder(&mut string_table);
     let expected_int = builtin_type_ids::INT;
 
@@ -878,7 +769,7 @@ fn runtime_integer_division_lowers_to_hir_int_div_with_int_type() {
 #[test]
 fn lowers_unary_not_in_runtime_rpn() {
     let mut string_table = StringTable::new();
-    let location = location(4);
+    let location = test_source_location(4);
     let mut builder = setup_builder(&mut string_table);
 
     let items = vec![
@@ -912,7 +803,7 @@ fn lowers_unary_not_in_runtime_rpn() {
 #[test]
 fn lowers_range_operator_in_runtime_rpn() {
     let mut string_table = StringTable::new();
-    let location = location(5);
+    let location = test_source_location(5);
     let mut builder = setup_builder(&mut string_table);
 
     let items = vec![
@@ -949,7 +840,7 @@ fn lowers_range_operator_in_runtime_rpn() {
 fn lowers_function_call_to_call_statement_and_temp_load() {
     let mut string_table = StringTable::new();
     let function_name = super::symbol("sum", &mut string_table);
-    let location = location(6);
+    let location = test_source_location(6);
     let mut builder = setup_builder(&mut string_table);
     builder.test_register_function_name(function_name.clone(), FunctionId(2));
 
@@ -995,7 +886,7 @@ fn lowers_function_call_to_call_statement_and_temp_load() {
 fn expression_function_call_uses_variant_result_type_ids_for_single_return() {
     let mut string_table = StringTable::new();
     let function_name = super::symbol("typed_result", &mut string_table);
-    let location = location(6);
+    let location = test_source_location(6);
     let mut builder = setup_builder(&mut string_table);
     builder.test_register_function_name(function_name.clone(), FunctionId(32));
 
@@ -1030,7 +921,7 @@ fn expression_function_call_uses_variant_result_type_ids_for_single_return() {
 fn expression_function_call_uses_variant_result_type_ids_for_no_return() {
     let mut string_table = StringTable::new();
     let function_name = super::symbol("no_result", &mut string_table);
-    let location = location(6);
+    let location = test_source_location(6);
     let mut builder = setup_builder(&mut string_table);
     builder.test_register_function_name(function_name.clone(), FunctionId(33));
 
@@ -1056,7 +947,7 @@ fn expression_function_call_uses_variant_result_type_ids_for_no_return() {
 fn expression_function_call_uses_variant_result_type_ids_for_multi_return() {
     let mut string_table = StringTable::new();
     let function_name = super::symbol("multi_result", &mut string_table);
-    let location = location(6);
+    let location = test_source_location(6);
     let mut builder = setup_builder(&mut string_table);
     builder.test_register_function_name(function_name.clone(), FunctionId(34));
 
@@ -1102,7 +993,7 @@ fn expression_function_call_uses_variant_result_type_ids_for_multi_return() {
 #[test]
 fn expression_host_call_uses_variant_result_type_ids() {
     let mut string_table = StringTable::new();
-    let location = location(6);
+    let location = test_source_location(6);
     let mut builder = setup_builder(&mut string_table);
 
     let call_expr = Expression::host_function_call_with_typed_arguments(
@@ -1135,7 +1026,7 @@ fn expression_host_call_uses_variant_result_type_ids() {
 fn expression_handled_fallible_call_fallback_uses_variant_result_type_ids() {
     let mut string_table = StringTable::new();
     let function_name = super::symbol("handled_result", &mut string_table);
-    let location = location(6);
+    let location = test_source_location(6);
     let mut builder = setup_builder(&mut string_table);
     let ok_type = builder
         .lower_type_id(builtin_type_ids::INT, &location)
@@ -1199,7 +1090,7 @@ fn expression_handled_fallible_call_fallback_uses_variant_result_type_ids() {
 fn expression_handled_result_derives_success_slots_from_tuple_type_id() {
     let mut string_table = StringTable::new();
     let function_name = super::symbol("handled_result_expr", &mut string_table);
-    let location = location(6);
+    let location = test_source_location(6);
     let mut builder = setup_builder(&mut string_table);
     builder.test_register_function_name(function_name.clone(), FunctionId(36));
 
@@ -1251,7 +1142,7 @@ fn expression_handled_result_derives_success_slots_from_tuple_type_id() {
 fn lowers_fresh_mutable_call_argument_via_hidden_local_with_origin_metadata() {
     let mut string_table = StringTable::new();
     let function_name = super::symbol("mutate", &mut string_table);
-    let location = location(6);
+    let location = test_source_location(6);
     let mut builder = setup_builder(&mut string_table);
     builder.test_register_function_name(function_name.clone(), FunctionId(24));
 
@@ -1327,7 +1218,7 @@ fn lowers_receiver_method_call_with_receiver_as_first_argument() {
     let method_path = super::symbol("Vector2/reset", &mut string_table);
     let receiver_name = super::symbol("vec", &mut string_table);
     let receiver_struct = super::symbol("Vector2", &mut string_table);
-    let location = location(6);
+    let location = test_source_location(6);
     let mut builder = setup_builder(&mut string_table);
 
     builder.test_register_function_name(method_path.clone(), FunctionId(22));
@@ -1349,7 +1240,7 @@ fn lowers_receiver_method_call_with_receiver_as_first_argument() {
     );
 
     let method_expression = Expression::method_call_with_typed_arguments(
-        reference_expr(
+        inferred_type_reference_expr(
             receiver_name,
             receiver_type_id,
             location.clone(),
@@ -1391,7 +1282,7 @@ fn lowers_builtin_scalar_receiver_method_call_with_receiver_as_first_argument() 
     let mut string_table = StringTable::new();
     let method_path = super::symbol("Int/double", &mut string_table);
     let receiver_name = super::symbol("value", &mut string_table);
-    let location = location(12);
+    let location = test_source_location(12);
     let mut builder = setup_builder(&mut string_table);
 
     builder.test_register_function_name(method_path.clone(), FunctionId(41));
@@ -1405,7 +1296,7 @@ fn lowers_builtin_scalar_receiver_method_call_with_receiver_as_first_argument() 
     );
 
     let method_expression = Expression::method_call_with_typed_arguments(
-        reference_expr(
+        inferred_type_reference_expr(
             receiver_name,
             builtin_type_ids::INT,
             location.clone(),
@@ -1440,7 +1331,7 @@ fn lowers_builtin_scalar_receiver_method_call_with_receiver_as_first_argument() 
 fn lowers_host_call_expression_with_host_target() {
     let mut string_table = StringTable::new();
     let literal_x = string_table.intern("x");
-    let location = location(7);
+    let location = test_source_location(7);
     let mut builder = setup_builder(&mut string_table);
 
     let host_call = Expression::host_function_call(
@@ -1476,7 +1367,7 @@ fn preserves_left_to_right_call_prelude_order_in_nested_call_args() {
     let first = super::symbol("first", &mut string_table);
     let second = super::symbol("second", &mut string_table);
     let outer = super::symbol("outer", &mut string_table);
-    let location = location(8);
+    let location = test_source_location(8);
     let mut builder = setup_builder(&mut string_table);
 
     builder.test_register_function_name(first.clone(), FunctionId(1));
@@ -1530,7 +1421,7 @@ fn preserves_left_to_right_call_prelude_order_in_nested_call_args() {
 #[test]
 fn malformed_runtime_rpn_reports_hir_transformation_error() {
     let mut string_table = StringTable::new();
-    let location = location(9);
+    let location = test_source_location(9);
     let mut builder = setup_builder(&mut string_table);
 
     let expr = runtime_expr(
@@ -1555,7 +1446,7 @@ fn malformed_runtime_rpn_reports_hir_transformation_error() {
 fn runtime_template_expression_lowers_inline_to_accumulator() {
     let mut string_table = StringTable::new();
     let hello = string_table.intern("hello");
-    let location = location(10);
+    let location = test_source_location(10);
     let mut builder = setup_builder(&mut string_table);
 
     let expr = runtime_template_expression(
@@ -1592,7 +1483,7 @@ fn runtime_template_expression_lowers_inline_to_accumulator() {
 fn runtime_template_handoff_expression_lowers_inline_to_accumulator() {
     let mut string_table = StringTable::new();
     let hello = string_table.intern("hello");
-    let location = location(10);
+    let location = test_source_location(10);
     let mut builder = setup_builder(&mut string_table);
 
     let expr = runtime_template_expression(
@@ -1631,7 +1522,7 @@ fn runtime_template_handoff_expression_flattens_nested_linear_handoff() {
     let before = string_table.intern("before ");
     let inner = string_table.intern("inner");
     let after = string_table.intern(" after");
-    let location = location(10);
+    let location = test_source_location(10);
 
     let inner_template = runtime_template_expression(
         location.clone(),
@@ -1678,7 +1569,7 @@ fn runtime_template_handoff_expression_flattens_nested_linear_handoff() {
 #[test]
 fn runtime_template_inline_accumulator_coerces_non_string_segments() {
     let mut string_table = StringTable::new();
-    let location = location(11);
+    let location = test_source_location(11);
     let mut builder = setup_builder(&mut string_table);
 
     let expr = runtime_template_expression(
@@ -1706,7 +1597,7 @@ fn runtime_template_inline_accumulator_coerces_non_string_segments() {
 #[test]
 fn reactive_linear_template_keeps_subscription_chunks_lazy() {
     let mut string_table = StringTable::new();
-    let location = location(12);
+    let location = test_source_location(12);
     let count_path = InternedPath::from_single_str("count", &mut string_table);
     let count_local = LocalId(24);
     let count_source = ReactiveSource {
@@ -1730,7 +1621,7 @@ fn reactive_linear_template_keeps_subscription_chunks_lazy() {
         location: location.clone(),
     });
 
-    let count_expression = reference_expr(
+    let count_expression = inferred_type_reference_expr(
         count_path,
         builtin_type_ids::INT,
         location.clone(),
@@ -1780,7 +1671,7 @@ fn runtime_template_lowers_nested_templates_in_order() {
     let a = string_table.intern("A");
     let b = string_table.intern("B");
     let c = string_table.intern("C");
-    let location = location(12);
+    let location = test_source_location(12);
     let mut builder = setup_builder(&mut string_table);
 
     let nested = runtime_template_expression(
@@ -1830,7 +1721,7 @@ fn runtime_template_control_flow_bool_if_lowers_inline_without_helper_call() {
     let show_name = InternedPath::from_single_str("show", &mut string_table);
     let shown = string_table.intern("shown");
     let hidden = string_table.intern("hidden");
-    let location = location(13);
+    let location = test_source_location(13);
     let mut builder = setup_builder(&mut string_table);
     register_local(
         &mut builder,
@@ -1840,7 +1731,7 @@ fn runtime_template_control_flow_bool_if_lowers_inline_without_helper_call() {
         location.clone(),
     );
 
-    let condition = reference_expr(
+    let condition = inferred_type_reference_expr(
         show_name,
         builtin_type_ids::BOOL,
         location.clone(),
@@ -1916,7 +1807,7 @@ fn runtime_template_control_flow_bool_if_branch_preserves_fallible_propagation_c
     let can_fail_name = InternedPath::from_single_str("can_fail", &mut string_table);
     let show_name = InternedPath::from_single_str("show", &mut string_table);
     let fallback = string_table.intern("fallback");
-    let location = location(14);
+    let location = test_source_location(14);
     let mut builder = setup_builder(&mut string_table);
 
     let enclosing_return_type = result_carrier_type_id(
@@ -1948,7 +1839,7 @@ fn runtime_template_control_flow_bool_if_branch_preserves_fallible_propagation_c
         location.clone(),
     );
 
-    let condition = reference_expr(
+    let condition = inferred_type_reference_expr(
         show_name,
         builtin_type_ids::BOOL,
         location.clone(),
@@ -2023,7 +1914,7 @@ fn runtime_template_control_flow_bool_if_without_else_appends_nothing_on_false_p
     let mut string_table = StringTable::new();
     let show_name = InternedPath::from_single_str("show", &mut string_table);
     let shown = string_table.intern("shown");
-    let location = location(14);
+    let location = test_source_location(14);
     let mut builder = setup_builder(&mut string_table);
     register_local(
         &mut builder,
@@ -2033,7 +1924,7 @@ fn runtime_template_control_flow_bool_if_without_else_appends_nothing_on_false_p
         location.clone(),
     );
 
-    let condition = reference_expr(
+    let condition = inferred_type_reference_expr(
         show_name,
         builtin_type_ids::BOOL,
         location.clone(),
@@ -2095,7 +1986,7 @@ fn runtime_template_control_flow_bool_if_without_else_appends_nothing_on_false_p
 fn runtime_template_control_flow_bool_if_coerces_dynamic_branch_chunks() {
     let mut string_table = StringTable::new();
     let show_name = InternedPath::from_single_str("show", &mut string_table);
-    let location = location(15);
+    let location = test_source_location(15);
     let mut builder = setup_builder(&mut string_table);
     register_local(
         &mut builder,
@@ -2105,7 +1996,7 @@ fn runtime_template_control_flow_bool_if_coerces_dynamic_branch_chunks() {
         location.clone(),
     );
 
-    let condition = reference_expr(
+    let condition = inferred_type_reference_expr(
         show_name,
         builtin_type_ids::BOOL,
         location.clone(),
@@ -2155,7 +2046,7 @@ fn runtime_template_control_flow_option_capture_lowers_match_and_payload_binding
     let capture_name = string_table.intern("name");
     let capture_path = InternedPath::from_single_str("name", &mut string_table);
     let hidden = string_table.intern("hidden");
-    let location = location(16);
+    let location = test_source_location(16);
     let mut builder = setup_builder(&mut string_table);
     let option_string = builder
         .type_environment
@@ -2168,13 +2059,13 @@ fn runtime_template_control_flow_option_capture_lowers_match_and_payload_binding
         location.clone(),
     );
 
-    let scrutinee = reference_expr(
+    let scrutinee = inferred_type_reference_expr(
         maybe_name,
         option_string,
         location.clone(),
         ValueMode::ImmutableOwned,
     );
-    let then_content = vec![reference_expr(
+    let then_content = vec![inferred_type_reference_expr(
         capture_path.clone(),
         builtin_type_ids::STRING,
         location.clone(),
@@ -2278,7 +2169,7 @@ fn runtime_template_control_flow_option_capture_without_else_appends_nothing_whe
     let maybe_name = InternedPath::from_single_str("maybe_name", &mut string_table);
     let capture_name = string_table.intern("name");
     let capture_path = InternedPath::from_single_str("name", &mut string_table);
-    let location = location(17);
+    let location = test_source_location(17);
     let mut builder = setup_builder(&mut string_table);
     let option_string = builder
         .type_environment
@@ -2291,13 +2182,13 @@ fn runtime_template_control_flow_option_capture_without_else_appends_nothing_whe
         location.clone(),
     );
 
-    let scrutinee = reference_expr(
+    let scrutinee = inferred_type_reference_expr(
         maybe_name,
         option_string,
         location.clone(),
         ValueMode::ImmutableOwned,
     );
-    let then_content = vec![reference_expr(
+    let then_content = vec![inferred_type_reference_expr(
         capture_path.clone(),
         builtin_type_ids::STRING,
         location.clone(),
@@ -2350,7 +2241,7 @@ fn runtime_template_control_flow_loop_range_lowers_inline_and_wraps_aggregate_wh
     let mut string_table = StringTable::new();
     let prefix = string_table.intern("<card>");
     let suffix = string_table.intern("</card>");
-    let location = location(18);
+    let location = test_source_location(18);
     let limit_path = InternedPath::from_single_str("limit", &mut string_table);
     let item_binding = loop_binding("i", builtin_type_ids::INT, &mut string_table);
     let item_path = item_binding.id.clone();
@@ -2362,7 +2253,7 @@ fn runtime_template_control_flow_loop_range_lowers_inline_and_wraps_aggregate_wh
         builtin_type_ids::INT,
         location.clone(),
     );
-    let body_content = vec![reference_expr(
+    let body_content = vec![inferred_type_reference_expr(
         item_path,
         builtin_type_ids::INT,
         location.clone(),
@@ -2370,7 +2261,7 @@ fn runtime_template_control_flow_loop_range_lowers_inline_and_wraps_aggregate_wh
     )];
     let range = RangeLoopSpec {
         start: Expression::int(0, location.clone(), ValueMode::ImmutableOwned),
-        end: reference_expr(
+        end: inferred_type_reference_expr(
             limit_path,
             builtin_type_ids::INT,
             location.clone(),
@@ -2428,7 +2319,7 @@ fn runtime_template_control_flow_loop_collection_materializes_iterable_and_lengt
     let mut string_table = StringTable::new();
     let prefix = string_table.intern("");
     let suffix = string_table.intern("");
-    let location = location(19);
+    let location = test_source_location(19);
     let items_path = InternedPath::from_single_str("items", &mut string_table);
     let item_binding = loop_binding("item", builtin_type_ids::INT, &mut string_table);
     let item_path = item_binding.id.clone();
@@ -2443,13 +2334,13 @@ fn runtime_template_control_flow_loop_collection_materializes_iterable_and_lengt
         collection_type,
         location.clone(),
     );
-    let body_content = vec![reference_expr(
+    let body_content = vec![inferred_type_reference_expr(
         item_path,
         builtin_type_ids::INT,
         location.clone(),
         ValueMode::ImmutableReference,
     )];
-    let iterable = reference_expr(
+    let iterable = inferred_type_reference_expr(
         items_path,
         collection_type,
         location.clone(),
@@ -2504,7 +2395,7 @@ fn runtime_template_control_flow_conditional_loop_rechecks_condition_and_wraps_w
     let prefix = string_table.intern("<wrap>");
     let suffix = string_table.intern("</wrap>");
     let tick = string_table.intern("tick");
-    let location = location(20);
+    let location = test_source_location(20);
     let keep_going_path = InternedPath::from_single_str("keep_going", &mut string_table);
     let mut builder = setup_builder(&mut string_table);
     register_local(
@@ -2519,7 +2410,7 @@ fn runtime_template_control_flow_conditional_loop_rechecks_condition_and_wraps_w
         location.clone(),
         ValueMode::ImmutableOwned,
     )];
-    let condition = reference_expr(
+    let condition = inferred_type_reference_expr(
         keep_going_path,
         builtin_type_ids::BOOL,
         location.clone(),
@@ -2558,7 +2449,7 @@ fn runtime_template_control_flow_loop_empty_body_does_not_mark_iteration_emitted
     let mut string_table = StringTable::new();
     let prefix = string_table.intern("<wrap>");
     let suffix = string_table.intern("</wrap>");
-    let location = location(21);
+    let location = test_source_location(21);
     let limit_path = InternedPath::from_single_str("limit", &mut string_table);
     let mut builder = setup_builder(&mut string_table);
     register_local(
@@ -2571,7 +2462,7 @@ fn runtime_template_control_flow_loop_empty_body_does_not_mark_iteration_emitted
     let body_content: Vec<Expression> = vec![];
     let range = RangeLoopSpec {
         start: Expression::int(0, location.clone(), ValueMode::ImmutableOwned),
-        end: reference_expr(
+        end: inferred_type_reference_expr(
             limit_path,
             builtin_type_ids::INT,
             location.clone(),
@@ -2744,7 +2635,7 @@ fn local_resolution_uses_full_path_identity_not_leaf_name() {
     let scope_b = InternedPath::from_single_str("scope_b", &mut string_table);
     let local_a = scope_a.append(x_leaf);
     let local_b = scope_b.append(x_leaf);
-    let location = location(10);
+    let location = test_source_location(10);
     let mut builder = setup_builder(&mut string_table);
 
     register_local(
@@ -2755,7 +2646,7 @@ fn local_resolution_uses_full_path_identity_not_leaf_name() {
         location.clone(),
     );
 
-    let expr = reference_expr(
+    let expr = inferred_type_reference_expr(
         local_b,
         builtin_type_ids::INT,
         location.clone(),
@@ -2772,7 +2663,7 @@ fn local_resolution_uses_full_path_identity_not_leaf_name() {
 #[test]
 fn nominal_struct_identity_uses_field_parent_path() {
     let mut string_table = StringTable::new();
-    let location = location(11);
+    let location = test_source_location(11);
     let struct_path = super::symbol("MyStruct", &mut string_table);
     let field_path = field_symbol(&struct_path, "value", &mut string_table);
     let mut builder = setup_builder(&mut string_table);
@@ -2823,7 +2714,7 @@ fn nominal_struct_identity_uses_field_parent_path() {
 #[test]
 fn rejects_const_record_struct_instance_runtime_lowering() {
     let mut string_table = StringTable::new();
-    let location = location(12);
+    let location = test_source_location(12);
     let struct_path = super::symbol("Palette", &mut string_table);
     let field_path = field_symbol(&struct_path, "red", &mut string_table);
     let field_value = string_table.intern("red");
@@ -2873,7 +2764,7 @@ fn temp_locals_are_not_resolvable_as_user_symbols() {
     let mut string_table = StringTable::new();
     let callee = super::symbol("callee", &mut string_table);
     let temp_name = super::symbol("__hir_tmp_0", &mut string_table);
-    let location = location(12);
+    let location = test_source_location(12);
     let mut builder = setup_builder(&mut string_table);
 
     builder.test_register_function_name(callee.clone(), FunctionId(8));
@@ -2897,7 +2788,7 @@ fn temp_locals_are_not_resolvable_as_user_symbols() {
         }
     ));
 
-    let temp_reference = reference_expr(
+    let temp_reference = inferred_type_reference_expr(
         temp_name,
         builtin_type_ids::INT,
         location.clone(),
@@ -2915,7 +2806,7 @@ fn temp_locals_are_not_resolvable_as_user_symbols() {
 #[test]
 fn field_access_uses_base_struct_identity_not_global_leaf_lookup() {
     let mut string_table = StringTable::new();
-    let location = location(13);
+    let location = test_source_location(13);
     let struct_a = super::symbol("StructA", &mut string_table);
     let struct_b = super::symbol("StructB", &mut string_table);
     let field_leaf = string_table.intern("value");
@@ -2951,7 +2842,7 @@ fn field_access_uses_base_struct_identity_not_global_leaf_lookup() {
         location.clone(),
     );
 
-    let base_expression = reference_expr(
+    let base_expression = inferred_type_reference_expr(
         local_name,
         local_struct_type_id,
         location.clone(),
@@ -2980,7 +2871,7 @@ fn field_access_uses_base_struct_identity_not_global_leaf_lookup() {
 #[test]
 fn field_access_from_module_constant_base_materializes_temp_place() {
     let mut string_table = StringTable::new();
-    let location = location(14);
+    let location = test_source_location(14);
     let format_name = super::symbol("format", &mut string_table);
     let format_struct = super::symbol("Format", &mut string_table);
     let center_leaf = string_table.intern("center");
@@ -3026,7 +2917,7 @@ fn field_access_from_module_constant_base_materializes_temp_place() {
 
     builder.test_register_module_constant(format_name.clone(), format_constant);
 
-    let format_reference = reference_expr(
+    let format_reference = inferred_type_reference_expr(
         format_name,
         format_type_id,
         location.clone(),
@@ -3065,7 +2956,7 @@ fn field_access_from_module_constant_base_materializes_temp_place() {
 #[test]
 fn const_record_module_constant_field_access_lowers_field_value_without_struct_construct() {
     let mut string_table = StringTable::new();
-    let location = location(15);
+    let location = test_source_location(15);
     let palette_name = super::symbol("palette", &mut string_table);
     let palette_struct = super::symbol("Palette", &mut string_table);
     let red_leaf = string_table.intern("red");
@@ -3132,7 +3023,7 @@ fn const_record_module_constant_field_access_lowers_field_value_without_struct_c
 #[test]
 fn lowers_collection_builtin_host_calls_from_explicit_ast_nodes() {
     let mut string_table = StringTable::new();
-    let location = location(15);
+    let location = test_source_location(15);
     let receiver_name = super::symbol("values", &mut string_table);
     let get_id = crate::compiler_frontend::external_packages::ExternalFunctionId::CollectionGet;
     let set_id = crate::compiler_frontend::external_packages::ExternalFunctionId::CollectionSet;
@@ -3154,7 +3045,7 @@ fn lowers_collection_builtin_host_calls_from_explicit_ast_nodes() {
         location.clone(),
     );
 
-    let receiver_expression = reference_expr(
+    let receiver_expression = inferred_type_reference_expr(
         receiver_name,
         receiver_type_id,
         location.clone(),
@@ -3274,7 +3165,7 @@ fn lowers_collection_builtin_host_calls_from_explicit_ast_nodes() {
 #[test]
 fn map_literal_lowering_preserves_entry_order() {
     let mut string_table = StringTable::new();
-    let location = location(37);
+    let location = test_source_location(37);
     let priya = string_table.intern("Priya");
     let grace = string_table.intern("Grace");
     let mut builder = setup_builder(&mut string_table);
@@ -3323,7 +3214,7 @@ fn map_literal_lowering_preserves_entry_order() {
 #[test]
 fn map_builtin_calls_lower_to_first_class_hir_ops() {
     let mut string_table = StringTable::new();
-    let location = location(41);
+    let location = test_source_location(41);
     let scores_name = InternedPath::from_single_str("scores", &mut string_table);
     let key_name = string_table.intern("Priya");
     let mut builder = setup_builder(&mut string_table);
@@ -3338,7 +3229,7 @@ fn map_builtin_calls_lower_to_first_class_hir_ops() {
         location.clone(),
     );
 
-    let receiver_expression = reference_expr(
+    let receiver_expression = inferred_type_reference_expr(
         scores_name,
         map_type,
         location.clone(),
@@ -3459,7 +3350,7 @@ fn map_builtin_calls_lower_to_first_class_hir_ops() {
 #[test]
 fn lowers_choice_variant_expression_to_hir_variant_construct() {
     let mut string_table = StringTable::new();
-    let location = location(1);
+    let location = test_source_location(1);
 
     let status_path = InternedPath::from_single_str("Status", &mut string_table);
     let ready_name = string_table.intern("Ready");
@@ -3537,7 +3428,7 @@ fn lowers_choice_variant_expression_to_hir_variant_construct() {
 #[test]
 fn collection_expression_lowering_preserves_fixed_type_identity() {
     let mut string_table = StringTable::new();
-    let location = location(1);
+    let location = test_source_location(1);
     let mut builder = setup_builder(&mut string_table);
     let int_type = builder.type_environment.builtins().int;
     let fixed_collection = builder
@@ -3589,7 +3480,7 @@ fn collection_expression_lowering_preserves_fixed_type_identity() {
 #[test]
 fn lowers_option_none_to_hir_variant_construct() {
     let mut string_table = StringTable::new();
-    let location = location(1);
+    let location = test_source_location(1);
     let mut builder = setup_builder(&mut string_table);
 
     let option_expr = option_none_expr(
@@ -3621,7 +3512,7 @@ fn lowers_option_none_to_hir_variant_construct() {
 #[test]
 fn lowers_fallible_success_to_hir_variant_construct() {
     let mut string_table = StringTable::new();
-    let location = location(1);
+    let location = test_source_location(1);
     let mut builder = setup_builder(&mut string_table);
 
     let ok_type_id = builtin_type_ids::INT;
@@ -3671,7 +3562,7 @@ fn lowers_fallible_success_to_hir_variant_construct() {
 fn lowers_fallible_error_to_hir_variant_construct() {
     let mut string_table = StringTable::new();
     let error_text = string_table.intern("oops");
-    let location = location(1);
+    let location = test_source_location(1);
     let mut builder = setup_builder(&mut string_table);
 
     let ok_type_id = builtin_type_ids::INT;
@@ -3719,7 +3610,7 @@ fn lowers_fallible_error_to_hir_variant_construct() {
 #[test]
 fn external_float_call_emits_validate_float_in_current_block() {
     let mut string_table = StringTable::new();
-    let location = location(1);
+    let location = test_source_location(1);
     let mut builder = setup_builder(&mut string_table);
     let float_type = builder
         .lower_type_id(builtin_type_ids::FLOAT, &location)
@@ -3762,7 +3653,7 @@ fn external_float_call_emits_validate_float_in_current_block() {
 fn external_float_call_in_builtin_error_function_validates_with_return_error() {
     let mut string_table = StringTable::new();
     let function_name = super::symbol("external_float_boundary", &mut string_table);
-    let location = location(1);
+    let location = test_source_location(1);
     let mut builder = setup_builder(&mut string_table);
     let float_type = builder
         .lower_type_id(builtin_type_ids::FLOAT, &location)
@@ -3811,7 +3702,7 @@ fn external_float_call_in_builtin_error_function_validates_with_return_error() {
 #[test]
 fn external_int_call_does_not_emit_validate_float() {
     let mut string_table = StringTable::new();
-    let location = location(1);
+    let location = test_source_location(1);
     let mut builder = setup_builder(&mut string_table);
 
     let call_expr = Expression::host_function_call_with_typed_arguments(
@@ -3842,7 +3733,7 @@ fn external_int_call_does_not_emit_validate_float() {
 fn external_fallible_float_call_propagation_validates_success() {
     let mut string_table = StringTable::new();
     let function_name = super::symbol("fallible_float", &mut string_table);
-    let location = location(1);
+    let location = test_source_location(1);
     let mut builder = setup_builder(&mut string_table);
     let float_type = builder
         .lower_type_id(builtin_type_ids::FLOAT, &location)
@@ -3905,7 +3796,7 @@ fn external_fallible_float_call_propagation_validates_success() {
 fn external_fallible_float_call_catch_validates_success() {
     let mut string_table = StringTable::new();
     let function_name = super::symbol("fallible_float_catch", &mut string_table);
-    let location = location(1);
+    let location = test_source_location(1);
     let mut builder = setup_builder(&mut string_table);
     let float_type = builder
         .lower_type_id(builtin_type_ids::FLOAT, &location)

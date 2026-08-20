@@ -18,10 +18,9 @@ use super::super::{
     receiver_method_semantics_from_seed,
 };
 use super::test_support::{
-    choice_origin, constant_origin, default_location, empty_fields, free_function_origin,
-    immutable, module_origin, nominal_origins_map, path, receiver_entry, register_struct,
-    struct_origin, struct_root, this_type, trait_binding, trait_origin, trait_origins_map,
-    trait_root,
+    choice_origin, constant_origin, empty_fields, free_function_origin, module_origin,
+    nominal_origins_map, path, receiver_entry, register_struct, struct_origin, struct_root,
+    this_type, trait_binding, trait_origin, trait_origins_map, trait_root,
 };
 
 use crate::compiler_frontend::analysis::borrow_checker::BorrowAnalysis;
@@ -164,10 +163,10 @@ fn field_declaration_no_default(
     Declaration {
         id: path(name, string_table),
         value: Expression::no_value_with_type_id(
-            default_location(),
+            SourceLocation::default(),
             DataType::Inferred,
             type_id,
-            immutable(),
+            ValueMode::ImmutableOwned,
         ),
     }
 }
@@ -176,7 +175,7 @@ fn field_def(name: &str, type_id: TypeId, string_table: &mut StringTable) -> Fie
     FieldDefinition {
         name: path(name, string_table),
         type_id,
-        location: default_location(),
+        location: SourceLocation::default(),
     }
 }
 #[test]
@@ -265,7 +264,7 @@ fn builder_produces_declaration_centric_draft_covering_every_category() {
 
     let max_size_constant = Declaration {
         id: InternedPath::from_single_str("MaxSize", &mut string_table),
-        value: Expression::int(256, default_location(), immutable()),
+        value: Expression::int(256, SourceLocation::default(), ValueMode::ImmutableOwned),
     };
     let module_constants = vec![max_size_constant];
 
@@ -697,15 +696,15 @@ fn free_function_retains_folded_parameter_defaults_in_authored_order() {
             string_id,
             Expression::string_slice(
                 string_table.intern("default-prefix"),
-                default_location(),
-                immutable(),
+                SourceLocation::default(),
+                ValueMode::ImmutableOwned,
             ),
             &mut string_table,
         ),
         field_declaration_with_default(
             "count",
             int_id,
-            Expression::int(42, default_location(), immutable()),
+            Expression::int(42, SourceLocation::default(), ValueMode::ImmutableOwned),
             &mut string_table,
         ),
         field_declaration_no_default("subject", string_id, &mut string_table),
@@ -800,13 +799,13 @@ fn struct_retains_folded_field_defaults_in_authored_order() {
         field_declaration_with_default(
             "x",
             int_id,
-            Expression::int(10, default_location(), immutable()),
+            Expression::int(10, SourceLocation::default(), ValueMode::ImmutableOwned),
             &mut string_table,
         ),
         field_declaration_with_default(
             "flag",
             bool_id,
-            Expression::bool(true, default_location(), immutable()),
+            Expression::bool(true, SourceLocation::default(), ValueMode::ImmutableOwned),
             &mut string_table,
         ),
         field_declaration_no_default("label", string_id, &mut string_table),
@@ -892,10 +891,10 @@ fn choice_payload_fields_remain_default_free() {
             fields: Box::new([FieldDefinition {
                 name: path("value", &mut string_table),
                 type_id: int_id,
-                location: default_location(),
+                location: SourceLocation::default(),
             }]),
         },
-        location: default_location(),
+        location: SourceLocation::default(),
     };
 
     let choice_path = path("Option", &mut string_table);
@@ -987,8 +986,8 @@ fn receiver_method_retains_folded_parameter_defaults() {
                 string_id,
                 Expression::string_slice(
                     string_table.intern("fallback"),
-                    default_location(),
-                    immutable(),
+                    SourceLocation::default(),
+                    ValueMode::ImmutableOwned,
                 ),
                 &mut string_table,
             ),
