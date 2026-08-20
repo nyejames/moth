@@ -227,3 +227,56 @@ fn top_level_usage_lists_stress() {
     assert!(TOP_LEVEL_USAGE.contains("stress"));
     assert!(TOP_LEVEL_USAGE.contains("--repeats <n>; default 3"));
 }
+
+// ----------------------------
+//  parse_args: honesty-audit
+// ----------------------------
+
+/// The CI gate runs the audit without arguments, and must not modify the checkout.
+#[test]
+fn parse_args_honesty_audit_leaves_the_tracked_evidence_alone_by_default() {
+    assert_eq!(
+        unwrap_mode(BenchmarkMode::parse_args(&args(&["honesty-audit"]))),
+        BenchmarkMode::HonestyAudit {
+            update_evidence: false
+        }
+    );
+}
+
+#[test]
+fn parse_args_honesty_audit_accepts_the_evidence_refresh_flag() {
+    assert_eq!(
+        unwrap_mode(BenchmarkMode::parse_args(&args(&[
+            "honesty-audit",
+            "--update-evidence"
+        ]))),
+        BenchmarkMode::HonestyAudit {
+            update_evidence: true
+        }
+    );
+}
+
+#[test]
+fn parse_args_honesty_audit_rejects_anything_else() {
+    for rejected in [
+        vec!["honesty-audit", "--update"],
+        vec!["honesty-audit", "--update-evidence", "extra"],
+        vec!["honesty-audit", "--update-evidence", "--update-evidence"],
+    ] {
+        let error = unwrap_error(BenchmarkMode::parse_args(&args(&rejected)));
+        assert!(
+            error.contains("--update-evidence"),
+            "unexpected error for {rejected:?}: {error}"
+        );
+    }
+}
+
+#[test]
+fn top_level_usage_lists_every_audit_mode() {
+    for mode in ["honesty-audit", "source-audit", "feature-lane-check"] {
+        assert!(
+            TOP_LEVEL_USAGE.contains(mode),
+            "usage does not mention '{mode}', so nobody running `xtask` learns it exists"
+        );
+    }
+}

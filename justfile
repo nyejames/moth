@@ -78,16 +78,26 @@ test-feature-matrix:
 feature-lane-check:
     cargo run --quiet --package xtask --bin xtask -- feature-lane-check
 
-# Write the machine-readable honesty reports under target/test-reports/.
+# The canonical test-honesty audit.
+#
+# The suite inventory runs first because the audit composes it: `xtask honesty-audit` runs the
+# source and feature-lane audits itself, but the integration suite inventory is written by the
+# compiler binary, and an audit that read a stale one would report counters no current run
+# measured. Every report lands under target/test-reports/.
 test-honesty-audit:
     @echo "integration suite inventory"
     cargo run --quiet -- tests --audit
 
-    @echo "feature lane coverage"
-    just feature-lane-check
+    @echo "honesty audit"
+    cargo run --quiet --package xtask --bin xtask -- honesty-audit
 
-    @echo "source audit"
-    just source-audit
+# Refresh the tracked durable inventory from the audit that measures it.
+#
+# Separate from `test-honesty-audit` because a CI gate must not modify the checkout, and because
+# the durable copy is a reviewed artifact: it changes when someone decides it should.
+test-honesty-evidence:
+    cargo run --quiet -- tests --audit
+    cargo run --quiet --package xtask --bin xtask -- honesty-audit --update-evidence
 
 # Independently reported CI gates.
 #

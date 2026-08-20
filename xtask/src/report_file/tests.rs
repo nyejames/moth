@@ -128,7 +128,7 @@ fn rejects_a_report_path_with_no_file_name() {
 
 #[test]
 fn run_identity_records_the_command_and_the_host() {
-    let identity = ReportRunIdentity::capture("feature-lane-check");
+    let identity = ReportRunIdentity::started("feature-lane-check", None);
 
     assert_eq!(identity.command, "feature-lane-check");
     assert_eq!(identity.os, std::env::consts::OS);
@@ -136,9 +136,80 @@ fn run_identity_records_the_command_and_the_host() {
 }
 
 #[test]
+fn run_identity_records_the_build_configuration_of_the_linked_compiler() {
+    let identity = ReportRunIdentity::started("source-audit", None);
+
+    let expected: Vec<String> = moth::ENABLED_FEATURES
+        .iter()
+        .map(|feature| (*feature).to_string())
+        .collect();
+    assert_eq!(identity.features, expected);
+    assert!(
+        identity.features.iter().any(|feature| feature == "timers"),
+        "xtask depends on moth with features = [\"timers\"], so every xtask report describes a \
+         timers build: {:?}",
+        identity.features
+    );
+}
+
+#[test]
+fn a_started_run_is_not_completed_and_carries_no_thread_count_by_default() {
+    let identity = ReportRunIdentity::started("source-audit", None);
+
+    assert!(!identity.completed);
+    assert_eq!(identity.thread_count, None);
+}
+
+#[test]
+fn a_run_that_owns_a_thread_count_records_it() {
+    let identity = ReportRunIdentity::started("stress", Some(16));
+
+    assert_eq!(identity.thread_count, Some(16));
+}
+
+#[test]
+fn completing_a_run_changes_only_the_completion_state() {
+    let started = ReportRunIdentity::started("feature-matrix", Some(4));
+    let completed = started.completed();
+
+    assert!(!started.completed);
+    assert!(completed.completed);
+    assert_eq!(completed.id, started.id);
+    assert_eq!(completed.command, started.command);
+    assert_eq!(completed.os, started.os);
+    assert_eq!(completed.arch, started.arch);
+    assert_eq!(completed.features, started.features);
+    assert_eq!(completed.thread_count, started.thread_count);
+}
+
+#[test]
 fn two_runs_do_not_share_one_identity() {
-    let first = ReportRunIdentity::capture("feature-matrix");
-    let second = ReportRunIdentity::capture("feature-matrix");
+    let first = ReportRunIdentity::started("feature-matrix", None);
+    let second = ReportRunIdentity::started("feature-matrix", None);
 
     assert_ne!(first.id, second.id);
+}
+
+/// Uniqueness within one process must come from the sequence, not from the clock advancing.
+///
+/// The wall clock is only descriptive data in the id. If it were the part that separated two
+/// captures, `two_runs_do_not_share_one_identity` would be a clock-resolution test: it would pass
+/// on a machine whose clock ticks between two calls and fail on one whose clock does not.
+#[test]
+fn identity_uniqueness_comes_from_the_process_local_sequence() {
+    /// The `sequence` field of a `process-sequence-clock` id.
+    fn sequence_of(identity: &ReportRunIdentity) -> &str {
+        let mut parts = identity.id.split('-');
+        parts.next().expect("an id names its process");
+        parts.next().expect("an id names its sequence")
+    }
+
+    let first = ReportRunIdentity::started("feature-matrix", None);
+    let second = ReportRunIdentity::started("feature-matrix", None);
+
+    assert_ne!(
+        sequence_of(&first),
+        sequence_of(&second),
+        "the process-local sequence must advance between two captures, whatever the clock did"
+    );
 }

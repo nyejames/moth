@@ -5,11 +5,12 @@
 //! features stops matching the declared features, a feature-gated test silently stops running.
 
 use super::{
-    COVERAGE_REPORT_SCHEMA_VERSION, FEATURE_LANES, FeatureLane, cfg_feature_names,
-    declared_features, lanes_enabling, relative_display_path,
+    COVERAGE_REPORT_SCHEMA_VERSION, FEATURE_LANES, FeatureLane, LaneFailure, LaneOutcome,
+    LaneResult, MATRIX_RESULTS_SCHEMA_VERSION, MatrixResultsReport, cfg_feature_names,
+    declared_features, lane_report, lanes_enabling,
 };
+use crate::report_file::ReportRunIdentity;
 use std::collections::BTreeSet;
-use std::path::Path;
 
 /// The manifests the lane table must agree with, read at compile time so the test cannot drift
 /// from the tree it claims to check.
@@ -231,17 +232,84 @@ fn scanner_ignores_an_identifier_that_merely_ends_in_cfg() {
 }
 
 #[test]
-fn relative_paths_use_forward_slashes_under_the_workspace_root() {
-    let root = Path::new("/work/moth");
-    let path = root.join("src").join("timing").join("mod.rs");
-
-    assert_eq!(
-        relative_display_path(root, &path).expect("an ASCII path is valid UTF-8"),
-        "src/timing/mod.rs"
-    );
+fn the_coverage_schema_version_is_the_one_consumers_are_told_to_expect() {
+    assert_eq!(COVERAGE_REPORT_SCHEMA_VERSION, 2);
 }
 
 #[test]
-fn the_coverage_schema_version_is_the_one_consumers_are_told_to_expect() {
-    assert_eq!(COVERAGE_REPORT_SCHEMA_VERSION, 1);
+fn the_matrix_results_schema_version_is_the_one_consumers_are_told_to_expect() {
+    assert_eq!(MATRIX_RESULTS_SCHEMA_VERSION, 1);
+}
+
+/// The coverage map must not be able to state a lane outcome.
+///
+/// `feature-lane-check` writes this report without running a lane, so any outcome field on it
+/// would be a value no run had measured. Keeping the two reports apart is what makes that
+/// impossible rather than merely unlikely.
+#[test]
+fn the_coverage_report_states_lane_coverage_and_never_lane_outcomes() {
+    let serialised = serde_json::to_value(lane_report(&FEATURE_LANES[0]))
+        .expect("a lane report should serialise");
+    let lane = serialised.as_object().expect("a lane is an object");
+
+    let mut fields: Vec<&str> = lane.keys().map(String::as_str).collect();
+    fields.sort_unstable();
+    assert_eq!(
+        fields,
+        vec!["command", "features", "name", "owns", "package"]
+    );
+}
+
+/// A matrix that stops partway must report the lanes it never reached.
+#[test]
+fn an_unfinished_matrix_report_marks_every_unreached_lane_pending() {
+    let report = MatrixResultsReport {
+        schema_version: MATRIX_RESULTS_SCHEMA_VERSION,
+        run: ReportRunIdentity::started("feature-matrix", None),
+        lanes: vec![
+            LaneResult {
+                lane: lane_report(&FEATURE_LANES[0]),
+                result: LaneOutcome::Passed,
+            },
+            LaneResult {
+                lane: lane_report(&FEATURE_LANES[1]),
+                result: LaneOutcome::Pending,
+            },
+        ],
+    };
+
+    assert!(!report.run.completed);
+    assert_eq!(report.passed(), 1);
+    assert!(
+        report.failures().is_empty(),
+        "a lane that never ran is unmeasured, not failed"
+    );
+}
+
+/// A failed lane must carry the failure a reader would need to reproduce it.
+#[test]
+fn a_failed_lane_records_how_it_failed() {
+    assert_eq!(
+        LaneFailure::Exit(Some(101)).into_outcome(),
+        LaneOutcome::Failed {
+            exit_code: Some(101)
+        }
+    );
+    assert_eq!(
+        LaneFailure::Launch("no such file".to_string()).into_outcome(),
+        LaneOutcome::LaunchFailed {
+            error: "no such file".to_string()
+        }
+    );
+
+    let report = MatrixResultsReport {
+        schema_version: MATRIX_RESULTS_SCHEMA_VERSION,
+        run: ReportRunIdentity::started("feature-matrix", None),
+        lanes: vec![LaneResult {
+            lane: lane_report(&FEATURE_LANES[0]),
+            result: LaneFailure::Exit(Some(101)).into_outcome(),
+        }],
+    };
+    assert_eq!(report.failures().len(), 1);
+    assert_eq!(report.passed(), 0);
 }

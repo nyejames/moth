@@ -24,7 +24,9 @@ Modes:
   timers-erasure-check Build a no-timer release binary and verify zero-cost erasure
   feature-matrix       Run every curated feature lane and report the outcome table
   feature-lane-check   Check feature-lane coverage and write the coverage report
-  source-audit         Apply the broad-source architecture bans and write their report";
+  source-audit         Apply the broad-source architecture bans and write their report
+  honesty-audit        Classify the test-honesty findings and write the canonical inventory
+                       (use --update-evidence to refresh the tracked durable copy)";
 
 /// Distinguishes the supported xtask benchmark modes.
 ///
@@ -60,6 +62,11 @@ pub enum BenchmarkMode {
     FeatureLaneCheck,
     /// Apply the broad-source architecture bans across the workspace.
     SourceAudit,
+    /// Classify the test-honesty findings and write the canonical honesty inventory.
+    ///
+    /// `update_evidence` additionally replaces the tracked durable copy. It is off by default so
+    /// a CI gate, which must not modify the checkout, is the same command a developer runs.
+    HonestyAudit { update_evidence: bool },
     /// Repeat the unit and integration suites across the stress thread counts.
     Stress { repeats: u32 },
 }
@@ -119,6 +126,15 @@ impl BenchmarkMode {
             return ModeParseResult::Mode(mode);
         }
 
+        if mode_str == "honesty-audit" {
+            return match parse_honesty_audit_flags(&args[1..]) {
+                Ok(update_evidence) => {
+                    ModeParseResult::Mode(BenchmarkMode::HonestyAudit { update_evidence })
+                }
+                Err(error) => ModeParseResult::Error(error),
+            };
+        }
+
         if mode_str == "stress" {
             return match parse_stress_repeats(&args[1..]) {
                 Ok(repeats) => ModeParseResult::Mode(BenchmarkMode::Stress { repeats }),
@@ -140,6 +156,15 @@ impl BenchmarkMode {
         }
 
         ModeParseResult::Error(format!("Unknown mode '{}'", mode_str))
+    }
+}
+
+/// Parse the optional `--update-evidence` flag for the honesty audit mode.
+fn parse_honesty_audit_flags(args: &[String]) -> Result<bool, String> {
+    match args {
+        [] => Ok(false),
+        [flag] if flag == "--update-evidence" => Ok(true),
+        _ => Err("Mode 'honesty-audit' accepts only '--update-evidence'.".to_string()),
     }
 }
 

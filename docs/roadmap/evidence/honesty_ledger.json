@@ -1,0 +1,378 @@
+{
+  "schema_version": 1,
+  "work_id": "test-suite-honesty",
+  "base_revision": "f41f93a7a",
+  "declared_measurements": [
+    {
+      "name": "unit_tests",
+      "command": "cargo test --workspace --quiet -- --format terse",
+      "result": "4396 passed, 0 failed, 0 ignored",
+      "recorded_by_phase": "Phase 8"
+    },
+    {
+      "name": "integration_cases",
+      "command": "cargo run --quiet -- tests --terse",
+      "result": "1698 cases correct of 1851 backend executions; the single failure is EF-0001",
+      "recorded_by_phase": "Phase 8"
+    },
+    {
+      "name": "linux_lane",
+      "command": "GitHub Actions validate-linux",
+      "result": "passed via GitHub Actions validate-linux (4324 unit tests incl. Linux-only non-UTF-8 filesystem identity tests, 1851/1851 integration cases)",
+      "recorded_by_phase": "Phase 8"
+    },
+    {
+      "name": "open_exposed_failures",
+      "command": "docs/roadmap/evidence/exposed-failure-ledger.md",
+      "result": "2 \u2014 EF-0001 (borrow_checker_string_memory, integration) and EF-0002 (const_required_construction_preparation_is_reused_by_folding, counter lanes); see docs/roadmap/plans/test-suite-honesty-exposed-failures.md",
+      "recorded_by_phase": "Phase 8"
+    },
+    {
+      "name": "feature_lane:default",
+      "command": "cargo run --package xtask --bin xtask -- feature-matrix",
+      "result": "pass (4284 moth + 17 cli_exit_status)",
+      "recorded_by_phase": "Phase 8"
+    },
+    {
+      "name": "feature_lane:timers",
+      "command": "cargo run --package xtask --bin xtask -- feature-matrix",
+      "result": "pass (4396 + 17)",
+      "recorded_by_phase": "Phase 8"
+    },
+    {
+      "name": "feature_lane:detailed_timers",
+      "command": "cargo run --package xtask --bin xtask -- feature-matrix",
+      "result": "pass (4398 + 17)",
+      "recorded_by_phase": "Phase 8"
+    },
+    {
+      "name": "feature_lane:benchmark_counters",
+      "command": "cargo run --package xtask --bin xtask -- feature-matrix",
+      "result": "fail: const_required_construction_preparation_is_reused_by_folding (4286 passed, 1 failed) \u2014 ledgered as EF-0002",
+      "recorded_by_phase": "Phase 8"
+    },
+    {
+      "name": "feature_lane:timers+benchmark_counters",
+      "command": "cargo run --package xtask --bin xtask -- feature-matrix",
+      "result": "fail: const_required_construction_preparation_is_reused_by_folding (4414 passed, 1 failed) \u2014 the same single failure as the counters lane, ledgered as EF-0002. Phase 0 recorded four failures in this lane; the other three are gone, and the remaining one reproduces identically at one thread and at default parallelism, so none of the set is race-dependent",
+      "recorded_by_phase": "Phase 8"
+    },
+    {
+      "name": "feature_lane:checked_blocks+async_blocks",
+      "command": "cargo run --package xtask --bin xtask -- feature-matrix",
+      "result": "pass (4286 + 17)",
+      "recorded_by_phase": "Phase 8"
+    },
+    {
+      "name": "feature_lane:show_* (dev-output)",
+      "command": "cargo run --package xtask --bin xtask -- feature-matrix",
+      "result": "pass (4284 + 17) \u2014 adds no tests; it is the only lane that compiles the developer stage-dump branches",
+      "recorded_by_phase": "Phase 8"
+    },
+    {
+      "name": "feature_lane:xtask",
+      "command": "cargo run --package xtask --bin xtask -- feature-matrix",
+      "result": "pass (699)",
+      "recorded_by_phase": "Phase 8"
+    },
+    {
+      "name": "feature_lanes_note",
+      "command": "cargo run --package xtask --bin xtask -- feature-matrix",
+      "result": "Phase 8 replaced the workspace-wide feature commands with package-scoped lanes. cargo test --workspace unifies features across the resolve graph and always enables timers through xtask's dependency on moth, so the pre-Phase-8 'default' and 'benchmark_counters' rows measured the timers-unified configuration, not the ones they named. Every row below is `cargo test -p moth --features <lane>` measured on macOS 23.6.0 arm64, and every lane is executed by `just test-feature-matrix`",
+      "recorded_by_phase": "Phase 8"
+    }
+  ],
+  "findings": [
+    {
+      "code": "temp_dir_uncreated_paths",
+      "severity": "hard",
+      "status": "resolved",
+      "description": "test_support::temp_dir returned uncreated paths; callers had to create_dir_all manually",
+      "disposition": "fixed: renamed to unused_temp_path with non-existence contract; ALL created-workspace fixtures migrated to tempfile::tempdir() with owned cleanup; remaining 3 uses (validate_dangerous_project, output_defaults, output_overrides) are genuine uncreated-path contracts",
+      "owning_phase": "Phase 1"
+    },
+    {
+      "code": "hardcoded_tmp_paths",
+      "severity": "hard",
+      "status": "resolved",
+      "description": "Hardcoded /tmp/ paths in test files",
+      "disposition": "fixed: all hardcoded /tmp/ paths removed and replaced with tempfile::tempdir() or unused_temp_path",
+      "owning_phase": "Phase 1"
+    },
+    {
+      "code": "exists_isfile_isdir_hiding_io_failures",
+      "severity": "hard",
+      "status": "resolved",
+      "description": "exists()/is_file()/is_dir() mask IO errors as absence",
+      "disposition": "fixed: test_fs helpers use symlink_metadata; all negative exists() assertions in build_orchestration_tests, build_cleanup_tests, check_tests, and cli_tests migrated to assert_path_missing; fixture discovery uses symlink_metadata with fail-closed on metadata errors",
+      "owning_phase": "Phase 1"
+    },
+    {
+      "code": "broad_iserr_assertions",
+      "severity": "review",
+      "status": "resolved",
+      "description": "Broad is_err()/error_count()>0 assertions accept wrong failure at multi-lane boundaries; String-only transport in integration fixture/expectation/runner forced substring error identity",
+      "disposition": "fixed: all 26 build_orchestration is_err() assertions migrated to assert_output_rejection; benchmark errors carry typed FrontendBenchmarkFailureKind + diagnostic_codes; fixture/expectation loading returns FixtureLoadError{kind,message} (Filesystem/Manifest/ExpectationParse/ExpectationContract/FixtureContract/PathBoundary); runner returns TestRunnerError with Options/SuitePolicy/InventoryReport/TriageReport/Selection/ThreadPool/Fixture kinds; negative self-tests assert error.kind; compile_project_frontend broad is_err() seeds made exact; containment test uses assert_output_rejection; busy benchmark test uses owned entry + TimingSession kind",
+      "owning_phase": "Phase 2"
+    },
+    {
+      "code": "infrastructure_error_inspection_missing_later_errors",
+      "severity": "hard",
+      "status": "resolved",
+      "description": "first_infrastructure_error_for_tests only returned the first infrastructure error",
+      "disposition": "fixed: infrastructure_errors_for_tests() iterator scans all error diagnostics",
+      "owning_phase": "Phase 2"
+    },
+    {
+      "code": "synthetic_test_data_violating_identity_rules",
+      "severity": "hard",
+      "status": "resolved",
+      "description": "WarningBuilder created StringId from fresh StringTable; CaseExecutionResult had impossible states",
+      "disposition": "fixed: WarningBuilder uses active string_table; CaseExecutionResult constructors removed from production; runner tests use panic_if_called; terse_reporting uses valid BuildResult and CompilerMessages in all synthetic fixtures",
+      "owning_phase": "Phase 3"
+    },
+    {
+      "code": "current_dir_restoration_failures_discarded",
+      "severity": "hard",
+      "status": "resolved",
+      "description": "CurrentDirGuard::Drop discarded restoration failures",
+      "disposition": "fixed: Option<PathBuf> take pattern prevents double-restore; finish() returns Result; Drop panics on restore failure (non-unwinding) or reports to stderr (unwinding); restore-failure injection seam; regression tests for both finish-error and unwind-report paths; obsolete test_restore seam removed in favor of finish() called directly under an injected restore that actually restores CWD then returns the synthetic error",
+      "owning_phase": "Phase 3"
+    },
+    {
+      "code": "lossy_path_text_conversion",
+      "severity": "review",
+      "status": "resolved",
+      "description": "to_string_lossy/from_utf8_lossy across ~30 files",
+      "disposition": "resolved in Phase 5 for every boundary finding 8 names: integration entry-path execution, the rendered-output harness paths and process output, golden text comparison, MOTH_TEST_THREADS and the module-discovery test helpers' file_name().unwrap_or_default(). The HTML-Wasm harness now resolves its artifacts through __dirname so no workspace path crosses a text boundary at all. Remaining to_string_lossy/from_utf8_lossy uses are failure-report rendering (xtask process output echo, path display), never assertion inputs",
+      "owning_phase": "Phase 5"
+    },
+    {
+      "code": "weak_positive_assertions",
+      "severity": "review",
+      "status": "resolved",
+      "description": "Tests use >= or > assertions where exact counts are needed",
+      "disposition": "fixed in Phase 4: BuiltArtifactIndex (integration) and BuiltOutputs (build-system tests) replace first-match find_map with unique-path lookup and exactly-one selectors; reachable-dependency test asserts the exact emitted path set plus the lowered dependency body and its call site; JS glue, runtime-module and canvas tests assert exactly-one glue/canvas/runtime artifacts at exact paths and that the page imports the module actually emitted; frontend pipeline tests assert exact function-origin multisets and side-table coverage instead of functions_analyzed >= N; borrow-checker pipeline test asserts statement/terminator fact sets equal the lowered statements/blocks and an exact snapshot count; source-package benchmark warning test asserts an exact warning multiset; HIR local lowering tests assert exact authored locals and exactly one assignment to the authored local",
+      "owning_phase": "Phase 4"
+    },
+    {
+      "code": "golden_comparison_accepting_directories_as_empty_files",
+      "severity": "review",
+      "status": "resolved",
+      "description": "Golden comparison accepts directory entries as empty golden files",
+      "disposition": "resolved in Phase 5: the golden comparison decides the artifact kind before reading content. A Directory or NotBuilt entry is a kind mismatch instead of empty bytes, text goldens require strict UTF-8 (invalid UTF-8 is a HarnessFailed, not a silent rewrite), and binary/wasm goldens compare bytes only. Phase 5 closeout: the expected artifact kind is owned by the authored golden's own extension (GoldenFile.expected_kind), so a cross-kind match is rejected before content is read and identical bytes emitted as a different artifact kind cannot satisfy the golden. Regressions cover directory-vs-empty-file, an unbuilt path, invalid UTF-8, binary byte comparison, a duplicate-path artifact set, a JS golden against generic bytes, a wasm golden against generic bytes, an HTML golden produced as JavaScript outside the universal index.html baseline path, and a binary golden that must still match generic bytes",
+      "owning_phase": "Phase 5"
+    },
+    {
+      "code": "html_wasm_baseline_broad_fragments",
+      "severity": "review",
+      "status": "resolved",
+      "description": "HTML/Wasm baseline tests rely on broad fragment matching",
+      "disposition": "resolved in Phase 5: the HTML shell contract is now ordered, bounded and unique (html_shell_violation, one owner shared with the HTML builder's own shell tests), and the HTML-Wasm baseline derives its required exports from the emitted page.js (instance.exports.<name>) and checks each against the module's typed export kind, with an explicit ABI floor including moth_start. Duplicate exports and imports are rejected, and the page script include must appear exactly once inside the body. Phase 5 closeout: the shell contract is structural rather than a raw substring count. Script and style content is opaque payload the shell inserts, so marker-like text such as a JavaScript string spelling '</body>' no longer counts as a second element, while a marker repeated in real markup is still rejected",
+      "owning_phase": "Phase 5"
+    },
+    {
+      "code": "node_runtime_harness_can_hang",
+      "severity": "review",
+      "status": "resolved",
+      "description": "Node runtime harness tests can hang without timeout",
+      "disposition": "resolved in Phase 5: the harness owns a tempfile workspace whose removal failure is reported, runs Node under a 30s deadline with kill-and-reap, drains stdout/stderr on their own threads with a 4 MiB bound, decodes protocol output strictly, and parses only supported <script> shapes. Typed RenderHarnessError{kind,message} separates Artifact/Workspace/Spawn/Timeout/ExitStatus/OutputDecoding/OutputProtocol/ScriptShape/Cleanup. Phase 5 closeout: both capture threads are joined before any result is inspected so no failure path drops a live thread; termination always attempts the reap and reports the kill and wait outcomes separately; type=\"module\" is rejected rather than executed under classic semantics because the harness materializes no glue, provider or runtime module and no import map; nameless or malformed attribute tokens fail closed instead of being skipped; and every failure class now has a focused self-test, including Artifact (missing and wrong-kind), Workspace (write collision) and Spawn (a nonexistent interpreter through the process owner's executable seam, not a PATH mutation)",
+      "owning_phase": "Phase 5"
+    },
+    {
+      "code": "fixture_discovery_fail_open",
+      "severity": "hard",
+      "status": "resolved",
+      "description": "Fixture discovery used is_dir/is_file which fail open; non-UTF-8 identities silently skipped",
+      "disposition": "fixed: symlink_metadata with NotFound-only continue; non-UTF-8 names return error; manifest_path and expect_path checks use symlink_metadata",
+      "owning_phase": "Phase 1"
+    },
+    {
+      "code": "timing_concurrency_tests_machine_speed",
+      "severity": "review",
+      "status": "resolved",
+      "description": "Timing/concurrency tests depend on machine speed",
+      "disposition": "resolved in Phase 6: the collector drain seam is a condition variable with a bounded deadline used only as deadlock protection, and its waits report the observed state; wait_for_timing_flag's 1,000,000-iteration yield loop is deleted, the dev-server SSE and partial-request tests own and join their server threads, and the SSE registration wait is a bounded deadline that names the observed client count",
+      "owning_phase": "Phase 6"
+    },
+    {
+      "code": "feature_gated_tests_not_executed",
+      "severity": "review",
+      "status": "resolved",
+      "description": "Feature-gated test modules need explicit execution lane mapping",
+      "disposition": "fixed in Phase 8: eight package-scoped lanes in xtask feature_matrix, run by `just test-feature-matrix`, cover every declared feature. `just feature-lane-check` (part of `just validate`) reads Cargo.toml and every cfg attribute in src and xtask/src, and fails when a declared feature has no lane, when a lane names an undeclared feature, or when a cfg names a feature that does not exist; it writes target/test-reports/feature_lane_coverage.json. The check also exposed that the previous workspace-wide feature commands never ran the default configuration, because xtask depends on moth with features = [\"timers\"] and Cargo unifies features across one resolve graph",
+      "owning_phase": "Phase 8"
+    },
+    {
+      "code": "filesystem_timestamp_tests",
+      "severity": "review",
+      "status": "resolved",
+      "description": "Tests rely on filesystem timestamps",
+      "disposition": "resolved in Phase 6: write_project_outputs returns a typed OutputWriteSummary and the two skip-unchanged tests assert Written / SkippedUnchanged directly, so both 30ms sleeps and both modification-time comparisons are gone; the remaining timestamp reads are the dev-server watch fingerprints, whose tests set modification times explicitly",
+      "owning_phase": "Phase 6"
+    },
+    {
+      "code": "counters_only_lane_dead_code",
+      "severity": "review",
+      "status": "open",
+      "description": "The counters-only feature configuration compiles a test helper no caller can reach",
+      "disposition": "found in Phase 8 when the counters lane became an executed command; routed to Phase 11. frontend_counters::capture_frontend_counters_for_test, FrontendCounterTestCaptureGuard and the re-export are gated on benchmark_counters, while every caller is gated on all(timers, benchmark_counters), so the counters-only lane emits three dead-code warnings. Nothing fails. It was invisible because `just ci-clippy-native` lints with --all-features and never builds that configuration. The correction is a cfg gate, not a behaviour change, so it is left outside the Patch A evidence boundary",
+      "owning_phase": "Phase 10 (EF-0002)"
+    },
+    {
+      "code": "monolithic_ci_steps",
+      "severity": "review",
+      "status": "resolved",
+      "description": "CI steps are monolithic",
+      "disposition": "fixed in Phase 8: the validation workflow runs nine gates (clippy, unit-tests, feature-matrix, integration, docs, benchmarks, timers-erasure, source-audit, honesty-audit) as independent jobs on Linux, macOS and Windows with fail-fast disabled, so one failed family never stops another from reporting. Windows stays non-blocking through a job-level continue-on-error, and validation.mtf > Platform policy now states the two conditions that end that status. The integration, feature-matrix and honesty-audit gates upload target/test-reports/ whether they passed or failed. `just validate` keeps the fail-fast local ordering, and the release workflow deliberately keeps it too. validation.mtf also lost its claim that `just ci-clippy` lints Linux and Windows x64 targets: that recipe does not exist and never did the cross-target work",
+      "owning_phase": "Phase 8"
+    },
+    {
+      "code": "acceptance_only_smoke_overclaiming",
+      "severity": "review",
+      "status": "resolved",
+      "description": "Acceptance-only smoke cases overclaim coverage",
+      "disposition": "fixed in Phase 7: all 12 acceptance-only backend blocks (exactly the 12 smoke-role cases) promoted to rendered_output_exact runtime contracts with a manifest contract and a non-smoke role, and each fixture comment rewritten to state what the case proves; the suite now declares zero acceptance-only blocks and zero smoke roles. Acceptance-only and the smoke role remain legal; schema 7 of the suite inventory reports smoke_role_cases and per-backend weak_contract_reviews so a returning weak contract stays findable",
+      "owning_phase": "Phase 7"
+    },
+    {
+      "code": "ignored_tests_needing_governance",
+      "severity": "review",
+      "status": "resolved",
+      "description": "Any #[ignore] tests would lack governance",
+      "disposition": "confirmed: 0 #[ignore] attributes in src or xtask",
+      "owning_phase": "Phase 7"
+    },
+    {
+      "code": "source_text_tests_false_confidence",
+      "severity": "review",
+      "status": "resolved",
+      "description": "Tests comparing source text create false confidence",
+      "disposition": "fixed in Phase 8: xtask source_audit is now the one owner of broad-source architecture bans. It walks src and xtask/src once, fails closed on unreadable paths, reports typed findings (timer-erasure, removed-legacy-conversion-name, removed-legacy-payload-variant, unreadable-source) and writes target/test-reports/source_audit.json. Three source-text tests were deleted into it: the diagnostics conversion-name tripwire, old_error_payload_has_been_removed_from_diagnostic_payloads (which read one file) and timer_facade_sources_never_use_cfg_timer_macro (which read four). The audit applies both removed-name bans across the whole tree rather than to the single file each test read. timers-erasure-check kept only its compiled-artifact half and now defines the timer rules that source_audit applies, so no second walk exists to skip a file silently. The remaining include_str! uses in src are CSS and JS assets that a test then parses or executes, which is input, not a source-text assertion",
+      "owning_phase": "Phase 8"
+    },
+    {
+      "code": "stale_partial_machine_readable_reports",
+      "severity": "review",
+      "status": "resolved",
+      "description": "Machine-readable reports can become stale or partial",
+      "disposition": "fixed in Phase 8: every report is written to a sibling temporary file, flushed and renamed into place, and a failed write removes the temporary file so the previous report survives instead of a partial new one. Each report carries a RunIdentity (run id, command, host OS and architecture, the features the binary was built with, runner thread count and completion state), and the inventory and triage reports are replaced by a completed:false report before the work starts, so an interrupted run leaves a report that says it did not finish. repository_commit became a typed repository_revision that distinguishes a discovered commit, a run outside a repository, and a failed discovery with its reason, instead of collapsing all three into null. Suite inventory schema 7 to 8; the triage report gained a schema version. Self-tests cover the started/completed transition observed from inside execution, the absence of a partial sibling, a blocked write leaving the previous report intact, and each revision classification",
+      "owning_phase": "Phase 8"
+    },
+    {
+      "code": "env_mutation_not_panic_safe",
+      "severity": "hard",
+      "status": "resolved",
+      "description": "xtask bench_history tests manually save/set/restore RAYON_NUM_THREADS without panic-safe guard",
+      "disposition": "fixed: ScopedEnvVar guard restores on drop including during unwinding",
+      "owning_phase": "Phase 3"
+    },
+    {
+      "code": "discarded_thread_joins",
+      "severity": "hard",
+      "status": "resolved",
+      "description": "Timing tests discarded thread join results",
+      "disposition": "fixed: surface_thread_panic helper replaces discarded joins",
+      "owning_phase": "Phase 3"
+    },
+    {
+      "code": "diagnostic_reason_parallel_taxonomy",
+      "severity": "hard",
+      "status": "resolved",
+      "description": "assert_diagnostic_reason used manual payload_variant_name mapping instead of reason_key",
+      "disposition": "fixed: uses diagnostic.identity().reason_key with unwrap_or fallback",
+      "owning_phase": "Phase 2"
+    },
+    {
+      "code": "case_execution_result_impossible_states",
+      "severity": "hard",
+      "status": "resolved",
+      "description": "Test fixtures created CaseExecutionResult with impossible states (passed=true with build_result=None, failure with no build_result or messages)",
+      "disposition": "fixed: all synthetic CaseExecutionResult fixtures now carry valid build_result or messages; triage test uses valid messages; terse_reporting uses valid BuildResult and CompilerMessages",
+      "owning_phase": "Phase 4"
+    },
+    {
+      "code": "assert_exact_infrastructure_error_too_loose",
+      "severity": "review",
+      "status": "resolved",
+      "description": "assert_exact_infrastructure_error only checked infrastructure error count, not total error count",
+      "disposition": "fixed: now requires exactly one error diagnostic overall, and that error must be the expected infrastructure type",
+      "owning_phase": "Phase 2"
+    },
+    {
+      "code": "string_transport_typed_error_seams",
+      "severity": "hard",
+      "status": "resolved",
+      "description": "Integration fixture/expectation loading and runner harness failures travelled as String, forcing negative self-tests to match error identity by prose substrings (fragile; could match the fixture path)",
+      "disposition": "fixed: added FixtureLoadError{kind,message} (Filesystem/Manifest/ExpectationParse/ExpectationContract/FixtureContract/PathBoundary) across fixture.rs, expectations.rs, manifest.rs and golden discovery; added TestRunnerError with Options/SuitePolicy/InventoryReport/TriageReport/Selection/ThreadPool/Fixture kinds across run_all_test_cases/run_loaded_suite/options.validate/report persistence/selection/thread-pool/env parsing; migrated all negative self-tests in runner.rs, manifest.rs, expectations.rs, fixture.rs to assert error.kind while retaining message prose checks; CLI reads error.message for display",
+      "owning_phase": "Phase 2"
+    },
+    {
+      "code": "first_match_artifact_selection",
+      "severity": "hard",
+      "status": "resolved",
+      "description": "find_output_file returned the first matching artifact and collect_built_artifact_paths accepted duplicate normalized paths, so every later assertion inspected one artifact of an ambiguous set",
+      "disposition": "fixed in Phase 4: BuiltArtifactIndex is built once in validate_success_result before any success assertion and consumed by the HTML/HTML-Wasm baselines, artifact assertions, absence checks, goldens and rendered-output harnesses; validity and collision identity come from the canonical output_path_identity used by the output writer, so the harness rejects exactly the destinations production rejects and folds ASCII case only; an ambiguous or invalid set fails the case as FailureKind::HarnessFailed; self-tests match the typed ArtifactIndexError variants (with one separate test owning the rendered wording) and cover duplicates, ASCII case aliases, non-ASCII case distinctness, parent segments, reserved device basenames, separator normalization, NotBuilt entries and non-UTF-8 paths",
+      "owning_phase": "Phase 4"
+    },
+    {
+      "code": "unused_temp_path_unverified_absence",
+      "severity": "review",
+      "status": "resolved",
+      "description": "unused_temp_path promised a nonexistent path without proving it; PID reuse after an interrupted run could return a stale node",
+      "disposition": "fixed in the pre-Phase-4 review pass: the helper verifies absence with symlink_metadata before returning",
+      "owning_phase": "Phase 1"
+    },
+    {
+      "code": "panic_assertions_without_reason",
+      "severity": "review",
+      "status": "resolved",
+      "description": "Helper self-tests and timers conflict tests asserted only catch_unwind(...).is_err(), so an unrelated panic satisfied them",
+      "disposition": "fixed in the pre-Phase-4 review pass: assert_panics_with requires the panic payload to contain the intended message; migrated test_fs, test_diagnostics, timers conflict tests and the new BuiltOutputs self-tests",
+      "owning_phase": "Phase 2"
+    },
+    {
+      "code": "xtask_negative_exists_assertions",
+      "severity": "hard",
+      "status": "resolved",
+      "description": "Phase 1's absence migration covered only the compiler crate; 14 negative Path::exists assertions remained in xtask tests",
+      "disposition": "fixed in the pre-Phase-4 review pass: added xtask/src/test_fs.rs (assert_path_missing/assert_regular_file/assert_directory with a dangling-symlink regression) and migrated bench_history and benchmark_workspace call sites",
+      "owning_phase": "Phase 1"
+    },
+    {
+      "code": "unanchored_output_path_predicates",
+      "severity": "review",
+      "status": "resolved",
+      "description": "Build-system glue selectors matched path.contains(\"_moth/js/glue/\"), so a glue module emitted under an unexpected parent directory satisfied an assertion about the glue directory",
+      "disposition": "fixed in the Phase 4 closeout: glue predicates use a shared GLUE_MODULE_PREFIX with starts_with, matching the already-anchored provider, canvas and runtime selectors, with a self-test proving a nested vendor/_moth/js/glue path does not match",
+      "owning_phase": "Phase 4"
+    },
+    {
+      "code": "global_timing_collector_observed_flake",
+      "severity": "review",
+      "status": "resolved",
+      "description": "frontend_benchmark_rejects_a_busy_raw_session_before_compilation failed once during Phase 5 validation and did not reproduce in 24 subsequent full-suite runs (including 6 at --test-threads=16)",
+      "disposition": "resolved in Phase 6: the flake reproduced on the Phase 6 baseline run and was the test's evidence, not the compiler. The outer-session 'every aggregate has zero samples' proxy is replaced by two deterministic ordering tests \u2014 a missing entry path must fail as TimingSession rather than PathValidation, and invalid source must fail as TimingSession rather than Compilation \u2014 neither of which depends on the process-global collector being quiet. The collector stays process-global because cross-thread recording is its production contract",
+      "owning_phase": "Phase 6"
+    }
+  ],
+  "infrastructure_added": [
+    "src/compiler_tests/test_fs.rs: assert_path_missing, assert_regular_file, assert_directory, assert_symlink, read_bytes, read_utf8",
+    "src/compiler_tests/test_diagnostics.rs: assert_exact_diagnostic_codes, assert_no_infrastructure_errors, assert_exact_infrastructure_error (tightened), assert_diagnostic_reason, error_code_counts",
+    "infrastructure_errors_for_tests() iterator in CompilerMessages",
+    "ScopedEnvVar guard in xtask bench_history/tests.rs",
+    "surface_thread_panic helper in timing/tests/enabled_tests.rs",
+    "CurrentDirGuard::finish() with Option<PathBuf> take pattern",
+    "CurrentDirGuard restore-failure injection seam (with_restore_override, RestoreFn type)",
+    "CurrentDirGuard Drop reports restore failure to stderr during unwinding",
+    "src/compiler_tests/test_support.rs: assert_panics_with (panic-reason assertion), unused_temp_path absence verification",
+    "xtask/src/test_fs.rs: assert_path_missing, assert_regular_file, assert_directory",
+    "BuiltArtifactIndex + typed ArtifactIndexError in the integration assertion owner; validity and collision identity come from the canonical output_path_identity, so the harness applies the writer's destination policy instead of a second path taxonomy",
+    "BuiltOutputs index with at/exactly_one/exactly_one_path/none_matching plus html_text/js_text kind accessors, owned by build_system/tests/build_dependency_tests.rs and using the same canonical output_path_identity collision check",
+    "assertions/node_harness.rs: HarnessWorkspace (owned tempfile workspace with reported cleanup), with_harness_workspace, run_node_script/run_node_script_within (bounded deadline, kill and reap, threaded bounded capture, strict stdout decoding) and typed RenderHarnessError/RenderHarnessErrorKind",
+    "assertions/html_scripts.rs: extract_executable_scripts, a supported-shape <script> parser that skips recognised data blocks and rejects external src, unknown types, execution-changing attributes and malformed or unterminated tags",
+    "assertions/artifacts.rs: html_shell_violation + HtmlShellViolation, the single ordered/unique document-shell contract shared with html_project's assert_has_basic_shell",
+    "assertions/wasm.rs: typed export map (BTreeMap<String, ExternalKind>) with duplicate rejection, duplicate import rejection and required_runtime_exports derived from the emitted bootstrap",
+    "tests/synthetic_build_results.rs: shared success-shaped BuildResult and TestCaseSpec fixtures for the assertion, rendered-output and wasm-baseline self-tests"
+  ]
+}

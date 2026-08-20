@@ -19,11 +19,12 @@
 //! - Feature-lane coverage (see `feature_matrix`)
 
 use crate::report_file::{ReportRunIdentity, write_report_atomically};
+use crate::source_tree::{relative_display_path, walk_rust_files, workspace_root};
 use crate::timers_erasure_check::audit_timer_source_fragment;
 use serde::Serialize;
 use std::fmt;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Where the audit report is written, relative to the workspace root.
 pub const SOURCE_AUDIT_REPORT_PATH: &str = "target/test-reports/source_audit.json";
@@ -101,27 +102,28 @@ pub struct SourceAuditReport {
 }
 
 /// Run the audit and write its report.
+///
+/// The report is replaced by a `completed: false` one before the walk starts. Without that, a run
+/// interrupted during the walk leaves the previous successful report untouched, and a reader has
+/// no way to tell that file apart from evidence this run produced.
 pub fn run_source_audit() -> Result<(), String> {
     let workspace_root = workspace_root()?;
+    let report_path = workspace_root.join(SOURCE_AUDIT_REPORT_PATH);
+    let run = ReportRunIdentity::started("source-audit", None);
+
+    write_source_audit_report(&report_path, &started_report(run.clone()))?;
+
     let (audited_file_count, findings) = audit_sources(&workspace_root)?;
 
     let report = SourceAuditReport {
         schema_version: SOURCE_AUDIT_SCHEMA_VERSION,
-        run: ReportRunIdentity::capture("source-audit"),
-        audited_roots: AUDITED_SOURCE_ROOTS
-            .iter()
-            .map(|root| (*root).to_string())
-            .collect(),
+        run: run.completed(),
+        audited_roots: audited_roots(),
         audited_file_count,
         findings,
     };
 
-    let json = serde_json::to_string_pretty(&report)
-        .map_err(|error| format!("failed to serialise the source audit report: {error}"))?;
-    write_report_atomically(
-        &workspace_root.join(SOURCE_AUDIT_REPORT_PATH),
-        json.as_bytes(),
-    )?;
+    write_source_audit_report(&report_path, &report)?;
 
     println!(
         "source-audit: {} files audited, {} finding(s)",
@@ -140,6 +142,33 @@ pub fn run_source_audit() -> Result<(), String> {
         "source audit failed with {} finding(s)",
         report.findings.len()
     ))
+}
+
+/// The report a run writes before it has audited anything.
+///
+/// The counts are zero and the findings empty because that is what this run has measured so far;
+/// `completed: false` is what tells a reader those numbers are not a result.
+fn started_report(run: ReportRunIdentity) -> SourceAuditReport {
+    SourceAuditReport {
+        schema_version: SOURCE_AUDIT_SCHEMA_VERSION,
+        run,
+        audited_roots: audited_roots(),
+        audited_file_count: 0,
+        findings: Vec::new(),
+    }
+}
+
+fn audited_roots() -> Vec<String> {
+    AUDITED_SOURCE_ROOTS
+        .iter()
+        .map(|root| (*root).to_string())
+        .collect()
+}
+
+fn write_source_audit_report(path: &Path, report: &SourceAuditReport) -> Result<(), String> {
+    let json = serde_json::to_string_pretty(report)
+        .map_err(|error| format!("failed to serialise the source audit report: {error}"))?;
+    write_report_atomically(path, json.as_bytes())
 }
 
 /// Apply every rule to every audited source file, returning the file count and all findings.
@@ -242,68 +271,6 @@ fn audit_legacy_error_payload(relative: &str, content: &str) -> Vec<SourceFindin
              diagnostic payloads are typed, never a rendered string"
         ),
     }]
-}
-
-/// Every `.rs` file under `root`, failing closed on any directory that cannot be read.
-fn walk_rust_files(root: &Path) -> Result<Vec<PathBuf>, String> {
-    let mut files = Vec::new();
-    let mut pending = vec![root.to_path_buf()];
-
-    while let Some(directory) = pending.pop() {
-        let entries = fs::read_dir(&directory)
-            .map_err(|error| format!("failed to read '{}': {error}", directory.display()))?;
-
-        for entry in entries {
-            let entry = entry.map_err(|error| {
-                format!(
-                    "failed to read an entry of '{}': {error}",
-                    directory.display()
-                )
-            })?;
-            let path = entry.path();
-            let metadata = fs::symlink_metadata(&path)
-                .map_err(|error| format!("failed to stat '{}': {error}", path.display()))?;
-
-            if metadata.is_dir() {
-                pending.push(path);
-            } else if metadata.is_file()
-                && path.extension().is_some_and(|extension| extension == "rs")
-            {
-                files.push(path);
-            }
-        }
-    }
-
-    files.sort();
-    Ok(files)
-}
-
-/// Workspace-relative path with `/` separators, so findings read the same on every platform.
-///
-/// A component that is not UTF-8 is an error rather than a lossy replacement: a finding names a
-/// file a reader is expected to open, and a substituted character names a different file.
-fn relative_display_path(workspace_root: &Path, path: &Path) -> Result<String, String> {
-    let relative = path.strip_prefix(workspace_root).unwrap_or(path);
-    let mut segments = Vec::new();
-
-    for component in relative.components() {
-        let segment = component.as_os_str().to_str().ok_or_else(|| {
-            format!(
-                "path '{}' has a component that is not valid UTF-8",
-                relative.display()
-            )
-        })?;
-        segments.push(segment);
-    }
-
-    Ok(segments.join("/"))
-}
-
-fn workspace_root() -> Result<PathBuf, String> {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .map(Path::to_path_buf)
-        .ok_or_else(|| "xtask manifest has no parent directory".to_string())
 }
 
 #[cfg(test)]

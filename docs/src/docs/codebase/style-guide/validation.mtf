@@ -225,16 +225,63 @@ Before declaring a non-trivial code-bearing slice complete, run:
 
 The integration command loads the complete canonical suite and applies the shared hard-policy
 evaluator before selection or compilation. This makes missing ownership, duplicate primaries and
-other hard suite-policy findings part of the normal validation gate. Run the honesty audit when the
-machine-readable reports under `target/test-reports/` are also required:
+other hard suite-policy findings part of the normal validation gate.
+
+### Test honesty audit
+
+The campaign that hardened this suite is owned by one command:
 
 [codeblock, $code("bash"):
     just test-honesty-audit
 ]
 
-It writes `integration_suite_inventory.json`, `feature_lane_coverage.json` and `source_audit.json`.
-Each is written to a sibling temporary file and renamed into place, and each carries the identity
-of the run that produced it, so a partial or stale report cannot be read as this run's evidence.
+It writes the canonical inventory to `target/test-reports/test_honesty_inventory.json`, and it is
+the single owner of what that file says. The inventory has four parts:
+
+- Hard findings. Shapes with no honest use in this tree: the retired `temp_dir` helper, a `/tmp`
+  literal handed to a call that touches the filesystem, a discarded current-directory or
+  environment restoration, a discarded thread join, an `ignore` attribute with no reason, and a report
+  written straight to its final path. Every hit fails the audit.
+- Review findings. Shapes that can hide a weak contract and are also correct in most of their
+  uses. The audit counts them, names the files, and records the disposition the campaign decided
+  for the category. These never fail the audit. `is_err`, `contains` and `any` are review
+  categories on purpose: a gate that failed on each of them would be turned off within a week.
+- The declared ledger, read from `docs/roadmap/evidence/honesty_ledger.json`. Every entry must
+  carry a severity, a status, a description, a disposition and an owning phase; a duplicate code,
+  a missing decision or an open hard finding fails the audit.
+- The composed audits. The source audit and the feature-lane check are run, not read, so the
+  verdict never depends on when somebody last ran them. The integration suite inventory is read,
+  because the compiler binary writes it, and its state is reported as one of absent, unusable or
+  present so a missing report can never be read as a clean one.
+
+The tracked durable copy under `docs/roadmap/evidence/` is refreshed by the same owner, never by
+hand:
+
+[codeblock, $code("bash"):
+    just test-honesty-evidence
+]
+
+### What a report guarantees
+
+Every machine-readable report is written to a sibling temporary file and renamed into place, so a
+reader never observes a partial file and a failed write leaves the previous report intact.
+
+Every report also carries the identity of the run that produced it: an id unique within the
+process without depending on the wall clock, the command, the OS and architecture, the features
+the linked compiler was built with, a thread count where the command owns one, and whether the run
+finished.
+
+Completion state is what separates the reports, and the distinction is real:
+
+- `test_honesty_inventory.json`, `source_audit.json` and `integration_suite_inventory.json` are
+  replaced by a `completed: false` report before their owned work starts. A run interrupted partway
+  leaves a report that says so rather than a previous successful one that looks current.
+- `feature_matrix_results.json` starts with every lane `pending` and is rewritten as each lane
+  resolves, so an interrupted matrix reports the lanes it measured and the lanes it never reached.
+- `feature_lane_coverage.json` is a coverage map, not an outcome table. It answers which lane
+  covers which declared feature, which `just feature-lane-check` establishes without running a
+  single lane, so it is complete the moment it is written and never states a lane result. Lane
+  outcomes live in `feature_matrix_results.json`.
 
 ### Source audit
 
@@ -447,8 +494,13 @@ not apply. Use the full code-bearing gate.
     ]
 
     [td:
-        [: Machine-readable honesty reports]
+        [: Test honesty audit and inventory]
         [: `just test-honesty-audit`]
+    ]
+
+    [td:
+        [: Durable honesty evidence refresh]
+        [: `just test-honesty-evidence`]
     ]
 
     [td:

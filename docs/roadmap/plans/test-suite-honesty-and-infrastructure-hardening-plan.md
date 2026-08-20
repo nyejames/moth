@@ -6,8 +6,10 @@
 WORK_ID: test-suite-honesty
 WORK_SOURCE: docs/roadmap/plans/test-suite-honesty-and-infrastructure-hardening-plan.md
 BASE_REVISION: f41f93a7a (post-TIR, post-benchmark-counters-timers)
-STATUS: active — Phase 8 complete, ready for Phase 9; two exposed failures are open in the ledger
-CURRENT_SCOPE: Phase 8 feature, platform and CI visibility (paused before Phase 9)
+STATUS: active — Phase 8 complete including its pre-Phase-9 closeout, ready for Phase 9; two
+  exposed failures are open in the ledger
+CURRENT_SCOPE: Phase 8 feature, platform and CI visibility plus the audit/reporting closeout
+  (paused before Phase 9)
 COMPLETED:
   Phase 0: baseline established (4314 unit tests, 0 ignored, 1699 integration cases correct,
     1851 backend executions); durable inventory at docs/roadmap/evidence/test_honesty_inventory.json;
@@ -224,19 +226,22 @@ COMPLETED:
     and every cfg attribute in src and xtask/src and fails when a declared feature has no lane, when
     a lane names an undeclared feature, or when a cfg names a feature that does not exist; its
     scanner ignores cfg text inside comments and string literals, so prose and another gate's scan
-    fixtures are not counted as attributes. Machine-readable honesty reports are written by
-    `just test-honesty-audit` (suite inventory, feature-lane coverage, source audit). The
+    fixtures are not counted as attributes. The
     validation workflow now runs nine gates as independent jobs across Linux, macOS and Windows with
     fail-fast disabled, Windows non-blocking with a stated exit condition, and the integration,
     feature-matrix and honesty-audit gates upload target/test-reports/ whether they passed or
     failed; `just validate` and the release workflow keep the fail-fast ordering. Report staleness
     is closed: every report is written to a sibling temporary file and renamed into place, a failed
     write removes the temporary file and leaves the previous report intact, each report carries a
-    RunIdentity (id, command, OS, arch, built features, thread count, completion state), the
-    inventory and triage reports are replaced by a completed:false report before the work starts,
-    and repository_commit became a typed repository_revision that separates a discovered commit, a
+    RunIdentity (id, command, OS, arch, built features, thread count, completion state), and
+    repository_commit became a typed repository_revision that separates a discovered commit, a
     run outside a repository, and a failed discovery with its reason (suite inventory schema 7 to 8;
-    the triage report gained a schema version). Broad-source architecture bans moved into one owner:
+    the triage report gained a schema version). Which reports carry completed-run evidence is now
+    stated per report rather than claimed for all of them: the honesty inventory, source audit and
+    suite inventory are each replaced by a completed:false report before their owned work starts;
+    feature_matrix_results.json starts with every lane pending and is rewritten as each lane
+    resolves; feature_lane_coverage.json is a coverage map that `feature-lane-check` writes without
+    running a lane, so it is complete when written and states no lane outcome at all. Broad-source architecture bans moved into one owner:
     xtask source_audit walks src and xtask/src once, fails closed on unreadable paths, reports typed
     findings and writes source_audit.json; three source-text tests were deleted into it and the two
     removed-name bans now apply tree-wide instead of to the single file each test read;
@@ -246,9 +251,57 @@ COMPLETED:
     harness carry-overs; validation.mtf gained the source audit, feature lanes, CI gates and
     platform policy sections, and lost its claim that `just ci-clippy` lints Linux and Windows x64
     targets — that recipe does not exist
+  Phase 8 closeout (pre-Phase-9 review corrections): the plan-required honesty audit now exists as
+    an owned xtask command. `xtask honesty-audit` writes the canonical
+    target/test-reports/test_honesty_inventory.json, classifying 6 hard rules (retired temp_dir
+    helper, a /tmp literal reaching a filesystem call, discarded current-directory or environment
+    restoration, discarded thread join, unowned ignore attribute, unatomic report write) whose
+    every hit fails the gate, and 11 review categories that are counted per file and carry the
+    campaign's recorded disposition — deliberately including is_err/contains/any, which the plan
+    forbids banning. Rules read a code view or a literal view of each line through the shared
+    rust_scanner, so prose about a banned shape and a fixture string containing one are not
+    findings; each rule also declares whether it applies to every file or only to test-owning
+    files. The audit composes rather than collapses: it runs source_audit and the feature-lane
+    check in-process (reading their last reports would make its verdict depend on when somebody
+    else ran them), reads the integration suite inventory the compiler binary writes and reports it
+    as typed absent/unusable/present so a missing report cannot read as a clean one, and
+    dispositions the suite's four weak-contract counters. The 34-entry campaign ledger moved to the
+    tracked docs/roadmap/evidence/honesty_ledger.json, which the audit validates (no duplicate
+    code, no missing description/disposition/owning phase, no unknown severity or status, no open
+    hard finding) and embeds; the durable docs/roadmap/evidence/test_honesty_inventory.json is now
+    regenerated by `just test-honesty-evidence` with a measured generated_at, and the counts the
+    audit cannot measure are carried as declared_measurements naming the command that produced
+    each. Report identity was finished rather than overclaimed: xtask's ReportRunIdentity gained
+    built features, thread count and completion state, with started()/completed() matching the
+    integration runner's, and its id gained a process-local AtomicU64 sequence so two identities
+    differ without the wall clock advancing — the Phase 6 policy the previous uniqueness test had
+    regressed. source-audit and honesty-audit now write a completed:false report before their walk.
+    The feature-matrix outcome question is settled by splitting the reports: feature_lane_coverage
+    stays the coverage map (schema 2) and feature_matrix_results.json is the new outcome table
+    (schema 1) that starts every lane pending and is rewritten as each resolves. Three duplicated
+    helpers became shared owners: rust_scanner (the code/comment/literal classifier, now with a
+    three-way TextClass) and source_tree (the fail-closed walk and workspace-relative display path,
+    previously copied verbatim in feature_matrix and source_audit). moth::ENABLED_FEATURES became
+    public so xtask reports name the build configuration of the compiler they link rather than
+    xtask's own empty feature set. validation.mtf now states what each report guarantees instead of
+    claiming completed-run evidence for all of them, and gained the honesty-audit section.
 NEXT_ACTION: run Phase 9 (Patch A honesty checkpoint), then clear ledger entries EF-0001 and
   EF-0002 in Phase 10
-VALIDATION: Phase 8 — cargo fmt --all --check clean; clippy --workspace --all-targets
+VALIDATION: Phase 8 closeout (macOS 23.6.0 arm64) — cargo fmt --all --check clean; clippy
+  --workspace --all-targets --all-features -D warnings clean; cargo test --workspace 4396+17+760,
+  0 failed, 0 ignored (xtask 699 to 760: 61 new tests for the honesty audit, the shared scanner
+  and tree, the finished report identity and the split matrix reports); docs check clean;
+  honesty-audit 1173 files scanned, 564 test-owning, 0 hard findings, 11 review categories with
+  2195 dispositioned occurrences, 34 ledger findings with 0 open hard and 0 integrity findings, 0
+  composed findings; source-audit 1172 files, 0 findings; feature-lane-check 0 findings; the
+  honesty audit was proved to fail closed by injecting an unowned ignore and a discarded
+  set_current_dir, which it reported by file and line and exited 1 on. Feature matrix re-run to
+  exercise the split reports: 6 lanes passed, counters and timers-counters failed with exit 101,
+  both EF-0002 as expected, and feature_matrix_results.json recorded each outcome while
+  feature_lane_coverage.json carried no outcome field at all. The full Phase 9 validation,
+  platform, thread and repeat matrix is deliberately not run here; triggering the new workflow on
+  this branch tip is the first Phase 9 checkpoint action.
+  Phase 8 — cargo fmt --all --check clean; clippy --workspace --all-targets
   --all-features -D warnings clean; feature-lane-check 0 findings (12 features, 8 lanes);
   source-audit 1166 files, 0 findings; cargo test --workspace 4396+17+699, 0 failed, 0 ignored;
   docs check clean; bench-ci preflight and quick subsets; timers-erasure-check clean (8133904-byte
@@ -1252,8 +1305,8 @@ Delete the ledger file when its final entry closes, or retain an empty historica
 5. Confirm every ignored test is owned and none was added by this plan.
 6. Run the complete validation matrix below.
 7. Audit changed production seams for minimality and non-test ownership.
-8. Update the roadmap capsule and mark this plan complete.
-9. Only then allow frontend module compilation ownership cleanup to become active.
+8. Update the roadmap capsule and delete this plan.
+9. Only then allow new memory management design docs updates to become active.
 
 ## Validation matrix
 

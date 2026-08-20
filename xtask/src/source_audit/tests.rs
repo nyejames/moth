@@ -5,8 +5,9 @@
 
 use super::{
     AUDIT_IMPLEMENTATION_FILES, AUDITED_SOURCE_ROOTS, SOURCE_AUDIT_SCHEMA_VERSION, SourceRule,
-    audit_source_fragment, audit_sources, relative_display_path,
+    audit_source_fragment, audit_sources, started_report,
 };
+use crate::report_file::ReportRunIdentity;
 use std::path::Path;
 
 /// The banned name, assembled so this file does not contain it either.
@@ -131,17 +132,6 @@ fn the_audit_walks_both_workspace_source_trees() {
 }
 
 #[test]
-fn findings_name_files_with_forward_slashes_under_the_workspace_root() {
-    let root = Path::new("/work/moth");
-    let path = root.join("xtask").join("src").join("source_audit.rs");
-
-    assert_eq!(
-        relative_display_path(root, &path).expect("an ASCII path is valid UTF-8"),
-        "xtask/src/source_audit.rs"
-    );
-}
-
-#[test]
 fn the_report_schema_version_is_the_one_consumers_are_told_to_expect() {
     assert_eq!(SOURCE_AUDIT_SCHEMA_VERSION, 1);
 }
@@ -169,4 +159,26 @@ fn reports_the_removed_diagnostic_payload_variant_by_name() {
 /// The banned variant name, assembled so this file does not contain it either.
 fn removed_payload_variant_name() -> String {
     ["Legacy", "Error"].concat()
+}
+
+/// The report a run writes before it walks anything must say it measured nothing yet.
+///
+/// This is what stops an interrupted run from leaving the previous successful report in place,
+/// where a reader would take it for this run's evidence. The zero counts are only safe to write
+/// because `completed: false` is written with them.
+#[test]
+fn the_report_written_before_the_walk_claims_no_result() {
+    let started = started_report(ReportRunIdentity::started("source-audit", None));
+
+    assert!(!started.run.completed);
+    assert_eq!(started.audited_file_count, 0);
+    assert_eq!(started.findings, Vec::new());
+    assert_eq!(
+        started.audited_roots,
+        AUDITED_SOURCE_ROOTS
+            .iter()
+            .map(|root| (*root).to_string())
+            .collect::<Vec<String>>(),
+        "the roots are known before the walk, so the started report names them"
+    );
 }

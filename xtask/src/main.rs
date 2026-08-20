@@ -23,6 +23,7 @@
 //! - `feature-matrix`       - Run every curated feature lane and report the outcome table
 //! - `feature-lane-check`   - Check feature-lane coverage and write the coverage report
 //! - `source-audit`         - Apply the broad-source architecture bans and write their report
+//! - `honesty-audit`        - Classify the test-honesty findings and write the canonical inventory
 
 mod bench;
 mod bench_ci;
@@ -45,11 +46,14 @@ mod benchmark_workspace;
 mod compiler_binary;
 mod feature_matrix;
 mod frontend_bench;
+mod honesty_audit;
 mod mode;
 mod process_runner;
 mod profile;
 mod report_file;
+mod rust_scanner;
 mod source_audit;
+mod source_tree;
 mod stress;
 #[cfg(test)]
 mod test_fs;
@@ -62,6 +66,7 @@ use bench_types::{BenchmarkRecording, BenchmarkRunPolicy, BenchmarkSelection};
 use bench_validate::validate_all_benchmarks;
 use feature_matrix::{run_feature_lane_check, run_feature_matrix};
 use frontend_bench::run_frontend_benchmarks;
+use honesty_audit::run_honesty_audit;
 use mode::{BenchmarkMode, ModeParseResult, TOP_LEVEL_USAGE};
 use source_audit::run_source_audit;
 use std::env;
@@ -138,6 +143,9 @@ fn main() {
         }
         BenchmarkMode::SourceAudit => {
             exit_with_result(run_source_audit());
+        }
+        BenchmarkMode::HonestyAudit { update_evidence } => {
+            exit_with_result(run_honesty_audit(update_evidence));
         }
     }
 }

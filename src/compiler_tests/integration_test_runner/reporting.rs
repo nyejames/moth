@@ -31,37 +31,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 const SUITE_INVENTORY_SCHEMA_VERSION: u32 = 8;
 const FAILURE_TRIAGE_SCHEMA_VERSION: u32 = 1;
 
-/// Features the running binary was built with, in declaration order.
-///
-/// A report that does not name its build configuration cannot be told apart from one produced by
-/// a differently configured run of the same command.
-const ENABLED_FEATURES: &[&str] = &[
-    #[cfg(feature = "timers")]
-    "timers",
-    #[cfg(feature = "detailed_timers")]
-    "detailed_timers",
-    #[cfg(feature = "benchmark_counters")]
-    "benchmark_counters",
-    #[cfg(feature = "checked_blocks")]
-    "checked_blocks",
-    #[cfg(feature = "async_blocks")]
-    "async_blocks",
-    #[cfg(feature = "show_tokens")]
-    "show_tokens",
-    #[cfg(feature = "show_headers")]
-    "show_headers",
-    #[cfg(feature = "show_ast")]
-    "show_ast",
-    #[cfg(feature = "show_eval")]
-    "show_eval",
-    #[cfg(feature = "show_hir")]
-    "show_hir",
-    #[cfg(feature = "show_codegen")]
-    "show_codegen",
-    #[cfg(feature = "show_borrow_checker")]
-    "show_borrow_checker",
-];
-
 /// What a report knows about the repository revision it describes.
 ///
 /// A failed discovery and a repository that genuinely has nothing to report are different facts.
@@ -106,7 +75,7 @@ impl RunIdentity {
             command: command.to_owned(),
             os: std::env::consts::OS,
             arch: std::env::consts::ARCH,
-            features: ENABLED_FEATURES.to_vec(),
+            features: crate::ENABLED_FEATURES.to_vec(),
             thread_count,
             completed: false,
         }

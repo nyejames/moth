@@ -24,21 +24,38 @@
 //! - Zero-cost erasure of the timer system (see `timers_erasure_check`)
 
 use crate::report_file::{ReportRunIdentity, write_report_atomically};
+use crate::rust_scanner::{code_mask, is_identifier_character, matches_at};
+use crate::source_tree::{relative_display_path, walk_rust_files, workspace_root};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
 /// Where the coverage report is written, relative to the workspace root.
 pub const COVERAGE_REPORT_PATH: &str = "target/test-reports/feature_lane_coverage.json";
 
+/// Where the lane-outcome report is written, relative to the workspace root.
+///
+/// This is a separate file from the coverage map on purpose. The coverage report answers "does
+/// every declared feature have a lane", which `feature-lane-check` can answer without running
+/// anything; this one answers "what happened when each lane ran", which only `feature-matrix`
+/// can. One file carrying both would have to claim outcomes it did not measure whenever the
+/// cheap command wrote it.
+pub const MATRIX_RESULTS_REPORT_PATH: &str = "target/test-reports/feature_matrix_results.json";
+
 /// Schema version of the coverage report.
 ///
 /// Bump whenever a field is added, removed or re-meant, so a consumer can reject a report it
 /// cannot read instead of silently misreading it.
-pub const COVERAGE_REPORT_SCHEMA_VERSION: u32 = 1;
+///
+/// Schema 2 added the completion state, build features and thread count of the run identity, and
+/// moved lane outcomes out into the separate matrix-results report.
+pub const COVERAGE_REPORT_SCHEMA_VERSION: u32 = 2;
+
+/// Schema version of the lane-outcome report.
+pub const MATRIX_RESULTS_SCHEMA_VERSION: u32 = 1;
 
 /// Cargo target directory the matrix builds into.
 ///
@@ -169,6 +186,16 @@ enum LaneFailure {
     Exit(Option<i32>),
 }
 
+impl LaneFailure {
+    /// The reported outcome for a lane that did not pass.
+    fn into_outcome(self) -> LaneOutcome {
+        match self {
+            Self::Launch(error) => LaneOutcome::LaunchFailed { error },
+            Self::Exit(exit_code) => LaneOutcome::Failed { exit_code },
+        }
+    }
+}
+
 impl fmt::Display for LaneFailure {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -213,7 +240,11 @@ pub struct LaneReport {
     pub owns: String,
 }
 
-/// The complete machine-readable coverage report.
+/// The machine-readable coverage map: which lane covers which declared feature.
+///
+/// This report describes coverage, never outcomes. `feature-lane-check` writes it without running
+/// a single lane, so a lane result here would be a claim no run had measured. Lane outcomes live
+/// in [`MatrixResultsReport`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CoverageReport {
     pub schema_version: u32,
@@ -226,10 +257,63 @@ pub struct CoverageReport {
     pub findings: Vec<String>,
 }
 
+/// What one lane's run produced.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "outcome")]
+pub enum LaneOutcome {
+    /// The matrix has not reached this lane yet.
+    ///
+    /// A pending lane is recorded rather than omitted so an interrupted matrix reports which
+    /// lanes it never got to, instead of a shorter list that reads as a complete one.
+    Pending,
+    /// The lane's test command exited successfully.
+    Passed,
+    /// The lane's test command could not be started.
+    LaunchFailed { error: String },
+    /// The lane ran and reported failure.
+    Failed { exit_code: Option<i32> },
+}
+
+/// One lane and what running it produced.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LaneResult {
+    pub lane: LaneReport,
+    pub result: LaneOutcome,
+}
+
+/// The machine-readable outcome table of one `feature-matrix` run.
+///
+/// Written before the first lane starts and rewritten after each lane finishes, so an interrupted
+/// matrix leaves the lanes it did measure plus `completed: false`, rather than a stale table from
+/// a previous run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct MatrixResultsReport {
+    pub schema_version: u32,
+    pub run: ReportRunIdentity,
+    pub lanes: Vec<LaneResult>,
+}
+
+impl MatrixResultsReport {
+    fn passed(&self) -> usize {
+        self.lanes
+            .iter()
+            .filter(|lane| lane.result == LaneOutcome::Passed)
+            .count()
+    }
+
+    fn failures(&self) -> Vec<&LaneResult> {
+        self.lanes
+            .iter()
+            .filter(|lane| !matches!(lane.result, LaneOutcome::Passed | LaneOutcome::Pending))
+            .collect()
+    }
+}
+
 /// Validate lane coverage and write the report, without running any lane.
 pub fn run_feature_lane_check() -> Result<(), String> {
     let workspace_root = workspace_root()?;
-    let report = build_coverage_report(&workspace_root, "feature-lane-check")?;
+    let run = ReportRunIdentity::started("feature-lane-check", None);
+    let report = build_coverage_report(&workspace_root, run)?;
 
     print_coverage(&report);
     write_coverage_report(&workspace_root, &report)?;
@@ -251,49 +335,98 @@ pub fn run_feature_lane_check() -> Result<(), String> {
 ///
 /// Lanes keep running after a failure. A matrix exists to show which configurations are broken,
 /// and stopping at the first one hides the rest.
+///
+/// Two reports are written, because there are two separate facts. The coverage map is finished
+/// before any lane starts and is complete at that point. The outcome table is only complete when
+/// the last lane has run, so it starts as `Pending` for every lane and is rewritten as each one
+/// resolves.
 pub fn run_feature_matrix() -> Result<(), String> {
     let workspace_root = workspace_root()?;
-    let report = build_coverage_report(&workspace_root, "feature-matrix")?;
+    let coverage_run = ReportRunIdentity::started("feature-matrix", None);
+    let coverage = build_coverage_report(&workspace_root, coverage_run)?;
 
-    print_coverage(&report);
-    write_coverage_report(&workspace_root, &report)?;
+    print_coverage(&coverage);
+    write_coverage_report(&workspace_root, &coverage)?;
 
-    if !report.findings.is_empty() {
-        for finding in &report.findings {
+    if !coverage.findings.is_empty() {
+        for finding in &coverage.findings {
             println!("  {finding}");
         }
         return Err(format!(
             "{} feature-lane coverage finding(s); no lane was run",
-            report.findings.len()
+            coverage.findings.len()
         ));
     }
 
-    let mut failures: Vec<(&FeatureLane, LaneFailure)> = Vec::new();
+    let mut results = MatrixResultsReport {
+        schema_version: MATRIX_RESULTS_SCHEMA_VERSION,
+        run: ReportRunIdentity::started("feature-matrix", None),
+        lanes: FEATURE_LANES
+            .iter()
+            .map(|lane| LaneResult {
+                lane: lane_report(lane),
+                result: LaneOutcome::Pending,
+            })
+            .collect(),
+    };
+    write_matrix_results(&workspace_root, &results)?;
 
-    for lane in FEATURE_LANES {
+    for (index, lane) in FEATURE_LANES.iter().enumerate() {
         println!("\n=== feature lane: {lane} ===");
         println!("{}", lane.command_line());
-        if let Err(failure) = run_lane(&workspace_root, lane) {
-            println!("lane failed: {failure}");
-            failures.push((lane, failure));
-        }
+
+        results.lanes[index].result = match run_lane(&workspace_root, lane) {
+            Ok(()) => LaneOutcome::Passed,
+            Err(failure) => {
+                println!("lane failed: {failure}");
+                failure.into_outcome()
+            }
+        };
+        write_matrix_results(&workspace_root, &results)?;
     }
 
+    results.run = results.run.completed();
+    write_matrix_results(&workspace_root, &results)?;
+
+    let failures = results.failures();
     println!("\n=== feature matrix summary ===");
     println!("lanes run: {}", FEATURE_LANES.len());
+    println!("lanes passed: {}", results.passed());
     println!("lanes failed: {}", failures.len());
     if failures.is_empty() {
         return Ok(());
     }
 
-    for (lane, failure) in &failures {
-        println!("  {lane}: {failure}");
+    for failure in &failures {
+        println!("  {}: {}", failure.lane.name, describe(&failure.result));
     }
     Err(format!(
         "{} of {} feature lanes failed",
         failures.len(),
         FEATURE_LANES.len()
     ))
+}
+
+/// How a resolved lane outcome reads in the summary table.
+fn describe(outcome: &LaneOutcome) -> String {
+    match outcome {
+        LaneOutcome::Pending => "never run".to_string(),
+        LaneOutcome::Passed => "passed".to_string(),
+        LaneOutcome::LaunchFailed { error } => format!("could not start: {error}"),
+        LaneOutcome::Failed {
+            exit_code: Some(code),
+        } => format!("exit code {code}"),
+        LaneOutcome::Failed { exit_code: None } => "terminated without an exit code".to_string(),
+    }
+}
+
+fn write_matrix_results(workspace_root: &Path, report: &MatrixResultsReport) -> Result<(), String> {
+    let json = serde_json::to_string_pretty(report)
+        .map_err(|error| format!("failed to serialise the feature matrix results: {error}"))?;
+    write_report_atomically(
+        &workspace_root.join(MATRIX_RESULTS_REPORT_PATH),
+        json.as_bytes(),
+    )
 }
 
 /// Execute one lane, inheriting stdio so a failing lane shows its own output.
@@ -322,8 +455,23 @@ fn run_lane(workspace_root: &Path, lane: &FeatureLane) -> Result<(), LaneFailure
     }
 }
 
+/// Build the coverage report for another audit to compose, without writing it.
+///
+/// The honesty audit runs this rather than reading `feature_lane_coverage.json`, because reading
+/// the file would make its verdict depend on when somebody last ran `feature-lane-check`. The
+/// coverage report itself stays owned by that command.
+pub fn build_coverage_report_for_audit(workspace_root: &Path) -> Result<CoverageReport, String> {
+    build_coverage_report(
+        workspace_root,
+        ReportRunIdentity::started("honesty-audit", None),
+    )
+}
+
 /// Read the tree and build the complete coverage report.
-fn build_coverage_report(workspace_root: &Path, command: &str) -> Result<CoverageReport, String> {
+fn build_coverage_report(
+    workspace_root: &Path,
+    run: ReportRunIdentity,
+) -> Result<CoverageReport, String> {
     let mut features: Vec<FeatureCoverage> = Vec::new();
     let mut undeclared: Vec<CfgSite> = Vec::new();
     let mut findings: Vec<String> = Vec::new();
@@ -383,7 +531,9 @@ fn build_coverage_report(workspace_root: &Path, command: &str) -> Result<Coverag
 
     Ok(CoverageReport {
         schema_version: COVERAGE_REPORT_SCHEMA_VERSION,
-        run: ReportRunIdentity::capture(command),
+        // The coverage map is finished the moment this function returns: reading the tree is the
+        // whole of the work it describes.
+        run: run.completed(),
         lanes: FEATURE_LANES.iter().map(lane_report).collect(),
         features,
         undeclared_cfg_features: undeclared,
@@ -553,14 +703,6 @@ fn cfg_prefix_length(characters: &[char], index: usize) -> Option<usize> {
     None
 }
 
-/// Whether `characters` at `index` starts with `needle`.
-fn matches_at(characters: &[char], index: usize, needle: &str) -> bool {
-    needle
-        .chars()
-        .enumerate()
-        .all(|(offset, character)| characters.get(index + offset) == Some(&character))
-}
-
 /// The characters between `open_index` and the matching close parenthesis.
 ///
 /// Only code parentheses change the depth, so a parenthesis inside a feature name or any other
@@ -642,219 +784,6 @@ fn skip_whitespace(span: &[char], mut index: usize) -> usize {
         index += 1;
     }
     index
-}
-
-/// Which characters are code, rather than comment or literal text.
-///
-/// This is a scanner, not a parser: it recognises line and nested block comments, normal and raw
-/// strings (with the `b` prefix) and character literals, which is everything that can carry text
-/// resembling a `cfg` attribute.
-fn code_mask(characters: &[char]) -> Vec<bool> {
-    let mut mask = vec![true; characters.len()];
-    let mut index = 0;
-
-    while index < characters.len() {
-        let skipped = skip_comment(characters, index)
-            .or_else(|| skip_raw_string(characters, index))
-            .or_else(|| (characters[index] == '"').then(|| skip_normal_string(characters, index)))
-            .or_else(|| {
-                (characters[index] == '\'')
-                    .then(|| skip_character_literal(characters, index))
-                    .flatten()
-            });
-
-        match skipped {
-            Some(next) => {
-                let next = next.min(characters.len()).max(index + 1);
-                mask[index..next].fill(false);
-                index = next;
-            }
-            None => index += 1,
-        }
-    }
-
-    mask
-}
-
-/// Index just past a line or nested block comment starting at `index`, if one starts there.
-fn skip_comment(characters: &[char], index: usize) -> Option<usize> {
-    if characters[index] != '/' {
-        return None;
-    }
-
-    match characters.get(index + 1) {
-        Some('/') => {
-            let mut cursor = index + 2;
-            while cursor < characters.len() && characters[cursor] != '\n' {
-                cursor += 1;
-            }
-            Some(cursor)
-        }
-        Some('*') => {
-            let mut cursor = index + 2;
-            let mut depth = 1_usize;
-            while cursor < characters.len() && depth > 0 {
-                if characters[cursor] == '/' && characters.get(cursor + 1) == Some(&'*') {
-                    depth += 1;
-                    cursor += 2;
-                } else if characters[cursor] == '*' && characters.get(cursor + 1) == Some(&'/') {
-                    depth -= 1;
-                    cursor += 2;
-                } else {
-                    cursor += 1;
-                }
-            }
-            Some(cursor)
-        }
-        _ => None,
-    }
-}
-
-/// Index just past a raw string starting at `index`, if one starts there.
-///
-/// The `r` must not continue an identifier, so `for` and `char` do not open a raw string. An
-/// unterminated raw string runs to end of file, which is what the compiler would do; the
-/// alternative is reading literal text as code.
-fn skip_raw_string(characters: &[char], index: usize) -> Option<usize> {
-    let prefix_len = match characters[index] {
-        'r' => 1,
-        'b' if characters.get(index + 1) == Some(&'r') => 2,
-        _ => return None,
-    };
-
-    if index > 0 && is_identifier_character(characters[index - 1]) {
-        return None;
-    }
-
-    let mut cursor = index + prefix_len;
-    let mut hashes = 0_usize;
-    while characters.get(cursor) == Some(&'#') {
-        hashes += 1;
-        cursor += 1;
-    }
-
-    if characters.get(cursor) != Some(&'"') {
-        return None;
-    }
-    cursor += 1;
-
-    while cursor < characters.len() {
-        if characters[cursor] == '"'
-            && (1..=hashes).all(|offset| characters.get(cursor + offset) == Some(&'#'))
-        {
-            return Some(cursor + 1 + hashes);
-        }
-        cursor += 1;
-    }
-
-    Some(characters.len())
-}
-
-/// Index just past a normal or byte string starting at `index`.
-fn skip_normal_string(characters: &[char], index: usize) -> usize {
-    let mut cursor = index + 1;
-
-    while cursor < characters.len() {
-        match characters[cursor] {
-            '\\' => cursor += 2,
-            '"' => return cursor + 1,
-            _ => cursor += 1,
-        }
-    }
-
-    characters.len()
-}
-
-/// Index just past a character literal starting at `index`, or `None` for a lifetime.
-fn skip_character_literal(characters: &[char], index: usize) -> Option<usize> {
-    let body_start = index + 1;
-
-    let close = if characters.get(body_start) == Some(&'\\') {
-        match characters.get(body_start + 1) {
-            Some('u') if characters.get(body_start + 2) == Some(&'{') => {
-                let mut cursor = body_start + 3;
-                while cursor < characters.len() && characters[cursor] != '}' {
-                    cursor += 1;
-                }
-                cursor + 1
-            }
-            Some('x') => body_start + 4,
-            Some(_) => body_start + 2,
-            None => return None,
-        }
-    } else {
-        body_start + 1
-    };
-
-    (characters.get(close) == Some(&'\'')).then_some(close + 1)
-}
-
-fn is_identifier_character(character: char) -> bool {
-    character.is_alphanumeric() || character == '_'
-}
-
-/// Every `.rs` file under `root`, failing closed on any directory that cannot be read.
-///
-/// A scan that skips an unreadable directory reports coverage it never measured.
-fn walk_rust_files(root: &Path) -> Result<Vec<PathBuf>, String> {
-    let mut files = Vec::new();
-    let mut pending = vec![root.to_path_buf()];
-
-    while let Some(directory) = pending.pop() {
-        let entries = fs::read_dir(&directory)
-            .map_err(|error| format!("failed to read '{}': {error}", directory.display()))?;
-
-        for entry in entries {
-            let entry = entry.map_err(|error| {
-                format!(
-                    "failed to read an entry of '{}': {error}",
-                    directory.display()
-                )
-            })?;
-            let path = entry.path();
-            let metadata = fs::symlink_metadata(&path)
-                .map_err(|error| format!("failed to stat '{}': {error}", path.display()))?;
-
-            if metadata.is_dir() {
-                pending.push(path);
-            } else if metadata.is_file()
-                && path.extension().is_some_and(|extension| extension == "rs")
-            {
-                files.push(path);
-            }
-        }
-    }
-
-    files.sort();
-    Ok(files)
-}
-
-/// Workspace-relative path with `/` separators, so the report reads the same on every platform.
-///
-/// A path component that is not UTF-8 is an error rather than a lossy replacement: the report
-/// names files a reader is expected to open, and a substituted character names a different file.
-fn relative_display_path(workspace_root: &Path, path: &Path) -> Result<String, String> {
-    let relative = path.strip_prefix(workspace_root).unwrap_or(path);
-    let mut segments = Vec::new();
-
-    for component in relative.components() {
-        let segment = component.as_os_str().to_str().ok_or_else(|| {
-            format!(
-                "path '{}' has a component that is not valid UTF-8",
-                relative.display()
-            )
-        })?;
-        segments.push(segment);
-    }
-
-    Ok(segments.join("/"))
-}
-
-fn workspace_root() -> Result<PathBuf, String> {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .map(Path::to_path_buf)
-        .ok_or_else(|| "xtask manifest has no parent directory".to_string())
 }
 
 #[cfg(test)]
