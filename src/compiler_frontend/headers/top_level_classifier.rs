@@ -87,7 +87,9 @@ fn classify_current_item_with_boundary(
             at_statement_boundary,
         },
 
-        TokenKind::TemplateHead => HeaderFileItem::RuntimeTemplate,
+        TokenKind::TemplateHead if at_statement_boundary => HeaderFileItem::RuntimeTemplate,
+
+        TokenKind::TemplateHead => HeaderFileItem::StartBodyToken,
 
         TokenKind::Must | TokenKind::TraitThis => HeaderFileItem::ReservedTraitSyntax,
 

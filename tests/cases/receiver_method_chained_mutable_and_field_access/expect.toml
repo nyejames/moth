@@ -3,4 +3,4 @@ entry = "."
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = "receiver_method_chained_mutable_and_field_access value=8\n"
+rendered_output_exact = "receiver_method_chained_mutable_and_field_access value=8"

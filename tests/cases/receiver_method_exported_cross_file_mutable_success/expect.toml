@@ -3,4 +3,4 @@ entry = "."
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = "receiver_method_exported_cross_file_mutable_success value=0\n"
+rendered_output_exact = "receiver_method_exported_cross_file_mutable_success value=0"

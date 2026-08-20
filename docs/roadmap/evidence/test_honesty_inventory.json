@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "run": {
-    "id": "a896-0-18cd75e5a80e7010",
+    "id": "f0bf-0-18cd794cbb95c8d0",
     "command": "honesty-audit",
     "os": "macos",
     "arch": "aarch64",
@@ -11,7 +11,7 @@
     "thread_count": null,
     "completed": true
   },
-  "generated_at": "2026-08-20T08:24:24Z",
+  "generated_at": "2026-08-20T09:26:45Z",
   "work_id": "test-suite-honesty",
   "base_revision": "f41f93a7a",
   "scanned_roots": [
@@ -19,7 +19,7 @@
     "xtask/src"
   ],
   "scanned_file_count": 1173,
-  "test_owning_file_count": 564,
+  "test_owning_file_count": 565,
   "hard_findings": [],
   "review_findings": [
     {
@@ -2184,7 +2184,7 @@
       "state": "present",
       "path": "target/test-reports/integration_suite_inventory.json",
       "schema_version": 8,
-      "run_id": "a889-18cd75e57b758598",
+      "run_id": "f0a6-18cd794c9050dd68",
       "run_command": "tests --audit",
       "run_completed": true,
       "hard_policy_violation_count": 0,

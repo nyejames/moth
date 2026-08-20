@@ -6,9 +6,9 @@
 WORK_ID: test-suite-honesty
 WORK_SOURCE: docs/roadmap/plans/test-suite-honesty-and-infrastructure-hardening-plan.md
 BASE_REVISION: f41f93a7a (post-TIR, post-benchmark-counters-timers)
-STATUS: active — Phase 9 complete; Phase 10 exposed-defect corrections are next; paused before
-  Phase 11 final review
-CURRENT_SCOPE: Phase 10 corrections for the two reviewed, reproducible exposed failures
+STATUS: active — Phase 10 implementation, validation and interim audit are complete; paused at user
+  request before Phase 11 final review
+CURRENT_SCOPE: Phase 10 closed out for EF-0001 and EF-0002; no Phase 11 work has started
 COMPLETED:
   Phase 0: baseline established (4314 unit tests, 0 ignored, 1699 integration cases correct,
     1851 backend executions); durable inventory at docs/roadmap/evidence/test_honesty_inventory.json;
@@ -290,8 +290,15 @@ COMPLETED:
   separated the sandbox-only socket denial from repository failures. The corrected exposed-failure
   ledger and durable evidence passed interim auditor pass 2 with `audit_clean`; Phase 10 owns the
   fixes and the two entries remain open.
-NEXT_ACTION: reproduce and fix EF-0001 and EF-0002 in Phase 10, then re-run the focused and full
-  code-bearing validation gates before its checkpoint
+  Phase 10 implementation, validation and audit: EF-0001 now classifies only direct
+  statement-boundary template heads as entry runtime fragments, with a header-parser regression;
+  EF-0002 now prepares the composed TIR view once in const-required construction and carries that
+  preparation into folding, with a counter regression. Twelve exact-output fixtures were updated
+  to remove the empty mount separators that EF-0001 had exposed. The interim audit findings were
+  resolved, both entries were closed against this validating checkpoint, and the exposed-failure
+  ledger was removed as required by Phase 10.
+NEXT_ACTION: continue the remaining plan work when resumed, preserving the Phase 11 final-review
+  boundary; do not start Phase 11 final review until explicitly requested
 VALIDATION: Phase 9 baseline (macOS 23.6.0 arm64) — cargo fmt --all -- --check clean;
   just feature-lane-check (0 findings); cargo run --quiet -- tests --audit (1699 cases, 1851
   backend executions); just source-audit (1172 files, 0 findings); just test-honesty-audit
@@ -307,6 +314,21 @@ VALIDATION: Phase 9 baseline (macOS 23.6.0 arm64) — cargo fmt --all -- --check
   integration step. The sandbox-only socket denial in the feature matrix was reproduced as
   passing by the narrow owner test outside the sandbox. Linux and Windows platform legs remain
   CI-owned and were not run on this macOS host.
+  Phase 10 handover validation (macOS 23.6.0 arm64) — cargo fmt --all -- --check clean;
+  just feature-lane-check (0 findings); just source-audit (1172 files, 0 findings);
+  just test-honesty-audit (1173 files, 565 test-owning files, 0 hard findings, 2196
+  dispositioned review occurrences, 0 composed findings, 34 ledger findings with 0 open hard
+  findings); just test-honesty-evidence refreshed the durable inventory with the same counts;
+  just test-feature-matrix outside the sandbox passed all 8 lanes (default, timers,
+  detailed-timers, counters, timers-counters, scoped-blocks, dev-output and xtask); cargo test
+  --workspace --quiet -- --format terse passed 4397 workspace tests, 17 CLI tests and 760 xtask
+  tests; cargo run --quiet -- tests --terse passed 1851/1851; just stress 1 passed all six
+  unit/integration thread lanes; focused regressions for the header classification, const-required
+  preparation reuse, const loop break/continue and borrow_checker_string_memory passed. `just
+  validate` passed completely: Clippy, feature coverage, source audit, workspace tests, integration
+  tests, docs check, bench-ci's 60-case preflight and quick benchmarks, and timers-erasure-check
+  (no-timer binary 8133904 bytes, clean). The counters-only lane still emits the three known
+  dead-code warnings routed to Phase 11; no Linux or Windows leg was run on this macOS host.
   Phase 8 closeout (macOS 23.6.0 arm64) — clippy
   --workspace --all-targets --all-features -D warnings clean; cargo test --workspace 4396+17+760,
   0 failed, 0 ignored (xtask 699 to 760: 61 new tests for the honesty audit, the shared scanner
@@ -372,7 +394,11 @@ VALIDATION: Phase 9 baseline (macOS 23.6.0 arm64) — cargo fmt --all -- --check
 AUDITS: Phase 9 interim auditor pass 2 is audit_clean after resolving two low-severity findings:
   the EF-0002 pending-review wording now records the confirmed compiler defect, and the durable
   open-exposed-failures command path now names the real ledger. `just test-honesty-evidence`
-  regenerated the durable inventory from the corrected path. Phase 8 required repository
+  regenerated the durable inventory from the corrected path. Phase 10 interim auditor pass 1 found
+  one low-severity stale validation-field finding and pass 2 found one low-severity stale AUDITS
+  status sentence; both documentation findings were corrected in this checkpoint. The
+  implementation audit is clean; no final auditor was run because Phase 11 remains deferred. Phase 8
+  required repository
   search pass rerun across src and xtask (is_err/is_ok/
   expect_err/catch_unwind/should_panic; >=, non-empty and is_empty; exists/is_file/is_dir; lossy
   conversions and path unwrap_or_default; temp_dir/SystemTime::now/process::id; discarded results;
@@ -399,24 +425,30 @@ AUDITS: Phase 9 interim auditor pass 2 is audit_clean after resolving two low-se
   remaining report-rendering uses dispositioned; AUD-0001 (Redundancy over tests.support) —
   F01, F02 and F03 corrected on this branch, F04 routed to Phase 11, and F05 decided in Phase 7
   (both helpers retired, deletion left to Phase 11)
-BLOCKERS: none for Phase 10 implementation. Two exposed failures are open in
-  docs/roadmap/plans/test-suite-honesty-exposed-failures.md — EF-0001 (assigned top-level templates
-  are counted as page fragments) and EF-0002 (const-required construction prepares the same
-  composed view twice). Phase 9 confirmed both stronger assertions are valid and Phase 10 owns the
-  corrections; the integration suite and the two counter lanes stay red until they land, which is
-  Patch A's intended state.
-NOTES: Phase 9 confirmed both stronger contracts are valid. Interim auditor pass 2 is clean after
-  correcting stale ledger/evidence metadata; both entries remain open and reproducible. EF-0001 is
-  user-visible page fragment behavior and reproduced at all integration thread counts. EF-0002 is
-  a real duplicate TIR preparation, reproduced in both counter lanes and isolated from the fold itself. Phase 8
-  turned the pre-existing counter-lane failure into a reported one and ledgered it as
-  EF-0002. Root cause: Template::new_const_required prepares the same composed view twice — once at
-  new_nested_template's Stage 6 in TemplatePreparationMode::Value and again in
-  validate_const_required_template_control_flow in TemplatePreparationMode::ConstRequired — so
-  TirPreparationAttempts reads 2 where the test requires 1. Folding is not the second walk;
-  fold_prepared_template consumes the returned preparation, which is the part the test's name is
-  about and the part that works. Phase 9 must decide whether the two modes should share one walk or
-  whether the counter contract is genuinely 2, and only then may the assertion change.
+BLOCKERS: none. The user pause is intentional, and Phase 11 final review remains deferred. Phase 10
+  has complete implementation, validation, interim audit and ledger closeout; no Phase 11 work has
+  started.
+NOTES: Phase 10 closeout notes. EF-0001 is fixed in
+  src/compiler_frontend/headers/top_level_classifier.rs by requiring `at_statement_boundary` for
+  `TokenKind::TemplateHead` to become `HeaderFileItem::RuntimeTemplate`; assigned, returned and
+  nested template heads fall through to body-token handling. The focused regression is
+  `entry_runtime_fragment_count_ignores_assigned_templates` in
+  src/compiler_frontend/headers/tests/parse_file_headers_tests.rs. The integration fixture
+  `borrow_checker_string_memory` remains the user-visible owner; the other changed expectation
+  files only remove the empty mount-event separators caused by the incorrect fragment count.
+  EF-0002 is fixed in the template construction path. `ConstRequiredTemplateConstruction` was
+  replaced by `PreparedTemplateConstruction`; `new_nested_template` now returns the durable
+  `Template` together with its `TemplatePreparation`, and `NestedTemplateParseOptions` selects
+  one `TemplatePreparationMode`. Const-required construction performs one `prepare_tir_view` and
+  passes the carried preparation to folding. Recursive child construction explicitly remains in
+  `TemplatePreparationMode::Value`, preserving the existing loop-constant semantics; the old
+  direct const-required validator is now test-only for its direct-view tests. The focused counter
+  test proves exactly one `TirPreparationAttempts`.
+  The complete Phase 10 diff was reviewed by two interim auditor passes, both entries were closed
+  against this validating checkpoint, and docs/roadmap/plans/test-suite-honesty-exposed-failures.md
+  was deleted as required after its final entry closed. The durable evidence was refreshed by the owner: the new header regression makes
+  the inventory report 565 test-owning files (up from 564); the generated report identity and run
+  metadata changes are expected and belong with this work.
   Phase 8 also found that `cargo test --workspace` has never run the default configuration. xtask
   depends on moth with features = ["timers"] and Cargo unifies features across one resolve graph, so
   the workspace command builds the compiler with timers enabled and cannot compile any
@@ -513,6 +545,67 @@ NOTES: Phase 9 confirmed both stronger contracts are valid. Interim auditor pass
   11) and AUD-0001-F05 (Phase 7, then Phase 11) stay open because both depend on decisions this
   plan owns.
 ```
+
+## Phase 10 closeout handover
+
+Phase 10 is complete and is the checkpoint immediately following
+`a86e8cdd2 checkpoint(test-suite-honesty): complete Phase 9 honesty checkpoint`. Two interim auditor
+passes reviewed the complete Phase 10 slice: both found only low-severity plan-status wording, and
+both findings were corrected before closeout. Do not run `final_auditor` or begin Phase 11 from this
+handover.
+
+Implementation ownership and review points:
+
+- EF-0001 is owned by `src/compiler_frontend/headers/top_level_classifier.rs`. Only a template head
+  at a statement boundary is now classified as an entry runtime fragment. The focused regression is
+  `entry_runtime_fragment_count_ignores_assigned_templates` in
+  `src/compiler_frontend/headers/tests/parse_file_headers_tests.rs`. This preserves the documented
+  distinction between direct top-level page fragments and assigned, returned or nested templates.
+- EF-0002 is owned by the template construction path. `PreparedTemplateConstruction` carries the
+  durable `Template` and its `TemplatePreparation`; `NestedTemplateParseOptions` selects the one
+  preparation mode; const-required construction performs one `prepare_tir_view` and passes the
+  result into folding. Recursive child construction explicitly uses value preparation so existing
+  `template_loop_const_break` and `template_loop_const_continue` semantics do not change. The old
+  direct const-required validator is test-only and must not be restored as a production second walk.
+  The counter regression is
+  `const_required_construction_preparation_is_reused_by_folding` under `benchmark_counters`.
+- The twelve changed exact-output expectations remove only the empty mount-event separators caused
+  by EF-0001's false fragment count. They are not weakened assertions: the rendered content remains
+  exact. The affected cases are `char_in_template`, the four return/result-binding cases and the
+  seven receiver-method cases visible in `git diff --name-only`.
+- `docs/roadmap/evidence/test_honesty_inventory.json` was refreshed by
+  `just test-honesty-evidence`; the owning-file count is now 565 because of the new header test.
+  Keep the generated identity and count changes with Phase 10, and do not manually edit the report
+  back to its Phase 9 value.
+
+Validation already completed for this slice on macOS 23.6.0 arm64: formatting, feature-lane
+coverage, source audit, honesty audit, durable honesty evidence, all eight feature lanes, the
+workspace/CLI/xtask tests (4397/17/760), the complete integration suite (1851/1851), focused
+regressions and `just stress 1`. The first sandboxed feature-matrix run hit the known Unix-socket
+permission restriction; the same matrix passed outside the sandbox. The counters-only lane still
+prints the three known dead-code warnings routed to Phase 11. Linux and Windows remain CI-owned.
+
+The required `just validate` run has now completed directly and passed Clippy, feature coverage,
+source audit, workspace tests, integration tests, docs check, bench-ci's 60-case preflight and quick
+benchmarks, and timers-erasure-check. The no-timer binary was 8133904 bytes and passed the source
+rules. Do not rerun this gate solely because of the earlier pause; record this complete result in the
+checkpoint.
+
+Continuation notes:
+
+1. The Phase 10 checkpoint contains the accepted implementation, focused tests, exact-output updates,
+   generated evidence and this closeout record. The exposed-failure ledger was removed after both
+   entries closed, as required by the Phase 10 section.
+2. Continue the remaining plan work only when resumed. Preserve the Phase 11 items currently called
+   out in this plan, especially AUD-0001-F04/F05, the counters-only warning cleanup and
+   superseded-helper pruning.
+3. Stop before Phase 11 final review unless the user explicitly resumes that phase. Linux and
+   Windows platform legs remain CI-owned and were not run on this macOS host.
+
+Shell note for the next agent: direct commands work in this zsh environment; no `/bin/bash` prefix
+was needed. The only shell issue encountered was using zsh's special `path` array as a loop variable,
+which mutated `PATH` and temporarily made commands such as `sed` unavailable. Use a non-special
+variable name for shell loops.
 
 ## Purpose
 

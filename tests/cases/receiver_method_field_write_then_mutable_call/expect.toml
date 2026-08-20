@@ -3,4 +3,4 @@ entry = "."
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = "receiver_method_field_write_then_mutable_call value=7\n"
+rendered_output_exact = "receiver_method_field_write_then_mutable_call value=7"

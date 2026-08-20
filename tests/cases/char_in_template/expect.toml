@@ -1,4 +1,4 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = "char_in_template  The letter is Z\n"
+rendered_output_exact = "char_in_template  The letter is Z"

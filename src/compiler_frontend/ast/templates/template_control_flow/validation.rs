@@ -9,9 +9,11 @@
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template::TemplateType;
+#[cfg(test)]
+use crate::compiler_frontend::ast::templates::tir::TemplatePreparation;
 use crate::compiler_frontend::ast::templates::tir::{
-    TemplateIrNodeId, TemplateIrNodeKind, TemplateIrStore, TemplatePreparation,
-    TemplatePreparationMode, TemplateTirPhase, TirView, TirViewIdentity, prepare_tir_view,
+    TemplateIrNodeId, TemplateIrNodeKind, TemplateIrStore, TemplatePreparationMode,
+    TemplateTirPhase, TirView, TirViewIdentity, prepare_tir_view,
 };
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
@@ -19,18 +21,19 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use std::collections::HashSet;
 
-/// Validates structured template control flow in a const-required context.
+/// Test-only direct validation entry point for a const-required TIR view.
 ///
-/// Runtime-capable templates keep structured control flow for HIR lowering.
-/// Const-required callers use this narrower entry point so supported forms can
-/// fold now while unsupported const shapes produce source diagnostics instead of
-/// leaking as infrastructure errors during finalization.
+/// Production const construction now performs this preparation once through
+/// `TemplatePreparationMode::ConstRequired` and carries the result into folding.
+/// Tests retain this narrow entry point for exercising view authority and
+/// diagnostic propagation independently of the construction call path.
 ///
 /// WHAT: validates through the template's module-store Composed-or-later
 ///       `TirView` so expression overlays and module-local children are authoritative.
 /// WHY: every production const-required template has completed construction before
 ///      this entry runs. Missing view authority is therefore a compiler invariant,
 ///      not permission to fall back to a raw store walk.
+#[cfg(test)]
 pub(crate) fn validate_const_required_template_control_flow(
     template: &Template,
     tir_store: &TemplateIrStore,

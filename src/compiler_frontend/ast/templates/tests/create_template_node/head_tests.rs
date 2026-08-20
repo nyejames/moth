@@ -1281,7 +1281,8 @@ fn template_if_composition_applies_shared_head_prefix_to_each_branch() {
         &mut string_table,
         NestedTemplateParseOptions::runtime_capable(),
     )
-    .expect("template if should parse through control-flow composition");
+    .expect("template if should parse through control-flow composition")
+    .template;
 
     let branch_chain = expect_branch_chain_node(&template, &context);
 
@@ -2681,7 +2682,8 @@ fn parse_control_flow_template_after_composition(
         &mut string_table,
         NestedTemplateParseOptions::runtime_capable(),
     )
-    .expect("control-flow template should parse through composition");
+    .expect("control-flow template should parse through composition")
+    .template;
 
     (template, context, string_table)
 }
