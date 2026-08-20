@@ -15,6 +15,7 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 
 ## Queued implementation chain
 
+- [Runtime assertion messages and call-argument parser consolidation](./plans/runtime-assertion-messages-and-call-argument-parser-consolidation-plan.md)
 - [Constant evaluation, static control-flow specialisation and type-system architecture](./plans/constant-folding-and-type-system-hot-path-optimization-plan.md)
 - [Path values and resource linking](./plans/path-values-and-resource-linking-plan.md)
 - [Growable collections infallability](./plans/collection-push-fallibility-split-plan.md)
