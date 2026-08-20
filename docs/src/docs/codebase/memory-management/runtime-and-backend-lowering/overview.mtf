@@ -1,14 +1,14 @@
 # Runtime and backend memory lowering
 
-GC baseline and ownership-aware backend paths.
+Physical memory strategies and the collector-free release guarantee.
 
 ## Contract
 
 - Input: validated HIR; borrow facts; validated lifetime topology; selected function set; target assignment; import/export/capability plan; semantic layout identity; builder lifecycle/runtime plan
-- Output: target-specific allocation, GC and ownership representations
-- Decides: backend memory strategy, ownership metadata representation, fallback behaviour for already-legal topology
+- Output: target-specific allocation, region, counted, collected and ownership representations
+- Decides: realisation of the selected memory plan, handle-tag representation, and conservative retention behaviour for already-legal topology
 - Must not decide: source legality, borrow facts, region legality, target partition, or page lifecycle policy
-- Invariant: every backend preserves the same shared, exclusive, copy and move semantics
+- Invariant: every backend preserves the same shared, exclusive, copy and move semantics; a capable full-control release backend must not fall back to a tracing collector
 
 ## Main paths
 
@@ -22,6 +22,7 @@ GC baseline and ownership-aware backend paths.
 
 - `docs/src/docs/codebase/memory-management/runtime-and-backend-lowering/runtime-and-backend-lowering.mtf`
 - `docs/src/docs/codebase/memory-management/ownership-and-drops/overview.mtf`
+- `docs/src/docs/codebase/memory-management/retained-edge-counting/overview.mtf`
 - `docs/src/docs/codebase/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
 - `docs/compiler-design-overview.md`, especially Stage 6, lifetime-region validation, and backend handoff
 - `docs/build-system-design.md`, especially mixed-target planning and runtime/memory

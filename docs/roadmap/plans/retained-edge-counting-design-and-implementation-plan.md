@@ -18,7 +18,7 @@ docs/src/docs/codebase/memory-management/retained-edge-counting/retained-edge-co
 
 Companion to:
 
-- the final memory-management redesign plan
+- the parent plan `docs/roadmap/plans/final-memory-management-redesign-and-implementation-plan.md`
 - `docs/src/docs/codebase/memory-management/overview.mtf`
 - `docs/src/docs/codebase/memory-management/ownership-and-drops/`
 - `docs/src/docs/codebase/memory-management/lifetime-regions-and-escape-validation/`

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
     <title>Memory management | Moth</title>
-    <meta name="description" content="Reference semantics, borrow validation, lifetime regions, ownership and backend memory lowering.">
+    <meta name="description" content="Reference semantics, borrow validation, lifetime topology, explicit groups and collector-free backend lowering.">
     <style>
 /*!
   MOTH CSS CORE (absolute basics CSS reset)
@@ -414,7 +414,7 @@ td {
         </a>
     </div>
 </nav>
-<section class="container"><p><a href="../">Codebase</a> / Memory management</p><h1>Memory management</h1><p><strong>Moth is reference-semantic by default, copy-explicit and move-inferred. It omits explicit reference types and lifetime syntax, not references themselves.</strong></p><p>Moth keeps the source model small. Reads are shared, copies are explicit and mutation has to announce itself.</p><p>Borrow validation enforces exclusive mutation and optional transfer safety. Lifetime-region validation enforces one lifetime owner and legal retained edges. A GC representation keeps execution practical while ownership analysis leaves room for future allocation and deterministic-drop optimisations.</p></section>
+<section class="container"><p><a href="../">Codebase</a> / Memory management</p><h1>Memory management</h1><p><strong>Moth is reference-semantic by default, copy-explicit and move-inferred. It omits explicit reference types and lifetime syntax, not references themselves.</strong></p><p>Moth keeps the source model small. Reads are shared, copies are explicit and mutation has to announce itself.</p><p>Memory safety comes from static proof, not from a collector. Borrow validation enforces exclusive mutation and last-use safety. Lifetime-topology validation enforces one lifetime owner per allocation family and legal retained edges. Both run under every backend and every build profile.</p><p>Garbage collection is a permitted representation of a topology that is already proven legal. It is not the correctness baseline, and release builds on backends that advertise full memory control lower every accepted program without a tracing collector.</p></section>
 <section class="container"><h2>Shared access vs copy</h2><p>Existing values use shared, read-only access by default. Binding a new name to an existing value doesn&#39;t copy it. Use <code>copy</code> when you need an independent value.</p><p>Shared aliases use last-potential-use activity, not pure lexical lifetime. After the final potential use of a shared alias, later mutation may proceed.</p><pre style="
     padding-left: 1em;
     border-radius: 5px;
@@ -453,22 +453,25 @@ copied_items <span class='moth-code-operator'>=</span> <span class='moth-code-ke
     white-space: pre;
     overflow-x: auto;
 "><code class='codeblock'><span class='moth-code-function'>change</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>{</span><span class='moth-code-string'>&quot;fresh&quot;</span><span class='moth-code-delimiter'>}</span><span class='moth-code-delimiter'>)</span></code></pre></section>
-<section class="container"><h2>Lifetime owners</h2><p>Every runtime allocation has exactly one semantic lifetime owner. Multiple bindings or fields may alias that allocation without becoming additional owners.</p><p>An object may retain a reference only when the referenced allocation belongs to the same lifetime region or to a region statically known to outlive the retaining object.</p><p>The compiler rejects illegal sibling sharing and cross-region cycles even under GC. GC is a permitted representation for a statically legal topology, not a way to accept invalid retained edges.</p><p>Declared <code>group</code> / <code>into</code> syntax is accepted end-state design with implementation deferred. See <a href="./declared-memory-groups">Declared memory groups</a> for the source contract and <a href="./lifetime-regions-and-escape-validation">Lifetime regions and escape validation</a> for the general topology model.</p></section>
+<section class="container"><h2>Lifetime owners</h2><p>Every runtime allocation family has exactly one semantic lifetime owner. Multiple bindings or fields may alias that allocation without becoming additional owners.</p><p>An object may retain a reference only when the referenced allocation belongs to the same lifetime region or to a region statically known to outlive the retaining object.</p><p>Inferred regions are compiler-generated intervals over control flow, not plain lexical scopes. The compiler starts from the narrowest valid owner and widens only along the nearest enclosing ancestor. It never promotes across independently ending siblings and never invents a page or application owner to avoid a diagnostic.</p><p>The compiler rejects illegal sibling sharing and cross-region cycles on every backend. GC is a permitted representation for a statically legal topology, not a way to accept invalid retained edges.</p><p>Declared <code>group</code> / <code>into</code> syntax is accepted end-state design with implementation deferred. It is the only source mechanism for reference cycles. See <a href="./declared-memory-groups">Declared memory groups</a> for the source contract and <a href="./lifetime-regions-and-escape-validation">Lifetime regions and escape validation</a> for the general topology model.</p></section>
 <section class="container"><h2>How the compiler layers it</h2><pre style="
     padding-left: 1em;
     border-radius: 5px;
     max-width: 100%;
     white-space: pre;
     overflow-x: auto;
-"><code class='codeblock'>source access and copy rules
+"><code class='codeblock'>source access, copy and group syntax
     -&gt; AST access-mode, placement and freshness validation
     -&gt; validated HIR with explicit places and control flow
-    -&gt; borrow validation and optional transfer facts
-    -&gt; lifetime-region and escape validation
-    -&gt; build-owned reachability, lifecycle roots and target planning
-    -&gt; GC, region, ownership-aware or other validated backend lowering</code></pre></section>
-<section class="container"><h2>Detailed pages</h2><ul><li><a href="./access-and-aliasing">Access and aliasing</a>: shared reads, explicit copies and <code>~</code> access</li><li><a href="./borrow-validation">Borrow validation</a>: roots, joins, optional transfer safety and facts</li><li><a href="./lifetime-regions-and-escape-validation">Lifetime regions and escape validation</a>: one owner, retained edges, escapes and region topology</li><li><a href="./declared-memory-groups">Declared memory groups</a>: accepted deferred <code>group</code> / <code>into</code> semantics and hard destination lifetimes</li><li><a href="./ownership-and-drops">Ownership and drops</a>: inferred transfer, unified ABI and conditional destruction</li><li><a href="./runtime-and-backend-lowering">Runtime and backend lowering</a>: GC baseline and ownership-aware backend paths</li></ul></section>
-<section class="container"><h2>Current support</h2><p>See <a href="../../progress">Progress matrix</a> for what is implemented today.</p></section>
+    -&gt; borrow and last-use analysis
+    -&gt; local allocation-family and retained-edge constraints
+    -&gt; project and package summary instantiation
+    -&gt; complete lifetime-topology validation
+    -&gt; non-lexical interval, frontier and epoch completion
+    -&gt; memory-strategy planning
+    -&gt; backend memory lowering</code></pre></section>
+<section class="container"><h2>Detailed pages</h2><ul><li><a href="./access-and-aliasing">Access and aliasing</a>: shared reads, explicit copies and <code>~</code> access</li><li><a href="./borrow-validation">Borrow validation</a>: roots, joins, last-use facts and affine transfer safety</li><li><a href="./lifetime-regions-and-escape-validation">Lifetime regions and escape validation</a>: one owner, retained edges, non-lexical intervals, cleanup frontiers and escapes</li><li><a href="./declared-memory-groups">Declared memory groups</a>: accepted deferred <code>group</code> / <code>into</code> semantics and hard bulk lifetimes</li><li><a href="./retained-edge-counting">Retained Edge Counting</a>: the narrow counted strategy for runtime-many persistent retained edges</li><li><a href="./ownership-and-drops">Affine ownership and drops</a>: affine cleanup responsibility, the ownership ABI and conditional destruction</li><li><a href="./runtime-and-backend-lowering">Runtime and backend lowering</a>: physical strategies and the collector-free release guarantee</li></ul></section>
+<section class="container"><h2>Current support</h2><p>See <a href="../../progress">Progress matrix</a> for what is implemented today. Most of this model is accepted design with implementation deferred.</p></section>
 <script>
 function __moth_is_ref(value) {
 return value !== null && typeof value === "object" && value.__moth_ref === true;

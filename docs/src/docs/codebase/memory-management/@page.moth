@@ -1,7 +1,7 @@
 @styles navbar, section, theme_head, codeblock
 
 page_title #= "Memory management"
-page_description #= "Reference semantics, borrow validation, lifetime regions, ownership and backend memory lowering."
+page_description #= "Reference semantics, borrow validation, lifetime topology, explicit groups and collector-free backend lowering."
 page_head #= theme_head
 
 #[navbar]
@@ -15,7 +15,9 @@ page_head #= theme_head
 
     Moth keeps the source model small. Reads are shared, copies are explicit and mutation has to announce itself.
 
-    Borrow validation enforces exclusive mutation and optional transfer safety. Lifetime-region validation enforces one lifetime owner and legal retained edges. A GC representation keeps execution practical while ownership analysis leaves room for future allocation and deterministic-drop optimisations.
+    Memory safety comes from static proof, not from a collector. Borrow validation enforces exclusive mutation and last-use safety. Lifetime-topology validation enforces one lifetime owner per allocation family and legal retained edges. Both run under every backend and every build profile.
+
+    Garbage collection is a permitted representation of a topology that is already proven legal. It is not the correctness baseline, and release builds on backends that advertise full memory control lower every accepted program without a tracing collector.
 ]
 
 #[section, $md:
@@ -63,26 +65,31 @@ page_head #= theme_head
 #[section, $md:
     ## Lifetime owners
 
-    Every runtime allocation has exactly one semantic lifetime owner. Multiple bindings or fields may alias that allocation without becoming additional owners.
+    Every runtime allocation family has exactly one semantic lifetime owner. Multiple bindings or fields may alias that allocation without becoming additional owners.
 
     An object may retain a reference only when the referenced allocation belongs to the same lifetime region or to a region statically known to outlive the retaining object.
 
-    The compiler rejects illegal sibling sharing and cross-region cycles even under GC. GC is a permitted representation for a statically legal topology, not a way to accept invalid retained edges.
+    Inferred regions are compiler-generated intervals over control flow, not plain lexical scopes. The compiler starts from the narrowest valid owner and widens only along the nearest enclosing ancestor. It never promotes across independently ending siblings and never invents a page or application owner to avoid a diagnostic.
 
-    Declared `group` / `into` syntax is accepted end-state design with implementation deferred. See @./declared-memory-groups (Declared memory groups) for the source contract and @./lifetime-regions-and-escape-validation (Lifetime regions and escape validation) for the general topology model.
+    The compiler rejects illegal sibling sharing and cross-region cycles on every backend. GC is a permitted representation for a statically legal topology, not a way to accept invalid retained edges.
+
+    Declared `group` / `into` syntax is accepted end-state design with implementation deferred. It is the only source mechanism for reference cycles. See @./declared-memory-groups (Declared memory groups) for the source contract and @./lifetime-regions-and-escape-validation (Lifetime regions and escape validation) for the general topology model.
 ]
 
 #[section, $md:
     ## How the compiler layers it
 
     [codeblock, $code("text"):
-        source access and copy rules
+        source access, copy and group syntax
             -> AST access-mode, placement and freshness validation
             -> validated HIR with explicit places and control flow
-            -> borrow validation and optional transfer facts
-            -> lifetime-region and escape validation
-            -> build-owned reachability, lifecycle roots and target planning
-            -> GC, region, ownership-aware or other validated backend lowering
+            -> borrow and last-use analysis
+            -> local allocation-family and retained-edge constraints
+            -> project and package summary instantiation
+            -> complete lifetime-topology validation
+            -> non-lexical interval, frontier and epoch completion
+            -> memory-strategy planning
+            -> backend memory lowering
     ]
 ]
 
@@ -90,15 +97,16 @@ page_head #= theme_head
     ## Detailed pages
 
     - @./access-and-aliasing (Access and aliasing): shared reads, explicit copies and `~` access
-    - @./borrow-validation (Borrow validation): roots, joins, optional transfer safety and facts
-    - @./lifetime-regions-and-escape-validation (Lifetime regions and escape validation): one owner, retained edges, escapes and region topology
-    - @./declared-memory-groups (Declared memory groups): accepted deferred `group` / `into` semantics and hard destination lifetimes
-    - @./ownership-and-drops (Ownership and drops): inferred transfer, unified ABI and conditional destruction
-    - @./runtime-and-backend-lowering (Runtime and backend lowering): GC baseline and ownership-aware backend paths
+    - @./borrow-validation (Borrow validation): roots, joins, last-use facts and affine transfer safety
+    - @./lifetime-regions-and-escape-validation (Lifetime regions and escape validation): one owner, retained edges, non-lexical intervals, cleanup frontiers and escapes
+    - @./declared-memory-groups (Declared memory groups): accepted deferred `group` / `into` semantics and hard bulk lifetimes
+    - @./retained-edge-counting (Retained Edge Counting): the narrow counted strategy for runtime-many persistent retained edges
+    - @./ownership-and-drops (Affine ownership and drops): affine cleanup responsibility, the ownership ABI and conditional destruction
+    - @./runtime-and-backend-lowering (Runtime and backend lowering): physical strategies and the collector-free release guarantee
 ]
 
 #[section, $md:
     ## Current support
 
-    See @../../progress (Progress matrix) for what is implemented today.
+    See @../../progress (Progress matrix) for what is implemented today. Most of this model is accepted design with implementation deferred.
 ]

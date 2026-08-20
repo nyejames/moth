@@ -11,11 +11,10 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 
 ## Active implementation work
 
-- [New memory management design — documentation updates](./plans/final-memory-management-redesign-and-implementation-plan.md) — first active slice after test-suite hardening. This slice migrates the canonical memory-management documentation and roadmap status to the accepted final model; compiler implementation remains deferred until the documentation authority is current.
+- [Frontend module compilation ownership cleanup](./plans/frontend-module-compilation-ownership-cleanup-plan.md)
 
 ## Queued implementation chain
 
-- [Frontend module compilation ownership cleanup](./plans/frontend-module-compilation-ownership-cleanup-plan.md)
 - [Constant evaluation, static control-flow specialisation and type-system architecture](./plans/constant-folding-and-type-system-hot-path-optimization-plan.md)
 - [Path values and resource linking](./plans/path-values-and-resource-linking-plan.md)
 - [Growable collections infallability](./plans/collection-push-fallibility-split-plan.md)
@@ -45,11 +44,18 @@ Do not mark a plan active unless its current-state capsule says it is active.
 
 These items are genuinely deferred. They are not current implementation work. Each item links to its owning plan or stays here only when no plan exists yet.
 
-## Region based memory management syntax and ownership-aware Wasm completion
+## Collector-free memory implementation
 
 Canonical memory design lives under [the memory management design docs](docs/src/docs/codebase/memory-management).
 
-Accepted end-state grouped-memory semantics live under [declared memory groups](docs/src/docs/codebase/memory-management/declared-memory-groups). Implementation sequencing and deferred follow-up live in [grouped memory implementation roadmap](docs/roadmap/plans/grouped-memory-design.md). The work remains deferred and is not automatically active or queued merely because the design is accepted. It is a likely prerequisite to final ownership-aware Wasm completion.
+The accepted end state is mandatory static lifetime topology with a collector-free release guarantee for backends that advertise full memory control. GC is a permitted representation for an already legal topology on debug profiles and GC-native backends. It is not the semantic correctness baseline and it cannot legalise unproven topology.
+
+Two plans own this work:
+
+- [Final memory-management redesign](./plans/final-memory-management-redesign-and-implementation-plan.md) is the parent authority for source semantics, analysis boundaries, inferred regions, cleanup frontiers, explicit groups, physical memory planning and backend parity.
+- [Retained Edge Counting](./plans/retained-edge-counting-design-and-implementation-plan.md) is the sole detailed owner of REC analysis, the two-bit handle ABI, counters and lowering.
+
+Milestone A of the parent plan (documentation authority migration) is complete. Every implementation phase from Phase 2 onward remains deferred and is not automatically active or queued merely because the design is accepted. Declared groups, lifetime topology, cleanup frontiers, REC and collector-free verification each advance as separate progress-matrix rows.
 
 Build profiles may vary optional optimisation-analysis effort and physical allocation strategy. They must run semantically equivalent mandatory borrow and lifetime-topology validation and must not change source legality.
 
@@ -106,7 +112,6 @@ performs semantic symbol resolution or syntax diagnostics.
 - additional target builders and capability surfaces
 - profiling-backed frontend optimisations and the deferred post-TIR template investigations linked above
 - future Component Model integration
-- ownership optimisation deferred until after GC-first correctness
 - external non-scalar constant design: string slices, collections and opaque-type external constants in const contexts
 - private const and config follow-ups: consume HIR const metadata in borrow checking, temporary-local reduction and constant propagation
 - `moth new` follow-ups: non-interactive `--default`, template selection, project type aliases, richer scaffold presets and optional package or dev tooling setup

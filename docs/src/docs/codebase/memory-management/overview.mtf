@@ -14,42 +14,92 @@ Companion authorities:
 
 The source language stays small: existing values use shared access by default, mutation requires explicit exclusive access, copies are explicit and moves are inferred by the compiler.
 
-These pages record accepted memory model and target backend architecture. They include design decisions that may not yet be fully implemented, particularly around lifetime-region analysis, grouped memory and ownership-aware Wasm lowering.
+These pages record accepted memory model and target backend architecture. They include design decisions that are not yet implemented, particularly around lifetime-topology validation, retained-edge liveness, grouped memory, Retained Edge Counting and collector-free backend lowering.
 
 They are not an implementation-status report. Use `docs/src/docs/progress/@page.moth` for current support and major gaps.
 
 ## The model in one paragraph
 
-Moth is semantically GC-safe and reference-semantic. Existing values use shared, read-only access by default. Mutation requires explicit exclusive access. Copies are explicit, moves are inferred and ownership-aware destruction is an optimisation layered over mandatory borrow validation and mandatory lifetime-topology validation.
+Moth is reference-semantic and statically memory-safe. Existing values use shared, read-only access by default. Mutation requires explicit exclusive access. Copies are explicit and transfer is inferred. Memory safety comes from mandatory borrow validation and mandatory lifetime-topology validation, not from a collector. Every allocation family has exactly one statically proven semantic lifetime owner, and every retained edge must point to storage that lives at least as long as the container holding it.
 
-If ownership optimisation cannot be proven or is not useful for a backend, the value remains GC-managed without changing program behaviour. GC cannot make an invalid or unproven lifetime topology legal.
+Garbage collection is a permitted physical representation of a topology that has already been proven legal. It is not the semantic correctness baseline. GC cannot legalise an invalid or unproven topology, and a release build on a backend that advertises full memory control must not fall back to a tracing collector.
 
-## Two proof layers
+## Mandatory proof and physical strategy
 
 **Mandatory semantic proof**
 
 - access and exclusivity legality
-- alias relationships
+- alias relationships and last potential use
 - lifetime owner and region legality
 - retained-edge outlives relationships
 - escape legality
 - cycle legality
 - external-boundary legality
 
-User-authored topology that is invalid or cannot be proven legal produces a structured `CompilerDiagnostic`. Missing or inconsistent compiler-owned summaries, boundary classifications, lifecycle roots, or metadata produce `CompilerError`.
+User-authored topology that is invalid or cannot be proven legal produces a structured `CompilerDiagnostic`. Missing or inconsistent compiler-owned summaries, boundary classifications, lifecycle roots or metadata produce `CompilerError`.
 
-**Optional optimisation proof**
+**Physical strategy selection**
 
-- final-use transfer
-- deterministic drop placement
-- retain/drop elimination
-- stack, arena or region allocation
-- collector elision
-- ownership specialisation
+After topology is proven, the compiler selects a physical strategy per allocation family:
 
-Failure to prove an optimisation must preserve semantics through a conservative representation such as GC. It must not reject the program.
+- stack or inline placement
+- static affine cleanup at a proven final use
+- inferred region allocation with a complete exit
+- explicit-group bulk reclamation
+- Retained Edge Counting for unresolved runtime-many persistent edges
+- host collection on debug profiles and GC-native backends
 
-Do not treat "ownership unavailable" and "topology unproven" as the same fallback case. Missing optimisation proof may use GC. Missing topology proof is a source diagnostic.
+Strategy selection changes memory quality, never source legality. A missing physical strategy after successful topology validation is a `CompilerError`, not a silent collector fallback.
+
+Do not treat "no precise strategy found" and "topology unproven" as the same case. The first is a planning outcome bounded by the collector-free guarantee. The second is a source diagnostic.
+
+## The six cooperating mechanisms
+
+The mechanisms are ordered. A later mechanism consumes validated facts from earlier owners and must not reconstruct them.
+
+[table:
+    [th:
+        [: **Mechanism**]
+        [: **Owns**]
+        [: **Does not own**]
+    ]
+
+    [td:
+        [: Borrow and last-use analysis]
+        [: access conflicts, alias activity, final potential uses, optional affine transfer]
+        [: lifetime owner assignment, REC selection, physical drops]
+    ]
+
+    [td:
+        [: Lifetime topology]
+        [: allocation families, retained edges, outlives constraints, escapes, non-lexical intervals, cleanup frontiers, lifecycle roots]
+        [: runtime ownership tags, allocator layout, target lowering]
+    ]
+
+    [td:
+        [: Affine Ownership ABI]
+        [: the runtime path that may perform individual cleanup]
+        [: lifetime legality, result provenance, alias counting]
+    ]
+
+    [td:
+        [: Explicit groups]
+        [: hard source-declared bulk lifetimes, count-free cycles, group exits]
+        [: individual early cleanup, REC, dynamic sharing outside the group]
+    ]
+
+    [td:
+        [: Retained Edge Counting]
+        [: unresolved runtime-many persistent retained-edge obligations]
+        [: ordinary aliases, legality, cycles, source types]
+    ]
+
+    [td:
+        [: Physical memory planning]
+        [: stack placement, affine heap cleanup, inferred arenas, explicit-group arenas, REC layouts, drop coalescing]
+        [: source validity, borrow rules, lifetime topology]
+    ]
+]
 
 ## Rules every contributor must know
 
@@ -59,44 +109,73 @@ Do not treat "ownership unavailable" and "topology unproven" as the same fallbac
 
 **3. `~` requests exclusive access.** `~place` applies to an existing mutable place. It requests temporary mutation-capable access and excludes conflicting access. It is not a move marker or a type identity. Fresh rvalues satisfy ordinary mutable parameters without source `~`. Mutable receivers always require an existing mutable place.
 
-**4. Inferred transfer is optional.** There is no explicit move syntax. The compiler may transfer destruction responsibility only at proven final-use points. When proof is unavailable, the operation remains a borrow. Lack of transfer proof must not reject an otherwise valid program.
+**4. Last-use analysis is central.** There is no explicit move syntax. Alias activity is path-sensitive and non-lexical, branches are analysed independently and loops use fixed-point future-use reasoning. The compiler may transfer affine cleanup responsibility only where every relevant path proves no later source use. When transfer is not proven, the operation remains a borrow and the program stays valid.
 
-**5. Borrow validation is mandatory.** Shared and exclusive conflicts are checked under every backend, including GC-only backends.
+**5. Borrow validation is mandatory.** Shared and exclusive conflicts are checked under every backend and every profile, including GC-native backends.
 
-**6. One lifetime owner and stored-edge legality.** Every allocation has exactly one semantic lifetime owner. An object may retain a reference only when the referenced allocation belongs to the same lifetime region or to a region statically known to outlive the retaining object (`R_value >= R_container`).
+**6. One lifetime owner and retained-edge legality.** Every allocation family has exactly one semantic lifetime owner. An object may retain a reference only when the referenced allocation belongs to the same lifetime region or to a region statically known to outlive the retaining object (`R_value >= R_container`).
 
-**7. Lifetime-region validation is mandatory.** Lifetime topology is a backend-neutral source-legality check after borrow validation. GC cannot bypass it. Build profiles may vary optional optimisation-analysis effort and physical allocation strategy. They must run semantically equivalent mandatory borrow and lifetime-topology validation and must not change source legality.
+**7. Lifetime-topology validation is mandatory.** Lifetime topology is a backend-neutral source-legality check after borrow validation. GC cannot bypass it. Build profiles may vary optional optimisation-analysis effort and physical allocation strategy. They must run semantically equivalent mandatory borrow and lifetime-topology validation and must not change source legality.
 
-**8. Backend representation is optional.** GC, internal RC, arenas, handles, stack storage and hybrid representations may realise a topology already proven legal. Source-visible RC and unrestricted dynamic shared ownership remain outside the language.
+**8. Inferred regions are non-lexical.** Implicit lifetime regions are compiler-generated CFG intervals, not merely lexical scopes. The compiler starts from the narrowest valid candidate owner and may widen only along the nearest existing ancestor on one ordered lifetime chain. It must not promote laterally across independently ending siblings, and it must not invent a page, application or process owner to avoid a diagnostic.
+
+**9. Retained-edge liveness can end a region early.** A final cleanup frontier is a CFG point after which every relevant retained edge into an allocation family or inferred region is proven gone. A collection may outlive the region whose values it once held.
+
+**10. Cycles require an explicit group.** Implicit lifetime inference never invents a cyclic region. Direct source-created reference cycles are legal only inside one declared group, and group-owned storage is reclaimed in bulk at group exit.
+
+**11. Release builds on capable backends are collector-free.** There is no source-visible or project-visible no-GC mode. Backends declare whether they support collector-free release lowering, and a capable backend must not silently fall back to a tracing or reachability collector. REC is a selective retained-edge strategy, not the correctness fallback.
+
+## Collector-free correctness argument
+
+For every accepted allocation family `A`:
+
+1. `A` has exactly one statically proven semantic lifetime owner `R`.
+2. Every retained edge into `A` is legal under the outlives relation.
+3. Borrow validation prevents conflicting access and use after affine transfer.
+4. Last-use analysis may move or discharge individual cleanup responsibility earlier.
+5. A complete cleanup frontier may end `R` before the retaining aggregate itself dies.
+6. Runtime-many independent persistent edges may use REC for earlier cleanup.
+7. Explicit-group-owned values remain until their one bulk exit.
+8. If no earlier strategy applies, `A` remains alive until `R` ends.
+9. When `R` ends, no surviving legal value can retain an edge into `R`.
+
+A full-control backend can therefore reclaim every remaining allocation in `R` without tracing runtime reachability. The proof guarantees correctness. Memory quality depends on interval precision, cleanup frontiers, affine transfer, REC selection, field splitting and physical region planning.
 
 ## Goals and tradeoffs
 
 - Unconditional memory safety under all backends and profiles.
 - A predictable source model without reference types, lifetime syntax or move keywords.
-- Stronger static proof improves performance without changing language semantics.
+- Identical source legality on every backend and profile.
+- Stronger static proof improves memory quality without changing language semantics.
 - Conservative topology analysis may reject unproven structures.
-- Optional ownership proof may fall back without rejection.
-- Runtime checks and collection may remain where optimisation is unavailable.
+- Conservative retention is the acceptable failure mode for imprecise planning; rejecting legal source is not.
 
 ## Compiler and backend layers
 
 [codeblock, $code("text"):
-    source access and copy rules
+    source access, copy and group syntax
         -> AST access-mode, placement and freshness validation
         -> validated HIR with explicit places and control flow
-        -> borrow validation and optional transfer facts
-        -> lifetime-region and escape validation
-        -> build-owned reachability, lifecycle roots and target planning
-        -> GC, region, ownership-aware or other validated backend lowering
+        -> borrow and last-use analysis
+        -> local allocation-family and retained-edge constraints
+        -> exported lifetime and retention summaries
+        -> project and package summary instantiation
+        -> complete lifetime-topology validation
+        -> non-lexical interval, frontier and epoch completion
+        -> field-sensitive family splitting where implemented
+        -> memory-strategy planning
+        -> target partition and target validation
+        -> backend memory lowering
 ]
 
-Local module compilation produces local lifetime constraints and exported summaries. Project/link analysis instantiates those summaries over the reachable call graph and builder-supplied lifecycle roots. Backends receive a validated topology and may not reconsider source legality.
+Local module compilation produces local lifetime constraints and exported summaries. Project/link analysis instantiates those summaries over the reachable call graph and builder-supplied lifecycle roots. Backends receive a validated topology and a memory plan, and may not reconsider source legality.
 
-- AST validates source access syntax, mutable call requirements and explicit copies.
+- AST validates source access syntax, mutable call requirements, explicit copies and group placement.
 - HIR represents places and control flow explicitly and materialises fresh mutable call arguments where necessary.
-- Borrow validation enforces exclusivity, alias safety and optional transfer safety.
-- Lifetime-region validation enforces one owner, retained-edge legality, escapes and cycles.
-- Backend lowering applies GC, ownership metadata, conditional destruction or specialisation without changing semantics.
+- Borrow validation enforces exclusivity, alias safety and optional affine transfer safety.
+- Lifetime-topology validation enforces one owner, retained-edge legality, escapes, frontiers and cycles.
+- Memory-strategy planning selects the physical representation for each validated allocation family.
+- Backend lowering realises that plan without changing semantics.
 
 ## Task-reading guide
 
@@ -114,13 +193,13 @@ Local module compilation produces local lifetime constraints and exported summar
     ]
 
     [td:
-        [: HIR, borrow checker, alias diagnostics or reactivity facts]
+        [: HIR, borrow checker, last-use facts, alias diagnostics or reactivity facts]
         [: `docs/src/docs/codebase/memory-management/borrow-validation/overview.mtf`]
         [: `docs/src/docs/codebase/memory-management/borrow-validation/borrow-validation.mtf`]
     ]
 
     [td:
-        [: Returns, escaping aliases, regions, reactive lifetime roots, cross-region cycles or external retention]
+        [: Returns, escaping aliases, regions, non-lexical intervals, reactive lifetime roots, cross-region cycles or external retention]
         [:
             - `docs/src/docs/codebase/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
             - `docs/src/docs/codebase/memory-management/borrow-validation/overview.mtf`
@@ -129,6 +208,24 @@ Local module compilation produces local lifetime constraints and exported summar
             - `docs/src/docs/codebase/memory-management/lifetime-regions-and-escape-validation/lifetime-regions-and-escape-validation.mtf`
             - `docs/src/docs/codebase/memory-management/declared-memory-groups/declared-memory-groups.mtf`
         ]
+    ]
+
+    [td:
+        [: Collection retention effects, whole-domain kills, `clear`, cleanup frontiers or region epochs]
+        [:
+            - `docs/src/docs/codebase/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
+            - `docs/src/docs/codebase/memory-management/retained-edge-counting/overview.mtf`
+        ]
+        [:
+            - `docs/src/docs/codebase/memory-management/lifetime-regions-and-escape-validation/lifetime-regions-and-escape-validation.mtf`
+            - `docs/src/docs/codebase/memory-management/retained-edge-counting/retained-edge-counting.mtf`
+        ]
+    ]
+
+    [td:
+        [: REC selection, elision, counters, tagged handles or iterative destruction]
+        [: `docs/src/docs/codebase/memory-management/retained-edge-counting/overview.mtf`]
+        [: `docs/src/docs/codebase/memory-management/retained-edge-counting/retained-edge-counting.mtf`]
     ]
 
     [td:
@@ -141,7 +238,7 @@ Local module compilation produces local lifetime constraints and exported summar
     ]
 
     [td:
-        [: Moves, last use, control-flow exits or drop placement]
+        [: Last use, affine cleanup transfer, control-flow exits or drop placement]
         [:
             - `docs/src/docs/codebase/memory-management/ownership-and-drops/overview.mtf`
             - `docs/src/docs/codebase/memory-management/borrow-validation/overview.mtf`
@@ -153,7 +250,7 @@ Local module compilation produces local lifetime constraints and exported summar
     ]
 
     [td:
-        [: JS, Wasm, runtime handles, ABI, external boundaries or memory lowering]
+        [: JS, Wasm, runtime handles, ABI, external boundaries, memory lowering or collector-free verification]
         [:
             - `docs/src/docs/codebase/memory-management/runtime-and-backend-lowering/overview.mtf`
             - `docs/src/docs/codebase/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
@@ -161,7 +258,7 @@ Local module compilation produces local lifetime constraints and exported summar
         ]
         [:
             - `docs/src/docs/codebase/memory-management/runtime-and-backend-lowering/runtime-and-backend-lowering.mtf`
-            - `docs/src/docs/codebase/memory-management/lifetime-regions-and-escape-validation/lifetime-regions-and-escape-validation.mtf`
+            - `docs/src/docs/codebase/memory-management/retained-edge-counting/retained-edge-counting.mtf`
             - `docs/src/docs/codebase/memory-management/ownership-and-drops/ownership-and-drops.mtf`
         ]
     ]
@@ -180,11 +277,15 @@ Local module compilation produces local lifetime constraints and exported summar
 
 ## Hard invariants
 
-- GC-only and ownership-aware lowering preserve the same source semantics.
+- Every backend and profile accepts and rejects exactly the same source.
 - Borrow validation reads HIR and writes side tables. It does not rewrite HIR or perform backend lowering.
-- Lifetime-region validation is mandatory, backend-independent and profile-independent.
-- Every allocation has exactly one semantic lifetime owner.
+- Lifetime-topology validation is mandatory, backend-independent and profile-independent.
+- Every allocation family has exactly one semantic lifetime owner.
 - GC cannot bypass topology validation or legalise invalid retained edges.
-- The ownership bit records destruction responsibility only.
-- Backends receive validated topology and may not reconsider source legality.
-- No compiler or backend path may rely on unchecked aliasing or undefined behaviour to make the ownership model work.
+- A capable full-control release backend must not fall back to a tracing or reachability collector.
+- A missing physical strategy after successful topology validation is `CompilerError`.
+- Affine cleanup responsibility may move or be discharged, but it never duplicates.
+- REC counts persistent retained edges only. It never counts ordinary aliases and never establishes legality.
+- Group-owned storage is count-free, is never released individually and is the only source mechanism for cycles.
+- Backends receive validated topology and a memory plan, and may not reconsider source legality.
+- No compiler or backend path may rely on unchecked aliasing or undefined behaviour to make the memory model work.

@@ -11,7 +11,7 @@ Companion authorities:
 - `docs/compiler-design-overview.md` for core compiler architecture
 - `docs/src/docs/codebase/language/overview.mtf` and the canonical unsuffixed references it selects for source syntax and language semantics
 - `docs/src/docs/design-scope/` for design bias and scope boundaries
-- `docs/src/docs/codebase/memory-management/overview.mtf` for reference semantics, borrow validation, lifetime topology, declared groups, ownership, GC and backend memory lowering
+- `docs/src/docs/codebase/memory-management/overview.mtf` for reference semantics, borrow validation, lifetime topology, retained-edge liveness, declared groups, affine ownership, Retained Edge Counting and backend memory lowering
 - `docs/src/docs/codebase/style-guide/style-guide.mtf` for implementation standards
 - `docs/src/docs/progress/@page.moth` for current support and backend coverage
 - `docs/roadmap/roadmap.md` and `docs/roadmap/plans/` for implementation order and genuinely deferred design
@@ -1218,11 +1218,28 @@ Project and package link planning instantiates local lifetime summaries with bui
 
 `ProjectCompilation` or the link plan conceptually carries project-level validated lifetime topology. Exact Rust shape remains open.
 
-Builder-supplied page, mount, request, frame and arena roots are lifecycle inputs, not builder-specific source-law exceptions. Builder lifecycles cannot change language validity.
+Builder-supplied page, mount, request, frame and arena roots are lifecycle inputs, not builder-specific source-law exceptions. Builder lifecycles cannot change language validity. Lifecycle-root instantiation is what lets reactive and mounted storage that outlives a lexical function still satisfy one lifetime owner and the retained-edge outlives rule.
 
-Exported lifetime summaries participate in the public-interface fingerprint. Topology-relevant implementation and link facts invalidate affected assemblies. Exact persistent encoding remains deferred.
+Exported lifetime summaries participate in the public-interface fingerprint. They carry result provenance, retention, extraction, cardinality, whole-domain kill and cleanup-frontier facts, and never carry donor-local allocation-family, region or counter indexes. Topology-relevant implementation and link facts invalidate affected assemblies. Exact persistent encoding remains deferred.
 
 External boundary profile and capability metadata belong on the builder surface conceptually so backends receive closed WIT-value or host-binding classifications rather than inventing retention graphs.
+
+### Memory-strategy plans
+
+After link-level topology validation succeeds, memory-strategy planning selects one physical strategy per allocation family: stack or inline placement, static affine cleanup, inferred region allocation, explicit-group bulk reclamation, Retained Edge Counting, or host collection.
+
+The link plan conceptually carries this memory plan alongside validated topology. Backends consume it and never select their own strategy or reconsider source legality. Imprecise planning retains conservatively; a missing physical strategy after successful topology validation is `CompilerError`.
+
+### Backend capability metadata and collector-free verification
+
+Each backend declares whether it supports collector-free release lowering. This is backend capability metadata consumed by the builder, not a source-visible or project-visible no-GC mode, and no `config.moth` field selects it.
+
+- A backend advertising full memory control must lower every accepted topology in a release build without a tracing or reachability collector.
+- Debug and development profiles may deliberately use collection for simpler lowering, faster compilation and instrumentation.
+- GC-native backends may use their host collector on any profile.
+- Every profile and backend runs semantically equivalent mandatory borrow and lifetime-topology validation and accepts exactly the same source.
+
+A project builder may verify after reachability and memory planning that a produced artefact contains no tracing runtime, and report that as an artefact property. Verification reports a fact about the emitted artefact; it never changes source legality or observable behaviour.
 
 ### Runtime and memory
 
@@ -1234,7 +1251,9 @@ This one-page runtime/memory contract applies to linked Moth Wasm variants. It d
 
 Project-level runtime bytes may be emitted once and instantiated separately for each page.
 
-Wasm lowering consumes explicit selected-function, import, export, capability, layout and validated lifetime plans.
+Wasm lowering consumes explicit selected-function, import, export, capability, layout, validated lifetime and memory-strategy plans.
+
+Full-control runtime memory support must eventually cover allocator, inferred region, explicit-group, REC counter and destruction-plan behaviour. The current basic linear-memory page and heap-base planning is migration debt, not the accepted end state.
 
 Wasm LIR is structured and backend-owned. It is not a second frontend semantic authority.
 

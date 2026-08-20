@@ -3,11 +3,13 @@
 
 ## Design contract
 
-Borrow validation runs after HIR generation. It reads coherent, validated HIR, enforces source-language access safety and optional transfer safety, and writes analysis facts beside HIR.
+Borrow validation runs after HIR generation. It reads coherent, validated HIR, enforces source-language access safety and optional affine-transfer safety, and writes analysis facts beside HIR.
+
+Last-use analysis is central to the memory model. Its facts are what let later stages transfer affine cleanup responsibility, end inferred regions at cleanup frontiers and avoid counting most allocations.
 
 Recoverable numeric, cast and fallible-operation paths are already explicit HIR branches, locals and exits before borrow validation.
 
-It doesn't rewrite HIR, choose the final allocation strategy, perform backend ownership lowering, or decide lifetime topology. Lifetime owners, retained edges, escapes and cycles belong to @../lifetime-regions-and-escape-validation (Lifetime regions and escape validation).
+It doesn't rewrite HIR, choose the final memory strategy, perform backend lowering, or decide lifetime topology. Borrow validation does not assign semantic lifetime owners and does not choose a physical memory strategy. Lifetime owners, retained edges, escapes and cycles belong to @../lifetime-regions-and-escape-validation (Lifetime regions and escape validation).
 
 ## Main compiler paths
 
@@ -68,6 +70,22 @@ Shared and exclusive aliases use non-lexical, control-flow-sensitive activity.
 - GC doesn't relax exclusivity rules.
 - Map alias rules use the same conflict machinery.
 
+## The last-use contract
+
+These points are locked accepted design.
+
+1. Last-use analysis is central to memory precision.
+2. Alias activity is path-sensitive and non-lexical.
+3. Branches are analysed independently.
+4. Loops use fixed-point future-use reasoning.
+5. A transfer is legal only when every relevant path proves that the transferred value has no later source use.
+6. When optional transfer is not proven, the operation remains a borrow and the program remains valid.
+7. Last-use facts may move affine cleanup responsibility through calls, returns, aggregate insertion, extraction and control-flow paths.
+8. Loop forms may expose a final-iteration fact only when finality is known without changing source evaluation order.
+9. Borrow validation does not assign semantic lifetime owners and does not choose a physical memory strategy.
+
+Cleanup responsibility is affine: it may move or be discharged, but it never duplicates.
+
 ## Future-use and optional transfer safety
 
 Future-use analysis answers whether a root is required again after the current program point. It is a sufficient basis for optional transfer eligibility, not a source-visible lifetime system.
@@ -108,15 +126,13 @@ Borrow validation consumes and produces:
 - parameter access mode
 - mutation effects
 - transfer eligibility / effect category
-- return-alias summaries
-- fresh result roots
-- alias of one or more parameters
-- unknown or imprecise alias result
+- result provenance, distinguishing at least a fresh result root, an alias of one or more parameters, a projection of a parameter, an extracted or detached result, an alias of another result, and an independent result graph
+- retained-parameter and outlives constraints
 - reactive effects
 - external function access rules
 - external return-alias metadata
 
-Lifetime constraints are produced and validated by the separate lifetime-region analysis.
+A final successful public or generated summary must not leave topology-relevant result provenance unknown. Lifetime constraints themselves are produced and validated by the separate lifetime-region analysis.
 
 All runtime value parameters, immutable or mutable, may be eligible for inferred responsibility transfer. Parameter access mode remains separate from optional ownership effect. An immutable parameter receiving ownership remains read-only. A mutable parameter receiving ownership may mutate according to the source contract.
 
@@ -177,6 +193,16 @@ Borrow validation supplies the next analysis with:
 
 Lifetime-region and escape validation then decides one lifetime owner, retained-edge legality, escapes, cycles and outlives constraints. See @../lifetime-regions-and-escape-validation (Lifetime regions and escape validation).
 
+### Handoff to retained-edge analysis
+
+Retained-edge liveness is part of lifetime topology, not a separate runtime ownership system. Borrow validation supplies the alias-liveness substrate it depends on:
+
+- last potential use per alias, per path
+- proof that no capable source alias survives a candidate frontier
+- proof that a persistent edge or affine root cannot be destroyed while a dependent temporary borrow is still usable
+
+That last guarantee is what allows Retained Edge Counting to ignore temporary aliases entirely rather than adding a second safety mechanism. Borrow validation never decides which allocation families are counted. See @../retained-edge-counting (Retained Edge Counting).
+
 ## Conservative precision and extension points
 
 Borrow validation may be conservative. Stronger field-, projection-, region- or path-level analysis may accept more programs or unlock more optimisation, but it must not change the semantics of already-valid programs.
@@ -207,7 +233,7 @@ These are precision choices, not permanent source-language restrictions.
 - Decide lifetime topology, escapes or region owners.
 - Reject a program merely because optional transfer is unavailable.
 - Restrict transfer eligibility to mutable parameters.
-- Choose GC versus ownership allocation.
+- Choose the physical memory strategy or select counted representations.
 - Emit runtime drops or frees.
 - Decide pointer tagging.
 - Solve generics or traits.
@@ -220,7 +246,7 @@ These are precision choices, not permanent source-language restrictions.
 
 - Equating analysis slot state with guaranteed runtime ownership.
 - Treating aliases as independent copies.
-- Allowing GC to bypass invalid aliasing.
+- Allowing a collected representation to bypass invalid aliasing.
 - Using diagnostics as transfer state.
 - Mutating HIR to insert drops.
 - Deciding runtime ABI inside the checker.
@@ -234,6 +260,7 @@ These are precision choices, not permanent source-language restrictions.
 - @../ (Memory management): core memory contract
 - @../access-and-aliasing (Access and aliasing): source access semantics
 - @../lifetime-regions-and-escape-validation (Lifetime regions and escape validation): retained edges and region topology
-- @../ownership-and-drops (Ownership and drops): consumers of transfer and drop facts
+- @../ownership-and-drops (Affine ownership and drops): consumers of transfer and drop facts
+- @../retained-edge-counting (Retained Edge Counting): why temporary aliases are never counted
 - @https://github.com/nyejames/moth/blob/main/docs/compiler-design-overview.md (Compiler HIR generation): validated HIR input
 - @https://github.com/nyejames/moth/blob/main/docs/compiler-design-overview.md (Compiler borrow validation): module ownership and exported call effects

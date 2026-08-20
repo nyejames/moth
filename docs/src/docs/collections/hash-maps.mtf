@@ -119,6 +119,29 @@ Insertion order follows these rules:
 A live shared value returned by `get` prevents mutation of the same map until
 that shared access is no longer used.
 
+### Compiler-known retention effects
+
+Builtin maps are part of Moth's trusted dynamic-storage substrate. The compiler
+knows exactly which stored references each operation creates and destroys.
+
+| Operation | Retained-edge effect |
+|---|---|
+| `get` | returns a statically bounded shared alias; creates no stored reference |
+| `contains` | creates no stored reference |
+| `set` | destroys any old stored reference for that key and creates a new one |
+| `remove` | destroys one stored reference and returns the value detached from the map |
+| `clear` | destroys every stored key and value reference in that map |
+| map destruction | destroys every stored reference and the backing storage |
+
+`clear` and map destruction are whole-domain kills: they let the compiler prove
+that every stored reference into a set of values is gone at one point, so those
+values can be reclaimed while the map itself stays alive. Individual `remove` or
+`set` does not give that proof.
+
+Future map APIs must preserve narrow, analysable destruction effects. The full
+contract lives in
+@../codebase/memory-management/retained-edge-counting (Retained Edge Counting).
+
 ### Outside the builtin map surface
 
 - hashset syntax

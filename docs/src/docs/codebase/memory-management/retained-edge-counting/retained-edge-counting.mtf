@@ -1,0 +1,393 @@
+# Retained Edge Counting
+
+## Design contract
+
+Retained Edge Counting, abbreviated REC, is a selective physical representation for allocation families whose persistent retained-edge count is only known at runtime. It is chosen by the memory-strategy planner after every static and region-based answer has been exhausted.
+
+**REC is a physical representation, not source semantics.** Moth has no source-visible reference counting, no counter type, no retain or release syntax and no way for a program to observe a count.
+
+## Status
+
+Accepted end-state design with implementation deferred. This page is the canonical technical authority for REC inside the memory model. Detailed phase sequencing lives in `docs/roadmap/plans/retained-edge-counting-design-and-implementation-plan.md`. Current implementation support lives in the progress matrix.
+
+## Why REC exists
+
+Last-use analysis, affine cleanup responsibility and inferred regions handle most values without any runtime bookkeeping. REC covers the remaining narrow case:
+
+> A runtime-dependent number of persistent retained edges can point to one allocation family, those edges can disappear independently, and the narrowest statically proven region would otherwise retain substantial storage materially beyond its useful lifetime.
+
+REC is not general reference counting. It does not count ordinary aliases, it does not establish lifetime legality and it does not permit cycles. Cycles remain legal only inside one declared group, and group-owned allocations are always count-free.
+
+## Terminology
+
+### Allocation family
+
+The semantic allocation root that must be kept alive as one unit under the current field-splitting result. A projection may point inside an allocation family while cleanup still targets the family root.
+
+### Retained edge
+
+A stored reference that keeps an allocation alive beyond the current expression. Local aliases, parameters, temporary projections and `get()` borrows are not retained edges.
+
+### Retention domain
+
+The set of retained edges owned by one container or aggregate, such as the element edges of one collection.
+
+### Dynamic retained multiplicity
+
+A retained-edge count that is not statically known because it depends on runtime control flow or data.
+
+### Final cleanup frontier
+
+A CFG point after which every relevant retained edge into an allocation family is proven gone.
+
+### REC candidate
+
+An allocation family with dynamic retained multiplicity whose edges can disappear independently.
+
+### Affine root obligation
+
+The single optional cleanup obligation carried by an owned handle on the current path.
+
+### Persistent-edge obligation
+
+One counted obligation held by a stored retained edge.
+
+## Relationship to the rest of the model
+
+REC is the fifth of the six cooperating mechanisms described in the memory overview. It consumes validated facts and produces layout decisions only.
+
+- Borrow and last-use analysis proves access legality, alias liveness and safe affine transfer points. REC relies on these proofs and does not repeat them.
+- Lifetime topology proves one owner per allocation family, retained-edge legality, escapes, non-lexical intervals and cleanup frontiers. REC never changes a legality answer.
+- The Affine Ownership ABI carries the runtime path that may perform individual cleanup. REC extends it with one extra representation bit.
+- Explicit groups own hard bulk lifetimes. Group-owned allocations never use REC.
+- Physical memory planning chooses REC only through the elision ladder below.
+
+## Builtin collection retention vocabulary
+
+Builtin fixed and growable collections are Moth's trusted dynamic-storage substrate. Their memory effects are compiler-known.
+
+[table:
+    [th:
+        [: **Operation**]
+        [: **Retained-edge effect**]
+    ]
+
+    [td:
+        [: `get`]
+        [: returns a statically bounded shared alias, no count change]
+    ]
+
+    [td:
+        [: `push`]
+        [: creates one persistent retained edge]
+    ]
+
+    [td:
+        [: `set`]
+        [: destroys one old retained edge and creates one new retained edge]
+    ]
+
+    [td:
+        [: `remove`]
+        [: destroys one persistent retained edge and returns the existing value detached from the collection]
+    ]
+
+    [td:
+        [: `clear`]
+        [: destroys every retained element edge in that collection domain]
+    ]
+
+    [td:
+        [: collection destruction]
+        [: destroys every retained element edge and its backing storage domain]
+    ]
+
+    [td:
+        [: growth or reallocation]
+        [: replaces backing storage while preserving logical element edges]
+    ]
+]
+
+The compiler does not recognise user methods by name. A user abstraction earns an equivalent summary by composing builtin effects, and only when analysis proves every relevant edge is killed on every path.
+
+[codeblock, $code("moth"):
+    clear |this ~UserIndex|:
+        ~this.values.clear()
+        this.count = 0
+    ;
+]
+
+If `values` is the only field retaining indexed elements, the compiler may infer that this method kills the whole element-retention domain. A handwritten slot-clearing loop remains valid source, but it receives the strong summary only when the proof succeeds.
+
+Future collection APIs must preserve narrow, analysable destruction effects.
+
+## Extracted and detached results
+
+`remove` is neither a fresh result nor an ordinary alias return. The existing allocation survives while the collection stops retaining it.
+
+[codeblock, $code("text"):
+    before:  collection  ->  value
+
+    after:   collection  -X-> value
+             result       ->  value
+]
+
+The summary vocabulary preserves this distinction so a caller can receive affine cleanup responsibility, keep a borrowed alias under another owner, or reclassify a counted persistent-edge obligation into an affine root obligation. This applies to maps, collections, stacks, queues, deques, caches and tree-node detachment.
+
+## REC elision and strategy selection
+
+Strategy selection is deterministic for one compile and backend configuration. The planner uses this order and stops at the first mechanism that answers.
+
+1. **No dynamic retained multiplicity.** Use affine cleanup or an inferred region.
+2. **Static fixed cardinality with a known cleanup path.** Use affine or region handling. More than one possible edge is not by itself a reason to count.
+3. **Explicit-group ownership.** Use the hard group lifetime. Group-owned allocations never use REC.
+4. **Complete final cleanup frontier.** If every possible runtime-many retained edge disappears at one statically proven frontier, create an inferred region or region epoch that ends there.
+5. **Field-sensitive allocation splitting.** Split an expensive parent family when a small retained field can legally become independent, then rerun selection for the new families.
+6. **Statically cheap bounded retention.** A simple, conservative compiler-owned heuristic may accept the fallback region when retained-family size, allocation-site repetition, known maximum cardinality, fallback lifecycle breadth and distance to a frontier are all bounded enough. This heuristic must not become a user-facing `config.moth` contract.
+7. **REC.** Select REC when runtime-many persistent edges disappear independently and region retention would be materially broader than useful lifetime.
+
+The cleanup-frontier case is the most common elision:
+
+[codeblock, $code("moth"):
+    populate(~index)
+    use(index)
+    ~index.clear()
+]
+
+The collection may continue living. The region holding the retained values may end at `clear()`.
+
+## Cleanup frontiers and region epochs
+
+A final cleanup frontier for family `A` requires proof that:
+
+1. every possible retained edge into `A` from the relevant domains is gone on that path
+2. no live local or projection alias survives the point
+3. no future operation can recreate an edge, because no capable source alias survives
+4. no external or builder lifecycle retains `A`
+5. every aliasing aggregate that remains live is proven unable to retain `A` after the point
+
+A long-lived collection may therefore create several inferred epochs, while the collection object and its backing capacity outlive each retained-value epoch.
+
+[codeblock, $code("text"):
+    R_index_epoch_0
+        population 0
+        -> first clear
+
+    R_index_epoch_1
+        population 1
+        -> second clear
+]
+
+Individual `remove`, `set` or partial cleanup does not establish a frontier by itself. Uniqueness scans, alias registries and adaptive owner recovery are rejected from the design.
+
+## Two-bit tagged handle ABI
+
+Full-memory-control backends use a two-bit tagged allocation-family handle for heap values that participate in ownership-aware lowering.
+
+[codeblock, $code("text"):
+    bit 0: OWNED
+    bit 1: REC
+]
+
+[table:
+    [th:
+        [: **Bits**]
+        [: **Meaning**]
+    ]
+
+    [td:
+        [: `00`]
+        [: uncounted borrowed handle]
+    ]
+
+    [td:
+        [: `01`]
+        [: uncounted affine-owned handle]
+    ]
+
+    [td:
+        [: `10`]
+        [: REC-managed borrowed handle or counted persistent edge]
+    ]
+
+    [td:
+        [: `11`]
+        [: REC-managed affine-owned handle]
+    ]
+]
+
+A backend masks both bits before recovering the allocation-family base.
+
+[codeblock, $code("text"):
+    family_base = handle & !TAG_MASK
+]
+
+Invariants:
+
+- Taggable family handles are aligned to at least four bytes.
+- Bit 0 is per-handle cleanup responsibility.
+- Bit 1 describes the target allocation family's physical REC representation.
+- A counted persistent storage edge is canonically stored as `10`.
+- An affine REC root is carried as `11`.
+- A borrowed call from an owned REC root passes `10` while the caller retains `11`.
+- An affine transfer moves `11` without changing the counter.
+- Scalars and target-native immediate values do not use this tagged handle ABI.
+- GC-native backends may erase the physical tags while preserving the same semantic analysis.
+
+The tags belong to the allocation-family handle, not to an arbitrary interior address. A projection must carry the family base alongside its offset, use a canonical handle that can recover the base, or use another representation preserving the same two logical bits and family identity. Masking an arbitrary interior pointer is not sufficient.
+
+An uncounted allocation is never upgraded to REC at runtime. The planner selects the layout before code generation.
+
+## Counter representation and invariant
+
+Only REC-managed allocation families carry a counter. There is no global side table and no universal header on affine, region or group allocations.
+
+[codeblock, $code("text"):
+    +-----------------------+
+    | REC count word        |
+    +-----------------------+
+    | allocation-family data|
+    +-----------------------+
+]
+
+- one target-word-sized unsigned count
+- `u32` on Wasm32, `u64` on ordinary 64-bit native targets
+- non-atomic under the accepted concurrency model
+- underflow traps in every profile rather than permitting a double free
+
+The invariant is:
+
+[codeblock, $code("text"):
+    REC count =
+        number of live counted persistent-edge obligations
+        + one optional affine-root obligation
+]
+
+The counter is not the number of source aliases. It excludes local aliases, parameters, temporary projections, ordinary call borrows, `get()` results, statically known region-only edges and explicit-group-owned edges.
+
+Temporary aliases cannot race the count to zero, because borrow validation already guarantees that a persistent edge or affine root cannot be destroyed while a dependent temporary borrow remains usable. REC relies on that existing proof rather than adding a second safety mechanism.
+
+## Count transitions
+
+[table:
+    [th:
+        [: **Operation**]
+        [: **Counter effect**]
+        [: **Handle effect**]
+    ]
+
+    [td:
+        [: ordinary local alias]
+        [: `0`]
+        [: borrowed alias, no new obligation]
+    ]
+
+    [td:
+        [: borrowed function call]
+        [: `0`]
+        [: callee receives owned bit clear]
+    ]
+
+    [td:
+        [: affine root transfer]
+        [: `0`]
+        [: `11` moves to the new path]
+    ]
+
+    [td:
+        [: persistent insertion while affine root remains]
+        [: `+1`]
+        [: stored edge is `10`]
+    ]
+
+    [td:
+        [: final-use insertion]
+        [: `0`]
+        [: root obligation is reclassified as a persistent edge, stored `10`]
+    ]
+
+    [td:
+        [: `get()`]
+        [: `0`]
+        [: returns a temporary `10` borrow]
+    ]
+
+    [td:
+        [: persistent edge removal with no returned root]
+        [: `-1`]
+        [: edge disappears]
+    ]
+
+    [td:
+        [: extraction that creates an affine root]
+        [: `0`]
+        [: edge obligation is reclassified as an `11` result]
+    ]
+
+    [td:
+        [: extraction while another affine root remains]
+        [: `-1`]
+        [: result is a borrowed `10`]
+    ]
+
+    [td:
+        [: affine root final release]
+        [: `-1`]
+        [: owned path discharged]
+    ]
+
+    [td:
+        [: persistent overwrite]
+        [: old `-1`, new `+1` or reclassification]
+        [: old edge dies, new edge appears]
+    ]
+
+    [td:
+        [: whole-domain clear]
+        [: one release per surviving external counted edge unless region elision applies]
+        [: domain edges disappear]
+    ]
+
+    [td:
+        [: count reaches zero]
+        [: destroy exactly once]
+        [: no usable handles remain]
+    ]
+]
+
+A fresh REC allocation returned with affine cleanup responsibility starts at `count = 1` with tag `11`. One constructed directly into a counted persistent edge may start at `count = 1` with stored tag `10`, so hidden destination allocation need not create and remove a temporary root.
+
+## Destruction
+
+Counted destruction is iterative through a deletion worklist, never recursive through the native or Wasm stack. Reaching zero destroys the family exactly once. Because cycles are legal only inside explicit groups and group-owned allocations are count-free, a counted family can never be kept alive by a cycle, and no cycle collector is required.
+
+Mixed cleanup is expected: one region exit may release counted edges, and one counted destruction may end a family that also owns region-allocated or group-external storage.
+
+## Boundaries
+
+REC may cross Moth function and package boundaries, but only retention-sensitive operations need to inspect the REC bit. Read-only and temporary-borrow functions are unaffected. Whole-function REC and non-REC specialisation is rejected as a default; mixed call paths use one body with local tag handling around retention-sensitive or cleanup-sensitive operations.
+
+Public semantic interfaces describe aliasing, retention, extraction, cardinality and cleanup effects. They never expose REC as source semantics, and donor-local family, region and counter identities never cross module boundaries.
+
+Ordinary foreign boundaries remain closed and value-only. REC does not create a cross-language shared-reference protocol.
+
+## Rejected
+
+- general reference counting
+- a universal REC header on every allocation
+- runtime adaptive REC or region switching
+- runtime region-pressure switching
+- uniqueness scans on removal
+- alias registries
+- source-visible RC or REC
+- cycle collection
+- profiling-guided REC selection in the initial design
+
+## Read next
+
+- @../ (Memory management): top-level memory authority
+- @../lifetime-regions-and-escape-validation (Lifetime regions and escape validation): intervals, retained-edge liveness and cleanup frontiers
+- @../ownership-and-drops (Affine ownership and drops): affine cleanup responsibility and the ownership ABI
+- @../declared-memory-groups (Declared memory groups): count-free bulk lifetimes and group-only cycles
+- @../runtime-and-backend-lowering (Runtime and backend lowering): physical strategies and the collector-free release guarantee
+- @https://github.com/nyejames/moth/blob/main/docs/roadmap/plans/retained-edge-counting-design-and-implementation-plan.md (Retained Edge Counting plan): detailed analysis, ABI and lowering sequencing

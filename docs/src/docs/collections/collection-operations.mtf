@@ -1,4 +1,4 @@
-Collections use five compiler-owned member operations.
+Collections use five compiler-owned member operations, with `clear` accepted as a sixth and not yet implemented.
 
 ### `get`
 
@@ -68,10 +68,48 @@ Collections use five compiler-owned member operations.
 - receiver access: shared
 - returns logical length, not fixed capacity
 
+### `clear`
+
+Accepted design with implementation deferred. Maps already expose `clear()`; fixed and growable collections do not yet.
+
+[codeblock, $code("moth"):
+    ~items.clear()
+]
+
+- no arguments
+- success: no value
+- infallible
+- receiver access: mutable
+- removes every element and sets the logical length to zero
+- keeps the collection usable, and does not shrink fixed capacity
+
+## Compiler-known retention effects
+
+Builtin fixed and growable collections are Moth's trusted dynamic-storage substrate. The compiler knows exactly which stored references each operation creates and destroys, and memory analysis relies on that knowledge rather than on any user annotation.
+
+| Operation | Retained-edge effect |
+|---|---|
+| `get` | returns a statically bounded shared alias; creates no stored reference |
+| `push` | creates one stored reference |
+| `set` | destroys one stored reference and creates one new stored reference |
+| `remove` | destroys one stored reference and returns the value detached from the collection |
+| `clear` | destroys every stored element reference in that collection |
+| collection destruction | destroys every stored element reference and the backing storage |
+| growth or reallocation | replaces backing storage while preserving the logical elements |
+
+`clear` and collection destruction are whole-domain kills: they let the compiler prove that every stored reference into a set of values is gone at one point, so those values can be reclaimed while the collection itself stays alive. Individual `remove` or `set` does not give that proof.
+
+The compiler does not recognise user methods by name. A user abstraction earns the same strong summary only by composing these builtin operations in a way analysis can prove kills every relevant reference on every path.
+
+Future collection APIs must preserve narrow, analysable destruction effects. An operation whose effect on stored references cannot be stated precisely weakens memory analysis for every program that uses it.
+
+The full contract lives in @../codebase/memory-management/retained-edge-counting (Retained Edge Counting).
+
 ### Shared rules
 
 - `get`, `set`, `push` and `remove` must use postfix `!` or `catch`.
-- `set`, `push` and `remove` require `~receiver`.
+- `set`, `push`, `remove` and `clear` require `~receiver`.
+- `length` and `clear` are infallible and take no error handling.
 - Builtin member arguments are positional-only.
 - Assignment through `get` is removed.
 - Square-bracket indexing is not supported.

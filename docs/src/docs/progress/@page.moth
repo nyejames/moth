@@ -307,11 +307,19 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         ]
 
         [data:
-            [: Borrow validation and ownership analysis]
-            [: Supported]
+            [: Borrow validation and local last-use analysis]
+            [: Partial]
             [: Broad borrow, aliasing, mutable/exclusive access, branch merge, loop, short-circuit, future-use, optional-transfer, advisory drop-site, hashmap, aggregate-storage, reactivity and adversarial coverage.]
-            [: HIR analysis / JS GC baseline]
-            [: Borrow validation enforces shared/exclusive access while optional transfer and drop facts remain advisory. Path-dependent or imprecise transfer proof falls back to borrowing, and existing values stored in maps and collections retain shared semantics. GC remains the language baseline representation. Lifetime-region and escape validation remains deferred below.]
+            [: HIR analysis / all backends]
+            [: Shared and exclusive access enforcement is implemented and mandatory on every backend. Path-sensitive future-use facts drive optional transfer, and unproven or path-dependent transfer correctly falls back to borrowing. Accepted incomplete work: loop final-iteration facts, extraction transfer and the complete affine-transfer contract are not implemented, and drop facts remain advisory rather than memory-plan-driven. Complete when path-sensitive transfer and final-use facts are complete.]
+        ]
+
+        [data:
+            [: Result provenance and retention summaries]
+            [: Partial]
+            [: Targeted return-alias and fresh-result summary coverage.]
+            [: HIR analysis / link planning]
+            [: Public summaries currently distinguish fresh result roots, parameter aliases and an imprecise unknown case. Accepted incomplete work: projection results, extracted or detached results, result-to-result aliases, independent result graphs, retained-parameter and outlives constraints, retention and cardinality effects, whole-domain kill effects and cleanup-frontier facts are not exported yet. Complete when stable complete summaries cross module and package boundaries with no unknown topology-relevant provenance.]
         ]
 
         [data:
@@ -319,7 +327,23 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Deferred]
             [: None]
             [: Backend-neutral design]
-            [: Accepted architecture exists; no implementation owner has landed. GC does not bypass the future semantic validation.]
+            [: Accepted architecture exists; no implementation owner has landed. This validation is mandatory in the accepted design, and no backend or profile may bypass it. Complete when mandatory local and link topology proof is implemented.]
+        ]
+
+        [data:
+            [: Retained-edge liveness and cleanup frontiers]
+            [: Deferred]
+            [: None]
+            [: Backend-neutral design]
+            [: Accepted design only. Covers retention domains, edge creation, whole-domain kill effects and path-sensitive final cleanup frontiers. Builtin collections do not yet expose `clear` or compiler-known retention effects outside maps. Complete when whole-domain effects, frontiers and epochs are implemented.]
+        ]
+
+        [data:
+            [: Compiler-generated intervals and region epochs]
+            [: Deferred]
+            [: None]
+            [: Backend-neutral design]
+            [: Accepted design only. Inferred regions must be non-lexical CFG intervals rather than lexical scopes, with repeated population and teardown forming region epochs. Complete when non-lexical interval inference and epochs are implemented.]
         ]
 
         [data:
@@ -327,7 +351,79 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Deferred]
             [: None]
             [: Frontend / HIR / lifetime analysis / all backends]
-            [: Accepted end-state syntax; not current source support. Canonical semantics live under `docs/src/docs/codebase/memory-management/declared-memory-groups/`; implementation sequencing in `docs/roadmap/plans/grouped-memory-design.md`.]
+            [: Accepted end-state syntax; not current source support. Groups are hard count-free bulk lifetimes whose storage is never released individually. Canonical semantics live under `docs/src/docs/codebase/memory-management/declared-memory-groups/`; implementation sequencing in `docs/roadmap/plans/final-memory-management-redesign-and-implementation-plan.md`. Complete when source, HIR, topology and backend support are implemented.]
+        ]
+
+        [data:
+            [: Group-only reference cycles]
+            [: Deferred]
+            [: None]
+            [: Frontend / lifetime analysis / all backends]
+            [: Accepted design only. A declared group is the only source mechanism for reference cycles, and implicit inference never invents a cyclic region. Complete when explicit cycle construction and bulk cleanup are implemented.]
+        ]
+
+        [data:
+            [: Affine Ownership ABI]
+            [: Experimental]
+            [: Targeted Wasm ownership-projection and conditional-drop coverage.]
+            [: Wasm]
+            [: Present but not part of the Alpha stability promise. Borrow-checker advisory drop sites currently emit Wasm [$html:<code>DropIfOwned</code>] directly under GC-first scaffolding, and the LIR carries a reserved retain instruction. This direct path is migration debt, not accepted final architecture. Complete when memory-plan-driven full-control lowering replaces it.]
+        ]
+
+        [data:
+            [: Memory-strategy planning]
+            [: Deferred]
+            [: None]
+            [: Backend-neutral design]
+            [: Accepted design only. A distinct planner must select stack, affine, inferred-region, explicit-group, REC or collected representation per allocation family after topology is proven. A missing strategy after successful validation is a `CompilerError` in the accepted design. Complete when the planner owns every strategy decision.]
+        ]
+
+        [data:
+            [: REC analysis and selection]
+            [: Deferred]
+            [: None]
+            [: Backend-neutral design]
+            [: Accepted design only. Retained Edge Counting is a compiler-selected physical representation for runtime-many persistent retained edges, never source semantics. Detailed contract in `docs/roadmap/plans/retained-edge-counting-design-and-implementation-plan.md`. Complete when the companion analysis and its decision reporting are implemented.]
+        ]
+
+        [data:
+            [: REC backend lowering]
+            [: Deferred]
+            [: None]
+            [: Full-control backends]
+            [: Accepted design only. Covers the two-bit tagged handle ABI, selective inline counters, count transitions and iterative destruction. Complete when tags, counters, collections and iterative destruction are implemented.]
+        ]
+
+        [data:
+            [: Field-sensitive allocation splitting]
+            [: Deferred]
+            [: None]
+            [: Backend-neutral design]
+            [: Accepted design only. Projections currently remain rooted in their containing allocation family. Complete when split analysis and strategy rerun are implemented.]
+        ]
+
+        [data:
+            [: Inferred-region and group backend lowering]
+            [: Deferred]
+            [: None]
+            [: Full-control backends]
+            [: Accepted design only. Wasm runtime memory currently provides basic linear-memory page and heap-base planning with no allocator, region, group or destruction-plan support. Complete when region allocation with complete exits and group bulk cleanup are implemented.]
+        ]
+
+        [data:
+            [: Collector-free release verification]
+            [: Deferred]
+            [: None]
+            [: Full-control backends / project builders]
+            [: Accepted design only. Backends must declare collector-free release capability, and a capable backend must not fall back to a tracing collector. This is a backend capability and an artefact property, never a source-visible or project-visible mode. Complete when a capable backend proves no tracing runtime remains.]
+        ]
+
+        [data:
+            [: Debug and GC-native representation parity]
+            [: Partial]
+            [: Broad JS pipeline coverage; no cross-backend memory parity suite.]
+            [: JS / host GC]
+            [: The JS backend uses host collection for already-legal topology, which is accepted behaviour for a GC-native target. Accepted incomplete work: parity currently rests on borrow validation alone because lifetime-topology validation is deferred, so the shared legality guarantee is not yet fully enforced. Complete when debug, GC-native and collector-free paths demonstrably share source legality and observable behaviour.]
         ]
 
         [data:

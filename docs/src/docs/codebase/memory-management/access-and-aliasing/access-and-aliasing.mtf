@@ -9,7 +9,7 @@ Existing values use shared, read-only access by default. Independent copies requ
 
 Reference relationships are real source semantics. Moth does not expose reference type constructors or lifetime syntax.
 
-These are source-semantic rules. Backends may use different scalar, handle, pointer or GC representations as long as they preserve the same observable behaviour.
+These are source-semantic rules. Backends may use different scalar, handle, pointer, region, counted or collected representations as long as they preserve the same observable behaviour.
 
 ## Main compiler paths
 
@@ -61,7 +61,7 @@ This is a navigation map, not a status declaration.
 
     [td:
         [: Allocation family]
-        [: The containing allocation plus projections that remain rooted in it.]
+        [: The semantic allocation root that must be kept alive as one unit, plus every projection that remains rooted in it. Cleanup targets the family root, never an interior projection.]
     ]
 
     [td:
@@ -76,7 +76,17 @@ This is a navigation map, not a status declaration.
 
     [td:
         [: Move / inferred transfer]
-        [: Compiler-inferred optional ownership transfer at a proven final-use point.]
+        [: Compiler-inferred optional transfer of affine cleanup responsibility at a proven final-use point.]
+    ]
+
+    [td:
+        [: Result provenance]
+        [: The static fact describing where a result's storage came from: a fresh root, an alias or projection of a parameter, an extracted value, an alias of another result, or an independent graph.]
+    ]
+
+    [td:
+        [: Cleanup responsibility]
+        [: The runtime fact describing which path may perform individual cleanup. It is affine: it may move or be discharged, but it never duplicates.]
     ]
 
     [td:
@@ -252,7 +262,27 @@ This applies to structs, choices, collections, maps, tuples, templates and other
 - Mutating collection and map methods require exclusive receiver access.
 - Backend scalar representation must not create a separate source-semantic implicit-copy exception.
 
+Last-use analysis is central to the whole memory model, not a peripheral optimisation. It is what lets the compiler transfer affine cleanup responsibility, end inferred regions early and avoid counting most allocations. When a final use cannot be proven, the operation stays a borrow and the program remains valid.
+
 Topology questions about retained edges, escapes and region owners belong to @../lifetime-regions-and-escape-validation (Lifetime regions and escape validation).
+
+## Static provenance vs runtime responsibility
+
+Two distinct facts travel with a value. Do not collapse them.
+
+**Static result provenance** answers where storage came from and which lifetime constraints apply to it. It is a compile-time summary fact: fresh root, alias of one or more parameters, projection of a parameter, extracted or detached result, alias of another result, or independent result graph, together with any retained-parameter and outlives constraints. Provenance never enters `TypeId` and is never source syntax.
+
+**Runtime cleanup responsibility** answers who may perform individual cleanup on the current path. It is affine and may move through calls, returns and aggregate insertion, but it never duplicates.
+
+A value can be a projection of a parameter (provenance) while the caller retains cleanup responsibility (runtime state). A fresh result root may carry cleanup responsibility to the caller, or be constructed directly into a caller-selected hidden destination. The hidden destination is not source syntax, not a lifetime parameter and not part of any signature.
+
+Semantic lifetime ownership stays static even when cleanup responsibility moves at runtime.
+
+## Allocation families and projections
+
+An allocation family is the unit that lifetime analysis and cleanup operate on. A field access or element access produces a projection that remains rooted in its containing family, so retaining a projection retains the whole family.
+
+Field-sensitive allocation splitting may later prove that a projected field is an independent family with its own lifetime owner. Until that analysis runs and succeeds, treat every projection as rooted in its parent. A proven final use transfers the entire allocation family rather than detaching one child.
 
 ## No source-level reference, move or lifetime syntax
 
@@ -289,6 +319,8 @@ rule lives in `docs/src/docs/bindings/shadowing.mtf`.
 - Assuming `copy` may preserve mutable sharing with the source graph.
 - Making backend scalar representation define source copy semantics.
 - Treating explicit copy as merely a backend hint.
+- Confusing static result provenance with runtime cleanup responsibility.
+- Detaching a projection from its allocation family before field-sensitive splitting proves independence.
 
 ## Related reading
 
@@ -296,7 +328,8 @@ rule lives in `docs/src/docs/bindings/shadowing.mtf`.
 - @../borrow-validation (Borrow validation): how shared and exclusive access are checked
 - @../lifetime-regions-and-escape-validation (Lifetime regions and escape validation): retained edges, escapes and region topology
 - @../declared-memory-groups (Declared memory groups): accepted `group` / `into` placement and destination lifetimes
-- @../ownership-and-drops (Ownership and drops): inferred transfer after access validation
+- @../ownership-and-drops (Affine ownership and drops): affine cleanup responsibility after access validation
+- @../retained-edge-counting (Retained Edge Counting): why ordinary aliases are never counted
 - @../../language/ (Language reference): canonical source syntax and semantics
 - @https://github.com/nyejames/moth/blob/main/docs/compiler-design-overview.md (Compiler AST construction): source access and coercion ownership
 - @https://github.com/nyejames/moth/blob/main/docs/compiler-design-overview.md (Compiler HIR generation): places and hidden mutable-rvalue locals

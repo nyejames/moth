@@ -185,7 +185,11 @@ independent ~= copy items
 
 `copy` accepts a binding, field projection or parenthesised place. It deep-copies the copyable graph, preserves internal alias topology and shares no mutable allocation with the source. Fresh literals, templates, calls and computations are invalid `copy` operands.
 
-Moth has no move operator. The compiler may transfer destruction responsibility at proven final use without changing aliasing or source meaning. Each allocation still has one semantic lifetime owner, and retained references must point to the same or a longer-lived region. GC never bypasses these rules.
+Moth has no move operator. The compiler may transfer cleanup responsibility at proven final use without changing aliasing or source meaning. Each allocation still has one semantic lifetime owner, and retained references must point to the same or a longer-lived region.
+
+Memory safety comes from static proof, not from a collector. Borrow validation and lifetime-topology validation are mandatory on every backend and every build profile, so every target accepts and rejects exactly the same programs. Garbage collection is one permitted way to represent a topology the compiler has already proven legal; it can never make an illegal program legal.
+
+Backends that advertise full memory control lower release builds without a tracing collector. That is a property of the backend and the emitted artefact, not a language mode: there is no source or project setting that turns GC on or off, and nothing about it appears in your code.
 
 ### Declared memory groups - accepted deferred
 
@@ -196,7 +200,7 @@ group request:
 ;
 ```
 
-`into group_name` appears after access/type syntax and before `=`. A group is a hard local lifetime owner, not a value or type. Placement targets the current group or an ancestor. Parent/sibling storage cannot retain child-group values, and group-owned values cannot escape. V1 has no expression placement, extraction or unrestricted group transfer.
+`into group_name` appears after access/type syntax and before `=`. A group is a hard local lifetime owner, not a value or type. Placement targets the current group or an ancestor. Parent/sibling storage cannot retain child-group values, and group-owned values cannot escape. Everything in a group is released together when the group exits, never individually. A group is also the only place a program may build a reference cycle. V1 has no expression placement, extraction or unrestricted group transfer.
 
 ## Numbers and operators
 

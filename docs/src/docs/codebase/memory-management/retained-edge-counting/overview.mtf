@@ -1,0 +1,26 @@
+# Retained Edge Counting
+
+The narrow counted strategy for runtime-many persistent retained edges.
+
+**REC is a physical representation, not source semantics. Moth has no source-visible reference counting, and no Moth program can name, observe or request a counter.**
+
+## Contract
+
+- Input: validated HIR, borrow and last-use facts, validated lifetime topology, allocation-family and retained-edge facts, builtin collection retention effects, and the selected memory strategy
+- Output: REC candidate selection, elision decisions, counted-family layout, count transitions and iterative destruction plans
+- Decides: which allocation families carry a counter, where retain, release and extraction happen, and how counted destruction runs
+- Must not decide: source legality, lifetime ownership, retained-edge legality, cycle legality, or whether a program compiles
+- Invariant: REC counts persistent retained edges only. It never counts ordinary aliases, never establishes legality and never permits cycles
+
+REC is selected only after affine cleanup, inferred regions, cleanup frontiers, explicit groups, field-sensitive splitting and cheap bounded retention have all failed to give a precise enough answer. It is a precision mechanism inside a statically safe collector-free system, not the correctness fallback.
+
+Implementation of this analysis is deferred.
+
+## Read next
+
+- `docs/src/docs/codebase/memory-management/retained-edge-counting/retained-edge-counting.mtf`
+- `docs/src/docs/codebase/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
+- `docs/src/docs/codebase/memory-management/ownership-and-drops/overview.mtf`
+- `docs/src/docs/codebase/memory-management/declared-memory-groups/overview.mtf`
+- `docs/src/docs/codebase/memory-management/runtime-and-backend-lowering/overview.mtf`
+- `docs/roadmap/plans/retained-edge-counting-design-and-implementation-plan.md`

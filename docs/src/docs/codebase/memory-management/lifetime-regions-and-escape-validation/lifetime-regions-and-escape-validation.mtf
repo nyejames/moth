@@ -5,7 +5,7 @@
 
 **Moth is reference-semantic by default, copy-explicit and move-inferred. It omits explicit reference types and lifetime syntax, not references themselves.**
 
-Lifetime-region and escape validation is the mandatory semantic proof that every retained reference is legal under one lifetime owner. It is distinct from optional ownership optimisation.
+Lifetime-region and escape validation is the mandatory semantic proof that every retained reference is legal under one lifetime owner. It is distinct from physical memory-strategy selection, which happens afterwards.
 
 **Mandatory semantic proof** covers:
 
@@ -17,9 +17,11 @@ Lifetime-region and escape validation is the mandatory semantic proof that every
 
 User-authored topology that is invalid or cannot be proven legal produces a structured `CompilerDiagnostic`. Missing or inconsistent compiler-owned summaries, boundary classifications, lifecycle roots, or metadata produce `CompilerError`.
 
-**Optional optimisation proof** covers final-use transfer, deterministic drop placement, retain/drop elimination, stack/arena/region allocation, collector elision and ownership specialisation. Failure to prove an optimisation preserves semantics through a conservative representation such as GC. It must not reject the program.
+It also owns compiler-generated non-lexical intervals, retained-edge liveness and final cleanup frontiers. These decide how precisely a legal topology can be reclaimed, not whether it is legal.
 
-GC is a permitted runtime representation for a statically legal lifetime topology. It is not a mechanism for accepting invalid retained edges, lateral lifetime promotion, unowned escapes or cross-region cycles.
+**Physical strategy selection** happens after this proof succeeds. It chooses stack placement, static affine cleanup, inferred region allocation, explicit-group bulk reclamation, Retained Edge Counting or host collection. Imprecise planning results in conservative retention, never in rejecting a legal program. A missing physical strategy after successful topology validation is a `CompilerError`, not a silent collector fallback.
+
+GC is a permitted runtime representation for a statically legal lifetime topology on debug profiles and GC-native backends. It is not a mechanism for accepting invalid retained edges, lateral lifetime promotion, unowned escapes or cross-region cycles, and a capable full-control release backend must not fall back to it.
 
 Implementation of this analysis is deferred. This leaf is the canonical design authority for lifetime topology. Canonical grouped-memory semantics live under @../declared-memory-groups (Declared memory groups). The roadmap file owns implementation sequencing and deferred follow-up only.
 
@@ -57,6 +59,26 @@ Implementation of this analysis is deferred. This leaf is the canonical design a
     ]
 
     [td:
+        [: Implicit lifetime region]
+        [: A compiler-generated non-lexical interval over control flow that owns ordinary ungrouped allocations. It is not a lexical scope and may end before the block that introduced it.]
+    ]
+
+    [td:
+        [: Retained-edge liveness]
+        [: Whether any retained edge into an allocation family or region can still be observed on the current path, tracked separately from the binding lifetime of the aggregate that holds it.]
+    ]
+
+    [td:
+        [: Final cleanup frontier]
+        [: A CFG point after which every relevant retained edge into an allocation family or inferred region is proven gone.]
+    ]
+
+    [td:
+        [: Region epoch]
+        [: One compiler-generated population-and-teardown cycle of a region whose retaining aggregate outlives it.]
+    ]
+
+    [td:
         [: Retained reference]
         [: A stored reference that survives the immediate operation.]
     ]
@@ -72,11 +94,6 @@ Implementation of this analysis is deferred. This leaf is the canonical design a
     ]
 
     [td:
-        [: Implicit region]
-        [: A compiler-inferred lifetime owner for ordinary ungrouped allocations.]
-    ]
-
-    [td:
         [: Declared group]
         [: An accepted deferred hard lifetime boundary introduced by `group name:`.]
     ]
@@ -88,7 +105,7 @@ Implementation of this analysis is deferred. This leaf is the canonical design a
 
     [td:
         [: Physical representation]
-        [: GC, RC, arena, stack, handle or hybrid storage chosen after topology is validated.]
+        [: Stack, inline, affine heap, inferred arena, explicit-group arena, REC-counted or collected storage, chosen after topology is validated.]
     ]
 
     [td:
@@ -123,7 +140,7 @@ Multiple bindings, fields, elements or returned values may alias one allocation 
     theme binding ─┘
 ]
 
-The ownership bit records destruction responsibility. It does not prove uniqueness, identify the final observer, establish lifetime legality or create dynamic shared ownership.
+Affine cleanup responsibility records which runtime path may perform individual cleanup. It does not prove uniqueness, identify the final observer, establish lifetime legality or create dynamic shared ownership. Semantic lifetime ownership stays static even when cleanup responsibility moves at runtime.
 
 ## Stored-edge outlives rule
 
@@ -157,6 +174,8 @@ Shared aliases may outlive the lexical binding that first named the storage.
 Lexical scope does not define allocation lifetime. Escaping or retained aliases do not create unrestricted dynamic shared ownership. They remain under one lifetime owner and must satisfy the stored-edge outlives rule.
 
 ## Implicit lifetime inference
+
+Implicit lifetime regions are compiler-generated non-lexical CFG intervals, not merely lexical scopes. An inferred region may begin and end at points that no source block boundary names, may end before the enclosing block finishes, and may differ between branches of the same function.
 
 An ordinary allocation begins in the narrowest inferred region capable of owning its initial uses. The compiler may widen that allocation only to the nearest existing ancestor on the same ordered owner chain that outlives every retained observer.
 
@@ -200,7 +219,7 @@ Interior projections remain rooted in their containing allocation family. Return
 
 A projection does not silently become an independent allocation or independent copy. Returning, storing or escaping a field or element alias retains the base family under the stored-edge rule.
 
-Field-sensitive allocation splitting may remain as a future compatible optimisation only when the compiler establishes separate child ownership before the alias escapes. It is not retroactive child extraction.
+Field-sensitive allocation splitting may prove that a projected field is an independent allocation family with its own lifetime owner, after which strategy selection reruns for the new families. It applies only when the compiler establishes separate child ownership before the alias escapes. It is not retroactive child extraction.
 
 ## Returns and multi-return aliasing
 
@@ -217,13 +236,67 @@ Multiple return values may alias one allocation when they remain under one calle
 
 A caller may place a fresh result root directly into a destination region only when every retained edge in the result is legal for that destination. An alias result remains tied to its existing lifetime owner. An independent result graph may enter an unrelated destination lifetime without retained edges to its source graph.
 
+## Retained-edge liveness and cleanup frontiers
+
+Lifetime inference tracks retained-edge liveness separately from aggregate binding lifetime. A collection or aggregate may continue to live after the region holding its retained values has ended.
+
+A final cleanup frontier for allocation family `A` requires proof that:
+
+1. every possible retained edge into `A` from the relevant domains is gone on that path
+2. no live local or projection alias survives the point
+3. no future operation can recreate an edge, because no capable source alias survives
+4. no external or builder lifecycle retains `A`
+5. every aliasing aggregate that remains live is proven unable to retain `A` after the point
+
+Frontiers may be path-sensitive and may have different exits on different branches.
+
+The initial whole-domain kill primitives are:
+
+- collection or map `clear`
+- aggregate destruction
+- whole-value replacement when old contents are definitely discarded
+- explicit group exit
+- builder lifecycle teardown
+
+Individual `remove`, `set` or partial cleanup does not establish uniqueness or a frontier by itself. Uniqueness scans, alias registries and adaptive owner recovery are rejected from the design.
+
+[codeblock, $code("moth"):
+    populate(~index)
+    use(index)
+    ~index.clear()
+]
+
+The collection may continue living. The region owning the retained values may end at `clear()`.
+
+### Region epochs
+
+Repeated population and whole-domain cleanup may form compiler-generated region epochs. The aggregate object and its backing capacity outlive each retained-value epoch.
+
+[codeblock, $code("text"):
+    R_index_epoch_0
+        population 0
+        -> first clear
+
+    R_index_epoch_1
+        population 1
+        -> second clear
+]
+
+Retained-edge liveness is part of lifetime topology. It is not a separate runtime ownership system.
+
+## Retained Edge Counting eligibility
+
+When an allocation family has runtime-dependent persistent retained-edge multiplicity, those edges disappear independently, and no complete cleanup frontier, explicit group, field split or cheap bounded retention gives a precise enough answer, the memory planner may select Retained Edge Counting for that family.
+
+Eligibility is a planning outcome, never a legality question. This analysis never counts anything and never selects a strategy; it supplies the family, edge and frontier facts that make selection possible. See @../retained-edge-counting (Retained Edge Counting) for the selection ladder and the counted representation.
+
 ## Cycles and strongly connected graphs
 
 Cross-region cycles are invalid.
 
 Every strongly connected allocation graph must belong to one lifetime region.
 
-Same-region cycles are lifetime-safe. Direct source construction of cyclic reference graphs remains deferred. V1 programs should model cyclic domain graphs through scalar IDs, indexes or keys inside one region when needed.
+Implicit lifetime inference never invents a cyclic region. Direct source-created reference cycles are legal only inside one declared group, where storage is count-free and reclaimed in bulk at group exit. Direct source construction of cyclic reference graphs remains deferred with the rest of declared-group implementation. V1 programs should model cyclic domain graphs through scalar IDs, indexes or keys inside one region when needed.
 
 ## Reactive and builder-owned lifetimes
 
@@ -313,8 +386,9 @@ Conservative analysis may reject topology it cannot prove legal. That is a sourc
 - Decide source access syntax or `~` validity.
 - Decide optional transfer points as source legality.
 - Choose target partition or backend.
-- Choose GC, RC, arena, stack or handle representation.
-- Encode the ownership bit.
+- Choose stack, affine heap, arena, counted or collected representation.
+- Encode ownership or REC handle tags.
+- Select or elide Retained Edge Counting.
 - Invent overly broad page or process owners to avoid diagnostics.
 - Silently widen declared groups.
 - Fold region identity into `TypeId` or source signatures.
@@ -324,10 +398,12 @@ Conservative analysis may reject topology it cannot prove legal. That is a sourc
 
 - Treating GC as a legality escape for invalid or unproven topology.
 - Treating every alias as another lifetime owner.
-- Treating the ownership bit as uniqueness or observer count.
+- Treating affine cleanup responsibility as uniqueness or observer count.
+- Treating a cleanup frontier as established by an individual `remove` or `set`.
+- Treating retained-edge liveness as a separate runtime ownership system.
 - Widening laterally across independently ending sibling domains.
 - Detaching projections from their containing allocation family.
-- Allowing cross-region cycles.
+- Allowing cross-region cycles, or inventing a cyclic inferred region.
 - Folding topology into `TypeId`.
 - Making backend or profile choice affect validity.
 - Assigning topology legality to borrow validation alone.
@@ -339,8 +415,9 @@ Conservative analysis may reject topology it cannot prove legal. That is a sourc
 - @../access-and-aliasing (Access and aliasing): shared aliases, copies and aggregate storage
 - @../borrow-validation (Borrow validation): exclusivity and optional transfer safety
 - @../declared-memory-groups (Declared memory groups): accepted deferred `group` / `into` surface and hard destination lifetimes
-- @../ownership-and-drops (Ownership and drops): destruction responsibility
-- @../runtime-and-backend-lowering (Runtime and backend lowering): GC/RC/arena representations and external profiles
+- @../ownership-and-drops (Affine ownership and drops): affine cleanup responsibility
+- @../retained-edge-counting (Retained Edge Counting): the counted strategy for runtime-many persistent edges
+- @../runtime-and-backend-lowering (Runtime and backend lowering): physical strategies, collector-free release and external profiles
 - @https://github.com/nyejames/moth/blob/main/docs/compiler-design-overview.md (Compiler design overview): analysis boundary and artefact lanes
 - @https://github.com/nyejames/moth/blob/main/docs/build-system-design.md (Build-system design): lifecycle roots and link planning
-- @https://github.com/nyejames/moth/blob/main/docs/roadmap/plans/grouped-memory-design.md (Grouped memory implementation roadmap): implementation sequencing and deferred investigations
+- @https://github.com/nyejames/moth/blob/main/docs/roadmap/plans/final-memory-management-redesign-and-implementation-plan.md (Final memory-management redesign plan): implementation sequencing and deferred investigations

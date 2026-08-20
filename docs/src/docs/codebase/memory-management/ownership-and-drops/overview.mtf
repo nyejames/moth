@@ -1,16 +1,16 @@
-# Ownership and drops
+# Affine ownership and drops
 
-Inferred transfer, unified ABI and conditional destruction.
+Affine cleanup responsibility, the unified two-bit ABI and conditional destruction.
 
 ## Contract
 
-- Input: validated HIR, borrow facts and validated lifetime facts
-- Output: ownership-aware lowering decisions and conditional drop placement
-- Decides: runtime realisation of validated transfer facts, ownership metadata encoding, unified ABI behaviour, and conditional destruction
+- Input: validated HIR, borrow and last-use facts, validated lifetime facts and the selected memory plan
+- Output: affine cleanup lowering decisions, handle-tag encoding and conditional drop placement
+- Decides: runtime realisation of validated transfer facts, handle-tag encoding, unified ABI behaviour, and conditional destruction
 - Must not decide: source legality, lifetime topology, HIR shape, or borrow facts
-- Invariant: ownership-aware and GC paths preserve identical observable behavior
+- Invariant: cleanup responsibility is affine and never duplicates; collector-free, GC-native and debug paths preserve identical observable behavior
 
-Source legality and lifetime topology are already fixed before ownership lowering.
+Source legality and lifetime topology are already fixed before ownership lowering. Final lowering must consume a validated memory plan; the current direct path from borrow-checker advisory drop sites to Wasm `DropIfOwned` is scaffolding to be replaced.
 
 ## Main paths
 
@@ -23,4 +23,5 @@ Source legality and lifetime topology are already fixed before ownership lowerin
 - `docs/src/docs/codebase/memory-management/ownership-and-drops/ownership-and-drops.mtf`
 - `docs/src/docs/codebase/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
 - `docs/src/docs/codebase/memory-management/borrow-validation/overview.mtf`
+- `docs/src/docs/codebase/memory-management/retained-edge-counting/overview.mtf`
 - `docs/src/docs/codebase/memory-management/runtime-and-backend-lowering/overview.mtf`

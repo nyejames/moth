@@ -1,25 +1,27 @@
 
-# Ownership and drops
+# Affine ownership and drops
 
 ## Design contract
 
-Moth ownership is an optimisation state layered over GC-safe source semantics. It isn't a separate source type system.
+Moth ownership is a runtime cleanup discipline over statically validated topology. It isn't a separate source type system.
 
-Borrow and lifetime analysis prove optional transfer eligibility and topology legality. Ownership lowering only realises already-validated facts.
+Cleanup responsibility is **affine**: it may move or be discharged, but it never duplicates. That single property is what makes deterministic cleanup safe without counting ordinary aliases.
 
-The compiler may transfer destruction responsibility only where static analysis proves that doing so can't invalidate a later source use. If that proof is unavailable, the operation remains a borrow and the value may remain GC-managed.
+Borrow and lifetime analysis prove transfer eligibility and topology legality. Ownership lowering only realises already-validated facts, and it consumes a **validated memory plan** rather than borrow-checker advisory drop sites.
 
-## Ownership is an optimisation state
+The compiler may transfer cleanup responsibility only where static analysis proves that doing so can't invalidate a later source use. If that proof is unavailable, the operation remains a borrow and the allocation stays under its region owner.
+
+## Ownership is a runtime state, not a source type
 
 - Ownership metadata is separate from semantic `TypeId`.
 - Shared/mutable parameter syntax doesn't create owned/borrowed source types.
-- Backend ownership eligibility isn't required for correctness.
-- GC is a permitted runtime representation for a statically legal lifetime topology.
-- Ownership-aware and GC paths must preserve identical observable behaviour.
+- Cleanup responsibility never decides whether a program compiles.
+- Collection is a permitted runtime representation for a statically legal topology on debug profiles and GC-native backends.
+- Collector-free, GC-native and debug paths must preserve identical observable behaviour.
 
-## Ownership bit
+## The ownership bit
 
-The ownership bit records destruction responsibility. It does not prove uniqueness, identify the final observer, establish lifetime legality or create dynamic shared ownership.
+Bit 0 of a full-control allocation-family handle records affine cleanup responsibility. It does not prove uniqueness, identify the final observer, establish lifetime legality or create dynamic shared ownership.
 
 [codeblock, $code("text"):
     borrowed
@@ -29,16 +31,37 @@ The ownership bit records destruction responsibility. It does not prove uniquene
         The runtime path carries release or safe-transfer responsibility.
 ]
 
+## The two-bit logical extension
+
+Full-control backends extend the ownership bit with one representation bit. The two bits are independent: bit 0 is per-handle responsibility, bit 1 describes the target allocation family's physical representation.
+
+[codeblock, $code("text"):
+    bit 0: affine cleanup responsibility
+    bit 1: REC representation
+]
+
+[codeblock, $code("text"):
+    00: uncounted borrowed
+    01: uncounted affine-owned
+    10: REC-managed borrowed or counted persistent edge
+    11: REC-managed affine owner
+]
+
+The tags belong to an allocation-family handle, so a projection must retain or recover the family base. Scalars and target-native immediate values do not use this handle ABI, and GC-native backends may erase the tags while preserving the same semantic analysis.
+
+Only retention-sensitive and cleanup-sensitive operations need to inspect bit 1. The exact counter, transition and destruction contract lives in @../retained-edge-counting (Retained Edge Counting).
+
 ## Ownership responsibility versus lifetime ownership
 
 Contrast these distinct concepts:
 
-- **Lifetime owner:** the one semantic region responsible for allocation lifetime
-- **destruction-responsibility path:** the runtime path that may release or transfer when deterministic release is used
-- **shared aliases:** observers that do not become additional lifetime owners
-- **region-owned allocation family:** storage whose release is owned by a group or region rather than an individual callee
+- **Lifetime owner:** the one semantic region responsible for allocation lifetime, fixed statically
+- **Static result provenance:** where a result's storage came from and which outlives constraints apply
+- **Cleanup-responsibility path:** the runtime path that may perform individual cleanup, affine and movable
+- **Shared aliases:** observers that do not become additional lifetime owners
+- **Region-owned or group-owned allocation family:** storage whose release is owned by a region or group rather than an individual callee, recorded as static memory-plan metadata
 
-The bit does not imply individual releasability when the value belongs to a region-owned allocation family.
+Semantic lifetime ownership stays static even when cleanup responsibility moves at runtime. The bit does not imply individual releasability when the value belongs to a region-owned or group-owned allocation family.
 
 ## Inferred transfer
 
@@ -72,7 +95,9 @@ Closed external boundary profiles override this general rule. WIT value-only cal
 - Ordinary calls normally borrow group-owned storage.
 - An individual callee cannot release one group child merely because an owned bit exists.
 - Hidden destination allocation may produce a fresh result root directly in a group when every retained edge is legal for that destination.
-- Group-owned values may use grouped release rather than individual drop when the region ends.
+- Group-owned values use bulk release at group exit rather than individual drop.
+- Group-owned allocations are count-free and never carry a REC representation.
+- Last-use analysis still checks access legality inside a group, but never shortens group-owned physical lifetime.
 
 ## Unified ownership ABI
 
@@ -129,7 +154,7 @@ A non-exiting loop needs no exit destruction point. A loop that can exit must ac
 
 A control-flow join determines whether a later exit may own. The join itself is not a destruction point and is not automatically a release site.
 
-Deterministic release is enabled where analysis supports it. Where it does not, GC-backed or otherwise conservative representation remains legal for already-valid topology.
+Deterministic release is enabled where analysis supports it. Where individual release cannot be placed, the allocation remains under its region or group owner and is reclaimed at that owner's exit. Conservative retention is the acceptable outcome; falling back to a tracing collector in a capable release build is not.
 
 ## Aggregates and stored values
 
@@ -162,21 +187,20 @@ These are analysis/lowering facts only, not required exact Rust enum names and n
 
 ## Physical representations
 
-Internal reference counting is permitted as a backend representation for a statically legal topology. Source-visible RC, retain/release, weak ownership or dynamic shared-ownership semantics remain outside the language design.
+Retained Edge Counting is permitted as a narrow backend representation for statically legal topology with runtime-many persistent retained edges. Source-visible RC, retain/release, weak ownership, finalizers or dynamic shared-ownership semantics remain outside the language design.
 
 Compatible extension points within the accepted memory model:
 
 - stronger future-use precision
-- region-based allocation
+- inferred region allocation and region epochs
 - place- and projection-based alias precision
-- drop elision through region knowledge
+- drop elision and physical drop coalescing through region knowledge
 - static ownership specialisation
-- retain elimination
+- field-sensitive allocation splitting
 - escape analysis
-- GC elision for proven regions
-- internal RC for already-legal topology
+- REC selection and elision for proven families
 
-These must preserve source-language semantics, the unified ownership contract and GC as a legal representation for valid topology.
+These must preserve source-language semantics and the unified ownership contract. A missing physical strategy after successful topology validation is a `CompilerError`, not a silent collector fallback.
 
 ## Common mistakes
 
@@ -184,6 +208,9 @@ These must preserve source-language semantics, the unified ownership contract an
 - Treating `~` as ownership transfer.
 - Using runtime ownership metadata to decide source legality.
 - Treating the ownership bit as uniqueness or observer count.
+- Confusing bit 0 (affine responsibility) with bit 1 (REC representation).
+- Masking an arbitrary interior pointer to recover an allocation-family base.
+- Treating borrow-checker advisory drop sites as the final lowering authority.
 - Treating individual owned bits as permission to free group-owned children.
 - Generating separate visible borrowed/owned functions.
 - Assuming every scalar is a tagged pointer.
@@ -199,7 +226,8 @@ These must preserve source-language semantics, the unified ownership contract an
 - @../access-and-aliasing (Access and aliasing): source semantics
 - @../borrow-validation (Borrow validation): optional transfer facts
 - @../lifetime-regions-and-escape-validation (Lifetime regions and escape validation): lifetime owners and topology
-- @../declared-memory-groups (Declared memory groups): group ownership of release families and reassignment
+- @../declared-memory-groups (Declared memory groups): count-free bulk release families and reassignment
+- @../retained-edge-counting (Retained Edge Counting): the counted representation carried by bit 1
 - @../runtime-and-backend-lowering (Runtime and backend memory lowering): ABI realisation and representations
 - @https://github.com/nyejames/moth/blob/main/docs/compiler-design-overview.md (Compiler borrow validation): transfer and drop facts
 - @https://github.com/nyejames/moth/blob/main/docs/compiler-design-overview.md (Compiler Wasm lowering): ownership-aware backend seam

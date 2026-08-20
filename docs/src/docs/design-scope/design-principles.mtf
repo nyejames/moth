@@ -57,7 +57,7 @@ source-language obligations.
 
     [td:
         [: Memory safety]
-        [: GC baseline plus mandatory borrow and lifetime-region validation]
+        [: Mandatory borrow validation plus mandatory lifetime-topology validation. Static proof is the baseline; collection is one permitted physical representation, never the correctness mechanism.]
     ]
 
     [td:
@@ -67,7 +67,12 @@ source-language obligations.
 
     [td:
         [: Ownership]
-        [: Compiler-inferred optional transfer rather than source-visible move or lifetime syntax]
+        [: Compiler-inferred affine cleanup transfer rather than source-visible move or lifetime syntax]
+    ]
+
+    [td:
+        [: Release memory]
+        [: Backends that advertise full memory control lower release builds without a tracing collector. This is a backend capability, not a source or project mode.]
     ]
 
     [td:

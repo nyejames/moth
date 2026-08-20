@@ -5,17 +5,23 @@ lifetime-region and escape validation. That validation remains deferred in the
 current compiler. Once implemented, it will prove every retained reference
 legal under one lifetime owner, and GC won't bypass it.
 
-The accepted design layers optional ownership optimisation, including final-use
-transfer, deterministic drops, stack or arena allocation and collector elision,
-over a topology already proven legal. When optimisation proof remains
-unavailable, the value stays GC-managed without changing program behaviour.
+After that proof succeeds, the compiler selects a physical strategy for each
+allocation: stack placement, cleanup at a proven final use, an inferred region,
+bulk release with a declared group, or host collection. Strategy selection
+changes memory quality, never program behaviour and never which programs are
+valid. When no precise strategy applies, storage simply stays alive until its
+owning region ends.
+
+Backends that advertise full memory control lower release builds with no tracing
+collector. That is a property of the backend, not a mode you select in source or
+project config.
 
 The rules below define the accepted end state rather than current compiler
 enforcement. Use the progress matrix for implementation status.
 
 ### One semantic lifetime owner
 
-Every runtime allocation has exactly one semantic lifetime owner. Multiple bindings, fields, elements or returned values may alias one allocation without becoming additional owners. The ownership bit records destruction responsibility only. It doesn't prove uniqueness.
+Every runtime allocation has exactly one semantic lifetime owner. Multiple bindings, fields, elements or returned values may alias one allocation without becoming additional owners. Cleanup responsibility is a separate runtime fact that may move between paths but never duplicates. It doesn't prove uniqueness, and the semantic lifetime owner stays fixed regardless of where cleanup happens.
 
 ### The retained-edge outlives rule
 
@@ -116,7 +122,7 @@ that more precise per-result analysis could prove independent.
 
 ### Cycles
 
-Cross-region cycles are invalid. Every strongly connected allocation graph must belong to one lifetime region. Same-region cycles are lifetime-safe.
+Cross-region cycles are invalid. Every strongly connected allocation graph must belong to one lifetime region. Same-region cycles are lifetime-safe, and a declared `group` is the only source mechanism for building one: the compiler never invents a cyclic region on your behalf. Direct source construction of cyclic graphs is deferred with the rest of declared-group implementation.
 
 ### Reactive and builder-owned lifetimes
 

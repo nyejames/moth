@@ -3,6 +3,8 @@
 **Status:** documentation migration active, compiler implementation deferred
 **Repository:** `nyejames/moth`  
 **Baseline reviewed:** `main` at `34afc996b746bfe93281dad115c40083a9106ac8`  
+**Activation branch:** `main`  
+**Activation HEAD:** `357dbab3190f1d7160488479ac7cf246d569fded` (squash-merged upstream as `03168082de813b9ce060a9cceb1667f8ea8e1fa1`)  
 **Proposed repository path:** `docs/roadmap/plans/final-memory-management-redesign-and-implementation-plan.md`  
 **Primary companion plan:** `docs/roadmap/plans/retained-edge-counting-design-and-implementation-plan.md`  
 **Required final code gate:** `just validate`  
@@ -12,18 +14,18 @@ This plan is the parent roadmap for Moth's final memory-management model. It rep
 
 The Retained Edge Counting plan owns the detailed REC analysis, ABI, counter and lowering contract. This plan owns the complete source semantics, analysis boundaries, inferred regions, cleanup frontiers, explicit groups, field-sensitive allocation splitting, physical memory planning, backend/profile parity, channel prerequisites and repository-wide documentation migration.
 
-The existing `docs/roadmap/plans/grouped-memory-design.md` plan is superseded as the umbrella memory roadmap. Its still-valid explicit-group implementation detail must be folded into this plan and the canonical declared-group pages, then the old plan must be deleted or reduced to a short superseded pointer. Do not leave two overlapping implementation authorities.
+The former `docs/roadmap/plans/grouped-memory-design.md` plan is superseded as the umbrella memory roadmap. Its still-valid explicit-group implementation detail is folded into Phases 7 and 8 and into the canonical declared-group pages, and the old plan is deleted. Do not reintroduce a second overlapping implementation authority.
 
 ## Current state
 
 ```text
-STATUS: active — the documentation-migration slice is the first roadmap item after test-suite
-  hardening. Compiler implementation remains deferred until the accepted memory model is reflected
-  consistently in the canonical documentation and progress matrix.
-CURRENT_SCOPE: Milestone A documentation authority migration; no Rust implementation or backend
-  memory-lowering work is active in this slice.
-NEXT_ACTION: refresh the baseline from the post-squash main branch, then begin Phase 0 authority and
-  repository-baseline reconciliation before changing canonical memory documentation.
+STATUS: documentation slice complete — Milestone A landed. The canonical memory documentation,
+  compiler and build authorities, roadmap and progress matrix now describe the accepted
+  collector-free model. Compiler implementation remains deferred and no phase is active.
+CURRENT_SCOPE: none active. Milestone A (Phases 0 and 1) is closed; Phases 2 through 18 are
+  deferred implementation work awaiting explicit activation.
+NEXT_ACTION: Phase 0 and Phase 1 are complete. Milestone A is closed. Do not begin Phase 2 until
+  the borrow and last-use implementation slice is explicitly activated on the roadmap.
 BLOCKERS: none for the documentation slice; implementation phases remain gated on its completion.
 ```
 
@@ -503,13 +505,15 @@ Baseline observations at `34afc996b746bfe93281dad115c40083a9106ac8`:
 
 Current scaffolding must be replaced in place. Do not add compatibility adapters, parallel memory plans or a second backend ownership path.
 
+**Documentation migration status.** The documentation rows of this table are complete as of Milestone A. The canonical memory pages, compiler and build authorities, design-scope pages, collection references, cheatsheet, async draft, `README.md`, `AGENTS.md`, the roadmap and the progress matrix now describe the accepted collector-free model. Every implementation row remains open, and the progress matrix records each one separately.
+
 ---
 
 ## 8. Delivery milestones
 
-### Milestone A: accepted design migration
+### Milestone A: accepted design migration — complete
 
-The canonical docs, roadmap and progress matrix describe the final model while clearly marking implementation as deferred or partial.
+The canonical docs, roadmap and progress matrix describe the final model while clearly marking implementation as deferred or partial. Delivered by Phases 0 and 1. No compiler or backend behaviour changed in this milestone.
 
 ### Milestone B: collector-free correctness baseline
 
@@ -543,26 +547,26 @@ The repository currently has a completed historical memory documentation plan, a
 
 ### Tasks
 
-- [ ] Add this plan at the proposed repository path.
-- [ ] Record the activation branch and exact activation HEAD.
-- [ ] Confirm the REC companion plan remains the sole detailed REC owner.
-- [ ] Mark `grouped-memory-design.md` as superseded.
-- [ ] Move any still-useful group implementation tasks into this plan.
-- [ ] Delete the old grouped plan after every live link is migrated, or reduce it to one short superseded pointer if repository policy requires a retained historical marker.
-- [ ] Add this plan to `docs/roadmap/roadmap.md` under deferred design until implementation is explicitly activated.
-- [ ] Remove the roadmap statement that ownership optimization is deferred until after GC-first correctness.
-- [ ] Add links between this plan and the REC companion plan.
-- [ ] Inventory current source, tests, docs and generated output before the first implementation slice.
-- [ ] Preserve unrelated work.
+- [x] Add this plan at the proposed repository path.
+- [x] Record the activation branch and exact activation HEAD.
+- [x] Confirm the REC companion plan remains the sole detailed REC owner.
+- [x] Mark `grouped-memory-design.md` as superseded.
+- [x] Move any still-useful group implementation tasks into this plan.
+- [x] Delete the old grouped plan after every live link is migrated. Every live link now points at this plan; no historical stub was retained.
+- [x] Add this plan to `docs/roadmap/roadmap.md`. The documentation slice ran under active work; every implementation phase stays under deferred design until explicitly activated.
+- [x] Remove the roadmap statement that ownership optimization is deferred until after GC-first correctness.
+- [x] Add links between this plan and the REC companion plan.
+- [x] Inventory current source, tests, docs and generated output before the first implementation slice.
+- [x] Preserve unrelated work.
 
 ### Audit and validation
 
-- [ ] One parent memory roadmap exists.
-- [ ] One detailed REC roadmap exists.
-- [ ] Canonical docs remain semantic authorities.
-- [ ] No roadmap plan silently overrides a canonical page.
-- [ ] No implementation work starts in this phase.
-- [ ] Run the documentation-only release-build gate.
+- [x] One parent memory roadmap exists.
+- [x] One detailed REC roadmap exists.
+- [x] Canonical docs remain semantic authorities.
+- [x] No roadmap plan silently overrides a canonical page.
+- [x] No implementation work starts in this phase.
+- [x] Run the documentation-only release-build gate.
 
 ---
 
@@ -574,67 +578,67 @@ Accepted design must be authoritative before implementation starts. This phase d
 
 ### Memory authority tasks
 
-- [ ] Rewrite `docs/src/docs/codebase/memory-management/overview.mtf` around the six cooperating mechanisms.
-- [ ] Replace the two-proof-layer GC fallback wording with mandatory topology plus collector-free strategy selection.
-- [ ] Add retained-edge liveness, cleanup frontiers, inferred intervals, region epochs and REC's narrow role.
-- [ ] Update the memory task-reading guide with the REC canonical page and the correct route for collection retention work.
-- [ ] Rewrite `docs/src/docs/codebase/memory-management/@page.moth` with the concise final summary and detailed-page routing.
-- [ ] Update `access-and-aliasing` with last-use centrality, allocation-family meaning and the static provenance versus runtime responsibility distinction.
-- [ ] Update `borrow-validation` with the final last-use contract and explicit handoff to retained-edge analysis.
-- [ ] Update `lifetime-regions-and-escape-validation` with non-lexical intervals, retained-edge liveness, cleanup frontiers, epochs, group-only cycles and REC eligibility.
-- [ ] Update `declared-memory-groups` with hard count-free lifetimes, no individual early cleanup and the only-source-cycle rule.
-- [ ] Rename the ownership page title to `Affine ownership and drops` while keeping the existing path unless a separate file move clearly improves navigation.
-- [ ] Update `ownership-and-drops` with affine cleanup responsibility, memory-plan ownership and the two-bit logical extension.
-- [ ] Update `runtime-and-backend-lowering` with the collector-free release invariant and all physical strategies.
-- [ ] Add the canonical REC documentation directory and page required by the companion plan.
-- [ ] Route the REC page from the memory index.
+- [x] Rewrite `docs/src/docs/codebase/memory-management/overview.mtf` around the six cooperating mechanisms.
+- [x] Replace the two-proof-layer GC fallback wording with mandatory topology plus collector-free strategy selection.
+- [x] Add retained-edge liveness, cleanup frontiers, inferred intervals, region epochs and REC's narrow role.
+- [x] Update the memory task-reading guide with the REC canonical page and the correct route for collection retention work.
+- [x] Rewrite `docs/src/docs/codebase/memory-management/@page.moth` with the concise final summary and detailed-page routing.
+- [x] Update `access-and-aliasing` with last-use centrality, allocation-family meaning and the static provenance versus runtime responsibility distinction.
+- [x] Update `borrow-validation` with the final last-use contract and explicit handoff to retained-edge analysis.
+- [x] Update `lifetime-regions-and-escape-validation` with non-lexical intervals, retained-edge liveness, cleanup frontiers, epochs, group-only cycles and REC eligibility.
+- [x] Update `declared-memory-groups` with hard count-free lifetimes, no individual early cleanup and the only-source-cycle rule.
+- [x] Rename the ownership page title to `Affine ownership and drops`. The existing `ownership-and-drops/` path is kept; no file move was needed.
+- [x] Update `ownership-and-drops` with affine cleanup responsibility, memory-plan ownership and the two-bit logical extension.
+- [x] Update `runtime-and-backend-lowering` with the collector-free release invariant and all physical strategies.
+- [x] Add the canonical REC documentation directory and page required by the companion plan.
+- [x] Route the REC page from the memory index.
 
 ### Compiler and build authority tasks
 
-- [ ] Update `docs/compiler-design-overview.md` with the retained-edge analysis owner, final summary vocabulary, memory-strategy planner and backend handoff.
-- [ ] Update `docs/build-system-design.md` with lifecycle-root instantiation, memory strategy plans, backend capability metadata and collector-free verification.
-- [ ] Update public-interface and fingerprint descriptions with retention, extraction, cardinality, whole-domain kill and cleanup-frontier facts.
-- [ ] Keep donor-local family and region IDs out of interfaces.
+- [x] Update `docs/compiler-design-overview.md` with the retained-edge analysis owner, final summary vocabulary, memory-strategy planner and backend handoff.
+- [x] Update `docs/build-system-design.md` with lifecycle-root instantiation, memory strategy plans, backend capability metadata and collector-free verification.
+- [x] Update public-interface and fingerprint descriptions with retention, extraction, cardinality, whole-domain kill and cleanup-frontier facts.
+- [x] Keep donor-local family and region IDs out of interfaces.
 
 ### Language and design-scope tasks
 
-- [ ] Update `docs/src/docs/design-scope/design-principles.mtf` so memory safety is no longer described as a GC baseline.
-- [ ] Update the excluded-language inventory with no source REC, no implicit cyclic regions and no backend-specific legality.
-- [ ] Update fixed and growable collection references with `clear()` and compiler-known retained-edge effects.
-- [ ] Update map and collection docs with the trusted dynamic-storage role.
-- [ ] State that future collection APIs must preserve narrow analyzable destruction effects.
-- [ ] Update the language cheatsheet with a concise user-facing collector-free release statement.
-- [ ] Do not expose REC counters, tags or regions as source types in the cheatsheet.
-- [ ] Update the async draft with mandatory send transfer, channel-owned queued values, group restrictions and non-atomic REC prerequisites.
-- [ ] Keep async status explicitly deferred.
-- [ ] Update `README.md` from optional GC avoidance to the accepted collector-free release direction.
-- [ ] Update `AGENTS.md` core memory contracts and routing only where the new REC page or release invariant needs explicit mention.
+- [x] Update `docs/src/docs/design-scope/design-principles.mtf` so memory safety is no longer described as a GC baseline.
+- [x] Update the excluded-language inventory with no source REC, no implicit cyclic regions and no backend-specific legality.
+- [x] Update fixed and growable collection references with `clear()` and compiler-known retained-edge effects. `clear` is documented as an accepted sixth operation with implementation deferred: only maps expose it today.
+- [x] Update map and collection docs with the trusted dynamic-storage role.
+- [x] State that future collection APIs must preserve narrow analyzable destruction effects.
+- [x] Update the language cheatsheet with a concise user-facing collector-free release statement.
+- [x] Do not expose REC counters, tags or regions as source types in the cheatsheet.
+- [x] Update the async draft with mandatory send transfer, channel-owned queued values, group restrictions and non-atomic REC prerequisites.
+- [x] Keep async status explicitly deferred.
+- [x] Update `README.md` from optional GC avoidance to the accepted collector-free release direction.
+- [x] Update `AGENTS.md` core memory contracts and routing only where the new REC page or release invariant needs explicit mention.
 
 ### Roadmap and historical-plan tasks
 
-- [ ] Update `docs/roadmap/roadmap.md` with this parent plan and the REC companion.
-- [ ] Remove `GC-first correctness` as the accepted direction.
-- [ ] Add a historical note to `final-memory-management-documentation-consistency-cleanup-plan.md` explaining that it predates this redesign and is not current semantic authority.
-- [ ] Remove or supersede stale collector-elision wording in other roadmap plans.
+- [x] Update `docs/roadmap/roadmap.md` with this parent plan and the REC companion.
+- [x] Remove `GC-first correctness` as the accepted direction.
+- [x] Not applicable: `final-memory-management-documentation-consistency-cleanup-plan.md` no longer exists in the repository, so there is nothing to annotate.
+- [x] Remove or supersede stale collector-elision wording in other roadmap plans, and add a historical banner to `docs/wasm-notes/future-wasm-components-report.md`, which described the model as GC-first.
 
 ### Progress-matrix tasks
 
 Create or update separate rows for:
 
-- [ ] borrow validation and local last-use analysis
-- [ ] result provenance and allocation-family summaries
-- [ ] lifetime-region and escape validation
-- [ ] retained-edge liveness and cleanup frontiers
-- [ ] compiler-generated intervals and region epochs
-- [ ] declared groups and group-only cycles
-- [ ] Affine Ownership ABI
-- [ ] memory-strategy planning
-- [ ] REC analysis and selection
-- [ ] REC backend lowering
-- [ ] field-sensitive allocation splitting
-- [ ] inferred-region and group backend lowering
-- [ ] collector-free release verification
-- [ ] debug or GC-native representation parity
+- [x] borrow validation and local last-use analysis
+- [x] result provenance and allocation-family summaries
+- [x] lifetime-region and escape validation
+- [x] retained-edge liveness and cleanup frontiers
+- [x] compiler-generated intervals and region epochs
+- [x] declared groups and group-only cycles
+- [x] Affine Ownership ABI
+- [x] memory-strategy planning
+- [x] REC analysis and selection
+- [x] REC backend lowering
+- [x] field-sensitive allocation splitting
+- [x] inferred-region and group backend lowering
+- [x] collector-free release verification
+- [x] debug or GC-native representation parity
 
 Use these initial status rules:
 
@@ -645,13 +649,13 @@ Use these initial status rules:
 
 ### Audit and validation
 
-- [ ] No final authority calls GC the semantic correctness baseline.
-- [ ] No final authority says capable release builds may silently fall back to tracing GC.
-- [ ] No user-facing page exposes REC as a source memory type.
-- [ ] No page permits source-created cycles outside explicit groups.
-- [ ] No page permits individual early cleanup of group-owned storage.
-- [ ] All links form one clear authority chain.
-- [ ] Run the documentation-only release-build gate and inspect every changed route.
+- [x] No final authority calls GC the semantic correctness baseline.
+- [x] No final authority says capable release builds may silently fall back to tracing GC.
+- [x] No user-facing page exposes REC as a source memory type.
+- [x] No page permits source-created cycles outside explicit groups.
+- [x] No page permits individual early cleanup of group-owned storage.
+- [x] All links form one clear authority chain.
+- [x] Run the documentation-only release-build gate and inspect every changed route.
 
 ---
 
@@ -867,12 +871,64 @@ Groups are the explicit source escape hatch for deliberate shared lifetimes and 
 - [ ] Reject group values in constants, config, fields, signatures and exports.
 - [ ] Keep source-created cycles invalid until all members are placed into one explicit group.
 
+HIR group metadata has this conceptual shape. Group identity must not enter `TypeId`.
+
+```rust
+pub struct HirMemoryGroup {
+    pub id: MemoryGroupId,
+    pub name: StringId,
+    pub owner_region: RegionId,
+    pub parent_group: Option<MemoryGroupId>,
+    pub source_location: SourceLocation,
+}
+
+pub struct HirPlacement {
+    pub group: MemoryGroupId,
+    pub source_location: SourceLocation,
+}
+```
+
+Conditional production uses one declaration in the destination scope whose initializer is a
+value-producing `if`, match or `catch`. Loop production mutates a destination-owned aggregate
+rather than repeatedly declaring an ancestor-owned name.
+
+### Group and topology diagnostic coverage
+
+Lifetime and group diagnostics are part of the memory model. They must distinguish topology proven
+invalid, topology not proven legal by conservative analysis, invalid group syntax or placement,
+non-copyable graph contents, unsupported external boundary profiles, and missing or inconsistent
+compiler-owned metadata. User-facing failures use stable codes and structured reason payloads.
+Internal impossible or inconsistent metadata uses `CompilerError`.
+
+- [ ] invalid group name or position
+- [ ] non-fresh placement
+- [ ] alias result placement
+- [ ] return or projection escape
+- [ ] store escape
+- [ ] nested escape
+- [ ] cross-region cycle
+- [ ] live alias at exit
+- [ ] reactive escape
+- [ ] external retention
+- [ ] missing common owner
+
+Diagnostics must present this remedy order:
+
+1. allocate directly into the required destination region
+2. place observers under one common group
+3. create independent storage with `copy`
+4. shorten the alias or retained edge
+5. repair package-owned external lifetime metadata
+
+There is no backend-specific escape from semantic lifetime diagnostics.
+
 ### Audit and validation
 
 - [ ] AST owns syntax and obvious placement diagnostics.
 - [ ] HIR owns structure, not final topology.
 - [ ] No source lifetime parameter is introduced.
 - [ ] No hidden widening of declared groups exists.
+- [ ] Every listed group diagnostic has coverage and a stable code.
 - [ ] Run `just validate`.
 
 ---
@@ -1301,7 +1357,7 @@ Do not collapse these rows into one generic "memory management" status.
 | `declared-memory-groups/**` | count-free hard lifetimes, no early cleanup, cycles |
 | `ownership-and-drops/**` | Affine Ownership ABI and memory-plan-driven cleanup |
 | `runtime-and-backend-lowering/**` | all strategies and no tracing fallback for capable release |
-| new `retained-edge-counting/**` | canonical REC technical authority |
+| new `retained-edge-counting/**` | canonical REC technical authority, routed from the memory index |
 | `docs/compiler-design-overview.md` | analysis owner, summaries, artifacts and backend handoff |
 | `docs/build-system-design.md` | lifecycle instantiation, strategy plans and capability verification |
 | `docs/src/docs/collections/**` | trusted builtin effects and collection `clear()` |
@@ -1310,7 +1366,7 @@ Do not collapse these rows into one generic "memory management" status.
 | `docs/src/docs/cheatsheet/moth-language-cheatsheet.md` | concise user-facing final model only |
 | `docs/src/docs/progress/@page.moth` | separate accepted-design and implementation rows |
 | `docs/roadmap/roadmap.md` | parent and companion plan sequencing, no GC-first wording |
-| `docs/roadmap/plans/grouped-memory-design.md` | supersede and remove overlapping authority |
+| `docs/roadmap/plans/grouped-memory-design.md` | superseded and deleted; its group implementation detail now lives in Phases 7 and 8, and every live link points at this plan |
 | historical memory cleanup plan | mark as historical relative to this redesign |
 | `README.md` | collector-free capable release goal |
 | `AGENTS.md` | update memory route and invariant wording where needed |
@@ -1346,6 +1402,21 @@ Accepted but implementation-deferred:
 - richer aggregate REC beyond the collection-first slice
 - channel and task implementation
 - any future atomic REC model
+- reserved-byte or preallocation syntax
+- safe adoption of an ungrouped uniquely owned value into a group
+- safe extraction or movement between declared groups
+- expression-site placement
+- group-local graph construction and publication
+- direct source construction of reference cycles inside one group
+- builder lifecycle region metadata for reactivity
+
+Final-use extraction or detachment of one projected child from an allocation family is not accepted
+design. Before it could become accepted architecture, a separate design must define partially moved
+aggregate semantics, the parent representation after extraction, invalidation of existing aliases
+and projections, control-flow joins, destruction of remaining fields, reactive and external
+observers, aggregate invariants, and parity across GC, region, REC and collector-free backends.
+Until then, projections remain rooted in their containing allocation family, and a proven final use
+transfers the entire allocation family rather than detaching one child.
 
 Deferred work must remain compatible with the locked source semantics and collector-free guarantee.
 

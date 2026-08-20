@@ -2,7 +2,9 @@
 
 Heap values must stay usable while something can still observe them. They must also release resources without letting code touch storage that already died. Those two needs sound like one problem. They are at least two.
 
-**Garbage collection** answers liveness: is this value still reachable? **Access validation** answers conflicting use: may two aliases overlap right now? Moth runs both on purpose.
+**Liveness** asks whether a value can still be observed. **Access validation** asks whether two aliases may overlap right now. These are separate questions, and Moth answers both statically.
+
+A tracing collector answers liveness at runtime. Moth answers it at compile time instead, through mandatory lifetime-topology validation. Collection remains available as a physical representation, but it is never what makes a program correct.
 
 ## The sentence to keep
 
@@ -16,7 +18,7 @@ Compare strategies by *when storage ends*, not by marketing labels.
 
 **Manual allocation.** You call allocate and free. Maximum control. Maximum chance to free too early, free twice or forget entirely.
 
-**Reference counting.** Each alias bumps a count. When the count hits zero, storage frees. Cycles need special care. Costs sit on every alias edge.
+**Reference counting.** Each alias bumps a count. When the count hits zero, storage frees. Cycles need special care. Costs sit on every alias edge. Moth rejects this as a source-visible mechanism; it counts only stored references that analysis could not resolve statically, and never ordinary aliases.
 
 **Tracing GC.** A collector walks from roots and reclaims what it cannot reach. You stop writing most frees. Pauses and throughput become runtime concerns.
 
@@ -24,7 +26,7 @@ Compare strategies by *when storage ends*, not by marketing labels.
 
 **Region or arena allocation.** Many values share a bulk lifetime. The region frees as a unit. Great for bursty work with clear epochs. Awkward when lifetimes tangle.
 
-Real systems mix these. Moth's semantic baseline is GC. Ownership-aware lowering may ride on top when proof exists. A deferred grouped-memory surface (`group` / `into`) aims at arena-style bulk lifetimes later. It is accepted design with implementation still deferred.
+Real systems mix these. Moth's semantic baseline is static proof: mandatory borrow validation plus mandatory lifetime-topology validation. Once a topology is proven legal, the compiler picks a physical strategy for it — stack placement, cleanup at a final use, an inferred region, a declared group, selective counting, or host collection. A deferred grouped-memory surface (`group` / `into`) provides arena-style bulk lifetimes explicitly. It is accepted design with implementation still deferred.
 
 **Diagram placeholder:** Five strategies show when values become reachable and reclaimable
 
@@ -48,7 +50,7 @@ GC aims at lifetime hazards. It does not automatically bless conflicting mutatio
 
 A tracing collector (or a host GC such as the JavaScript heap) tracks **reachability** from roots. Unreachable objects become reclaimable.
 
-That property underwrites Moth's semantic promise: correctness does not depend on proving a deterministic drop on every path. If ownership analysis cannot prove a transfer, the value may remain GC-managed. Observable behaviour stays stable.
+That property is useful, but it is not Moth's semantic promise. Moth proves lifetime topology statically, so correctness never depends on runtime reachability. If cleanup cannot be placed at a precise point, storage stays alive until its owning region ends. Observable behaviour stays stable either way.
 
 GC does **not** make this safe:
 
@@ -76,16 +78,17 @@ Think of shared access as several vines reading the same stem. Exclusive access 
 
 Hold these rules together:
 
-1. **GC is a permitted runtime representation** for a statically legal lifetime topology. It is not a legality escape for invalid retained edges or unproven topology.
-2. **Borrow validation is mandatory**, even under GC.
-3. **Lifetime-region validation is mandatory** after borrow validation. Two proof layers stay distinct: mandatory topology/access legality versus optional ownership optimisation.
+1. **Static proof is the baseline.** GC is one permitted runtime representation for a statically legal lifetime topology. It is not a legality escape for invalid retained edges or unproven topology.
+2. **Borrow validation is mandatory**, on every backend and every profile.
+3. **Lifetime-region validation is mandatory** after borrow validation. Keep two things distinct: mandatory legality proof, and the physical strategy chosen afterwards.
 4. **Shared access** is the default for existing values. Binding, passing, returning or storing an existing value creates a shared alias unless exclusive access or explicit copy applies.
 5. **`copy`** creates an independent value on purpose. Ordinary assignment does not clone.
 6. **`~place`** requests temporary exclusive access to an existing mutable place. It is not a move marker and not a type constructor.
-7. **Moves are inferred** at safe consumption points. Optional inferred transfer always backs off to borrowing when proof is unavailable.
-8. **Ownership-aware lowering** is optional optimisation layered over the same accepted programs.
+7. **Moves are inferred** at safe consumption points. Inferred transfer always backs off to borrowing when proof is unavailable.
+8. **Physical strategy is chosen after legality**, per allocation family, and never changes which programs are accepted.
+9. **Capable release backends are collector-free.** A backend that advertises full memory control must lower release builds without a tracing or reachability collector. This is a backend capability, not a source or project mode.
 
-GC-only and ownership-aware backends must accept and reject the same source programs. Optimisation may not widen or shrink the language. GC does not accept any lifetime graph merely because deterministic lowering cannot prove ownership.
+GC-native and collector-free backends must accept and reject the same source programs with the same observable behaviour. Strategy selection may not widen or shrink the language. GC does not accept any lifetime graph merely because precise cleanup cannot be placed.
 
 Shared access is a source-semantic relationship. It does not require every scalar to be heap-allocated or represented by a pointer. A small integer can still follow shared-access rules at the language level while living in a register at runtime.
 

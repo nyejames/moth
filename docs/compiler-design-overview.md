@@ -13,7 +13,7 @@ Companion authorities:
 - `docs/build-system-design.md` for project and build orchestration
 - `docs/src/docs/codebase/language/overview.mtf` and the canonical unsuffixed references it selects for source syntax and language semantics
 - `docs/src/docs/design-scope/` for design bias and scope boundaries
-- `docs/src/docs/codebase/memory-management/overview.mtf` for reference semantics, borrow validation, lifetime topology, declared groups, ownership, GC and backend memory lowering
+- `docs/src/docs/codebase/memory-management/overview.mtf` for reference semantics, borrow validation, lifetime topology, retained-edge liveness, declared groups, affine ownership, Retained Edge Counting and backend memory lowering
 - `docs/src/docs/codebase/style-guide/style-guide.mtf` for implementation standards
 - `docs/src/docs/progress/@page.moth` for current support and backend coverage
 - `docs/roadmap/roadmap.md` and `docs/roadmap/plans/` for implementation order and genuinely deferred design
@@ -41,7 +41,8 @@ or thorough reviews.
 | AST typing, constants, traits, casts, templates, reactivity or another language feature | `Frontend stages > Stage 4: AST semantics` and the exact relevant subsection | The feature's canonical unsuffixed language references and routed memory material when value flow is affected |
 | HIR shape, lowering, validation, numeric ownership or call targets | `Frontend stages > Stage 5: HIR and validation` and the exact relevant subsection | The affected Stage 4 producer, Stage 6 consumer or backend handoff |
 | Borrow validation, transfer facts or exported access summaries | `Frontend stages > Stage 6: borrow validation` | The task route in `docs/src/docs/codebase/memory-management/overview.mtf` |
-| Lifetime regions, escapes, retention or exported lifetime summaries | `Lifetime-region and escape validation` | The memory task route and `docs/build-system-design.md` > `HTML project builder > Link planning and lifetime topology` when project lifecycles are involved |
+| Lifetime regions, escapes, retention, cleanup frontiers or exported lifetime summaries | `Lifetime-region and escape validation` | The memory task route and `docs/build-system-design.md` > `HTML project builder > Link planning and lifetime topology` when project lifecycles are involved |
+| Memory-strategy selection, REC, handle tags or collector-free lowering | `Lifetime-region and escape validation` > `Memory-strategy planning` | `docs/src/docs/codebase/memory-management/retained-edge-counting/` and the backend memory route |
 | Reachability, link facts, target checks or backend inputs | `Per-function link facts`; `Target-contract validation`; `Backend-facing compiler handoff` | `docs/build-system-design.md` > `Entry and package link planning` and the relevant builder section |
 | Current source locations | `Compiler implementation map` | Open the owning module entry point and adjacent producer or consumer before changing code |
 
@@ -64,9 +65,10 @@ or thorough reviews.
 - Public semantic facts, executable state, backend-neutral link facts and compiler metadata are separate artefact lanes.
 - User-facing failures use `CompilerDiagnostic`. Internal invariants and infrastructure failures use `CompilerError`.
 - Backend validation consumes explicit roots, target assignments, validated HIR and validated lifetime topology. Lowerers never rediscover source meaning or reconsider lifetime legality.
-- GC is the semantic baseline. Ownership-aware lowering preserves the same accepted programs and observable behaviour.
+- Static proof is the semantic baseline, not collection. GC is one permitted physical representation of an already legal topology and preserves the same accepted programs and observable behaviour.
 - Lifetime-region and escape validation is mandatory and backend-independent. GC cannot bypass topology legality.
-- Ownership optimisation preserves accepted programs; missing optimisation proof must not reject source.
+- Backends declare whether they support collector-free release lowering. A capable full-control release backend must not fall back to a tracing or reachability collector.
+- Imprecise memory planning retains conservatively; it must not reject legal source. A missing physical strategy after successful topology validation is `CompilerError`.
 - Parallelism, reuse and caching preserve deterministic identities, diagnostics and output order.
 
 ## Compiler input and result boundary
@@ -1031,8 +1033,18 @@ Public function interfaces export:
 - parameter access modes
 - mutation effects
 - transfer eligibility and effect categories
-- return aliasing
+- complete result provenance: fresh result root, alias of one or more parameters, projection of a parameter, extracted or detached result, alias of another result, or independent result graph
+- retained-parameter and outlives constraints
+- retention effects, including persistent-edge creation and destruction
+- extraction effects, distinguishing a detached result from a fresh root and an ordinary alias
+- retained-edge cardinality where statically known
+- whole-domain kill effects such as `clear`, aggregate destruction and definite whole-value replacement
+- cleanup-frontier facts
 - relevant reactive effects
+
+A final successful public or generated summary must not leave topology-relevant result provenance unknown.
+
+Interfaces and fingerprints carry stable semantic identities and summaries only. Donor-local `TypeId`, HIR, allocation-family, region and counter indexes never cross module boundaries, and REC is never exposed as source semantics.
 
 Cross-module call transfer consumes these summaries. It never opens the callee's HIR as local control flow.
 
@@ -1040,7 +1052,7 @@ Borrow validation resolves binding-backed function IDs through semantic package 
 
 Missing or inconsistent summaries are `CompilerError` invariant failures.
 
-GC remains the semantic baseline. GC-only backends may ignore ownership optimisation facts but cannot skip borrow validation or lifetime-region validation. GC and ownership-aware lowering accept and reject the same programs.
+GC-native backends may ignore affine cleanup facts but cannot skip borrow validation or lifetime-region validation. Collected, debug and collector-free lowering accept and reject exactly the same programs.
 
 Reactive subscriptions are read-only source dependencies rather than active borrow lifetimes.
 
@@ -1054,6 +1066,7 @@ Local per-function and module work:
 
 - reads validated HIR and read-only borrow/effect facts
 - produces allocation, alias, retention, escape, result and outlives constraints
+- produces compiler-generated non-lexical lifetime intervals
 - writes immutable side-table facts and exported lifetime summaries
 - does not rewrite HIR
 - does not choose target partition or physical allocation representation
@@ -1062,7 +1075,30 @@ Project and link work instantiates those summaries over the reachable call graph
 
 The analysis decides semantic lifetime ownership and topology legality. Diagnostics distinguish topology proven invalid from topology not proven legal by conservative analysis. Backends receive a validated topology and may not reconsider source legality.
 
-Canonical design lives under `docs/src/docs/codebase/memory-management/lifetime-regions-and-escape-validation/`. Declared `group` / `into` is accepted end-state syntax with implementation deferred; see `docs/src/docs/codebase/memory-management/declared-memory-groups/` for the canonical semantic contract and `docs/roadmap/plans/grouped-memory-design.md` for implementation sequencing.
+### Retained-edge analysis
+
+Retained-edge liveness belongs to this analysis, not to a separate runtime ownership system. It owns:
+
+- retention domains and the edges within them
+- edge creation and whole-domain kill effects
+- final cleanup frontiers, which may be path-sensitive
+- compiler-generated region epochs for repeated population and teardown
+
+A final cleanup frontier lets an inferred region end before the aggregate that once held its values. Individual `remove` or `set` does not establish a frontier. Uniqueness scans and alias registries are rejected.
+
+### Memory-strategy planning
+
+After topology validation succeeds, a distinct memory-strategy planner selects one physical strategy per allocation family: stack or inline placement, static affine cleanup, inferred region allocation, explicit-group bulk reclamation, Retained Edge Counting, or host collection.
+
+The planner is the sole owner of strategy selection. Borrow validation and lifetime validation supply facts and never choose a representation. Selection is deterministic for one compile and backend configuration, and never changes source legality.
+
+Canonical REC design lives under `docs/src/docs/codebase/memory-management/retained-edge-counting/`, with detailed sequencing in `docs/roadmap/plans/retained-edge-counting-design-and-implementation-plan.md`.
+
+### Backend handoff
+
+Backends receive validated HIR, borrow facts, validated lifetime topology and the memory plan. They realise the plan and never reconsider source legality, recompute topology or select their own strategy. A backend that advertises full memory control must lower every accepted topology in a release build without a tracing collector; a missing strategy at that point is `CompilerError`.
+
+Canonical design lives under `docs/src/docs/codebase/memory-management/lifetime-regions-and-escape-validation/`. Declared `group` / `into` is accepted end-state syntax with implementation deferred; see `docs/src/docs/codebase/memory-management/declared-memory-groups/` for the canonical semantic contract and `docs/roadmap/plans/final-memory-management-redesign-and-implementation-plan.md` for implementation sequencing.
 
 When group syntax is implemented:
 

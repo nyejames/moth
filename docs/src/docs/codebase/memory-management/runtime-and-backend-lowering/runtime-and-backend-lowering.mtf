@@ -3,11 +3,13 @@
 
 ## Design contract
 
-Backends may choose different allocation, GC, handle and ownership representations. They may not choose different language semantics.
+Backends may choose different allocation, region, counted, handle and ownership representations. They may not choose different language semantics.
 
-Every backend must preserve shared read-only access, exclusive mutation, explicit copy behaviour, optional transfer safety, lifetime-topology legality, reactive liveness and GC-equivalent observable results.
+Every backend must preserve shared read-only access, exclusive mutation, explicit copy behaviour, affine transfer safety, lifetime-topology legality, reactive liveness and identical observable results.
 
-GC is a permitted runtime representation for a statically legal lifetime topology. It is not a mechanism for accepting invalid retained edges, lateral lifetime promotion, unowned escapes or cross-region cycles.
+**Collector-free release guarantee.** Backends declare whether they support collector-free release lowering. A backend that advertises full memory control must lower every accepted topology in a release build without a tracing or reachability collector, and must not silently fall back to one. There is no source-visible or project-visible no-GC mode: this is a backend capability, not a language mode.
+
+GC is a permitted runtime representation for a statically legal lifetime topology on debug profiles and GC-native backends. It is not a mechanism for accepting invalid retained edges, lateral lifetime promotion, unowned escapes or cross-region cycles.
 
 ## Main backend paths
 
@@ -23,31 +25,47 @@ GC is a permitted runtime representation for a statically legal lifetime topolog
 - Invalid source access or topology is rejected before backend codegen.
 - Backend doesn't infer access or topology from source syntax.
 - Backend consumes HIR plus borrow facts plus validated lifetime facts.
-- Ownership optimisation is optional.
+- Backend consumes a validated memory plan rather than rediscovering strategy.
 - Backend representation can't affect `copy`, alias or `~` semantics.
-- Missing optimisation proof may retain GC for already-legal topology.
+- Imprecise planning results in conservative retention, never in rejecting legal source.
 - Missing topology proof is not a backend fallback.
+- A missing physical strategy after successful topology validation is `CompilerError`.
 
-## GC baseline
+## Physical memory strategies
 
-- Deterministic destruction is not required for correctness.
-- Valid topology may be represented by host or runtime GC.
+The memory planner selects one strategy per validated allocation family. Backends realise the plan; they do not choose semantics.
+
+- stack or inline placement
+- static affine cleanup at a proven final use
+- inferred region allocation with a complete exit, including region epochs
+- explicit-group bulk reclamation
+- Retained Edge Counting for unresolved runtime-many persistent edges
+- host or runtime collection on debug profiles and GC-native backends
+
+Arenas, handles, slabs, pools, grouped drop lists and hybrid representations are permitted for valid topology. Source-visible RC, weak references, finalizers and hidden unrestricted dynamic sharing are not.
+
+## Collection as a representation
+
+Where collection is used, it represents an already-legal topology:
+
+- Deterministic destruction is not required for observable correctness.
 - Mandatory access and lifetime validation still run.
-- Optional ownership operations may be erased.
+- Affine cleanup operations may be erased.
 - `drop_if_owned` may be a no-op.
-- Borrowed/owned distinctions may be omitted at runtime when irrelevant.
+- Handle tags may be erased when the host owns storage.
 
-GC can be host GC, Wasm GC, a runtime collector or another backend strategy. Exact current target support belongs in the progress matrix.
+Collection can be host GC, Wasm GC or a runtime collector. Exact current target support belongs in the progress matrix.
 
-Internal RC, arenas, handles, regions, stack storage, pools and hybrid representations are permitted for valid topology. Source-visible RC and hidden unrestricted dynamic sharing are not permitted.
+## Profiles and backend capability
 
-## Debug and development configurations
+Profiles differ only in analysis effort and physical representation, never in source legality.
 
-Debug and development configurations may deliberately retain the GC baseline even where ownership-aware lowering is available.
+- Debug and development profiles may deliberately use collection even where collector-free lowering is available, because debuggability, instrumentation, faster compilation and predictable runtime behaviour take priority.
+- GC-native backends may use their host collector on any profile.
+- A capable full-control backend in a release build must be collector-free. It may not fall back per value when precision is unavailable; it retains conservatively under the owning region instead.
+- Debug, GC-native and collector-free paths preserve identical observable Moth behaviour and identical source legality.
 
-Unless a configuration is specifically intended to exercise ownership behaviour, debuggability, instrumentation and predictable runtime behaviour take priority over deterministic-destruction optimisation.
-
-Release configurations may still fall back to GC per value whenever ownership proof is unavailable. Profiles differ only in optimisation effort and physical representation, never in source legality.
+A project builder may verify after reachability and memory planning that a physical artefact contains no tracing runtime. That is an artefact property reported by the build, not a source mode or a project-wide language contract.
 
 ## Build-owned target and lifecycle planning
 
@@ -162,21 +180,22 @@ A future resource-capable profile requires a separate complete design for identi
 ## Wasm lowering
 
 - Borrow and lifetime facts precede LIR.
-- Ownership bit is responsibility only.
-- Group/region representation is separate from the ownership bit.
-- Missing optimisation proof may retain GC.
+- Bit 0 of a family handle is affine cleanup responsibility only.
+- Bit 1 identifies REC representation; group and region representation are separate memory-plan metadata.
+- Imprecise planning retains conservatively; it does not reintroduce a collector in a capable release build.
 - Missing topology proof is not a backend fallback.
-- Ownership-aware heap values use handles or pointers carrying ownership state.
+- Ownership-aware heap values use allocation-family handles carrying the two tag bits.
+- A projection must retain or recover the family base rather than masking an arbitrary interior pointer.
 - Conditional drops release owned handles where individual release is legal.
 - Runtime helpers own allocation, release, string, collection and handle contracts.
 - The unified ownership ABI applies across ownership-aware calls.
 - Source semantics remain backend independent.
 
-`src/backends/wasm/hir_to_lir/ownership.rs` is the ownership projection seam, and Wasm LIR includes conditional `DropIfOwned` plus reserved retain support.
+`src/backends/wasm/hir_to_lir/ownership.rs` is the ownership projection seam, and Wasm LIR includes conditional `DropIfOwned` plus reserved retain support. The current direct path from borrow-checker advisory drop sites to `DropIfOwned` is GC-first scaffolding: final lowering must consume a validated memory plan and support affine, region, group and REC strategies. Treat the present implementation as migration debt, not as the accepted architecture.
 
 ## Runtime ownership metadata
 
-- ownership bit or tag on heap handles
+- two tag bits on allocation-family handles: affine responsibility and REC representation
 - borrowed versus owned state
 - mask and extract value representation
 - callee responsibility
@@ -193,8 +212,10 @@ A future resource-capable profile requires a separate complete design for identi
 - Remove retain and release checks when static proof permits.
 - Avoid double release.
 - Ensure all potential ownership paths reach release or safe transfer.
-- GC lowering can erase ownership-specific operations.
-- Internal RC may be used only for already-legal topology.
+- Collected lowering can erase ownership-specific operations.
+- REC may be used only for already-legal topology, and only where the planner selected it.
+- Counted destruction is iterative through a worklist, never recursive through the target stack.
+- Group-owned storage is released in bulk at group exit and never individually.
 
 ## Fact consumption
 
@@ -243,13 +264,13 @@ Requirements:
 - same validation result
 - no unchecked aliasing
 - no source-visible lifetime or ownership surface
-- graceful GC representation when optimisation is unavailable
+- conservative retention under the owning region when precision is unavailable
 
-## Fallback requirements
+## Imprecision requirements
 
-When a backend can't prove or implement an ownership optimisation safely, it must retain GC-managed behaviour for that value or feature on already-legal topology.
+When a backend can't place precise individual cleanup for a value, the allocation remains under its region or group owner and is reclaimed at that owner's exit.
 
-A missing optimisation is valid. A semantic divergence isn't. Unknown external retention is not a GC fallback.
+Conservative retention is valid. Semantic divergence isn't. In a capable full-control release build, imprecision must not reintroduce a tracing collector, and unknown external retention is never a collector fallback. A missing physical strategy after successful topology validation is `CompilerError`.
 
 ## What backends must not do
 
@@ -260,7 +281,9 @@ A missing optimisation is valid. A semantic divergence isn't. Unknown external r
 - Destroy borrowed data.
 - Expose source lifetimes.
 - Rediscover source dependencies or access syntax.
-- Require deterministic destruction for correctness.
+- Require deterministic destruction for observable correctness.
+- Fall back to a tracing collector in a capable full-control release build.
+- Upgrade an uncounted allocation to REC at runtime.
 - Make reactive observability depend on target-specific early release.
 - Assume page memory includes arbitrary imported components.
 - Invent a numbered Stage 7 for backend lowering.
@@ -273,15 +296,17 @@ A missing optimisation is valid. A semantic divergence isn't. Unknown external r
 - Treating every runtime value as a tagged heap pointer.
 - Lowering advisory drops without checking ownership.
 - Freeing reactive state too early.
-- Treating missing ownership proof as an error.
+- Treating imprecise cleanup placement as an error.
 - Treating missing topology proof as backend GC fallback.
+- Presenting collector-free release as a source-visible or project-visible mode.
 - Creating separate borrowed/owned language APIs.
 - Assuming imported components share Moth page memory.
 
 ## Related reading
 
 - @../ (Memory management): core contract
-- @../ownership-and-drops (Ownership and drops): unified ABI and destruction
+- @../ownership-and-drops (Affine ownership and drops): unified two-bit ABI and destruction
+- @../retained-edge-counting (Retained Edge Counting): counted layout, transitions and iterative destruction
 - @../borrow-validation (Borrow validation): analysis facts
 - @../lifetime-regions-and-escape-validation (Lifetime regions and escape validation): topology legality
 - @../declared-memory-groups (Declared memory groups): declared lifetimes, placement, exits and group-crossing restrictions

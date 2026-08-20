@@ -1,5 +1,16 @@
 # Moth and the WebAssembly Component Model Backend Plan
 
+> **Historical research note.** This report predates the final memory-management
+> redesign and is not current semantic authority. Where it describes Moth's memory
+> model as "GC-first", with static analysis as an optimisation layer rather than a
+> semantic requirement, that description is superseded. The accepted model makes
+> borrow validation and lifetime-topology validation mandatory, treats collection
+> as one permitted physical representation of an already legal topology, and
+> requires backends that advertise full memory control to lower release builds
+> without a tracing collector. See
+> `docs/src/docs/codebase/memory-management/overview.mtf` and `docs/roadmap/plans/final-memory-management-redesign-and-implementation-plan.md`. The Wasm
+> and component-model research in this report remains useful.
+
 ## Moth’s current Wasm pipeline baseline and where it strains today
 
 Moth’s compiler pipeline is explicitly split into a frontend that produces a stable semantic IR (HIR) plus borrow-check facts, and a backend/build-system layer that consumes that output to generate artefacts. The core stages are: project structure → tokenization → header parsing → dependency sorting → AST construction → HIR → borrow validation; then project builders perform backend lowering (JS or Wasm) using the `BackendBuilder`/`ProjectBuilder` seam. fileciteturn9file0L1-L1

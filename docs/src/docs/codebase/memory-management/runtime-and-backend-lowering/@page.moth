@@ -2,7 +2,7 @@
 @styles navbar, section, theme_head
 
 page_title #= "Runtime and backend memory lowering"
-page_description #= "How GC baseline and ownership-aware lowering meet backend targets."
+page_description #= "How physical memory strategies and the collector-free release guarantee meet backend targets."
 page_head #= theme_head
 
 #[navbar]

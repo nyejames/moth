@@ -124,9 +124,27 @@ outside scope.
 ### Source-visible RC and dynamic shared ownership
 
 Source-visible RC, retain/release, weak ownership, finalisers and unrestricted
-dynamic shared ownership stay outside the language. Internal backend RC remains
-allowed for already-legal topology. Diagnostics, common-owner groups, `copy`
-and builder lifecycle roots replace source-level RC.
+dynamic shared ownership stay outside the language. Diagnostics, common-owner
+groups, `copy` and builder lifecycle roots replace source-level RC.
+
+Retained Edge Counting is a compiler-selected physical representation for
+already-legal topology. It is not source syntax, not a type, and no program can
+name, observe or request a counter. There is no source REC.
+
+### Implicit cyclic regions
+
+The compiler never invents a cyclic lifetime region to accept a program. Direct
+source-created reference cycles are legal only inside one declared group, where
+storage is count-free and reclaimed in bulk at group exit. Cross-region cycles
+are invalid, and Moth has no cycle collector.
+
+### Backend-specific source legality
+
+No backend or build profile may change which source programs are valid. Borrow
+validation and lifetime-topology validation run identically everywhere, and
+debug, GC-native and collector-free paths accept and reject exactly the same
+source with the same observable behaviour. There is no source-visible or
+project-visible no-GC mode.
 
 ### Target-conditional source and backend-specific semantics
 

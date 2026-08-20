@@ -1,0 +1,18 @@
+@retained-edge-counting content as reference_content
+@styles navbar, section, theme_head
+
+page_title #= "Retained Edge Counting"
+page_description #= "The narrow counted strategy for runtime-many persistent retained edges."
+page_head #= theme_head
+
+#[navbar]
+
+#[section, $md:
+    @../ (Memory management) / Retained Edge Counting
+
+    **REC is a physical representation, not source semantics.** Moth has no source-visible reference counting, and no program can name, observe or request a counter.
+
+    REC covers one narrow case: an allocation family whose persistent retained edges are only counted at runtime, disappear independently, and cannot be reclaimed precisely enough through affine last-use analysis, inferred cleanup-frontier regions, field-sensitive splitting or explicit groups. Accepted design with implementation deferred.
+]
+
+#[section, reference_content]

@@ -32,10 +32,12 @@ page_head #= language_theme_head
     # Memory and lifetimes
 
     Moth shares existing values by default, requires explicit copies and infers
-    safe ownership transfers. Unlike Rust, it exposes no reference types,
+    safe cleanup transfers. Unlike Rust, it exposes no reference types,
     lifetime parameters or move syntax. Unlike a conventional garbage-collected
-    language, its accepted design also requires alias and lifetime-topology
-    validation. Lifetime-topology validation remains deferred in the compiler.
+    language, its accepted design proves memory safety statically: alias and
+    lifetime-topology validation are mandatory on every backend, and backends
+    with full memory control produce release builds with no tracing collector.
+    Lifetime-topology validation remains deferred in the compiler.
 
     These pages explain source behaviour. The @../codebase/memory-management (memory model) defines borrow validation and backend lowering.
 ]

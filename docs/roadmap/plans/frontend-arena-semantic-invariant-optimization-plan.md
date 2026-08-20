@@ -1066,7 +1066,7 @@ the expression, template, and docs profiles. Phase 8 remains deferred.
 
 - [ ] Confirm HIR validation still catches transformation invariants.
 - [ ] Confirm borrow facts remain side tables and do not mutate HIR.
-- [ ] Confirm GC-only backend semantics are unchanged.
+- [ ] Confirm backend semantics are unchanged and identical across debug, GC-native and collector-free paths.
 - [ ] Run `just validate`.
 - [ ] Run borrow stress benchmarks and profiles.
 
