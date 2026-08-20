@@ -47,7 +47,7 @@ After topology is proven, the compiler selects a physical strategy per allocatio
 - inferred region allocation with a complete exit
 - explicit-group bulk reclamation
 - Retained Edge Counting for unresolved runtime-many persistent edges
-- host collection on debug profiles and GC-native backends
+- host garbage-collected representation on debug profiles and GC-native backends
 
 Strategy selection changes memory quality, never source legality. A missing physical strategy after successful topology validation is a `CompilerError`, not a silent collector fallback.
 

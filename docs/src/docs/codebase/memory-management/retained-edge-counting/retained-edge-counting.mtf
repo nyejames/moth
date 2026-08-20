@@ -6,7 +6,7 @@ Retained Edge Counting, abbreviated REC, is a selective physical representation 
 
 **REC is a physical representation, not source semantics.** Moth has no source-visible reference counting, no counter type, no retain or release syntax and no way for a program to observe a count.
 
-Retained-edge analysis supplies candidate, cardinality, edge-effect and cleanup-frontier facts. The memory-strategy planner owns the decision to select REC or elide it. REC lowering consumes that decision and owns tags, counter layout, transitions and the destruction plan.
+Retained-edge analysis supplies candidate, cardinality, edge-effect, outcome and frontier-enabling facts. The memory-strategy planner owns the decision to select REC or elide it. REC lowering consumes that decision and owns tags, counter layout, transitions and the destruction plan.
 
 ## Status
 
@@ -68,6 +68,10 @@ REC is the fifth of the six cooperating mechanisms described in the memory overv
 
 Builtin fixed and growable collections are Moth's trusted dynamic-storage substrate. Their memory effects are compiler-known.
 
+Each stored value contributes a retained-edge summary. A scalar such as `Int` can contribute zero obligations. An ordinary heap-backed value can contribute one direct obligation. An inline aggregate can contribute several obligations, and an aggregate such as `Collection<Holder>` can contribute transitive obligations through each stored `Holder`. A storage operation adds or removes the complete summary contributed by the stored value. It does not assume that one element means one edge.
+
+The table describes the successful semantic path. Fallible operations publish their retention effects only at their commit point.
+
 [table:
     [th:
         [: **Operation**]
@@ -76,39 +80,109 @@ Builtin fixed and growable collections are Moth's trusted dynamic-storage substr
 
     [td:
         [: `get`]
-        [: returns a statically bounded shared alias, no count change]
+        [: creates a statically bounded temporary alias. It adds no persistent obligation.]
     ]
 
     [td:
         [: `push`]
-        [: creates one persistent retained edge]
+        [: adds the inserted element's retained-edge obligations]
     ]
 
     [td:
         [: `set`]
-        [: destroys one old retained edge and creates one new retained edge]
+        [: removes the replaced element's obligations and adds the new element's obligations]
     ]
 
     [td:
         [: `remove`]
-        [: destroys one persistent retained edge and returns the existing value detached from the collection]
+        [: removes the stored element's obligations and returns the existing value as a detached stored result]
     ]
 
     [td:
         [: `clear`]
-        [: destroys every retained element edge in that collection domain]
+        [: removes the obligations contributed by every stored element]
     ]
 
     [td:
         [: collection destruction]
-        [: destroys every retained element edge and its backing storage domain]
+        [: removes all element obligations and destroys the backing-storage domain]
     ]
 
     [td:
         [: growth or reallocation]
-        [: replaces backing storage while preserving logical element edges]
+        [: replaces backing storage while preserving logical element summaries]
     ]
 ]
+
+For the initial direct-handle implementation, an element commonly contributes zero or one direct obligation. The semantic vocabulary stays general so aggregate and transitive retention can use the same summaries.
+
+### Outcome-sensitive builtin commits
+
+A builtin collection mutation commits its retained-edge effects atomically on the successful path. A failed operation preserves the original storage topology and every cleanup obligation. HIR represents these outcomes as explicit control-flow paths, so summary facts must remain exit-specific:
+
+```text
+success:
+    remove old obligations
+    add new obligations
+
+error:
+    retain the original obligations
+```
+
+Invalid-index `remove` destroys no obligation. A failed fixed-capacity `push` adds none. A failed `set` leaves the old element in place. A failed map insertion retains neither the incoming key nor the incoming value. Count changes happen after the operation reaches its semantic commit point.
+
+### Map retention vocabulary
+
+Maps retain both stored keys and stored values. Replacing an existing key keeps the stored key and changes only the stored value. The lookup key supplied to an existing-key `set`, `get`, `contains` or `remove` call remains a temporary borrowed alias unless the operation inserts it as a new stored key.
+
+[table:
+    [th:
+        [: **Operation**]
+        [: **Retained-edge effect**]
+    ]
+
+    [td:
+        [: `get` or `contains`]
+        [: creates a temporary lookup alias and adds no persistent obligation]
+    ]
+
+    [td:
+        [: new-key `set`]
+        [: adds the stored key's obligations and the new value's obligations]
+    ]
+
+    [td:
+        [: existing-key `set`]
+        [: keeps the existing stored key, removes the old value's obligations and adds the new value's obligations. The incoming lookup key is not retained]
+    ]
+
+    [td:
+        [: `remove`]
+        [: removes the stored key's and stored value's obligations. The value becomes a detached stored result, but the stored key does not]
+    ]
+
+    [td:
+        [: `clear`]
+        [: removes all stored key and value obligations]
+    ]
+
+    [td:
+        [: map destruction]
+        [: removes all stored key and value obligations and destroys the backing-storage domain]
+    ]
+]
+
+Consider a map whose key and value point to the same allocation family:
+
+[codeblock, $code("moth"):
+    text = [: large value]
+    values ~{String = String} = {}
+
+    ~values.set(text, text)!
+    removed = ~values.remove(text)!
+]
+
+The new-key insertion creates two persistent obligations to the same family, one from the stored key and one from the stored value. Removal removes the key obligation and detaches the value obligation into the result when the caller receives affine responsibility. The lookup `text` used to find the entry does not add another obligation. If the mutation fails, neither stored obligation changes.
 
 The compiler does not recognise user methods by name. A user abstraction earns an equivalent summary by composing builtin effects, and only when analysis proves every relevant edge is killed on every path.
 
@@ -123,18 +197,20 @@ If `values` is the only field retaining indexed elements, the compiler may infer
 
 Future collection APIs must preserve narrow, analysable destruction effects.
 
-## Extracted and detached results
+## Detached stored results
 
-`remove` is neither a fresh result nor an ordinary alias return. The existing allocation survives while the collection stops retaining it.
+`remove` returns a detached stored result. It is neither a fresh result nor an ordinary alias return. The existing allocation survives while the collection stops retaining it.
 
 [codeblock, $code("text"):
-    before:  collection  ->  value
+before:  collection  ->  stored value
 
-    after:   collection  -X-> value
-             result       ->  value
+after:   collection  -X-> stored value
+         result       ->  stored value
 ]
 
-The summary vocabulary preserves this distinction so a caller can receive affine cleanup responsibility, keep a borrowed alias under another owner, or reclassify a counted persistent-edge obligation into an affine root obligation. This applies to maps, collections, stacks, queues, deques, caches and tree-node detachment.
+The summary vocabulary preserves this distinction so a caller can receive affine cleanup responsibility, keep a borrowed alias under another owner, or reclassify the removed value's persistent obligations into the returned result. This applies to maps, collections, stacks, queues, deques, caches and other container detachment operations.
+
+Container detachment differs from group extraction or adoption, which would move a group-owned allocation family outside its group. It also differs from interior projection detachment, which would separate a field from its containing allocation family. Group extraction and adoption remain forbidden in V1. Interior projection detachment remains deferred until field-sensitive splitting has established separate ownership. The restriction on extraction means moving a group-owned allocation out of its group or retroactively detaching an interior projection from its allocation family. It does not prohibit builtin collection or map `remove`, which kills a container-retained edge and returns the already-stored value under ordinary lifetime rules.
 
 ## REC elision ladder
 
@@ -162,7 +238,7 @@ The cleanup-frontier case is the most common elision:
     ~index.clear()
 ]
 
-The collection may continue living. The region holding the retained values may end at `clear()`.
+The collection may continue living. If no other live alias or retention domain can retain a target allocation family, `clear()` can become that family's final cleanup frontier. The collection itself may continue to live. For group-owned storage, `clear()` kills the group's collection edges logically, but the group still keeps its allocation storage until group exit and no REC counter applies.
 
 ## Cleanup frontiers and region epochs
 
@@ -223,6 +299,8 @@ Full-memory-control backends use a two-bit tagged allocation-family handle for h
         [: REC-managed affine-owned handle]
     ]
 ]
+
+The REC bit identifies the target allocation family's physical layout. It does not by itself say that this particular handle contributed one count. A temporary borrowed `get()` result may carry `10` while adding no obligation. The operation that stores or removes a persistent edge determines count changes.
 
 A backend masks both bits before recovering the allocation-family base.
 
@@ -304,8 +382,8 @@ Temporary aliases cannot race the count to zero, because borrow validation alrea
 
     [td:
         [: persistent insertion while affine root remains]
-        [: `+1`]
-        [: stored edge is `10`]
+        [: `+1` per inserted retained-edge obligation]
+        [: stored edge obligations use `10`]
     ]
 
     [td:
@@ -322,20 +400,20 @@ Temporary aliases cannot race the count to zero, because borrow validation alrea
 
     [td:
         [: persistent edge removal with no returned root]
-        [: `-1`]
-        [: edge disappears]
+        [: `-1` per removed retained-edge obligation]
+        [: obligations disappear]
     ]
 
     [td:
-        [: extraction that creates an affine root]
+        [: container detachment that creates an affine root]
         [: `0`]
-        [: edge obligation is reclassified as an `11` result]
+        [: returned obligations are reclassified as an `11` result]
     ]
 
     [td:
-        [: extraction while another affine root remains]
-        [: `-1`]
-        [: result is a borrowed `10`]
+        [: container detachment while another affine root remains]
+        [: `-1` per detached obligation]
+        [: returned value is borrowed `10`]
     ]
 
     [td:
@@ -346,14 +424,14 @@ Temporary aliases cannot race the count to zero, because borrow validation alrea
 
     [td:
         [: persistent overwrite]
-        [: old `-1`, new `+1` or reclassification]
-        [: old edge dies, new edge appears]
+        [: old `-1` per removed obligation, new `+1` per added obligation or reclassification]
+        [: old summary disappears, new summary appears]
     ]
 
     [td:
         [: whole-domain clear]
-        [: one release per surviving external counted edge unless region elision applies]
-        [: domain edges disappear]
+        [: one release per surviving external counted-edge obligation unless region elision applies]
+        [: domain obligations disappear]
     ]
 
     [td:
@@ -375,7 +453,7 @@ Mixed cleanup is expected: one region exit may release counted edges, and one co
 
 REC may cross Moth function and package boundaries, but only retention-sensitive operations need to inspect the REC bit. Read-only and temporary-borrow functions are unaffected. Whole-function REC and non-REC specialisation is rejected as a default; mixed call paths use one body with local tag handling around retention-sensitive or cleanup-sensitive operations.
 
-Public semantic interfaces describe aliasing, retention, extraction, cardinality and cleanup effects. They never expose REC as source semantics, and donor-local family, region and counter identities never cross module boundaries.
+Public semantic interfaces describe aliasing, retention, detached stored results, cardinality, whole-domain kills and outcome-sensitive cleanup effects. They never expose REC as source semantics, and donor-local family, region, counter and concrete-frontier identities never cross module boundaries.
 
 Ordinary foreign boundaries remain closed and value-only. REC does not create a cross-language shared-reference protocol.
 

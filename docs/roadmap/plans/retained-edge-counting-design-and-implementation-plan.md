@@ -1,6 +1,6 @@
 # Retained Edge Counting design and implementation plan
 
-Status: accepted final design, implementation deferred
+Status: accepted final design, REC/public retained-edge consistency pass complete, implementation deferred
 
 Repository baseline: `nyejames/moth` `main` at `356d0666fa16507a5690aa8451f8c5616d01d00c`
 
@@ -60,7 +60,7 @@ The following decisions are locked for the final design.
 15. The counter is non-atomic under the accepted channel and task model.
 16. Counted destruction is iterative through a deletion worklist rather than recursive through the native or Wasm stack.
 17. REC can cross Moth function and package boundaries, but only retention-sensitive operations need to inspect the REC bit.
-18. Public semantic interfaces describe aliasing, retention, extraction, cardinality and cleanup effects. They never expose REC as source semantics.
+18. Public semantic interfaces describe aliasing, retention, detached stored results, cardinality, whole-domain kills and outcome-sensitive cleanup effects. They never expose REC as source semantics.
 19. Ordinary foreign boundaries remain closed and value-only. REC does not create a cross-language shared-reference protocol.
 20. The first REC implementation includes structured developer reporting for every considered allocation, including exact elision reasons.
 
@@ -169,7 +169,7 @@ One counted obligation represented by one runtime persistent retained edge.
 - count transitions
 - builtin collection integration
 - compositional user-function and package summaries
-- extraction and detached results
+- detached stored results
 - transitive aggregate retention
 - iterative destruction
 - mixed region and REC cleanup
@@ -355,7 +355,7 @@ pub enum ResultProvenance {
     Fresh,
     AliasParameter(u32),
     ProjectionOfParameter(u32),
-    ExtractedFromParameter(u32),
+    DetachedStoredValue(u32),
     AliasResult(u32),
     Independent,
 }
@@ -387,10 +387,11 @@ They may need to express:
 - parameter access mode
 - optional affine transfer eligibility
 - returned alias or projection relationships
-- extracted or detached results
+- detached stored results
 - result-to-result aliasing
 - parameters or receiver domains retained after return
 - retention cardinality, including runtime-many creation
+- persistent-retention effects, including exit-specific success and error paths
 - complete retained-edge domain destruction
 - outlives constraints
 - external boundary classification
@@ -409,19 +410,63 @@ A package consumer instantiates these summaries into its project topology. Strat
 
 Builtin fixed and growable collections are the trusted dynamic-storage substrate.
 
-Their memory effects are compiler-known.
+Their memory effects are compiler-known. Each stored value contributes a complete retained-edge summary. A scalar such as `Int` may contribute zero obligations, a direct heap-backed value may contribute one, an inline aggregate may contribute several and a nested aggregate may contribute transitive obligations. A storage operation adds or removes the summary contributed by the stored value.
+
+The table describes the successful semantic path. Fallible operations publish their effects only at their semantic commit point.
 
 | Operation | Retained-edge effect |
 |---|---|
-| `get` | returns a statically bounded shared alias, no count change |
-| `push` | creates one persistent retained edge |
-| `set` | destroys one old retained edge and creates one new retained edge |
-| `remove` | destroys one persistent retained edge and returns the existing value detached from the collection |
-| `clear` | destroys every retained element edge in that collection domain |
-| collection destruction | destroys every retained element edge and its backing storage domain |
-| growth or reallocation | replaces backing storage while preserving logical element edges |
+| `get` | creates a statically bounded temporary alias. It adds no persistent obligation |
+| `push` | adds the inserted element's retained-edge obligations |
+| `set` | removes the replaced element's obligations and adds the new element's obligations |
+| `remove` | removes the stored element's obligations and returns the existing value as a detached stored result |
+| `clear` | removes the obligations contributed by every stored element |
+| collection destruction | removes all element obligations and destroys the backing-storage domain |
+| growth or reallocation | replaces backing storage while preserving logical element summaries |
 
 The compiler does not recognize user methods by name.
+
+For the initial direct-handle implementation, an element commonly contributes zero or one direct obligation. The semantic vocabulary remains general so aggregate and transitive retention do not require a later redesign.
+
+### Outcome-sensitive builtin commits
+
+A builtin collection mutation commits its retained-edge effects atomically on the successful path. A failed operation preserves the original storage topology and every cleanup obligation. HIR represents these outcomes as explicit control-flow paths, so public summaries must preserve the distinction:
+
+```text
+success:
+    remove old obligations
+    add new obligations
+
+error:
+    retain the original obligations
+```
+
+Invalid-index `remove` destroys no obligation. A failed fixed-capacity `push` adds none. A failed `set` leaves the old element intact. A failed map insertion retains neither the incoming key nor the incoming value. Count changes happen after the operation reaches its semantic commit point.
+
+### Map retention vocabulary
+
+Maps retain both stored keys and stored values. Replacing an existing key keeps the stored key and changes only the stored value. The lookup key for an existing-key `set`, `get`, `contains` or `remove` call remains a temporary borrowed alias unless the operation inserts it as a new stored key.
+
+| Operation | Retained-edge effect |
+|---|---|
+| `get` or `contains` | creates a temporary lookup alias and adds no persistent obligation |
+| new-key `set` | adds the stored key's obligations and the new value's obligations |
+| existing-key `set` | keeps the existing stored key, removes the old value's obligations and adds the new value's obligations. The incoming lookup key is not retained |
+| `remove` | removes the stored key's and stored value's obligations. The value becomes a detached stored result, but the stored key does not |
+| `clear` | removes all stored key and value obligations |
+| map destruction | removes all stored key and value obligations and destroys the backing-storage domain |
+
+Consider a map whose key and value point to the same allocation family:
+
+```moth
+text = [: large value]
+values ~{String = String} = {}
+
+~values.set(text, text)!
+removed = ~values.remove(text)!
+```
+
+The new-key insertion creates two persistent obligations to the same family, one from the stored key and one from the stored value. Removal removes the key obligation and detaches the value obligation into the result when the caller receives affine responsibility. The lookup `text` used to find the entry does not add another obligation. If the mutation fails, neither stored obligation changes.
 
 A user method gets a strong summary by composing builtin effects.
 
@@ -436,21 +481,21 @@ If `values` is the only field retaining indexed elements, the compiler may infer
 
 If a user implementation clears slots through a handwritten loop, the function remains valid. It receives the strong summary only when analysis proves every relevant edge is killed on every path.
 
-## Extracted and detached results
+## Detached stored results
 
-`remove` is not a fresh result and not an ordinary alias return.
+`remove` returns a detached stored result. It is not a fresh result and not an ordinary alias return.
 
-Before extraction:
+Before container detachment:
 
 ```text
-collection -> value
+collection -> stored value
 ```
 
-After extraction:
+After container detachment:
 
 ```text
-collection -X-> value
-result --------> value
+collection -X-> stored value
+result       -> stored value
 ```
 
 The existing allocation survives. The collection no longer retains it.
@@ -459,9 +504,11 @@ The summary vocabulary must preserve this distinction so the caller can:
 
 - receive affine cleanup responsibility
 - keep a borrowed alias under another owner
-- reclassify a counted persistent-edge obligation into an affine root obligation
+- reclassify the detached value's persistent obligations into the returned result
 
-This applies to maps, collections, stacks, queues, deques, caches and tree-node detachment.
+This applies to maps, collections, stacks, queues, deques, caches and other container detachment operations. Container detachment does not mean group extraction or adoption, which would move a group-owned allocation family outside its group. It also does not mean interior projection detachment, which would separate a field from its containing allocation family. Group extraction and adoption remain forbidden in V1. Interior projection detachment remains deferred until field-sensitive splitting has established separate ownership.
+
+The restriction on extraction means moving a group-owned allocation out of its group or retroactively detaching an interior projection from its allocation family. It does not prohibit builtin collection or map `remove`, which kills a container-retained edge and returns the already-stored value under ordinary lifetime rules.
 
 ## REC elision and strategy selection
 
@@ -491,7 +538,7 @@ use(index)
 ~index.clear()
 ```
 
-The collection may continue living. The retained allocation region may end at `clear()`.
+The collection may continue living. If no other live alias or retention domain can retain a target allocation family, `clear()` can become that family's final cleanup frontier. The collection itself may continue to live. Group-owned storage still remains until group exit, even though `clear()` kills the group's collection edges logically.
 
 ### 5. Field-sensitive family splitting
 
@@ -560,6 +607,8 @@ Tag table:
 | `01` | uncounted affine-owned handle |
 | `10` | REC-managed borrowed handle or counted persistent edge |
 | `11` | REC-managed affine-owned handle |
+
+Bit 1 identifies the target allocation family's physical REC layout. It does not prove that this particular handle contributed one count. A temporary borrowed `get()` result may carry `10` while adding no obligation. The operation that stores or removes a persistent edge determines count changes.
 
 Conceptual constants:
 
@@ -683,15 +732,15 @@ The initial count reflects the initial liveness obligation. A temporary root nee
 | ordinary local alias | `0` | borrowed alias, no new obligation |
 | borrowed function call | `0` | callee receives owned bit clear |
 | affine root transfer | `0` | `11` moves to new path |
-| persistent insertion while affine root remains | `+1` | stored edge is `10` |
+| persistent insertion while affine root remains | `+1` per inserted retained-edge obligation | stored edge obligations use `10` |
 | final-use insertion | `0` | reclassify root obligation as persistent edge, store `10` |
 | `get()` | `0` | returns temporary `10` borrow |
-| persistent edge removal with no returned root | `-1` | edge disappears |
-| extraction that creates affine root | `0` | reclassify edge obligation as `11` result |
-| extraction while another affine root remains | `-1` | result is borrowed `10` |
+| persistent edge removal with no returned root | `-1` per removed retained-edge obligation | obligations disappear |
+| container detachment that creates affine root | `0` | reclassify returned obligations as an `11` result |
+| container detachment while another affine root remains | `-1` per detached obligation | result is borrowed `10` |
 | affine root final release | `-1` | owned path discharged |
-| persistent overwrite | old `-1`, new `+1` or reclassification | old edge dies, new edge appears |
-| whole-domain clear | one release per surviving external counted edge unless region elision applies | domain edges disappear |
+| persistent overwrite | old `-1` per removed obligation, new `+1` per added obligation or reclassification | old summary disappears, new summary appears |
+| whole-domain clear | one release per surviving external counted-edge obligation unless region elision applies | domain obligations disappear |
 | count reaches zero | destroy exactly once | no usable handles remain |
 
 ## Why temporary aliases do not race count zero
@@ -817,7 +866,7 @@ Return tags preserve affine responsibility.
 - a returned affine root carries `11`
 - a returned borrow carries `10`
 - result-to-result alias summaries ensure at most one returned handle carries the affine root for one family
-- extracted results may reclassify one persistent obligation as the returned root without count traffic
+- detached stored results may reclassify returned obligations without count traffic
 
 ## Hidden destination allocation
 
@@ -1048,7 +1097,7 @@ Rejected because maintaining a dynamic alias set is more metadata and pointer tr
 
 ### `group self`
 
-Rejected because extraction, shared values and cross-collection retention would require region migration, adoption or implicit copying.
+Rejected because group extraction, shared values and cross-collection retention would require region migration, adoption or implicit copying.
 
 ### Source-visible RC
 
@@ -1169,7 +1218,7 @@ The first implementation should be deliberately narrow.
 ### Required compositional slice
 
 - user-defined functions wrapping builtin collection operations
-- public retention and extraction summaries
+- public retention and detached stored-result summaries
 - Moth package propagation
 - mixed counted and uncounted function paths
 - local tag tests only at retention-sensitive operations
@@ -1194,27 +1243,27 @@ Each phase ends with an audit before the next phase starts. Do not implement a p
 
 ### Summary and reasoning
 
-The current authorities still describe GC as the semantic baseline and the ownership ABI as one bit. REC must enter as part of the replacement final model, not as an optional patch to the old GC-fallback architecture.
+This phase locks REC into the replacement final model rather than treating it as an optional patch to the superseded collector-fallback architecture. The canonical memory authorities now make static topology proof mandatory, keep cycles group-only, and place REC after topology validation as one physical strategy. Compiler implementation remains deferred.
 
 ### Tasks
 
-- [ ] Add this plan at the proposed roadmap path.
-- [ ] Add the REC canonical docs directory and route it from the memory overview.
-- [ ] Add a concise REC section to the main final memory-management plan.
-- [ ] State that full-control release backends cannot fall back to tracing GC.
-- [ ] State that REC is one physical strategy after mandatory topology validation.
-- [ ] Replace one-bit ABI wording with the two-bit logical handle contract.
-- [ ] Mark REC implementation as incomplete in the progress matrix.
-- [ ] Mark current GC fallback implementation as migration debt rather than accepted final behavior.
-- [ ] Record profiling, adaptive REC and config tuning as out of scope.
+- [x] Add this plan at the proposed roadmap path.
+- [x] Add the REC canonical docs directory and route it from the memory overview.
+- [x] Add a concise REC section to the main final memory-management plan.
+- [x] State that full-control release backends cannot fall back to tracing GC.
+- [x] State that REC is one physical strategy after mandatory topology validation.
+- [ ] Confirm every full-control handle path uses the two-bit logical handle contract.
+- [x] Mark REC implementation as incomplete in the progress matrix.
+- [x] Mark current GC fallback implementation as migration debt rather than accepted final behavior.
+- [x] Record profiling, adaptive REC and config tuning as out of scope.
 
 ### Audit and validation
 
-- [ ] No document claims REC is source-visible.
-- [ ] No document claims dynamic multiplicity automatically requires REC.
-- [ ] No document permits cycles under REC.
-- [ ] No final-design document says release may silently retain tracing GC.
-- [ ] Documentation links have one clear authority chain.
+- [x] No document claims REC is source-visible.
+- [x] No document claims dynamic multiplicity automatically requires REC.
+- [x] No document permits cycles under REC.
+- [x] No final-design document says release may silently retain tracing GC.
+- [x] Documentation links have one clear authority chain.
 
 ## Phase 1: Add retained-edge effect vocabulary
 
@@ -1225,11 +1274,12 @@ REC planning requires precise semantic effects before any counter can be emitted
 ### Tasks
 
 - [ ] Define allocation-family identity after current aggregate-family analysis.
-- [ ] Define retained-edge creation, destruction and whole-domain kill facts.
+- [ ] Define retained-edge creation, destruction and whole-domain kill facts as summaries contributed by stored values rather than one-edge operation shorthands.
 - [ ] Define retention cardinality, including `RuntimeMany`.
-- [ ] Add extracted or detached result provenance.
+- [ ] Add `DetachedStoredValue` provenance for container-detached results.
 - [ ] Add result-to-result family alias relationships where missing.
 - [ ] Add retained receiver and parameter relationships.
+- [ ] Preserve successful and error-path retention effects as separate exits.
 - [ ] Add cleanup-frontier candidate facts.
 - [ ] Extend public interface fingerprints to cover the new summaries.
 - [ ] Extend generated-function sidecars with the same summary vocabulary.
@@ -1320,7 +1370,7 @@ The runtime needs one compact representation that carries affine responsibility 
 - [ ] Projections cannot lose family identity.
 - [ ] At most one returned alias carries the owned bit for one family.
 - [ ] No source type or `TypeId` changes due to tags.
-- [ ] Existing one-bit assumptions are removed rather than layered underneath.
+- [ ] Legacy single-tag assumptions are removed rather than layered underneath.
 
 ## Phase 5: Implement REC allocation layout and counter primitives
 
@@ -1361,11 +1411,15 @@ Builtin collections are the first practical REC boundary and the trusted effect 
 - [ ] Implement final-use insertion reclassification with no count change.
 - [ ] Implement counted `set` replacement.
 - [ ] Implement counted `remove` edge destruction.
-- [ ] Implement extracted-result reclassification into an affine root.
+- [ ] Implement detached-stored-result reclassification into an affine root.
 - [ ] Keep `get()` count-free.
 - [ ] Implement `clear()` count processing when region elision does not apply.
 - [ ] Implement collection destruction.
 - [ ] Cover fixed collections, growable collections and maps.
+- [ ] Apply one complete retained-edge summary per scalar, direct, aggregate or transitive element value.
+- [ ] Cover new-key map insertion, existing-key replacement, equal-content lookup keys and key/value aliases.
+- [ ] Drop the stored key obligation and detach the stored value obligation on map removal.
+- [ ] Commit all successful-path effects atomically and preserve topology on every error path.
 - [ ] Preserve collection error and trap semantics.
 
 ### Audit and validation
@@ -1373,7 +1427,7 @@ Builtin collections are the first practical REC boundary and the trusted effect 
 - [ ] Unique insertion stays affine when REC is unnecessary.
 - [ ] Duplicate runtime aliases count exactly once per persistent edge.
 - [ ] `get()` emits no count traffic.
-- [ ] Extracted results avoid decrement-plus-increment when reclassification is legal.
+- [ ] Detached stored results avoid decrement-plus-increment when reclassification is legal.
 - [ ] `clear()` is skipped entirely for count-free frontier regions where legal.
 
 ## Phase 7: Add iterative destruction plans
@@ -1410,7 +1464,7 @@ User collection packages must receive builtin-quality memory behavior without so
 ### Tasks
 
 - [ ] Infer user `clear` summaries from complete builtin-domain kills.
-- [ ] Infer user extraction summaries from builtin `remove`.
+- [ ] Infer user detached stored-result summaries from builtin `remove`.
 - [ ] Infer runtime-many retention through wrappers.
 - [ ] Export summaries in immutable public interfaces.
 - [ ] Instantiate summaries across package graphs.
@@ -1506,32 +1560,35 @@ The feature is not complete until capable release backends prove collector-free 
 
 ### Summary and reasoning
 
-The repository currently contains old GC-baseline and one-bit-ABI wording. Final closure requires one consistent authority set and explicit implementation status.
+The documentation migration and consistency pass now use the accepted collector-free model, value-shaped retained-edge effects, detached stored-result terminology, exit-specific public effects and caller-local concrete frontiers. Implementation status remains explicit: REC and the surrounding topology planner are accepted design, not implemented compiler support.
 
 ### Tasks
 
-- [ ] Update `docs/src/docs/codebase/memory-management/overview.mtf` with the six-part memory model and concise REC role.
-- [ ] Update `ownership-and-drops` to the Affine Ownership ABI and two-bit handle extension.
-- [ ] Update lifetime-region docs with retained-edge liveness, cleanup frontiers, region epochs and REC eligibility.
-- [ ] Update declared-group docs with hard count-free group ownership and cycle policy.
-- [ ] Update runtime/backend docs with the strategy planner, two-bit tags, REC layout and collector-free release invariant.
+- [x] Update `docs/src/docs/codebase/memory-management/overview.mtf` with the six-part memory model and concise REC role.
+- [x] Update `ownership-and-drops` to the Affine Ownership ABI and two-bit handle extension.
+- [x] Update lifetime-region docs with retained-edge liveness, cleanup frontiers, region epochs and REC eligibility.
+- [x] Update declared-group docs with hard count-free group ownership and cycle policy.
+- [x] Update runtime/backend docs with the strategy planner, two-bit tags, REC layout and collector-free release invariant.
 - [x] Add the canonical REC technical page.
-- [ ] Update language collection docs to explain why builtin destructive operations remain narrow and compiler-known.
-- [ ] Update `docs/compiler-design-overview.md` public summaries, analysis boundaries and backend handoff.
-- [ ] Update `docs/build-system-design.md` physical-strategy plans, capability metadata and release verification.
-- [ ] Update the README memory goal from optional GC avoidance to the accepted collector-free release direction.
-- [ ] Update the language cheatsheet with only a concise user-facing statement. Do not expose REC mechanics as source semantics.
-- [ ] Update `docs/src/docs/progress/@page.moth` with separate rows for topology, retained-edge liveness, Affine Ownership ABI, REC planning, REC backend lowering, explicit groups and collector-free release verification.
-- [ ] Mark old compiler paths that still assume GC fallback as incomplete migration work.
-- [ ] Link this plan from the main final memory-management plan.
+- [x] Update language collection and map docs with value-shaped retained-edge summaries, key/value effects, successful commits and unchanged error paths.
+- [x] Add the public Automatic cleanup and retained edges page pair and route it from the public Memory page.
+- [x] Distinguish detached stored results from group extraction/adoption and interior projection detachment.
+- [x] Keep public summary effects exit-specific and caller-localise concrete cleanup frontiers.
+- [x] Update `docs/compiler-design-overview.md` public summaries, analysis boundaries and backend handoff.
+- [x] Update `docs/build-system-design.md` physical-strategy plans, capability metadata and release verification.
+- [x] Update the README memory goal from optional GC avoidance to the accepted collector-free release direction.
+- [x] Update the language cheatsheet with only a concise user-facing statement. Do not expose REC mechanics as source semantics.
+- [x] Update `docs/src/docs/progress/@page.moth` with separate rows for topology, retained-edge liveness, Affine Ownership ABI, REC planning, REC backend lowering, explicit groups and collector-free release verification.
+- [x] Mark old compiler paths that still assume GC fallback as incomplete migration work.
+- [x] Link this plan from the main final memory-management plan.
 
 ### Audit and validation
 
-- [ ] No final authority calls GC the semantic correctness baseline.
-- [ ] No final authority describes only one pointer tag bit for full-control lowering.
-- [ ] REC detail lives here and in the canonical REC page, not duplicated across every memory document.
-- [ ] User-facing docs explain behavior without exposing compiler-only counter machinery.
-- [ ] Progress status distinguishes accepted design from implemented support.
+- [x] No final authority calls GC the semantic correctness baseline.
+- [x] No final authority describes only one pointer tag bit for full-control lowering.
+- [x] REC detail lives here and in the canonical REC page, not duplicated across every memory document.
+- [x] User-facing docs explain behavior without exposing compiler-only counter machinery.
+- [x] Progress status distinguishes accepted design from implemented support.
 
 ## Phase 13: Final validation and closeout
 
@@ -1544,6 +1601,9 @@ Close REC only after semantic, ABI, runtime, package and documentation gates pas
 - [ ] Run the repository validation command.
 - [ ] Run native and Wasm-specific compiler tests.
 - [ ] Run direct collection REC fixtures.
+- [ ] Run scalar-zero, direct-one, aggregate-several and transitive-retention fixtures.
+- [ ] Run map key/value, replacement, equal-content lookup and detached-value fixtures.
+- [ ] Run successful-commit and failed-mutation fixtures with exit-sensitive summaries.
 - [ ] Run user-wrapper and package-summary fixtures.
 - [ ] Run explicit-group count-elision fixtures.
 - [ ] Run cleanup-frontier region-elision fixtures.
@@ -1563,9 +1623,13 @@ Close REC only after semantic, ABI, runtime, package and documentation gates pas
 - [ ] No cycle depends on REC.
 - [ ] No full-control release path depends on tracing GC.
 - [ ] No whole-function strategy explosion was introduced by default.
-- [ ] All stale GC-fallback and one-bit-only architecture wording is removed or clearly marked as current implementation debt.
+- [ ] All stale collector-fallback and single-tag architecture wording is removed or clearly marked as current implementation debt.
 
 # Required test matrix
+
+These fixtures define the semantic contract before backend implementation lands. They must exercise
+value-shaped obligations, map key/value ownership and exit-sensitive commits rather than encode a
+one-direct-handle shortcut.
 
 | Case | Expected strategy or result |
 |---|---|
@@ -1579,7 +1643,16 @@ Close REC only after semantic, ABI, runtime, package and documentation gates pas
 | `get` followed by use | no count change |
 | mutation while `get` alias is live | borrow diagnostic |
 | final-use insertion into REC collection | root-to-edge reclassification, no count change |
-| remove returning affine result | edge-to-root reclassification, no count change |
+| scalar collection element | zero retained-edge obligations |
+| direct heap collection element | one direct retained-edge obligation |
+| aggregate collection element | several or transitive retained-edge obligations |
+| new-key map insertion | stored key and stored value obligations both appear |
+| existing-key map replacement | stored key remains, old value obligations disappear and new value obligations appear |
+| equal-content replacement lookup key | lookup key remains borrowed and is not retained |
+| map key and value alias one family | two obligations point to one allocation family |
+| map removal with aliased key and value | key obligation decrements and value obligation detaches into the result |
+| failed collection or map mutation | original storage topology and obligations remain unchanged |
+| remove returning affine result | detached stored obligations reclassify into the result, with no count change |
 | remove while another affine root exists | edge decrement, borrowed result |
 | overwrite REC child | old decrement and new retain/reclassification |
 | explicit group with arbitrary aliases | no REC, bulk cleanup |
@@ -1603,7 +1676,7 @@ REC is complete only when all of these are true.
 2. The compiler can elide REC through cleanup frontiers, regions and explicit groups.
 3. REC-selected families use the two-bit handle ABI and selective inline counters.
 4. Count transitions preserve the affine cleanup invariant.
-5. Builtin collections implement exact retain, release, clear and extraction behavior.
+5. Builtin collections implement exact retain, release, clear and detached-stored-result behavior.
 6. User functions and packages inherit those effects compositionally.
 7. Mixed function boundaries do not require default whole-function duplication.
 8. Zero-count destruction is iterative and cycle-free.

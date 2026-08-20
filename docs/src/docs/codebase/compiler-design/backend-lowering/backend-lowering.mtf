@@ -81,12 +81,7 @@ JavaScript companion facades and wrappers call Wasm exports through explicit han
 
 Binding-backed calls lower through demand-driven glue. The binder's semantic interface already existed upstream. The lowerer maps stable external ids to imports, helpers or native operations.
 
-Borrow facts may guide **optional ownership-aware Wasm lowering**: earlier drops, specialised paths, less GC traffic. GC backends may ignore ownership operations. They still required validation upstream. Optimisation must preserve observable behaviour and the same accepted program set.
-
-**Diagram placeholder:** Ownership side facts guide Wasm operations while GC can ignore them
-
-*Caption: semantic invariant.*
-*Question: what can optimisation change?*
+Borrow facts may guide **optional ownership-aware Wasm lowering**: earlier drops and specialised paths. A garbage-collected representation may erase ownership cleanup operations after upstream validation. Every backend still requires the same validation. Optimisation must preserve observable behaviour and the same accepted program set.
 
 ## What can fail here
 

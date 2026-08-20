@@ -109,7 +109,7 @@ Read in order. The path groups ideas by time of appearance, not by internal crat
 9. @./templates-and-tir (09. Templates and TIR)
 10. @./diagnostics (10. Diagnostics)
 11. @./hir (11. HIR)
-12. @./memory-management-and-gc (12. Memory management and GC)
+12. @./memory-management-and-gc (12. Memory topology and lowering)
 13. @./borrow-validation-and-drops (13. Borrow validation and drops)
 14. @./module-artefacts-and-reuse (14. Module artefacts and reuse)
 15. @./linking-entries-and-reachability (15. Linking, entries and reachability)

@@ -7,7 +7,7 @@ Moth separates two questions that often get bundled together:
 
 Borrow validation answers access questions. Lifetime-region and escape validation proves one legal lifetime topology. A memory-strategy planner then chooses a representation for each validated allocation family.
 
-Collection can represent an already-proven topology, but collection never supplies the proof. A capable full-control release backend must lower without a tracing or reachability collector.
+Garbage-collected representation can represent an already-proven topology, but garbage collection never supplies the proof. A capable full-control release backend must lower without a tracing or reachability collector.
 
 ## The sentence to keep
 
@@ -38,7 +38,7 @@ The accepted memory pipeline reads from one owner at each stage:
         -> backend lowering
 ]
 
-The planner selects stack or inline placement, affine cleanup, an inferred region, an explicit-group arena, REC or collection. The selection changes memory quality, not source legality or observable behaviour.
+The planner selects stack or inline placement, affine cleanup, an inferred region, an explicit-group arena, REC or a garbage-collected representation. The selection changes memory quality, not source legality or observable behaviour.
 
 ## When transfer proof is missing
 
@@ -50,7 +50,7 @@ Moth infers cleanup-responsibility transfer only at a proven final use. If analy
         -> statically proven region retains responsibility
 ]
 
-This fallback keeps the source program under the same legal topology. It does not ask a capable release backend to switch to tracing collection.
+This fallback keeps the source program under the same legal topology. It does not ask a capable release backend to switch to tracing garbage collection.
 
 ## Explicit copies and groups
 
@@ -68,11 +68,6 @@ Backends realise the validated memory plan through different physical mechanisms
 - **Physical coalescing:** a planner may keep storage slightly longer to reduce overhead. Coalescing never widens semantic topology, changes an outlives relationship or changes diagnostics.
 
 Backends consume a validated memory plan. They do not infer source meaning, reconstruct lifetime topology or choose a new strategy when lowering.
-
-**Diagram placeholder:** One validated topology enters collector-free, GC-native or counted backend representations
-
-*Caption: physical choices preserve one semantic contract.*
-*Question: which facts must remain unchanged across targets?*
 
 ## Reactive and builder-owned lifetimes
 

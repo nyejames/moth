@@ -311,7 +311,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Partial]
             [: Broad borrow, aliasing, mutable/exclusive access, branch merge, loop, short-circuit, future-use, optional-transfer, advisory drop-site, hashmap, aggregate-storage, reactivity and adversarial coverage.]
             [: HIR analysis / all backends]
-            [: Shared and exclusive access enforcement is implemented and mandatory on every backend. Path-sensitive future-use facts drive optional transfer, and unproven or path-dependent transfer correctly falls back to borrowing. Accepted incomplete work: loop final-iteration facts, extraction transfer and the complete affine-transfer contract are not implemented, and drop facts remain advisory rather than memory-plan-driven. Complete when path-sensitive transfer and final-use facts are complete.]
+            [: Shared and exclusive access enforcement is implemented and mandatory on every backend. Path-sensitive future-use facts drive optional transfer, and unproven or path-dependent transfer correctly falls back to borrowing. Accepted incomplete work: loop final-iteration facts, detached stored-result transfer and the complete affine-transfer contract are not implemented, and drop facts remain advisory rather than memory-plan-driven. Complete when path-sensitive transfer and final-use facts are complete.]
         ]
 
         [data:
@@ -319,7 +319,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Partial]
             [: Targeted return-alias and fresh-result summary coverage.]
             [: HIR analysis / link planning]
-            [: Public summaries currently distinguish fresh result roots, parameter aliases and an imprecise unknown case. Accepted incomplete work: projection results, extracted or detached results, result-to-result aliases, independent result graphs, retained-parameter and outlives constraints, retention and cardinality effects, whole-domain kill effects and cleanup-frontier facts are not exported yet. Complete when stable complete summaries cross module and package boundaries with no unknown topology-relevant provenance.]
+            [: Public summaries currently distinguish fresh result roots, parameter aliases and an imprecise unknown case. Accepted incomplete work: projection results, detached stored results, result-to-result aliases, independent result graphs, retained-parameter and outlives constraints, retention and cardinality effects, whole-domain kill effects, outcome-sensitive effects and frontier-enabling effects are not exported yet. Complete when stable complete summaries cross module and package boundaries with no unknown topology-relevant provenance.]
         ]
 
         [data:
@@ -375,7 +375,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Deferred]
             [: None]
             [: Backend-neutral design]
-            [: Accepted design only. A distinct planner must select stack, affine, inferred-region, explicit-group, REC or collected representation per allocation family after topology is proven. A missing strategy after successful validation is a `CompilerError` in the accepted design. Complete when the planner owns every strategy decision.]
+            [: Accepted design only. A distinct planner must select stack, affine, inferred-region, explicit-group, REC or garbage-collected representation per allocation family after topology is proven. A missing strategy after successful validation is a `CompilerError` in the accepted design. Complete when the planner owns every strategy decision.]
         ]
 
         [data:

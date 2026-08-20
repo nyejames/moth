@@ -8,7 +8,9 @@ When you put a value into a group, that value cannot outlive the group.
 
 Every group-owned value stays with the group until the group exits. Last-use
 analysis still checks access, but it never releases one group child early.
-The group reclaims its contents together in one bulk cleanup.
+The group reclaims its contents together in one bulk cleanup. Group-owned
+storage carries no REC counter because the group never releases one child on
+its own.
 
 A group also provides Moth's only source mechanism for direct reference cycles.
 Every member of a cycle must belong to the same group. Inferred regions never

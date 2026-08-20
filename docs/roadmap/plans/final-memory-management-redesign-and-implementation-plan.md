@@ -1,6 +1,6 @@
 # Final Memory Management Redesign and Implementation Plan
 
-**Status:** documentation migration consistency pass complete, compiler implementation deferred
+**Status:** documentation migration and REC/public retained-edge consistency passes complete, compiler implementation deferred
 **Repository:** `nyejames/moth`  
 **Baseline reviewed:** `main` at `34afc996b746bfe93281dad115c40083a9106ac8`  
 **Activation branch:** `main`  
@@ -10,7 +10,7 @@
 **Required final code gate:** `just validate`  
 **Required documentation-only gate:** `moth build docs --release` or `cargo run --quiet -- build docs --release`  
 
-This plan is the parent roadmap for Moth's final memory-management model. It replaces the old GC-fallback direction with mandatory static lifetime topology and a hard collector-free release guarantee for capable backends. The initial Phase 1 migration reopened for one focused consistency pass after review, and that closure pass now completes Milestone A.
+This plan is the parent roadmap for Moth's final memory-management model. It replaces the old GC-fallback direction with mandatory static lifetime topology and a hard collector-free release guarantee for capable backends. The initial Phase 1 migration reopened for one focused consistency pass after review, and a second audit then corrected REC effects, public retained-edge teaching, summary ownership and implementation-debt wording. Both closure passes complete Milestone A.
 
 The Retained Edge Counting plan owns the detailed REC analysis, ABI, counter and lowering contract. This plan owns the complete source semantics, analysis boundaries, inferred regions, cleanup frontiers, explicit groups, field-sensitive allocation splitting, physical memory planning, backend/profile parity, channel prerequisites and repository-wide documentation migration.
 
@@ -19,13 +19,13 @@ The former `docs/roadmap/plans/grouped-memory-design.md` plan is superseded as t
 ## Current state
 
 ```text
-STATUS: documentation slice complete after the Phase 1 consistency closure pass — Milestone A
-  landed. The canonical memory documentation, compiler and build authorities, roadmap and
-  progress matrix now describe the accepted collector-free model. Compiler implementation
-  remains deferred and no phase is active.
+STATUS: documentation slice complete after the Phase 1 consistency closure passes — Milestone A
+  landed. The canonical memory documentation, REC authority, public retained-edge pages,
+  compiler and build authorities, roadmap and progress matrix now describe the accepted
+  collector-free model. Compiler implementation remains deferred and no phase is active.
 CURRENT_SCOPE: none active. Milestone A (Phases 0 and 1) is closed; Phases 2 through 18 are
   deferred implementation work awaiting explicit activation.
-NEXT_ACTION: Phase 0 and the reopened Phase 1 consistency pass are complete. Milestone A is
+NEXT_ACTION: Phase 0 and both reopened Phase 1 consistency passes are complete. Milestone A is
   closed. Do not begin Phase 2 until
   the borrow and last-use implementation slice is explicitly activated on the roadmap.
 BLOCKERS: none for the documentation slice; implementation phases remain gated on its completion.
@@ -39,7 +39,7 @@ Moth is reference-semantic by default, copy-explicit and move-inferred. Memory s
 
 The compiler combines path-sensitive alias tracking, last-use analysis and affine cleanup transfer with compiler-generated non-lexical lifetime intervals. Retained-edge liveness and final cleanup frontiers let inferred regions end before the collections or objects that once held their aliases. Explicit groups provide hard count-free bulk lifetimes and are the only source mechanism for reference cycles. REC covers only unresolved runtime-many persistent retained edges.
 
-These semantics are identical on every backend. Debug builds and GC-native backends may use collection as a simpler representation. Release builds on backends that advertise full memory control must lower every accepted topology without a tracing collector.
+These semantics are identical on every backend. Debug builds and GC-native backends may use a garbage-collected representation. Release builds on backends that advertise full memory control must lower every accepted topology without a tracing collector.
 
 ---
 
@@ -77,7 +77,7 @@ These decisions are final for this plan.
 4. Loops use fixed-point future-use reasoning.
 5. A transfer is legal only when every relevant path proves that the transferred value has no later source use.
 6. When optional transfer is not proven, the operation remains a borrow and the program remains valid.
-7. Last-use facts may move affine cleanup responsibility through calls, returns, aggregate insertion, extraction and control-flow paths.
+7. Last-use facts may move affine cleanup responsibility through calls, returns, aggregate insertion, container detachment and control-flow paths.
 8. Loop forms may expose a final-iteration fact only when finality is known without changing source evaluation order.
 9. Borrow validation does not assign semantic lifetime owners and does not choose a physical memory strategy.
 
@@ -103,14 +103,14 @@ The final summary vocabulary must distinguish at least:
 - fresh result root
 - alias of one or more parameters
 - projection of a parameter
-- extracted or detached result
+- detached stored result
 - alias of another result
 - independent result graph
 - retained-parameter and outlives constraints
 - retention cardinality
 - persistent-edge creation and destruction effects
 - whole-domain kill effects
-- cleanup-frontier facts
+- exit-specific retained-edge effects and frontier-enabling effects
 
 A fresh result root may be allocated directly into a caller-selected hidden destination when every retained edge is legal for that destination.
 
@@ -222,15 +222,17 @@ Their compiler-known effects are:
 
 | Operation | Memory effect |
 |---|---|
-| `get` | creates one temporary shared alias and no retained-edge obligation |
-| `push` | creates one persistent retained edge |
-| `set` | destroys one old retained edge and creates one new retained edge |
-| `remove` | detaches one existing edge and may transfer affine responsibility to the result |
-| `clear` | kills every retained edge in the collection domain |
-| collection destruction | kills the complete domain and backing storage |
-| growth or reallocation | changes backing storage without changing logical retained edges |
+| `get` | creates a temporary shared alias and adds no persistent obligation |
+| `push` | adds the inserted element's retained-edge obligations |
+| `set` | removes the replaced element's obligations and adds the new element's obligations |
+| `remove` | removes the stored element's obligations and returns a detached stored result |
+| `clear` | removes the obligations contributed by every stored element |
+| collection destruction | removes all element obligations and destroys the backing-storage domain |
+| growth or reallocation | changes backing storage without changing logical element summaries |
 
 Fixed and growable collections must gain a compiler-owned `clear()` operation in the accepted final surface.
+
+The table describes the successful path. A failed builtin mutation preserves the original storage topology and cleanup obligations, and public summaries preserve separate success and error effects. A stored scalar may contribute zero obligations, a direct heap value one, an inline aggregate several and a nested aggregate transitive obligations.
 
 User-defined collections and storage abstractions compose these builtin effects. Their semantic summaries are inferred. The compiler does not grant effects based on method names and source annotations are not added.
 
@@ -398,10 +400,12 @@ A new backend-neutral analysis owner after borrow validation owns:
 - persistent retained-edge creation and destruction
 - retention domains
 - retention cardinality
-- extraction and detached-result classification
+- detached stored-result classification
 - whole-domain kill effects
+- outcome-sensitive success and error effects
 - retained-edge liveness
 - cleanup-frontier candidates
+- frontier-enabling effects for public summaries. Concrete cleanup frontiers remain caller and link-level facts
 - local escape and outlives constraints
 - local SCC and cycle facts
 - exported lifetime and retention summaries
@@ -479,7 +483,7 @@ Backends do not reconsider legality.
 - the exact two-bit handle ABI
 - inline counter layout
 - counter transitions
-- extraction and reclassification
+- detached stored-result reclassification
 - function and package boundary lowering
 - builtin collection REC integration
 - iterative destruction
@@ -497,20 +501,20 @@ Baseline observations at `34afc996b746bfe93281dad115c40083a9106ac8`:
 | Area | Current state | Required migration |
 |---|---|---|
 | Borrow checker | Implemented root tracking, path-sensitive future use, optional transfer facts and advisory drop sites | Preserve and harden last-use analysis, enrich facts and stop treating advisory drop sites as final lowering authority |
-| Public call summaries | `Fresh`, `AliasParams` and `Unknown` plus access and transfer effects | Add full result provenance, retained parameters, extraction, outlives, domain kills and final-summary completeness |
+| Public call summaries | `Fresh`, `AliasParams` and `Unknown` plus access and transfer effects | Add full result provenance, retained parameters, detached stored results, outlives, domain kills and final-summary completeness |
 | Lifetime topology | Accepted design only, no implementation owner | Add local constraint analysis and project/link topology validation |
 | Retained-edge liveness | Not implemented | Add domains, edge creation and kills, cleanup frontiers and epochs |
 | Declared groups | Accepted syntax and semantics only | Add AST, HIR, topology and backend bulk cleanup |
-| Wasm ownership lowering | Borrow advisory sites directly emit `DropIfOwned` under GC-first scaffolding | Replace with memory-plan-driven affine, region, group and REC lowering |
-| Wasm LIR | Has `DropIfOwned` and a reserved retain instruction | Extend around the final memory plan and remove obsolete one-bit assumptions |
+| Wasm ownership lowering | Borrow advisory sites directly emit `DropIfOwned` under transitional garbage-collected scaffolding | Replace with memory-plan-driven affine, region, group and REC lowering |
+| Wasm LIR | Has `DropIfOwned` and a reserved retain instruction | Extend around the final memory plan and remove obsolete single-tag assumptions |
 | Wasm runtime memory | Only basic linear-memory page and heap-base planning | Add allocator, region, group, REC and destruction-plan runtime support |
 | REC | Accepted companion plan, no implementation | Execute only after parent topology and strategy prerequisites |
 | Collections | Maps have `clear`, fixed and growable collections expose five operations without `clear` | Add compiler-owned `clear` and trusted retention effects |
-| Progress matrix | Calls GC the language baseline and marks lifetime/groups deferred | Split accepted design from current implementation and list every migration surface |
-| Roadmap | Still says ownership work follows GC-first correctness | Replace with the collector-free plan and correct sequencing |
+| Progress matrix | Tracks deferred lifetime and group implementation separately from the accepted design | Keep accepted design and current implementation status separate |
+| Roadmap | Still contains superseded collector-first sequencing | Replace with the collector-free plan and correct sequencing |
 | Async draft | Says channel send may move or pass and leaves memory transfer open | Lock mandatory affine transfer and memory prerequisites while keeping async deferred |
-| Canonical docs | Repeatedly permit release GC fallback and describe one-bit ownership only | Rewrite to the accepted final model |
-| README and cheatsheet | Describe GC avoidance as optional | State the collector-free release guarantee without exposing REC as source semantics |
+| Canonical docs | Repeatedly permit release GC fallback and describe single-tag ownership only | Rewrite to the accepted final model |
+| README and cheatsheet | Describe static topology proof and collector-free release direction | Explain selective REC without exposing it as source semantics |
 
 Current scaffolding must be replaced in place. Do not add compatibility adapters, parallel memory plans or a second backend ownership path.
 
@@ -563,7 +567,7 @@ The repository currently has a completed historical memory documentation plan, a
 - [x] Move any still-useful group implementation tasks into this plan.
 - [x] Delete the old grouped plan after every live link is migrated. Every live link now points at this plan; no historical stub was retained.
 - [x] Add this plan to `docs/roadmap/roadmap.md`. The documentation slice ran under active work; every implementation phase stays under deferred design until explicitly activated.
-- [x] Remove the roadmap statement that ownership optimization is deferred until after GC-first correctness.
+- [x] Remove the roadmap statement that ownership optimisation is deferred until after the superseded collector-first model.
 - [x] Add links between this plan and the REC companion plan.
 - [x] Inventory current source, tests, docs and generated output before the first implementation slice.
 - [x] Preserve unrelated work.
@@ -583,7 +587,7 @@ The repository currently has a completed historical memory documentation plan, a
 
 ### Summary and reasoning
 
-Accepted design must be authoritative before implementation starts. This phase deliberately documents the end state while the progress matrix records current gaps. Review reopened Phase 1 for one consistency closure pass, which now completes the migration without changing compiler behaviour.
+Accepted design must be authoritative before implementation starts. This phase deliberately documents the end state while the progress matrix records current gaps. Review reopened Phase 1 for two consistency closure passes, which now complete the migration without changing compiler behaviour.
 
 ### Memory authority tasks
 
@@ -608,7 +612,7 @@ Accepted design must be authoritative before implementation starts. This phase d
 
 - [x] Update `docs/compiler-design-overview.md` with the retained-edge analysis owner, final summary vocabulary, memory-strategy planner and backend handoff.
 - [x] Update `docs/build-system-design.md` with lifecycle-root instantiation, memory strategy plans, backend capability metadata and collector-free verification.
-- [x] Update public-interface and fingerprint descriptions with retention, extraction, cardinality, whole-domain kill and cleanup-frontier facts.
+- [x] Update public-interface and fingerprint descriptions with retention, detached stored-result effects, cardinality, whole-domain kills, outcome-sensitive effects and frontier-enabling effects.
 - [x] Keep donor-local family and region IDs out of interfaces.
 
 ### Language and design-scope tasks
@@ -618,6 +622,11 @@ Accepted design must be authoritative before implementation starts. This phase d
 - [x] Update fixed and growable collection references with `clear()` and compiler-known retained-edge effects. `clear` is documented as an accepted sixth operation with implementation deferred: only maps expose it today.
 - [x] Update map and collection docs with the trusted dynamic-storage role.
 - [x] State that future collection APIs must preserve narrow analyzable destruction effects.
+- [x] Generalise collection and map effects to value-shaped retained-edge summaries, including key/value replacement and detached stored results.
+- [x] Document atomic successful commits and unchanged error paths for fallible builtin mutations.
+- [x] Keep concrete cleanup frontiers caller-local while exporting exit-specific and frontier-enabling effects.
+- [x] Add the public Automatic cleanup and retained edges page pair and route it between lifetime and group teaching.
+- [x] Remove educational diagram placeholders from the memory and borrow pages and qualify current Wasm and historical GC terminology.
 - [x] Update the language cheatsheet with a concise user-facing collector-free release statement.
 - [x] Do not expose REC counters, tags or regions as source types in the cheatsheet.
 - [x] Update the async draft with mandatory send transfer, channel-owned queued values, group restrictions and non-atomic REC prerequisites.
@@ -628,9 +637,9 @@ Accepted design must be authoritative before implementation starts. This phase d
 ### Roadmap and historical-plan tasks
 
 - [x] Update `docs/roadmap/roadmap.md` with this parent plan and the REC companion.
-- [x] Remove `GC-first correctness` as the accepted direction.
+- [x] Remove the superseded collector-first direction as the accepted model.
 - [x] Confirm `final-memory-management-documentation-consistency-cleanup-plan.md` no longer exists in the repository and record that no historical annotation is required.
-- [x] Remove or supersede stale collector-elision wording in other roadmap plans, and add a historical banner to `docs/wasm-notes/future-wasm-components-report.md`, which described the model as GC-first.
+- [x] Remove or supersede stale collector-elision wording in other roadmap plans, and add a historical banner to `docs/wasm-notes/future-wasm-components-report.md`, which described the old model as collector-first.
 
 ### Progress-matrix tasks
 
@@ -683,7 +692,7 @@ Last-use precision is the primary early-reclamation mechanism. This phase streng
 
 - [ ] Confirm path-dependent optional transfer always falls back to borrowing rather than rejecting valid source.
 - [ ] Preserve branch-sensitive last use and fixed-point loop reasoning.
-- [ ] Add explicit last-use facts for aggregate insertion, field storage, returns and extraction sites.
+- [ ] Add explicit last-use facts for aggregate insertion, field storage, returns and container-detachment sites.
 - [ ] Add result-to-result last-use handling for multiple aliased returns.
 - [ ] Track projection use through the containing allocation family.
 - [ ] Expose final-iteration facts for collection and finite range loops when finality is knowable without changing evaluation order.
@@ -730,7 +739,7 @@ Cross-function and cross-package topology cannot be inferred from the current `F
 - [ ] Add allocation-family identity for local facts.
 - [ ] Add retained-parameter and retained-receiver facts.
 - [ ] Add outlives constraints.
-- [ ] Add extraction and detachment results.
+- [ ] Add detached stored results and distinguish them from group extraction and interior projection detachment.
 - [ ] Add result-to-result family aliasing.
 - [ ] Add complete retention-domain kill facts.
 - [ ] Add static retention cardinality required by the REC companion.
@@ -999,7 +1008,7 @@ The backend must receive one complete plan instead of translating borrow-checker
 - [ ] Adopt the two-bit logical full-control handle contract from the REC companion.
 - [ ] Preserve allocation-family base identity through projections.
 - [ ] Remove the direct Wasm path that consumes borrow advisory drop sites as final authority.
-- [ ] Delete obsolete one-bit-only assumptions.
+- [ ] Delete obsolete single-tag assumptions.
 - [ ] Avoid default whole-function strategy variants.
 - [ ] Add structured memory-strategy decision reporting.
 
@@ -1242,9 +1251,9 @@ Phase 1 records accepted design. This phase records what actually landed and rem
 - [ ] Inspect every changed generated route.
 - [ ] Search for stale terms:
   - GC baseline
-  - GC-first correctness
-  - release may fall back to GC
-  - one-bit-only handle
+  - superseded collector-first correctness
+  - release may fall back to a tracing collector
+  - single-tag-only handle
   - implicit cycle
   - individual group drop
   - collector elision as optional on capable release backends
@@ -1379,7 +1388,7 @@ Do not collapse these rows into one generic "memory management" status.
 | `docs/src/docs/async/@page.moth` | mandatory send transfer and memory prerequisites |
 | `docs/src/docs/cheatsheet/moth-language-cheatsheet.md` | concise user-facing final model only |
 | `docs/src/docs/progress/@page.moth` | separate accepted-design and implementation rows |
-| `docs/roadmap/roadmap.md` | parent and companion plan sequencing, no GC-first wording |
+| `docs/roadmap/roadmap.md` | parent and companion plan sequencing, no superseded collector-first wording |
 | `docs/roadmap/plans/grouped-memory-design.md` | superseded and deleted; its group implementation detail now lives in Phases 7 and 8, and every live link points at this plan |
 | historical memory cleanup plan | confirm the file is absent and record that no historical annotation is required |
 | `README.md` | collector-free capable release goal |
@@ -1418,15 +1427,15 @@ Accepted but implementation-deferred:
 - any future atomic REC model
 - reserved-byte or preallocation syntax
 - safe adoption of an ungrouped uniquely owned value into a group
-- safe extraction or movement between declared groups
+- safe group extraction or movement between declared groups
 - expression-site placement
 - group-local graph construction and publication
 - direct source construction of reference cycles inside one group
 - builder lifecycle region metadata for reactivity
 
-Final-use extraction or detachment of one projected child from an allocation family is not accepted
+Final-use interior projection detachment from an allocation family is not accepted
 design. Before it could become accepted architecture, a separate design must define partially moved
-aggregate semantics, the parent representation after extraction, invalidation of existing aliases
+aggregate semantics, the parent representation after detachment, invalidation of existing aliases
 and projections, control-flow joins, destruction of remaining fields, reactive and external
 observers, aggregate invariants, and parity across GC, region, REC and collector-free backends.
 Until then, projections remain rooted in their containing allocation family, and a proven final use
@@ -1443,7 +1452,7 @@ The final memory-management redesign is complete only when all of these are true
 1. Every accepted reachable allocation family has one validated semantic lifetime owner.
 2. Every retained edge has a proven outlives relationship.
 3. Borrow and last-use analysis provides path-sensitive affine-transfer facts.
-4. Public and generated summaries carry complete result, retention, extraction and outlives facts.
+4. Public and generated summaries carry complete result, retention, detached stored-result and outlives facts.
 5. Retained-edge liveness can end regions at final cleanup frontiers.
 6. Fixed collections, growable collections and maps expose the trusted retention vocabulary.
 7. Explicit groups provide hard count-free bulk lifetimes and the only source cycle mechanism.
@@ -1454,7 +1463,7 @@ The final memory-management redesign is complete only when all of these are true
 12. Capable release backends verify that no tracing collector remains.
 13. Debug and GC-native backends preserve identical source legality and observable behavior.
 14. The progress matrix reports every surface honestly.
-15. All stale GC-fallback and one-bit-only architecture wording is removed or marked historical.
+15. All stale collector-fallback and single-tag architecture wording is removed or marked historical.
 16. `just validate`, the required docs build and the final architecture audit pass.
 
 ---

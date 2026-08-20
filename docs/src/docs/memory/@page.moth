@@ -10,6 +10,10 @@
 
 @lifetimes-and-result-shapes-basic content as lifetimes_and_result_shapes_basic
 
+@automatic-cleanup-and-retained-edges content as automatic_cleanup_and_retained_edges
+
+@automatic-cleanup-and-retained-edges-basic content as automatic_cleanup_and_retained_edges_basic
+
 @declared-memory-groups content as declared_memory_groups
 
 @declared-memory-groups-basic content as declared_memory_groups_basic
@@ -21,7 +25,7 @@
     doc_pager
 
 page_title #= "Memory and lifetimes"
-page_description #= "Reference semantics, explicit copies, exclusive access, lifetimes and declared memory groups in Moth."
+page_description #= "Reference semantics, explicit copies, lifetimes, retained edges and declared memory groups in Moth."
 page_head #= language_theme_head
 
 #[navbar]
@@ -69,6 +73,16 @@ page_head #= language_theme_head
         [$insert("advanced"):[lifetimes_and_result_shapes]]
 
         [lifetimes_and_result_shapes_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):automatic-cleanup-and-retained-edges]
+        [$insert("title"):Automatic cleanup and retained edges]
+        [$insert("advanced"):[automatic_cleanup_and_retained_edges]]
+
+        [automatic_cleanup_and_retained_edges_basic]
     ]
 ]
 

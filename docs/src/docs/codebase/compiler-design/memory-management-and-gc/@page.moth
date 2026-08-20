@@ -1,16 +1,16 @@
 @memory-management-and-gc content as reference_content
 @styles navbar, section, theme_head
 
-page_title #= "12. Memory management and GC"
-page_description #= "Why GC and access validation solve different memory problems."
+page_title #= "12. Memory topology and lowering"
+page_description #= "How static access and lifetime proof feed physical memory lowering."
 page_head #= theme_head
 
 #[navbar]
 
 #[section, $md:
-    @../ (Compiler design) / 12. Memory management and GC
+    @../ (Compiler design) / 12. Memory topology and lowering
 
-    GC answers liveness. Access validation answers conflicting use. Moth runs both on purpose.
+    Access validation and lifetime topology prove the legal program. Backend lowering then chooses a physical representation for those validated facts.
 ]
 
 #[section, reference_content]

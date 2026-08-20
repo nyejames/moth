@@ -57,7 +57,7 @@ source-language obligations.
 
     [td:
         [: Memory safety]
-        [: Mandatory borrow validation plus mandatory lifetime-topology validation. Static proof is the baseline; collection is one permitted physical representation, never the correctness mechanism.]
+        [: Mandatory borrow validation plus mandatory lifetime-topology validation. Static proof is the baseline; a garbage-collected representation is one permitted physical representation, never the correctness mechanism.]
     ]
 
     [td:

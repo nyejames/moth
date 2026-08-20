@@ -191,6 +191,8 @@ Memory safety comes from static proof, not from a collector. Borrow validation a
 
 Backends that advertise full memory control lower release builds without a tracing collector. That is a property of the backend and the emitted artefact, not a language mode: there is no source or project setting that turns GC on or off, and nothing about it appears in your code.
 
+The compiler may use internal Retained Edge Counting when a runtime-dependent number of persistent stored aliases disappear independently. Ordinary local aliases and `get()` borrows are never counted, and no REC mechanism appears in source.
+
 ### Declared memory groups - accepted deferred
 
 ```moth

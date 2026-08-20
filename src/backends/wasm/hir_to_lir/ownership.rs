@@ -11,9 +11,9 @@ pub(crate) fn insert_advisory_drops(
     block_id: BlockId,
     statements: &mut Vec<WasmLirStmt>,
 ) {
-    // WHAT: project borrow checker advisory sites into concrete `DropIfOwned` statements.
-    // WHY: the current backend keeps GC-first correctness while preserving ownership hooks for
-    // the runtime ownership model described in the memory-management design.
+    // WHAT: project borrow-checker advisory sites into the current `DropIfOwned` scaffolding.
+    // WHY: the backend has not migrated to plan-driven cleanup yet. Final full-control release
+    // lowering consumes `ValidatedMemoryPlan` and cannot fall back to tracing garbage collection.
     let Some(drop_sites) = context
         .module_context
         .borrow_facts

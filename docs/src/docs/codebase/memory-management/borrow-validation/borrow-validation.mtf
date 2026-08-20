@@ -80,7 +80,7 @@ These points are locked accepted design.
 4. Loops use fixed-point future-use reasoning.
 5. A transfer is legal only when every relevant path proves that the transferred value has no later source use.
 6. When optional transfer is not proven, the operation remains a borrow and the program remains valid.
-7. Last-use facts may move affine cleanup responsibility through calls, returns, aggregate insertion, extraction and control-flow paths.
+7. Last-use facts may move affine cleanup responsibility through calls, returns, aggregate insertion, container detachment and control-flow paths.
 8. Loop forms may expose a final-iteration fact only when finality is known without changing source evaluation order.
 9. Borrow validation does not assign semantic lifetime owners and does not choose a physical memory strategy.
 
@@ -131,7 +131,7 @@ Borrow validation consumes and produces:
 - external function access rules
 - external return-alias metadata
 
-Borrow validation does not produce final result provenance, retained-parameter constraints, retention cardinality, extraction effects, whole-domain kills, cleanup-frontier facts or outlives summaries. Lifetime and retained-edge analysis owns those final summaries and validates their topology.
+Borrow validation does not produce final result provenance, retained-parameter constraints, retention cardinality, detached stored-result effects, whole-domain kills, frontier-enabling effects, outcome-sensitive retention effects or outlives summaries. Lifetime and retained-edge analysis owns those final summaries and validates their topology.
 
 All runtime value parameters, immutable or mutable, may be eligible for inferred responsibility transfer. Parameter access mode remains separate from optional ownership effect. An immutable parameter receiving ownership remains read-only. A mutable parameter receiving ownership may mutate according to the source contract.
 
@@ -245,7 +245,7 @@ These are precision choices, not permanent source-language restrictions.
 
 - Equating analysis slot state with guaranteed runtime ownership.
 - Treating aliases as independent copies.
-- Allowing a collected representation to bypass invalid aliasing.
+- Allowing a garbage-collected representation to bypass invalid aliasing.
 - Using diagnostics as transfer state.
 - Mutating HIR to insert drops.
 - Deciding runtime ABI inside the checker.

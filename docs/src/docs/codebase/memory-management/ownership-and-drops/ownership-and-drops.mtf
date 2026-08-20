@@ -16,10 +16,10 @@ The compiler may transfer cleanup responsibility only where static analysis prov
 - Ownership metadata is separate from semantic `TypeId`.
 - Shared/mutable parameter syntax doesn't create owned/borrowed source types.
 - Cleanup responsibility never decides whether a program compiles.
-- Collection is a permitted runtime representation for a statically legal topology on debug profiles and GC-native backends.
+- A garbage-collected representation is permitted for a statically legal topology on debug profiles and GC-native backends.
 - Collector-free, GC-native and debug paths must preserve identical observable behaviour.
 
-## The ownership bit
+## Bit 0: affine cleanup responsibility
 
 Bit 0 of a full-control allocation-family handle records affine cleanup responsibility. It does not prove uniqueness, identify the final observer, establish lifetime legality or create dynamic shared ownership.
 
@@ -31,9 +31,9 @@ Bit 0 of a full-control allocation-family handle records affine cleanup responsi
         The runtime path carries release or safe-transfer responsibility.
 ]
 
-## The two-bit logical extension
+## The two-bit logical handle
 
-Full-control backends extend the ownership bit with one representation bit. The two bits are independent: bit 0 is per-handle responsibility, bit 1 describes the target allocation family's physical representation.
+Full-control backends carry one representation bit alongside affine cleanup responsibility. The two bits are independent: bit 0 is per-handle responsibility, bit 1 describes the target allocation family's physical representation.
 
 [codeblock, $code("text"):
     bit 0: affine cleanup responsibility
@@ -207,7 +207,7 @@ These must preserve source-language semantics and the unified ownership contract
 - Treating ownership as a source type.
 - Treating `~` as ownership transfer.
 - Using runtime ownership metadata to decide source legality.
-- Treating the ownership bit as uniqueness or observer count.
+- Treating bit 0 as uniqueness or observer count.
 - Confusing bit 0 (affine responsibility) with bit 1 (REC representation).
 - Masking an arbitrary interior pointer to recover an allocation-family base.
 - Treating borrow-checker advisory drop sites as the final lowering authority.

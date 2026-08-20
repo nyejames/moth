@@ -9,7 +9,7 @@ Existing values use shared, read-only access by default. Independent copies requ
 
 Reference relationships are real source semantics. Moth does not expose reference type constructors or lifetime syntax.
 
-These are source-semantic rules. Backends may use different scalar, handle, pointer, region, counted or collected representations as long as they preserve the same observable behaviour.
+These are source-semantic rules. Backends may use different scalar, handle, pointer, region, counted or garbage-collected representations as long as they preserve the same observable behaviour.
 
 ## Main compiler paths
 
@@ -81,7 +81,7 @@ This is a navigation map, not a status declaration.
 
     [td:
         [: Result provenance]
-        [: The static fact describing where a result's storage came from: a fresh root, an alias or projection of a parameter, an extracted value, an alias of another result, or an independent graph.]
+        [: The static fact describing where a result's storage came from: a fresh root, an alias or projection of a parameter, a detached stored value, an alias of another result, or an independent graph.]
     ]
 
     [td:
@@ -270,7 +270,7 @@ Topology questions about retained edges, escapes and region owners belong to @..
 
 Two distinct facts travel with a value. Do not collapse them.
 
-**Static result provenance** answers where storage came from and which lifetime constraints apply to it. It is a compile-time summary fact: fresh root, alias of one or more parameters, projection of a parameter, extracted or detached result, alias of another result, or independent result graph, together with any retained-parameter and outlives constraints. Provenance never enters `TypeId` and is never source syntax.
+**Static result provenance** answers where storage came from and which lifetime constraints apply to it. It is a compile-time summary fact: fresh root, alias of one or more parameters, projection of a parameter, detached stored result, alias of another result or independent result graph, together with any retained-parameter and outlives constraints. Group extraction or adoption and interior projection detachment are separate topology questions. Provenance never enters `TypeId` and is never source syntax.
 
 **Runtime cleanup responsibility** answers who may perform individual cleanup on the current path. It is affine and may move through calls, returns and aggregate insertion, but it never duplicates.
 

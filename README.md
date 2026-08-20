@@ -110,7 +110,7 @@ This compiles the project using the command-selected builder and writes output t
 
 - A small static type system plus borrow validation for memory-safe code that's free of data races and iterator invalidation by default.
 
-- **Safe automatic memory management**, proven statically rather than by a collector. Compiler checks prevent invalid memory use, and backends with full memory control produce release builds with no tracing garbage collector at all — without any lifetime annotations, reference types or move syntax in your code.
+- **Safe automatic memory management**, with access safety and lifetime topology proven statically rather than delegated to a collector. Full-memory-control backends produce release builds with no tracing garbage collector, using inferred cleanup, regions, explicit groups and selective retained-edge counting where needed. You write no lifetime annotations, reference types or move syntax in your code.
 
 - A backend-neutral frontend. Wasm as the main, platform-agnostic workhorse output target (Wasm backend in development).
 

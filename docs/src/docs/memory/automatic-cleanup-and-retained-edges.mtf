@@ -1,0 +1,114 @@
+### Accepted automatic cleanup, deferred implementation
+
+Moth proves access safety and lifetime topology before it chooses physical
+cleanup. Most values need no runtime count. Last-use analysis handles ordinary
+aliases, inferred regions handle bounded stored lifetimes and explicit groups
+choose one deliberate bulk lifetime.
+
+When a runtime-dependent number of stored aliases disappears one at a time, the
+compiler may select internal Retained Edge Counting (REC). REC remains a
+compiler choice. It never changes which source programs pass borrow and lifetime
+validation.
+
+### Temporary aliases versus stored references
+
+A local alias or a `get()` result borrows an existing value for a bounded period.
+Last-use analysis tracks that access, and REC never counts it.
+
+A value stored in a collection, map, struct field or other aggregate can outlive
+the operation that inserted it. That stored reference forms a retained edge.
+The stored value contributes a retained-edge summary. A scalar can contribute
+zero obligations, a direct heap-backed value can contribute one and an inline or
+nested aggregate can contribute several or transitive obligations.
+
+Storage operations add or remove the complete summary contributed by the stored
+value. They don't assume that one element means one edge.
+
+### When a region is enough
+
+Use a region when a whole retention domain can end at one known frontier:
+
+[codeblock, $code("moth"):
+    blob = load_blob()!
+
+    loop names |name|:
+        ~index.set(name, blob)!
+    ;
+
+    use(index)
+    ~index.clear()
+]
+
+`clear()` kills the collection's complete retention domain. If no other live
+alias or retention domain can keep `blob` alive, the call becomes its final
+cleanup frontier. The collection and its backing storage may continue to live.
+Another map, field, local alias or builder lifecycle can keep the same allocation
+family alive, so `clear()` does not promise immediate reclamation on its own.
+
+### When REC may be selected
+
+Use a count only when stored edges disappear independently and a single region
+would keep too much storage alive:
+
+[codeblock, $code("moth"):
+    loop keys_to_remove |key|:
+        ~index.remove(key) catch:
+        ;
+    ;
+]
+
+Runtime execution decides which entry disappears and which removal leaves the
+last persistent edge. The compiler may use REC to track those persistent
+obligations. A failed removal leaves the original entry and its obligation in
+place.
+
+### What REC doesn't count
+
+REC never counts:
+
+- local aliases
+- parameters
+- temporary projections
+- `get()` results
+- ordinary affine transfers
+- group-owned values
+
+The compiler selects REC only after static cleanup, inferred regions, cleanup
+frontiers, field-sensitive splitting, bounded retention and explicit groups have
+failed to give a precise enough answer. Every REC family keeps its statically
+proven fallback region and can reclaim the family earlier than that region
+frontier.
+
+### Explicit groups
+
+An explicit group chooses one hard lifetime and one bulk cleanup. Last-use
+analysis still checks access inside the group, but it never releases one group
+child early. Group-owned storage carries no REC counter. A group also provides
+Moth's only source mechanism for direct reference cycles.
+
+### Fallible operations commit effects on success
+
+Builtin collection and map mutations publish retained-edge effects atomically on
+the successful path. A failed `push`, `set`, `remove` or map insertion preserves
+the original storage topology and cleanup obligations. Public summaries describe
+the two exits separately:
+
+```text
+success:
+    apply the retained-edge effect
+
+error:
+    no retention change
+```
+
+### Source visibility
+
+You never declare, inspect or configure an REC counter. REC is one possible
+compiler-selected physical strategy for source code that already passed the
+same borrow and lifetime checks as every other program. Debug or
+garbage-collected representations may erase cleanup operations, while a
+capable full-control release backend cannot fall back to tracing garbage
+collection.
+
+For the compiler contract, see
+@../codebase/memory-management/retained-edge-counting (Retained Edge Counting).

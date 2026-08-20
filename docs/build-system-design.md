@@ -1223,13 +1223,13 @@ Project and package link planning instantiates local lifetime summaries with bui
 
 Builder-supplied page, mount, request, frame and arena roots are lifecycle inputs, not builder-specific source-law exceptions. Builder lifecycles cannot change language validity. Lifecycle-root instantiation is what lets reactive and mounted storage that outlives a lexical function still satisfy one lifetime owner and the retained-edge outlives rule.
 
-Exported lifetime summaries participate in the public-interface fingerprint. They carry result provenance, retention, extraction, cardinality, whole-domain kill and cleanup-frontier facts, and never carry donor-local allocation-family, region or counter indexes. Topology-relevant implementation and link facts invalidate affected assemblies. Exact persistent encoding remains deferred.
+Exported lifetime summaries participate in the public-interface fingerprint. They carry result provenance, retention, detached stored-result effects, cardinality, whole-domain kills, exit-specific success and error effects and frontier-enabling effects. They never carry donor-local allocation-family, region, counter or concrete-frontier indexes. Caller and link-level lifetime analysis derives concrete cleanup frontiers after combining these effects with local aliases, other retention domains, future edge creation and builder lifecycles. Topology-relevant implementation and link facts invalidate affected assemblies. Exact persistent encoding remains deferred.
 
 External boundary profile and capability metadata belong on the builder surface conceptually so backends receive closed WIT-value or host-binding classifications rather than inventing retention graphs.
 
 ### Memory-strategy plans
 
-After link-level topology validation succeeds, memory-strategy planning selects one physical strategy per allocation family: stack or inline placement, static affine cleanup, inferred region allocation, explicit-group bulk reclamation, Retained Edge Counting, or host collection. The planner produces a `ValidatedMemoryPlan` containing allocation-family layouts, selected representations, affine cleanup decisions, region and group placement, cleanup and destruction plans, REC decisions and physical coalescing decisions.
+After link-level topology validation succeeds, memory-strategy planning selects one physical strategy per allocation family: stack or inline placement, static affine cleanup, inferred region allocation, explicit-group bulk reclamation, Retained Edge Counting or a host garbage-collected representation. The planner produces a `ValidatedMemoryPlan` containing allocation-family layouts, selected representations, affine cleanup decisions, region and group placement, cleanup and destruction plans, REC decisions and physical coalescing decisions.
 
 The link plan conceptually carries this `ValidatedMemoryPlan` alongside validated topology. Backends consume it and never select their own strategy or reconsider source legality. Imprecise planning retains conservatively; a missing physical strategy after successful topology validation is `CompilerError`.
 
@@ -1238,7 +1238,7 @@ The link plan conceptually carries this `ValidatedMemoryPlan` alongside validate
 Each backend declares whether it supports collector-free release lowering. This is backend capability metadata consumed by the builder, not a source-visible or project-visible no-GC mode, and no `config.moth` field selects it.
 
 - A backend advertising full memory control must lower every accepted topology in a release build without a tracing or reachability collector.
-- Debug and development profiles may deliberately use collection for simpler lowering, faster compilation and instrumentation.
+- Debug and development profiles may deliberately use a garbage-collected representation for simpler lowering, faster compilation and instrumentation.
 - GC-native backends may use their host collector on any profile.
 - Every profile and backend runs semantically equivalent mandatory borrow and lifetime-topology validation and accepts exactly the same source.
 

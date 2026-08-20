@@ -7,10 +7,13 @@ legal under one lifetime owner, and GC won't bypass it.
 
 After that proof succeeds, the compiler selects a physical strategy for each
 allocation: stack placement, cleanup at a proven final use, an inferred region,
-bulk release with a declared group, or host collection. Strategy selection
-changes memory quality, never program behaviour and never which programs are
-valid. When no precise strategy applies, storage simply stays alive until its
-owning region ends.
+bulk release with a declared group, selective Retained Edge Counting or a
+garbage-collected representation. REC may handle a runtime-dependent number of
+persistent stored edges that disappear independently when a region would retain
+storage materially beyond its useful lifetime. Strategy selection changes memory
+quality, never program behaviour and never which programs are valid. When no
+narrower strategy applies, storage remains under its owning region until that
+region ends.
 
 Backends that advertise full memory control lower release builds with no tracing
 collector. That is a property of the backend, not a mode you select in source or
@@ -82,6 +85,8 @@ An alias result reuses an existing root or projection. Shared bindings, field ac
 
 Interior projections remain rooted in their containing allocation family. Returning, storing or escaping a projection retains that family. A projection doesn't silently become an independent allocation or independent copy.
 
+Interior projection detachment means moving a projected field out of its containing allocation family. It remains deferred until field-sensitive splitting has established separate ownership. This restriction does not prohibit a container-detached result from `remove`, which kills a collection-retained edge and returns the already-stored value under ordinary lifetime rules.
+
 ### Result binding versus allocation identity
 
 Every returned value enters a fresh caller binding slot. Binding-slot freshness and allocation freshness are separate facts: a fresh slot may contain a value that aliases an older allocation. Rebinding that slot replaces its current value provenance; it does not rebind or mutate another binding that still observes the older allocation.
@@ -112,7 +117,7 @@ Maps own their entry structure while keys and values follow the same shared/copy
 
 ### Return and multi-return aliasing
 
-Function lifetime summaries cover fresh result roots, parameter aliases, projection aliases, result-to-result aliases, retained-parameter constraints and required outlives relationships.
+Function lifetime summaries cover fresh result roots, parameter aliases, projection aliases, detached stored results, result-to-result aliases, independent result graphs, retained-parameter constraints, persistent-retention effects, retention cardinality, whole-domain kills, outcome-sensitive success and error effects and required outlives relationships.
 
 Multiple return values may alias one allocation when they remain under one caller lifetime owner. A caller may place a fresh result root directly into a destination region only when every retained edge in the result is legal for that destination.
 
@@ -153,6 +158,7 @@ Immutable and mutable parameters may both receive inferred destruction responsib
 
 - @#reference-semantics (Reference semantics)
 - @#copy-and-exclusive-access (Copy and exclusive access)
+- @#automatic-cleanup-and-retained-edges (Automatic cleanup and retained edges)
 - @#declared-memory-groups (Declared memory groups)
 
 For the formal lifetime-region rules, see

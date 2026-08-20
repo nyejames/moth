@@ -19,7 +19,7 @@ User-authored topology that is invalid or cannot be proven legal produces a stru
 
 It also owns compiler-generated non-lexical intervals, retained-edge liveness and final cleanup frontiers. These decide how precisely a legal topology can be reclaimed, not whether it is legal.
 
-**Physical strategy selection** happens after this proof succeeds. It chooses stack placement, static affine cleanup, inferred region allocation, explicit-group bulk reclamation, Retained Edge Counting or host collection. Imprecise planning results in conservative retention, never in rejecting a legal program. A missing physical strategy after successful topology validation is a `CompilerError`, not a silent collector fallback.
+**Physical strategy selection** happens after this proof succeeds. It chooses stack placement, static affine cleanup, inferred region allocation, explicit-group bulk reclamation, Retained Edge Counting or a host garbage-collected representation. Imprecise planning results in conservative retention, never in rejecting a legal program. A missing physical strategy after successful topology validation is a `CompilerError`, not a silent collector fallback.
 
 GC is a permitted runtime representation for a statically legal lifetime topology on debug profiles and GC-native backends. It is not a mechanism for accepting invalid retained edges, lateral lifetime promotion, unowned escapes or cross-region cycles, and a capable full-control release backend must not fall back to it.
 
@@ -105,7 +105,7 @@ Implementation of this analysis is deferred. This leaf is the canonical design a
 
     [td:
         [: Physical representation]
-        [: Stack, inline, affine heap, inferred arena, explicit-group arena, REC-counted or collected storage, chosen after topology is validated.]
+        [: Stack, inline, affine heap, inferred arena, explicit-group arena, REC-counted or garbage-collected storage, chosen after topology is validated.]
     ]
 
     [td:
@@ -219,7 +219,7 @@ Interior projections remain rooted in their containing allocation family. Return
 
 A projection does not silently become an independent allocation or independent copy. Returning, storing or escaping a field or element alias retains the base family under the stored-edge rule.
 
-Field-sensitive allocation splitting may prove that a projected field is an independent allocation family with its own lifetime owner, after which strategy selection reruns for the new families. It applies only when the compiler establishes separate child ownership before the alias escapes. It is not retroactive child extraction.
+Field-sensitive allocation splitting may prove that a projected field is an independent allocation family with its own lifetime owner, after which strategy selection reruns for the new families. It applies only when the compiler establishes separate child ownership before the alias escapes. It is not retroactive interior projection detachment.
 
 ## Returns and multi-return aliasing
 
@@ -228,15 +228,16 @@ Function lifetime summaries cover:
 - fresh result roots
 - aliases of one or more parameters
 - projection aliases
-- extracted or detached results
+- detached stored results
 - aliases of another result
 - independent result graphs
 - retained-parameter constraints
 - retention cardinality
 - persistent-edge creation and destruction
-- extraction effects
+- detached stored-result effects
 - whole-domain kill effects
-- cleanup-frontier facts
+- frontier-enabling retention effects
+- outcome-sensitive success and error effects
 - required outlives relationships
 
 Multiple return values may alias one allocation when they remain under one caller lifetime owner.
@@ -253,13 +254,25 @@ Lifetime and retained-edge analysis owns the final summary vocabulary:
 - complete result provenance
 - retained parameters and outlives constraints
 - retention cardinality
-- extraction and detached-result classification
+- detached stored-result classification
 - persistent retained-edge creation and destruction
 - whole-domain kills
 - cleanup-frontier candidates
 - exported lifetime and retention summaries
 
-The final summary distinguishes fresh roots, parameter aliases, projections, extracted or detached results, result-to-result aliases and independent result graphs. These stable semantic facts cross module and package boundaries. Donor-local family, region and counter indexes do not.
+The final summary distinguishes fresh roots, parameter aliases, projections, detached stored results, result-to-result aliases and independent result graphs. It also preserves exit-specific retention effects, whole-domain kills and frontier-enabling facts. These stable semantic facts cross module and package boundaries. Donor-local family, region, counter and concrete-frontier indexes do not.
+
+### Public effects versus caller-local frontiers
+
+A module or package interface may export:
+
+- an exit-specific retained-edge effect
+- a whole-domain kill effect
+- a frontier-enabling effect
+- a retained parameter or result
+- a detached stored result
+
+The caller and link-level lifetime analysis derives the concrete `CleanupFrontier`, region exit and region epoch after combining those effects with caller-local aliases, other live retention domains, future edge-creation ability and builder lifecycle roots. A donor-local frontier ID never crosses a module boundary.
 
 ## Retained-edge liveness and cleanup frontiers
 
@@ -291,7 +304,7 @@ Individual `remove`, `set` or partial cleanup does not establish uniqueness or a
     ~index.clear()
 ]
 
-The collection may continue living. The region owning the retained values may end at `clear()`.
+The collection may continue living. If no other live alias or retention domain can retain a target allocation family, `clear()` can become that family's final cleanup frontier. The collection itself may continue to live. Group-owned storage still remains until group exit, even though `clear()` kills the group's collection edges logically.
 
 ### Region epochs
 
@@ -403,7 +416,7 @@ There is no backend-specific escape from semantic lifetime diagnostics.
 
 Stronger future analysis may prove more legal programs or narrower owners, but cannot change the meaning of already-accepted programs.
 
-Conservative analysis may reject topology it cannot prove legal. That is a source diagnostic, not permission to fall back to GC for an unproven graph.
+Conservative analysis may reject topology it cannot prove legal. That is a source diagnostic, not permission to fall back to a tracing garbage collector for an unproven graph.
 
 ## What this analysis must not do
 
@@ -411,7 +424,7 @@ Conservative analysis may reject topology it cannot prove legal. That is a sourc
 - Decide source access syntax or `~` validity.
 - Decide optional transfer points as source legality.
 - Choose target partition or backend.
-- Choose stack, affine heap, arena, counted or collected representation.
+- Choose stack, affine heap, arena, counted or garbage-collected representation.
 - Encode ownership or REC handle tags.
 - Select or elide Retained Edge Counting.
 - Invent overly broad page or process owners to avoid diagnostics.

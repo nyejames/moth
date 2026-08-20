@@ -85,25 +85,46 @@ Accepted design with implementation deferred. Maps already expose `clear()`; fix
 
 ## Compiler-known retention effects
 
-Builtin fixed and growable collections are Moth's trusted dynamic-storage substrate. The compiler knows exactly which stored references each operation creates and destroys, and memory analysis relies on that knowledge rather than on any user annotation.
+Builtin fixed and growable collections are Moth's trusted dynamic-storage substrate. The compiler knows the retained-edge summary contributed by each stored value. An `Int` can contribute zero obligations, a direct heap-backed value can contribute one, an inline aggregate can contribute several and a nested aggregate can contribute transitive obligations. Memory analysis uses those value summaries rather than assuming that one element means one edge.
+
+The table describes each operation's successful path.
 
 | Operation | Retained-edge effect |
 |---|---|
-| `get` | returns a statically bounded shared alias; creates no stored reference |
-| `push` | creates one stored reference |
-| `set` | destroys one stored reference and creates one new stored reference |
-| `remove` | destroys one stored reference and returns the value detached from the collection |
-| `clear` | destroys every stored element reference in that collection |
-| collection destruction | destroys every stored element reference and the backing storage |
-| growth or reallocation | replaces backing storage while preserving the logical elements |
+| `get` | creates a statically bounded temporary alias. It adds no persistent obligation |
+| `push` | adds the inserted element's retained-edge obligations |
+| `set` | removes the replaced element's obligations and adds the new element's obligations |
+| `remove` | removes the stored element's obligations and returns the existing value as a detached stored result |
+| `clear` | removes the obligations contributed by every stored element |
+| collection destruction | removes all element obligations and destroys the backing-storage domain |
+| growth or reallocation | replaces backing storage while preserving logical element summaries |
 
-`clear` and collection destruction are whole-domain kills: they let the compiler prove that every stored reference into a set of values is gone at one point, so those values can be reclaimed while the collection itself stays alive. Individual `remove` or `set` does not give that proof.
+For the initial direct-handle implementation, an element commonly contributes zero or one direct obligation. The general summary supports aggregate and transitive retention without changing the collection contract.
+
+### Successful commits and failed operations
+
+A builtin collection mutation commits its retained-edge effects atomically on the successful path. A failed operation preserves the original storage topology and all cleanup obligations. Invalid-index `remove` destroys no obligation, a failed fixed-capacity `push` adds none and a failed `set` leaves the previous entry intact. Count changes happen after the operation reaches its semantic commit point.
+
+Public summaries must preserve exit-specific effects:
+
+```text
+success:
+    remove old obligations
+    add new obligations
+
+error:
+    no retention change
+```
+
+`clear` kills the collection's complete retention domain. If no other live alias or retention domain can retain a target allocation family, the call becomes that family's final cleanup frontier. The collection itself may continue to live. Group-owned allocation storage still remains until group exit.
+
+Individual `remove` or `set` does not establish a final cleanup frontier by itself.
 
 The compiler does not recognise user methods by name. A user abstraction earns the same strong summary only by composing these builtin operations in a way analysis can prove kills every relevant reference on every path.
 
 Future collection APIs must preserve narrow, analysable destruction effects. An operation whose effect on stored references cannot be stated precisely weakens memory analysis for every program that uses it.
 
-The full contract lives in @../codebase/memory-management/retained-edge-counting (Retained Edge Counting).
+For the accessible explanation, see @../memory/automatic-cleanup-and-retained-edges (Automatic cleanup and retained edges). The compiler implementation details live in @../codebase/memory-management/retained-edge-counting (Retained Edge Counting).
 
 ### Shared rules
 

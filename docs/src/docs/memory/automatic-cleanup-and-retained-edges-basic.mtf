@@ -1,0 +1,12 @@
+Most Moth aliases end through last-use analysis. A stored reference inside a
+collection or map can live longer than the operation that inserted it.
+
+`clear()` can remove a collection's complete retention domain. If nothing else
+keeps a value alive, that point can end the value's region even while the
+collection remains usable.
+
+When stored aliases disappear one at a time and a region would keep too much
+storage alive, the compiler may track those stored obligations internally with
+Retained Edge Counting. You never write REC code or inspect its counter.
+
+An explicit group chooses one bulk cleanup. Group-owned values never use REC.

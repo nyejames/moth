@@ -65,7 +65,7 @@ or thorough reviews.
 - Public semantic facts, executable state, backend-neutral link facts and compiler metadata are separate artefact lanes.
 - User-facing failures use `CompilerDiagnostic`. Internal invariants and infrastructure failures use `CompilerError`.
 - Backend validation consumes explicit roots, target assignments, validated HIR and validated lifetime topology. Lowerers never rediscover source meaning or reconsider lifetime legality.
-- Static proof is the semantic baseline, not collection. GC is one permitted physical representation of an already legal topology and preserves the same accepted programs and observable behaviour.
+- Static proof is the semantic baseline, not garbage collection. GC is one permitted physical representation of an already legal topology and preserves the same accepted programs and observable behaviour.
 - Lifetime-region and escape validation is mandatory and backend-independent. GC cannot bypass topology legality.
 - Backends declare whether they support collector-free release lowering. A capable full-control release backend must not fall back to a tracing or reachability collector.
 - Imprecise memory planning retains conservatively; it must not reject legal source. A missing physical strategy after successful topology validation is `CompilerError`.
@@ -169,15 +169,16 @@ pub struct CompiledModuleArtifact {
 - fresh result roots
 - aliases of one or more parameters
 - projection results
-- extracted or detached results
+- detached stored results
 - aliases of another result
 - independent result graphs
 - retained-parameter relationships
 - retention cardinality
 - persistent-edge creation and destruction effects
-- extraction effects
+- detached stored-result effects
 - whole-domain kill effects
-- cleanup-frontier facts
+- frontier-enabling retention effects
+- outcome-sensitive success and error effects
 - outlives constraints
 - external boundary classification
 
@@ -379,11 +380,11 @@ A public interface contains only facts a semantic consumer may observe:
 - receiver surfaces and visible methods
 - function parameter access modes
 - mutation, optional transfer eligibility and effect categories
-- complete result provenance: fresh roots, parameter aliases, projections, extracted or detached results, result-to-result aliases and independent result graphs
+- complete result provenance: fresh roots, parameter aliases, projections, detached stored results, result-to-result aliases and independent result graphs
 - retained-parameter and outlives summaries
 - retention cardinality and persistent-edge creation or destruction effects
-- extraction effects and whole-domain kill effects
-- cleanup-frontier facts
+- detached stored-result effects and whole-domain kill effects
+- frontier-enabling retention effects and outcome-sensitive success and error effects
 - external-boundary classifications
 - relevant reactive effect summaries
 - project-context provenance for every exported fact
@@ -408,7 +409,7 @@ Semantic surface validation covers:
 - trait requirements
 - receiver methods
 - reusable conformance evidence
-- access, optional-transfer, complete result provenance, retention, cardinality, extraction, whole-domain kill, cleanup-frontier, outlives, external-boundary and reactive summaries
+- access, optional-transfer, complete result provenance, retention, cardinality, detached stored-result effects, whole-domain kills, frontier-enabling and outcome-sensitive retention effects, outlives, external-boundary and reactive summaries
 
 An exported semantic surface cannot leak:
 
@@ -455,7 +456,7 @@ Covers the canonical semantic contents of `PublicSemanticInterface`:
 - generic template semantics and bounds
 - trait and conformance evidence
 - receiver surfaces
-- access, optional-transfer, complete result provenance, retention, cardinality, extraction, whole-domain kill, cleanup-frontier, outlives and external-boundary summaries
+- access, optional-transfer, complete result provenance, retention, cardinality, detached stored-result effects, whole-domain kills, frontier-enabling and outcome-sensitive retention effects, outlives and external-boundary summaries
 - relevant reactive effect summaries
 - project-context provenance
 
@@ -1049,7 +1050,7 @@ Borrow validation resolves binding-backed function IDs through semantic package 
 
 Missing or inconsistent summaries are `CompilerError` invariant failures.
 
-GC-native backends may ignore affine cleanup facts but cannot skip borrow validation or lifetime-region validation. Collected, debug and collector-free lowering accept and reject exactly the same programs.
+GC-native backends may ignore affine cleanup facts but cannot skip borrow validation or lifetime-region validation. Garbage-collected, debug and collector-free lowering accept and reject exactly the same programs.
 
 Reactive subscriptions are read-only source dependencies rather than active borrow lifetimes.
 
@@ -1063,7 +1064,8 @@ Local per-function and module work:
 
 - reads validated HIR and read-only borrow/effect facts
 - owns allocation-family identity, complete result provenance, retention, escape and outlives constraints
-- owns retention cardinality, extraction, whole-domain kill and cleanup-frontier candidate facts
+- owns retention cardinality, detached stored-result classification, whole-domain kill and cleanup-frontier candidate facts
+- exports exit-specific retention effects and frontier-enabling effects. Concrete cleanup frontiers remain caller and link-level facts
 - produces compiler-generated non-lexical lifetime intervals
 - writes immutable side-table facts and exported lifetime summaries
 - does not rewrite HIR
@@ -1086,7 +1088,7 @@ A final cleanup frontier lets an inferred region end before the aggregate that o
 
 ### Memory-strategy planning
 
-After topology validation succeeds, a distinct memory-strategy planner selects one physical strategy per allocation family: stack or inline placement, static affine cleanup, inferred region allocation, explicit-group bulk reclamation, Retained Edge Counting, or host collection.
+After topology validation succeeds, a distinct memory-strategy planner selects one physical strategy per allocation family: stack or inline placement, static affine cleanup, inferred region allocation, explicit-group bulk reclamation, Retained Edge Counting or a host garbage-collected representation.
 
 The planner is the sole owner of strategy selection. Borrow validation and lifetime validation supply facts and never choose a representation. Selection is deterministic for one compile and backend configuration, and never changes source legality.
 

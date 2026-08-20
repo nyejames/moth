@@ -21,7 +21,7 @@ A declaration can target a group with the `into` keyword:
 
 ### Bulk cleanup and cycles
 
-A group forms one deliberate allocation and cleanup domain. Every group-owned allocation remains under that group until group exit. Last-use analysis still checks access inside the group, but it never shortens group storage or releases one child early. The group reclaims its contents together in one bulk cleanup.
+A group forms one deliberate allocation and cleanup domain. Every group-owned allocation remains under that group until group exit. Last-use analysis still checks access inside the group, but it never shortens group storage or releases one child early. The group reclaims its contents together in one bulk cleanup. Because group-owned storage is reclaimed in bulk, it carries no REC counter.
 
 The group-only cycle rule follows from that bulk lifetime. A declared group provides the only source mechanism for constructing a direct reference cycle. Every member of the cycle must belong to the same group. Inferred regions never become cyclic, and a copied cyclic graph must enter one explicit group as a whole.
 
@@ -99,13 +99,15 @@ A group has one lexical entry and explicit exits. Values placed into the group c
 
 ### No group-to-group transfer in V1
 
-V1 has no extraction, adoption or unrestricted group-to-group transfer. A value crosses from a shorter-lived group into a longer-lived group only by producing independent storage in the destination lifetime or by invoking a fresh producer that allocates directly into the destination.
+V1 has no group extraction, group adoption or unrestricted group-to-group transfer. A value crosses from a shorter-lived group into a longer-lived group only by producing independent storage in the destination lifetime or by invoking a fresh producer that allocates directly into the destination.
 
 Use one of:
 
 - allocate the result directly into the destination group
 - `copy` into the destination group
 - place the whole graph in the correct common group from the start
+
+The restriction on extraction means moving a group-owned allocation out of its group or retroactively detaching an interior projection from its allocation family. It does not prohibit builtin collection or map `remove`, which kills a container-retained edge and returns the already-stored value under ordinary lifetime rules.
 
 ### Escapes
 
@@ -160,7 +162,7 @@ Hidden result destinations don't become source signature parameters.
 
 - no expression-site placement
 - no `into group` syntax on reassignment
-- no extraction
+- no group extraction or group adoption
 - no unrestricted group-to-group adoption
 
 ### Why groups exist

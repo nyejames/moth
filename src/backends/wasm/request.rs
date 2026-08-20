@@ -99,7 +99,9 @@ pub(crate) struct WasmTargetFeatures {
     /// Placeholder for future GC proposal-specific codegen branches.
     pub use_wasm_gc: bool,
     /// Enables ownership-aware runtime scaffolding planning.
-    /// The current path remains conservative/GC-first either way.
+    /// The current path remains transitional collected scaffolding either way. Final full-control
+    /// release lowering consumes `ValidatedMemoryPlan` and cannot fall back to tracing garbage
+    /// collection.
     pub enable_runtime_ownership: bool,
     /// Reserved for user-facing memory/data-segment feature gating if needed.
     pub enable_bulk_memory: bool,

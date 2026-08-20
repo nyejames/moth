@@ -135,7 +135,8 @@ fn lower_assignment(
     statements: &mut Vec<WasmLirStmt>,
 ) -> Result<(), CompilerError> {
     // WHAT: preserve explicit move/copy distinction in LIR.
-    // WHY: ownership optimization stays representable even under GC-first semantics.
+    // WHY: the current emitter keeps the ownership hook representable while transitional
+    // collected scaffolding remains. Final lowering consumes `ValidatedMemoryPlan`.
     let HirPlace::Local(target_local) = target else {
         return Err(lir_transformation_error(
             "Wasm lowering currently supports assignments only to direct locals",

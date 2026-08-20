@@ -6,10 +6,10 @@ The narrow counted strategy for runtime-many persistent retained edges.
 
 ## Contract
 
-- Retained-edge analysis supplies: allocation-family candidates, retained-edge creation and destruction facts, cardinality, cleanup-frontier candidates and builtin collection effects
+- Retained-edge analysis supplies: allocation-family candidates, retained-edge creation and destruction facts, value-shape cardinality, outcome-sensitive effects, frontier-enabling effects and builtin collection/map summaries
 - The memory-strategy planner supplies: the selected `REC` strategy or an explicit REC-elision decision
 - REC lowering produces: counted-family layout, tags, count transitions and iterative destruction plans for REC-selected families
-- Decides: how an already-selected REC family carries retain, release and extraction operations and how counted destruction runs
+- Decides: how an already-selected REC family carries retain, release and detached stored-result operations and how counted destruction runs
 - Must not decide: source legality, lifetime ownership, retained-edge legality, cycle legality, memory-strategy selection or whether a program compiles
 - Invariant: REC counts persistent retained edges only. It never counts ordinary aliases, never establishes legality and never permits cycles
 

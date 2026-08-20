@@ -27,9 +27,9 @@ Grouped memory extends, rather than replaces, Moth's existing memory model:
 - HIR remains the backend-facing semantic IR.
 - Borrow validation and lifetime analysis write side-table facts and do not rewrite HIR.
 - Allocation and release strategy remain backend decisions.
-- Collection remains a legal physical representation for already-legal topology on debug profiles and GC-native backends.
+- A garbage-collected representation remains legal for already-legal topology on debug profiles and GC-native backends.
 
-A collected representation must not weaken group escape rules. A GC-native backend may ignore physical group release, but it must accept and reject the same grouped source as every other backend.
+A garbage-collected representation must not weaken group escape rules. A GC-native backend may ignore physical group release, but it must accept and reject the same grouped source as every other backend.
 
 Canonical general topology rules, including the one-owner invariant, the stored-edge outlives rule, narrowing and widening, cycles and projection families, live in `docs/src/docs/codebase/memory-management/lifetime-regions-and-escape-validation/`.
 
@@ -270,15 +270,17 @@ It must not retain values owned by a child, sibling or otherwise shorter-lived r
 
 A group has one lexical entry and explicit exits. Values placed into the group cannot escape it. The compiler must not silently widen a declared group. A child group ends before its parent.
 
-### No group-to-group transfer in V1
+### No group extraction or adoption in V1
 
-A value crosses from a shorter-lived group into a longer-lived group only by producing independent storage in the destination lifetime or by invoking a fresh producer that allocates directly into the destination. V1 has no extraction, adoption, or group-to-group transfer operation.
+A value crosses from a shorter-lived group into a longer-lived group only by producing independent storage in the destination lifetime or by invoking a fresh producer that allocates directly into the destination. V1 has no group extraction, group adoption or unrestricted group-to-group transfer operation.
 
 Use one of:
 
 - allocate the result directly into the destination group
 - `copy` into the destination group
 - place the whole graph in the correct common group from the start
+
+The restriction on extraction means moving a group-owned allocation out of its group or retroactively detaching an interior projection from its allocation family. It does not prohibit builtin collection or map `remove`, which kills a container-retained edge and returns the already-stored value under ordinary lifetime rules.
 
 This avoids graph splitting, alias rewriting and drop-list reparenting.
 
@@ -407,8 +409,8 @@ There is no backend-specific escape from semantic lifetime diagnostics. A GC-nat
 Deferred work includes:
 
 - reserved-byte or preallocation syntax
-- safe adoption of an ungrouped uniquely owned value into a group
-- safe extraction or movement between declared groups
+- safe group adoption of an ungrouped uniquely owned value
+- safe group extraction or movement between declared groups
 - expression-site placement
 - group-local graph construction and publication
 - direct reference-cycle construction inside one group
@@ -416,7 +418,7 @@ Deferred work includes:
 - field-sensitive region splitting
 - physical region layout and runtime ABI encoding
 
-Final-use extraction of one projected child from an allocation family is not accepted current design and is not part of the first grouped-memory implementation. See the deferred child-extraction note in `docs/roadmap/plans/final-memory-management-redesign-and-implementation-plan.md`.
+Final-use interior projection detachment from an allocation family is not accepted current design and is not part of the first grouped-memory implementation. See the deferred child-detachment note in `docs/roadmap/plans/final-memory-management-redesign-and-implementation-plan.md`.
 
 ## Related reading
 

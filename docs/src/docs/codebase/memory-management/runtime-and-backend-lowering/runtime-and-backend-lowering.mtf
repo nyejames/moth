@@ -40,7 +40,7 @@ The memory planner selects one strategy per validated allocation family. Backend
 - inferred region allocation with a complete exit, including region epochs
 - explicit-group bulk reclamation
 - Retained Edge Counting for unresolved runtime-many persistent edges
-- host or runtime collection on debug profiles and GC-native backends
+- host garbage-collected representation on debug profiles and GC-native backends
 
 Arenas, handles, slabs, pools, grouped drop lists and hybrid representations are permitted for valid topology. Source-visible RC, weak references, finalizers and hidden unrestricted dynamic sharing are not.
 
@@ -50,9 +50,9 @@ Semantic lifetime analysis chooses the narrowest proven useful interval for each
 
 Physical coalescing never widens semantic topology. It never changes an outlives relationship, makes an illegal retained edge legal or changes diagnostics. A coalesced arena or grouped drop may keep storage available longer than the semantic interval while preserving the same validated lifetime facts.
 
-## Collection as a representation
+## Garbage-collected representation
 
-Where collection is used, it represents an already-legal topology:
+Where garbage collection is used, it represents an already-legal topology:
 
 - Deterministic destruction is not required for observable correctness.
 - Mandatory access and lifetime validation still run.
@@ -60,13 +60,13 @@ Where collection is used, it represents an already-legal topology:
 - `drop_if_owned` may be a no-op.
 - Handle tags may be erased when the host owns storage.
 
-Collection can be host GC, Wasm GC or a runtime collector. Exact current target support belongs in the progress matrix.
+The representation can use host garbage collection, Wasm GC or a runtime tracing collector. Exact current target support belongs in the progress matrix.
 
 ## Profiles and backend capability
 
 Profiles differ only in analysis effort and physical representation, never in source legality.
 
-- Debug and development profiles may deliberately use collection even where collector-free lowering is available, because debuggability, instrumentation, faster compilation and predictable runtime behaviour take priority.
+- Debug and development profiles may deliberately use a garbage-collected representation even where collector-free lowering is available, because debuggability, instrumentation, faster compilation and predictable runtime behaviour take priority.
 - GC-native backends may use their host collector on any profile.
 - A capable full-control backend in a release build must be collector-free. It may not fall back per value when precision is unavailable; it retains conservatively under the owning region instead.
 - Debug, GC-native and collector-free paths preserve identical observable Moth behaviour and identical source legality.
@@ -220,7 +220,7 @@ A future resource-capable profile requires a separate complete design for identi
 - Remove retain and release checks when static proof permits.
 - Avoid double release.
 - Ensure all potential ownership paths reach release or safe transfer.
-- Collected lowering can erase ownership-specific operations.
+- Garbage-collected lowering can erase ownership-specific operations.
 - REC may be used only for already-legal topology, and only where the planner selected it.
 - Counted destruction is iterative through a worklist, never recursive through the target stack.
 - Group-owned storage is released in bulk at group exit and never individually.
@@ -231,7 +231,7 @@ Backends may consume:
 
 - value access classifications
 - call effects
-- complete result, retention and outlives summaries
+- complete result provenance, including detached stored results, retention, outcome-sensitive effects and outlives summaries
 - validated transfer decisions
 - validated affine cleanup decisions
 - `ValidatedMemoryPlan`, including allocation-family layout, selected representation, cleanup plans, destruction plans, REC decisions and physical coalescing decisions

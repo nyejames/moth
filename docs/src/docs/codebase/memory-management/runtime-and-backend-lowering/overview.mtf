@@ -5,7 +5,7 @@ Physical memory strategies and the collector-free release guarantee.
 ## Contract
 
 - Input: validated HIR; borrow facts; validated affine cleanup decisions; validated lifetime topology; `ValidatedMemoryPlan` containing allocation-family layouts, selected strategies, cleanup/destruction plans, REC decisions and physical coalescing decisions; selected function set; target assignment; import/export/capability plan; semantic layout identity; builder lifecycle/runtime plan
-- Output: target-specific allocation, region, counted, collected and ownership representations
+- Output: target-specific allocation, region, counted, garbage-collected and ownership representations
 - Decides: realisation of the selected memory plan, handle-tag representation and conservative retention behaviour for already-legal topology
 - Must not decide: source legality, borrow facts, region legality, memory-strategy selection, target partition or page lifecycle policy
 - Invariant: every backend consumes the complete validated memory plan, preserves the same shared, exclusive, copy and move semantics, and a capable full-control release backend must not fall back to a tracing collector

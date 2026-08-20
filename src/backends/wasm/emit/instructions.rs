@@ -185,8 +185,9 @@ pub(crate) fn emit_statement(
         }
         WasmLirStmt::RetainHandle { .. } => {
             // WHAT: retain is currently a no-op at codegen level.
-            // WHY: GC-first semantics and conservative helper runtime make extra retain
-            // unnecessary in the current emitter.
+            // WHY: the current helper runtime uses transitional collected scaffolding, so this
+            // reserved hook has no effect. Final lowering will derive retain traffic from the
+            // validated memory plan rather than from a tracing-collector fallback.
         }
         WasmLirStmt::IntEq { dst, lhs, rhs } => {
             emit_compare(function, *lhs, *rhs, context, true)?;

@@ -17,7 +17,7 @@ Moth’s compiler pipeline is explicitly split into a frontend that produces a s
 
 Two current design choices are especially relevant to a long-term “components-first” Wasm story:
 
-Moth’s memory model is GC-first with static analysis used as an optimisation layer, not as a semantic requirement. Ownership is described as a runtime-tagged optimisation (e.g., an “ownership bit” in tagged pointers), with “possible_drop” sites that become no-ops in GC-only backends and conditional frees in hybrid backends. fileciteturn8file0L1-L1
+> **Superseded memory-model note.** This historical report described Moth’s memory model as “GC-first”, with static analysis as an optimisation layer and runtime-tagged ownership hooks such as an “ownership bit” and “possible_drop” sites. The current model instead makes borrow validation and lifetime-topology validation mandatory, and final full-control release lowering consumes `ValidatedMemoryPlan` without a tracing-collector fallback. fileciteturn8file0L1-L1
 
 The Wasm backend is the long-term primary target, but it is currently constrained to emitting a core Wasm module in a “phase-2” state: feature flags for Wasm GC, multi-value, and reference types are actively rejected by request validation, and the backend is explicitly focused on “core linear-memory Wasm only” at present. fileciteturn16file0L1-L1 fileciteturn15file0L1-L1
 
@@ -90,7 +90,7 @@ Each Moth library package ships two artefacts:
 
 This fits naturally with:
 - Moth’s desire for backend-agnostic build systems that can consume compilation output and apply their own codegen. WIT becomes the backend-agnostic ABI contract, while the emitted component is one backend product. fileciteturn9file0L1-L1  
-- A “GC-first semantics” memory model: you can keep internal memory/ownership lowering as an optimisation, while the component boundary stays copy/handle based via canonical ABI. fileciteturn8file0L1-L1 citeturn0search1turn11search0
+- **Superseded memory-model note:** the report proposed a “GC-first semantics” model with internal memory and ownership lowering treated as an optimisation. The component boundary remains copy and handle based through the canonical ABI, but current Moth memory semantics no longer use GC as their baseline. fileciteturn8file0L1-L1 citeturn0search1turn11search0
 
 Practically, Moth should define “ABI-safe public surface” rules early:
 - Public exports are restricted to types that map cleanly to WIT (primitives, string, list, record, variant/result, and later resources). citeturn0search2turn2search3  
