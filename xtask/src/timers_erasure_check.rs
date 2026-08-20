@@ -1,17 +1,22 @@
-//! Zero-cost timer erasure gate.
+//! Zero-cost timer erasure gate, and the timer subsystem's source rules.
 //!
 //! WHAT: builds the `moth` release binary without any timer-related feature
 //!      and proves that timer-only implementation markers are absent from the
-//!      produced bytes. It also audits the source tree for runtime `cfg!`
-//!      checks and for direct calls into the enabled timer implementation
-//!      outside the facade. It also rejects no-op timer closure wrappers:
-//!      disabled frontend timer expansions must be the production expression
-//!      itself, never a closure call.
+//!      produced bytes. It also defines the timer source rules — runtime `cfg!`
+//!      checks, direct calls into the enabled implementation outside the
+//!      facade, direct wall clocks, obsolete macro and metric names, unguarded
+//!      timer-only fields, and no-op timer closure wrappers, because a disabled
+//!      frontend timer expansion must be the production expression itself.
 //! WHY:  the plan's primary invariant is that a compiler built without
 //!       `timers` performs no timer-system runtime work. Source-level erasure
 //!       tests prove macro semantics; this gate proves the compiled artifact
 //!       contains none of the timer-only strings that a live implementation
 //!       would retain.
+//!
+//! The rules defined here are applied by `source_audit`, which owns the single
+//! walk of the tree and reports typed findings. This module owns what the rules
+//! are, not when they run: a second walk would be a second place for a rule to
+//! be silently skipped.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -97,16 +102,9 @@ pub fn run_timers_erasure_check() -> Result<(), String> {
         ));
     }
 
-    let source_failures = audit_timer_sources(&workspace_root);
-    if !source_failures.is_empty() {
-        return Err(format!(
-            "timer source audit failed:\n{}",
-            source_failures.join("\n")
-        ));
-    }
-
     println!(
-        "timers-erasure-check: no-timer binary clean ({} bytes), source audit clean",
+        "timers-erasure-check: no-timer binary clean ({} bytes); the timer source rules run in \
+         `just source-audit`",
         binary_bytes.len()
     );
     Ok(())
@@ -176,96 +174,56 @@ fn no_timer_release_binary_path(workspace_root: &Path) -> PathBuf {
         .join(binary_name)
 }
 
-/// Audit source for runtime timer checks and direct implementation calls.
-fn audit_timer_sources(workspace_root: &Path) -> Vec<String> {
-    let mut failures = Vec::new();
-    let source_roots = [
-        workspace_root.join("src"),
-        workspace_root.join("xtask").join("src"),
-    ];
-
-    for source_root in source_roots {
-        for entry in walk_rust_files(&source_root) {
-            let relative = entry
-                .strip_prefix(workspace_root)
-                .unwrap_or(&entry)
-                .display()
-                .to_string();
-            // This file is the audit implementation and necessarily contains
-            // the forbidden fragments it searches for, plus focused fixture
-            // strings. Its tests exercise the audit rules directly below.
-            if relative == "xtask/src/timers_erasure_check.rs" {
-                continue;
-            }
-            let is_facade_path = relative == "src/timing.rs" || relative.starts_with("src/timing/");
-            let content = match fs::read_to_string(&entry) {
-                Ok(content) => content,
-                Err(error) => {
-                    failures.push(format!("{relative}: unreadable ({error})"));
-                    continue;
-                }
-            };
-
-            failures.extend(audit_source_fragment(&relative, &content, is_facade_path));
-        }
-    }
-
-    failures
-}
-
-/// Run the source-level audit rules against one Rust source fragment.
+/// Run the timer source rules against one Rust source fragment.
 ///
-/// Separated from the directory walk so the closure-wrapper rules have
-/// focused unit coverage.
-fn audit_source_fragment(relative: &str, content: &str, is_facade_path: bool) -> Vec<String> {
+/// `relative` is the workspace-relative path with `/` separators, which the allowlists match
+/// against. The timing facade is exempt from the rules that exist to keep callers off the enabled
+/// implementation: the facade is the thing they must go through.
+///
+/// Applied by `source_audit`, which owns the walk. Separated from any walk so each rule has
+/// focused coverage against fixture text rather than against whatever the tree happens to hold.
+pub(crate) fn audit_timer_source_fragment(relative: &str, content: &str) -> Vec<String> {
+    let is_facade_path = relative == "src/timing.rs" || relative.starts_with("src/timing/");
     let mut failures = Vec::new();
 
     if content.contains("cfg!(feature = \"timers\")") {
-        failures.push(format!(
-            "{relative}: uses runtime cfg! check; use #[cfg] macro definitions instead"
-        ));
+        failures.push("uses runtime cfg! check; use #[cfg] macro definitions instead".to_owned());
     }
 
     if !is_facade_path
         && (content.contains("timing::enabled::") || content.contains("timing::collector::"))
     {
-        failures.push(format!(
-            "{relative}: calls enabled timer implementation directly; use the facade macros"
-        ));
+        failures
+            .push("calls enabled timer implementation directly; use the facade macros".to_owned());
     }
 
     if !is_facade_path
         && content.contains("Instant::now()")
         && !is_allowed_wall_clock_source(relative)
     {
-        failures.push(format!(
-            "{relative}: creates a direct timer clock outside timing internals; use the timing facade or an explicitly allowed wall-clock owner"
-        ));
+        failures.push("creates a direct timer clock outside timing internals; use the timing facade or an explicitly allowed wall-clock owner".to_owned());
     }
 
     if content.contains("$stage()") {
-        failures.push(format!(
-            "{relative}: timed_frontend_stage! expands through a closure call; expand the production expression directly"
-        ));
+        failures.push("timed_frontend_stage! expands through a closure call; expand the production expression directly".to_owned());
     }
 
     if content.contains("$substep()") || content.contains("substep()") {
-        failures.push(format!(
-            "{relative}: timed_frontend_substep! expands through a closure call; expand the production expression directly"
-        ));
+        failures.push("timed_frontend_substep! expands through a closure call; expand the production expression directly".to_owned());
     }
 
     if content.contains("fn timed_frontend_substep<") || content.contains("timed_frontend_substep(")
     {
-        failures.push(format!(
-            "{relative}: timed_frontend_substep must be a direct-expression macro, not a function wrapper"
-        ));
+        failures.push(
+            "timed_frontend_substep must be a direct-expression macro, not a function wrapper"
+                .to_owned(),
+        );
     }
 
     for macro_name in OBSOLETE_TIMER_MACRO_NAMES {
         if content.contains(macro_name) {
             failures.push(format!(
-                "{relative}: obsolete timer macro name '{macro_name}' remains; use the typed facade"
+                "obsolete timer macro name '{macro_name}' remains; use the typed facade"
             ));
         }
     }
@@ -274,7 +232,7 @@ fn audit_source_fragment(relative: &str, content: &str, is_facade_path: bool) ->
         for metric_name in OBSOLETE_RAW_TIMING_NAMES {
             if content.contains(metric_name) {
                 failures.push(format!(
-                    "{relative}: obsolete raw timing metric '{metric_name}' remains outside schema tests or history adapters"
+                    "obsolete raw timing metric '{metric_name}' remains outside schema tests or history adapters"
                 ));
             }
         }
@@ -285,16 +243,15 @@ fn audit_source_fragment(relative: &str, content: &str, is_facade_path: bool) ->
             let quoted_metric_name = format!("\"{metric_name}\"");
             if content.contains(&quoted_metric_name) {
                 failures.push(format!(
-                    "{relative}: current timing schema metric '{metric_name}' is hard-coded outside the schema owner; use the typed registry"
+                    "current timing schema metric '{metric_name}' is hard-coded outside the schema owner; use the typed registry"
                 ));
             }
         }
     }
 
     if !is_facade_path && has_unguarded_timer_only_field(content) {
-        failures.push(format!(
-            "{relative}: timer-only field or parameter lacks #[cfg(feature = \"timers\")]"
-        ));
+        failures
+            .push("timer-only field or parameter lacks #[cfg(feature = \"timers\")]".to_owned());
     }
 
     failures
@@ -356,28 +313,6 @@ fn is_allowed_wall_clock_source(relative: &str) -> bool {
     )
 }
 
-fn walk_rust_files(root: &Path) -> Vec<PathBuf> {
-    let mut files = Vec::new();
-    let mut pending = vec![root.to_path_buf()];
-
-    while let Some(directory) = pending.pop() {
-        let entries = match fs::read_dir(&directory) {
-            Ok(entries) => entries,
-            Err(_) => continue,
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                pending.push(path);
-            } else if path.extension().is_some_and(|extension| extension == "rs") {
-                files.push(path);
-            }
-        }
-    }
-
-    files
-}
-
 fn workspace_root() -> Result<PathBuf, String> {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -387,7 +322,9 @@ fn workspace_root() -> Result<PathBuf, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{audit_source_fragment, find_present_markers, find_present_schema_metric_markers};
+    use super::{
+        audit_timer_source_fragment, find_present_markers, find_present_schema_metric_markers,
+    };
 
     #[test]
     fn finds_present_markers_in_declaration_order() {
@@ -410,10 +347,9 @@ mod tests {
 
     #[test]
     fn rejects_closure_wrapper_expansion_in_frontend_stage_macro() {
-        let failures = audit_source_fragment(
+        let failures = audit_timer_source_fragment(
             "src/timing.rs",
             "macro_rules! timed_frontend_stage {\n  ($stage:expr) => {{ $stage() }};\n}",
-            true,
         );
 
         assert!(
@@ -426,10 +362,9 @@ mod tests {
 
     #[test]
     fn rejects_function_wrapper_form_of_frontend_substep() {
-        let failures = audit_source_fragment(
+        let failures = audit_timer_source_fragment(
             "src/build_system/create_project_modules/frontend_orchestration.rs",
             "fn timed_frontend_substep<T>(_m: &'static str, _l: &str, s: impl FnOnce() -> T) -> T {\n  s()\n}",
-            false,
         );
 
         assert!(
@@ -442,10 +377,9 @@ mod tests {
 
     #[test]
     fn accepts_direct_expression_macro_bodies() {
-        let failures = audit_source_fragment(
+        let failures = audit_timer_source_fragment(
             "src/timing.rs",
             "macro_rules! direct_stage {\n  ($stage:expr) => {{ $stage }};\n}\nmacro_rules! direct_substep {\n  ($substep:expr) => {{ $substep }};\n}",
-            true,
         );
 
         assert!(failures.is_empty(), "unexpected failures: {failures:?}");
@@ -456,10 +390,9 @@ mod tests {
         // The _opt macro variant accepts Option<TimingMetric> and is a valid
         // facade macro. It must not be flagged as an obsolete timer macro or
         // a closure-wrapper timer.
-        let failures = audit_source_fragment(
+        let failures = audit_timer_source_fragment(
             "src/compiler_frontend/ast/module_ast/environment/type_resolution.rs",
             "timing_scope_attributed_opt!(\n    self.context.timing_metric_family.constant_header_resolution(),\n    self.context.timing_context\n);\n",
-            false,
         );
 
         assert!(failures.is_empty(), "unexpected failures: {failures:?}");
@@ -469,10 +402,9 @@ mod tests {
     fn accepts_timed_stage_attributed_opt_macro_usage() {
         // The _opt macro variant accepts Option<TimingMetric> and evaluates the
         // expression directly when the metric is None. It must not be flagged.
-        let failures = audit_source_fragment(
+        let failures = audit_timer_source_fragment(
             "src/compiler_frontend/ast/module_ast/emission/emitter.rs",
             "let result = timed_stage_attributed_opt!(\n    self.context.timing_metric_family.const_template_parse(),\n    self.context.timing_context,\n    parse_const_template(header)\n);\n",
-            false,
         );
 
         assert!(failures.is_empty(), "unexpected failures: {failures:?}");
@@ -480,10 +412,9 @@ mod tests {
 
     #[test]
     fn rejects_direct_timer_clock_outside_allowed_owner() {
-        let failures = audit_source_fragment(
+        let failures = audit_timer_source_fragment(
             "src/compiler_frontend/example.rs",
             "let start = Instant::now();",
-            false,
         );
 
         assert!(
@@ -496,21 +427,17 @@ mod tests {
 
     #[test]
     fn accepts_explicit_user_visible_wall_clock_owner() {
-        let failures = audit_source_fragment(
-            "src/projects/check.rs",
-            "let start = Instant::now();",
-            false,
-        );
+        let failures =
+            audit_timer_source_fragment("src/projects/check.rs", "let start = Instant::now();");
 
         assert!(failures.is_empty(), "unexpected failures: {failures:?}");
     }
 
     #[test]
     fn rejects_obsolete_timer_macro_names() {
-        let failures = audit_source_fragment(
+        let failures = audit_timer_source_fragment(
             "src/build_system/example.rs",
             "macro_rules! timed_frontend_stage { ($stage:expr) => {{ $stage }}; }",
-            false,
         );
 
         assert!(
@@ -523,10 +450,9 @@ mod tests {
 
     #[test]
     fn rejects_obsolete_raw_metric_literals() {
-        let failures = audit_source_fragment(
+        let failures = audit_timer_source_fragment(
             "src/build_system/example.rs",
             "const METRIC: &str = \"ast_ms\";",
-            false,
         );
 
         assert!(
@@ -539,10 +465,9 @@ mod tests {
 
     #[test]
     fn accepts_legacy_metric_literal_in_schema_test() {
-        let failures = audit_source_fragment(
+        let failures = audit_timer_source_fragment(
             "src/timing/tests/schema_tests.rs",
             "const LEGACY_METRIC: &str = \"ast_ms\";",
-            false,
         );
 
         assert!(failures.is_empty(), "unexpected failures: {failures:?}");
@@ -550,10 +475,9 @@ mod tests {
 
     #[test]
     fn rejects_unguarded_timer_only_fields() {
-        let failures = audit_source_fragment(
+        let failures = audit_timer_source_fragment(
             "src/build_system/example.rs",
             "struct Context {\n  timing_context: Option<TimingContext>,\n}",
-            false,
         );
 
         assert!(
@@ -566,10 +490,9 @@ mod tests {
 
     #[test]
     fn accepts_cfg_guarded_timer_only_fields() {
-        let failures = audit_source_fragment(
+        let failures = audit_timer_source_fragment(
             "src/build_system/example.rs",
             "struct Context {\n  #[cfg(feature = \"timers\")]\n  timing_context: Option<TimingContext>,\n}",
-            false,
         );
 
         assert!(failures.is_empty(), "unexpected failures: {failures:?}");
@@ -594,7 +517,7 @@ mod tests {
             .expect("timing schema should contain one metric");
         let source = format!("const METRIC: &str = \"{metric_name}\";");
 
-        let failures = audit_source_fragment("xtask/src/bench_report.rs", &source, false);
+        let failures = audit_timer_source_fragment("xtask/src/bench_report.rs", &source);
 
         assert!(
             failures
@@ -611,7 +534,7 @@ mod tests {
             .expect("timing schema should contain one metric");
         let source = format!("const METRIC: &str = \"{metric_name}\";");
 
-        let failures = audit_source_fragment("src/timing/enabled/schema.rs", &source, true);
+        let failures = audit_timer_source_fragment("src/timing/enabled/schema.rs", &source);
 
         assert!(failures.is_empty(), "unexpected failures: {failures:?}");
     }
@@ -624,7 +547,7 @@ mod tests {
         let source = format!("const METRIC: &str = \"{metric_name}\";");
 
         let failures =
-            audit_source_fragment("src/build_system/tests/timing_tests.rs", &source, false);
+            audit_timer_source_fragment("src/build_system/tests/timing_tests.rs", &source);
 
         assert!(failures.is_empty(), "unexpected failures: {failures:?}");
     }
@@ -635,7 +558,7 @@ mod tests {
             .first()
             .expect("timing schema should contain one metric");
         let source = format!("const METRIC: &str = \"{metric_name}\";");
-        let failures = audit_source_fragment("xtask/src/bench_history.rs", &source, false);
+        let failures = audit_timer_source_fragment("xtask/src/bench_history.rs", &source);
 
         assert!(
             failures

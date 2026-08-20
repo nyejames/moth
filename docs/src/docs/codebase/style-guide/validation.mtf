@@ -54,6 +54,24 @@ infrastructure or auditing the complete gate policy.
     ]
 
     [td:
+        [: Add or change a Cargo feature, or a feature-gated test]
+        [: `Feature lanes`]
+    ]
+
+    [td:
+        [: Add or change a broad-source architecture ban]
+        [: `Source audit`]
+    ]
+
+    [td:
+        [: Read, change or interpret a CI gate]
+        [:
+            - `CI gates`
+            - `Platform policy`
+        ]
+    ]
+
+    [td:
         [: Pick a targeted iteration command]
         [: `Fast iteration commands`]
     ]
@@ -136,15 +154,23 @@ Before declaring a non-trivial code-bearing slice complete, run:
     ]
 
     [td:
-        [: Cross-target Clippy]
-        [: `just ci-clippy`]
-        [: Native, Linux x64 and Windows x64 linting with warnings denied]
+        [: Clippy]
+        [: `just ci-clippy-native`]
+        [: Native-host linting of every workspace target under every feature, warnings denied]
+    ]
+
+    [td:
+        [: Feature lane coverage]
+        [: `just feature-lane-check`]
+        [: Proves every declared Cargo feature has an executing lane, and that no `cfg` names
+        a feature that does not exist]
     ]
 
     [td:
         [: Rust unit tests]
         [: `cargo test --workspace --quiet -- --format terse`]
-        [: Rust unit and subsystem tests across the complete workspace]
+        [: Rust unit and subsystem tests across the complete workspace, in the
+        workspace-unified feature configuration]
     ]
 
     [td:
@@ -166,32 +192,177 @@ Before declaring a non-trivial code-bearing slice complete, run:
     ]
 
     [td:
+        [: Source audit]
+        [: `just source-audit`]
+        [: The one broad-source architecture audit: `cfg!` timer checks, direct
+        clocks, collector and runtime calls outside the facade, closure
+        wrappers, unguarded timer-only fields, obsolete timer macros,
+        provisional and hard-coded metric names, and the removed-name
+        tripwires. Reports typed findings and writes `source_audit.json`]
+    ]
+
+    [td:
         [: Timer erasure gate]
         [: `just timers-erasure-check`]
-        [: Builds a no-timer release binary, scans the schema-owned metric
-        inventory plus timer-only environment and report markers, and audits
-        both `src` and `xtask/src` for direct clocks, collector/runtime calls,
-        `cfg!` timer checks, closure wrappers, unguarded timer-only fields,
-        obsolete timer macros and provisional metric names]
+        [: Builds a no-timer release binary and proves that no timer-only
+        marker, and no name from the schema-owned metric inventory, survives
+        into its bytes]
     ]
 ]
 
-- `ci-clippy` uses the pinned Rust toolchain configured in the `justfile`.
+- `ci-clippy-native` lints the native host only, across every workspace target and every feature.
 - Warnings are denied.
-- It checks the complete workspace on the native host, Linux x64 and Windows x64 targets.
+- Cross-target linting is CI's job: the gate matrix runs `clippy` on Linux, macOS and Windows.
 - The workspace test command includes the compiler, CLI and `xtask` packages.
+- That command is not the default configuration. `xtask` depends on `moth` with
+  `features = ["timers"]`, and Cargo unifies features across one resolve graph, so
+  `cargo test --workspace` always builds the compiler with `timers` enabled. The default
+  configuration and each feature configuration are covered by `just test-feature-matrix`, not by
+  `just validate`.
 - `bench-ci` preflights every benchmark manifest case once, then measures only the quick CLI and
   frontend subsets with three iterations.
 - `bench-ci` does not update local history or tracked benchmark summaries.
 
 The integration command loads the complete canonical suite and applies the shared hard-policy
 evaluator before selection or compilation. This makes missing ownership, duplicate primaries and
-other hard suite-policy findings part of the normal validation gate. Run the audit command when the
-JSON inventory under `target/test-reports/` is also required:
+other hard suite-policy findings part of the normal validation gate. Run the honesty audit when the
+machine-readable reports under `target/test-reports/` are also required:
 
 [codeblock, $code("bash"):
-    cargo run --quiet -- tests --audit
+    just test-honesty-audit
 ]
+
+It writes `integration_suite_inventory.json`, `feature_lane_coverage.json` and `source_audit.json`.
+Each is written to a sibling temporary file and renamed into place, and each carries the identity
+of the run that produced it, so a partial or stale report cannot be read as this run's evidence.
+
+### Source audit
+
+An architecture ban whose scope is "no file anywhere may contain this" is not a behaviour claim,
+and a unit test that reads one file's text and asserts on it is not behaviour evidence. Those bans
+have one owner:
+
+[codeblock, $code("bash"):
+    just source-audit
+]
+
+It walks `src` and `xtask/src` once, applies every broad-source rule, and reports typed findings
+with the file each was found in. Only the audit's own implementation files are exempt, because they
+necessarily contain the fragments the rules search for; their rules are proved against fixture text
+instead. A source file that cannot be read is a finding, not a file the audit skips.
+
+Add a broad-source ban here rather than as a test. A ban that lives in a test reads one file, calls
+that evidence, and stops applying the moment the code moves.
+
+### Feature lanes
+
+`just validate` runs one feature configuration. The lanes run all of them:
+
+[codeblock, $code("bash"):
+    just test-feature-matrix
+]
+
+Eight package-scoped lanes cover the default configuration, `timers`, `detailed_timers`,
+`benchmark_counters`, `timers` with `benchmark_counters`, the scoped-block features, every `show_*`
+feature and the `xtask` package. `testing.mtf > Feature and platform lanes` owns the lane table and
+what each lane uniquely covers.
+
+Lanes use `cargo test -p <package>` rather than `--workspace` because Cargo unifies features across
+one resolve graph. `xtask` requires `moth` with `timers`, so no workspace-wide command can run the
+default configuration.
+
+`just feature-lane-check` proves the mapping without running a lane, and is part of `just validate`.
+Adding a Cargo feature means adding it to a lane in the same change; the check fails otherwise.
+
+### CI gates
+
+`just validate` is the local gate and is deliberately fail-fast: the first failure stops the run.
+
+CI does not work that way. Each validation family is its own job, so one failure never stops
+another from reporting:
+
+[table:
+    [th:
+        [: **Gate**]
+        [: **Command**]
+    ]
+
+    [td:
+        [: `clippy`]
+        [: `just ci-gate-clippy`]
+    ]
+
+    [td:
+        [: `unit-tests`]
+        [: `just ci-gate-unit-tests`]
+    ]
+
+    [td:
+        [: `feature-matrix`]
+        [: `just ci-gate-feature-matrix`]
+    ]
+
+    [td:
+        [: `integration`]
+        [: `just ci-gate-integration`]
+    ]
+
+    [td:
+        [: `docs`]
+        [: `just ci-gate-docs`]
+    ]
+
+    [td:
+        [: `benchmarks`]
+        [: `just ci-gate-benchmarks`]
+    ]
+
+    [td:
+        [: `timers-erasure`]
+        [: `just ci-gate-timers-erasure`]
+    ]
+
+    [td:
+        [: `source-audit`]
+        [: `just ci-gate-source-audit`]
+    ]
+
+    [td:
+        [: `honesty-audit`]
+        [: `just ci-gate-honesty-audit`]
+    ]
+]
+
+Each gate runs on Linux, macOS and Windows. The workflow result is still failed when any blocking
+gate fails. The `integration`, `feature-matrix` and `honesty-audit` gates upload
+`target/test-reports/` whether they passed or failed, because a failed run's report is the evidence
+a reviewer needs most.
+
+`unit-tests` and `feature-matrix` overlap on purpose. `unit-tests` runs the workspace-unified
+command a developer runs locally; `feature-matrix` runs the configurations that command cannot
+reach.
+
+The release workflow keeps the single fail-fast `just validate`. A tag build only needs to know
+whether the revision is releasable, and the split gates have already reported on every push to the
+default branch.
+
+### Platform policy
+
+Linux and macOS gates are blocking. Windows gates are non-blocking: a Windows failure is reported
+but does not fail the workflow or hold back deployment.
+
+Windows becomes blocking when both hold:
+
+- every gate has passed on `windows-latest` in one run of the default branch
+- no Windows-only failure is open in the exposed-failure ledger
+
+The change is then removing `continue-on-error` from the gate job. Until that happens, a Windows
+result is evidence to act on, not a gate that can be ignored: a Windows-only failure belongs in the
+ledger like any other.
+
+A platform-specific test may be absent only when the underlying API does not exist on that
+platform. An equivalent portable policy test should still run everywhere. `testing.mtf > Feature
+and platform lanes` owns which gate owns which platform behaviour.
 
 ### Documentation-only release-build gate
 
@@ -257,7 +428,27 @@ not apply. Use the full code-bearing gate.
 
     [td:
         [: Clippy iteration]
-        [: `just ci-clippy`]
+        [: `just ci-clippy-native`]
+    ]
+
+    [td:
+        [: Feature lane coverage]
+        [: `just feature-lane-check`]
+    ]
+
+    [td:
+        [: Every feature lane]
+        [: `just test-feature-matrix`]
+    ]
+
+    [td:
+        [: Broad-source architecture audit]
+        [: `just source-audit`]
+    ]
+
+    [td:
+        [: Machine-readable honesty reports]
+        [: `just test-honesty-audit`]
     ]
 
     [td:

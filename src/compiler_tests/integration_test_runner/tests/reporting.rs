@@ -4,7 +4,10 @@
 //! WHY: both reporting modes must expose retained metadata without invoking case execution.
 
 use super::super::policy::evaluate_suite;
-use super::super::reporting::{build_suite_inventory_report, format_case_listing};
+use super::super::reporting::{
+    RepositoryRevision, RunIdentity, build_suite_inventory_report, classify_revision_failure,
+    format_case_listing,
+};
 use super::super::types::{
     DiagnosticAssertion, ExactWarningExpectation, GoldenExpectation, RenderedOutputExpectation,
     SuccessContract,
@@ -40,13 +43,18 @@ fn case(
 
 fn report_for_cases(
     cases: &[TestCaseSpec],
-    repository_commit: Option<String>,
+    repository_revision: RepositoryRevision,
 ) -> super::super::reporting::SuiteInventoryReport {
     let suite = TestSuiteSpec {
         cases: cases.to_vec(),
     };
     let policy_evaluation = evaluate_suite(&suite);
-    build_suite_inventory_report(&suite.cases, &policy_evaluation, repository_commit)
+    build_suite_inventory_report(
+        &suite.cases,
+        &policy_evaluation,
+        &RunIdentity::started("tests --audit", Some(4)),
+        repository_revision,
+    )
 }
 
 #[test]
@@ -151,11 +159,17 @@ fn inventory_json_groups_backend_metadata_under_one_canonical_case() {
         }),
     );
 
-    let report = report_for_cases(&[html_case, wasm_case], Some("0123456789abcdef".to_owned()));
+    let report = report_for_cases(
+        &[html_case, wasm_case],
+        RepositoryRevision::Commit("0123456789abcdef".to_owned()),
+    );
     let json = serde_json::to_value(&report).expect("inventory should serialize");
 
-    assert_eq!(json["schema_version"], 7);
-    assert_eq!(json["repository_commit"], "0123456789abcdef");
+    assert_eq!(json["schema_version"], 8);
+    assert_eq!(json["repository_revision"]["commit"], "0123456789abcdef");
+    assert_eq!(json["run"]["command"], "tests --audit");
+    assert_eq!(json["run"]["thread_count"], 4);
+    assert_eq!(json["run"]["completed"], true);
     assert_eq!(json["manifest_case_count"], 1);
     assert_eq!(json["expanded_backend_execution_count"], 2);
     assert_eq!(json["cases"][0]["canonical_id"], "case_a");
@@ -227,7 +241,7 @@ fn inventory_reports_acceptance_only_without_baseline_only_state() {
             artifacts_must_not_exist: Vec::new(),
         }),
     );
-    let report = report_for_cases(&[explicit_case], None);
+    let report = report_for_cases(&[explicit_case], RepositoryRevision::NotARepository);
     let json = serde_json::to_value(&report).expect("inventory should serialize");
 
     assert_eq!(json["cases"][0]["backends"][0]["baseline_applied"], true);
@@ -301,10 +315,10 @@ fn inventory_reports_each_rendered_output_form_and_schema_six_summary_counts() {
         ),
     ];
 
-    let json =
-        serde_json::to_value(report_for_cases(&cases, None)).expect("report should serialize");
+    let json = serde_json::to_value(report_for_cases(&cases, RepositoryRevision::NotARepository))
+        .expect("report should serialize");
 
-    assert_eq!(json["schema_version"], 7);
+    assert_eq!(json["schema_version"], 8);
     assert_eq!(json["summary"]["rendered_output_backend_blocks"], 3);
     assert_eq!(json["summary"]["rendered_output_exact_backend_blocks"], 1);
     assert_eq!(json["summary"]["rendered_output_order_backend_blocks"], 1);
@@ -379,7 +393,7 @@ fn inventory_counts_authored_expected_warning_as_a_contract() {
                 artifacts_must_not_exist: Vec::new(),
             }),
         )],
-        None,
+        RepositoryRevision::NotARepository,
     );
     let json = serde_json::to_value(&report).expect("inventory should serialize");
 
@@ -425,7 +439,7 @@ fn inventory_serializes_exact_warning_codes_without_a_transitional_count() {
                 artifacts_must_not_exist: Vec::new(),
             }),
         )],
-        None,
+        RepositoryRevision::NotARepository,
     );
     let json = serde_json::to_value(&report).expect("inventory should serialize");
 
@@ -486,7 +500,12 @@ fn report_serializes_supplied_policy_evaluation() {
         cases: cases.to_vec(),
     };
     let policy_evaluation = evaluate_suite(&suite);
-    let report = build_suite_inventory_report(&suite.cases, &policy_evaluation, None);
+    let report = build_suite_inventory_report(
+        &suite.cases,
+        &policy_evaluation,
+        &RunIdentity::started("tests --audit", None),
+        RepositoryRevision::NotARepository,
+    );
     assert_eq!(report.hard_policy_violations.len(), 1);
     assert_eq!(
         report.hard_policy_violations[0].code,
@@ -512,7 +531,7 @@ fn report_serializes_contains_policy_finding_once_with_typed_reason_fact() {
         }),
     );
 
-    let report = report_for_cases(&[case], None);
+    let report = report_for_cases(&[case], RepositoryRevision::NotARepository);
     let json = serde_json::to_value(&report).expect("inventory should serialize");
 
     assert_eq!(
@@ -596,8 +615,8 @@ fn inventory_reports_every_weak_contract_a_case_may_legally_declare() {
         ),
     ];
 
-    let json =
-        serde_json::to_value(report_for_cases(&cases, None)).expect("report should serialize");
+    let json = serde_json::to_value(report_for_cases(&cases, RepositoryRevision::NotARepository))
+        .expect("report should serialize");
 
     assert_eq!(json["summary"]["smoke_role_cases"], 1);
     assert_eq!(json["summary"]["acceptance_only_backend_blocks"], 1);
@@ -617,4 +636,76 @@ fn inventory_reports_every_weak_contract_a_case_may_legally_declare() {
         json["cases"][2]["backends"][0]["weak_contract_reviews"],
         serde_json::json!(["diagnostic_match_contains", "warnings_ignored"])
     );
+}
+
+#[test]
+fn a_missing_repository_is_reported_as_a_clean_absence() {
+    let revision = classify_revision_failure(
+        b"fatal: not a git repository (or any of the parent directories): .git\n",
+    );
+
+    assert_eq!(revision, RepositoryRevision::NotARepository);
+}
+
+#[test]
+fn a_failed_discovery_keeps_the_reason_instead_of_reading_as_an_absence() {
+    let revision = classify_revision_failure(b"fatal: ambiguous argument 'HEAD'\n");
+
+    assert_eq!(
+        revision,
+        RepositoryRevision::Unknown {
+            reason: "git rev-parse HEAD failed: fatal: ambiguous argument 'HEAD'".to_owned(),
+        }
+    );
+}
+
+#[test]
+fn a_silent_git_failure_is_still_unknown_rather_than_absent() {
+    let revision = classify_revision_failure(b"");
+
+    assert_eq!(
+        revision,
+        RepositoryRevision::Unknown {
+            reason: "git rev-parse HEAD failed without a message".to_owned(),
+        }
+    );
+}
+
+#[test]
+fn the_run_identity_names_the_features_the_binary_was_built_with() {
+    let run = RunIdentity::started("tests", None);
+
+    // The default lane builds no features, and every other lane adds exactly the features its
+    // command names. Asserting the lane's own configuration keeps the report honest per lane.
+    #[cfg(not(any(
+        feature = "timers",
+        feature = "detailed_timers",
+        feature = "benchmark_counters",
+        feature = "checked_blocks",
+        feature = "async_blocks",
+        feature = "show_tokens",
+        feature = "show_headers",
+        feature = "show_ast",
+        feature = "show_eval",
+        feature = "show_hir",
+        feature = "show_codegen",
+        feature = "show_borrow_checker"
+    )))]
+    assert_eq!(run.features, Vec::<&str>::new());
+
+    #[cfg(feature = "timers")]
+    assert!(run.features.contains(&"timers"), "{:?}", run.features);
+
+    #[cfg(feature = "benchmark_counters")]
+    assert!(
+        run.features.contains(&"benchmark_counters"),
+        "{:?}",
+        run.features
+    );
+
+    #[cfg(not(feature = "timers"))]
+    assert!(!run.features.contains(&"timers"), "{:?}", run.features);
+
+    assert!(!run.completed, "a started run has not finished");
+    assert!(run.completed().completed, "completing a run marks it done");
 }

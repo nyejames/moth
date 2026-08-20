@@ -393,6 +393,8 @@ pub(crate) struct FailureTriageEntry {
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct FailureTriageReport {
+    pub schema_version: u32,
+    pub run: super::reporting::RunIdentity,
     pub total_tests: usize,
     pub incorrect_results: usize,
     pub failures: Vec<FailureTriageEntry>,

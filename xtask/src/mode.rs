@@ -21,7 +21,10 @@ Modes:
   bench-profile        Run Samply-backed profiling (use --help for options)
   stress               Repeat the unit and integration suites across thread counts
                        (use --repeats <n>; default 3)
-  timers-erasure-check Build a no-timer release binary and verify zero-cost erasure";
+  timers-erasure-check Build a no-timer release binary and verify zero-cost erasure
+  feature-matrix       Run every curated feature lane and report the outcome table
+  feature-lane-check   Check feature-lane coverage and write the coverage report
+  source-audit         Apply the broad-source architecture bans and write their report";
 
 /// Distinguishes the supported xtask benchmark modes.
 ///
@@ -51,6 +54,12 @@ pub enum BenchmarkMode {
     BenchProfile(ProfileOptions),
     /// Prove that a no-timer release binary contains no timer-only markers.
     TimersErasureCheck,
+    /// Run every curated feature lane and report the complete outcome table.
+    FeatureMatrix,
+    /// Check feature-lane coverage without running a lane.
+    FeatureLaneCheck,
+    /// Apply the broad-source architecture bans across the workspace.
+    SourceAudit,
     /// Repeat the unit and integration suites across the stress thread counts.
     Stress { repeats: u32 },
 }
@@ -94,6 +103,9 @@ impl BenchmarkMode {
             "bench-frontend-check" => Some(BenchmarkMode::BenchFrontendCheck),
             "bench-validate" => Some(BenchmarkMode::BenchValidate),
             "timers-erasure-check" => Some(BenchmarkMode::TimersErasureCheck),
+            "feature-matrix" => Some(BenchmarkMode::FeatureMatrix),
+            "feature-lane-check" => Some(BenchmarkMode::FeatureLaneCheck),
+            "source-audit" => Some(BenchmarkMode::SourceAudit),
             _ => None,
         };
 

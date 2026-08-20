@@ -7,6 +7,12 @@ validate:
     just validate-common
 
 validate-common:
+    @echo "feature lane coverage"
+    just feature-lane-check
+
+    @echo "source audit"
+    just source-audit
+
     @echo "unit tests"
     cargo test --workspace --quiet -- --format terse
 
@@ -53,8 +59,68 @@ bench-frontend-check:
 bench-validate:
     cargo run --package xtask --bin xtask -- bench-validate
 
+# Build a no-timer release binary and prove no timer-only marker survives into its bytes.
+# The timer *source* rules are applied by `just source-audit`, which owns the single walk.
 timers-erasure-check:
     cargo run --package xtask --bin xtask -- timers-erasure-check
+
+# The one broad-source architecture audit: timer source rules plus the removed-name tripwires.
+source-audit:
+    cargo run --quiet --package xtask --bin xtask -- source-audit
+
+# Run every curated feature lane. Lanes are package-scoped: `cargo test --workspace` unifies
+# features across the resolve graph and always enables `timers` through xtask's dependency, so it
+# can never run the default configuration.
+test-feature-matrix:
+    cargo run --package xtask --bin xtask -- feature-matrix
+
+# Prove every declared Cargo feature has an executing lane, without running one.
+feature-lane-check:
+    cargo run --quiet --package xtask --bin xtask -- feature-lane-check
+
+# Write the machine-readable honesty reports under target/test-reports/.
+test-honesty-audit:
+    @echo "integration suite inventory"
+    cargo run --quiet -- tests --audit
+
+    @echo "feature lane coverage"
+    just feature-lane-check
+
+    @echo "source audit"
+    just source-audit
+
+# Independently reported CI gates.
+#
+# CI runs each as its own job so one failed validation family never hides another; `just validate`
+# keeps the fail-fast local ordering. `ci-gate-unit-tests` is the workspace-unified configuration
+# a developer runs locally, and `ci-gate-feature-matrix` is what actually covers the default and
+# per-feature configurations.
+ci-gate-clippy:
+    just ci-clippy-native
+
+ci-gate-unit-tests:
+    cargo test --workspace --quiet -- --format terse
+
+ci-gate-feature-matrix:
+    just test-feature-matrix
+
+ci-gate-integration:
+    cargo run --quiet -- tests --terse
+
+ci-gate-docs:
+    cargo run --quiet -- check docs --terse
+
+ci-gate-benchmarks:
+    just bench-ci
+
+ci-gate-timers-erasure:
+    just timers-erasure-check
+
+ci-gate-source-audit:
+    just source-audit
+
+ci-gate-honesty-audit:
+    just test-honesty-audit
 
 # Repeat the unit and integration suites at one, default and 16 threads.
 stress repeats="3":

@@ -6,8 +6,8 @@
 WORK_ID: test-suite-honesty
 WORK_SOURCE: docs/roadmap/plans/test-suite-honesty-and-infrastructure-hardening-plan.md
 BASE_REVISION: f41f93a7a (post-TIR, post-benchmark-counters-timers)
-STATUS: active — Phase 7 complete, ready for Phase 8; one exposed failure is open in the ledger
-CURRENT_SCOPE: Phase 7 integration contract honesty (paused before Phase 8)
+STATUS: active — Phase 8 complete, ready for Phase 9; two exposed failures are open in the ledger
+CURRENT_SCOPE: Phase 8 feature, platform and CI visibility (paused before Phase 9)
 COMPLETED:
   Phase 0: baseline established (4314 unit tests, 0 ignored, 1699 integration cases correct,
     1851 backend executions); durable inventory at docs/roadmap/evidence/test_honesty_inventory.json;
@@ -213,9 +213,54 @@ COMPLETED:
     adopted, because the integration suite's diagnostic_assertions[].reason owns reason-key
     contracts (192 cases) and assert_exact_diagnostic_codes plus the suite's diagnostic_codes
     multiset own exact cardinality; each suppression now names that decision for Phase 11 to delete
-NEXT_ACTION: clear ledger entry EF-0001 in Phase 10, and run Phase 8 (feature, platform and CI
-  visibility)
-VALIDATION: Phase 7 — cargo fmt --all --check clean; clippy --workspace --all-targets
+  Phase 8: every declared Cargo feature has an executing lane, and CI reports each validation
+    family on its own. Eight package-scoped lanes (default, timers, detailed-timers, counters,
+    timers-counters, scoped-blocks, dev-output, xtask) live in xtask feature_matrix and run through
+    `just test-feature-matrix`; the lanes are package-scoped because Cargo unifies features across
+    one resolve graph and xtask depends on moth with features = ["timers"], so no --workspace
+    command can ever run the default configuration — the pre-Phase-8 "default" and
+    "benchmark_counters" rows in the evidence inventory had measured the timers-unified build, not
+    the ones they named. `just feature-lane-check` (now part of `just validate`) reads Cargo.toml
+    and every cfg attribute in src and xtask/src and fails when a declared feature has no lane, when
+    a lane names an undeclared feature, or when a cfg names a feature that does not exist; its
+    scanner ignores cfg text inside comments and string literals, so prose and another gate's scan
+    fixtures are not counted as attributes. Machine-readable honesty reports are written by
+    `just test-honesty-audit` (suite inventory, feature-lane coverage, source audit). The
+    validation workflow now runs nine gates as independent jobs across Linux, macOS and Windows with
+    fail-fast disabled, Windows non-blocking with a stated exit condition, and the integration,
+    feature-matrix and honesty-audit gates upload target/test-reports/ whether they passed or
+    failed; `just validate` and the release workflow keep the fail-fast ordering. Report staleness
+    is closed: every report is written to a sibling temporary file and renamed into place, a failed
+    write removes the temporary file and leaves the previous report intact, each report carries a
+    RunIdentity (id, command, OS, arch, built features, thread count, completion state), the
+    inventory and triage reports are replaced by a completed:false report before the work starts,
+    and repository_commit became a typed repository_revision that separates a discovered commit, a
+    run outside a repository, and a failed discovery with its reason (suite inventory schema 7 to 8;
+    the triage report gained a schema version). Broad-source architecture bans moved into one owner:
+    xtask source_audit walks src and xtask/src once, fails closed on unreadable paths, reports typed
+    findings and writes source_audit.json; three source-text tests were deleted into it and the two
+    removed-name bans now apply tree-wide instead of to the single file each test read;
+    timers-erasure-check kept only its compiled-artifact half and now defines the timer rules that
+    source_audit applies, so no second walk exists to skip a file silently. testing.mtf gained the
+    feature and platform lane tables, the source-text and concurrency policies and the Phase 5
+    harness carry-overs; validation.mtf gained the source audit, feature lanes, CI gates and
+    platform policy sections, and lost its claim that `just ci-clippy` lints Linux and Windows x64
+    targets — that recipe does not exist
+NEXT_ACTION: run Phase 9 (Patch A honesty checkpoint), then clear ledger entries EF-0001 and
+  EF-0002 in Phase 10
+VALIDATION: Phase 8 — cargo fmt --all --check clean; clippy --workspace --all-targets
+  --all-features -D warnings clean; feature-lane-check 0 findings (12 features, 8 lanes);
+  source-audit 1166 files, 0 findings; cargo test --workspace 4396+17+699, 0 failed, 0 ignored;
+  docs check clean; bench-ci preflight and quick subsets; timers-erasure-check clean (8133904-byte
+  no-timer binary); integration 1850/1851, the single failure being EF-0001. Feature matrix
+  measured per lane on macOS 23.6.0 arm64: default 4284+17, timers 4396+17, detailed-timers
+  4398+17, scoped-blocks 4286+17, dev-output 4284+17, xtask 699 — all pass; counters 4286 passed
+  with 1 failed and timers-counters 4414 passed with 1 failed, both the single failure now ledgered
+  as EF-0002. `just validate` was not run to completion because its integration step stops on
+  EF-0001; every gate it chains was run individually and is reported above. The Linux and Windows
+  legs of the new gate matrix were not run on this machine: CI owns them, and Windows is
+  non-blocking by policy.
+  Phase 7 — cargo fmt --all --check clean; clippy --workspace --all-targets
   --all-features -D warnings clean; cargo test --workspace 4391+17+658, 0 failed, 0 ignored;
   timers lane 4391+17+658; detailed_timers lane 4393+17+658; docs check clean; bench-ci preflight;
   timers-erasure-check clean; integration 1850/1851 with the single failure being ledger entry
@@ -251,7 +296,19 @@ VALIDATION: Phase 7 — cargo fmt --all --check clean; clippy --workspace --all-
   pre-existing benchmark_counters failure unchanged; Linux lane passed via GitHub Actions
   validate-linux (4324 unit tests incl. Linux-only non-UTF-8 filesystem identity tests,
   1851/1851 integration cases)
-AUDITS: Phase 7 inventory of every acceptance-only backend block, smoke role,
+AUDITS: Phase 8 required repository search pass rerun across src and xtask (is_err/is_ok/
+  expect_err/catch_unwind/should_panic; >=, non-empty and is_empty; exists/is_file/is_dir; lossy
+  conversions and path unwrap_or_default; temp_dir/SystemTime::now/process::id; discarded results;
+  env and current-dir mutation; sleeps, yields, clocks and mtimes; #[ignore]; feature and platform
+  cfg gates), with 0 #[ignore] confirmed and the new Phase 8 code held to the same rules — the two
+  SystemTime::now and process::id uses are the report run identity and are documented as such, the
+  one from_utf8_lossy classifies a Git stderr message that a replacement character cannot change,
+  and the new xtask tests use assert_directory and a fail-closed UTF-8 file listing rather than
+  is_dir() and to_string_lossy(). Phase 8 also inventoried every feature- and platform-gated test
+  owner: 12 declared features across 8 lanes, and 31 cfg(unix), 4 cfg(windows), 11
+  cfg(any(unix, windows)) and 4 cfg(target_os = "linux") gated test owners, each mapped to the
+  platforms that run it.
+  Phase 7 inventory of every acceptance-only backend block, smoke role,
   diagnostic_match = "contains" reason and warnings = "ignore" block in the canonical suite, each
   re-measured against the compiler rather than accepted from its authored justification; Phase 6
   sweep of every thread::sleep, yield_now, spin_loop, Instant::now,
@@ -265,11 +322,41 @@ AUDITS: Phase 7 inventory of every acceptance-only backend block, smoke role,
   remaining report-rendering uses dispositioned; AUD-0001 (Redundancy over tests.support) —
   F01, F02 and F03 corrected on this branch, F04 routed to Phase 11, and F05 decided in Phase 7
   (both helpers retired, deletion left to Phase 11)
-BLOCKERS: none for Phase 8. One exposed failure is open —
-  docs/roadmap/plans/test-suite-honesty-exposed-failures.md entry EF-0001 (assigned top-level
-  templates are counted as page fragments). Phase 10 owns the correction; the suite stays red until
-  it lands, which is Patch A's intended state.
-NOTES: Phase 7 exposed one defect, ledgered as EF-0001: a template head that opens the
+BLOCKERS: none for Phase 9. Two exposed failures are open in
+  docs/roadmap/plans/test-suite-honesty-exposed-failures.md — EF-0001 (assigned top-level templates
+  are counted as page fragments) and EF-0002 (const-required construction prepares the same
+  composed view twice). Phase 9 reviews whether each stronger assertion is valid and Phase 10 owns
+  the corrections; the integration suite and the two counter lanes stay red until they land, which
+  is Patch A's intended state.
+NOTES: Phase 8 turned the pre-existing counter-lane failure into a reported one and ledgered it as
+  EF-0002. Root cause: Template::new_const_required prepares the same composed view twice — once at
+  new_nested_template's Stage 6 in TemplatePreparationMode::Value and again in
+  validate_const_required_template_control_flow in TemplatePreparationMode::ConstRequired — so
+  TirPreparationAttempts reads 2 where the test requires 1. Folding is not the second walk;
+  fold_prepared_template consumes the returned preparation, which is the part the test's name is
+  about and the part that works. Phase 9 must decide whether the two modes should share one walk or
+  whether the counter contract is genuinely 2, and only then may the assertion change.
+  Phase 8 also found that `cargo test --workspace` has never run the default configuration. xtask
+  depends on moth with features = ["timers"] and Cargo unifies features across one resolve graph, so
+  the workspace command builds the compiler with timers enabled and cannot compile any
+  cfg(not(feature = "timers")) branch. The measured gap is 4396 tests under --workspace against 4284
+  under `cargo test -p moth`. Every feature command in the plan's validation matrix had the same
+  problem, which is why the lanes are package-scoped; the matrix section already allowed
+  "package-owned recipes" provided executed branch coverage is preserved.
+  The validation matrix's required local gates list was rewritten to the package-scoped commands
+  for the same reason, which that section already allowed.
+  Phase 8 observation, routed to Phase 11: the counters-only lane (benchmark_counters without
+  timers) is the only lane that is not warning-clean. It emits three dead-code warnings for
+  frontend_counters::capture_frontend_counters_for_test, its guard type and its re-export, because
+  the helper is gated on benchmark_counters while every caller is gated on
+  all(timers, benchmark_counters). Nothing fails — these are warnings — and they were invisible
+  before because `just ci-clippy-native` lints with --all-features and so never sees the
+  counters-only configuration. The correction is a gate, not a behaviour change, so it belongs with
+  Phase 11's superseded-helper removal rather than inside this checkpoint.
+  Phase 8 carry-over for Phase 11: the validation workflow's job names changed from
+  "Validate Linux"/"Validate macOS"/"Validate Windows (non-blocking)" to per-gate names, so any
+  branch protection rule that requires the old names needs updating outside this repository.
+  Phase 7 exposed one defect, ledgered as EF-0001: a template head that opens the
   right-hand side of a top-level assignment is classified as a top-level runtime fragment, because
   top_level_classifier.rs maps TokenKind::TemplateHead to HeaderFileItem::RuntimeTemplate with no
   at_statement_boundary guard, unlike every other statement-level classification in that match. The
@@ -1174,19 +1261,16 @@ Delete the ledger file when its final entry closes, or retain an empty historica
 
 ```bash
 cargo fmt --all -- --check
+just feature-lane-check
+just source-audit
 just test-honesty-audit
-cargo test --workspace --quiet -- --format terse
-cargo test --workspace --quiet --features timers -- --format terse
-cargo test --workspace --quiet --features benchmark_counters -- --format terse
-cargo test --workspace --quiet --features timers,benchmark_counters -- --format terse
-cargo test --workspace --quiet --features detailed_timers -- --format terse
-cargo test --workspace --quiet --all-features -- --format terse
+just test-feature-matrix
 cargo run --quiet -- tests --audit
 cargo run --quiet -- tests --terse
 just validate
 ```
 
-The implementation may consolidate feature commands into faster package-owned recipes after Phase 0 measures duplication. It must preserve executed branch coverage.
+Phase 8 replaced the per-feature `--workspace` commands with `just test-feature-matrix`, as this section allowed. The replacement was required, not merely faster: `xtask` depends on `moth` with `features = ["timers"]` and Cargo unifies features across one resolve graph, so no `--workspace` command can compile a `cfg(not(feature = "timers"))` branch, and `--features benchmark_counters` on a workspace command is really `timers` plus counters. Executed branch coverage is preserved and extended — the lane matrix adds the default, scoped-block, developer-output and `xtask` lanes that the list above never ran.
 
 ### Thread and repetition gates
 

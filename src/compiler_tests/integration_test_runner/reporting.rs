@@ -21,11 +21,105 @@ use saying::say;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fmt::Write;
-use std::fs;
+use std::fs::{self, File};
+use std::io::Write as IoWrite;
 use std::path::Path;
+use std::process;
 use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
 
-const SUITE_INVENTORY_SCHEMA_VERSION: u32 = 7;
+const SUITE_INVENTORY_SCHEMA_VERSION: u32 = 8;
+const FAILURE_TRIAGE_SCHEMA_VERSION: u32 = 1;
+
+/// Features the running binary was built with, in declaration order.
+///
+/// A report that does not name its build configuration cannot be told apart from one produced by
+/// a differently configured run of the same command.
+const ENABLED_FEATURES: &[&str] = &[
+    #[cfg(feature = "timers")]
+    "timers",
+    #[cfg(feature = "detailed_timers")]
+    "detailed_timers",
+    #[cfg(feature = "benchmark_counters")]
+    "benchmark_counters",
+    #[cfg(feature = "checked_blocks")]
+    "checked_blocks",
+    #[cfg(feature = "async_blocks")]
+    "async_blocks",
+    #[cfg(feature = "show_tokens")]
+    "show_tokens",
+    #[cfg(feature = "show_headers")]
+    "show_headers",
+    #[cfg(feature = "show_ast")]
+    "show_ast",
+    #[cfg(feature = "show_eval")]
+    "show_eval",
+    #[cfg(feature = "show_hir")]
+    "show_hir",
+    #[cfg(feature = "show_codegen")]
+    "show_codegen",
+    #[cfg(feature = "show_borrow_checker")]
+    "show_borrow_checker",
+];
+
+/// What a report knows about the repository revision it describes.
+///
+/// A failed discovery and a repository that genuinely has nothing to report are different facts.
+/// Collapsing both into `null` makes a report from outside a checkout look like a clean one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum RepositoryRevision {
+    /// The revision Git reported.
+    Commit(String),
+    /// The command did not run inside a Git repository, so there is no revision.
+    NotARepository,
+    /// Discovery failed. The reason is kept so this is not read as a clean absence.
+    Unknown { reason: String },
+}
+
+/// Identity of the run that produced a report.
+///
+/// `id` exists to tell two runs apart, not to order them: it pairs the process id with the
+/// wall-clock nanoseconds at capture, which is enough for that and nothing more.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct RunIdentity {
+    pub id: String,
+    pub command: String,
+    pub os: &'static str,
+    pub arch: &'static str,
+    pub features: Vec<&'static str>,
+    /// Runner thread count when the run chose one, or `None` for default parallelism.
+    pub thread_count: Option<usize>,
+    /// Whether the run that owns this report reached the end of the work the report describes.
+    pub completed: bool,
+}
+
+impl RunIdentity {
+    /// Capture the identity of a run that has started but not finished.
+    pub(crate) fn started(command: &str, thread_count: Option<usize>) -> Self {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_nanos());
+
+        Self {
+            id: format!("{:x}-{nanos:x}", process::id()),
+            command: command.to_owned(),
+            os: std::env::consts::OS,
+            arch: std::env::consts::ARCH,
+            features: ENABLED_FEATURES.to_vec(),
+            thread_count,
+            completed: false,
+        }
+    }
+
+    /// The same identity, marked as describing finished work.
+    pub(crate) fn completed(&self) -> Self {
+        Self {
+            completed: true,
+            ..self.clone()
+        }
+    }
+}
 
 pub(crate) fn format_case_listing(cases: &[TestCaseSpec]) -> String {
     if cases.is_empty() {
@@ -83,7 +177,8 @@ pub(crate) fn format_case_listing(cases: &[TestCaseSpec]) -> String {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct SuiteInventoryReport {
     pub schema_version: u32,
-    pub repository_commit: Option<String>,
+    pub run: RunIdentity,
+    pub repository_revision: RepositoryRevision,
     pub manifest_case_count: usize,
     pub expanded_backend_execution_count: usize,
     pub summary: InventorySummary,
@@ -162,7 +257,8 @@ pub(crate) struct InventoryBackend {
 pub(crate) fn build_suite_inventory_report(
     cases: &[TestCaseSpec],
     policy_evaluation: &PolicyEvaluation,
-    repository_commit: Option<String>,
+    run: &RunIdentity,
+    repository_revision: RepositoryRevision,
 ) -> SuiteInventoryReport {
     let mut inventory_cases = Vec::<InventoryCase>::new();
 
@@ -186,7 +282,8 @@ pub(crate) fn build_suite_inventory_report(
 
     SuiteInventoryReport {
         schema_version: SUITE_INVENTORY_SCHEMA_VERSION,
-        repository_commit,
+        run: run.completed(),
+        repository_revision,
         manifest_case_count: inventory_cases.len(),
         expanded_backend_execution_count: cases.len(),
         summary: build_inventory_summary(&inventory_cases),
@@ -441,44 +538,158 @@ fn golden_mode_label(mode: super::GoldenMode) -> &'static str {
 }
 
 /// Discovers the current repository revision without making audit depend on Git.
-pub(crate) fn discover_repository_commit() -> Option<String> {
-    let output = Command::new("git")
-        .args(["rev-parse", "HEAD"])
-        .output()
-        .ok()?;
+///
+/// Every outcome is reported as itself. A discarded Git failure would put `null` in the report,
+/// which reads as "there is no revision" rather than "the revision was never learned".
+pub(crate) fn discover_repository_revision() -> RepositoryRevision {
+    let output = match Command::new("git").args(["rev-parse", "HEAD"]).output() {
+        Ok(output) => output,
+        Err(error) => {
+            return RepositoryRevision::Unknown {
+                reason: format!("git could not be started: {error}"),
+            };
+        }
+    };
 
     if !output.status.success() {
-        return None;
+        return classify_revision_failure(&output.stderr);
     }
 
-    let commit = String::from_utf8(output.stdout).ok()?.trim().to_owned();
-    (!commit.is_empty()).then_some(commit)
+    match String::from_utf8(output.stdout) {
+        Ok(text) => {
+            let commit = text.trim().to_owned();
+            if commit.is_empty() {
+                RepositoryRevision::Unknown {
+                    reason: "git rev-parse HEAD printed no revision".to_owned(),
+                }
+            } else {
+                RepositoryRevision::Commit(commit)
+            }
+        }
+        Err(error) => RepositoryRevision::Unknown {
+            reason: format!("git rev-parse HEAD printed output that is not UTF-8: {error}"),
+        },
+    }
+}
+
+/// Classify a failed `git rev-parse HEAD` from what Git said about it.
+pub(super) fn classify_revision_failure(stderr: &[u8]) -> RepositoryRevision {
+    // This text is a message for a reader, never an assertion input. A replacement character
+    // cannot spell the phrase below, so a lossy decode cannot change the classification.
+    let described = String::from_utf8_lossy(stderr);
+    let described = described.trim();
+
+    if described.contains("not a git repository") {
+        return RepositoryRevision::NotARepository;
+    }
+
+    RepositoryRevision::Unknown {
+        reason: if described.is_empty() {
+            "git rev-parse HEAD failed without a message".to_owned()
+        } else {
+            format!("git rev-parse HEAD failed: {described}")
+        },
+    }
 }
 
 pub(crate) fn write_suite_inventory_report(
     report_path_str: &str,
     report: &SuiteInventoryReport,
 ) -> Result<(), String> {
-    let report_path = Path::new(report_path_str);
-    if let Some(parent) = report_path.parent() {
-        fs::create_dir_all(parent).map_err(|error| {
-            format!(
-                "Failed to create suite inventory directory '{}': {error}",
-                parent.display()
-            )
-        })?;
-    }
-
     let report_json =
         serde_json::to_string_pretty(report).map_err(|error| format!("JSON error: {error}"))?;
-    fs::write(report_path, report_json).map_err(|error| {
+
+    write_report_atomically(Path::new(report_path_str), report_json.as_bytes())
+        .map_err(|error| format!("Failed to write the suite inventory report: {error}"))
+}
+
+/// Mark an inventory report as belonging to a run that has started and not finished.
+///
+/// Written before the work begins, so an interrupted run leaves a report that says so instead of
+/// the previous run's output, which a reader would take for this run's result.
+pub(crate) fn write_started_suite_inventory_report(
+    report_path_str: &str,
+    run: &RunIdentity,
+) -> Result<(), String> {
+    write_suite_inventory_report(
+        report_path_str,
+        &SuiteInventoryReport {
+            schema_version: SUITE_INVENTORY_SCHEMA_VERSION,
+            run: run.clone(),
+            repository_revision: RepositoryRevision::Unknown {
+                reason: "the run had not reached revision discovery".to_owned(),
+            },
+            manifest_case_count: 0,
+            expanded_backend_execution_count: 0,
+            summary: build_inventory_summary(&[]),
+            cases: Vec::new(),
+            hard_policy_violations: Vec::new(),
+            advisory_findings: Vec::new(),
+        },
+    )
+}
+
+/// Write `bytes` to `path` so a reader never observes a partial report.
+///
+/// The temporary file is a sibling of the final path so the rename stays on one filesystem; a
+/// cross-filesystem rename is a copy, which is the non-atomic write this exists to avoid. A
+/// failure after the temporary file exists removes it, leaving the previous report in place
+/// rather than a partial new one beside it.
+fn write_report_atomically(report_path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let parent = report_path.parent().ok_or_else(|| {
         format!(
-            "Failed to write suite inventory report '{}': {error}",
+            "report path '{}' has no parent directory",
             report_path.display()
         )
     })?;
 
-    Ok(())
+    fs::create_dir_all(parent)
+        .map_err(|error| format!("Failed to create '{}': {error}", parent.display()))?;
+
+    let file_name = report_path
+        .file_name()
+        .ok_or_else(|| format!("report path '{}' has no file name", report_path.display()))?;
+    let mut temporary_name = file_name.to_os_string();
+    temporary_name.push(format!(".{}.partial", process::id()));
+    let temporary_path = parent.join(temporary_name);
+
+    if let Err(error) = write_and_flush(&temporary_path, bytes) {
+        remove_partial_report(&temporary_path);
+        return Err(error);
+    }
+
+    fs::rename(&temporary_path, report_path).map_err(|error| {
+        remove_partial_report(&temporary_path);
+        format!(
+            "Failed to move '{}' onto '{}': {error}",
+            temporary_path.display(),
+            report_path.display()
+        )
+    })
+}
+
+fn write_and_flush(temporary_path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let mut file = File::create(temporary_path)
+        .map_err(|error| format!("Failed to create '{}': {error}", temporary_path.display()))?;
+
+    file.write_all(bytes)
+        .map_err(|error| format!("Failed to write '{}': {error}", temporary_path.display()))?;
+
+    file.sync_all()
+        .map_err(|error| format!("Failed to flush '{}': {error}", temporary_path.display()))
+}
+
+/// Remove a temporary file after a failed write.
+///
+/// A removal failure is reported but never replaces the write failure that caused it: the caller
+/// is already returning the reason the report was not written.
+fn remove_partial_report(temporary_path: &Path) {
+    if let Err(error) = fs::remove_file(temporary_path) {
+        eprintln!(
+            "warning: failed to remove the partial report '{}': {error}",
+            temporary_path.display()
+        );
+    }
 }
 
 pub(crate) fn render_case_result(
@@ -641,34 +852,48 @@ fn diagnostic_summary_label(diagnostic: &CompilerDiagnostic) -> String {
 
 pub(crate) fn write_failure_triage_report(
     report_path_str: &str,
+    run: &RunIdentity,
     summary: SummaryCounts,
     failures: &[FailureTriageEntry],
 ) -> Result<(), String> {
-    let report = FailureTriageReport {
-        total_tests: summary.total_tests,
-        incorrect_results: summary.incorrect_results(),
-        failures: failures.to_vec(),
-    };
+    write_triage_report(
+        report_path_str,
+        &FailureTriageReport {
+            schema_version: FAILURE_TRIAGE_SCHEMA_VERSION,
+            run: run.completed(),
+            total_tests: summary.total_tests,
+            incorrect_results: summary.incorrect_results(),
+            failures: failures.to_vec(),
+        },
+    )
+}
 
-    let report_path = Path::new(report_path_str);
-    if let Some(parent) = report_path.parent() {
-        fs::create_dir_all(parent).map_err(|error| {
-            format!(
-                "Failed to create triage report directory '{}': {error}",
-                parent.display()
-            )
-        })?;
-    }
+/// Mark a triage report as belonging to a run that has started and not finished.
+///
+/// Execution is the long part of a run, so this is where a killed process would otherwise leave
+/// the previous run's passing triage report standing as if it described this one.
+pub(crate) fn write_started_failure_triage_report(
+    report_path_str: &str,
+    run: &RunIdentity,
+) -> Result<(), String> {
+    write_triage_report(
+        report_path_str,
+        &FailureTriageReport {
+            schema_version: FAILURE_TRIAGE_SCHEMA_VERSION,
+            run: run.clone(),
+            total_tests: 0,
+            incorrect_results: 0,
+            failures: Vec::new(),
+        },
+    )
+}
 
+fn write_triage_report(report_path_str: &str, report: &FailureTriageReport) -> Result<(), String> {
     let report_json =
-        serde_json::to_string_pretty(&report).map_err(|error| format!("JSON error: {error}"))?;
-    fs::write(report_path, report_json).map_err(|error| {
-        format!(
-            "Failed to write triage report '{}': {error}",
-            report_path.display()
-        )
-    })?;
-    Ok(())
+        serde_json::to_string_pretty(report).map_err(|error| format!("JSON error: {error}"))?;
+
+    write_report_atomically(Path::new(report_path_str), report_json.as_bytes())
+        .map_err(|error| format!("Failed to write the failure triage report: {error}"))
 }
 
 fn failure_kind_label(kind: FailureKind) -> &'static str {

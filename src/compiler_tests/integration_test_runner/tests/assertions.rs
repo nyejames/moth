@@ -31,8 +31,6 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const DIAGNOSTICS_SOURCE: &str = include_str!("../assertions/diagnostics.rs");
-
 fn test_location(path: InternedPath) -> SourceLocation {
     test_location_at(path, 0, 0)
 }
@@ -158,26 +156,6 @@ fn failure_message_contains_includes_rendered_label_text() {
     let result = validate_failure_result(messages, &expectation, Path::new("."));
 
     assert!(result.passed, "{:?}", result.failure_reason);
-}
-
-/// Source-text architecture ban, not behavior evidence.
-///
-/// WHAT: checks that the diagnostic assertion owner does not reintroduce the removed legacy
-///       error conversion by name.
-/// WHY: the behavior this protects — failure-message assertions reading typed render-boundary
-///      output — is owned by `failure_message_contains_uses_structured_render_output` and
-///      `failure_message_contains_includes_rendered_label_text` above. Text matching cannot
-///      prove that behavior: an alias, a reformat or an equivalent reimplementation would all
-///      pass. This ban is kept only as a cheap reintroduction tripwire and is scheduled to move
-///      into the owned structured architecture audit.
-#[test]
-fn diagnostics_source_does_not_name_the_removed_legacy_error_conversion() {
-    let removed_conversion_name = ["to", "_", "legacy", "_", "error"].concat();
-
-    assert!(
-        !DIAGNOSTICS_SOURCE.contains(&removed_conversion_name),
-        "the removed legacy error conversion must not be reintroduced by name",
-    );
 }
 
 #[test]

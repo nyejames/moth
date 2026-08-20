@@ -46,10 +46,17 @@ where
     let policy_evaluation = super::policy::evaluate_suite(&suite);
 
     if options.audit {
+        // Audit compiles no case, so it has no runner thread count to report. Reading one here
+        // would put a number in the report that describes nothing this run did.
+        let run = reporting::RunIdentity::started("tests --audit", None);
+        reporting::write_started_suite_inventory_report(inventory_report_path, &run)
+            .map_err(TestRunnerError::inventory_report)?;
+
         let report = reporting::build_suite_inventory_report(
             &suite.cases,
             &policy_evaluation,
-            reporting::discover_repository_commit(),
+            &run,
+            reporting::discover_repository_revision(),
         );
         reporting::write_suite_inventory_report(inventory_report_path, &report)
             .map_err(TestRunnerError::inventory_report)?;
@@ -91,8 +98,17 @@ where
     if !options.terse {
         println!("Running Moth test cases...\n");
     }
+
+    // The previous run's triage report is replaced before execution starts. Execution is the long
+    // part of a run, so this is the window where an interrupted process would otherwise leave a
+    // passing report standing as if it described this run.
+    let configured_thread_count = test_thread_count_from_env()?;
+    let run = reporting::RunIdentity::started("tests", configured_thread_count);
+    reporting::write_started_failure_triage_report(triage_report_path, &run)
+        .map_err(TestRunnerError::triage_report)?;
+
     let timer = std::time::Instant::now();
-    let mut indexed_results = if let Some(thread_count) = test_thread_count_from_env()? {
+    let mut indexed_results = if let Some(thread_count) = configured_thread_count {
         let pool = rayon::ThreadPoolBuilder::new()
             .num_threads(thread_count)
             .build()
@@ -159,6 +175,7 @@ where
     // A report failure must leave the command with only its infrastructure error.
     reporting::write_failure_triage_report(
         triage_report_path,
+        &run,
         total_summary,
         &failure_triage_entries,
     )

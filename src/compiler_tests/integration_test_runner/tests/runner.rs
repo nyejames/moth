@@ -256,10 +256,146 @@ fn triage_report_write_failure_returns_error() {
         error.kind
     );
     assert!(
-        error
-            .message
-            .contains("Failed to create triage report directory"),
+        error.message.contains("Failed to create"),
         "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn the_triage_report_says_the_run_is_incomplete_until_execution_finishes() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    let inventory_path = root.join("inventory.json");
+    let triage_path = root.join("triage.json");
+    let observed_during_execution = triage_path.clone();
+
+    let result = run_loaded_suite(
+        suite_with_case(Some(CaseRole::Backend), Some("backend.lowering.shared")),
+        TestRunnerOptions {
+            terse: true,
+            ..TestRunnerOptions::default()
+        },
+        move |_| {
+            // Read the report from inside execution: this is exactly the window in which an
+            // interrupted run would otherwise leave the previous run's result standing.
+            let during = fs::read_to_string(&observed_during_execution)
+                .expect("a started triage report should exist before execution");
+            let during_json: serde_json::Value =
+                serde_json::from_str(&during).expect("the started report should be valid JSON");
+            assert_eq!(during_json["run"]["completed"], false);
+            assert_eq!(during_json["total_tests"], 0);
+
+            CaseExecutionResult {
+                passed: true,
+                panic_message: None,
+                build_result: None,
+                messages: None,
+                failure_reason: None,
+                failure_kind: None,
+            }
+        },
+        inventory_path
+            .to_str()
+            .expect("temporary path should be UTF-8"),
+        triage_path
+            .to_str()
+            .expect("temporary path should be UTF-8"),
+    );
+
+    result.expect("the run should succeed");
+
+    let after = fs::read_to_string(&triage_path).expect("the run should write its triage report");
+    let after_json: serde_json::Value =
+        serde_json::from_str(&after).expect("the final report should be valid JSON");
+    assert_eq!(after_json["run"]["completed"], true);
+    assert_eq!(after_json["schema_version"], 1);
+    assert_eq!(after_json["total_tests"], 1);
+    assert_eq!(after_json["run"]["command"], "tests");
+}
+
+#[test]
+fn a_written_report_leaves_no_partial_file_beside_it() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    let report_path = root.join("inventory.json");
+
+    let result = run_loaded_suite(
+        suite_with_case(Some(CaseRole::Backend), Some("backend.lowering.shared")),
+        TestRunnerOptions {
+            audit: true,
+            ..TestRunnerOptions::default()
+        },
+        panic_if_called,
+        report_path
+            .to_str()
+            .expect("temporary path should be UTF-8"),
+        root.join("triage.json")
+            .to_str()
+            .expect("temporary path should be UTF-8"),
+    );
+
+    result.expect("the audit should succeed");
+
+    let mut entries: Vec<String> = fs::read_dir(&root)
+        .expect("the report directory should be readable")
+        .map(|entry| {
+            entry
+                .expect("the entry should be readable")
+                .file_name()
+                .to_str()
+                .expect("temporary names are UTF-8")
+                .to_owned()
+        })
+        .collect();
+    entries.sort();
+
+    assert_eq!(entries, vec!["inventory.json".to_string()]);
+}
+
+#[test]
+fn the_audit_report_records_the_run_and_the_repository_revision() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    let report_path = root.join("inventory.json");
+
+    run_loaded_suite(
+        suite_with_case(Some(CaseRole::Backend), Some("backend.lowering.shared")),
+        TestRunnerOptions {
+            audit: true,
+            ..TestRunnerOptions::default()
+        },
+        panic_if_called,
+        report_path
+            .to_str()
+            .expect("temporary path should be UTF-8"),
+        root.join("triage.json")
+            .to_str()
+            .expect("temporary path should be UTF-8"),
+    )
+    .expect("the audit should succeed");
+
+    let report = fs::read_to_string(&report_path).expect("audit should write its report");
+    let json: serde_json::Value =
+        serde_json::from_str(&report).expect("audit report should be valid JSON");
+
+    assert_eq!(json["schema_version"], 8);
+    assert_eq!(json["run"]["command"], "tests --audit");
+    assert_eq!(json["run"]["completed"], true);
+    assert_eq!(json["run"]["os"], std::env::consts::OS);
+    assert_eq!(json["run"]["arch"], std::env::consts::ARCH);
+    assert!(
+        json["run"]["id"]
+            .as_str()
+            .is_some_and(|id| id.contains('-')),
+        "the run identity should name a run: {}",
+        json["run"]
+    );
+    // The suite runs inside this repository, so discovery must produce a revision rather than
+    // the null a discarded Git failure used to leave behind.
+    assert!(
+        json["repository_revision"]["commit"].is_string(),
+        "unexpected revision: {}",
+        json["repository_revision"]
     );
 }
 

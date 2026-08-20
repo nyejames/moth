@@ -6,20 +6,24 @@
   "branch": "test-suite-honesty",
   "host_platform": "macOS",
   "summary": {
-    "unit_tests_passed": 4391,
+    "unit_tests_passed": 4396,
     "unit_tests_failed": 0,
     "unit_tests_ignored": 0,
     "integration_cases_correct": 1698,
     "integration_backend_executions": 1851,
+    "feature_lanes_note": "Phase 8 replaced the workspace-wide feature commands with package-scoped lanes. cargo test --workspace unifies features across the resolve graph and always enables timers through xtask's dependency on moth, so the pre-Phase-8 'default' and 'benchmark_counters' rows measured the timers-unified configuration, not the ones they named. Every row below is `cargo test -p moth --features <lane>` measured on macOS 23.6.0 arm64, and every lane is executed by `just test-feature-matrix`",
     "feature_lanes": {
-      "default": "pass",
-      "timers": "pass",
-      "benchmark_counters": "pre-existing failure: const_required_construction_preparation_is_reused_by_folding",
-      "timers+benchmark_counters": "pre-existing failure: const_required_construction_preparation_is_reused_by_folding. Phase 6 also removed a CollectorBusy failure of synthetic_traversal_prepares_retained_clauses_without_a_token_rescan by giving the source-read counter tests the shared instrumentation lock. Phase 0 recorded four failures in this lane; two were observed on this machine before the fix and one after, so the race-dependent members of that set need re-measuring in Phase 8",
-      "detailed_timers": "pass (4393+17+658)"
+      "default": "pass (4284 moth + 17 cli_exit_status)",
+      "timers": "pass (4396 + 17)",
+      "detailed_timers": "pass (4398 + 17)",
+      "benchmark_counters": "fail: const_required_construction_preparation_is_reused_by_folding (4286 passed, 1 failed) \u2014 ledgered as EF-0002",
+      "timers+benchmark_counters": "fail: const_required_construction_preparation_is_reused_by_folding (4414 passed, 1 failed) \u2014 the same single failure as the counters lane, ledgered as EF-0002. Phase 0 recorded four failures in this lane; the other three are gone, and the remaining one reproduces identically at one thread and at default parallelism, so none of the set is race-dependent",
+      "checked_blocks+async_blocks": "pass (4286 + 17)",
+      "show_* (dev-output)": "pass (4284 + 17) \u2014 adds no tests; it is the only lane that compiles the developer stage-dump branches",
+      "xtask": "pass (699)"
     },
     "linux_lane": "passed via GitHub Actions validate-linux (4324 unit tests incl. Linux-only non-UTF-8 filesystem identity tests, 1851/1851 integration cases)",
-    "integration_open_exposed_failures": "1 (EF-0001, borrow_checker_string_memory) \u2014 see docs/roadmap/plans/test-suite-honesty-exposed-failures.md"
+    "open_exposed_failures": "2 \u2014 EF-0001 (borrow_checker_string_memory, integration) and EF-0002 (const_required_construction_preparation_is_reused_by_folding, counter lanes); see docs/roadmap/plans/test-suite-honesty-exposed-failures.md"
   },
   "findings": [
     {
@@ -124,8 +128,8 @@
       "code": "feature_gated_tests_not_executed",
       "severity": "review",
       "description": "Feature-gated test modules need explicit execution lane mapping",
-      "disposition": "documented: timers (pass), benchmark_counters (pre-existing failure), detailed_timers (depends on timers), timers+benchmark_counters (pre-existing failures)",
-      "status": "documented"
+      "disposition": "fixed in Phase 8: eight package-scoped lanes in xtask feature_matrix, run by `just test-feature-matrix`, cover every declared feature. `just feature-lane-check` (part of `just validate`) reads Cargo.toml and every cfg attribute in src and xtask/src, and fails when a declared feature has no lane, when a lane names an undeclared feature, or when a cfg names a feature that does not exist; it writes target/test-reports/feature_lane_coverage.json. The check also exposed that the previous workspace-wide feature commands never ran the default configuration, because xtask depends on moth with features = [\"timers\"] and Cargo unifies features across one resolve graph",
+      "status": "resolved"
     },
     {
       "code": "filesystem_timestamp_tests",
@@ -135,11 +139,18 @@
       "status": "resolved"
     },
     {
+      "code": "counters_only_lane_dead_code",
+      "severity": "review",
+      "description": "The counters-only feature configuration compiles a test helper no caller can reach",
+      "disposition": "found in Phase 8 when the counters lane became an executed command; routed to Phase 11. frontend_counters::capture_frontend_counters_for_test, FrontendCounterTestCaptureGuard and the re-export are gated on benchmark_counters, while every caller is gated on all(timers, benchmark_counters), so the counters-only lane emits three dead-code warnings. Nothing fails. It was invisible because `just ci-clippy-native` lints with --all-features and never builds that configuration. The correction is a cfg gate, not a behaviour change, so it is left outside the Patch A evidence boundary",
+      "status": "open"
+    },
+    {
       "code": "monolithic_ci_steps",
       "severity": "review",
       "description": "CI steps are monolithic",
-      "disposition": "deferred to Phase 8",
-      "status": "open"
+      "disposition": "fixed in Phase 8: the validation workflow runs nine gates (clippy, unit-tests, feature-matrix, integration, docs, benchmarks, timers-erasure, source-audit, honesty-audit) as independent jobs on Linux, macOS and Windows with fail-fast disabled, so one failed family never stops another from reporting. Windows stays non-blocking through a job-level continue-on-error, and validation.mtf > Platform policy now states the two conditions that end that status. The integration, feature-matrix and honesty-audit gates upload target/test-reports/ whether they passed or failed. `just validate` keeps the fail-fast local ordering, and the release workflow deliberately keeps it too. validation.mtf also lost its claim that `just ci-clippy` lints Linux and Windows x64 targets: that recipe does not exist and never did the cross-target work",
+      "status": "resolved"
     },
     {
       "code": "acceptance_only_smoke_overclaiming",
@@ -159,15 +170,15 @@
       "code": "source_text_tests_false_confidence",
       "severity": "review",
       "description": "Tests comparing source text create false confidence",
-      "disposition": "reviewed in Phase 4: the diagnostics include_str! check is not sole evidence \u2014 failure_message_contains_uses_structured_render_output and failure_message_contains_includes_rendered_label_text own the behavior. Renamed to diagnostics_source_does_not_name_the_removed_legacy_error_conversion and documented as a source-text reintroduction tripwire, not behavior evidence; scheduled to move into the structured architecture audit in Phase 8 along with the timers erasure source check",
-      "status": "documented"
+      "disposition": "fixed in Phase 8: xtask source_audit is now the one owner of broad-source architecture bans. It walks src and xtask/src once, fails closed on unreadable paths, reports typed findings (timer-erasure, removed-legacy-conversion-name, removed-legacy-payload-variant, unreadable-source) and writes target/test-reports/source_audit.json. Three source-text tests were deleted into it: the diagnostics conversion-name tripwire, old_error_payload_has_been_removed_from_diagnostic_payloads (which read one file) and timer_facade_sources_never_use_cfg_timer_macro (which read four). The audit applies both removed-name bans across the whole tree rather than to the single file each test read. timers-erasure-check kept only its compiled-artifact half and now defines the timer rules that source_audit applies, so no second walk exists to skip a file silently. The remaining include_str! uses in src are CSS and JS assets that a test then parses or executes, which is input, not a source-text assertion",
+      "status": "resolved"
     },
     {
       "code": "stale_partial_machine_readable_reports",
       "severity": "review",
       "description": "Machine-readable reports can become stale or partial",
-      "disposition": "deferred to Phase 8",
-      "status": "open"
+      "disposition": "fixed in Phase 8: every report is written to a sibling temporary file, flushed and renamed into place, and a failed write removes the temporary file so the previous report survives instead of a partial new one. Each report carries a RunIdentity (run id, command, host OS and architecture, the features the binary was built with, runner thread count and completion state), and the inventory and triage reports are replaced by a completed:false report before the work starts, so an interrupted run leaves a report that says it did not finish. repository_commit became a typed repository_revision that distinguishes a discovered commit, a run outside a repository, and a failed discovery with its reason, instead of collapsing all three into null. Suite inventory schema 7 to 8; the triage report gained a schema version. Self-tests cover the started/completed transition observed from inside execution, the absence of a partial sibling, a blocked write leaving the previous report intact, and each revision classification",
+      "status": "resolved"
     },
     {
       "code": "env_mutation_not_panic_safe",
