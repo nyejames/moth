@@ -5,9 +5,9 @@
 name: Validate and deploy
 
 on:
-  # Temporary branch trigger for platform validation. Revert before squash-merging this branch.
+  # Runs on pushes targeting the default branch
   push:
-    branches: ["main", "test-suite-honesty"]
+    branches: ["main"]
 
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
@@ -81,7 +81,6 @@ jobs:
 
   deploy:
     # Deployment waits for every gate. A non-blocking Windows failure does not hold it back.
-    if: github.ref == 'refs/heads/main'
     needs: gate
 
     concurrency:
