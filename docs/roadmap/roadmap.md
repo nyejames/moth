@@ -11,7 +11,7 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 
 ## Active implementation work
 
-- [Test-suite honesty and infrastructure hardening](./plans/test-suite-honesty-and-infrastructure-hardening-plan.md) — all phases implemented; every local gate passes. Held open for one thing: its final completion criterion names the platform matrix, and the Linux and Windows legs have not run against this branch tip. The gate workflow triggers on a push to `main` or a manual dispatch, so a maintainer owns that run. Delete this plan once those legs pass.
+- [Test-suite honesty and infrastructure hardening](./plans/test-suite-honesty-and-infrastructure-hardening-plan.md) — all phases implemented; local gates and every non-Windows CI gate pass. The only known CI failure is the non-blocking Windows leg, which is caused by the remaining large-error variants and is intentionally deferred to the [diagnostics and tokens optimised memory layout plan](./plans/compiler-source-token-and-diagnostic-data-layout-plan.md). That plan owns the refactor needed to make Windows green; this is not an unresolved test-honesty defect. Keep the handoff recorded when this plan is deleted.
 
 ## Queued implementation chain
 

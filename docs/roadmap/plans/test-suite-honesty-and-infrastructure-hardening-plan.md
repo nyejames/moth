@@ -6,10 +6,13 @@
 WORK_ID: test-suite-honesty
 WORK_SOURCE: docs/roadmap/plans/test-suite-honesty-and-infrastructure-hardening-plan.md
 BASE_REVISION: f41f93a7a (post-TIR, post-benchmark-counters-timers)
-STATUS: active — every phase is implemented and every local gate passes. One completion criterion
-  is unmet: the platform matrix. The Linux and Windows legs have not run against this branch tip.
-CURRENT_SCOPE: Phase 11 complete except its final two items, which are held behind the platform
-  legs: deleting this plan, and releasing the memory-management documentation gate
+STATUS: active — every phase is implemented; local gates and every non-Windows CI gate pass. One
+  completion criterion is unmet: the platform matrix. The only known CI failure is the non-blocking
+  Windows leg, caused by the remaining large-error variants owned by the diagnostics and tokens
+  optimised memory layout plan.
+CURRENT_SCOPE: Phase 11 complete except its final two handoff items: deleting this plan, and
+  releasing the memory-management documentation gate. The Windows failure is an explicitly
+  deferred diagnostics-layout dependency, not a test-suite-honesty regression.
 COMPLETED:
   Phase 0: baseline established (4314 unit tests, 0 ignored, 1699 integration cases correct,
     1851 backend executions); durable inventory at docs/roadmap/evidence/test_honesty_inventory.json;
@@ -325,9 +328,11 @@ COMPLETED:
   the capture guard on all(test, timers) to match its callers; audited the production seams this
   plan added and confirmed each has real non-test consumers; confirmed 0 ignored tests and 0 smoke,
   acceptance-only, warning-ignore and diagnostic-contains backend blocks by measurement.
-NEXT_ACTION: a maintainer runs the gate workflow against this branch tip (push to main or a manual
-  dispatch — it does not trigger on branch pushes). When the Linux and Windows legs pass, delete
-  this plan and release the memory-management documentation gate. Nothing else is outstanding.
+NEXT_ACTION: the branch gate workflow has run. Every non-Windows gate passed; the only known failure
+  is the non-blocking Windows large-error-variant issue. Carry that issue into the diagnostics and
+  tokens optimised memory layout plan, which owns the refactor required for Windows to pass, and do
+  not reopen this hardening work for it. The final handoff still records the platform criterion
+  before deleting this plan and releasing the memory-management documentation gate.
 VALIDATION: Phase 11 (macOS 23.6.0 arm64) — `just validate` passed completely for the first time
   in this campaign: Clippy, feature coverage, source audit, workspace tests, integration tests,
   docs check, bench-ci's 60-case preflight and both quick benchmark suites, and
@@ -336,7 +341,9 @@ VALIDATION: Phase 11 (macOS 23.6.0 arm64) — `just validate` passed completely 
   1851/1851; just test-feature-matrix all 8 lanes pass; just stress 1 all six lanes pass;
   just test-honesty-evidence 1173 files, 564 test-owning, 0 hard findings, 0 integrity findings,
   0 composed findings; clippy -p moth --features benchmark_counters --all-targets warning-free,
-  closing the last known lane warning. No Linux or Windows leg was run on this macOS host.
+  closing the last known lane warning. Branch CI then passed every non-Windows gate; the only
+  known failure was the non-blocking Windows large-error-variant issue owned by the diagnostics
+  and tokens optimised memory layout plan.
   Phase 10 review corrections (macOS 23.6.0 arm64) — cargo fmt --all -- --check clean;
   cargo clippy --workspace --all-targets --all-features -D warnings clean; cargo test --workspace
   4397 + 17 + 765, 0 failed, 0 ignored (xtask 760 to 765: five new declared-measurement integrity
@@ -474,11 +481,12 @@ AUDITS: Phase 9 interim auditor pass 2 is audit_clean after resolving two low-se
   remaining report-rendering uses dispositioned; AUD-0001 (Redundancy over tests.support) —
   F01, F02 and F03 corrected on this branch, F04 routed to Phase 11, and F05 decided in Phase 7
   (both helpers retired, deletion left to Phase 11)
-BLOCKERS: one, and it is the reason this file still exists. The completion criterion "the full
-  validation, feature, thread and platform matrix passes" is not met: no Linux or Windows leg has
-  run against this branch tip, and the compiler has changed materially since the Phase 0 Linux
-  run. Every local gate passes on macOS 23.6.0 arm64. Deleting this plan before those legs pass
-  would assert a result nobody measured, which is the exact failure the campaign exists to remove.
+BLOCKERS: one documented platform exception. The completion criterion "the full validation, feature,
+  thread and platform matrix passes" is not met because the Windows leg still fails on the known
+  large-error variants. Linux and every other gate passed in the branch workflow, and Windows is
+  non-blocking by policy. The diagnostics and tokens optimised memory layout plan owns the refactor
+  that removes this failure; deleting this plan must preserve that handoff rather than presenting
+  Windows as green or treating the issue as a new hardening defect.
 NOTES: Phase 10 closeout notes. EF-0001 is fixed in
   src/compiler_frontend/headers/top_level_classifier.rs by requiring `at_statement_boundary` for
   `TokenKind::TemplateHead` to become `HeaderFileItem::RuntimeTemplate`; assigned, returned and
