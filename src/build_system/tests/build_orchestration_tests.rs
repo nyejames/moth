@@ -8,7 +8,9 @@ use crate::build_system::build::{FileKind, OutputFile, Project, ProjectBuilder, 
 #[cfg(unix)]
 use crate::build_system::output::ValidatedOutputPlan;
 use crate::build_system::output::manifest::BUILD_MANIFEST_FILENAME;
-use crate::build_system::output::{BuilderKind, OutputOwner, OutputPlan};
+use crate::build_system::output::{
+    BuilderKind, OutputDestinationOutcome, OutputOwner, OutputPlan, OutputWriteOutcome,
+};
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::render::{
@@ -18,12 +20,13 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticCategory, DiagnosticPayload, InvalidConfigReason,
 };
 use crate::compiler_frontend::utilities::basic::normalize_path;
+use crate::compiler_tests::test_diagnostics::{
+    assert_no_infrastructure_errors, assert_output_rejection,
+};
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use crate::projects::settings::Config;
 use std::fs;
-use std::path::PathBuf;
-use std::thread;
-use std::time::Duration;
+use std::path::{Path, PathBuf};
 
 fn rendered_error_messages(messages: &CompilerMessages) -> Vec<String> {
     let context = DiagnosticRenderContext::new(&messages.string_table);
@@ -68,8 +71,9 @@ fn assert_invalid_project_setting(
 
 #[test]
 fn build_project_returns_result_without_writing_files() {
-    let root = temp_dir("build_only");
-    fs::create_dir_all(&root).expect("should create temp root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let entry_file = root.join("main.moth");
     fs::write(&entry_file, "value = 1\n").expect("should write source file");
 
@@ -84,18 +88,14 @@ fn build_project_returns_result_without_writing_files() {
     .expect("build should succeed");
 
     assert!(!result.project.output_files.is_empty());
-    assert!(
-        !root.join("index.html").exists(),
-        "build_project should not write files to disk"
-    );
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
+    assert_path_missing(&root.join("index.html"));
 }
 
 #[test]
 fn build_project_preserves_builder_warnings_in_build_result() {
-    let root = temp_dir("warnings");
-    fs::create_dir_all(&root).expect("should create temp root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     fs::write(root.join("main.moth"), "value = 1\n").expect("should write source file");
 
     {
@@ -113,14 +113,13 @@ fn build_project_preserves_builder_warnings_in_build_result() {
             "build result should include backend warnings"
         );
     }
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn build_project_calls_validate_project_config() {
-    let root = temp_dir("validation_tracking");
-    fs::create_dir_all(&root).expect("should create temp root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     fs::write(root.join("main.moth"), "value = 1\n").expect("should write source file");
     {
         let _cwd_guard = CurrentDirGuard::set_to(&root);
@@ -144,12 +143,12 @@ fn build_project_calls_validate_project_config() {
             "build_project should call build_backend"
         );
     }
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn project_compilation_selects_only_modules_with_root_activity_as_entries() {
-    let root = temp_dir("project_compilation_entries");
+    let temp = tempfile::tempdir().expect("should create temp dir");
+    let root = temp.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(src.join("api")).expect("should create module directories");
     fs::write(
@@ -177,12 +176,13 @@ fn project_compilation_selects_only_modules_with_root_activity_as_entries() {
     assert_eq!(module_count.load(std::sync::atomic::Ordering::SeqCst), 2);
     assert_eq!(entry_count.load(std::sync::atomic::Ordering::SeqCst), 1);
 
-    fs::remove_dir_all(&root).expect("should remove temp dir");
+    let _ = temp;
 }
 
 #[test]
 fn diagnosed_module_prevents_project_compilation_from_reaching_backend() {
-    let root = temp_dir("diagnosed_project_compilation");
+    let temp = tempfile::tempdir().expect("should create temp dir");
+    let root = temp.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(src.join("broken")).expect("should create module directories");
     fs::write(
@@ -207,23 +207,23 @@ fn diagnosed_module_prevents_project_compilation_from_reaching_backend() {
         &[],
     );
 
-    assert!(
-        result.is_err(),
-        "diagnosed module should fail project compilation"
-    );
+    let Err(messages) = result else {
+        panic!("diagnosed module should fail project compilation");
+    };
+    assert_no_infrastructure_errors(&messages);
     assert!(validated.load(std::sync::atomic::Ordering::SeqCst));
     assert!(
         !built.load(std::sync::atomic::Ordering::SeqCst),
         "backend must not receive a partial project compilation"
     );
 
-    fs::remove_dir_all(&root).expect("should remove temp dir");
+    let _ = temp;
 }
 
 #[test]
 fn write_project_outputs_writes_all_supported_artifacts_and_skips_not_built() {
-    let root = temp_dir("writer_success");
-    fs::create_dir_all(&root).expect("should create temp root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
 
     let project = Project {
         output_files: vec![
@@ -248,10 +248,28 @@ fn write_project_outputs_writes_all_supported_artifacts_and_skips_not_built() {
         warnings: vec![],
     };
 
-    write_project_outputs(&project, &always_write_options(root.clone(), None))
+    let summary = write_project_outputs(&project, &always_write_options(root.clone(), None))
         .expect("writer should succeed");
 
-    assert!(root.join("assets").is_dir());
+    // The reported destinations are the writer's own account of what it emitted, in preparation
+    // order. The `NotBuilt` entry is deliberately absent rather than reported as an empty write.
+    let emitted = |path: &str, outcome: OutputWriteOutcome| OutputDestinationOutcome {
+        relative_path: PathBuf::from(path),
+        outcome,
+    };
+    assert_eq!(
+        summary.destinations(),
+        &[
+            emitted("assets", OutputWriteOutcome::DirectoryCreated),
+            emitted("scripts/app.js", OutputWriteOutcome::Written),
+            emitted("index.html", OutputWriteOutcome::Written),
+            emitted("assets/logo.png", OutputWriteOutcome::Written),
+            emitted("bin/app.wasm", OutputWriteOutcome::Written),
+        ]
+    );
+    assert_eq!(summary.emitted_count(), 5);
+
+    assert_directory(&root.join("assets"));
     assert_eq!(
         fs::read_to_string(root.join("scripts/app.js")).expect("should read JS file"),
         "console.log('hi');"
@@ -268,19 +286,17 @@ fn write_project_outputs_writes_all_supported_artifacts_and_skips_not_built() {
         fs::read(root.join("bin/app.wasm")).expect("should read wasm file"),
         vec![0, 1, 2]
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn write_project_outputs_rejects_invalid_paths() {
-    let root = temp_dir("writer_invalid");
-    fs::create_dir_all(&root).expect("should create temp root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
 
     let invalid_projects = vec![
         Project {
             output_files: vec![OutputFile::new(
-                PathBuf::from("/tmp/absolute.js"),
+                PathBuf::from("/var/absolute.js"),
                 FileKind::Js(String::from("x")),
             )],
             entry_page_rel: None,
@@ -318,16 +334,18 @@ fn write_project_outputs_rejects_invalid_paths() {
 
     for project in invalid_projects {
         let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
-        assert!(result.is_err(), "invalid output path should be rejected");
+        let Err(messages) = result else {
+            panic!("invalid output path should be rejected");
+        };
+        assert_output_rejection(&messages, "invalid-relative-output-path");
     }
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn reserved_manifest_destination_is_rejected_before_emission() {
-    let collision_root = temp_dir("manifest_destination_collision");
-    fs::create_dir_all(&collision_root).expect("should create collision root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let collision_root = _temp.path().to_path_buf();
+
     let collision_project = Project {
         output_files: vec![
             OutputFile::new(
@@ -343,25 +361,25 @@ fn reserved_manifest_destination_is_rejected_before_emission() {
         cleanup_policy: html_cleanup_policy(),
         warnings: vec![],
     };
-    assert!(
-        write_project_outputs(
-            &collision_project,
-            &always_write_options(collision_root.clone(), None)
-        )
-        .is_err()
+    let result = write_project_outputs(
+        &collision_project,
+        &always_write_options(collision_root.clone(), None),
     );
-    assert!(!collision_root.join("index.html").exists());
-    assert!(!collision_root.join(".moth_manifest").exists());
-    fs::remove_dir_all(&collision_root).expect("should remove collision root");
+    let Err(messages) = result else {
+        panic!("reserved manifest destination should be rejected");
+    };
+    assert_output_rejection(&messages, "reserved-manifest-destination");
+    assert_path_missing(&collision_root.join("index.html"));
+    assert_path_missing(&collision_root.join(".moth_manifest"));
 
-    for (case_index, reserved_descendant) in [
+    for reserved_descendant in [
         PathBuf::from(".moth_manifest/child.js"),
         PathBuf::from(r".MOTH_MANIFEST\child.js"),
     ]
     .into_iter()
-    .enumerate()
     {
-        let descendant_root = temp_dir(&format!("manifest_destination_descendant_{case_index}"));
+        let _descendant_temp = tempfile::tempdir().expect("should create descendant temp dir");
+        let descendant_root = _descendant_temp.path().to_path_buf();
         fs::create_dir_all(&descendant_root).expect("should create descendant root");
         let descendant_project = Project {
             output_files: vec![
@@ -375,19 +393,22 @@ fn reserved_manifest_destination_is_rejected_before_emission() {
             cleanup_policy: html_cleanup_policy(),
             warnings: vec![],
         };
-        assert!(
-            write_project_outputs(
-                &descendant_project,
-                &always_write_options(descendant_root.clone(), None)
-            )
-            .is_err()
+        let result = write_project_outputs(
+            &descendant_project,
+            &always_write_options(descendant_root.clone(), None),
         );
-        assert!(!descendant_root.join("index.html").exists());
-        assert!(!descendant_root.join(".moth_manifest").exists());
-        fs::remove_dir_all(&descendant_root).expect("should remove descendant root");
+        let Err(messages) = result else {
+            panic!("reserved manifest descendant should be rejected");
+        };
+        assert_output_rejection(&messages, "reserved-manifest-destination");
+        assert_path_missing(&descendant_root.join("index.html"));
+        assert_path_missing(&descendant_root.join(".moth_manifest"));
+
+        let _ = _descendant_temp;
     }
 
-    let directory_root = temp_dir("manifest_destination_directory");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let directory_root = _temp.path().to_path_buf();
     fs::create_dir_all(directory_root.join(".moth_manifest"))
         .expect("should create manifest directory");
     let project = html_project(
@@ -397,16 +418,16 @@ fn reserved_manifest_destination_is_rejected_before_emission() {
         )],
         Some(PathBuf::from("index.html")),
     );
-    assert!(
-        write_project_outputs(
-            &project,
-            &always_write_options(directory_root.clone(), None)
-        )
-        .is_err()
+    let result = write_project_outputs(
+        &project,
+        &always_write_options(directory_root.clone(), None),
     );
-    assert!(!directory_root.join("index.html").exists());
-    assert!(directory_root.join(".moth_manifest").is_dir());
-    fs::remove_dir_all(&directory_root).expect("should remove manifest directory root");
+    let Err(messages) = result else {
+        panic!("reserved manifest directory should be rejected");
+    };
+    assert_output_rejection(&messages, "manifest-not-regular-file");
+    assert_path_missing(&directory_root.join("index.html"));
+    assert_directory(&directory_root.join(".moth_manifest"));
 }
 
 #[cfg(unix)]
@@ -414,13 +435,15 @@ fn reserved_manifest_destination_is_rejected_before_emission() {
 fn manifest_symlink_destinations_are_rejected_before_emission() {
     use std::os::unix::fs::symlink;
 
-    for (case_name, target_kind) in ["inside", "outside", "dangling"]
+    for (_case_name, target_kind) in ["inside", "outside", "dangling"]
         .into_iter()
         .map(|case_name| (case_name, case_name))
     {
-        let root = temp_dir(&format!("manifest_symlink_{case_name}"));
+        let _temp1 = tempfile::tempdir().expect("should create temp dir");
+        let root = _temp1.path().to_path_buf();
         fs::create_dir_all(&root).expect("should create symlink test root");
-        let outside = temp_dir(&format!("manifest_symlink_target_{case_name}"));
+        let _temp2 = tempfile::tempdir().expect("should create temp dir");
+        let outside = _temp2.path().to_path_buf();
         if target_kind == "outside" {
             fs::create_dir_all(&outside).expect("should create outside symlink target root");
         }
@@ -442,10 +465,12 @@ fn manifest_symlink_destinations_are_rejected_before_emission() {
             )],
             Some(PathBuf::from("index.html")),
         );
-        assert!(
-            write_project_outputs(&project, &always_write_options(root.clone(), None)).is_err()
-        );
-        assert!(!root.join("index.html").exists());
+        let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
+        let Err(messages) = result else {
+            panic!("manifest symlink destination should be rejected");
+        };
+        assert_output_rejection(&messages, "manifest-not-regular-file");
+        assert_path_missing(&root.join("index.html"));
         assert!(
             fs::symlink_metadata(root.join(".moth_manifest"))
                 .expect("manifest symlink should remain")
@@ -488,7 +513,8 @@ fn output_alias_to_manifest_destination_is_rejected_before_emission() {
             String::from("existing literal-backslash child"),
         ),
     ] {
-        let root = temp_dir(&format!("output_alias_manifest_{case_name}"));
+        let _temp3 = tempfile::tempdir().expect("should create temp dir");
+        let root = _temp3.path().to_path_buf();
         fs::create_dir_all(&root).expect("should create output root");
         let target = root.join(&target_path);
         if let Some(parent) = target.parent() {
@@ -513,11 +539,19 @@ fn output_alias_to_manifest_destination_is_rejected_before_emission() {
             cleanup_policy: html_cleanup_policy(),
             warnings: vec![],
         };
-        assert!(
-            write_project_outputs(&project, &always_write_options(root.clone(), None)).is_err(),
-            "case-variant manifest aliases must be rejected before emission: {case_name}"
-        );
-        assert!(!root.join("index.html").exists());
+        let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
+        let Err(messages) = result else {
+            panic!("case-variant manifest aliases must be rejected before emission: {case_name}");
+        };
+        let expected_reason = match case_name {
+            "exact_case_variant" | "descendant_case_variant" => {
+                "reserved-manifest-destination-canonical"
+            }
+            "descendant_literal_backslash" => "non-lossless-canonical-path",
+            _ => unreachable!("unexpected case: {case_name}"),
+        };
+        assert_output_rejection(&messages, expected_reason);
+        assert_path_missing(&root.join("index.html"));
         assert_eq!(
             fs::read(&target).expect("case-variant target should remain unchanged"),
             target_contents.as_bytes()
@@ -562,7 +596,8 @@ fn non_portable_canonical_aliases_are_rejected_before_emission() {
             ],
         ),
     ] {
-        let root = temp_dir(&format!("non_portable_canonical_alias_{case_name}"));
+        let _temp4 = tempfile::tempdir().expect("should create temp dir");
+        let root = _temp4.path().to_path_buf();
         fs::create_dir_all(&root).expect("should create output root");
         let target = root.join(&target_path);
         fs::write(&target, "target unchanged").expect("should create non-portable target");
@@ -590,11 +625,12 @@ fn non_portable_canonical_aliases_are_rejected_before_emission() {
             cleanup_policy: html_cleanup_policy(),
             warnings: vec![],
         };
-        assert!(
-            write_project_outputs(&project, &always_write_options(root.clone(), None)).is_err(),
-            "non-portable canonical aliases must be rejected before emission: {case_name}"
-        );
-        assert!(!root.join("index.html").exists());
+        let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
+        let Err(messages) = result else {
+            panic!("non-portable canonical aliases must be rejected before emission: {case_name}");
+        };
+        assert_output_rejection(&messages, "non-lossless-canonical-path");
+        assert_path_missing(&root.join("index.html"));
         assert_eq!(
             fs::read(&target).expect("non-portable target should remain unchanged"),
             b"target unchanged"
@@ -616,8 +652,9 @@ fn invalid_utf8_authored_output_path_is_rejected_before_emission() {
     use std::ffi::OsString;
     use std::os::unix::ffi::OsStringExt;
 
-    let root = temp_dir("invalid_utf8_authored_output");
-    fs::create_dir_all(&root).expect("should create output root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let invalid_path = PathBuf::from(OsString::from_vec(b"safe-\xFF-file.js".to_vec()));
     let project = Project {
         output_files: vec![
@@ -632,15 +669,14 @@ fn invalid_utf8_authored_output_path_is_rejected_before_emission() {
         warnings: vec![],
     };
 
-    assert!(
-        write_project_outputs(&project, &always_write_options(root.clone(), None)).is_err(),
-        "invalid UTF-8 output paths must be rejected before emission"
-    );
-    assert!(!root.join("index.html").exists());
-    assert!(!root.join("safe-�-file.js").exists());
-    assert!(!root.join(BUILD_MANIFEST_FILENAME).exists());
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
+    let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
+    let Err(messages) = result else {
+        panic!("invalid UTF-8 output paths must be rejected before emission");
+    };
+    assert_output_rejection(&messages, "invalid-relative-output-path");
+    assert_path_missing(&root.join("index.html"));
+    assert_path_missing(&root.join("safe-�-file.js"));
+    assert_path_missing(&root.join(BUILD_MANIFEST_FILENAME));
 }
 
 #[cfg(unix)]
@@ -648,8 +684,9 @@ fn invalid_utf8_authored_output_path_is_rejected_before_emission() {
 fn canonical_case_collisions_are_rejected_before_emission() {
     use std::os::unix::fs::symlink;
 
-    let root = temp_dir("canonical_case_collision");
-    fs::create_dir_all(&root).expect("should create output root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let lower_target = root.join("pages");
     let upper_target = root.join("PAGES");
     fs::write(&lower_target, "lower unchanged").expect("should create lower target");
@@ -679,11 +716,12 @@ fn canonical_case_collisions_are_rejected_before_emission() {
         warnings: vec![],
     };
 
-    assert!(
-        write_project_outputs(&project, &always_write_options(root.clone(), None)).is_err(),
-        "canonical case-only aliases must be rejected before emission"
-    );
-    assert!(!root.join("index.html").exists());
+    let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
+    let Err(messages) = result else {
+        panic!("canonical case-only aliases must be rejected before emission");
+    };
+    assert_output_rejection(&messages, "canonical-destination-collision");
+    assert_path_missing(&root.join("index.html"));
     assert_eq!(
         fs::read(&lower_target).expect("lower target should remain unchanged"),
         lower_contents_before
@@ -692,8 +730,6 @@ fn canonical_case_collisions_are_rejected_before_emission() {
         fs::read(&upper_target).expect("upper target should remain unchanged"),
         upper_contents_before
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[cfg(any(unix, windows))]
@@ -707,8 +743,10 @@ fn hard_linked_outputs_are_rejected_before_emission() {
         "output_to_outside",
         "directory_to_outside",
     ] {
-        let root = temp_dir(&format!("hard_link_output_{case_name}"));
-        let outside = temp_dir(&format!("hard_link_target_{case_name}"));
+        let _temp5 = tempfile::tempdir().expect("should create temp dir");
+        let root = _temp5.path().to_path_buf();
+        let _temp6 = tempfile::tempdir().expect("should create temp dir");
+        let outside = _temp6.path().to_path_buf();
         fs::create_dir_all(&root).expect("should create output root");
         fs::create_dir_all(&outside).expect("should create outside root");
         let manifest_path = root.join(".moth_manifest");
@@ -753,11 +791,18 @@ fn hard_linked_outputs_are_rejected_before_emission() {
             warnings: vec![],
         };
 
-        assert!(
-            write_project_outputs(&project, &always_write_options(root.clone(), None)).is_err(),
-            "hard-linked destinations must be rejected before emission: {case_name}"
-        );
-        assert!(!root.join("index.html").exists());
+        let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
+        let Err(messages) = result else {
+            panic!("hard-linked destinations must be rejected before emission: {case_name}");
+        };
+        let expected_reason = match case_name {
+            "manifest_to_outside" => "manifest-hard-linked",
+            "directory_to_outside" => "directory-destination-exists-as-non-directory",
+            "output_to_manifest" | "output_to_outside" => "hard-linked-destination",
+            _ => unreachable!("unexpected case: {case_name}"),
+        };
+        assert_output_rejection(&messages, expected_reason);
+        assert_path_missing(&root.join("index.html"));
         match case_name {
             "output_to_manifest" => {
                 assert_eq!(
@@ -788,7 +833,7 @@ fn hard_linked_outputs_are_rejected_before_emission() {
                     fs::read(&outside_target).expect("outside target should remain unchanged"),
                     b"unchanged"
                 );
-                assert!(!manifest_path.exists());
+                assert_path_missing(&manifest_path);
             }
             _ => unreachable!("hard-link cases are fixed"),
         }
@@ -800,7 +845,8 @@ fn hard_linked_outputs_are_rejected_before_emission() {
 
 #[test]
 fn file_output_to_existing_directory_is_rejected_before_emission() {
-    let root = temp_dir("file_output_existing_directory");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("occupied")).expect("should create existing directory");
 
     let project = Project {
@@ -819,21 +865,25 @@ fn file_output_to_existing_directory_is_rejected_before_emission() {
         warnings: vec![],
     };
 
-    assert!(
-        write_project_outputs(&project, &always_write_options(root.clone(), None)).is_err(),
-        "file outputs must reject existing directories before emission"
-    );
-    assert!(!root.join("index.html").exists());
-    assert!(root.join("occupied").is_dir());
-    assert!(!root.join(BUILD_MANIFEST_FILENAME).exists());
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
+    let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
+    let Err(messages) = result else {
+        panic!("file outputs must reject existing directories before emission");
+    };
+    assert_output_rejection(&messages, "file-destination-exists-as-non-file");
+    assert_path_missing(&root.join("index.html"));
+    assert_directory(&root.join("occupied"));
+    assert_path_missing(&root.join(BUILD_MANIFEST_FILENAME));
 }
 
+/// Skip-unchanged mode must leave an identical destination untouched.
+///
+/// The evidence is the writer's own outcome, not a modification time: filesystems with
+/// second-granularity timestamps report the same value after a rewrite, so an mtime comparison
+/// passes whether or not the file was skipped.
 #[test]
-fn skip_unchanged_mode_preserves_existing_output_mtime() {
-    let root = temp_dir("skip_unchanged_mtime");
-    fs::create_dir_all(&root).expect("should create temp root");
+fn skip_unchanged_mode_reports_an_identical_destination_as_skipped() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
 
     let project = html_project(
         vec![OutputFile::new(
@@ -844,27 +894,31 @@ fn skip_unchanged_mode_preserves_existing_output_mtime() {
     );
     let options = skip_unchanged_options(root.clone(), None);
 
-    write_project_outputs(&project, &options).expect("first write should succeed");
-    let first_modified = fs::metadata(root.join("index.html"))
-        .expect("output file should exist")
-        .modified()
-        .expect("metadata should include modified time");
+    let first = write_project_outputs(&project, &options).expect("first write should succeed");
+    assert_eq!(
+        first.outcome_for(Path::new("index.html")),
+        Some(OutputWriteOutcome::Written),
+        "the first write has nothing to compare against and must emit the file"
+    );
 
-    thread::sleep(Duration::from_millis(30));
-    write_project_outputs(&project, &options).expect("second write should succeed");
-    let second_modified = fs::metadata(root.join("index.html"))
-        .expect("output file should exist")
-        .modified()
-        .expect("metadata should include modified time");
-
-    assert_eq!(first_modified, second_modified);
-    fs::remove_dir_all(&root).expect("should remove temp dir");
+    let second = write_project_outputs(&project, &options).expect("second write should succeed");
+    assert_eq!(
+        second.outcome_for(Path::new("index.html")),
+        Some(OutputWriteOutcome::SkippedUnchanged),
+        "identical content must be skipped rather than rewritten"
+    );
+    assert_eq!(
+        second.emitted_count(),
+        0,
+        "an unchanged project emits no artifact; the manifest is cleanup's own concern"
+    );
 }
 
 #[test]
 fn skip_unchanged_mode_still_cleans_stale_manifest_tracked_outputs() {
-    let root = temp_dir("skip_unchanged_cleanup");
-    fs::create_dir_all(&root).expect("should create temp root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let project_dir = root.join("project");
     fs::create_dir_all(&project_dir).expect("should create project dir");
     let output_root = project_dir.join("dev");
@@ -888,12 +942,6 @@ fn skip_unchanged_mode_still_cleans_stale_manifest_tracked_outputs() {
     )
     .expect("initial write should succeed");
 
-    let index_modified = fs::metadata(output_root.join("index.html"))
-        .expect("index should exist")
-        .modified()
-        .expect("metadata should include modified time");
-
-    thread::sleep(Duration::from_millis(30));
     let follow_up_project = html_project(
         vec![OutputFile::new(
             PathBuf::from("index.html"),
@@ -901,29 +949,25 @@ fn skip_unchanged_mode_still_cleans_stale_manifest_tracked_outputs() {
         )],
         Some(PathBuf::from("index.html")),
     );
-    write_project_outputs(
+    let follow_up = write_project_outputs(
         &follow_up_project,
         &skip_unchanged_options(output_root.clone(), Some(project_dir.clone())),
     )
     .expect("follow-up write should succeed");
 
-    let updated_index_modified = fs::metadata(output_root.join("index.html"))
-        .expect("index should still exist")
-        .modified()
-        .expect("metadata should include modified time");
-    assert_eq!(index_modified, updated_index_modified);
-    assert!(
-        !output_root.join("about/index.html").exists(),
-        "stale manifest-tracked output should still be removed in skip-unchanged mode"
+    assert_eq!(
+        follow_up.outcome_for(Path::new("index.html")),
+        Some(OutputWriteOutcome::SkippedUnchanged),
+        "the retained page keeps its existing content"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
+    assert_path_missing(&output_root.join("about/index.html"));
 }
 
 #[test]
 fn build_project_preserves_string_table_for_frontend_signature_diagnostics() {
-    let root = temp_dir("frontend_signature_diagnostics");
-    fs::create_dir_all(&root).expect("should create temp root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     fs::write(
         root.join("main.moth"),
         "use_missing |value Missing|:\n    return value\n;\n",
@@ -951,16 +995,15 @@ fn build_project_preserves_string_table_for_frontend_signature_diagnostics() {
             )
         );
     }
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn config_validation_failure_returns_config_error_before_compilation() {
-    let root = temp_dir("failing_validation");
-    fs::create_dir_all(&root).expect("should create temp root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     // Invalid frontend syntax to prove it fails BEFORE frontend compilation
-    fs::write(root.join("main.moth"), "invalid syntax;;;;;").expect("should write source file");
+    fs::write(root.join("main.moth"), "invalid syntax;;").expect("should write source file");
     {
         let _cwd_guard = CurrentDirGuard::set_to(&root);
 
@@ -978,13 +1021,11 @@ fn config_validation_failure_returns_config_error_before_compilation() {
             "expected fake config validation message"
         );
     }
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn validated_output_settings_select_default_profile_roots() {
-    let root = temp_dir("output_defaults");
+    let root = unused_temp_path("output_defaults");
     let config = Config::new(root.clone());
     let mut string_table = StringTable::new();
     let settings = crate::build_system::project_config::validate_directory_output_settings(
@@ -1014,7 +1055,7 @@ fn validated_output_settings_select_default_profile_roots() {
 
 #[test]
 fn validated_output_settings_preserve_configured_profile_roots() {
-    let root = temp_dir("output_overrides");
+    let root = unused_temp_path("output_overrides");
     let mut config = Config::new(root.clone());
     config.dev_folder = PathBuf::from("preview");
     config.release_folder = PathBuf::from("public");
@@ -1031,7 +1072,8 @@ fn validated_output_settings_preserve_configured_profile_roots() {
 
 #[test]
 fn directory_frontend_skips_separator_normalized_output_roots() {
-    let root = temp_dir("stage0_separator_normalized_output_skip");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let normalized_dev_root = root.join("generated/site");
     fs::create_dir_all(&normalized_dev_root).expect("should create normalized output root");
     fs::write(
@@ -1062,8 +1104,6 @@ output_folder #= "generated\\release"
             .err()
             .map(|messages| rendered_error_messages(&messages))
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[cfg(unix)]
@@ -1071,7 +1111,8 @@ output_folder #= "generated\\release"
 fn directory_frontend_skips_symlink_ancestor_output_aliases() {
     use std::os::unix::fs::symlink;
 
-    let root = temp_dir("stage0_symlink_ancestor_output_alias_skip");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let physical_output_root = root.join("generated/site");
     fs::create_dir_all(&physical_output_root).expect("should create physical output root");
     symlink(root.join("generated"), root.join("preview"))
@@ -1104,8 +1145,6 @@ output_folder #= "generated\\release"
             .err()
             .map(|messages| rendered_error_messages(&messages))
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[cfg(unix)]
@@ -1113,7 +1152,8 @@ output_folder #= "generated\\release"
 fn directory_frontend_skips_symlink_aliases_to_output_descendants() {
     use std::os::unix::fs::symlink;
 
-    let root = temp_dir("stage0_symlink_output_descendant_skip");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let physical_output_root = root.join("generated/site");
     let physical_output_descendant = physical_output_root.join("nested");
     fs::create_dir_all(&physical_output_descendant)
@@ -1148,8 +1188,6 @@ output_folder #= "generated\\release"
             .err()
             .map(|messages| rendered_error_messages(&messages))
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[cfg(unix)]
@@ -1157,7 +1195,8 @@ output_folder #= "generated\\release"
 fn validated_output_settings_reject_canonical_root_aliases() {
     use std::os::unix::fs::symlink;
 
-    let root = temp_dir("output_canonical_aliases");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let entry_root = root.join("src");
     let shared_root = root.join("shared-output");
     fs::create_dir_all(&entry_root).expect("should create entry root");
@@ -1213,13 +1252,12 @@ fn validated_output_settings_reject_canonical_root_aliases() {
         rendered.contains("resolve to the same output root and must be distinct"),
         "canonical-alias rejection should explain the physical output-root conflict: {rendered}"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[test]
 fn build_directory_project_requires_artifact_root_in_configured_entry_root() {
-    let root = temp_dir("missing_homepage");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(src.join("about")).expect("should create about folder");
 
@@ -1238,20 +1276,20 @@ fn build_directory_project_requires_artifact_root_in_configured_entry_root() {
         &[],
     );
 
-    assert!(result.is_err(), "missing root homepage should fail");
-    let messages = result.err().expect("expected missing homepage error");
+    let Err(messages) = result else {
+        panic!("missing root homepage should fail");
+    };
     assert_has_config_error(&messages);
     assert!(
         messages.first_infrastructure_error_for_tests().is_none(),
         "missing homepage should stay as a typed config diagnostic"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn build_project_routes_invalid_page_url_style_through_typed_config_diagnostic() {
-    let root = temp_dir("invalid_page_url_style");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create source folder");
     fs::write(
@@ -1273,8 +1311,6 @@ fn build_project_routes_invalid_page_url_style_through_typed_config_diagnostic()
     };
     assert_has_config_error(&messages);
     assert_invalid_project_setting(&messages, "page_url_style", "slashy");
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 // -------------------------
@@ -1283,8 +1319,8 @@ fn build_project_routes_invalid_page_url_style_through_typed_config_diagnostic()
 
 #[test]
 fn duplicate_output_destination_causes_zero_files_written() {
-    let root = temp_dir("duplicate_dest");
-    fs::create_dir_all(&root).expect("should create temp root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
 
     let project = Project {
         output_files: vec![
@@ -1303,20 +1339,18 @@ fn duplicate_output_destination_causes_zero_files_written() {
     };
 
     let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
-    assert!(result.is_err(), "duplicate output path should be rejected");
+    let Err(messages) = result else {
+        panic!("duplicate output path should be rejected");
+    };
+    assert_output_rejection(&messages, "duplicate-destination");
 
-    assert!(
-        !root.join("index.html").exists(),
-        "no files should be written when a duplicate destination is detected"
-    );
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
+    assert_path_missing(&root.join("index.html"));
 }
 
 #[test]
 fn windows_ambiguous_output_aliases_fail_before_emission() {
-    let root = temp_dir("windows_ambiguous_output_alias");
-    fs::create_dir_all(&root).expect("should create temp root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
 
     let project = Project {
         output_files: vec![
@@ -1335,20 +1369,18 @@ fn windows_ambiguous_output_aliases_fail_before_emission() {
     };
 
     let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
-    assert!(
-        result.is_err(),
-        "Windows-normalized output aliases must fail during preflight"
-    );
-    assert!(!root.join("page.js").exists());
-    assert!(!root.join("page.js.").exists());
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
+    let Err(messages) = result else {
+        panic!("Windows-normalized output aliases must fail during preflight");
+    };
+    assert_output_rejection(&messages, "invalid-relative-output-path");
+    assert_path_missing(&root.join("page.js"));
+    assert_path_missing(&root.join("page.js."));
 }
 
 #[test]
 fn file_ancestor_conflict_causes_zero_files_written() {
-    let root = temp_dir("file_ancestor_dest");
-    fs::create_dir_all(&root).expect("should create temp root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
 
     let project = Project {
         output_files: vec![
@@ -1367,13 +1399,11 @@ fn file_ancestor_conflict_causes_zero_files_written() {
     };
 
     let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
-    assert!(result.is_err(), "a file cannot contain a child output");
-    assert!(
-        !root.join("assets").exists(),
-        "preflight must reject the batch before creating an ancestor"
-    );
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
+    let Err(messages) = result else {
+        panic!("a file cannot contain a child output");
+    };
+    assert_output_rejection(&messages, "file-ancestor-conflict");
+    assert_path_missing(&root.join("assets"));
 }
 
 #[test]
@@ -1381,8 +1411,9 @@ fn file_ancestor_conflict_uses_component_boundaries_before_emission() {
     let output_paths = ["assets", "assets-keep.js", "assets/chunk.js"];
     let input_orders = [[0, 1, 2], [1, 2, 0], [2, 0, 1]];
 
-    for (case_index, order) in input_orders.into_iter().enumerate() {
-        let root = temp_dir(&format!("file_ancestor_component_{case_index}"));
+    for order in input_orders {
+        let _temp7 = tempfile::tempdir().expect("should create temp dir");
+        let root = _temp7.path().to_path_buf();
         fs::create_dir_all(&root).expect("should create temp root");
         let output_files = order
             .into_iter()
@@ -1401,10 +1432,10 @@ fn file_ancestor_conflict_uses_component_boundaries_before_emission() {
         };
 
         let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
-        assert!(
-            result.is_err(),
-            "a file ancestor must be rejected regardless of lexical sibling ordering"
-        );
+        let Err(messages) = result else {
+            panic!("a file ancestor must be rejected regardless of lexical sibling ordering");
+        };
+        assert_output_rejection(&messages, "file-ancestor-conflict");
         assert!(
             fs::read_dir(&root)
                 .expect("output root should remain readable")
@@ -1419,8 +1450,8 @@ fn file_ancestor_conflict_uses_component_boundaries_before_emission() {
 
 #[test]
 fn explicit_directory_output_may_contain_child_files() {
-    let root = temp_dir("directory_child_dest");
-    fs::create_dir_all(&root).expect("should create temp root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
 
     let project = Project {
         output_files: vec![
@@ -1437,19 +1468,17 @@ fn explicit_directory_output_may_contain_child_files() {
 
     write_project_outputs(&project, &always_write_options(root.clone(), None))
         .expect("an explicit directory output should contain child files");
-    assert!(root.join("assets").is_dir());
+    assert_directory(&root.join("assets"));
     assert_eq!(
         fs::read(root.join("assets/logo.png")).expect("child output should exist"),
         vec![1, 2, 3]
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn file_and_directory_same_destination_is_rejected_before_writing() {
-    let root = temp_dir("file_directory_same_dest");
-    fs::create_dir_all(&root).expect("should create temp root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
 
     let project = Project {
         output_files: vec![
@@ -1465,19 +1494,17 @@ fn file_and_directory_same_destination_is_rejected_before_writing() {
     };
 
     let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
-    assert!(
-        result.is_err(),
-        "a file and directory cannot claim one destination"
-    );
-    assert!(!root.join("assets").exists());
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
+    let Err(messages) = result else {
+        panic!("a file and directory cannot claim one destination");
+    };
+    assert_output_rejection(&messages, "duplicate-destination");
+    assert_path_missing(&root.join("assets"));
 }
 
 #[test]
 fn case_only_output_collision_causes_zero_files_written() {
-    let root = temp_dir("case_only_dest");
-    fs::create_dir_all(&root).expect("should create temp root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
 
     let project = Project {
         output_files: vec![
@@ -1496,14 +1523,12 @@ fn case_only_output_collision_causes_zero_files_written() {
     };
 
     let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
-    assert!(
-        result.is_err(),
-        "case-only output collisions must be rejected"
-    );
-    assert!(!root.join("Pages").exists());
-    assert!(!root.join("pages").exists());
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
+    let Err(messages) = result else {
+        panic!("case-only output collisions must be rejected");
+    };
+    assert_output_rejection(&messages, "duplicate-destination");
+    assert_path_missing(&root.join("Pages"));
+    assert_path_missing(&root.join("pages"));
 }
 
 #[cfg(unix)]
@@ -1511,10 +1536,11 @@ fn case_only_output_collision_causes_zero_files_written() {
 fn symlinked_output_ancestor_escape_causes_zero_files_written() {
     use std::os::unix::fs::symlink;
 
-    let root = temp_dir("symlink_output_escape");
-    let outside = temp_dir("symlink_output_outside");
-    fs::create_dir_all(&root).expect("should create temp root");
-    fs::create_dir_all(&outside).expect("should create outside root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let outside = _temp.path().to_path_buf();
+
     symlink(&outside, root.join("link")).expect("should create output symlink");
 
     let project = Project {
@@ -1528,14 +1554,11 @@ fn symlinked_output_ancestor_escape_causes_zero_files_written() {
     };
 
     let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
-    assert!(
-        result.is_err(),
-        "symlink escapes must be rejected before writes"
-    );
-    assert!(!outside.join("escape.js").exists());
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
-    fs::remove_dir_all(&outside).expect("should remove outside root");
+    let Err(messages) = result else {
+        panic!("symlink escapes must be rejected before writes");
+    };
+    assert_output_rejection(&messages, "escapes-output-root");
+    assert_path_missing(&outside.join("escape.js"));
 }
 
 #[cfg(unix)]
@@ -1543,7 +1566,8 @@ fn symlinked_output_ancestor_escape_causes_zero_files_written() {
 fn symlink_alias_destinations_are_rejected_before_writing() {
     use std::os::unix::fs::symlink;
 
-    let root = temp_dir("symlink_alias_destinations");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let real = root.join("real");
     fs::create_dir_all(&real).expect("should create real output directory");
     symlink(&real, root.join("left")).expect("should create first alias");
@@ -1566,19 +1590,17 @@ fn symlink_alias_destinations_are_rejected_before_writing() {
     };
 
     let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
-    assert!(
-        result.is_err(),
-        "distinct relative paths that alias one canonical file must be rejected"
-    );
-    assert!(!real.join("app.js").exists());
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
+    let Err(messages) = result else {
+        panic!("distinct relative paths that alias one canonical file must be rejected");
+    };
+    assert_output_rejection(&messages, "canonical-destination-collision");
+    assert_path_missing(&real.join("app.js"));
 }
 
 #[test]
 fn nested_explicit_directory_outputs_may_contain_child_files() {
-    let root = temp_dir("nested_directory_child_dest");
-    fs::create_dir_all(&root).expect("should create temp root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
 
     let project = Project {
         output_files: vec![
@@ -1601,8 +1623,6 @@ fn nested_explicit_directory_outputs_may_contain_child_files() {
         fs::read(root.join("assets/scripts/pages/app.js")).expect("child output should exist"),
         b"console.log('app');"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[cfg(unix)]
@@ -1610,8 +1630,9 @@ fn nested_explicit_directory_outputs_may_contain_child_files() {
 fn symlink_alias_file_ancestor_conflict_is_rejected_before_writing() {
     use std::os::unix::fs::symlink;
 
-    let root = temp_dir("symlink_alias_file_ancestor");
-    fs::create_dir_all(&root).expect("should create output root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let real_file = root.join("real");
     fs::write(&real_file, "existing").expect("should create existing file ancestor");
     symlink(&real_file, root.join("alias")).expect("should create file alias");
@@ -1633,16 +1654,14 @@ fn symlink_alias_file_ancestor_conflict_is_rejected_before_writing() {
     };
 
     let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
-    assert!(
-        result.is_err(),
-        "a symlinked path below a canonical file ancestor must fail preflight"
-    );
+    let Err(messages) = result else {
+        panic!("a symlinked path below a canonical file ancestor must fail preflight");
+    };
+    assert_output_rejection(&messages, "dangling-symlink-in-destination");
     assert_eq!(
         fs::read(&real_file).expect("existing file should remain"),
         b"existing"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp root");
 }
 
 #[cfg(unix)]
@@ -1650,8 +1669,9 @@ fn symlink_alias_file_ancestor_conflict_is_rejected_before_writing() {
 fn dangling_symlink_aliases_are_rejected_before_emission() {
     use std::os::unix::fs::symlink;
 
-    let root = temp_dir("dangling_symlink_alias_file");
-    fs::create_dir_all(&root).expect("should create output root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     symlink(root.join("real"), root.join("alias")).expect("should create dangling alias");
     let project = Project {
         output_files: vec![
@@ -1669,12 +1689,15 @@ fn dangling_symlink_aliases_are_rejected_before_emission() {
         warnings: vec![],
     };
     let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
-    assert!(result.is_err());
-    assert!(!root.join("real/app.js").exists());
-    fs::remove_dir_all(&root).expect("should remove temp root");
+    let Err(messages) = result else {
+        panic!("dangling symlink should be rejected");
+    };
+    assert_output_rejection(&messages, "dangling-symlink-in-destination");
+    assert_path_missing(&root.join("real/app.js"));
 
-    let root = temp_dir("dangling_symlink_alias_ancestor");
-    fs::create_dir_all(&root).expect("should create output root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     symlink(root.join("real"), root.join("alias")).expect("should create dangling alias");
     let project = Project {
         output_files: vec![
@@ -1692,9 +1715,11 @@ fn dangling_symlink_aliases_are_rejected_before_emission() {
         warnings: vec![],
     };
     let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
-    assert!(result.is_err());
-    assert!(!root.join("real").exists());
-    fs::remove_dir_all(&root).expect("should remove temp root");
+    let Err(messages) = result else {
+        panic!("dangling symlink directory should be rejected");
+    };
+    assert_output_rejection(&messages, "dangling-symlink-in-destination");
+    assert_path_missing(&root.join("real"));
 }
 
 #[cfg(unix)]
@@ -1702,9 +1727,11 @@ fn dangling_symlink_aliases_are_rejected_before_emission() {
 fn directory_output_root_symlink_escape_causes_zero_files_written() {
     use std::os::unix::fs::symlink;
 
-    for (case_name, target_name) in [("sibling", "outside"), ("entry", "src")] {
-        let root = temp_dir(&format!("directory_output_root_symlink_{case_name}"));
-        let outside = temp_dir(&format!("directory_output_root_target_{case_name}"));
+    for (_case_name, target_name) in [("sibling", "outside"), ("entry", "src")] {
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let _temp8 = tempfile::tempdir().expect("should create temp dir");
+        let outside = _temp8.path().to_path_buf();
         let entry_root = root.join("src");
         let output_root = root.join("dev");
         fs::create_dir_all(&entry_root).expect("should create entry root");
@@ -1740,12 +1767,14 @@ fn directory_output_root_symlink_escape_causes_zero_files_written() {
         };
 
         let result = write_project_outputs(&project, &options);
-        assert!(
-            result.is_err(),
-            "directory output roots must reject symlink targets outside their validated boundary"
-        );
-        assert!(!outside.join("index.html").exists());
-        assert!(!entry_root.join("index.html").exists());
+        let Err(messages) = result else {
+            panic!(
+                "directory output roots must reject symlink targets outside their validated boundary"
+            );
+        };
+        assert_output_rejection(&messages, "output-root-not-inside-project");
+        assert_path_missing(&outside.join("index.html"));
+        assert_path_missing(&entry_root.join("index.html"));
         assert!(
             fs::symlink_metadata(&output_root)
                 .expect("output symlink should remain")
@@ -1753,15 +1782,14 @@ fn directory_output_root_symlink_escape_causes_zero_files_written() {
                 .is_symlink()
         );
 
-        fs::remove_dir_all(&root).expect("should remove project root");
         fs::remove_dir_all(&outside).expect("should remove target root");
     }
 }
 
 #[test]
 fn invalid_later_output_path_causes_zero_files_written() {
-    let root = temp_dir("invalid_later_path");
-    fs::create_dir_all(&root).expect("should create temp root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
 
     let project = Project {
         output_files: vec![
@@ -1780,19 +1808,18 @@ fn invalid_later_output_path_causes_zero_files_written() {
     };
 
     let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
-    assert!(result.is_err(), "invalid later path should be rejected");
+    let Err(messages) = result else {
+        panic!("invalid later path should be rejected");
+    };
+    assert_output_rejection(&messages, "invalid-relative-output-path");
 
-    assert!(
-        !root.join("index.html").exists(),
-        "preflight must reject the batch before any file is written"
-    );
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
+    assert_path_missing(&root.join("index.html"));
 }
 
 #[test]
 fn empty_directory_output_setting_is_rejected() {
-    let root = temp_dir("empty_output_setting");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create source folder");
     fs::write(
@@ -1813,13 +1840,12 @@ fn empty_directory_output_setting_is_rejected() {
         panic!("empty dev_folder should fail build");
     };
     assert_has_config_error(&messages);
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn absolute_output_setting_is_rejected() {
-    let root = temp_dir("absolute_output_setting");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create source folder");
     fs::write(
@@ -1840,13 +1866,12 @@ fn absolute_output_setting_is_rejected() {
         panic!("absolute dev_folder should fail build");
     };
     assert_has_config_error(&messages);
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn output_folder_inside_entry_root_is_rejected() {
-    let root = temp_dir("output_inside_entry_root");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create source folder");
     fs::write(
@@ -1867,13 +1892,12 @@ fn output_folder_inside_entry_root_is_rejected() {
         panic!("output folder inside entry_root should fail build");
     };
     assert_has_config_error(&messages);
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn identical_dev_and_release_folders_are_rejected() {
-    let root = temp_dir("identical_dev_release");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create source folder");
     fs::write(
@@ -1894,13 +1918,12 @@ fn identical_dev_and_release_folders_are_rejected() {
         panic!("identical dev and release folders should fail build");
     };
     assert_has_config_error(&messages);
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn valid_distinct_output_folders_resolve_unchanged() {
-    let root = temp_dir("valid_output_folders");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create source folder");
     fs::write(
@@ -1926,13 +1949,12 @@ fn valid_distinct_output_folders_resolve_unchanged() {
             .output_root,
         root.join("dev")
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn first_dev_and_release_builds_create_independent_owned_manifests() {
-    let root = temp_dir("first_profile_manifests");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let source_root = root.join("src");
     fs::create_dir_all(&source_root).expect("should create source root");
     fs::write(
@@ -1966,7 +1988,7 @@ fn first_dev_and_release_builds_create_independent_owned_manifests() {
     let dev_manifest = fs::read_to_string(root.join("dev/.moth_manifest"))
         .expect("dev manifest should exist after the first build");
     assert!(dev_manifest.contains("# profile: dev"));
-    assert!(!root.join("release/.moth_manifest").exists());
+    assert_path_missing(&root.join("release/.moth_manifest"));
 
     let release_build = build_project(
         &builder,
@@ -1990,8 +2012,7 @@ fn first_dev_and_release_builds_create_independent_owned_manifests() {
     let release_manifest = fs::read_to_string(root.join("release/.moth_manifest"))
         .expect("release manifest should exist after the first build");
     assert!(release_manifest.contains("# profile: release"));
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
-use crate::compiler_tests::test_support::temp_dir;
+use crate::compiler_tests::test_fs::{assert_directory, assert_path_missing};
+use crate::compiler_tests::test_support::unused_temp_path;

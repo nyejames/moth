@@ -40,6 +40,11 @@ compact diagnostic, infrastructure-failure or compiler-bug lanes and the benchma
 has received its own size fix rather than a lint exemption.
 The later migration gate and final validation gate must both prove that the allowances and large-error condition are gone.
 
+The latest test-suite-honesty branch CI run confirms the current handoff: every non-Windows gate
+passed, while the only known failure was the non-blocking Windows leg reporting the remaining
+large-error variants. This is the diagnostics-layout refactor's owned follow-up, not a test-suite
+honesty regression; do not add another local allowance to mask it.
+
 The implementation must converge on:
 
 - one deterministic build-lifetime source database

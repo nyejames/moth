@@ -3,21 +3,36 @@
 //! WHAT: sequences success and failure checks against the canonical expectation model.
 //! WHY: each assertion family owns its checks while this module preserves their established
 //!      order and converts failures into runner results.
+//!
+//! Family owners: `artifacts` (artifact index, kinds, HTML shell contract), `diagnostics`,
+//! `goldens`, `warnings`, `wasm` (module structure and the HTML-Wasm runtime export contract),
+//! `rendered_output` (harness JavaScript, event protocol, rendered expectations), and its two
+//! supporting owners `html_scripts` (supported `<script>` shapes) and `node_harness` (owned
+//! temporary workspace, bounded Node execution, typed harness failures).
 
 mod artifacts;
 mod diagnostics;
 mod goldens;
+mod html_scripts;
+mod node_harness;
 mod rendered_output;
 mod warnings;
 mod wasm;
 
+#[cfg(test)]
+pub(crate) use artifacts::{ArtifactIndexError, HtmlShellViolation, html_shell_violation};
 pub(crate) use goldens::discover_golden_expectation;
 #[cfg(test)]
-pub(crate) use rendered_output::execute_wasm_harness_for_test;
+pub(crate) use html_scripts::extract_executable_scripts;
 #[cfg(test)]
-pub(crate) use rendered_output::{
-    RuntimeEvent, SlotOutput, extract_script_blocks, parse_harness_output,
+pub(crate) use node_harness::{
+    RenderHarnessError, RenderHarnessErrorKind, run_node_script_within,
+    run_script_with_executable_for_test, with_harness_workspace,
 };
+#[cfg(test)]
+pub(crate) use rendered_output::{RuntimeEvent, SlotOutput, parse_harness_output};
+#[cfg(test)]
+pub(crate) use rendered_output::{execute_wasm_harness_for_test, required_text_artifact_for_test};
 
 #[cfg(test)]
 use super::GoldenMode;
@@ -111,7 +126,25 @@ pub(crate) fn validate_golden_outputs(
     build_result: &BuildResult,
     golden: &GoldenExpectation,
 ) -> Option<(String, FailureKind)> {
-    goldens::validate_golden_outputs(build_result, golden)
+    let index = match artifacts::BuiltArtifactIndex::build(build_result) {
+        Ok(index) => index,
+        Err(error) => {
+            return Some((
+                format!("Artifact inventory is ambiguous: {error}."),
+                FailureKind::HarnessFailed,
+            ));
+        }
+    };
+    goldens::validate_golden_outputs(&index, golden)
+}
+
+/// Test-only view of the artifact index construction contract.
+///
+/// The typed error is handed back unchanged so self-tests identify a rejection by its variant
+/// rather than by matching prose.
+#[cfg(test)]
+pub(crate) fn build_artifact_index_error(build_result: &BuildResult) -> Option<ArtifactIndexError> {
+    artifacts::BuiltArtifactIndex::build(build_result).err()
 }
 
 #[cfg(test)]
@@ -133,49 +166,13 @@ pub(crate) fn validate_success_result(
         return fail(build_result, reason, FailureKind::ExpectationViolation);
     }
 
-    if case.backend_id == BackendId::Html
-        && let Some(reason) = artifacts::validate_html_baseline_contract(&build_result)
-    {
-        return fail(build_result, reason, FailureKind::ExpectationViolation);
-    }
-
-    if case.backend_id == BackendId::HtmlWasm
-        && let Some(reason) = wasm::validate_html_wasm_baseline_contract(&build_result)
-    {
-        return fail(build_result, reason, FailureKind::ExpectationViolation);
-    }
-
-    if let Some(reason) =
-        artifacts::validate_artifact_assertions(&build_result, &expectation.artifact_assertions)
-    {
-        return fail(build_result, reason, FailureKind::ExpectationViolation);
-    }
-
-    if let Some(reason) = artifacts::validate_artifacts_must_not_exist(
-        &build_result,
-        &expectation.artifacts_must_not_exist,
-    ) {
-        return fail(build_result, reason, FailureKind::ExpectationViolation);
-    }
-
+    // The artifact-consuming assertions borrow `build_result` through the index, so they run
+    // in their own scope and hand back an owned reason. That keeps the index alive for exactly
+    // as long as the assertions need it and leaves `build_result` movable into the result.
     if let Some((reason, kind)) =
-        goldens::validate_golden_outputs(&build_result, &expectation.golden)
+        validate_indexed_success_assertions(case, &build_result, expectation)
     {
         return fail(build_result, reason, kind);
-    }
-
-    if expectation.rendered_output.is_present() {
-        let rendered_output_result = if case.backend_id == BackendId::HtmlWasm {
-            rendered_output::validate_wasm_rendered_output(
-                &build_result,
-                &expectation.rendered_output,
-            )
-        } else {
-            rendered_output::validate_rendered_output(&build_result, &expectation.rendered_output)
-        };
-        if let Some((reason, kind)) = rendered_output_result {
-            return fail(build_result, reason, kind);
-        }
     }
 
     CaseExecutionResult {
@@ -186,6 +183,70 @@ pub(crate) fn validate_success_result(
         failure_reason: None,
         failure_kind: None,
     }
+}
+
+/// Runs every success assertion that consumes the built-artifact index.
+///
+/// WHAT: builds one unique artifact index, then evaluates the baseline, artifact, golden and
+///       rendered-output families against it.
+/// WHY: artifact identity is proved once, before any assertion consumes it. An ambiguous output
+///      set (duplicate paths, case aliases, non-UTF-8 paths) is a harness failure, because every
+///      later assertion would silently inspect whichever artifact won a first-match lookup.
+fn validate_indexed_success_assertions(
+    case: &TestCaseSpec,
+    build_result: &BuildResult,
+    expectation: &SuccessExpectation,
+) -> Option<(String, FailureKind)> {
+    let index = match artifacts::BuiltArtifactIndex::build(build_result) {
+        Ok(index) => index,
+        Err(error) => {
+            return Some((
+                format!("Artifact inventory is ambiguous: {error}."),
+                FailureKind::HarnessFailed,
+            ));
+        }
+    };
+
+    if case.backend_id == BackendId::Html
+        && let Some(reason) = artifacts::validate_html_baseline_contract(&index)
+    {
+        return Some((reason, FailureKind::ExpectationViolation));
+    }
+
+    if case.backend_id == BackendId::HtmlWasm
+        && let Some(reason) = wasm::validate_html_wasm_baseline_contract(&index)
+    {
+        return Some((reason, FailureKind::ExpectationViolation));
+    }
+
+    if let Some(reason) =
+        artifacts::validate_artifact_assertions(&index, &expectation.artifact_assertions)
+    {
+        return Some((reason, FailureKind::ExpectationViolation));
+    }
+
+    if let Some(reason) =
+        artifacts::validate_artifacts_must_not_exist(&index, &expectation.artifacts_must_not_exist)
+    {
+        return Some((reason, FailureKind::ExpectationViolation));
+    }
+
+    if let Some(failure) = goldens::validate_golden_outputs(&index, &expectation.golden) {
+        return Some(failure);
+    }
+
+    if expectation.rendered_output.is_present() {
+        let rendered_output_result = if case.backend_id == BackendId::HtmlWasm {
+            rendered_output::validate_wasm_rendered_output(&index, &expectation.rendered_output)
+        } else {
+            rendered_output::validate_rendered_output(&index, &expectation.rendered_output)
+        };
+        if let Some(failure) = rendered_output_result {
+            return Some(failure);
+        }
+    }
+
+    None
 }
 
 fn fail(build_result: BuildResult, reason: String, kind: FailureKind) -> CaseExecutionResult {

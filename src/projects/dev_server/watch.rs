@@ -261,8 +261,11 @@ impl Drop for WatchSession {
         self.stop_signal.store(true, Ordering::Relaxed);
         if let WatchBackend::Polling { join_handle } = &mut self.backend
             && let Some(join_handle) = join_handle.take()
+            && join_handle.join().is_err()
         {
-            let _ = join_handle.join();
+            // A polling worker that panicked stopped watching for changes. Discarding the join
+            // result would leave the dev server reporting a live watch it no longer has.
+            say!(Yellow "Dev server watch warning: the polling worker panicked and stopped watching.");
         }
     }
 }

@@ -38,38 +38,34 @@ use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterface
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
 
-fn empty_location() -> SourceLocation {
-    SourceLocation::default()
-}
-
 fn build_finalized_tir_template(store: &mut TemplateIrStore) -> TemplateIrId {
     let mut builder = TemplateIrBuilder::new(store);
-    let root = builder.push_sequence_node(vec![], empty_location());
+    let root = builder.push_sequence_node(vec![], SourceLocation::default());
     builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        empty_location(),
+        SourceLocation::default(),
     )
 }
 
 fn empty_sequence(store: &mut TemplateIrStore) -> TemplateIrNodeId {
     store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Sequence { children: vec![] },
-        empty_location(),
+        SourceLocation::default(),
     ))
 }
 
 fn runtime_slot_plan(render_root: TemplateIrNodeId) -> TemplateSlotPlan {
     TemplateSlotPlan {
-        location: empty_location(),
+        location: SourceLocation::default(),
         contribution_sources: vec![],
         slot_sites: vec![TemplateSlotSitePlan {
             site: RuntimeSlotSiteId(0),
             key: SlotKey::Default,
             render_root,
-            location: empty_location(),
+            location: SourceLocation::default(),
         }],
     }
 }
@@ -81,7 +77,7 @@ fn bool_selector() -> TemplateBranchSelector {
         diagnostic_type: DataType::Bool,
         function_receiver: None,
         value_mode: ValueMode::ImmutableOwned,
-        location: empty_location(),
+        location: SourceLocation::default(),
         reactive_source: None,
         reactive_template: None,
         const_record_state: ConstRecordState::RuntimeValue,
@@ -109,11 +105,11 @@ fn push_returns_sequential_ids_per_collection() {
             byte_len: 3,
             origin: TemplateSegmentOrigin::Body,
         },
-        empty_location(),
+        SourceLocation::default(),
     ));
     let node_b = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Sequence { children: vec![] },
-        empty_location(),
+        SourceLocation::default(),
     ));
     assert_eq!(node_a.index(), 0);
     assert_eq!(node_b.index(), 1);
@@ -125,14 +121,14 @@ fn push_returns_sequential_ids_per_collection() {
         Style::default(),
         TemplateType::StringFunction,
         TemplateIrSummary::default(),
-        empty_location(),
+        SourceLocation::default(),
     ));
     let template_b = store.push_template(TemplateIr::new(
         node_a,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        empty_location(),
+        SourceLocation::default(),
     ));
     assert_eq!(template_a.index(), 0);
     assert_eq!(template_b.index(), 1);
@@ -151,14 +147,14 @@ fn typed_retrieval_returns_stored_entry() {
             byte_len: 0,
             origin: TemplateSegmentOrigin::Body,
         },
-        empty_location(),
+        SourceLocation::default(),
     ));
     let template_id = store.push_template(TemplateIr::new(
         node_id,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        empty_location(),
+        SourceLocation::default(),
     ));
     let retrieved_template = store
         .get_template(template_id)
@@ -168,7 +164,7 @@ fn typed_retrieval_returns_stored_entry() {
     // Node: round-trips the exact node kind through get_node.
     let sequence_node_id = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Sequence { children: vec![] },
-        empty_location(),
+        SourceLocation::default(),
     ));
     let retrieved_node = store.get_node(sequence_node_id).expect("node should exist");
     assert!(matches!(
@@ -196,7 +192,7 @@ fn typed_retrieval_returns_stored_entry() {
     let retrieved_slot_plan = store
         .get_slot_plan(slot_plan_id)
         .expect("slot plan should exist");
-    assert_eq!(retrieved_slot_plan.location, empty_location());
+    assert_eq!(retrieved_slot_plan.location, SourceLocation::default());
     assert!(retrieved_slot_plan.contribution_sources.is_empty());
     assert_eq!(retrieved_slot_plan.slot_sites.len(), 1);
     assert_eq!(retrieved_slot_plan.slot_sites[0].site, RuntimeSlotSiteId(0));
@@ -205,7 +201,10 @@ fn typed_retrieval_returns_stored_entry() {
         retrieved_slot_plan.slot_sites[0].render_root,
         TemplateIrNodeId::new(0)
     );
-    assert_eq!(retrieved_slot_plan.slot_sites[0].location, empty_location());
+    assert_eq!(
+        retrieved_slot_plan.slot_sites[0].location,
+        SourceLocation::default()
+    );
 }
 
 #[test]
@@ -392,14 +391,14 @@ fn slot_placeholder_lookup_uses_the_store_not_raw_vectors() {
     let placeholder = TirSlotPlaceholder::with_wrapper_sets(
         SlotKey::Default,
         occurrence,
-        empty_location(),
+        SourceLocation::default(),
         None,
         None,
         false,
     );
     store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Slot { placeholder },
-        empty_location(),
+        SourceLocation::default(),
     ));
 
     let found = store
@@ -414,7 +413,7 @@ fn control_flow_body_replacement_rejects_missing_owner() {
     let mut store = TemplateIrStore::new();
     let replacement = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Sequence { children: vec![] },
-        empty_location(),
+        SourceLocation::default(),
     ));
     let error = store
         .replace_control_flow_body(
@@ -435,13 +434,13 @@ fn slot_plan_commit_rejects_source_id_that_differs_from_index() {
         .commit_slot_plan(
             reserved,
             TemplateSlotPlan {
-                location: empty_location(),
+                location: SourceLocation::default(),
                 contribution_sources: vec![TemplateSlotContributionSourcePlan {
                     source: RuntimeSlotContributionSourceId(1),
                     target: SlotKey::Default,
                     render_root,
                     renders_wrapper_unconditionally: false,
-                    location: empty_location(),
+                    location: SourceLocation::default(),
                 }],
                 slot_sites: vec![],
             },
@@ -460,13 +459,13 @@ fn slot_plan_commit_rejects_site_id_that_differs_from_index() {
         .commit_slot_plan(
             reserved,
             TemplateSlotPlan {
-                location: empty_location(),
+                location: SourceLocation::default(),
                 contribution_sources: vec![],
                 slot_sites: vec![TemplateSlotSitePlan {
                     site: RuntimeSlotSiteId(1),
                     key: SlotKey::Default,
                     render_root,
-                    location: empty_location(),
+                    location: SourceLocation::default(),
                 }],
             },
         )
@@ -483,13 +482,13 @@ fn slot_plan_commit_rejects_missing_source_render_root() {
         .commit_slot_plan(
             reserved,
             TemplateSlotPlan {
-                location: empty_location(),
+                location: SourceLocation::default(),
                 contribution_sources: vec![TemplateSlotContributionSourcePlan {
                     source: RuntimeSlotContributionSourceId(0),
                     target: SlotKey::Default,
                     render_root: TemplateIrNodeId::new(99),
                     renders_wrapper_unconditionally: false,
-                    location: empty_location(),
+                    location: SourceLocation::default(),
                 }],
                 slot_sites: vec![],
             },
@@ -519,13 +518,13 @@ fn conversion_failure_leaves_reserved_plan_invisible() {
             placeholder: TirSlotPlaceholder::with_wrapper_sets(
                 SlotKey::Default,
                 occurrence,
-                empty_location(),
+                SourceLocation::default(),
                 None,
                 None,
                 false,
             ),
         },
-        empty_location(),
+        SourceLocation::default(),
     ));
     let reserved = store.reserve_slot_plan();
     let mut copy_state = TirCopyState::new();
@@ -538,7 +537,7 @@ fn conversion_failure_leaves_reserved_plan_invisible() {
 #[test]
 fn active_slot_conversion_publishes_derived_child_and_rewrites_reference() {
     let mut store = TemplateIrStore::new();
-    let location = empty_location();
+    let location = SourceLocation::default();
     let (child_template_id, child_root) = {
         let mut builder = TemplateIrBuilder::new(&mut store);
         let occurrence = builder.store.next_slot_occurrence_id();
@@ -584,7 +583,7 @@ fn active_slot_conversion_publishes_derived_child_and_rewrites_reference() {
         site: RuntimeSlotSiteId(0),
         key: SlotKey::Default,
         render_root,
-        location: empty_location(),
+        location: SourceLocation::default(),
     }];
     let mut copy_state = TirCopyState::new();
 
@@ -669,7 +668,7 @@ fn reactive_subscription_rejects_non_text_node() {
             ReactiveSubscription {
                 source,
                 type_id: builtin_type_ids::STRING,
-                location: empty_location(),
+                location: SourceLocation::default(),
             },
         )
         .expect_err("only text nodes accept reactive subscriptions");
@@ -710,13 +709,13 @@ fn control_flow_lookup_reports_missing_forwarding_template_as_error() {
             ),
             occurrence_id,
         },
-        empty_location(),
+        SourceLocation::default(),
     ));
     let sequence = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Sequence {
             children: vec![child],
         },
-        empty_location(),
+        SourceLocation::default(),
     ));
     let error = store
         .control_flow_node_id_in_subtree(sequence)
@@ -766,7 +765,7 @@ fn derived_publication_preserves_source_metadata() {
         style.clone(),
         TemplateType::StringFunction,
         TemplateIrSummary::default(),
-        empty_location(),
+        SourceLocation::default(),
     ));
     let wrapper_set = store.push_or_reuse_wrapper_set(vec![TemplateWrapperReference::new(
         source,
@@ -798,7 +797,7 @@ fn derived_publication_preserves_source_metadata() {
     assert_eq!(derived_template.summary.text_byte_count, 0);
     assert!(derived_template.style.skip_parent_child_wrappers);
     assert_eq!(derived_template.kind, TemplateType::StringFunction);
-    assert_eq!(derived_template.location, empty_location());
+    assert_eq!(derived_template.location, SourceLocation::default());
     assert_eq!(
         derived_template.conditional_child_wrapper_set,
         Some(wrapper_set)
@@ -811,11 +810,11 @@ fn branch_construction_requires_an_allocated_selector_site() {
     let mut store = TemplateIrStore::new();
     let body = empty_sequence(&mut store);
     let site = store.next_expression_site_id();
-    let branch = TemplateIrBranch::new(bool_selector(), body, empty_location(), site);
+    let branch = TemplateIrBranch::new(bool_selector(), body, SourceLocation::default(), site);
     assert_eq!(branch.selector_site_id, site);
 
     let mut builder = TemplateIrBuilder::new(&mut store);
-    let node = builder.push_branch_chain_node(vec![branch], None, empty_location());
+    let node = builder.push_branch_chain_node(vec![branch], None, SourceLocation::default());
     let TemplateIrNodeKind::BranchChain { branches, .. } = &store.get_node(node).unwrap().kind
     else {
         panic!("expected a branch chain");

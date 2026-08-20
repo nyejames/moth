@@ -24,16 +24,16 @@ use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    function_node, make_test_variable, node, test_location,
+    function_node, make_test_variable, node, test_source_location,
 };
 
 use crate::compiler_frontend::tests::type_id_fixture_support::{
-    param_with_type_id, reference_expr,
+    inferred_type_reference_expr, param_with_type_id,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 
 use crate::compiler_frontend::hir::hir_builder::{
-    assert_no_placeholder_terminators, build_ast, lower_ast,
+    assert_no_placeholder_terminators, build_ast_with_registered_types, lower_ast,
 };
 
 /// Extracts the result-local assignment and merge target from a value-block arm block.
@@ -72,7 +72,7 @@ fn value_match_lowering_uses_shared_result_local_and_merge_block() {
     let arm_a = MatchArm {
         pattern: MatchPattern::Literal(Expression::int(
             1,
-            test_location(3),
+            test_source_location(3),
             ValueMode::ImmutableOwned,
         )),
         guard: None,
@@ -80,19 +80,19 @@ fn value_match_lowering_uses_shared_result_local_and_merge_block() {
             NodeKind::ThenValue(ProducedValues {
                 expressions: vec![Expression::int(
                     10,
-                    test_location(3),
+                    test_source_location(3),
                     ValueMode::ImmutableOwned,
                 )],
-                location: test_location(3),
+                location: test_source_location(3),
             }),
-            test_location(3),
+            test_source_location(3),
         )],
     };
 
     let arm_b = MatchArm {
         pattern: MatchPattern::Literal(Expression::int(
             2,
-            test_location(4),
+            test_source_location(4),
             ValueMode::ImmutableOwned,
         )),
         guard: None,
@@ -100,12 +100,12 @@ fn value_match_lowering_uses_shared_result_local_and_merge_block() {
             NodeKind::ThenValue(ProducedValues {
                 expressions: vec![Expression::int(
                     20,
-                    test_location(4),
+                    test_source_location(4),
                     ValueMode::ImmutableOwned,
                 )],
-                location: test_location(4),
+                location: test_source_location(4),
             }),
-            test_location(4),
+            test_source_location(4),
         )],
     };
 
@@ -113,31 +113,31 @@ fn value_match_lowering_uses_shared_result_local_and_merge_block() {
         NodeKind::ThenValue(ProducedValues {
             expressions: vec![Expression::int(
                 0,
-                test_location(5),
+                test_source_location(5),
                 ValueMode::ImmutableOwned,
             )],
-            location: test_location(5),
+            location: test_source_location(5),
         }),
-        test_location(5),
+        test_source_location(5),
     )];
 
     let value_match_expr = Expression::new(
         ExpressionKind::ValueBlock {
             block: Box::new(ValueBlock::Match(ValueMatchBlock {
-                scrutinee: reference_expr(
+                scrutinee: inferred_type_reference_expr(
                     x.clone(),
                     builtin_type_ids::INT,
-                    test_location(2),
+                    test_source_location(2),
                     ValueMode::ImmutableReference,
                 ),
                 arms: vec![arm_a, arm_b],
                 default: Some(default_body),
                 exhaustiveness: MatchExhaustiveness::HasDefault,
-                location: test_location(2),
+                location: test_source_location(2),
                 result_type_ids: vec![builtin_type_ids::INT],
             })),
         },
-        test_location(2),
+        test_source_location(2),
         builtin_type_ids::INT,
         DataType::Inferred,
         ValueMode::ImmutableOwned,
@@ -150,20 +150,22 @@ fn value_match_lowering_uses_shared_result_local_and_merge_block() {
                 x,
                 builtin_type_ids::INT,
                 false,
-                test_location(1),
+                test_source_location(1),
             )],
             returns: vec![],
         },
         vec![node(
             NodeKind::VariableDeclaration(make_test_variable(result_name, value_match_expr)),
-            test_location(2),
+            test_source_location(2),
         )],
-        test_location(1),
+        test_source_location(1),
     );
 
-    let (module, _type_environment) =
-        lower_ast(build_ast(vec![start_fn], entry_path), &mut string_table)
-            .expect("value-match lowering should succeed");
+    let (module, _type_environment) = lower_ast(
+        build_ast_with_registered_types(vec![start_fn], entry_path),
+        &mut string_table,
+    )
+    .expect("value-match lowering should succeed");
 
     let start = super::start_function(&module);
     let entry_block = &module.blocks[start.entry.0 as usize];
@@ -223,18 +225,21 @@ fn then_value_without_active_target_is_hir_invariant_failure() {
             NodeKind::ThenValue(ProducedValues {
                 expressions: vec![Expression::int(
                     1,
-                    test_location(2),
+                    test_source_location(2),
                     ValueMode::ImmutableOwned,
                 )],
-                location: test_location(2),
+                location: test_source_location(2),
             }),
-            test_location(2),
+            test_source_location(2),
         )],
-        test_location(1),
+        test_source_location(1),
     );
 
-    let err = lower_ast(build_ast(vec![start_fn], entry_path), &mut string_table)
-        .expect_err("ThenValue outside active value-block target should fail HIR lowering");
+    let err = lower_ast(
+        build_ast_with_registered_types(vec![start_fn], entry_path),
+        &mut string_table,
+    )
+    .expect_err("ThenValue outside active value-block target should fail HIR lowering");
 
     let (error_type, message, _location) = err
         .first_infrastructure_error_for_tests()

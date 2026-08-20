@@ -27,8 +27,7 @@ use crate::compiler_frontend::ast::templates::template_body_parser::{
 };
 use crate::compiler_frontend::ast::templates::template_build_state::TemplateBuildState;
 use crate::compiler_frontend::ast::templates::template_control_flow::{
-    TemplateControlFlowValidationMode, validate_const_required_template_control_flow,
-    validate_runtime_template_control_flow_slot_artifacts,
+    TemplateControlFlowValidationMode, validate_runtime_template_control_flow_slot_artifacts,
 };
 use crate::compiler_frontend::ast::templates::template_head_parser::{
     ParsedTemplateHead, TemplateHeadParseRequest, apply_doc_comment_defaults, parse_template_head,
@@ -38,8 +37,8 @@ use crate::compiler_frontend::ast::templates::template_render_units::{
     prepare_control_flow_render_units,
 };
 use crate::compiler_frontend::ast::templates::tir::{
-    TemplateConstructionContext, TemplatePreparation, TemplatePreparationMode, TemplateTirPhase,
-    TemplateTirReference, TemplateWrapperReference, TirView, attach_wrapper_context_overlay,
+    TemplateConstructionContext, TemplatePreparation, TemplateTirPhase, TemplateTirReference,
+    TemplateWrapperReference, TirView, attach_wrapper_context_overlay,
     compose_tir_head_chain_from_root, prepare_tir_view,
 };
 
@@ -66,20 +65,20 @@ const SYNTHETIC_CONTENT_CONSTANT_NAME: &str = "content";
 /// caller selects its reporting lane.
 type TemplateConstructionResult = Result<Template, TemplateError>;
 
-/// The immediate result of const-required construction.
+/// The immediate result of nested template construction.
 ///
 /// `Template` remains the durable two-field handle. The preparation is carried
 /// only across the construction-to-fold boundary because it proves the exact
-/// view that construction just validated; storing it on the handle would make
-/// preparation part of durable template identity.
+/// view that construction just validated. Runtime-capable callers discard it;
+/// const-required callers pass it to folding. Storing it on the handle would
+/// make preparation part of durable template identity.
 #[derive(Debug)]
-pub(crate) struct ConstRequiredTemplateConstruction {
+pub(crate) struct PreparedTemplateConstruction {
     pub(crate) template: Template,
     pub(crate) preparation: TemplatePreparation,
 }
 
-type ConstRequiredTemplateConstructionResult =
-    Result<ConstRequiredTemplateConstruction, TemplateError>;
+type PreparedTemplateConstructionResult = Result<PreparedTemplateConstruction, TemplateError>;
 
 // -------------------------
 //  Template Construction
@@ -102,14 +101,16 @@ impl Template {
         string_table: &mut StringTable,
     ) -> TemplateConstructionResult {
         let default_style = default_nested_style_for_source_path(token_stream, string_table);
-        Self::new_nested_template(
+        let construction = Self::new_nested_template(
             token_stream,
             context,
             type_interner,
             direct_child_wrappers,
             string_table,
             NestedTemplateParseOptions::runtime_capable().with_default_style(default_style),
-        )
+        )?;
+
+        Ok(construction.template)
     }
 
     /// Creates a template for a context that must fold during AST construction.
@@ -123,26 +124,16 @@ impl Template {
         type_interner: &mut AstTypeInterner<'_>,
         direct_child_wrappers: Vec<TemplateWrapperReference>,
         string_table: &mut StringTable,
-    ) -> ConstRequiredTemplateConstructionResult {
+    ) -> PreparedTemplateConstructionResult {
         let default_style = default_nested_style_for_source_path(token_stream, string_table);
-        let template = Self::new_nested_template(
+        Self::new_nested_template(
             token_stream,
             context,
             type_interner,
             direct_child_wrappers,
             string_table,
             NestedTemplateParseOptions::const_required().with_default_style(default_style),
-        )?;
-
-        let preparation = validate_const_required_template_control_flow(
-            &template,
-            &context.template_ir_store.borrow(),
-        )?;
-
-        Ok(ConstRequiredTemplateConstruction {
-            template,
-            preparation,
-        })
+        )
     }
 
     #[cfg(test)]
@@ -171,7 +162,7 @@ impl Template {
         context: &ScopeContext,
         templates_inherited: Vec<TemplateWrapperReference>,
         string_table: &mut StringTable,
-    ) -> ConstRequiredTemplateConstructionResult {
+    ) -> PreparedTemplateConstructionResult {
         let mut type_environment = TypeEnvironment::new();
         let mut compatibility_cache = TypeCompatibilityCache::new();
         let mut type_interner =
@@ -194,10 +185,11 @@ impl Template {
         direct_child_wrappers: Vec<TemplateWrapperReference>,
         string_table: &mut StringTable,
         parse_options: NestedTemplateParseOptions,
-    ) -> TemplateConstructionResult {
+    ) -> PreparedTemplateConstructionResult {
         let NestedTemplateParseOptions {
             parsing_mode,
             control_flow_validation,
+            preparation_mode,
             control_context,
             default_style,
             allow_stored_insert_carrier,
@@ -400,7 +392,7 @@ impl Template {
                 tir_reference.context,
             )
             .map_err(TemplateError::from)?;
-            prepare_tir_view(&view, TemplatePreparationMode::Value)?
+            prepare_tir_view(&view, preparation_mode)?
         };
 
         build_state.refresh_kind_from_preparation(&template_preparation.facts);
@@ -450,14 +442,13 @@ impl Template {
         }
 
         // Write the parser-local classification through the store owner before
-        // constructing the durable handle. All later consumers read this TIR entry.
+        // constructing the durable handle. All later consumers read this TIR entry through the
+        // handle.
         let template_id = tir_reference.root;
         let mut template_ir_store = context.template_ir_store.borrow_mut();
         template_ir_store.set_template_kind(template_id, build_state.kind.to_owned())?;
         drop(template_ir_store);
 
-        // Construct the durable `Template` only after its authoritative TIR
-        // entry has received the final parser classification.
         let template = Template {
             tir_reference,
             location: construction_location.clone(),
@@ -482,7 +473,10 @@ impl Template {
             }
         }
 
-        Ok(template)
+        Ok(PreparedTemplateConstruction {
+            template,
+            preparation: template_preparation,
+        })
     }
 }
 

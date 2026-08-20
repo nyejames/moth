@@ -15,6 +15,7 @@ use crate::build_system::build::{BuildBootstrap, ProjectBuilder, bootstrap_proje
 use crate::build_system::create_project_modules::compile_project_frontend;
 use crate::build_system::path_validation::check_if_valid_path;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_messages::diagnostic_severity::DiagnosticSeverity;
 use crate::compiler_frontend::display_messages::format_terse_compiler_messages;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
@@ -65,10 +66,34 @@ pub struct FrontendBenchmarkCounter {
 /// Error returned when a frontend benchmark fails.
 ///
 /// The message is pre-rendered into a terse, multi-line string suitable for
-/// direct display by xtask or other tooling.
-#[derive(Debug, Clone)]
+/// direct display by xtask or other tooling. `kind` gives the failure a
+/// structured identity so callers and tests can match the failure boundary
+/// without reparsing rendered prose, and `diagnostic_codes` carries the stable
+/// compiler diagnostic codes for compiler-backed failures.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FrontendBenchmarkError {
+    /// The boundary that rejected the benchmark.
+    pub kind: FrontendBenchmarkFailureKind,
+    /// Stable compiler diagnostic codes for path-validation, bootstrap and
+    /// compilation failures. Empty for tooling-only failures.
+    pub diagnostic_codes: Vec<String>,
+    /// Terse pre-rendered message for direct display by xtask or tooling.
     pub message: String,
+}
+
+/// Identifies the boundary that rejected a frontend benchmark.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FrontendBenchmarkFailureKind {
+    /// The raw benchmark timing session could not be acquired.
+    TimingSession,
+    /// The entry path is not valid UTF-8.
+    InvalidUtf8Path,
+    /// The entry path failed validation (e.g. missing file).
+    PathValidation,
+    /// Project bootstrap failed before compilation.
+    Bootstrap,
+    /// The frontend pipeline emitted compiler diagnostics.
+    Compilation,
 }
 
 impl std::fmt::Display for FrontendBenchmarkError {
@@ -100,6 +125,8 @@ pub fn run_frontend_benchmark(
     #[cfg(feature = "timers")]
     let timing_session = crate::timing::start_raw_benchmark_collection(true).map_err(|error| {
         FrontendBenchmarkError {
+            kind: FrontendBenchmarkFailureKind::TimingSession,
+            diagnostic_codes: Vec::new(),
             message: format!("Could not start frontend benchmark timing session: {error}"),
         }
     })?;
@@ -108,6 +135,8 @@ pub fn run_frontend_benchmark(
         .entry_path
         .to_str()
         .ok_or_else(|| FrontendBenchmarkError {
+            kind: FrontendBenchmarkFailureKind::InvalidUtf8Path,
+            diagnostic_codes: Vec::new(),
             message: format!(
                 "Frontend benchmark path is not valid UTF-8: {}",
                 options.entry_path.display()
@@ -120,8 +149,11 @@ pub fn run_frontend_benchmark(
         Ok(path) => path,
         Err(error) => {
             let messages = CompilerMessages::from_error(error, path_string_table);
+            let diagnostic_codes = collect_diagnostic_codes(&messages);
 
             return Err(FrontendBenchmarkError {
+                kind: FrontendBenchmarkFailureKind::PathValidation,
+                diagnostic_codes,
                 message: format_compiler_messages(&messages),
             });
         }
@@ -138,7 +170,10 @@ pub fn run_frontend_benchmark(
     } = match bootstrap_project_build(&project_builder, valid_path) {
         Ok(bootstrap) => bootstrap,
         Err(messages) => {
+            let diagnostic_codes = collect_diagnostic_codes(&messages);
             return Err(FrontendBenchmarkError {
+                kind: FrontendBenchmarkFailureKind::Bootstrap,
+                diagnostic_codes,
                 message: format_compiler_messages(&messages),
             });
         }
@@ -173,7 +208,10 @@ pub fn run_frontend_benchmark(
     let total_ms = start.elapsed().as_secs_f64() * 1000.0;
 
     if messages.error_count() > 0 {
+        let diagnostic_codes = collect_diagnostic_codes(&messages);
         return Err(FrontendBenchmarkError {
+            kind: FrontendBenchmarkFailureKind::Compilation,
+            diagnostic_codes,
             message: format_compiler_messages(&messages),
         });
     }
@@ -228,4 +266,14 @@ fn format_compiler_messages(messages: &CompilerMessages) -> String {
     }
 
     lines.join("\n")
+}
+
+/// Collects the stable diagnostic codes from the error diagnostics, preserving
+/// order and multiplicity.
+fn collect_diagnostic_codes(messages: &CompilerMessages) -> Vec<String> {
+    messages
+        .diagnostics()
+        .filter(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
+        .map(|diagnostic| diagnostic.kind.code().to_owned())
+        .collect()
 }

@@ -16,16 +16,37 @@ use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    assignment_target, function_node, make_test_variable, node, test_location,
+    assignment_target, function_node, make_test_variable, node, test_source_location,
 };
 
 use crate::compiler_frontend::value_mode::ValueMode;
 
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
-use crate::compiler_frontend::hir::hir_builder::{build_ast, lower_ast};
+use crate::compiler_frontend::hir::hir_builder::{build_ast_with_registered_types, lower_ast};
+
 use crate::compiler_frontend::tests::type_id_fixture_support::{
-    fresh_success_returns, param_with_type_id, reference_expr,
+    fresh_success_returns, inferred_type_reference_expr, param_with_type_id,
 };
+
+/// The authored (non-generated) local names a block owns, in declaration order.
+///
+/// WHAT: filters out lowering temporaries, which are an implementation detail of HIR
+///       construction rather than part of a declaration's contract.
+/// WHY: `!locals.is_empty()` passes for a lowering that emitted only a temporary and dropped
+///      the authored binding entirely.
+fn authored_local_names(
+    module: &crate::compiler_frontend::hir::module::HirModule,
+    block: &crate::compiler_frontend::hir::blocks::HirBlock,
+    string_table: &StringTable,
+) -> Vec<String> {
+    block
+        .locals
+        .iter()
+        .filter_map(|local| module.side_table.resolve_local_name(local.id, string_table))
+        .filter(|name| !name.starts_with("__hir_tmp_"))
+        .map(str::to_string)
+        .collect()
+}
 
 #[test]
 fn allocates_parameter_locals_and_binds_names() {
@@ -34,13 +55,13 @@ fn allocates_parameter_locals_and_binds_names() {
     let x = super::symbol("x", &mut string_table);
 
     let body = vec![node(
-        NodeKind::Return(vec![reference_expr(
+        NodeKind::Return(vec![inferred_type_reference_expr(
             x.clone(),
             builtin_type_ids::INT,
-            test_location(3),
+            test_source_location(3),
             ValueMode::ImmutableReference,
         )]),
-        test_location(3),
+        test_source_location(3),
     )];
 
     let start_function = function_node(
@@ -50,15 +71,15 @@ fn allocates_parameter_locals_and_binds_names() {
                 x,
                 builtin_type_ids::INT,
                 false,
-                test_location(2),
+                test_source_location(2),
             )],
             returns: fresh_success_returns(vec![builtin_type_ids::INT]),
         },
         body,
-        test_location(2),
+        test_source_location(2),
     );
 
-    let ast = build_ast(vec![start_function], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_function], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
 
@@ -68,8 +89,23 @@ fn allocates_parameter_locals_and_binds_names() {
         .0 as usize];
     assert_eq!(start_fn.params.len(), 1);
 
+    // The function declares exactly one parameter and no other bindings, so the entry block
+    // owns exactly one local. A non-empty check would also pass if lowering invented extras.
     let entry_block = &module.blocks[start_fn.entry.0 as usize];
-    assert!(!entry_block.locals.is_empty());
+    assert_eq!(
+        authored_local_names(&module, entry_block, &string_table),
+        vec!["x".to_string()],
+        "the entry block should own exactly the declared parameter besides lowering temporaries"
+    );
+    assert_eq!(
+        entry_block
+            .locals
+            .iter()
+            .filter(|local| local.id == start_fn.params[0])
+            .count(),
+        1,
+        "the parameter should be declared once in the entry block"
+    );
     assert_eq!(
         module
             .side_table
@@ -93,14 +129,14 @@ fn variable_declaration_emits_local_and_assign_statement() {
         vec![node(
             NodeKind::VariableDeclaration(make_test_variable(
                 x,
-                Expression::int(42, test_location(4), ValueMode::ImmutableOwned),
+                Expression::int(42, test_source_location(4), ValueMode::ImmutableOwned),
             )),
-            test_location(4),
+            test_source_location(4),
         )],
-        test_location(3),
+        test_source_location(3),
     );
 
-    let ast = build_ast(vec![start_function], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_function], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
 
@@ -110,12 +146,41 @@ fn variable_declaration_emits_local_and_assign_statement() {
         .0 as usize];
     let entry_block = &module.blocks[start_fn.entry.0 as usize];
 
-    assert!(!entry_block.locals.is_empty());
-    assert!(
-        entry_block
-            .statements
-            .iter()
-            .any(|statement| matches!(statement.kind, HirStatementKind::Assign { .. }))
+    // One declaration lowers to exactly one local and exactly one assignment. `any` would also
+    // pass for a lowering that emitted the assignment twice.
+    assert_eq!(
+        authored_local_names(&module, entry_block, &string_table),
+        vec!["x".to_string()],
+        "one declaration should lower to exactly one authored local"
+    );
+    // Lowering also assigns through a temporary, so the contract is exactly one assignment
+    // whose target is the authored local — not "some assignment exists".
+    let declared_local = entry_block
+        .locals
+        .iter()
+        .find(|local| {
+            module
+                .side_table
+                .resolve_local_name(local.id, &string_table)
+                == Some("x")
+        })
+        .expect("the authored local should be declared");
+    let assignments_to_x = entry_block
+        .statements
+        .iter()
+        .filter(|statement| {
+            matches!(
+                statement.kind,
+                HirStatementKind::Assign {
+                    target: crate::compiler_frontend::hir::places::HirPlace::Local(local),
+                    ..
+                } if local == declared_local.id
+            )
+        })
+        .count();
+    assert_eq!(
+        assignments_to_x, 1,
+        "one initialised declaration should lower to one assignment to that local"
     );
 }
 
@@ -135,22 +200,22 @@ fn duplicate_local_declarations_in_same_scope_fail() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     var_name.clone(),
-                    Expression::int(1, test_location(2), ValueMode::ImmutableOwned),
+                    Expression::int(1, test_source_location(2), ValueMode::ImmutableOwned),
                 )),
-                test_location(2),
+                test_source_location(2),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     var_name.clone(),
-                    Expression::int(2, test_location(3), ValueMode::ImmutableOwned),
+                    Expression::int(2, test_source_location(3), ValueMode::ImmutableOwned),
                 )),
-                test_location(3),
+                test_source_location(3),
             ),
         ],
-        test_location(1),
+        test_source_location(1),
     );
 
-    let ast = build_ast(vec![start_function], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_function], entry_path);
     let error = lower_ast(ast, &mut string_table).expect_err("duplicate symbol should fail");
     let (_error_type, message, _location) = error
         .first_infrastructure_error_for_tests()
@@ -174,12 +239,12 @@ fn assignment_lowers_value_prelude_before_assign() {
         vec![node(
             NodeKind::Return(vec![Expression::int(
                 1,
-                test_location(1),
+                test_source_location(1),
                 ValueMode::ImmutableOwned,
             )]),
-            test_location(1),
+            test_source_location(1),
         )],
-        test_location(1),
+        test_source_location(1),
     );
 
     let assignment = node(
@@ -188,16 +253,16 @@ fn assignment_lowers_value_prelude_before_assign() {
                 x.clone(),
                 DataType::Int,
                 builtin_type_ids::INT,
-                test_location(5),
+                test_source_location(5),
             ),
             value: Expression::function_call(
                 helper,
                 vec![],
                 vec![builtin_type_ids::INT],
-                test_location(5),
+                test_source_location(5),
             ),
         },
-        test_location(5),
+        test_source_location(5),
     );
 
     let start_fn = function_node(
@@ -207,15 +272,15 @@ fn assignment_lowers_value_prelude_before_assign() {
                 x,
                 builtin_type_ids::INT,
                 true,
-                test_location(4),
+                test_source_location(4),
             )],
             returns: vec![],
         },
         vec![assignment],
-        test_location(4),
+        test_source_location(4),
     );
 
-    let ast = build_ast(vec![helper_fn, start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![helper_fn, start_fn], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
 
@@ -265,12 +330,12 @@ fn call_expression_statements_materialize_result_values() {
         vec![node(
             NodeKind::Return(vec![Expression::int(
                 9,
-                test_location(1),
+                test_source_location(1),
                 ValueMode::ImmutableOwned,
             )]),
-            test_location(1),
+            test_source_location(1),
         )],
-        test_location(1),
+        test_source_location(1),
     );
 
     let start_fn = function_node(
@@ -285,28 +350,28 @@ fn call_expression_statements_materialize_result_values() {
                     callee,
                     vec![],
                     vec![builtin_type_ids::INT],
-                    test_location(2),
+                    test_source_location(2),
                 )),
-                test_location(2),
+                test_source_location(2),
             ),
             node(
                 NodeKind::ExpressionStatement(Expression::host_function_call_with_arguments(
                     alloc_id,
                     vec![CallArgument::positional(
-                        Expression::int(1, test_location(3), ValueMode::ImmutableOwned),
+                        Expression::int(1, test_source_location(3), ValueMode::ImmutableOwned),
                         CallAccessMode::Shared,
-                        test_location(3),
+                        test_source_location(3),
                     )],
                     vec![builtin_type_ids::INT],
-                    test_location(3),
+                    test_source_location(3),
                 )),
-                test_location(3),
+                test_source_location(3),
             ),
         ],
-        test_location(2),
+        test_source_location(2),
     );
 
-    let ast = build_ast(vec![callee_fn, start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![callee_fn, start_fn], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
 
@@ -345,8 +410,8 @@ fn return_lowering_handles_zero_one_and_many_values() {
             parameters: vec![],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), test_location(1))],
-        test_location(1),
+        vec![node(NodeKind::Return(vec![]), test_source_location(1))],
+        test_source_location(1),
     );
 
     let one_fn = function_node(
@@ -358,12 +423,12 @@ fn return_lowering_handles_zero_one_and_many_values() {
         vec![node(
             NodeKind::Return(vec![Expression::int(
                 8,
-                test_location(2),
+                test_source_location(2),
                 ValueMode::ImmutableOwned,
             )]),
-            test_location(2),
+            test_source_location(2),
         )],
-        test_location(2),
+        test_source_location(2),
     );
 
     let many_fn = function_node(
@@ -374,15 +439,15 @@ fn return_lowering_handles_zero_one_and_many_values() {
         },
         vec![node(
             NodeKind::Return(vec![
-                Expression::int(1, test_location(3), ValueMode::ImmutableOwned),
-                Expression::bool(true, test_location(3), ValueMode::ImmutableOwned),
+                Expression::int(1, test_source_location(3), ValueMode::ImmutableOwned),
+                Expression::bool(true, test_source_location(3), ValueMode::ImmutableOwned),
             ]),
-            test_location(3),
+            test_source_location(3),
         )],
-        test_location(3),
+        test_source_location(3),
     );
 
-    let ast = build_ast(vec![start_fn, one_fn, many_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn, one_fn, many_fn], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
 

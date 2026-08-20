@@ -9,24 +9,24 @@ use super::super::types::{
     DiagnosticMatchMode, ExactWarningExpectation, SuccessContract, WarningExpectation,
 };
 use super::super::{EXPECT_FILE_NAME, ExpectedOutcome, GOLDEN_DIR_NAME, INPUT_DIR_NAME};
-use crate::compiler_tests::test_support::temp_dir;
 use std::fs;
 use std::path::PathBuf;
 
-fn write_fixture(name: &str, expectation_source: &str) -> (PathBuf, PathBuf) {
-    let root = temp_dir(name);
+fn write_fixture(_name: &str, expectation_source: &str) -> (tempfile::TempDir, PathBuf) {
+    let temp = tempfile::tempdir().expect("should create fixture temp dir");
+    let root = temp.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
     fs::write(input_root.join("@page.moth"), "#[:ok]\n").expect("should write fixture source");
     fs::write(case_root.join(EXPECT_FILE_NAME), expectation_source)
         .expect("should write expect file");
-    (root, case_root)
+    (temp, case_root)
 }
 
 #[test]
 fn accepts_explicit_acceptance_only_and_retains_typed_intent() {
-    let (root, case_root) = write_fixture(
+    let (_root, case_root) = write_fixture(
         "explicit_acceptance_only",
         "[backends.html]\nmode = \"success\"\nwarnings = \"forbid\"\nsuccess_contract = \"acceptance_only\"\n",
     );
@@ -40,13 +40,11 @@ fn accepts_explicit_acceptance_only_and_retains_typed_intent() {
         expectation.success_contract,
         Some(SuccessContract::AcceptanceOnly)
     );
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
 fn failure_diagnostic_match_defaults_to_exact_and_is_retained() {
-    let (root, case_root) = write_fixture(
+    let (_root, case_root) = write_fixture(
         "default_diagnostic_match",
         "[backends.html]\nmode = \"failure\"\nwarnings = \"forbid\"\ndiagnostic_codes = [\"MOTH-RULE-0001\"]\n",
     );
@@ -58,13 +56,11 @@ fn failure_diagnostic_match_defaults_to_exact_and_is_retained() {
     };
     assert_eq!(expectation.diagnostic_match, DiagnosticMatchMode::Exact);
     assert_eq!(expectation.diagnostic_match_reason, None);
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
 fn diagnostic_codes_reject_a_blank_identity_entry() {
-    let (root, case_root) = write_fixture(
+    let (_root, case_root) = write_fixture(
         "diagnostic_codes_blank",
         "[backends.html]\nmode = \"failure\"\nwarnings = \"forbid\"\ndiagnostic_codes = [\"   \"]\n",
     );
@@ -72,17 +68,21 @@ fn diagnostic_codes_reject_a_blank_identity_entry() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("a blank diagnostic-code identity must be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("empty 'diagnostic_codes' entry"),
+        error.message.contains("empty 'diagnostic_codes' entry"),
         "unexpected error: {error}"
     );
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
 fn diagnostic_codes_keep_exact_multisets_and_duplicates() {
-    let (root, case_root) = write_fixture(
+    let (_root, case_root) = write_fixture(
         "diagnostic_codes_duplicates",
         "[backends.html]\nmode = \"failure\"\nwarnings = \"forbid\"\ndiagnostic_codes = [\"MOTH-RULE-0044\", \"MOTH-RULE-0044\"]\n",
     );
@@ -96,13 +96,11 @@ fn diagnostic_codes_keep_exact_multisets_and_duplicates() {
         expectation.diagnostic_codes,
         vec!["MOTH-RULE-0044".to_owned(), "MOTH-RULE-0044".to_owned()]
     );
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
 fn structured_diagnostic_assertions_parse_and_normalize_locations() {
-    let (root, case_root) = write_fixture(
+    let (_root, case_root) = write_fixture(
         "structured_diagnostic_assertions",
         concat!(
             "[backends.html]\n",
@@ -146,13 +144,11 @@ fn structured_diagnostic_assertions_parse_and_normalize_locations() {
         assertion.secondary_labels[0].path.as_deref(),
         Some("input/helper.moth")
     );
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
 fn unique_structured_diagnostic_code_defaults_occurrence_to_one() {
-    let (root, case_root) = write_fixture(
+    let (_root, case_root) = write_fixture(
         "structured_unique_occurrence",
         concat!(
             "[backends.html]\n",
@@ -172,8 +168,6 @@ fn unique_structured_diagnostic_code_defaults_occurrence_to_one() {
         panic!("case should have a failure expectation");
     };
     assert_eq!(expectation.diagnostic_assertions[0].occurrence, 1);
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
@@ -197,7 +191,7 @@ fn repeated_structured_diagnostic_code_requires_explicit_valid_unique_occurrence
     ];
 
     for (name, assertion, expected_error) in cases {
-        let (root, case_root) = write_fixture(
+        let (_root, case_root) = write_fixture(
             &format!("structured_occurrence_{name}"),
             &format!(
                 "[backends.html]\nmode = \"failure\"\nwarnings = \"forbid\"\ndiagnostic_codes = [\"MOTH-RULE-0044\", \"MOTH-RULE-0044\"]\n\n{assertion}"
@@ -207,9 +201,16 @@ fn repeated_structured_diagnostic_code_requires_explicit_valid_unique_occurrence
         let Err(error) = load_canonical_case_specs(&case_root, None) else {
             panic!("invalid occurrence selection should be rejected: {name}");
         };
-        assert!(error.contains(expected_error), "unexpected error: {error}");
-
-        fs::remove_dir_all(&root).expect("should clean up");
+        assert_eq!(
+            error.kind,
+            super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+            "unexpected kind: {:?} ({error})",
+            error.kind
+        );
+        assert!(
+            error.message.contains(expected_error),
+            "unexpected error: {error}"
+        );
     }
 }
 
@@ -234,7 +235,7 @@ fn structured_diagnostic_assertions_reject_absent_duplicate_and_empty_selectors(
     ];
 
     for (name, fields, expected_error) in cases {
-        let (root, case_root) = write_fixture(
+        let (_root, case_root) = write_fixture(
             &format!("structured_selector_{name}"),
             &format!("[backends.html]\nmode = \"failure\"\nwarnings = \"forbid\"\n{fields}"),
         );
@@ -242,9 +243,16 @@ fn structured_diagnostic_assertions_reject_absent_duplicate_and_empty_selectors(
         let Err(error) = load_canonical_case_specs(&case_root, None) else {
             panic!("invalid structured selector should be rejected: {name}");
         };
-        assert!(error.contains(expected_error), "unexpected error: {error}");
-
-        fs::remove_dir_all(&root).expect("should clean up");
+        assert_eq!(
+            error.kind,
+            super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+            "unexpected kind: {:?} ({error})",
+            error.kind
+        );
+        assert!(
+            error.message.contains(expected_error),
+            "unexpected error: {error}"
+        );
     }
 }
 
@@ -273,7 +281,7 @@ fn structured_diagnostic_assertions_validate_reason_location_and_count_shape() {
     ];
 
     for (name, fields, expected_error) in cases {
-        let (root, case_root) = write_fixture(
+        let (_root, case_root) = write_fixture(
             &format!("structured_shape_{name}"),
             &format!(
                 "[backends.html]\nmode = \"failure\"\nwarnings = \"forbid\"\ndiagnostic_codes = [\"MOTH-RULE-0044\"]\n\n[[backends.html.diagnostic_assertions]]\ncode = \"MOTH-RULE-0044\"\n{fields}"
@@ -283,9 +291,16 @@ fn structured_diagnostic_assertions_validate_reason_location_and_count_shape() {
         let Err(error) = load_canonical_case_specs(&case_root, None) else {
             panic!("invalid structured assertion shape should be rejected: {name}");
         };
-        assert!(error.contains(expected_error), "unexpected error: {error}");
-
-        fs::remove_dir_all(&root).expect("should clean up");
+        assert_eq!(
+            error.kind,
+            super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+            "unexpected kind: {:?} ({error})",
+            error.kind
+        );
+        assert!(
+            error.message.contains(expected_error),
+            "unexpected error: {error}"
+        );
     }
 }
 
@@ -305,7 +320,7 @@ fn structured_secondary_labels_require_occurrence_and_location_fact() {
     ];
 
     for (name, secondary_fields, expected_error) in cases {
-        let (root, case_root) = write_fixture(
+        let (_root, case_root) = write_fixture(
             &format!("structured_secondary_{name}"),
             &format!(
                 "[backends.html]\nmode = \"failure\"\nwarnings = \"forbid\"\ndiagnostic_codes = [\"MOTH-RULE-0044\"]\n\n[[backends.html.diagnostic_assertions]]\ncode = \"MOTH-RULE-0044\"\nline = 1\n\n[[backends.html.diagnostic_assertions.secondary_labels]]\n{secondary_fields}"
@@ -315,15 +330,22 @@ fn structured_secondary_labels_require_occurrence_and_location_fact() {
         let Err(error) = load_canonical_case_specs(&case_root, None) else {
             panic!("invalid secondary-label assertion should be rejected: {name}");
         };
-        assert!(error.contains(expected_error), "unexpected error: {error}");
-
-        fs::remove_dir_all(&root).expect("should clean up");
+        assert_eq!(
+            error.kind,
+            super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+            "unexpected kind: {:?} ({error})",
+            error.kind
+        );
+        assert!(
+            error.message.contains(expected_error),
+            "unexpected error: {error}"
+        );
     }
 }
 
 #[test]
 fn structured_diagnostic_assertions_are_failure_only() {
-    let (root, case_root) = write_fixture(
+    let (_root, case_root) = write_fixture(
         "structured_success_rejection",
         concat!(
             "[backends.html]\n",
@@ -341,17 +363,21 @@ fn structured_diagnostic_assertions_are_failure_only() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("structured assertions on a success backend should be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::FixtureContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("failure-only") && error.contains("diagnostic_assertions"),
+        error.message.contains("failure-only") && error.message.contains("diagnostic_assertions"),
         "unexpected error: {error}"
     );
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
 fn exact_warning_codes_are_retained_as_a_typed_multiset_contract() {
-    let (root, case_root) = write_fixture(
+    let (_root, case_root) = write_fixture(
         "exact_warning_codes",
         "[backends.html]\nmode = \"success\"\nwarnings = \"exact\"\nwarning_codes = [\"MOTH-RULE-0022\", \"MOTH-RULE-0010\"]\n",
     );
@@ -367,13 +393,11 @@ fn exact_warning_codes_are_retained_as_a_typed_multiset_contract() {
             expected_codes: vec!["MOTH-RULE-0022".to_owned(), "MOTH-RULE-0010".to_owned(),],
         })
     );
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
 fn exact_warning_codes_reject_an_authored_empty_multiset() {
-    let (root, case_root) = write_fixture(
+    let (_root, case_root) = write_fixture(
         "exact_warning_codes_empty",
         "[backends.html]\nmode = \"success\"\nwarnings = \"exact\"\nwarning_codes = []\n",
     );
@@ -381,17 +405,21 @@ fn exact_warning_codes_reject_an_authored_empty_multiset() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("an authored empty warning-code list must not satisfy success completeness");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("warnings = \"exact\"") && error.contains("empty"),
+        error.message.contains("warnings = \"exact\"") && error.message.contains("empty"),
         "unexpected error: {error}"
     );
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
 fn exact_warning_codes_reject_a_blank_identity_entry() {
-    let (root, case_root) = write_fixture(
+    let (_root, case_root) = write_fixture(
         "exact_warning_codes_blank",
         "[backends.html]\nmode = \"success\"\nwarnings = \"exact\"\nwarning_codes = [\"   \"]\n",
     );
@@ -399,12 +427,16 @@ fn exact_warning_codes_reject_a_blank_identity_entry() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("a blank warning-code identity must be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("empty 'warning_codes' entry"),
+        error.message.contains("empty 'warning_codes' entry"),
         "unexpected error: {error}"
     );
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
@@ -421,7 +453,7 @@ fn removed_warning_count_spelling_is_rejected() {
     ];
 
     for (shape, expectation_source) in cases {
-        let (root, case_root) = write_fixture(
+        let (_root, case_root) = write_fixture(
             &format!("removed_warning_count_spelling_{shape}"),
             expectation_source,
         );
@@ -429,18 +461,22 @@ fn removed_warning_count_spelling_is_rejected() {
         let Err(error) = load_canonical_case_specs(&case_root, None) else {
             panic!("the removed warning_count spelling should be rejected");
         };
+        assert_eq!(
+            error.kind,
+            super::super::errors::FixtureLoadErrorKind::ExpectationParse,
+            "unexpected kind: {:?} ({error})",
+            error.kind
+        );
         assert!(
-            error.contains("warning_count") && error.contains("unknown field"),
+            error.message.contains("warning_count") && error.message.contains("unknown field"),
             "unexpected error: {error}"
         );
-
-        fs::remove_dir_all(&root).expect("should clean up");
     }
 }
 
 #[test]
 fn exact_warning_expectations_require_warning_codes() {
-    let (root, case_root) = write_fixture(
+    let (_root, case_root) = write_fixture(
         "exact_warning_missing_identity",
         "[backends.html]\nmode = \"success\"\nwarnings = \"exact\"\nrendered_output_contains = [\"ok\"]\n",
     );
@@ -448,18 +484,22 @@ fn exact_warning_expectations_require_warning_codes() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("exact warnings without a code list should be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("warning_codes") && error.contains("warnings = \"exact\""),
+        error.message.contains("warning_codes") && error.message.contains("warnings = \"exact\""),
         "unexpected error: {error}"
     );
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
 fn ignore_and_forbid_reject_warning_identity_fields() {
     for mode in ["ignore", "forbid"] {
-        let (root, case_root) = write_fixture(
+        let (_root, case_root) = write_fixture(
             &format!("{mode}_warning_identity_fields"),
             &format!(
                 "[backends.html]\nmode = \"success\"\nwarnings = \"{mode}\"\nwarning_codes = []\nsuccess_contract = \"acceptance_only\"\n"
@@ -469,18 +509,23 @@ fn ignore_and_forbid_reject_warning_identity_fields() {
         let Err(error) = load_canonical_case_specs(&case_root, None) else {
             panic!("{mode} warnings with identity fields should be rejected");
         };
+        assert_eq!(
+            error.kind,
+            super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+            "unexpected kind: {:?} ({error})",
+            error.kind
+        );
         assert!(
-            error.contains("warning_codes") && error.contains("warnings != \"exact\""),
+            error.message.contains("warning_codes")
+                && error.message.contains("warnings != \"exact\""),
             "unexpected error for {mode}: {error}"
         );
-
-        fs::remove_dir_all(&root).expect("should clean up");
     }
 }
 
 #[test]
 fn justified_contains_diagnostic_match_is_retained() {
-    let (root, case_root) = write_fixture(
+    let (_root, case_root) = write_fixture(
         "contains_diagnostic_match",
         "[backends.html]\nmode = \"failure\"\nwarnings = \"forbid\"\ndiagnostic_codes = [\"MOTH-RULE-0001\"]\ndiagnostic_match = \"contains\"\ndiagnostic_match_reason = \"independent recovery\"\n",
     );
@@ -495,8 +540,6 @@ fn justified_contains_diagnostic_match_is_retained() {
         expectation.diagnostic_match_reason.as_deref(),
         Some("independent recovery")
     );
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
@@ -505,7 +548,7 @@ fn contains_diagnostic_match_retains_missing_and_blank_reasons_for_policy() {
         let reason_line = reason.map_or_else(String::new, |value| {
             format!("diagnostic_match_reason = \"{value}\"\n")
         });
-        let (root, case_root) = write_fixture(
+        let (_root, case_root) = write_fixture(
             &format!("contains_without_reason_{name}"),
             &format!(
                 "[backends.html]\nmode = \"failure\"\nwarnings = \"forbid\"\ndiagnostic_codes = [\"MOTH-RULE-0001\"]\ndiagnostic_match = \"contains\"\n{reason_line}"
@@ -522,14 +565,12 @@ fn contains_diagnostic_match_retains_missing_and_blank_reasons_for_policy() {
             "contains mode should be retained"
         );
         assert_eq!(expectation.diagnostic_match_reason.as_deref(), reason);
-
-        fs::remove_dir_all(&root).expect("should clean up");
     }
 }
 
 #[test]
 fn exact_diagnostic_match_rejects_authored_reason() {
-    let (root, case_root) = write_fixture(
+    let (_root, case_root) = write_fixture(
         "exact_diagnostic_match_reason",
         "[backends.html]\nmode = \"failure\"\nwarnings = \"forbid\"\ndiagnostic_codes = [\"MOTH-RULE-0001\"]\ndiagnostic_match = \"exact\"\ndiagnostic_match_reason = \"not allowed\"\n",
     );
@@ -537,17 +578,21 @@ fn exact_diagnostic_match_rejects_authored_reason() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("exact matching with a reason should be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("diagnostic_match_reason") && error.contains("exact"),
+        error.message.contains("diagnostic_match_reason") && error.message.contains("exact"),
         "unexpected error: {error}"
     );
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
 fn diagnostic_match_fields_are_failure_only() {
-    let (root, case_root) = write_fixture(
+    let (_root, case_root) = write_fixture(
         "success_diagnostic_match_field",
         "[backends.html]\nmode = \"success\"\nwarnings = \"forbid\"\ndiagnostic_match = \"exact\"\nrendered_output_contains = [\"ok\"]\n",
     );
@@ -555,17 +600,21 @@ fn diagnostic_match_fields_are_failure_only() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("diagnostic_match should be rejected on success expectations");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::FixtureContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("failure-only") && error.contains("diagnostic_match"),
+        error.message.contains("failure-only") && error.message.contains("diagnostic_match"),
         "unexpected error: {error}"
     );
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
 fn rejects_unknown_success_contract_value_with_backend_context() {
-    let (root, case_root) = write_fixture(
+    let (_root, case_root) = write_fixture(
         "unknown_success_contract",
         "[backends.html]\nmode = \"success\"\nwarnings = \"forbid\"\nsuccess_contract = \"typecheck_only\"\n",
     );
@@ -573,19 +622,23 @@ fn rejects_unknown_success_contract_value_with_backend_context() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("unknown success_contract should be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("success_contract")
-            && error.contains("typecheck_only")
-            && error.contains("[backends.html]"),
+        error.message.contains("success_contract")
+            && error.message.contains("typecheck_only")
+            && error.message.contains("[backends.html]"),
         "unexpected error: {error}"
     );
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
 fn rejects_acceptance_only_on_failure_backend() {
-    let (root, case_root) = write_fixture(
+    let (_root, case_root) = write_fixture(
         "acceptance_only_failure_mode",
         "[backends.html]\nmode = \"failure\"\nwarnings = \"forbid\"\nsuccess_contract = \"acceptance_only\"\ndiagnostic_codes = [\"MOTH-RULE-0001\"]\n",
     );
@@ -593,12 +646,16 @@ fn rejects_acceptance_only_on_failure_backend() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("acceptance_only on a failure backend should be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("mode = \"failure\"") && error.contains("success_contract"),
+        error.message.contains("mode = \"failure\"") && error.message.contains("success_contract"),
         "unexpected error: {error}"
     );
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
@@ -617,7 +674,7 @@ fn rejects_acceptance_only_mixed_with_success_assertions() {
     ];
 
     for (name, extra_contract) in mixed_contracts {
-        let (root, case_root) = write_fixture(
+        let (_root, case_root) = write_fixture(
             &format!("acceptance_only_mixed_{name}"),
             &format!(
                 "[backends.html]\nmode = \"success\"\nwarnings = \"forbid\"\nsuccess_contract = \"acceptance_only\"\n{extra_contract}"
@@ -627,19 +684,23 @@ fn rejects_acceptance_only_mixed_with_success_assertions() {
         let Err(error) = load_canonical_case_specs(&case_root, None) else {
             panic!("acceptance-only mixed with {name} should be rejected");
         };
+        assert_eq!(
+            error.kind,
+            super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+            "unexpected kind: {:?} ({error})",
+            error.kind
+        );
         assert!(
-            error.contains("acceptance_only") && error.contains("must not combine"),
+            error.message.contains("acceptance_only") && error.message.contains("must not combine"),
             "unexpected error for {name}: {error}"
         );
-
-        fs::remove_dir_all(&root).expect("should clean up");
     }
 }
 
 #[test]
 fn rejects_removed_success_contract_spelling() {
     let removed_contract = ["compile", "_only"].concat();
-    let (root, case_root) = write_fixture(
+    let (_root, case_root) = write_fixture(
         "removed_success_contract_spelling",
         &format!(
             "[backends.html]\nmode = \"success\"\nwarnings = \"forbid\"\nsuccess_contract = \"{removed_contract}\"\n"
@@ -649,17 +710,21 @@ fn rejects_removed_success_contract_spelling() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("the removed success contract spelling should be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains(&removed_contract) && error.contains("acceptance_only"),
+        error.message.contains(&removed_contract) && error.message.contains("acceptance_only"),
         "unexpected error: {error}"
     );
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
 fn rejects_acceptance_only_with_authored_expected_warning() {
-    let (root, case_root) = write_fixture(
+    let (_root, case_root) = write_fixture(
         "acceptance_only_expected_warning",
         "[backends.html]\nmode = \"success\"\nwarnings = \"exact\"\nwarning_codes = [\"MOTH-RULE-0022\"]\nsuccess_contract = \"acceptance_only\"\n",
     );
@@ -667,17 +732,22 @@ fn rejects_acceptance_only_with_authored_expected_warning() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("acceptance-only with an authored expected warning should be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("acceptance_only") && error.contains("expected-warning"),
+        error.message.contains("acceptance_only") && error.message.contains("expected-warning"),
         "unexpected error: {error}"
     );
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
 fn rejects_error_type_expectation_key() {
-    let root = temp_dir("reject_error_type_key");
+    let _root_temp = tempfile::tempdir().expect("should create fixture temp dir");
+    let root = _root_temp.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
@@ -691,14 +761,22 @@ fn rejects_error_type_expectation_key() {
     let Err(error) = parse_expectation_file(&case_root.join(EXPECT_FILE_NAME)) else {
         panic!("error_type key should be rejected");
     };
-    assert!(error.contains("unknown field"), "unexpected error: {error}");
-
-    fs::remove_dir_all(&root).expect("should clean up temp fixture root");
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationParse,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
+    assert!(
+        error.message.contains("unknown field"),
+        "unexpected error: {error}"
+    );
 }
 
 #[test]
 fn rejects_legacy_top_level_expectation_contract() {
-    let root = temp_dir("success_contract_backend_baseline");
+    let _root_temp = tempfile::tempdir().expect("should create fixture temp dir");
+    let root = _root_temp.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
@@ -712,17 +790,22 @@ fn rejects_legacy_top_level_expectation_contract() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("legacy fixture should be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("[backends.<id>]"),
+        error.message.contains("[backends.<id>]"),
         "unexpected error: {error}"
     );
-
-    fs::remove_dir_all(&root).expect("should clean up temp fixture root");
 }
 
 #[test]
 fn rejects_backend_panic_expectation_key() {
-    let root = temp_dir("reject_backend_panic_key");
+    let _root_temp = tempfile::tempdir().expect("should create fixture temp dir");
+    let root = _root_temp.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
@@ -736,14 +819,22 @@ fn rejects_backend_panic_expectation_key() {
     let Err(error) = parse_expectation_file(&case_root.join(EXPECT_FILE_NAME)) else {
         panic!("panic key should be rejected");
     };
-    assert!(error.contains("unknown field"), "unexpected error: {error}");
-
-    fs::remove_dir_all(&root).expect("should clean up temp fixture root");
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationParse,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
+    assert!(
+        error.message.contains("unknown field"),
+        "unexpected error: {error}"
+    );
 }
 
 #[test]
 fn rejects_top_level_panic_expectation_key() {
-    let root = temp_dir("reject_top_level_panic_key");
+    let _root_temp = tempfile::tempdir().expect("should create fixture temp dir");
+    let root = _root_temp.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
@@ -757,14 +848,22 @@ fn rejects_top_level_panic_expectation_key() {
     let Err(error) = parse_expectation_file(&case_root.join(EXPECT_FILE_NAME)) else {
         panic!("panic key should be rejected");
     };
-    assert!(error.contains("unknown field"), "unexpected error: {error}");
-
-    fs::remove_dir_all(&root).expect("should clean up temp fixture root");
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationParse,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
+    assert!(
+        error.message.contains("unknown field"),
+        "unexpected error: {error}"
+    );
 }
 
 #[test]
 fn rejects_unknown_backend_matrix_key() {
-    let root = temp_dir("backend_matrix_unknown");
+    let _root_temp = tempfile::tempdir().expect("should create fixture temp dir");
+    let root = _root_temp.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
@@ -778,17 +877,22 @@ fn rejects_unknown_backend_matrix_key() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("fixture should be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("Unsupported backend 'wasm'"),
+        error.message.contains("Unsupported backend 'wasm'"),
         "unexpected error: {error}"
     );
-
-    fs::remove_dir_all(&root).expect("should clean up temp fixture root");
 }
 
 #[test]
 fn accepts_normalized_golden_mode() {
-    let root = temp_dir("normalized_golden_mode");
+    let _root_temp = tempfile::tempdir().expect("should create fixture temp dir");
+    let root = _root_temp.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     let golden_root = case_root.join(GOLDEN_DIR_NAME).join("html");
@@ -805,13 +909,12 @@ fn accepts_normalized_golden_mode() {
     let cases = load_canonical_case_specs(&case_root, None)
         .expect("normalized golden_mode fixture should be accepted");
     assert_eq!(cases.len(), 1);
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
 fn rejects_unknown_golden_mode() {
-    let root = temp_dir("unknown_golden_mode");
+    let _root_temp = tempfile::tempdir().expect("should create fixture temp dir");
+    let root = _root_temp.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
@@ -825,17 +928,22 @@ fn rejects_unknown_golden_mode() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("unknown golden_mode should be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("golden_mode") && error.contains("fuzzy"),
+        error.message.contains("golden_mode") && error.message.contains("fuzzy"),
         "unexpected error: {error}"
     );
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
 fn accepts_success_fixture_with_rendered_output_only() {
-    let root = temp_dir("rendered_output_only");
+    let _root_temp = tempfile::tempdir().expect("should create fixture temp dir");
+    let root = _root_temp.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
@@ -849,13 +957,11 @@ fn accepts_success_fixture_with_rendered_output_only() {
     let cases = load_canonical_case_specs(&case_root, None)
         .expect("rendered_output_contains-only fixture should be accepted");
     assert_eq!(cases.len(), 1);
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
 fn parses_and_retains_all_rendered_output_assertion_forms() {
-    let (root, case_root) = write_fixture(
+    let (_root, case_root) = write_fixture(
         "rendered_output_forms",
         concat!(
             "[backends.html]\n",
@@ -890,13 +996,11 @@ fn parses_and_retains_all_rendered_output_assertion_forms() {
         expectation.rendered_output.contains_exactly_once,
         vec!["once".to_owned()]
     );
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
 fn exact_output_accepts_authored_empty_string() {
-    let (root, case_root) = write_fixture(
+    let (_root, case_root) = write_fixture(
         "rendered_output_exact_empty",
         "[backends.html]\nmode = \"success\"\nwarnings = \"forbid\"\nrendered_output_exact = \"\"\n",
     );
@@ -908,8 +1012,6 @@ fn exact_output_accepts_authored_empty_string() {
     };
     assert_eq!(expectation.rendered_output.exact.as_deref(), Some(""));
     assert!(expectation.rendered_output.is_present());
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
@@ -922,7 +1024,7 @@ fn rejects_exact_output_combined_with_each_other_rendered_form() {
     ];
 
     for (index, field) in fields.iter().enumerate() {
-        let (root, case_root) = write_fixture(
+        let (_root, case_root) = write_fixture(
             &format!("rendered_output_exact_exclusive_{index}"),
             &format!(
                 "[backends.html]\nmode = \"success\"\nwarnings = \"forbid\"\nrendered_output_exact = \"exact\"\n{field}\n"
@@ -932,10 +1034,14 @@ fn rejects_exact_output_combined_with_each_other_rendered_form() {
         let Err(error) = load_canonical_case_specs(&case_root, None) else {
             panic!("exact output combined with {field} should be rejected");
         };
-        assert!(error.contains("rendered_output_exact"), "{error}");
-        assert!(error.contains("must not combine"), "{error}");
-
-        fs::remove_dir_all(&root).expect("should clean up");
+        assert_eq!(
+            error.kind,
+            super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+            "unexpected kind: {:?} ({error})",
+            error.kind
+        );
+        assert!(error.message.contains("rendered_output_exact"), "{error}");
+        assert!(error.message.contains("must not combine"), "{error}");
     }
 }
 
@@ -948,23 +1054,41 @@ fn rejects_each_new_rendered_form_in_acceptance_only_and_failure_modes() {
     ];
 
     for (index, field) in fields.iter().enumerate() {
-        for (mode, suffix) in [
-            ("acceptance_only", "success_contract = \"acceptance_only\""),
-            ("failure", "diagnostic_codes = [\"MOTH-RULE-0001\"]"),
+        for (mode, mode_label, suffix) in [
+            (
+                "success",
+                "acceptance_only",
+                "success_contract = \"acceptance_only\"",
+            ),
+            (
+                "failure",
+                "failure",
+                "diagnostic_codes = [\"MOTH-RULE-0001\"]",
+            ),
         ] {
-            let (root, case_root) = write_fixture(
-                &format!("rendered_output_rejected_{index}_{mode}"),
+            let (_root, case_root) = write_fixture(
+                &format!("rendered_output_rejected_{index}_{mode_label}"),
                 &format!(
                     "[backends.html]\nmode = \"{mode}\"\nwarnings = \"forbid\"\n{suffix}\n{field}\n"
                 ),
             );
 
             let Err(error) = load_canonical_case_specs(&case_root, None) else {
-                panic!("{field} should be rejected in {mode} mode");
+                panic!("{field} should be rejected in {mode_label} mode");
             };
-            assert!(error.contains("rendered_output"), "{error}");
-
-            fs::remove_dir_all(&root).expect("should clean up");
+            assert_eq!(
+                error.kind,
+                super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+                "unexpected kind: {:?} ({error})",
+                error.kind
+            );
+            // Both lanes reject the rendered form: acceptance_only cannot combine
+            // with rendered-output assertions, and failure mode forbids them.
+            assert!(
+                error.message.contains("rendered_output")
+                    || error.message.contains("rendered-output"),
+                "unexpected error: {error}"
+            );
         }
     }
 }
@@ -1005,7 +1129,7 @@ fn rejects_invalid_ordered_and_exactly_once_authored_lists() {
     ];
 
     for (name, field, expected_error) in cases {
-        let (root, case_root) = write_fixture(
+        let (_root, case_root) = write_fixture(
             &format!("rendered_output_invalid_{name}"),
             &format!("[backends.html]\nmode = \"success\"\nwarnings = \"forbid\"\n{field}\n"),
         );
@@ -1013,15 +1137,23 @@ fn rejects_invalid_ordered_and_exactly_once_authored_lists() {
         let Err(error) = load_canonical_case_specs(&case_root, None) else {
             panic!("{field} should be rejected");
         };
-        assert!(error.contains(expected_error), "unexpected error: {error}");
-
-        fs::remove_dir_all(&root).expect("should clean up");
+        assert_eq!(
+            error.kind,
+            super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+            "unexpected kind: {:?} ({error})",
+            error.kind
+        );
+        assert!(
+            error.message.contains(expected_error),
+            "unexpected error: {error}"
+        );
     }
 }
 
 #[test]
 fn rejects_rendered_output_in_failure_mode() {
-    let root = temp_dir("rendered_output_failure_mode");
+    let _root_temp = tempfile::tempdir().expect("should create fixture temp dir");
+    let root = _root_temp.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
@@ -1035,17 +1167,22 @@ fn rejects_rendered_output_in_failure_mode() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("rendered_output_contains in failure mode should be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("rendered_output_contains"),
+        error.message.contains("rendered_output_contains"),
         "unexpected error: {error}"
     );
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
 fn rejects_normalized_contains_on_wasm_artifact() {
-    let root = temp_dir("normalized_contains_wasm");
+    let _root_temp = tempfile::tempdir().expect("should create fixture temp dir");
+    let root = _root_temp.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
@@ -1059,14 +1196,22 @@ fn rejects_normalized_contains_on_wasm_artifact() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("normalized_contains on wasm should be rejected");
     };
-    assert!(error.contains("text-only"), "unexpected error: {error}");
-
-    fs::remove_dir_all(&root).expect("should clean up");
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
+    assert!(
+        error.message.contains("text-only"),
+        "unexpected error: {error}"
+    );
 }
 
 #[test]
 fn accepts_artifacts_must_not_exist_in_success_mode() {
-    let root = temp_dir("absence_contract_success");
+    let _root_temp = tempfile::tempdir().expect("should create fixture temp dir");
+    let root = _root_temp.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
@@ -1089,13 +1234,12 @@ fn accepts_artifacts_must_not_exist_in_success_mode() {
         vec!["api/index.html".to_string()],
         "non-canonical backslash separator should be normalised to forward slashes"
     );
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
 fn rejects_artifacts_must_not_exist_in_failure_mode() {
-    let root = temp_dir("absence_contract_failure");
+    let _root_temp = tempfile::tempdir().expect("should create fixture temp dir");
+    let root = _root_temp.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
@@ -1109,17 +1253,22 @@ fn rejects_artifacts_must_not_exist_in_failure_mode() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("artifacts_must_not_exist in failure mode should be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("artifacts_must_not_exist"),
+        error.message.contains("artifacts_must_not_exist"),
         "unexpected error: {error}"
     );
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }
 
 #[test]
 fn rejects_empty_artifacts_must_not_exist_entry() {
-    let root = temp_dir("absence_contract_empty");
+    let _root_temp = tempfile::tempdir().expect("should create fixture temp dir");
+    let root = _root_temp.path().to_path_buf();
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
@@ -1133,10 +1282,14 @@ fn rejects_empty_artifacts_must_not_exist_entry() {
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("empty artifacts_must_not_exist entry should be rejected");
     };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
     assert!(
-        error.contains("empty") && error.contains("artifacts_must_not_exist"),
+        error.message.contains("empty") && error.message.contains("artifacts_must_not_exist"),
         "unexpected error: {error}"
     );
-
-    fs::remove_dir_all(&root).expect("should clean up");
 }

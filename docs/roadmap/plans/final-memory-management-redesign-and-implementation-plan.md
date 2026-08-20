@@ -1,6 +1,6 @@
 # Final Memory Management Redesign and Implementation Plan
 
-**Status:** accepted final design, implementation deferred  
+**Status:** documentation migration active, compiler implementation deferred
 **Repository:** `nyejames/moth`  
 **Baseline reviewed:** `main` at `34afc996b746bfe93281dad115c40083a9106ac8`  
 **Proposed repository path:** `docs/roadmap/plans/final-memory-management-redesign-and-implementation-plan.md`  
@@ -13,6 +13,19 @@ This plan is the parent roadmap for Moth's final memory-management model. It rep
 The Retained Edge Counting plan owns the detailed REC analysis, ABI, counter and lowering contract. This plan owns the complete source semantics, analysis boundaries, inferred regions, cleanup frontiers, explicit groups, field-sensitive allocation splitting, physical memory planning, backend/profile parity, channel prerequisites and repository-wide documentation migration.
 
 The existing `docs/roadmap/plans/grouped-memory-design.md` plan is superseded as the umbrella memory roadmap. Its still-valid explicit-group implementation detail must be folded into this plan and the canonical declared-group pages, then the old plan must be deleted or reduced to a short superseded pointer. Do not leave two overlapping implementation authorities.
+
+## Current state
+
+```text
+STATUS: active — the documentation-migration slice is the first roadmap item after test-suite
+  hardening. Compiler implementation remains deferred until the accepted memory model is reflected
+  consistently in the canonical documentation and progress matrix.
+CURRENT_SCOPE: Milestone A documentation authority migration; no Rust implementation or backend
+  memory-lowering work is active in this slice.
+NEXT_ACTION: refresh the baseline from the post-squash main branch, then begin Phase 0 authority and
+  repository-baseline reconciliation before changing canonical memory documentation.
+BLOCKERS: none for the documentation slice; implementation phases remain gated on its completion.
+```
 
 ---
 

@@ -1,4 +1,4 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-success_contract = "acceptance_only"
+rendered_output_exact = "nested_borrowing_patterns first=hello world second=hello world third=hello world sum=126 rebound=52"

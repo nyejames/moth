@@ -33,13 +33,14 @@ use crate::compiler_frontend::public_call_summary::{
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    assignment_target, function_node, make_test_variable, node, reference_expr, symbol,
-    test_location,
+    assignment_target, function_node, immutable_reference_expr, make_test_variable, node, symbol,
+    test_source_location,
 };
 use crate::compiler_frontend::tests::borrow_fixture_support::assert_invalid_mutable_access_reason;
 use crate::compiler_frontend::tests::borrow_fixture_support::run_borrow_checker;
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
-use crate::compiler_frontend::tests::hir_fixture_support::{build_ast, entry_and_start, lower_hir};
+use crate::compiler_frontend::tests::hir_fixture_support::{entry_and_start, lower_hir};
+use crate::compiler_frontend::tests::type_id_fixture_support::build_ast_with_registered_types;
 use crate::compiler_frontend::tests::type_id_fixture_support::param_with_type_id;
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::compiler_frontend::{external_packages::CallTarget, hir::reactivity::ReactiveSourceId};
@@ -62,10 +63,10 @@ fn reactive_assignment_records_invalidation_after_initialization() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     count_path.clone(),
-                    Expression::int(1, test_location(1), ValueMode::MutableOwned)
+                    Expression::int(1, test_source_location(1), ValueMode::MutableOwned)
                         .with_reactive_source(source),
                 )),
-                test_location(1),
+                test_source_location(1),
             ),
             node(
                 NodeKind::Assignment {
@@ -73,17 +74,20 @@ fn reactive_assignment_records_invalidation_after_initialization() {
                         count_path.clone(),
                         DataType::Int,
                         builtin_type_ids::INT,
-                        test_location(2),
+                        test_source_location(2),
                     ),
-                    value: Expression::int(2, test_location(2), ValueMode::ImmutableOwned),
+                    value: Expression::int(2, test_source_location(2), ValueMode::ImmutableOwned),
                 },
-                test_location(2),
+                test_source_location(2),
             ),
         ],
-        test_location(1),
+        test_source_location(1),
     );
 
-    let hir = lower_hir(build_ast(vec![start], entry_path), &mut string_table);
+    let hir = lower_hir(
+        build_ast_with_registered_types(vec![start], entry_path),
+        &mut string_table,
+    );
     let source_id = reactive_source_id_for_path(&hir, &count_path);
     let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
         .expect("reactive reassignment should follow ordinary mutable assignment rules");
@@ -114,7 +118,7 @@ fn reactive_parameter_summary_retains_subscription_without_transfer() {
         parameter_path.clone(),
         builtin_type_ids::INT,
         false,
-        test_location(1),
+        test_source_location(1),
     );
     parameter.value.reactive_source = Some(reactive_source(
         parameter_path.clone(),
@@ -138,31 +142,31 @@ fn reactive_parameter_summary_retains_subscription_without_transfer() {
                     view_path.clone(),
                     Expression::string_slice(
                         string_table.intern("reactive"),
-                        test_location(2),
+                        test_source_location(2),
                         ValueMode::ImmutableOwned,
                     ),
                 )),
-                test_location(2),
+                test_source_location(2),
             ),
             node(
                 NodeKind::Return(vec![
-                    reference_expr(
+                    immutable_reference_expr(
                         view_path,
                         DataType::StringSlice,
                         builtin_type_ids::STRING,
-                        test_location(2),
+                        test_source_location(2),
                     )
                     .with_reactive_template_metadata(
                         metadata_with_subscription(
                             reactive_source(parameter_path, ReactiveSourceKind::Parameter),
-                            test_location(2),
+                            test_source_location(2),
                         ),
                     ),
                 ]),
-                test_location(2),
+                test_source_location(2),
             ),
         ],
-        test_location(1),
+        test_source_location(1),
     );
 
     let start = function_node(
@@ -172,11 +176,11 @@ fn reactive_parameter_summary_retains_subscription_without_transfer() {
             returns: vec![],
         },
         vec![],
-        test_location(3),
+        test_source_location(3),
     );
 
     let hir = lower_hir(
-        build_ast(vec![render, start], entry_path),
+        build_ast_with_registered_types(vec![render, start], entry_path),
         &mut string_table,
     );
     let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
@@ -225,7 +229,7 @@ fn reactive_subscription_followed_by_mutation_is_valid_and_dirtying() {
     let count_path = symbol("count", &mut string_table);
     let view_path = symbol("view", &mut string_table);
     let source = reactive_source(count_path.clone(), ReactiveSourceKind::Declaration);
-    let template_metadata = metadata_with_subscription(source.clone(), test_location(3));
+    let template_metadata = metadata_with_subscription(source.clone(), test_source_location(3));
 
     let start = function_node(
         start_name,
@@ -237,33 +241,33 @@ fn reactive_subscription_followed_by_mutation_is_valid_and_dirtying() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     count_path.clone(),
-                    Expression::int(1, test_location(1), ValueMode::MutableOwned)
+                    Expression::int(1, test_source_location(1), ValueMode::MutableOwned)
                         .with_reactive_source(source),
                 )),
-                test_location(1),
+                test_source_location(1),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     view_path.clone(),
                     Expression::string_slice(
                         string_table.intern("<p>count</p>"),
-                        test_location(2),
+                        test_source_location(2),
                         ValueMode::ImmutableOwned,
                     ),
                 )),
-                test_location(2),
+                test_source_location(2),
             ),
             node(
                 NodeKind::PushStartRuntimeFragment(
-                    reference_expr(
+                    immutable_reference_expr(
                         view_path,
                         DataType::StringSlice,
                         builtin_type_ids::STRING,
-                        test_location(3),
+                        test_source_location(3),
                     )
                     .with_reactive_template_metadata(template_metadata),
                 ),
-                test_location(3),
+                test_source_location(3),
             ),
             node(
                 NodeKind::Assignment {
@@ -271,17 +275,20 @@ fn reactive_subscription_followed_by_mutation_is_valid_and_dirtying() {
                         count_path.clone(),
                         DataType::Int,
                         builtin_type_ids::INT,
-                        test_location(4),
+                        test_source_location(4),
                     ),
-                    value: Expression::int(2, test_location(4), ValueMode::ImmutableOwned),
+                    value: Expression::int(2, test_source_location(4), ValueMode::ImmutableOwned),
                 },
-                test_location(4),
+                test_source_location(4),
             ),
         ],
-        test_location(1),
+        test_source_location(1),
     );
 
-    let hir = lower_hir(build_ast(vec![start], entry_path), &mut string_table);
+    let hir = lower_hir(
+        build_ast_with_registered_types(vec![start], entry_path),
+        &mut string_table,
+    );
     let source_id = reactive_source_id_for_path(&hir, &count_path);
     let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
         .expect("subscriptions should not create active borrow lifetimes");
@@ -312,12 +319,12 @@ fn mutable_call_argument_records_reactive_invalidation() {
                 value_path,
                 builtin_type_ids::INT,
                 true,
-                test_location(1),
+                test_source_location(1),
             )],
             returns: vec![],
         },
         vec![],
-        test_location(1),
+        test_source_location(1),
     );
 
     let start = function_node(
@@ -330,35 +337,35 @@ fn mutable_call_argument_records_reactive_invalidation() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     count_path.clone(),
-                    Expression::int(1, test_location(2), ValueMode::MutableOwned)
+                    Expression::int(1, test_source_location(2), ValueMode::MutableOwned)
                         .with_reactive_source(source),
                 )),
-                test_location(2),
+                test_source_location(2),
             ),
             node(
                 NodeKind::ExpressionStatement(Expression::function_call_with_arguments(
                     mutate_path,
                     vec![CallArgument::positional(
-                        reference_expr(
+                        immutable_reference_expr(
                             count_path.clone(),
                             DataType::Int,
                             builtin_type_ids::INT,
-                            test_location(3),
+                            test_source_location(3),
                         ),
                         CallAccessMode::Shared,
-                        test_location(3),
+                        test_source_location(3),
                     )],
                     vec![],
-                    test_location(3),
+                    test_source_location(3),
                 )),
-                test_location(3),
+                test_source_location(3),
             ),
         ],
-        test_location(2),
+        test_source_location(2),
     );
 
     let hir = lower_hir(
-        build_ast(vec![callee, start], entry_path),
+        build_ast_with_registered_types(vec![callee, start], entry_path),
         &mut string_table,
     );
     let source_id = reactive_source_id_for_path(&hir, &count_path);
@@ -426,12 +433,12 @@ fn reactive_source_shared_optional_transfer_falls_back_to_read() {
                 parameter_path,
                 builtin_type_ids::INT,
                 false,
-                test_location(1),
+                test_source_location(1),
             )],
             returns: vec![],
         },
         vec![],
-        test_location(1),
+        test_source_location(1),
     );
 
     let start = function_node(
@@ -444,35 +451,35 @@ fn reactive_source_shared_optional_transfer_falls_back_to_read() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     count_path.clone(),
-                    Expression::int(1, test_location(2), ValueMode::MutableOwned)
+                    Expression::int(1, test_source_location(2), ValueMode::MutableOwned)
                         .with_reactive_source(source),
                 )),
-                test_location(2),
+                test_source_location(2),
             ),
             node(
                 NodeKind::ExpressionStatement(Expression::function_call_with_arguments(
                     inspect_path,
                     vec![CallArgument::positional(
-                        reference_expr(
+                        immutable_reference_expr(
                             count_path.clone(),
                             DataType::Int,
                             builtin_type_ids::INT,
-                            test_location(3),
+                            test_source_location(3),
                         ),
                         CallAccessMode::Shared,
-                        test_location(3),
+                        test_source_location(3),
                     )],
                     vec![],
-                    test_location(3),
+                    test_source_location(3),
                 )),
-                test_location(3),
+                test_source_location(3),
             ),
         ],
-        test_location(2),
+        test_source_location(2),
     );
 
     let hir = lower_hir(
-        build_ast(vec![inspect, start], entry_path),
+        build_ast_with_registered_types(vec![inspect, start], entry_path),
         &mut string_table,
     );
     let source_id = reactive_source_id_for_path(&hir, &count_path);
@@ -536,17 +543,20 @@ fn field_write_records_reactive_invalidation() {
         vec![node(
             NodeKind::VariableDeclaration(make_test_variable(
                 source_path.clone(),
-                Expression::int(1, test_location(1), ValueMode::MutableOwned)
+                Expression::int(1, test_source_location(1), ValueMode::MutableOwned)
                     .with_reactive_source(source),
             )),
-            test_location(1),
+            test_source_location(1),
         )],
-        test_location(1),
+        test_source_location(1),
     );
 
-    let mut hir = lower_hir(build_ast(vec![start], entry_path), &mut string_table);
+    let mut hir = lower_hir(
+        build_ast_with_registered_types(vec![start], entry_path),
+        &mut string_table,
+    );
     let source_id = reactive_source_id_for_path(&hir, &source_path);
-    let statement_id = append_synthetic_field_write(&mut hir, source_id, test_location(2));
+    let statement_id = append_synthetic_field_write(&mut hir, source_id, test_source_location(2));
 
     let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
         .expect("field write fact collection should preserve ordinary borrow rules");
@@ -573,7 +583,7 @@ fn reactive_parameter_does_not_grant_mutation_permission() {
         param_path.clone(),
         builtin_type_ids::INT,
         false,
-        test_location(1),
+        test_source_location(1),
     );
     parameter.value.reactive_source = Some(reactive_source(
         param_path.clone(),
@@ -592,16 +602,19 @@ fn reactive_parameter_does_not_grant_mutation_permission() {
                     param_path,
                     DataType::Int,
                     builtin_type_ids::INT,
-                    test_location(2),
+                    test_source_location(2),
                 ),
-                value: Expression::int(2, test_location(2), ValueMode::ImmutableOwned),
+                value: Expression::int(2, test_source_location(2), ValueMode::ImmutableOwned),
             },
-            test_location(2),
+            test_source_location(2),
         )],
-        test_location(1),
+        test_source_location(1),
     );
 
-    let hir = lower_hir(build_ast(vec![start], entry_path), &mut string_table);
+    let hir = lower_hir(
+        build_ast_with_registered_types(vec![start], entry_path),
+        &mut string_table,
+    );
     let error = run_borrow_checker(&hir, &external_package_registry, &string_table)
         .expect_err("reactive parameter metadata must not make an immutable parameter mutable");
 
@@ -625,18 +638,21 @@ fn map_mutation_records_reactive_invalidation() {
         vec![node(
             NodeKind::VariableDeclaration(make_test_variable(
                 map_path.clone(),
-                Expression::int(1, test_location(1), ValueMode::MutableOwned)
+                Expression::int(1, test_source_location(1), ValueMode::MutableOwned)
                     .with_reactive_source(source),
             )),
-            test_location(1),
+            test_source_location(1),
         )],
-        test_location(1),
+        test_source_location(1),
     );
 
-    let mut hir = lower_hir(build_ast(vec![start], entry_path), &mut string_table);
+    let mut hir = lower_hir(
+        build_ast_with_registered_types(vec![start], entry_path),
+        &mut string_table,
+    );
     let source_id = reactive_source_id_for_path(&hir, &map_path);
     let (statement_id, value_id) =
-        append_synthetic_map_clear(&mut hir, source_id, test_location(2));
+        append_synthetic_map_clear(&mut hir, source_id, test_source_location(2));
 
     let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
         .expect("map mutation fact collection should preserve ordinary borrow rules");

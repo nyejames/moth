@@ -20,11 +20,8 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tests::ast_fixture_support::test_source_location;
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
-
-fn location(line: i32) -> SourceLocation {
-    crate::compiler_frontend::hir::tests::hir_expression_lowering_tests::location(line)
-}
 
 fn node(kind: NodeKind, location: SourceLocation) -> AstNode {
     AstNode {
@@ -48,7 +45,7 @@ fn function_node(name: InternedPath, location: SourceLocation) -> AstNode {
     )
 }
 
-use crate::compiler_frontend::hir::hir_builder::build_ast;
+use crate::compiler_frontend::hir::hir_builder::build_ast_with_registered_types;
 
 fn find_function_id_by_path(
     module: &crate::compiler_frontend::hir::module::HirModule,
@@ -68,10 +65,10 @@ fn classifies_entry_start_and_normal_functions() {
     let entry_start = entry_path.join_str(IMPLICIT_START_FUNC_NAME, &mut string_table);
     let normal_fn = entry_path.join_str("helper", &mut string_table);
 
-    let ast = build_ast(
+    let ast = build_ast_with_registered_types(
         vec![
-            function_node(entry_start, location(1)),
-            function_node(normal_fn.clone(), location(2)),
+            function_node(entry_start, test_source_location(1)),
+            function_node(normal_fn.clone(), test_source_location(2)),
         ],
         entry_path,
     );
@@ -122,10 +119,10 @@ fn lowers_exact_stable_origin_to_local_function_id() {
     let stable_function_origin =
         OriginFunctionId::new_free(stable_module_origin, "helper".to_owned());
 
-    let ast = build_ast(
+    let ast = build_ast_with_registered_types(
         vec![
-            function_node(entry_start, location(1)),
-            function_node(normal_fn.clone(), location(2)),
+            function_node(entry_start, test_source_location(1)),
+            function_node(normal_fn.clone(), test_source_location(2)),
         ],
         entry_path,
     );
@@ -194,10 +191,10 @@ fn rejects_unused_concrete_origin_seed() {
         ModuleRootRole::Normal,
     );
 
-    let ast = build_ast(
+    let ast = build_ast_with_registered_types(
         vec![
-            function_node(entry_start, location(1)),
-            function_node(normal_fn.clone(), location(2)),
+            function_node(entry_start, test_source_location(1)),
+            function_node(normal_fn.clone(), test_source_location(2)),
         ],
         entry_path,
     );
@@ -248,10 +245,10 @@ fn hir_validation_rejects_two_origins_for_one_local_function() {
     let first_origin =
         OriginFunctionId::new_free(stable_module_origin.clone(), "helper".to_owned());
 
-    let ast = build_ast(
+    let ast = build_ast_with_registered_types(
         vec![
-            function_node(entry_start, location(1)),
-            function_node(normal_fn.clone(), location(2)),
+            function_node(entry_start, test_source_location(1)),
+            function_node(normal_fn.clone(), test_source_location(2)),
         ],
         entry_path.clone(),
     );

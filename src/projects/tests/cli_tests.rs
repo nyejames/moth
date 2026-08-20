@@ -22,7 +22,7 @@ use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_tests::integration_test_runner::{
     BackendId, IntegrationRunSummary, TestRunnerOptions,
 };
-use crate::compiler_tests::test_support::temp_dir;
+use crate::compiler_tests::test_fs::assert_path_missing;
 use crate::projects::command_status::CommandStatus;
 use crate::projects::dev_server::DevServerOptions;
 use crate::projects::html_project::new_html_project::NewHtmlProjectOptions;
@@ -70,7 +70,8 @@ fn build_command_uses_current_directory_when_path_is_missing() {
 #[test]
 fn build_command_writes_the_validated_directory_output_plan() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let root = temp_dir("cli_directory_output_plan");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let source_root = root.join("src");
     fs::create_dir_all(&source_root).expect("should create source root");
     fs::write(
@@ -91,9 +92,7 @@ fn build_command_writes_the_validated_directory_output_plan() {
     );
     assert_eq!(status, CommandStatus::Success);
     assert!(root.join("preview/index.html").exists());
-    assert!(!root.join("dev/index.html").exists());
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
+    assert_path_missing(&root.join("dev/index.html"));
 }
 
 /// An output-plan failure still reaches the command's single timing finish.
@@ -101,8 +100,9 @@ fn build_command_writes_the_validated_directory_output_plan() {
 #[test]
 fn failed_output_plan_records_the_build_command_total() {
     let _test_guard = crate::timing::lock_instrumentation_tests();
-    let root = temp_dir("cli_failed_output_plan_timer");
-    fs::create_dir_all(&root).expect("should create temporary project root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let entry_file = root.join("main.moth");
     fs::write(&entry_file, "value = 1\n").expect("should write source file");
 
@@ -144,8 +144,6 @@ fn failed_output_plan_records_the_build_command_total() {
         1,
         "the failed output-plan path must finish the output segment before the session drains"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temporary project root");
 }
 
 #[test]
@@ -901,7 +899,8 @@ fn successful_build_with_warnings_exposes_warning_messages() {
 #[test]
 fn successful_build_records_command_build_total() {
     let _test_guard = crate::timing::lock_instrumentation_tests();
-    let root = temp_dir("cli_successful_build_timer");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let source_root = root.join("src");
     fs::create_dir_all(&source_root).expect("should create temporary project root");
     fs::write(root.join("config.moth"), "entry_root #= \"src\"\n")
@@ -922,8 +921,6 @@ fn successful_build_records_command_build_total() {
         .find(|observation| observation.metric.descriptor().stable_name == "command.build.total")
         .expect("command.build.total must be recorded");
     assert_eq!(command_total.samples, 1);
-
-    fs::remove_dir_all(&root).expect("should remove temporary project root");
 }
 
 /// Boundary regression: a scripted build duration is recorded before rendering and
@@ -937,7 +934,8 @@ fn successful_build_records_command_build_total() {
 #[test]
 fn build_command_total_excludes_renderer_work() {
     let _test_guard = crate::timing::lock_instrumentation_tests();
-    let root = temp_dir("cli_build_boundary_renderer");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let source_root = root.join("src");
     fs::create_dir_all(&source_root).expect("should create source root");
     fs::write(root.join("config.moth"), "entry_root #= \"src\"\n").expect("should write config");
@@ -953,9 +951,10 @@ fn build_command_total_excludes_renderer_work() {
         super::create_build_output_plan,
         scripted_duration,
         |_outcome, duration| {
-            // Simulate renderer work after capture. The scripted duration must
-            // remain the recorded total regardless of this work.
-            std::thread::sleep(Duration::from_millis(5));
+            // The renderer receiving the captured duration is the ordering evidence: capture
+            // already happened. Sleeping here would add wall-clock time to the test without
+            // strengthening that, because the recorded total is the scripted value, not a
+            // measurement of this callback.
             assert_eq!(duration, scripted_duration);
             renderer_calls.fetch_add(1, Ordering::SeqCst);
         },
@@ -979,8 +978,59 @@ fn build_command_total_excludes_renderer_work() {
     // renderer work did not enter the captured boundary.
     assert_eq!(command_total.total, scripted_duration);
     assert_eq!(command_total.samples, 1, "exactly one command-total sample");
+}
 
-    fs::remove_dir_all(&root).expect("should remove temporary project root");
+/// A successful build reports the artifacts the writer emitted, not the artifacts the backend
+/// planned.
+///
+/// WHAT: replaces the built project's outputs with one emitted page beside one `NotBuilt` entry
+///       and asserts the rendered count is the emitted one.
+/// WHY: `NotBuilt` exists so a backend can declare an artifact it deliberately does not write.
+///      Counting the planned list would tell the user the compiler produced a file that is not
+///      on disk.
+#[cfg(feature = "timers")]
+#[test]
+fn build_success_counts_emitted_artifacts_not_planned_ones() {
+    let _test_guard = crate::timing::lock_instrumentation_tests();
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let source_root = root.join("src");
+    fs::create_dir_all(&source_root).expect("should create source root");
+    fs::write(root.join("config.moth"), "entry_root #= \"src\"\n").expect("should write config");
+    fs::write(source_root.join("@page.moth"), "value = 1\n").expect("should write source");
+
+    let reported_count = std::cell::Cell::new(None);
+    let (status, _) = run_build_command_with_output_plan_for_tests(
+        root.to_str().expect("temporary path should be valid UTF-8"),
+        &[],
+        |build_result| {
+            build_result.project.output_files = vec![
+                OutputFile::new(
+                    PathBuf::from("index.html"),
+                    FileKind::Html(String::from("<html></html>")),
+                ),
+                OutputFile::new(PathBuf::from("unbuilt.js"), FileKind::NotBuilt),
+            ];
+            super::create_build_output_plan(build_result)
+        },
+        Duration::from_millis(11),
+        |outcome, _| {
+            if let super::BuildCommandOutcome::Success {
+                output_file_count, ..
+            } = outcome
+            {
+                reported_count.set(Some(*output_file_count));
+            }
+        },
+    );
+
+    assert_eq!(status, CommandStatus::Success);
+    assert_eq!(
+        reported_count.get(),
+        Some(1),
+        "the planned list holds two artifacts, but only the page was emitted"
+    );
+    assert_path_missing(&root.join("dev/unbuilt.js"));
 }
 
 /// Boundary regression: a failed output write still records one command total and
@@ -989,8 +1039,9 @@ fn build_command_total_excludes_renderer_work() {
 #[test]
 fn failed_output_write_records_build_command_total() {
     let _test_guard = crate::timing::lock_instrumentation_tests();
-    let root = temp_dir("cli_failed_output_write_timer");
-    fs::create_dir_all(&root).expect("should create temporary project root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let entry_file = root.join("main.moth");
     fs::write(&entry_file, "value = 1\n").expect("should write source file");
 
@@ -1033,6 +1084,4 @@ fn failed_output_write_records_build_command_total() {
         1,
         "the failed output-write path must finish the output segment before the session drains"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temporary project root");
 }

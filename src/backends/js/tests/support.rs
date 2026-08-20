@@ -22,7 +22,7 @@ use crate::compiler_frontend::datatypes::ids::{
 pub(super) use crate::compiler_frontend::external_packages::{
     CallTarget, ExternalFunctionId, IO_INPUT_EXTERNAL_TYPE_ID,
 };
-use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
+use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{
     HirExpression, HirExpressionKind, HirMapEntry, ValueKind,
 };
@@ -31,12 +31,16 @@ use crate::compiler_frontend::hir::ids::{BlockId, ChoiceId, FunctionId, LocalId,
 use crate::compiler_frontend::hir::module::{HirChoice, HirModule};
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::regions::HirRegion;
-use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
+use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+pub(super) use crate::compiler_frontend::tests::ast_fixture_support::test_source_location;
+pub(super) use crate::compiler_frontend::tests::hir_fixture_support::{
+    bool_expression, expression, int_expression, local, statement, string_expression,
+    unit_expression,
+};
 
 pub(super) use crate::compiler_frontend::symbols::interned_path::InternedPath;
 pub(super) use crate::compiler_frontend::symbols::string_interning::StringTable;
-pub(super) use crate::compiler_frontend::tokenizer::tokens::{CharPosition, SourceLocation};
 
 #[derive(Clone, Copy)]
 pub(super) struct TypeIds {
@@ -110,20 +114,11 @@ pub(super) fn helper_source<'a>(source: &'a str, name: &str) -> &'a str {
     panic!("helper {name} body is not closed");
 }
 
-pub(super) fn loc(start: i32) -> SourceLocation {
-    SourceLocation {
-        scope: InternedPath::new(),
-        start_pos: CharPosition {
-            line_number: start,
-            char_column: 0,
-        },
-        end_pos: CharPosition {
-            line_number: start,
-            char_column: 120, // Arbitrary number
-        },
-    }
-}
-
+/// Registers the type surface this backend's tests exercise.
+///
+/// Deliberately local to each backend: the JS lane registers option, choice, collection, map,
+/// fallible-carrier and IO-input-handle types that the Wasm lane does not support, so the two
+/// `TypeIds` shapes are not equivalent and must not be merged.
 pub(super) fn build_type_environment() -> (TypeEnvironment, TypeIds) {
     let mut env = TypeEnvironment::new();
     let builtins = env.builtins();
@@ -171,42 +166,6 @@ pub(super) fn build_type_environment() -> (TypeEnvironment, TypeIds) {
     )
 }
 
-pub(super) fn expression(
-    id: u32,
-    kind: HirExpressionKind,
-    ty: TypeId,
-    region: RegionId,
-    value_kind: ValueKind,
-) -> HirExpression {
-    HirExpression {
-        id: crate::compiler_frontend::hir::ids::HirValueId(id),
-        kind,
-        ty,
-        value_kind,
-        region,
-    }
-}
-
-pub(super) fn unit_expression(id: u32, ty: TypeId, region: RegionId) -> HirExpression {
-    expression(
-        id,
-        HirExpressionKind::TupleConstruct { elements: vec![] },
-        ty,
-        region,
-        ValueKind::Const,
-    )
-}
-
-pub(super) fn int_expression(id: u32, value: i32, ty: TypeId, region: RegionId) -> HirExpression {
-    expression(
-        id,
-        HirExpressionKind::Int(value),
-        ty,
-        region,
-        ValueKind::Const,
-    )
-}
-
 pub(super) fn float_expression(id: u32, value: f64, ty: TypeId, region: RegionId) -> HirExpression {
     expression(
         id,
@@ -217,49 +176,11 @@ pub(super) fn float_expression(id: u32, value: f64, ty: TypeId, region: RegionId
     )
 }
 
-pub(super) fn bool_expression(id: u32, value: bool, ty: TypeId, region: RegionId) -> HirExpression {
-    expression(
-        id,
-        HirExpressionKind::Bool(value),
-        ty,
-        region,
-        ValueKind::Const,
-    )
-}
-
-pub(super) fn string_expression(
-    id: u32,
-    value: &str,
-    ty: TypeId,
-    region: RegionId,
-) -> HirExpression {
-    expression(
-        id,
-        HirExpressionKind::StringLiteral(value.to_owned()),
-        ty,
-        region,
-        ValueKind::Const,
-    )
-}
-
-pub(super) fn statement(id: u32, kind: HirStatementKind, line: i32) -> HirStatement {
-    HirStatement {
-        id: crate::compiler_frontend::hir::ids::HirNodeId(id),
-        kind,
-        location: loc(line),
-    }
-}
-
-pub(super) fn local(local_id: u32, ty: TypeId, region: RegionId) -> HirLocal {
-    HirLocal {
-        id: LocalId(local_id),
-        ty,
-        mutable: true,
-        region,
-        source_info: Some(loc(1)),
-    }
-}
-
+/// Assembles a module from this backend's fixture shape.
+///
+/// Deliberately local to each backend: the two signatures and their naming, region and choice
+/// seeding differ, so this is not the same operation under one name. Only the HIR node
+/// constructors are shared, from `compiler_frontend::tests::hir_fixture_support`.
 pub(super) fn build_module(
     string_table: &mut StringTable,
     function_name: &str,

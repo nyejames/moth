@@ -3,4 +3,4 @@ entry = "."
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = "receiver_method_alias_return_success value=99\n"
+rendered_output_exact = "receiver_method_alias_return_success value=99"

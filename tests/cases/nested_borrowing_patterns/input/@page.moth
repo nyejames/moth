@@ -1,36 +1,25 @@
--- Test file: Nested borrowing patterns (should pass)
--- Tests that borrowing from borrowed values works correctly
+-- Aliasing an alias keeps reading the original value at every depth, and once
+-- the last shared read of a mutable binding has happened the binding can be
+-- rebound. Each depth and the rebound value is named in one output event.
 
--- Initialize data
-original_data = "hello world"
+render_nested_borrowing || -> String:
+    original_data = "hello world"
 
--- Create first level of borrowing
-first_ref = original_data
+    first_ref = original_data
+    second_ref = first_ref
+    third_ref = second_ref
 
--- Create nested borrowing (borrow from a borrow)
-second_ref = first_ref
-third_ref = second_ref
+    mutable_data ~= 42
 
--- All references should be usable
-result1 = first_ref
-result2 = second_ref  
-result_three = third_ref
+    shared_ref = mutable_data
+    nested_shared1 = shared_ref
+    nested_shared2 = nested_shared1
 
--- Use the results to ensure they're valid
-final_result = result1
+    sum = shared_ref + nested_shared1 + nested_shared2
 
--- Test with mutable data
-mutable_data ~= 42
+    mutable_data = mutable_data + 10
 
--- Create shared reference to mutable data
-shared_ref = mutable_data
+    return [:nested_borrowing_patterns first=[first_ref] second=[second_ref] third=[third_ref] sum=[sum] rebound=[mutable_data]]
+;
 
--- Create nested shared references
-nested_shared1 = shared_ref
-nested_shared2 = nested_shared1
-
--- All should be usable
-sum = shared_ref + nested_shared1 + nested_shared2
-
--- After last use of shared references, mutable access should work
-mutable_data = mutable_data + 10
+[:[render_nested_borrowing()]]

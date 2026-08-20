@@ -394,7 +394,7 @@ pub(crate) fn activate_session(
     configuration: TimingSessionConfiguration,
 ) {
     #[cfg(test)]
-    RECORD_SESSION_DEACTIVATED.store(false, Ordering::Release);
+    note_session_deactivated_for_test(false);
     ACTIVE_COMMAND_KIND.store(command_code(command), Ordering::Release);
     ACTIVE_OUTPUT_SUPPRESSED.store(configuration.suppress_output(), Ordering::Relaxed);
     ACTIVE_CHANNEL_BITS.store(configuration.active_bits(), Ordering::Release);
@@ -408,7 +408,7 @@ pub(crate) fn deactivate_session() {
     ACTIVE_CHANNEL_BITS.store(0, Ordering::Release);
     ACTIVE_OUTPUT_SUPPRESSED.store(false, Ordering::Relaxed);
     #[cfg(test)]
-    RECORD_SESSION_DEACTIVATED.store(true, Ordering::Release);
+    note_session_deactivated_for_test(true);
 }
 
 /// Begin one lock-free record admission window for the current session.
@@ -550,14 +550,62 @@ pub(crate) fn timing_clock_reads_for_test() -> usize {
     TIMING_CLOCK_READS.load(Ordering::Relaxed)
 }
 
-#[cfg(test)]
-static RECORD_ADMISSION_PAUSED: AtomicBool = AtomicBool::new(false);
+// ---------------------------------------------------------------------------
+//  Drain-synchronization seam for collector tests
+// ---------------------------------------------------------------------------
+//
+// Session drain has two transient orderings a test must observe: a recorder
+// that has been admitted but has not published its observation, and a session
+// that has cleared its fast-path bits but has not finished draining. A test
+// stops the targeted recorder inside that window and waits for the matching
+// state.
+//
+// The seam is a condition variable, not atomics plus `yield_now`: a spin count
+// is a CPU-speed timeout rather than synchronization, and it reports nothing
+// about the state it gave up on. The wait deadline below exists only so a
+// broken ordering fails instead of hanging the suite.
 
 #[cfg(test)]
-static RECORD_ADMISSION_REACHED: AtomicBool = AtomicBool::new(false);
+use std::sync::{Condvar, Mutex};
+#[cfg(test)]
+use std::time::Duration;
+
+/// The transient drain state a collector test can wait on.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RecordAdmissionState {
+    /// The targeted recorder must stop after admission until the test releases it.
+    pub(crate) paused: bool,
+    /// The targeted recorder reached the pause point inside its admission window.
+    pub(crate) admission_reached: bool,
+    /// A session cleared its fast-path bits and is now draining admitted recorders.
+    pub(crate) session_deactivated: bool,
+}
 
 #[cfg(test)]
-static RECORD_SESSION_DEACTIVATED: AtomicBool = AtomicBool::new(false);
+impl std::fmt::Display for RecordAdmissionState {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "paused={}, admission_reached={}, session_deactivated={}",
+            self.paused, self.admission_reached, self.session_deactivated
+        )
+    }
+}
+
+#[cfg(test)]
+static RECORD_ADMISSION_STATE: Mutex<RecordAdmissionState> = Mutex::new(RecordAdmissionState {
+    paused: false,
+    admission_reached: false,
+    session_deactivated: false,
+});
+
+#[cfg(test)]
+static RECORD_ADMISSION_SIGNAL: Condvar = Condvar::new();
+
+/// Deadlock protection for the drain waits, never the synchronization itself.
+#[cfg(test)]
+const RECORD_ADMISSION_WAIT_DEADLINE: Duration = Duration::from_secs(30);
 
 #[cfg(test)]
 thread_local! {
@@ -570,12 +618,46 @@ thread_local! {
 }
 
 #[cfg(test)]
+fn lock_record_admission_state() -> std::sync::MutexGuard<'static, RecordAdmissionState> {
+    RECORD_ADMISSION_STATE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Apply one state change and wake every waiter.
+#[cfg(test)]
+fn publish_record_admission_state(update: impl FnOnce(&mut RecordAdmissionState)) {
+    update(&mut lock_record_admission_state());
+    RECORD_ADMISSION_SIGNAL.notify_all();
+}
+
+/// Wait until `reached` holds, or report the state the wait gave up on.
+#[cfg(test)]
+fn wait_for_record_admission_state(
+    reached: impl Fn(&RecordAdmissionState) -> bool,
+) -> Result<(), RecordAdmissionState> {
+    let (state, wait_result) = RECORD_ADMISSION_SIGNAL
+        .wait_timeout_while(
+            lock_record_admission_state(),
+            RECORD_ADMISSION_WAIT_DEADLINE,
+            |state| !reached(state),
+        )
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+    if wait_result.timed_out() {
+        Err(*state)
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(test)]
 pub(crate) struct RecordAdmissionPauseGuard;
 
 #[cfg(test)]
 impl RecordAdmissionPauseGuard {
     pub(crate) fn release(&self) {
-        RECORD_ADMISSION_PAUSED.store(false, Ordering::Release);
+        publish_record_admission_state(|state| state.paused = false);
     }
 }
 
@@ -588,20 +670,31 @@ impl Drop for RecordAdmissionPauseGuard {
 
 #[cfg(test)]
 pub(crate) fn pause_record_admission_for_test() -> RecordAdmissionPauseGuard {
-    RECORD_ADMISSION_REACHED.store(false, Ordering::Release);
-    RECORD_SESSION_DEACTIVATED.store(false, Ordering::Release);
-    RECORD_ADMISSION_PAUSED.store(true, Ordering::Release);
+    publish_record_admission_state(|state| {
+        *state = RecordAdmissionState {
+            paused: true,
+            admission_reached: false,
+            session_deactivated: false,
+        };
+    });
     RecordAdmissionPauseGuard
 }
 
+/// Block until the targeted recorder is parked inside its admission window.
 #[cfg(test)]
-pub(crate) fn record_admission_reached_for_test() -> bool {
-    RECORD_ADMISSION_REACHED.load(Ordering::Acquire)
+pub(crate) fn wait_for_paused_record_admission_for_test() -> Result<(), RecordAdmissionState> {
+    wait_for_record_admission_state(|state| state.admission_reached)
+}
+
+/// Block until a session has cleared its fast-path bits and started draining.
+#[cfg(test)]
+pub(crate) fn wait_for_session_deactivation_for_test() -> Result<(), RecordAdmissionState> {
+    wait_for_record_admission_state(|state| state.session_deactivated)
 }
 
 #[cfg(test)]
-pub(crate) fn record_session_deactivated_for_test() -> bool {
-    RECORD_SESSION_DEACTIVATED.load(Ordering::Acquire)
+fn note_session_deactivated_for_test(deactivated: bool) {
+    publish_record_admission_state(|state| state.session_deactivated = deactivated);
 }
 
 #[cfg(test)]
@@ -609,14 +702,24 @@ pub(crate) fn target_record_admission_pause_for_current_thread() {
     RECORD_ADMISSION_PAUSE_TARGET.with(|target| target.set(true));
 }
 
+/// Park the targeted recorder after admission until the owning test releases it.
 #[cfg(test)]
 fn pause_after_record_admission_for_test() {
-    let targeted = RECORD_ADMISSION_PAUSE_TARGET.with(|target| target.replace(false));
-    if targeted && RECORD_ADMISSION_PAUSED.load(Ordering::Acquire) {
-        RECORD_ADMISSION_REACHED.store(true, Ordering::Release);
-        while RECORD_ADMISSION_PAUSED.load(Ordering::Acquire) {
-            std::thread::yield_now();
-        }
+    if !RECORD_ADMISSION_PAUSE_TARGET.with(|target| target.replace(false)) {
+        return;
+    }
+
+    let mut state = lock_record_admission_state();
+    if !state.paused {
+        return;
+    }
+
+    state.admission_reached = true;
+    RECORD_ADMISSION_SIGNAL.notify_all();
+    while state.paused {
+        state = RECORD_ADMISSION_SIGNAL
+            .wait(state)
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
     }
 }
 

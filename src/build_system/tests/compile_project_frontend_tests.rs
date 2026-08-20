@@ -8,7 +8,7 @@ use crate::builder_surface::external_import_providers::provider::{
     ExternalImportProviderKind, ExternalImportRequest, ResolvedExternalImport,
     RuntimeAssetIdentity,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
 use crate::compiler_frontend::compiler_messages::render::{DiagnosticRenderContext, terse};
 use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, InvalidConfigReason};
 use crate::compiler_frontend::datatypes::builtin_type_ids;
@@ -24,7 +24,7 @@ use crate::compiler_frontend::public_call_summary::PublicCallMutationEffect;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_tests::test_support::temp_dir;
+use crate::compiler_tests::test_diagnostics::assert_exact_infrastructure_error;
 use crate::projects::settings::Config;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -63,7 +63,8 @@ fn module_has_timing(
 #[test]
 fn directory_graph_retains_independent_diagnostics_without_blocked_consumer_cascades() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = temp_dir("graph_outcomes_independent_diagnostics");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
     fs::create_dir_all(dir.join("provider")).expect("should create provider module");
     fs::create_dir_all(dir.join("consumer")).expect("should create second consumer module");
     fs::create_dir_all(dir.join("independent")).expect("should create independent module");
@@ -132,16 +133,15 @@ fn directory_graph_retains_independent_diagnostics_without_blocked_consumer_casc
             .all(|path| { !path.ends_with("@page.moth") && !path.ends_with("consumer/@mod.moth") }),
         "blocked consumers should not be semantically compiled: {diagnosed_paths:?}"
     );
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
 #[cfg(feature = "timers")]
 #[test]
 fn failed_directory_preparation_keeps_unfinished_module_metadata_out_of_completion() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = temp_dir("timing_failed_directory_preparation");
-    fs::create_dir_all(&dir).expect("should create project directory");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(dir.join("@page.moth"), "@core/math sin,\n#[:ok]\n")
         .expect("should write malformed entry");
@@ -160,9 +160,14 @@ fn failed_directory_preparation_keeps_unfinished_module_metadata_out_of_completi
         &mut BuilderSurface::with_mandatory_core(),
         &mut string_table,
     );
-    assert!(
-        result.is_err(),
-        "malformed Stage 0 input should fail preparation"
+    let Err(messages) = result else {
+        panic!("malformed Stage 0 input should fail preparation");
+    };
+    assert_has_diagnostic_code(&messages, "MOTH-SYNTAX-0019");
+    assert_eq!(
+        messages.error_count(),
+        1,
+        "malformed Stage 0 input should produce exactly the syntax diagnostic"
     );
 
     let snapshot = timing_session.finish();
@@ -179,8 +184,6 @@ fn failed_directory_preparation_keeps_unfinished_module_metadata_out_of_completi
         unfinished,
         crate::timing::TimingMetric::FrontendPrepare
     ));
-
-    fs::remove_dir_all(&dir).expect("should remove project directory");
 }
 
 #[cfg(feature = "timers")]
@@ -189,10 +192,12 @@ fn directory_frontend_registers_package_and_project_boundaries() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     // The collector is process-global, so serialize against other collector tests.
 
-    let dir = temp_dir("phase4_boundary_attribution");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
     // The package root lives outside the project root so the project boundary does not also
     // discover it as an owned module.
-    let package_root = temp_dir("phase4_package_root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let package_root = _temp.path().to_path_buf();
     // Unique names keep this test's records identifiable when unrelated parallel build tests
     // register their own boundaries into the shared process-global collection scope.
     const PACKAGE_NAME: &str = "phase4_helper";
@@ -370,9 +375,6 @@ fn directory_frontend_registers_package_and_project_boundaries() {
                 crate::timing::TimingMetric::FrontendModuleSemanticTotal,
             )
     }));
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
-    fs::remove_dir_all(&package_root).expect("should remove package temp dir");
 }
 
 #[cfg(feature = "timers")]
@@ -380,8 +382,9 @@ fn directory_frontend_registers_package_and_project_boundaries() {
 fn directory_frontend_records_incremental_file_prepare_with_module_attribution() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
 
-    let dir = temp_dir("phase5_directory_file_prepare");
-    fs::create_dir_all(&dir).expect("should create project directory");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(dir.join("@page.moth"), "value = 1\n").expect("should write project root");
 
@@ -428,8 +431,6 @@ fn directory_frontend_records_incremental_file_prepare_with_module_attribution()
             .all(|module| module.key.boundary() == project_boundary),
         "every project-boundary preparation observation must carry the owning module"
     );
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
 #[cfg(feature = "timers")]
@@ -437,8 +438,9 @@ fn directory_frontend_records_incremental_file_prepare_with_module_attribution()
 fn single_file_frontend_records_file_prepare_with_module_attribution() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
 
-    let dir = temp_dir("phase5_single_file_prepare");
-    fs::create_dir_all(&dir).expect("should create temp dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+
     let moth_path = dir.join("test.moth");
     fs::write(&moth_path, "value = 1\n").expect("should write .moth");
 
@@ -498,8 +500,6 @@ fn single_file_frontend_records_file_prepare_with_module_attribution() {
             .all(|module| module.key.boundary() == project_boundary),
         "single-file preparation must carry the synthetic module key"
     );
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
 #[cfg(feature = "timers")]
@@ -507,8 +507,9 @@ fn single_file_frontend_records_file_prepare_with_module_attribution() {
 fn ast_aggregate_metrics_recorded_with_timers() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
 
-    let dir = temp_dir("phase5_ast_aggregates");
-    fs::create_dir_all(&dir).expect("should create temp dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+
     let moth_path = dir.join("test.moth");
     fs::write(&moth_path, "value = 1\n").expect("should write .moth");
 
@@ -554,8 +555,6 @@ fn ast_aggregate_metrics_recorded_with_timers() {
         ast_total_count, 1,
         "module AST construction must record one aggregate timing span"
     );
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
 #[cfg(feature = "detailed_timers")]
@@ -563,8 +562,9 @@ fn ast_aggregate_metrics_recorded_with_timers() {
 fn ast_aggregate_metrics_are_not_double_recorded_with_detailed_timers() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
 
-    let dir = temp_dir("phase5_ast_aggregates_detailed");
-    fs::create_dir_all(&dir).expect("should create temp dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+
     let moth_path = dir.join("test.moth");
     fs::write(&moth_path, "value = 1\n").expect("should write .moth");
 
@@ -615,14 +615,13 @@ fn ast_aggregate_metrics_are_not_double_recorded_with_detailed_timers() {
         ast_total_count, 1,
         "detailed AST construction must still record one aggregate span"
     );
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
 #[test]
 fn directory_graph_retains_diagnostics_from_later_independent_source_packages() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = temp_dir("graph_outcomes_source_package_diagnostics");
+    let _tmp_dir = tempfile::tempdir().expect("should create temp dir");
+    let dir = _tmp_dir.path().to_path_buf();
     let first_package = dir.join("packages/first");
     let second_package = dir.join("packages/second");
     fs::create_dir_all(&first_package).expect("should create first package");
@@ -691,14 +690,13 @@ fn directory_graph_retains_diagnostics_from_later_independent_source_packages() 
             .any(|path| path.ends_with("packages/second/@mod.moth")),
         "later independent package should still compile: {diagnosed_paths:?}"
     );
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
 #[test]
 fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_errors() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = temp_dir("graph_outcomes_package_diagnosed_blocks_project");
+    let _tmp_dir = tempfile::tempdir().expect("should create temp dir");
+    let dir = _tmp_dir.path().to_path_buf();
     let package = dir.join("packages/broken");
     let src = dir.join("src");
     fs::create_dir_all(&package).expect("should create package root");
@@ -761,15 +759,14 @@ fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_
         1,
         "the package diagnostic should render once"
     );
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
 #[test]
 fn same_module_generated_sidecars_rebuild_const_templates_in_their_fresh_store() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = temp_dir("generated_const_template_projection");
-    fs::create_dir_all(&dir).expect("should create project root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
         dir.join("@page.moth"),
@@ -816,15 +813,14 @@ io.line(result)
         1,
         "the concrete wrap request needs one sidecar"
     );
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
 #[test]
 fn generated_sidecar_refreshes_active_base_public_summary() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = temp_dir("generated_active_base_public_summary");
-    fs::create_dir_all(&dir).expect("should create project root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
         dir.join("@page.moth"),
@@ -990,14 +986,13 @@ independent_result Int = independent(42)
         Some(exact_summary),
         "the sidecar should receive the exact active-base public summary"
     );
-
-    fs::remove_dir_all(&dir).expect("should remove active-base public fixture");
 }
 
 #[test]
 fn generated_sidecars_reconstruct_complete_generic_nominal_members() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = temp_dir("generated_nominal_blueprints");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
     fs::create_dir_all(dir.join("provider")).expect("should create provider module");
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
@@ -1126,14 +1121,13 @@ same_private_box PrivateBox of Bool = forward(private_box)
             other => panic!("unexpected generic nominal request base {other}"),
         }
     }
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
 #[test]
 fn generated_sidecars_reconstruct_hidden_facade_nominal_closure() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = temp_dir("generated_hidden_facade_nominal");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
     fs::create_dir_all(dir.join("facade/provider")).expect("should create provider module");
     fs::create_dir_all(dir.join("generics")).expect("should create generic provider module");
     fs::write(dir.join("config.moth"), "").expect("should write config");
@@ -1229,8 +1223,6 @@ wrapped Wrapper = identity(make())
         .expect("facade-hidden provider nominal should retain its fields");
     assert_eq!(hidden_fields.len(), 1);
     assert_eq!(hidden_fields[0].type_id, builtin_type_ids::INT);
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
 #[derive(Debug)]
@@ -1557,8 +1549,9 @@ fn builder_surface_with_dummy_js_provider_with_lowering(calls: Arc<AtomicUsize>)
 #[test]
 fn provider_created_package_registry_survives_into_module() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = temp_dir("provider_registry_survives");
-    fs::create_dir_all(&dir).expect("should create temp dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(dir.join("@page.moth"), "@drawing.js draw\nvalue = draw()\n")
         .expect("should write page");
@@ -1607,15 +1600,14 @@ fn provider_created_package_registry_survives_into_module() {
             "provider package should be ProjectLocal"
         );
     }
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
 #[test]
 fn provider_runtime_assets_deduped_for_repeated_imports() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = temp_dir("provider_runtime_assets_deduped");
-    fs::create_dir_all(&dir).expect("should create temp dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
         dir.join("@page.moth"),
@@ -1667,15 +1659,14 @@ fn provider_runtime_assets_deduped_for_repeated_imports() {
             .is_some(),
         "deduped import should carry runtime asset"
     );
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
 #[test]
 fn entry_runtime_metadata_ignores_unreachable_external_calls() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = temp_dir("provider_runtime_metadata_unreachable");
-    fs::create_dir_all(&dir).expect("should create temp dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(dir.join("@page.moth"), "@other run\nvalue = 1\n").expect("should write entry");
     fs::write(
@@ -1751,15 +1742,14 @@ fn entry_runtime_metadata_ignores_unreachable_external_calls() {
         selection.blocks_for_function(start_function_id),
         Some(&[start_entry_block][..])
     );
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
 #[test]
 fn entry_runtime_metadata_ignores_unreachable_source_package_wrappers() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = temp_dir("builder_runtime_metadata_unreachable");
-    fs::create_dir_all(&dir).expect("should create temp dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
         dir.join("@page.moth"),
@@ -1823,15 +1813,14 @@ fn entry_runtime_metadata_ignores_unreachable_source_package_wrappers() {
             .all(|import| import.package_id != canvas_package_id),
         "entry runtime metadata should exclude unreachable @web/canvas wrappers"
     );
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
 #[test]
 fn provider_backed_import_with_js_lowering_passes_html_build() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = temp_dir("provider_js_lowering_html");
-    fs::create_dir_all(&dir).expect("should create temp dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(dir.join("@page.moth"), "@drawing.js draw\nvalue = draw()\n")
         .expect("should write page");
@@ -1872,18 +1861,17 @@ fn provider_backed_import_with_js_lowering_passes_html_build() {
         !project.output_files.is_empty(),
         "HTML build should produce output files"
     );
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
 #[cfg(feature = "timers")]
 #[test]
 fn linked_module_js_lowering_is_observed_separately() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = temp_dir("phase6_linked_js_lowering");
-    let package_root = temp_dir("phase6_linked_package_root");
-    fs::create_dir_all(&dir).expect("should create temp dir");
-    fs::create_dir_all(&package_root).expect("should create package directory");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let package_root = _temp.path().to_path_buf();
+
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
         dir.join("@page.moth"),
@@ -1947,16 +1935,14 @@ fn linked_module_js_lowering_is_observed_separately() {
         }),
         "entry-module JS lowering must remain observed"
     );
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
-    fs::remove_dir_all(&package_root).expect("should remove package temp dir");
 }
 
 #[test]
 fn single_file_remaps_module_type_environment_nominal_fields() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = temp_dir("single_file_type_env_remap");
-    fs::create_dir_all(&dir).expect("should create temp dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+
     let moth_path = dir.join("test.moth");
     fs::write(
         &moth_path,
@@ -2019,15 +2005,14 @@ fn single_file_remaps_module_type_environment_nominal_fields() {
         ),
         "Int"
     );
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
 #[test]
 fn single_file_rejects_wrong_extension() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = temp_dir("single_file_wrong_ext");
-    fs::create_dir_all(&dir).expect("should create temp dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+
     let txt_path = dir.join("test.txt");
     fs::write(&txt_path, "x ~= 10\n").expect("should write .txt");
 
@@ -2044,8 +2029,9 @@ fn single_file_rejects_wrong_extension() {
         &mut string_table,
     );
 
-    assert!(result.is_err(), "expected Err for wrong extension");
-    let messages = result.err().expect("checked above");
+    let Err(messages) = result else {
+        panic!("expected Err for wrong extension");
+    };
     let diagnostic = messages
         .error_diagnostics()
         .next()
@@ -2058,15 +2044,14 @@ fn single_file_rejects_wrong_extension() {
         error_text.contains(".moth"),
         "expected error to mention .moth, got: {error_text}"
     );
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
 #[test]
 fn single_file_rejects_missing_file() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = temp_dir("single_file_missing");
-    fs::create_dir_all(&dir).expect("should create temp dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+
     let missing_path = dir.join("does_not_exist.moth");
 
     let mut config = Config::new(missing_path);
@@ -2082,20 +2067,18 @@ fn single_file_rejects_missing_file() {
         &mut string_table,
     );
 
-    assert!(result.is_err(), "expected Err for missing file");
-    assert!(
-        result.err().expect("checked above").error_count() > 0,
-        "expected at least one error"
-    );
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
+    let Err(messages) = result else {
+        panic!("missing entry file should produce an error, not success");
+    };
+    assert_exact_infrastructure_error(&messages, &ErrorType::File);
 }
 
 #[test]
 fn single_file_rejects_optional_core_package_not_exposed_by_builder() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = temp_dir("single_file_optional_core_not_exposed");
-    fs::create_dir_all(&dir).expect("should create temp dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+
     let moth_path = dir.join("test.moth");
     fs::write(&moth_path, "@core/text length\nvalue = length(\"abc\")\n")
         .expect("should write .moth");
@@ -2113,11 +2096,9 @@ fn single_file_rejects_optional_core_package_not_exposed_by_builder() {
         &mut string_table,
     );
 
-    assert!(
-        result.is_err(),
-        "optional core package should require builder opt-in"
-    );
-    let messages = result.err().expect("checked above");
+    let Err(messages) = result else {
+        panic!("optional core package should require builder opt-in");
+    };
     let diagnostic = messages
         .error_diagnostics()
         .next()
@@ -2126,8 +2107,6 @@ fn single_file_rejects_optional_core_package_not_exposed_by_builder() {
         panic!("unexpected diagnostic payload: {:?}", diagnostic.payload);
     };
     assert_eq!(messages.string_table.resolve(package_path), "@core/text");
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
 // ── Directory-project flow ────────────────────────────────────────────────────
@@ -2135,7 +2114,8 @@ fn single_file_rejects_optional_core_package_not_exposed_by_builder() {
 #[test]
 fn directory_project_discovers_multiple_entry_modules() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = temp_dir("dir_multi_module");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
     fs::create_dir_all(dir.join("page")).expect("should create page dir");
     fs::create_dir_all(dir.join("layout")).expect("should create layout dir");
     fs::write(dir.join("config.moth"), "").expect("should write config");
@@ -2167,14 +2147,13 @@ fn directory_project_discovers_multiple_entry_modules() {
         2,
         "expected exactly two modules"
     );
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
 #[test]
 fn directory_project_remaps_delta_collisions_across_modules() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = temp_dir("dir_delta_remap_collision");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
     fs::create_dir_all(dir.join("first")).expect("should create first module dir");
     fs::create_dir_all(dir.join("second")).expect("should create second module dir");
     fs::write(dir.join("config.moth"), "").expect("should write config");
@@ -2247,15 +2226,14 @@ fn directory_project_remaps_delta_collisions_across_modules() {
         "Item"
     );
     assert_eq!(field_names, vec![Some("shared"), Some("second_only")]);
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
 #[test]
 fn provider_backed_direct_selection_compiles_and_reuses_cache() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = temp_dir("provider_direct_selection_cache");
-    fs::create_dir_all(&dir).expect("should create temp dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
         dir.join("@page.moth"),
@@ -2296,15 +2274,14 @@ fn provider_backed_direct_selection_compiles_and_reuses_cache() {
             .any(module_contains_external_call),
         "HIR should lower provider-backed direct-selection calls to external function IDs"
     );
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
 #[test]
 fn provider_backed_namespace_binding_exposes_function_and_type_members() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = temp_dir("provider_namespace_binding");
-    fs::create_dir_all(&dir).expect("should create temp dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
         dir.join("@page.moth"),
@@ -2340,14 +2317,13 @@ fn provider_backed_namespace_binding_exposes_function_and_type_members() {
             .any(module_contains_external_call),
         "namespace member calls should lower to external function IDs"
     );
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
 #[test]
 fn provider_backed_same_bare_name_from_different_directories_gets_distinct_packages() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = temp_dir("provider_same_bare_name_distinct_dirs");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
     fs::create_dir_all(dir.join("a")).expect("should create a dir");
     fs::create_dir_all(dir.join("b")).expect("should create b dir");
     fs::write(dir.join("config.moth"), "").expect("should write config");
@@ -2396,15 +2372,14 @@ fn provider_backed_same_bare_name_from_different_directories_gets_distinct_packa
             .any(module_contains_external_call),
         "calls through both provider-created packages should lower to external IDs"
     );
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
 #[test]
 fn provider_backed_opaque_type_passes_to_same_package_function() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = temp_dir("provider_opaque_same_package");
-    fs::create_dir_all(&dir).expect("should create temp dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
         dir.join("@page.moth"),
@@ -2435,14 +2410,13 @@ fn provider_backed_opaque_type_passes_to_same_package_function() {
             .any(module_contains_external_call),
         "HIR should contain external calls for make_widget and use_widget"
     );
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
 #[test]
 fn provider_backed_opaque_type_from_different_package_is_rejected() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = temp_dir("provider_opaque_cross_package_rejected");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
     fs::create_dir_all(dir.join("a")).expect("should create a dir");
     fs::create_dir_all(dir.join("b")).expect("should create b dir");
     fs::write(dir.join("config.moth"), "").expect("should write config");
@@ -2477,15 +2451,14 @@ fn provider_backed_opaque_type_from_different_package_is_rejected() {
         }),
         "expected type mismatch diagnostic for cross-package opaque type, got {messages:?}"
     );
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
 #[test]
 fn directory_project_rejects_missing_entry_root() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = temp_dir("dir_missing_entry_root");
-    fs::create_dir_all(&dir).expect("should create temp dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+
     // Config declares an entry_root that does not exist.
     fs::write(dir.join("config.moth"), "entry_root #= \"nonexistent\"\n")
         .expect("should write config");
@@ -2518,8 +2491,9 @@ fn directory_project_rejects_missing_entry_root() {
         &mut string_table,
     );
 
-    assert!(result.is_err(), "expected Err for missing entry root");
-    let messages = result.err().expect("checked above");
+    let Err(messages) = result else {
+        panic!("expected Err for missing entry root");
+    };
     assert!(
         messages.error_diagnostics().any(|diagnostic| {
             matches!(
@@ -2532,8 +2506,6 @@ fn directory_project_rejects_missing_entry_root() {
         }),
         "expected ConfiguredEntryRootMissing for a nonexistent entry root, got {messages:?}"
     );
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
 // ── Real HTML JS provider tests ───────────────────────────────────────────────
@@ -2551,8 +2523,9 @@ fn builder_surface_with_html_js_provider() -> BuilderSurface {
 #[test]
 fn html_js_provider_namespace_binding_resolves() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = temp_dir("html_js_provider_namespace");
-    fs::create_dir_all(&dir).expect("should create temp dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
         dir.join("@page.moth"),
@@ -2586,15 +2559,14 @@ fn html_js_provider_namespace_binding_resolves() {
             .any(|module| module_contains_external_module_export(module, "draw")),
         "HIR should preserve namespace JS call export metadata"
     );
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
 #[test]
 fn html_js_provider_direct_selection_resolves() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = temp_dir("html_js_provider_grouped");
-    fs::create_dir_all(&dir).expect("should create temp dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
         dir.join("@page.moth"),
@@ -2628,15 +2600,14 @@ fn html_js_provider_direct_selection_resolves() {
             .any(|module| module_contains_external_module_export(module, "draw")),
         "HIR should preserve direct-selection alias JS export metadata"
     );
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
 #[test]
 fn html_js_provider_direct_alias_for_function_and_opaque_type_resolves() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = temp_dir("html_js_provider_direct_alias");
-    fs::create_dir_all(&dir).expect("should create temp dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
         dir.join("@page.moth"),
@@ -2670,15 +2641,14 @@ fn html_js_provider_direct_alias_for_function_and_opaque_type_resolves() {
             .any(|module| module_contains_external_module_export(module, "draw")),
         "HIR should contain provider export metadata for aliased JS function"
     );
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
 #[test]
 fn html_js_provider_receiver_method_in_project_local_js_rejected() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = temp_dir("html_js_provider_receiver_method_rejected");
-    fs::create_dir_all(&dir).expect("should create temp dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
         dir.join("@page.moth"),
@@ -2713,15 +2683,14 @@ fn html_js_provider_receiver_method_in_project_local_js_rejected() {
         "expected at least one error diagnostic for project-local JS receiver-style signature"
     );
     assert_has_diagnostic_code(&messages, "MOTH-IMPORT-0022");
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
 #[test]
 fn html_js_provider_repeated_imports_reuse_cache() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = temp_dir("html_js_provider_cache_reuse");
-    fs::create_dir_all(&dir).expect("should create temp dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
         dir.join("@page.moth"),
@@ -2764,15 +2733,14 @@ fn html_js_provider_repeated_imports_reuse_cache() {
         1,
         "same JS file imported twice should produce one deduped module external import"
     );
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
 #[test]
 fn html_js_provider_fallible_function_with_error_return_compiles() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = temp_dir("html_js_provider_fallible");
-    fs::create_dir_all(&dir).expect("should create temp dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+
     fs::write(dir.join("config.moth"), "").expect("should write config");
     fs::write(
         dir.join("@page.moth"),
@@ -2806,15 +2774,13 @@ fn html_js_provider_fallible_function_with_error_return_compiles() {
             .any(|module| module_contains_external_module_export(module, "getCanvas")),
         "HIR should contain JS export metadata for fallible JS function"
     );
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
 #[test]
 fn single_file_rejects_source_package_moth_folder_collision() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = temp_dir("single_file_source_package_collision");
-    fs::create_dir_all(&dir).expect("should create temp dir");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
 
     // Source-backed package with one valid normal module root plus a .moth/folder collision.
     let widget_lib = dir.join("lib").join("widgets");
@@ -2848,11 +2814,9 @@ fn single_file_rejects_source_package_moth_folder_collision() {
         &mut string_table,
     );
 
-    assert!(
-        result.is_err(),
-        "single-file build should reject source-backed package .moth/folder collision"
-    );
-    let messages = result.err().expect("checked above");
+    let Err(messages) = result else {
+        panic!("single-file build should reject source-backed package .moth/folder collision");
+    };
 
     assert!(
         messages.error_diagnostics().any(|diagnostic| {
@@ -2866,14 +2830,13 @@ fn single_file_rejects_source_package_moth_folder_collision() {
         }),
         "expected SourceFileFolderCollision diagnostic, got {messages:?}"
     );
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
 #[test]
 fn diagnosed_provider_retains_independent_successful_module() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = temp_dir("graph_outcomes_success_beside_diagnosed");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
     fs::create_dir_all(dir.join("provider")).expect("should create provider module");
     fs::create_dir_all(dir.join("consumer")).expect("should create second consumer module");
     fs::create_dir_all(dir.join("independent")).expect("should create independent module");
@@ -2948,14 +2911,13 @@ fn diagnosed_provider_retains_independent_successful_module() {
             .any(|path| path.ends_with("provider/+mod.moth")),
         "provider diagnostic should be retained: {diagnosed_paths:?}"
     );
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
 }
 
 #[test]
 fn source_package_warning_retained_by_frontend_outcome() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let dir = temp_dir("source_package_warning_frontend_outcome");
+    let _tmp_dir = tempfile::tempdir().expect("should create temp dir");
+    let dir = _tmp_dir.path().to_path_buf();
     let package = dir.join("packages/warnpkg");
     let src = dir.join("src");
     fs::create_dir_all(&package).expect("should create package root");
@@ -3008,6 +2970,4 @@ fn source_package_warning_retained_by_frontend_outcome() {
         messages.warning_count() >= 1,
         "render boundary should retain the source-package warning"
     );
-
-    fs::remove_dir_all(&dir).expect("should remove temp dir");
 }

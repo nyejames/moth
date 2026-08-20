@@ -1,9 +1,16 @@
--- Test case: immutable aliasing remains valid while another immutable alias is live
--- Plain '=' creates another immutable alias, not a move, so this should compile.
+-- Plain `=` creates another shared alias, not a move, so a second alias of the
+-- same mutable binding is legal while the first is still visible. Both aliases
+-- and the value read through the second are named in one output event.
 
-data ~= [:important data]
+render_aliases || -> String:
+    data ~= [:important data]
 
-data_ref = data
-another_ref = data
+    data_ref = data
+    another_ref = data
 
-result = another_ref
+    result = another_ref
+
+    return [:immutable_alias_while_borrowed first=[data_ref] second=[another_ref] result=[result]]
+;
+
+[:[render_aliases()]]

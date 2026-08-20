@@ -174,9 +174,12 @@ fn config_and_write_time_containment_share_canonical_classification() {
     use super::super::policy::validate_output_folder_containment;
     use crate::build_system::output::manifest::validate_output_root_is_safe;
     use crate::compiler_frontend::symbols::string_interning::StringTable;
+    use crate::compiler_tests::test_diagnostics::assert_output_rejection;
 
-    let project_root = crate::compiler_tests::test_support::temp_dir("shared_output_containment");
-    let outside_root = crate::compiler_tests::test_support::temp_dir("shared_output_outside");
+    let _project_temp = tempfile::tempdir().expect("should create project temp dir");
+    let project_root = _project_temp.path().to_path_buf();
+    let _outside_temp = tempfile::tempdir().expect("should create outside temp dir");
+    let outside_root = _outside_temp.path().to_path_buf();
     fs::create_dir_all(&project_root).expect("should create project root");
     fs::create_dir_all(&outside_root).expect("should create outside root");
     symlink(&outside_root, project_root.join("out")).expect("should create output symlink");
@@ -196,18 +199,14 @@ fn config_and_write_time_containment_share_canonical_classification() {
         ),
         expected
     );
-    assert!(
-        validate_output_root_is_safe(
-            &folder.resolved_path,
-            &project_root,
-            Some(&project_root.join("src")),
-            &StringTable::new(),
-        )
-        .is_err()
-    );
-
-    fs::remove_dir_all(&project_root).expect("should remove project root");
-    fs::remove_dir_all(&outside_root).expect("should remove outside root");
+    let messages = validate_output_root_is_safe(
+        &folder.resolved_path,
+        &project_root,
+        Some(&project_root.join("src")),
+        &StringTable::new(),
+    )
+    .expect_err("symlink output root should be rejected");
+    assert_output_rejection(&messages, "output-root-not-inside-project");
 }
 
 // -------------------------

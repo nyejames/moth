@@ -1,20 +1,21 @@
--- Test file: Function calls with borrow checker
--- Tests requirement 7.3: borrow checker integration with function calls
+-- Call arguments borrow rather than consume: a mutable argument is passed with
+-- the explicit `~` marker, a shared string argument stays readable after the
+-- call, and the caller's own bindings remain usable. Each returned value and
+-- each post-call read is named in one top-level output event.
 
-simple_function |value ~Int| -> Int:
+increment |value ~Int| -> Int:
     result = value + 1
     return result
 ;
 
-string_function |text String| -> String:
+echo_text |text String| -> String:
     return [text]
 ;
 
 number ~= 42
-result = simple_function(~number)
+incremented = increment(~number)
 
 message = "hello"
-echo = string_function(message)
+echoed = echo_text(message)
 
-value1 ~= 10
-value2 = simple_function(~value1)
+[:borrow_checker_function_calls incremented=[incremented] echoed=[echoed] message=[message]]

@@ -21,7 +21,6 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveSpec;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_tests::test_support::temp_dir;
 use crate::projects::dev_server::state::DevServerState;
 use crate::projects::dev_server::watch;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
@@ -292,8 +291,9 @@ impl BackendBuilder for InvalidOutputWarningBuilder {
 #[test]
 fn successful_build_marks_state_ok_and_uses_declared_entry_page() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let root = temp_dir("success");
-    fs::create_dir_all(&root).expect("should create temp root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let output_dir = root.join("dev");
     let state = Arc::new(DevServerState::new(output_dir.clone()));
     let mut executor = FakeExecutor::new(vec![Ok(multi_page_html_build_result())]);
@@ -317,15 +317,14 @@ fn successful_build_marks_state_ok_and_uses_declared_entry_page() {
     );
     assert!(output_dir.join("index.html").exists());
     assert!(output_dir.join("docs/basics/index.html").exists());
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn successful_rebuild_updates_output_and_watch_roots_from_new_plan() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let root = temp_dir("dev_output_plan_change");
-    fs::create_dir_all(&root).expect("should create temp root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let state = Arc::new(DevServerState::new(root.join("dev")));
     let mut executor = FakeExecutor::new(vec![
         Ok(directory_build_result(&root, "dev")),
@@ -363,14 +362,14 @@ fn successful_rebuild_updates_output_and_watch_roots_from_new_plan() {
     assert!(root.join("preview/index.html").exists());
 
     drop(build_state);
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn failed_build_marks_state_and_stores_error_page() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let root = temp_dir("failure");
-    fs::create_dir_all(&root).expect("should create temp root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let state = Arc::new(DevServerState::new(root.join("dev")));
     let messages =
         CompilerMessages::from_error(CompilerError::compiler_error("boom"), StringTable::new());
@@ -387,15 +386,14 @@ fn failed_build_marks_state_and_stores_error_page() {
         .expect("build state should not be poisoned");
     assert!(!build_state.last_build_ok);
     assert!(build_state.last_error_html.is_some());
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn build_without_declared_entry_page_is_treated_as_failure() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let root = temp_dir("missing_entry_page");
-    fs::create_dir_all(&root).expect("should create temp root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let state = Arc::new(DevServerState::new(root.join("dev")));
     let mut executor = FakeExecutor::new(vec![Ok(html_build_result_without_entry_page())]);
 
@@ -412,15 +410,14 @@ fn build_without_declared_entry_page_is_treated_as_failure() {
             .last_build_messages_summary
             .contains("did not declare a dev entry page")
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn build_version_increments_on_each_attempt() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let root = temp_dir("version");
-    fs::create_dir_all(&root).expect("should create temp root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let state = Arc::new(DevServerState::new(root.join("dev")));
     let mut executor = FakeExecutor::new(vec![Ok(html_build_result()), Ok(html_build_result())]);
 
@@ -430,14 +427,14 @@ fn build_version_increments_on_each_attempt() {
 
     assert_eq!(first.version, 1);
     assert_eq!(second.version, 2);
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn queued_rebuild_runs_when_files_change_during_build() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let root = temp_dir("queued");
-    fs::create_dir_all(&root).expect("should create temp root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     fs::write(root.join("main.moth"), "start").expect("should write initial source file");
     let output_dir = root.join("dev");
     let state = Arc::new(DevServerState::new(output_dir.clone()));
@@ -467,7 +464,6 @@ fn queued_rebuild_runs_when_files_change_during_build() {
 
     assert!(builds.watch_scope.is_some());
     assert_eq!(executor.call_count.load(Ordering::SeqCst), 2);
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
@@ -475,8 +471,9 @@ fn rebuild_loop_stops_at_max_consecutive_rebuilds() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     use super::MAX_CONSECUTIVE_REBUILDS;
 
-    let root = temp_dir("max_rebuilds");
-    fs::create_dir_all(&root).expect("should create temp root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     fs::write(root.join("main.moth"), "start").expect("should write initial source file");
     let output_dir = root.join("dev");
     let state = Arc::new(DevServerState::new(output_dir.clone()));
@@ -517,7 +514,6 @@ fn rebuild_loop_stops_at_max_consecutive_rebuilds() {
         executor.call_count.load(Ordering::SeqCst),
         MAX_CONSECUTIVE_REBUILDS
     );
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
@@ -534,8 +530,9 @@ fn dev_server_error_messages_use_dev_server_error_type() {
 #[test]
 fn successful_build_with_warnings_preserves_structured_success_messages() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let root = temp_dir("success_warnings");
-    fs::create_dir_all(&root).expect("should create temp root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let mut executor = FakeExecutor::new(vec![Ok(html_build_result_with_warning())]);
 
     let outcome = build_once(&mut executor, &root.join("main.moth"), &Vec::new());
@@ -551,15 +548,14 @@ fn successful_build_with_warnings_preserves_structured_success_messages() {
         "summary should name the warning, got: {}",
         outcome.diagnostics_summary
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn successful_build_without_warnings_has_no_success_messages() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let root = temp_dir("success_no_warnings");
-    fs::create_dir_all(&root).expect("should create temp root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let mut executor = FakeExecutor::new(vec![Ok(html_build_result())]);
 
     let outcome = build_once(&mut executor, &root.join("main.moth"), &Vec::new());
@@ -569,15 +565,14 @@ fn successful_build_without_warnings_has_no_success_messages() {
         outcome.success_messages.is_none(),
         "clean successful builds should not allocate an empty warning container"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn rebuild_loop_success_with_warnings_updates_summary() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let root = temp_dir("rebuild_warnings");
-    fs::create_dir_all(&root).expect("should create temp root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     fs::write(root.join("main.moth"), "start").expect("should write initial source file");
     let output_dir = root.join("dev");
     let state = Arc::new(DevServerState::new(output_dir.clone()));
@@ -609,15 +604,14 @@ fn rebuild_loop_success_with_warnings_updates_summary() {
         "state summary should surface warning titles to SSE/state consumers, got: {}",
         build_state.last_build_messages_summary
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn project_build_executor_preserves_warnings_when_output_write_fails() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let root = temp_dir("write_failure_preserves_warnings");
-    fs::create_dir_all(&root).expect("should create temp root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let entry_file = root.join("main.moth");
     fs::write(&entry_file, "value = 1\n").expect("should write source file");
 
@@ -663,14 +657,13 @@ fn project_build_executor_preserves_warnings_when_output_write_fails() {
             .to_path_buf(&messages.string_table),
         entry_file
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn project_build_executor_writes_the_validated_directory_plan() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let root = temp_dir("project_executor_directory_plan");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let source_root = root.join("src");
     fs::create_dir_all(&source_root).expect("should create source root");
     fs::write(
@@ -718,15 +711,14 @@ fn project_build_executor_writes_the_validated_directory_plan() {
     );
     assert!(root.join("preview/index.html").exists());
     assert!(!root.join("dev/index.html").exists());
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[cfg(feature = "timers")]
 #[test]
 fn dev_cycle_records_build_and_write_and_drains_one_collection_per_build() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let root = temp_dir("dev_cycle_timing");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let source_root = root.join("src");
     fs::create_dir_all(&source_root).expect("should create source root");
     fs::write(root.join("config.moth"), "entry_root #= \"src\"\n").expect("should write config");
@@ -826,16 +818,15 @@ fn dev_cycle_records_build_and_write_and_drains_one_collection_per_build() {
             "cycle observations must not leak across builds"
         );
     }
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[cfg(feature = "timers")]
 #[test]
 fn failed_dev_build_still_drains_timing_snapshot() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let root = temp_dir("dev_failed_cycle_timing");
-    fs::create_dir_all(&root).expect("should create temp root");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
     let state = Arc::new(DevServerState::new(root.join("dev")));
     let mut executor = FakeExecutor::new(vec![Err(dev_server_error_messages(
         &root.join("main.moth"),
@@ -865,6 +856,4 @@ fn failed_dev_build_still_drains_timing_snapshot() {
         1,
         "the failed executor call must finish the dev build/write span before formatting errors"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }

@@ -7,23 +7,155 @@
 
 use super::super::{ArtifactAssertion, ArtifactKind};
 use crate::build_system::build::{BuildResult, FileKind, OutputFile};
+use crate::build_system::output::output_path_identity;
+use crate::compiler_frontend::compiler_messages::InvalidOutputFolderReason;
 use crate::compiler_frontend::utilities::basic::portable_path_text;
+use std::collections::{BTreeMap, HashMap};
+use std::fmt;
 
-pub(super) fn validate_artifacts_must_not_exist(
-    build_result: &BuildResult,
-    forbidden_paths: &[String],
-) -> Option<String> {
-    if forbidden_paths.is_empty() {
-        return None;
+/// One normalized, unique view of the artifacts a build actually produced.
+///
+/// WHAT: maps every built artifact's portable relative path to its `OutputFile`, rejecting
+///       invalid output destinations, duplicate paths and portability aliases.
+/// WHY: first-match lookup silently inspects one of several artifacts claiming the same path,
+///      so every later assertion would read the winner and ignore the rest. Building the index
+///      once, before any success assertion runs, makes path identity a proved precondition
+///      rather than an assumption each assertion family repeats.
+pub(super) struct BuiltArtifactIndex<'a> {
+    by_path: BTreeMap<String, &'a OutputFile>,
+}
+
+/// Why a build result could not produce a usable artifact index.
+///
+/// These are harness-level facts about the produced output set, not expectation violations:
+/// no authored expectation can be evaluated honestly against an ambiguous artifact set.
+#[derive(Debug)]
+pub(crate) enum ArtifactIndexError {
+    /// Two built artifacts share one canonical output-path identity and one spelling.
+    DuplicatePath { path: String },
+    /// Two built artifacts spell one canonical output-path identity differently, so they
+    /// collide on hosts that fold case.
+    PortabilityAlias { first: String, second: String },
+    /// A relative output path is not valid UTF-8, so it cannot be compared with an
+    /// authored expectation without lossy replacement.
+    NonUtf8Path { path: String },
+    /// A relative output path is not a destination the output writer would accept.
+    InvalidOutputPath {
+        path: String,
+        reason: InvalidOutputFolderReason,
+    },
+}
+
+impl fmt::Display for ArtifactIndexError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::DuplicatePath { path } => write!(
+                formatter,
+                "the build produced more than one artifact at '{path}', so artifact assertions \
+                 cannot identify which one they inspect"
+            ),
+            Self::PortabilityAlias { first, second } => write!(
+                formatter,
+                "the build produced artifacts '{first}' and '{second}', which share one output \
+                 path identity and collide on case-insensitive filesystems"
+            ),
+            Self::NonUtf8Path { path } => write!(
+                formatter,
+                "the build produced an artifact whose relative path {path} is not valid UTF-8, \
+                 so it cannot be matched against an authored expectation"
+            ),
+            Self::InvalidOutputPath { path, reason } => write!(
+                formatter,
+                "the build produced an artifact at '{path}', which the output writer would \
+                 reject as an invalid portable destination ({reason:?})"
+            ),
+        }
+    }
+}
+
+impl<'a> BuiltArtifactIndex<'a> {
+    /// Build the index, or explain why the produced artifact set is ambiguous.
+    ///
+    /// Validity and collision identity come from `output_path_identity`, the same canonical
+    /// output-path policy the writer enforces, so the harness cannot accept a destination the
+    /// writer would reject or fold case differently than production does. `portable_path_text`
+    /// is used only for lookup keys, sorted display and failure reporting.
+    pub(super) fn build(build_result: &'a BuildResult) -> Result<Self, ArtifactIndexError> {
+        let mut by_path: BTreeMap<String, &'a OutputFile> = BTreeMap::new();
+        // `Page.js` and `page.js` are distinct spellings but one canonical identity, so
+        // collisions are decided on the identity and reported with the spellings.
+        let mut spelling_by_identity = HashMap::new();
+
+        for output in &build_result.project.output_files {
+            if matches!(output.file_kind(), FileKind::NotBuilt) {
+                continue;
+            }
+
+            let relative_path = output.relative_output_path();
+            let identity = match output_path_identity(relative_path) {
+                Ok(identity) => identity,
+                Err(InvalidOutputFolderReason::NonUtf8) => {
+                    return Err(ArtifactIndexError::NonUtf8Path {
+                        path: format!("{relative_path:?}"),
+                    });
+                }
+                Err(reason) => {
+                    return Err(ArtifactIndexError::InvalidOutputPath {
+                        path: portable_path_text(relative_path),
+                        reason,
+                    });
+                }
+            };
+
+            let spelling = portable_path_text(relative_path);
+            if let Some(existing) = spelling_by_identity.insert(identity, spelling.clone()) {
+                return Err(if existing == spelling {
+                    ArtifactIndexError::DuplicatePath { path: spelling }
+                } else {
+                    ArtifactIndexError::PortabilityAlias {
+                        first: existing,
+                        second: spelling,
+                    }
+                });
+            }
+
+            // Two spellings sharing one identity were rejected above, so this insert never
+            // displaces an entry.
+            by_path.insert(spelling, output);
+        }
+
+        Ok(Self { by_path })
     }
 
-    let built_paths = collect_built_artifact_paths(build_result);
+    /// Look up exactly one built artifact by its authored relative path.
+    pub(super) fn get(&self, relative_path: &str) -> Option<&'a OutputFile> {
+        self.by_path
+            .get(&portable_path_text(relative_path))
+            .copied()
+    }
 
+    /// Every built artifact path, in portable sorted order.
+    pub(super) fn paths(&self) -> Vec<&str> {
+        self.by_path.keys().map(String::as_str).collect()
+    }
+
+    /// Whether an artifact was produced at the authored relative path.
+    pub(super) fn contains(&self, relative_path: &str) -> bool {
+        self.by_path
+            .contains_key(&portable_path_text(relative_path))
+    }
+}
+
+pub(super) fn validate_artifacts_must_not_exist(
+    index: &BuiltArtifactIndex<'_>,
+    forbidden_paths: &[String],
+) -> Option<String> {
     for forbidden in forbidden_paths {
-        if built_paths.contains(forbidden) {
+        if index.contains(forbidden) {
             return Some(format!(
-                "Expected artifact '{}' to not exist, but it was produced. Built paths: {built_paths:?}.",
-                forbidden
+                "Expected artifact '{}' to not exist, but it was produced. Built paths: {:?}.",
+                forbidden,
+                index.paths()
             ));
         }
     }
@@ -32,15 +164,15 @@ pub(super) fn validate_artifacts_must_not_exist(
 }
 
 pub(super) fn validate_artifact_assertions(
-    build_result: &BuildResult,
+    index: &BuiltArtifactIndex<'_>,
     assertions: &[ArtifactAssertion],
 ) -> Option<String> {
     for assertion in assertions {
-        let Some(output) = find_output_file(build_result, &assertion.path) else {
+        let Some(output) = index.get(&assertion.path) else {
             return Some(format!(
                 "Artifact assertion expected output '{}', but produced paths were {:?}.",
                 assertion.path,
-                collect_built_artifact_paths(build_result)
+                index.paths()
             ));
         };
 
@@ -158,10 +290,12 @@ fn validate_single_artifact_assertion(
                 };
 
                 for required_export in &assertion.must_export {
-                    if !exports.contains(required_export) {
+                    if !exports.contains_key(required_export) {
                         return Some(format!(
                             "Artifact '{}' missing required wasm export '{}'. Available exports: {:?}.",
-                            assertion.path, required_export, exports
+                            assertion.path,
+                            required_export,
+                            super::wasm::export_summary(&exports)
                         ));
                     }
                 }
@@ -201,7 +335,7 @@ fn validate_single_artifact_assertion(
     None
 }
 
-fn artifact_kind_name(kind: ArtifactKind) -> &'static str {
+pub(super) fn artifact_kind_name(kind: ArtifactKind) -> &'static str {
     match kind {
         ArtifactKind::Html => "html",
         ArtifactKind::Js => "js",
@@ -210,67 +344,224 @@ fn artifact_kind_name(kind: ArtifactKind) -> &'static str {
     }
 }
 
-/// Verifies the baseline HTML backend interop/output contract.
+/// The ordered structural markers `render_html_document_shell` emits for every page.
 ///
-/// WHAT: requires a built `index.html` HTML artifact for every HTML backend success case.
-/// WHY: replacing legacy path assertions still needs a deterministic minimum output guarantee.
-pub(super) fn validate_html_baseline_contract(build_result: &BuildResult) -> Option<String> {
-    let Some(index_html) = find_output_file(build_result, "index.html") else {
-        return Some(
-            "html baseline contract expected 'index.html', but it was not produced.".to_string(),
-        );
-    };
+/// The shell writes each of these exactly once, in this order, so the contract can be ordered and
+/// bounded rather than "these fragments appear somewhere". `<html lang="` and `<body style="`
+/// include their always-emitted attribute so a marker cannot be satisfied by a different tag.
+const HTML_SHELL_MARKERS: [&str; 7] = [
+    "<!DOCTYPE html>",
+    "<html lang=\"",
+    "<head>",
+    "</head>",
+    "<body style=\"",
+    "</body>",
+    "</html>",
+];
 
-    let Some(html) = output_text_content(index_html, ArtifactKind::Html) else {
-        return Some(
-            "html baseline contract expected 'index.html' as an HTML artifact.".to_string(),
-        );
-    };
-
-    validate_html_document_structure(html, "html")
+/// How an emitted document deviates from the rendered HTML shell contract.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum HtmlShellViolation {
+    /// The document does not begin with the doctype.
+    MissingDoctypePrefix,
+    /// The document does not end with the closing html tag.
+    MissingClosingHtml,
+    /// A required structural marker is absent.
+    MissingMarker { marker: &'static str },
+    /// A structural marker the shell emits once appears several times.
+    RepeatedMarker {
+        marker: &'static str,
+        occurrences: usize,
+    },
+    /// A structural marker appears before the marker that must precede it.
+    OutOfOrderMarker {
+        marker: &'static str,
+        must_follow: &'static str,
+    },
 }
 
-pub(super) fn validate_html_document_structure(html: &str, baseline_name: &str) -> Option<String> {
-    for required_fragment in [
-        "<!DOCTYPE html>",
-        "<html",
-        "<head>",
-        "<body",
-        "</body>",
-        "</html>",
-    ] {
-        if !html.contains(required_fragment) {
-            return Some(format!(
-                "{baseline_name} baseline contract expected 'index.html' to contain '{required_fragment}'."
-            ));
+impl fmt::Display for HtmlShellViolation {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingDoctypePrefix => write!(
+                formatter,
+                "the document does not start with '{}'",
+                HTML_SHELL_MARKERS[0]
+            ),
+            Self::MissingClosingHtml => {
+                write!(formatter, "the document does not end with '</html>'")
+            }
+            Self::MissingMarker { marker } => {
+                write!(formatter, "the document is missing '{marker}'")
+            }
+            Self::RepeatedMarker {
+                marker,
+                occurrences,
+            } => write!(
+                formatter,
+                "the document contains '{marker}' {occurrences} times, but the shell emits it once"
+            ),
+            Self::OutOfOrderMarker {
+                marker,
+                must_follow,
+            } => write!(
+                formatter,
+                "the document places '{marker}' before '{must_follow}'"
+            ),
         }
+    }
+}
+
+/// Elements whose content the shell inserts verbatim and never parses as markup.
+///
+/// `<script>` carries the page bundle and any import map; `<style>` carries the core CSS. Their
+/// text is a payload, so `"</body>"` inside a JavaScript string literal is a string, not a second
+/// closing-body element.
+const OPAQUE_ELEMENTS: [&str; 2] = ["script", "style"];
+
+/// Checks one emitted document against the ordered, bounded HTML shell contract.
+///
+/// WHAT: requires the doctype prefix, the closing html suffix, and every shell marker exactly
+///       once in document order, counting only markers in structural markup.
+/// WHY: an unordered "contains" loop is satisfied by a comment, by markup inside a script and by
+///      a document whose head and body are inverted or duplicated, so it cannot claim to check
+///      document structure. Counting raw substrings across the whole document has the opposite
+///      failure: the shell inserts body HTML, script sources, import maps and head fragments as
+///      opaque payloads, so a page whose generated JavaScript merely contains the text `</body>`
+///      would be rejected for a structure it does not have. Script and style content is therefore
+///      removed before the markers are located. This is the one owner of that claim: the
+///      integration HTML baselines and the HTML builder's own shell tests both consume it.
+pub(crate) fn html_shell_violation(html: &str) -> Option<HtmlShellViolation> {
+    let structural = structural_shell_markup(html);
+
+    if !structural.starts_with(HTML_SHELL_MARKERS[0]) {
+        return Some(HtmlShellViolation::MissingDoctypePrefix);
+    }
+
+    if !structural.trim_end().ends_with("</html>") {
+        return Some(HtmlShellViolation::MissingClosingHtml);
+    }
+
+    let mut previous: Option<(&'static str, usize)> = None;
+    for marker in HTML_SHELL_MARKERS {
+        let Some(position) = structural.find(marker) else {
+            return Some(HtmlShellViolation::MissingMarker { marker });
+        };
+
+        let occurrences = count_occurrences(&structural, marker);
+        if occurrences > 1 {
+            return Some(HtmlShellViolation::RepeatedMarker {
+                marker,
+                occurrences,
+            });
+        }
+
+        if let Some((previous_marker, previous_position)) = previous
+            && position < previous_position
+        {
+            return Some(HtmlShellViolation::OutOfOrderMarker {
+                marker,
+                must_follow: previous_marker,
+            });
+        }
+        previous = Some((marker, position));
     }
 
     None
 }
 
-pub(super) fn collect_built_artifact_paths(build_result: &BuildResult) -> Vec<String> {
-    let mut actual_paths = build_result
-        .project
-        .output_files
-        .iter()
-        .filter(|output| !matches!(output.file_kind(), FileKind::NotBuilt))
-        .map(|output| portable_path_text(output.relative_output_path()))
-        .collect::<Vec<_>>();
-    actual_paths.sort();
-    actual_paths
+/// Returns the document with every opaque element's content removed.
+///
+/// The element's own tags are kept so the shell's ordering and the elements' own positions stay
+/// intact; only the bytes between them are dropped, because those bytes are a payload the shell
+/// inserted rather than markup it emitted. An unterminated opaque element leaves the remainder of
+/// the document untouched: the script-shape owner rejects such a document anyway, and guessing
+/// where the element ends would drop real markup.
+fn structural_shell_markup(html: &str) -> String {
+    let mut structural = html.to_owned();
+    for element in OPAQUE_ELEMENTS {
+        structural = strip_element_content(&structural, element);
+    }
+
+    structural
 }
 
-pub(super) fn find_output_file<'a>(
-    build_result: &'a BuildResult,
-    relative_path: &str,
-) -> Option<&'a OutputFile> {
-    let normalized_target = portable_path_text(relative_path);
+fn strip_element_content(html: &str, element: &str) -> String {
+    let open_needle = format!("<{element}");
+    let close_needle = format!("</{element}");
 
-    build_result.project.output_files.iter().find(|output| {
-        !matches!(output.file_kind(), FileKind::NotBuilt)
-            && portable_path_text(output.relative_output_path()) == normalized_target
-    })
+    let mut structural = String::with_capacity(html.len());
+    let mut offset = 0usize;
+
+    while let Some(tag_start) =
+        super::html_scripts::find_ascii_case_insensitive(html, &open_needle, offset)
+    {
+        let after_name = tag_start + open_needle.len();
+
+        // `<styles>` and `<scriptish>` are different elements, so the name must end here.
+        let ends_name = matches!(
+            html.as_bytes().get(after_name).copied(),
+            Some(byte) if byte.is_ascii_whitespace() || byte == b'>' || byte == b'/'
+        );
+        if !ends_name {
+            structural.push_str(&html[offset..after_name]);
+            offset = after_name;
+            continue;
+        }
+
+        let (Some(open_tag_end), Some(close_start)) = (
+            html[after_name..].find('>').map(|end| after_name + end),
+            super::html_scripts::find_ascii_case_insensitive(html, &close_needle, after_name),
+        ) else {
+            break;
+        };
+
+        let content_start = open_tag_end + 1;
+        if close_start < content_start {
+            break;
+        }
+
+        structural.push_str(&html[offset..content_start]);
+        offset = close_start;
+    }
+
+    structural.push_str(&html[offset..]);
+    structural
+}
+
+/// Verifies the baseline HTML backend interop/output contract.
+///
+/// WHAT: requires a built `index.html` HTML artifact that satisfies the document shell contract.
+/// WHY: replacing legacy path assertions still needs a deterministic minimum output guarantee.
+pub(super) fn validate_html_baseline_contract(index: &BuiltArtifactIndex<'_>) -> Option<String> {
+    validate_html_baseline_document(index, "html").err()
+}
+
+/// Shared `index.html` lookup and shell check for the HTML and HTML-Wasm baselines.
+///
+/// Returns the document text so the HTML-Wasm baseline can continue with its own contract.
+pub(crate) fn validate_html_baseline_document<'index>(
+    index: &BuiltArtifactIndex<'index>,
+    baseline_name: &str,
+) -> Result<&'index str, String> {
+    let Some(index_html) = index.get("index.html") else {
+        return Err(format!(
+            "{baseline_name} baseline contract expected 'index.html', but it was not produced."
+        ));
+    };
+
+    let Some(html) = output_text_content(index_html, ArtifactKind::Html) else {
+        return Err(format!(
+            "{baseline_name} baseline contract expected 'index.html' as an HTML artifact."
+        ));
+    };
+
+    match html_shell_violation(html) {
+        Some(violation) => Err(format!(
+            "{baseline_name} baseline contract expected 'index.html' to follow the document shell: {violation}."
+        )),
+        None => Ok(html),
+    }
 }
 
 pub(super) fn output_text_content(

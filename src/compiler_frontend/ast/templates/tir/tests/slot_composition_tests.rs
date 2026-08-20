@@ -36,10 +36,6 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
 
-fn empty_location() -> SourceLocation {
-    SourceLocation::default()
-}
-
 fn slot_summary(slot_count: u32) -> TemplateIrSummary {
     TemplateIrSummary {
         slot_count,
@@ -48,18 +44,18 @@ fn slot_summary(slot_count: u32) -> TemplateIrSummary {
 }
 
 fn bool_expression(value: bool) -> Expression {
-    Expression::bool(value, empty_location(), ValueMode::ImmutableOwned)
+    Expression::bool(value, SourceLocation::default(), ValueMode::ImmutableOwned)
 }
 
 fn build_single_slot_template(store: &mut TemplateIrStore, key: SlotKey) -> TemplateIrId {
     let mut builder = TemplateIrBuilder::new(store);
-    let slot_node = builder.push_slot_node(key, empty_location());
+    let slot_node = builder.push_slot_node(key, SourceLocation::default());
     builder.finish_template(
         slot_node,
         Style::default(),
         TemplateType::String,
         slot_summary(1),
-        empty_location(),
+        SourceLocation::default(),
     )
 }
 
@@ -76,7 +72,7 @@ fn build_slot_insert_template(
         text_id,
         byte_len,
         TemplateSegmentOrigin::Body,
-        empty_location(),
+        SourceLocation::default(),
     );
 
     builder.finish_template(
@@ -84,7 +80,7 @@ fn build_slot_insert_template(
         Style::default(),
         TemplateType::SlotInsert(target),
         TemplateIrSummary::default(),
-        empty_location(),
+        SourceLocation::default(),
     )
 }
 
@@ -98,7 +94,7 @@ fn build_text_node(
     let byte_len = string_table.resolve(text_id).len();
 
     let mut builder = TemplateIrBuilder::new(store);
-    builder.push_text_node(text_id, byte_len, origin, empty_location())
+    builder.push_text_node(text_id, byte_len, origin, SourceLocation::default())
 }
 
 fn build_child_template_node(
@@ -113,29 +109,29 @@ fn build_child_template_node(
         text_id,
         byte_len,
         TemplateSegmentOrigin::Body,
-        empty_location(),
+        SourceLocation::default(),
     );
     let child_template_id = builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        empty_location(),
+        SourceLocation::default(),
     );
 
-    builder.push_child_template_node(child_template_id, empty_location())
+    builder.push_child_template_node(child_template_id, SourceLocation::default())
 }
 
 fn build_fill_template(store: &mut TemplateIrStore, nodes: Vec<TemplateIrNodeId>) -> TemplateIrId {
     let mut builder = TemplateIrBuilder::new(store);
-    let root = builder.push_sequence_node(nodes, empty_location());
+    let root = builder.push_sequence_node(nodes, SourceLocation::default());
 
     builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        empty_location(),
+        SourceLocation::default(),
     )
 }
 
@@ -154,7 +150,7 @@ fn build_template_with_children(
         .count() as u32;
 
     let mut builder = TemplateIrBuilder::new(store);
-    let root = builder.push_sequence_node(children, empty_location());
+    let root = builder.push_sequence_node(children, SourceLocation::default());
 
     builder.finish_template(
         root,
@@ -164,7 +160,7 @@ fn build_template_with_children(
             child_template_count,
             ..TemplateIrSummary::default()
         },
-        empty_location(),
+        SourceLocation::default(),
     )
 }
 
@@ -174,25 +170,25 @@ fn build_child_template_node_for_template(
     template_id: TemplateIrId,
 ) -> TemplateIrNodeId {
     let mut builder = TemplateIrBuilder::new(store);
-    builder.push_child_template_node(template_id, empty_location())
+    builder.push_child_template_node(template_id, SourceLocation::default())
 }
 fn build_wrapper_with_slots(store: &mut TemplateIrStore, keys: Vec<SlotKey>) -> TemplateIrId {
     let mut builder = TemplateIrBuilder::new(store);
 
     let slot_nodes: Vec<TemplateIrNodeId> = keys
         .into_iter()
-        .map(|key| builder.push_slot_node(key, empty_location()))
+        .map(|key| builder.push_slot_node(key, SourceLocation::default()))
         .collect();
 
     let slot_count = slot_nodes.len();
-    let root = builder.push_sequence_node(slot_nodes, empty_location());
+    let root = builder.push_sequence_node(slot_nodes, SourceLocation::default());
 
     builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         slot_summary(u32::try_from(slot_count).unwrap_or(u32::MAX)),
-        empty_location(),
+        SourceLocation::default(),
     )
 }
 
@@ -303,18 +299,18 @@ fn build_wrapper_with_slot_sequence(
 
     let slot_nodes: Vec<TemplateIrNodeId> = keys
         .into_iter()
-        .map(|key| builder.push_slot_node(key, empty_location()))
+        .map(|key| builder.push_slot_node(key, SourceLocation::default()))
         .collect();
 
     let slot_count = slot_nodes.len();
-    let root = builder.push_sequence_node(slot_nodes, empty_location());
+    let root = builder.push_sequence_node(slot_nodes, SourceLocation::default());
 
     builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         slot_summary(u32::try_from(slot_count).unwrap_or(u32::MAX)),
-        empty_location(),
+        SourceLocation::default(),
     )
 }
 
@@ -347,10 +343,10 @@ fn build_text_slot_text_wrapper_with_markers(
         before_text_id,
         before_text_len,
         TemplateSegmentOrigin::Body,
-        empty_location(),
+        SourceLocation::default(),
     );
 
-    let slot_node = builder.push_slot_node(key, empty_location());
+    let slot_node = builder.push_slot_node(key, SourceLocation::default());
 
     let after_text_id = string_table.intern(after);
     let after_text_len = string_table.resolve(after_text_id).len();
@@ -358,18 +354,20 @@ fn build_text_slot_text_wrapper_with_markers(
         after_text_id,
         after_text_len,
         TemplateSegmentOrigin::Body,
-        empty_location(),
+        SourceLocation::default(),
     );
 
-    let root =
-        builder.push_sequence_node(vec![before_text, slot_node, after_text], empty_location());
+    let root = builder.push_sequence_node(
+        vec![before_text, slot_node, after_text],
+        SourceLocation::default(),
+    );
 
     builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         slot_summary(1),
-        empty_location(),
+        SourceLocation::default(),
     )
 }
 
@@ -386,7 +384,7 @@ fn build_single_text_template(
         text_id,
         text_len,
         TemplateSegmentOrigin::Body,
-        empty_location(),
+        SourceLocation::default(),
     );
 
     builder.finish_template(
@@ -394,7 +392,7 @@ fn build_single_text_template(
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        empty_location(),
+        SourceLocation::default(),
     )
 }
 
@@ -421,15 +419,15 @@ fn schema_from_named_slots() {
     let mut store = TemplateIrStore::new();
     let mut builder = TemplateIrBuilder::new(&mut store);
 
-    let alpha_slot = builder.push_slot_node(SlotKey::Named(name_alpha), empty_location());
-    let beta_slot = builder.push_slot_node(SlotKey::Named(name_beta), empty_location());
-    let root = builder.push_sequence_node(vec![alpha_slot, beta_slot], empty_location());
+    let alpha_slot = builder.push_slot_node(SlotKey::Named(name_alpha), SourceLocation::default());
+    let beta_slot = builder.push_slot_node(SlotKey::Named(name_beta), SourceLocation::default());
+    let root = builder.push_sequence_node(vec![alpha_slot, beta_slot], SourceLocation::default());
     let template_id = builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        empty_location(),
+        SourceLocation::default(),
     );
 
     let schema =
@@ -449,16 +447,16 @@ fn schema_from_positional_slots() {
     let mut store = TemplateIrStore::new();
     let mut builder = TemplateIrBuilder::new(&mut store);
 
-    let slot_0 = builder.push_slot_node(SlotKey::Positional(0), empty_location());
-    let slot_1 = builder.push_slot_node(SlotKey::Positional(1), empty_location());
-    let slot_2 = builder.push_slot_node(SlotKey::Positional(2), empty_location());
-    let root = builder.push_sequence_node(vec![slot_0, slot_1, slot_2], empty_location());
+    let slot_0 = builder.push_slot_node(SlotKey::Positional(0), SourceLocation::default());
+    let slot_1 = builder.push_slot_node(SlotKey::Positional(1), SourceLocation::default());
+    let slot_2 = builder.push_slot_node(SlotKey::Positional(2), SourceLocation::default());
+    let root = builder.push_sequence_node(vec![slot_0, slot_1, slot_2], SourceLocation::default());
     let template_id = builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        empty_location(),
+        SourceLocation::default(),
     );
 
     let schema =
@@ -478,19 +476,19 @@ fn schema_from_mixed_slot_types() {
     let mut store = TemplateIrStore::new();
     let mut builder = TemplateIrBuilder::new(&mut store);
 
-    let default_slot = builder.push_slot_node(SlotKey::Default, empty_location());
-    let named_slot = builder.push_slot_node(SlotKey::Named(name_id), empty_location());
-    let positional_slot = builder.push_slot_node(SlotKey::Positional(0), empty_location());
+    let default_slot = builder.push_slot_node(SlotKey::Default, SourceLocation::default());
+    let named_slot = builder.push_slot_node(SlotKey::Named(name_id), SourceLocation::default());
+    let positional_slot = builder.push_slot_node(SlotKey::Positional(0), SourceLocation::default());
     let root = builder.push_sequence_node(
         vec![default_slot, named_slot, positional_slot],
-        empty_location(),
+        SourceLocation::default(),
     );
     let template_id = builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        empty_location(),
+        SourceLocation::default(),
     );
 
     let schema =
@@ -510,23 +508,24 @@ fn schema_from_nested_child_template_containing_slot() {
     let mut store = TemplateIrStore::new();
     let mut builder = TemplateIrBuilder::new(&mut store);
 
-    let child_slot = builder.push_slot_node(SlotKey::Named(name_id), empty_location());
+    let child_slot = builder.push_slot_node(SlotKey::Named(name_id), SourceLocation::default());
     let child_template_id = builder.finish_template(
         child_slot,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        empty_location(),
+        SourceLocation::default(),
     );
 
-    let child_reference = builder.push_child_template_node(child_template_id, empty_location());
-    let root = builder.push_sequence_node(vec![child_reference], empty_location());
+    let child_reference =
+        builder.push_child_template_node(child_template_id, SourceLocation::default());
+    let root = builder.push_sequence_node(vec![child_reference], SourceLocation::default());
     let parent_template_id = builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        empty_location(),
+        SourceLocation::default(),
     );
 
     let schema = collect_tir_slot_schema(&store, parent_template_id)
@@ -546,20 +545,22 @@ fn schema_from_branch_chain_containing_slot() {
     let mut store = TemplateIrStore::new();
     let mut builder = TemplateIrBuilder::new(&mut store);
 
-    let branch_body_slot = builder.push_slot_node(SlotKey::Named(name_id), empty_location());
+    let branch_body_slot =
+        builder.push_slot_node(SlotKey::Named(name_id), SourceLocation::default());
     let branch = TemplateIrBranch::new(
         TemplateBranchSelector::Bool(bool_expression(true)),
         branch_body_slot,
-        empty_location(),
+        SourceLocation::default(),
         builder.store.next_expression_site_id(),
     );
-    let branch_chain = builder.push_branch_chain_node(vec![branch], None, empty_location());
+    let branch_chain =
+        builder.push_branch_chain_node(vec![branch], None, SourceLocation::default());
     let template_id = builder.finish_template(
         branch_chain,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        empty_location(),
+        SourceLocation::default(),
     );
 
     let schema =
@@ -579,21 +580,21 @@ fn schema_from_loop_containing_slot() {
     let mut store = TemplateIrStore::new();
     let mut builder = TemplateIrBuilder::new(&mut store);
 
-    let body_slot = builder.push_slot_node(SlotKey::Named(name_id), empty_location());
+    let body_slot = builder.push_slot_node(SlotKey::Named(name_id), SourceLocation::default());
     let loop_node = builder.push_loop_node(
         TemplateLoopHeader::Conditional {
             condition: Box::new(bool_expression(true)),
         },
         body_slot,
         None,
-        empty_location(),
+        SourceLocation::default(),
     );
     let template_id = builder.finish_template(
         loop_node,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        empty_location(),
+        SourceLocation::default(),
     );
 
     let schema =
@@ -610,29 +611,29 @@ fn loose_fill_target_prefers_later_positional_slot_across_branches() {
     let mut store = TemplateIrStore::new();
     let mut builder = TemplateIrBuilder::new(&mut store);
 
-    let default_slot = builder.push_slot_node(SlotKey::Default, empty_location());
-    let positional_slot = builder.push_slot_node(SlotKey::Positional(2), empty_location());
+    let default_slot = builder.push_slot_node(SlotKey::Default, SourceLocation::default());
+    let positional_slot = builder.push_slot_node(SlotKey::Positional(2), SourceLocation::default());
     let branches = vec![
         TemplateIrBranch::new(
             TemplateBranchSelector::Bool(bool_expression(true)),
             default_slot,
-            empty_location(),
+            SourceLocation::default(),
             builder.store.next_expression_site_id(),
         ),
         TemplateIrBranch::new(
             TemplateBranchSelector::Bool(bool_expression(false)),
             positional_slot,
-            empty_location(),
+            SourceLocation::default(),
             builder.store.next_expression_site_id(),
         ),
     ];
-    let root = builder.push_branch_chain_node(branches, None, empty_location());
+    let root = builder.push_branch_chain_node(branches, None, SourceLocation::default());
     let template_id = builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::empty(),
-        empty_location(),
+        SourceLocation::default(),
     );
 
     let schema =
@@ -655,25 +656,25 @@ fn loose_fill_target_prefers_aggregate_positional_slot_after_loop_body_default()
     let mut store = TemplateIrStore::new();
     let mut builder = TemplateIrBuilder::new(&mut store);
 
-    let body_default_slot = builder.push_slot_node(SlotKey::Default, empty_location());
+    let body_default_slot = builder.push_slot_node(SlotKey::Default, SourceLocation::default());
     let aggregate_positional_slot =
-        builder.push_slot_node(SlotKey::Positional(1), empty_location());
+        builder.push_slot_node(SlotKey::Positional(1), SourceLocation::default());
     let aggregate_wrapper =
-        builder.push_sequence_node(vec![aggregate_positional_slot], empty_location());
+        builder.push_sequence_node(vec![aggregate_positional_slot], SourceLocation::default());
     let root = builder.push_loop_node(
         TemplateLoopHeader::Conditional {
             condition: Box::new(bool_expression(true)),
         },
         body_default_slot,
         Some(aggregate_wrapper),
-        empty_location(),
+        SourceLocation::default(),
     );
     let template_id = builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::empty(),
-        empty_location(),
+        SourceLocation::default(),
     );
 
     let schema =
@@ -696,15 +697,18 @@ fn repeated_default_slots_are_valid_replay_sites() {
     let mut store = TemplateIrStore::new();
     let mut builder = TemplateIrBuilder::new(&mut store);
 
-    let first_default = builder.push_slot_node(SlotKey::Default, empty_location());
-    let second_default = builder.push_slot_node(SlotKey::Default, empty_location());
-    let root = builder.push_sequence_node(vec![first_default, second_default], empty_location());
+    let first_default = builder.push_slot_node(SlotKey::Default, SourceLocation::default());
+    let second_default = builder.push_slot_node(SlotKey::Default, SourceLocation::default());
+    let root = builder.push_sequence_node(
+        vec![first_default, second_default],
+        SourceLocation::default(),
+    );
     let template_id = builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        empty_location(),
+        SourceLocation::default(),
     );
 
     let schema =
@@ -735,21 +739,21 @@ fn ordered_slot_keys_returns_deterministic_order() {
     let mut store = TemplateIrStore::new();
     let mut builder = TemplateIrBuilder::new(&mut store);
 
-    let named_z = builder.push_slot_node(SlotKey::Named(name_z), empty_location());
-    let positional_2 = builder.push_slot_node(SlotKey::Positional(2), empty_location());
-    let default_slot = builder.push_slot_node(SlotKey::Default, empty_location());
-    let named_a = builder.push_slot_node(SlotKey::Named(name_a), empty_location());
-    let positional_0 = builder.push_slot_node(SlotKey::Positional(0), empty_location());
+    let named_z = builder.push_slot_node(SlotKey::Named(name_z), SourceLocation::default());
+    let positional_2 = builder.push_slot_node(SlotKey::Positional(2), SourceLocation::default());
+    let default_slot = builder.push_slot_node(SlotKey::Default, SourceLocation::default());
+    let named_a = builder.push_slot_node(SlotKey::Named(name_a), SourceLocation::default());
+    let positional_0 = builder.push_slot_node(SlotKey::Positional(0), SourceLocation::default());
     let root = builder.push_sequence_node(
         vec![named_z, positional_2, default_slot, named_a, positional_0],
-        empty_location(),
+        SourceLocation::default(),
     );
     let template_id = builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        empty_location(),
+        SourceLocation::default(),
     );
 
     let schema =
@@ -803,7 +807,7 @@ fn skipped_node_kinds_do_not_contribute_to_schema() {
     // not active while mutating the store through a second path.
     let aggregate_node = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::AggregateOutput,
-        empty_location(),
+        SourceLocation::default(),
     ));
 
     let mut builder = TemplateIrBuilder::new(&mut store);
@@ -813,28 +817,32 @@ fn skipped_node_kinds_do_not_contribute_to_schema() {
         text_id,
         text_len,
         TemplateSegmentOrigin::Body,
-        empty_location(),
+        SourceLocation::default(),
     );
-    let expression = Expression::string_slice(text_id, empty_location(), ValueMode::ImmutableOwned);
+    let expression = Expression::string_slice(
+        text_id,
+        SourceLocation::default(),
+        ValueMode::ImmutableOwned,
+    );
     let dynamic_node = builder.push_dynamic_expression_node(
         expression,
         TemplateSegmentOrigin::Body,
         None,
-        empty_location(),
+        SourceLocation::default(),
     );
     let loop_control_node =
-        builder.push_loop_control_node(TemplateLoopControlKind::Break, empty_location());
+        builder.push_loop_control_node(TemplateLoopControlKind::Break, SourceLocation::default());
 
     let root = builder.push_sequence_node(
         vec![text_node, dynamic_node, aggregate_node, loop_control_node],
-        empty_location(),
+        SourceLocation::default(),
     );
     let template_id = builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        empty_location(),
+        SourceLocation::default(),
     );
 
     let schema =
@@ -865,7 +873,7 @@ fn route_explicit_insert_to_each_target_slot_key() {
             build_slot_insert_template(&mut store, SlotKey::Named(name), &mut string_table);
         let insert_node = {
             let mut builder = TemplateIrBuilder::new(&mut store);
-            builder.push_insert_contribution_node(insert_template, empty_location())
+            builder.push_insert_contribution_node(insert_template, SourceLocation::default())
         };
         let fill = build_fill_template(&mut store, vec![insert_node]);
 
@@ -917,7 +925,7 @@ fn route_explicit_insert_to_each_target_slot_key() {
             build_slot_insert_template(&mut store, SlotKey::Default, &mut string_table);
         let insert_node = {
             let mut builder = TemplateIrBuilder::new(&mut store);
-            builder.push_insert_contribution_node(insert_template, empty_location())
+            builder.push_insert_contribution_node(insert_template, SourceLocation::default())
         };
         let fill = build_fill_template(&mut store, vec![insert_node]);
 
@@ -965,7 +973,7 @@ fn route_explicit_insert_to_each_target_slot_key() {
             build_slot_insert_template(&mut store, SlotKey::Positional(0), &mut string_table);
         let insert_node = {
             let mut builder = TemplateIrBuilder::new(&mut store);
-            builder.push_insert_contribution_node(insert_template, empty_location())
+            builder.push_insert_contribution_node(insert_template, SourceLocation::default())
         };
         let fill = build_fill_template(&mut store, vec![insert_node]);
 
@@ -1009,13 +1017,13 @@ fn route_missing_loose_node_produces_internal_error() {
     let missing_node = TemplateIrNodeId::new(store.node_count() + 100);
     let fill = {
         let mut builder = TemplateIrBuilder::new(&mut store);
-        let root = builder.push_sequence_node(vec![missing_node], empty_location());
+        let root = builder.push_sequence_node(vec![missing_node], SourceLocation::default());
         builder.finish_template(
             root,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::default(),
-            empty_location(),
+            SourceLocation::default(),
         )
     };
 
@@ -1033,18 +1041,18 @@ fn route_missing_insert_body_node_produces_internal_error() {
     let missing_node = TemplateIrNodeId::new(store.node_count() + 100);
     let insert_template = {
         let mut builder = TemplateIrBuilder::new(&mut store);
-        let root = builder.push_sequence_node(vec![missing_node], empty_location());
+        let root = builder.push_sequence_node(vec![missing_node], SourceLocation::default());
         builder.finish_template(
             root,
             Style::default(),
             TemplateType::SlotInsert(SlotKey::Default),
             TemplateIrSummary::default(),
-            empty_location(),
+            SourceLocation::default(),
         )
     };
     let insert_node = {
         let mut builder = TemplateIrBuilder::new(&mut store);
-        builder.push_insert_contribution_node(insert_template, empty_location())
+        builder.push_insert_contribution_node(insert_template, SourceLocation::default())
     };
     let fill = build_fill_template(&mut store, vec![insert_node]);
 
@@ -1259,7 +1267,8 @@ fn unknown_insert_target_produces_diagnostic() {
         build_slot_insert_template(&mut store, SlotKey::Named(unknown_name), &mut string_table);
 
     let mut builder = TemplateIrBuilder::new(&mut store);
-    let insert_node = builder.push_insert_contribution_node(insert_template, empty_location());
+    let insert_node =
+        builder.push_insert_contribution_node(insert_template, SourceLocation::default());
     let fill = build_fill_template(&mut store, vec![insert_node]);
 
     // The wrapper has a valid default slot, so only the unknown insert target
@@ -1323,7 +1332,8 @@ fn named_only_slots_discard_loose_whitespace_around_insert_contributions() {
         TemplateSegmentOrigin::Body,
     );
     let mut builder = TemplateIrBuilder::new(&mut store);
-    let insert_node = builder.push_insert_contribution_node(insert_template, empty_location());
+    let insert_node =
+        builder.push_insert_contribution_node(insert_template, SourceLocation::default());
     let fill = build_fill_template(
         &mut store,
         vec![leading_whitespace, insert_node, trailing_whitespace],
@@ -1436,7 +1446,8 @@ fn mixed_explicit_inserts_and_loose_content_are_bucketed() {
         build_slot_insert_template(&mut store, SlotKey::Named(name), &mut string_table);
 
     let mut builder = TemplateIrBuilder::new(&mut store);
-    let insert_node = builder.push_insert_contribution_node(insert_template, empty_location());
+    let insert_node =
+        builder.push_insert_contribution_node(insert_template, SourceLocation::default());
     let loose_text = build_text_node(
         &mut store,
         &mut string_table,
@@ -1566,7 +1577,7 @@ fn expansion_missing_wrapper_set_produces_internal_error() {
     let placeholder = TirSlotPlaceholder::with_wrapper_sets(
         SlotKey::Default,
         store.next_slot_occurrence_id(),
-        empty_location(),
+        SourceLocation::default(),
         None,
         Some(TemplateWrapperSetId::new(0)),
         false,
@@ -1579,7 +1590,7 @@ fn expansion_missing_wrapper_set_produces_internal_error() {
             Style::default(),
             TemplateType::String,
             slot_summary(1),
-            empty_location(),
+            SourceLocation::default(),
         )
     };
     let child_template = build_single_text_template(&mut store, &mut string_table, "child");
@@ -1602,7 +1613,7 @@ fn expansion_missing_conditional_wrapper_set_produces_internal_error() {
     let placeholder = TirSlotPlaceholder::with_wrapper_sets(
         SlotKey::Default,
         store.next_slot_occurrence_id(),
-        empty_location(),
+        SourceLocation::default(),
         None,
         Some(TemplateWrapperSetId::new(0)),
         false,
@@ -1615,7 +1626,7 @@ fn expansion_missing_conditional_wrapper_set_produces_internal_error() {
             Style::default(),
             TemplateType::String,
             slot_summary(1),
-            empty_location(),
+            SourceLocation::default(),
         )
     };
     let branch_node = {
@@ -1624,15 +1635,15 @@ fn expansion_missing_conditional_wrapper_set_produces_internal_error() {
             string_table.intern("branch"),
             "branch".len(),
             TemplateSegmentOrigin::Body,
-            empty_location(),
+            SourceLocation::default(),
         );
         let branch = TemplateIrBranch::new(
             TemplateBranchSelector::Bool(bool_expression(true)),
             body,
-            empty_location(),
+            SourceLocation::default(),
             builder.store.next_expression_site_id(),
         );
-        builder.push_branch_chain_node(vec![branch], None, empty_location())
+        builder.push_branch_chain_node(vec![branch], None, SourceLocation::default())
     };
     let routed = TirSlotContributions {
         default_nodes: vec![branch_node],
@@ -1692,16 +1703,20 @@ fn nested_child_template_clone_vs_reuse_by_slot_presence() {
 
     let parent_wrapper = {
         let mut builder = TemplateIrBuilder::new(&mut store);
-        let slot_child_ref = builder.push_child_template_node(slot_bearing_child, empty_location());
-        let no_slot_child_ref = builder.push_child_template_node(slot_less_child, empty_location());
-        let root =
-            builder.push_sequence_node(vec![slot_child_ref, no_slot_child_ref], empty_location());
+        let slot_child_ref =
+            builder.push_child_template_node(slot_bearing_child, SourceLocation::default());
+        let no_slot_child_ref =
+            builder.push_child_template_node(slot_less_child, SourceLocation::default());
+        let root = builder.push_sequence_node(
+            vec![slot_child_ref, no_slot_child_ref],
+            SourceLocation::default(),
+        );
         builder.finish_template(
             root,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::default(),
-            empty_location(),
+            SourceLocation::default(),
         )
     };
 
@@ -1783,7 +1798,7 @@ fn nested_child_slot_expansion_preserves_phase_context_wrapper_set_and_slot_plan
         build_wrapper_with_slot_sequence(&mut store, vec![SlotKey::Named(name)]);
     let wrapper_set_id = store.push_wrapper_set(TemplateWrapperSet { wrappers: vec![] });
     let slot_plan_id = store.push_slot_plan(TemplateSlotPlan {
-        location: empty_location(),
+        location: SourceLocation::default(),
         contribution_sources: vec![],
         slot_sites: vec![],
     });
@@ -1815,15 +1830,15 @@ fn nested_child_slot_expansion_preserves_phase_context_wrapper_set_and_slot_plan
         let mut builder = TemplateIrBuilder::new(&mut store);
         let child_ref = builder.push_child_template_node_with_reference(
             TemplateTirChildReference::new(slot_bearing_child, source_phase, source_context),
-            empty_location(),
+            SourceLocation::default(),
         );
-        let root = builder.push_sequence_node(vec![child_ref], empty_location());
+        let root = builder.push_sequence_node(vec![child_ref], SourceLocation::default());
         builder.finish_template(
             root,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::default(),
-            empty_location(),
+            SourceLocation::default(),
         )
     };
 
@@ -2017,27 +2032,29 @@ fn branch_chain_with_slots_in_body_is_expanded() {
     let mut store = TemplateIrStore::new();
 
     let occurrence_id = store.next_slot_occurrence_id();
-    let placeholder = TirSlotPlaceholder::new(SlotKey::Default, occurrence_id, empty_location());
+    let placeholder =
+        TirSlotPlaceholder::new(SlotKey::Default, occurrence_id, SourceLocation::default());
     let body_slot = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Slot { placeholder },
-        empty_location(),
+        SourceLocation::default(),
     ));
 
     let branch = TemplateIrBranch::new(
         TemplateBranchSelector::Bool(bool_expression(true)),
         body_slot,
-        empty_location(),
+        SourceLocation::default(),
         store.next_expression_site_id(),
     );
 
     let mut builder = TemplateIrBuilder::new(&mut store);
-    let branch_chain = builder.push_branch_chain_node(vec![branch], None, empty_location());
+    let branch_chain =
+        builder.push_branch_chain_node(vec![branch], None, SourceLocation::default());
     let wrapper = builder.finish_template(
         branch_chain,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        empty_location(),
+        SourceLocation::default(),
     );
 
     let contribution = build_single_text_template(&mut store, &mut string_table, "branch body");
@@ -2084,21 +2101,21 @@ fn loop_with_slots_in_body_is_expanded() {
     let mut store = TemplateIrStore::new();
 
     let mut builder = TemplateIrBuilder::new(&mut store);
-    let body_slot = builder.push_slot_node(SlotKey::Default, empty_location());
+    let body_slot = builder.push_slot_node(SlotKey::Default, SourceLocation::default());
     let loop_node = builder.push_loop_node(
         TemplateLoopHeader::Conditional {
             condition: Box::new(bool_expression(true)),
         },
         body_slot,
         None,
-        empty_location(),
+        SourceLocation::default(),
     );
     let wrapper = builder.finish_template(
         loop_node,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        empty_location(),
+        SourceLocation::default(),
     );
 
     let contribution = build_single_text_template(&mut store, &mut string_table, "iteration");
@@ -2172,22 +2189,26 @@ fn expand_preserves_non_slot_nodes() {
             byte_len: text_len,
             origin: TemplateSegmentOrigin::Body,
         },
-        empty_location(),
+        SourceLocation::default(),
     ));
 
     let aggregate_node = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::AggregateOutput,
-        empty_location(),
+        SourceLocation::default(),
     ));
 
     let loop_control_node = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::LoopControl {
             kind: TemplateLoopControlKind::Break,
         },
-        empty_location(),
+        SourceLocation::default(),
     ));
 
-    let expression = Expression::string_slice(text_id, empty_location(), ValueMode::ImmutableOwned);
+    let expression = Expression::string_slice(
+        text_id,
+        SourceLocation::default(),
+        ValueMode::ImmutableOwned,
+    );
     let site_id = store.next_expression_site_id();
     let dynamic_node = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::DynamicExpression {
@@ -2196,12 +2217,12 @@ fn expand_preserves_non_slot_nodes() {
             reactive_subscription: None,
             site_id,
         },
-        empty_location(),
+        SourceLocation::default(),
     ));
 
     let runtime_slot_plan_id = store.push_slot_plan(
         crate::compiler_frontend::ast::templates::tir::slot_plan::TemplateSlotPlan {
-            location: empty_location(),
+            location: SourceLocation::default(),
             contribution_sources: vec![],
             slot_sites: vec![],
         },
@@ -2214,14 +2235,15 @@ fn expand_preserves_non_slot_nodes() {
             plan: runtime_slot_plan_id,
             site: runtime_slot_site_id,
         },
-        empty_location(),
+        SourceLocation::default(),
     ));
 
     let occurrence_id = store.next_slot_occurrence_id();
-    let placeholder = TirSlotPlaceholder::new(SlotKey::Default, occurrence_id, empty_location());
+    let placeholder =
+        TirSlotPlaceholder::new(SlotKey::Default, occurrence_id, SourceLocation::default());
     let slot_node = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Slot { placeholder },
-        empty_location(),
+        SourceLocation::default(),
     ));
 
     let root = store.push_node(TemplateIrNode::new(
@@ -2235,7 +2257,7 @@ fn expand_preserves_non_slot_nodes() {
                 runtime_slot_site,
             ],
         },
-        empty_location(),
+        SourceLocation::default(),
     ));
 
     let wrapper = store.push_template(TemplateIr::new(
@@ -2243,7 +2265,7 @@ fn expand_preserves_non_slot_nodes() {
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        empty_location(),
+        SourceLocation::default(),
     ));
 
     let contribution = build_single_text_template(&mut store, &mut string_table, "only slot");
@@ -2444,7 +2466,7 @@ fn head_chain_missing_root_authority_remains_infrastructure_error() {
             child_template_count: 1,
             ..TemplateIrSummary::default()
         },
-        empty_location(),
+        SourceLocation::default(),
     ));
 
     let error = compose_tir_head_chain(&mut store, template_id, &string_table, false)
@@ -2573,7 +2595,8 @@ fn receiver_with_named_slots() {
         build_slot_insert_template(&mut store, SlotKey::Named(name), &mut string_table);
     let insert_body = template_root_node_id(insert_template, &store);
     let mut builder = TemplateIrBuilder::new(&mut store);
-    let insert_node = builder.push_insert_contribution_node(insert_template, empty_location());
+    let insert_node =
+        builder.push_insert_contribution_node(insert_template, SourceLocation::default());
 
     let template_id = build_template_with_children(&mut store, vec![wrapper_node, insert_node]);
 

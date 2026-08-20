@@ -2,5 +2,5 @@ entry = "."
 
 [backends.html]
 mode = "failure"
-warnings = "ignore"
+warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0063"]

@@ -10,13 +10,13 @@
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
-use crate::compiler_frontend::hir::hir_builder::{build_ast, lower_ast};
+use crate::compiler_frontend::hir::hir_builder::{build_ast_with_registered_types, lower_ast};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    function_node, make_test_variable, node, test_location,
+    function_node, make_test_variable, node, test_source_location,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -29,7 +29,7 @@ fn provenance_member(interface: &str, member_name: &str) -> SyntheticInterfaceMe
 }
 
 fn int_with_provenance(value: i32, provenance: SyntheticInterfaceProvenance) -> Expression {
-    Expression::int(value, test_location(2), ValueMode::ImmutableOwned)
+    Expression::int(value, test_source_location(2), ValueMode::ImmutableOwned)
         .with_synthetic_interface_provenance(provenance)
 }
 
@@ -45,19 +45,19 @@ fn retains_direct_provenance_per_function() {
     let injected =
         SyntheticInterfaceProvenance::from_members(vec![member_a.clone(), member_b.clone()]);
 
-    let start_body = vec![node(NodeKind::Return(vec![]), test_location(1))];
+    let start_body = vec![node(NodeKind::Return(vec![]), test_source_location(1))];
     let helper_body = vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(
                 var_name,
                 int_with_provenance(42, injected),
             )),
-            test_location(2),
+            test_source_location(2),
         ),
-        node(NodeKind::Return(vec![]), test_location(3)),
+        node(NodeKind::Return(vec![]), test_source_location(3)),
     ];
 
-    let ast = build_ast(
+    let ast = build_ast_with_registered_types(
         vec![
             function_node(
                 start_name,
@@ -66,7 +66,7 @@ fn retains_direct_provenance_per_function() {
                     returns: vec![],
                 },
                 start_body,
-                test_location(1),
+                test_source_location(1),
             ),
             function_node(
                 helper_name.clone(),
@@ -75,7 +75,7 @@ fn retains_direct_provenance_per_function() {
                     returns: vec![],
                 },
                 helper_body,
-                test_location(2),
+                test_source_location(2),
             ),
         ],
         entry_path,
@@ -129,9 +129,9 @@ fn empty_function_has_explicit_empty_provenance() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
 
-    let start_body = vec![node(NodeKind::Return(vec![]), test_location(1))];
+    let start_body = vec![node(NodeKind::Return(vec![]), test_source_location(1))];
 
-    let ast = build_ast(
+    let ast = build_ast_with_registered_types(
         vec![function_node(
             start_name,
             FunctionSignature {
@@ -139,7 +139,7 @@ fn empty_function_has_explicit_empty_provenance() {
                 returns: vec![],
             },
             start_body,
-            test_location(1),
+            test_source_location(1),
         )],
         entry_path,
     );
@@ -166,15 +166,15 @@ fn validation_rejects_missing_provenance_coverage() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
 
-    let ast = build_ast(
+    let ast = build_ast_with_registered_types(
         vec![function_node(
             start_name,
             FunctionSignature {
                 parameters: vec![],
                 returns: vec![],
             },
-            vec![node(NodeKind::Return(vec![]), test_location(1))],
-            test_location(1),
+            vec![node(NodeKind::Return(vec![]), test_source_location(1))],
+            test_source_location(1),
         )],
         entry_path,
     );
@@ -203,15 +203,15 @@ fn validation_rejects_extra_provenance_entry() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
 
-    let ast = build_ast(
+    let ast = build_ast_with_registered_types(
         vec![function_node(
             start_name,
             FunctionSignature {
                 parameters: vec![],
                 returns: vec![],
             },
-            vec![node(NodeKind::Return(vec![]), test_location(1))],
-            test_location(1),
+            vec![node(NodeKind::Return(vec![]), test_source_location(1))],
+            test_source_location(1),
         )],
         entry_path,
     );
@@ -242,15 +242,15 @@ fn validation_rejects_replaced_out_of_range_provenance_key() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
 
-    let ast = build_ast(
+    let ast = build_ast_with_registered_types(
         vec![function_node(
             start_name,
             FunctionSignature {
                 parameters: vec![],
                 returns: vec![],
             },
-            vec![node(NodeKind::Return(vec![]), test_location(1))],
-            test_location(1),
+            vec![node(NodeKind::Return(vec![]), test_source_location(1))],
+            test_source_location(1),
         )],
         entry_path,
     );

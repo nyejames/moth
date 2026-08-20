@@ -4,35 +4,32 @@
 //! WHY: assertion regressions can silently weaken the suite without changing compilation.
 
 use super::super::assertions::{
-    RuntimeEvent, SlotOutput, compare_text_golden, discover_golden_expectation,
-    execute_wasm_harness_for_test, extract_script_blocks, normalize_text_for_comparison,
-    parse_harness_output, validate_failure_result, validate_golden_outputs,
-    validate_rendered_output_fragments, validate_success_result,
+    ArtifactIndexError, HtmlShellViolation, build_artifact_index_error, compare_text_golden,
+    discover_golden_expectation, html_shell_violation, normalize_text_for_comparison,
+    validate_failure_result, validate_golden_outputs, validate_success_result,
 };
 use super::super::types::{
-    DiagnosticAssertion, ExactWarningExpectation, GoldenExpectation, RenderedOutputExpectation,
-    SecondaryLabelAssertion, SuccessContract,
+    DiagnosticAssertion, ExactWarningExpectation, GoldenExpectation, SecondaryLabelAssertion,
 };
 use super::super::{
     BackendId, DiagnosticMatchMode, ExpectedOutcome, FailureExpectation, FailureKind, GoldenMode,
     SuccessExpectation, TestCaseSpec, WarningExpectation,
 };
-use crate::build_system::BuildProfile;
-use crate::build_system::build::{BuildResult, FileKind, OutputFile, Project};
-use crate::build_system::output::{BuilderKind, CleanupPolicy, OutputOwner};
+use super::synthetic_build_results::{
+    VALID_HTML, VALID_HTML_WASM, acceptance_only_expectation, build_result_with_index_html,
+    build_result_with_output_files, success_test_case,
+};
+use crate::build_system::build::{BuildResult, FileKind};
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::source_location::{CharPosition, SourceLocation};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticLabel, DiagnosticLabelMessage, InvalidAssignmentTargetReason,
+    InvalidOutputFolderReason,
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_tests::test_support::temp_dir;
-use crate::projects::settings::Config;
 use std::fs;
 use std::path::{Path, PathBuf};
-
-const DIAGNOSTICS_SOURCE: &str = include_str!("../assertions/diagnostics.rs");
 
 fn test_location(path: InternedPath) -> SourceLocation {
     test_location_at(path, 0, 0)
@@ -162,16 +159,6 @@ fn failure_message_contains_includes_rendered_label_text() {
 }
 
 #[test]
-fn failure_message_contains_stays_on_typed_render_output() {
-    let removed_conversion_name = ["to", "_", "legacy", "_", "error"].concat();
-
-    assert!(
-        !DIAGNOSTICS_SOURCE.contains(&removed_conversion_name),
-        "failure message assertions must stay on typed render-boundary output",
-    );
-}
-
-#[test]
 fn exact_diagnostic_matching_ignores_order() {
     let messages = diagnostic_messages(&["MOTH-SYNTAX-0003", "MOTH-RULE-0044"]);
     let expectation = diagnostic_expectation(
@@ -282,14 +269,26 @@ fn contains_matching_requires_every_expected_occurrence() {
     assert!(!reason.contains("Unexpected codes"), "{reason}");
 }
 
+/// Renders one fixture-relative path as the UTF-8 text a diagnostic location carries.
+///
+/// A lossy conversion here would build a location for a path the fixture does not own, so an
+/// unrepresentable fixture root fails the test instead.
+#[track_caller]
+fn fixture_path_text(fixture_root: &Path, relative_path: &str) -> String {
+    let path = fixture_root.join(relative_path);
+    path.to_str()
+        .unwrap_or_else(|| panic!("fixture path {path:?} should be valid UTF-8"))
+        .to_owned()
+}
+
 fn structured_diagnostic_messages(fixture_root: &Path) -> CompilerMessages {
     let mut string_table = StringTable::new();
     let primary_path = InternedPath::from_single_str(
-        &fixture_root.join("input/main.moth").to_string_lossy(),
+        &fixture_path_text(fixture_root, "input/main.moth"),
         &mut string_table,
     );
     let secondary_path = InternedPath::from_single_str(
-        &fixture_root.join("input/helper.moth").to_string_lossy(),
+        &fixture_path_text(fixture_root, "input/helper.moth"),
         &mut string_table,
     );
     let diagnostic = CompilerDiagnostic::invalid_assignment_target(
@@ -318,7 +317,8 @@ fn structured_diagnostic_expectation(assertion: DiagnosticAssertion) -> FailureE
 
 #[test]
 fn structured_diagnostic_assertions_consume_compiler_identity_and_locations() {
-    let fixture_root = temp_dir("structured_diagnostic_paths");
+    let _tmp_fixture_root = tempfile::tempdir().expect("should create temp dir");
+    let fixture_root = _tmp_fixture_root.path().to_path_buf();
     let input_root = fixture_root.join("input");
     fs::create_dir_all(&input_root).expect("should create temporary fixture input directory");
     fs::write(input_root.join("main.moth"), "main").expect("should write primary source");
@@ -348,8 +348,6 @@ fn structured_diagnostic_assertions_consume_compiler_identity_and_locations() {
     );
 
     assert!(result.passed, "{:?}", result.failure_reason);
-
-    fs::remove_dir_all(&fixture_root).expect("should clean up temporary fixture root");
 }
 
 fn relative_structured_diagnostic_messages(scope: &str) -> CompilerMessages {
@@ -370,7 +368,8 @@ fn relative_structured_diagnostic_messages(scope: &str) -> CompilerMessages {
 
 #[test]
 fn structured_diagnostic_assertions_resolve_relative_scopes_under_input_root() {
-    let fixture_root = temp_dir("structured_relative_diagnostic_paths");
+    let _tmp_fixture_root = tempfile::tempdir().expect("should create temp dir");
+    let fixture_root = _tmp_fixture_root.path().to_path_buf();
     let input_root = fixture_root.join("input");
     fs::create_dir_all(input_root.join("nested"))
         .expect("should create temporary fixture input directory");
@@ -415,8 +414,6 @@ fn structured_diagnostic_assertions_resolve_relative_scopes_under_input_root() {
             result.failure_reason
         );
     }
-
-    fs::remove_dir_all(&fixture_root).expect("should clean up temporary fixture root");
 }
 
 #[test]
@@ -460,6 +457,42 @@ fn structured_diagnostic_mismatches_report_code_occurrence_field_expected_and_ac
     );
     assert!(reason.contains("expected 'wrong.moth'"), "{reason}");
     assert!(reason.contains("actual 'input/main.moth'"), "{reason}");
+}
+
+#[test]
+fn structured_reason_assertion_is_not_satisfied_by_a_reasonless_diagnostic() {
+    let fixture_root = std::env::current_dir().expect("test should have a current directory");
+    // The authored reason is the exact text the report renders for an absent reason key. A
+    // placeholder comparison would let this pass, which is the whole failure this guards.
+    let expectation = FailureExpectation {
+        warnings: WarningExpectation::Ignore,
+        message_contains: Vec::new(),
+        diagnostic_codes: vec!["MOTH-SYNTAX-0003".to_owned()],
+        diagnostic_assertions: vec![DiagnosticAssertion {
+            code: "MOTH-SYNTAX-0003".to_owned(),
+            occurrence: 1,
+            reason: Some("no reason key".to_owned()),
+            path: None,
+            line: None,
+            column: None,
+            count: None,
+            secondary_labels: Vec::new(),
+        }],
+        diagnostic_match: DiagnosticMatchMode::Exact,
+        diagnostic_match_reason: None,
+    };
+
+    let result = validate_failure_result(
+        diagnostic_messages(&["MOTH-SYNTAX-0003"]),
+        &expectation,
+        &fixture_root,
+    );
+    let reason = result
+        .failure_reason
+        .expect("a diagnostic with no reason key cannot satisfy a reason contract");
+
+    assert!(reason.contains("field 'reason'"), "{reason}");
+    assert!(reason.contains("actual '<no reason key>'"), "{reason}");
 }
 
 #[test]
@@ -853,41 +886,6 @@ fn normalization_preserves_base_name_segment() {
     );
 }
 
-const VALID_HTML: &str = "<!DOCTYPE html><html><head></head><body></body></html>";
-const VALID_HTML_WASM: &str =
-    "<!DOCTYPE html><html><head></head><body><script src=\"./page.js\"></script></body></html>";
-const VALID_PAGE_JS: &str = "__moth_instantiate_wasm instance.exports.moth_start() \"./page.wasm\"";
-
-fn build_result_with_output_files(files: Vec<(PathBuf, FileKind)>) -> BuildResult {
-    let output_files = files
-        .into_iter()
-        .map(|(path, kind)| OutputFile::new(path, kind))
-        .collect();
-    BuildResult {
-        project: Project {
-            output_files,
-            entry_page_rel: Some(PathBuf::from("index.html")),
-            cleanup_policy: CleanupPolicy::html(),
-            warnings: Vec::new(),
-        },
-        config: Config::new(PathBuf::from("main.moth")),
-        warnings: Vec::new(),
-        string_table: StringTable::new(),
-        output_owner: OutputOwner {
-            builder: BuilderKind::Html,
-            profile: BuildProfile::Dev,
-        },
-        directory_output_plan: None,
-    }
-}
-
-fn build_result_with_index_html(html: &str) -> BuildResult {
-    build_result_with_output_files(vec![(
-        PathBuf::from("index.html"),
-        FileKind::Html(html.to_owned()),
-    )])
-}
-
 fn absence_expectation(forbidden: Vec<String>) -> SuccessExpectation {
     SuccessExpectation {
         warnings: WarningExpectation::Forbid,
@@ -896,17 +894,6 @@ fn absence_expectation(forbidden: Vec<String>) -> SuccessExpectation {
         golden: GoldenExpectation::default(),
         rendered_output: Default::default(),
         artifacts_must_not_exist: forbidden,
-    }
-}
-
-fn acceptance_only_expectation() -> SuccessExpectation {
-    SuccessExpectation {
-        warnings: WarningExpectation::Forbid,
-        success_contract: Some(SuccessContract::AcceptanceOnly),
-        artifact_assertions: Vec::new(),
-        golden: GoldenExpectation::default(),
-        rendered_output: Default::default(),
-        artifacts_must_not_exist: Vec::new(),
     }
 }
 
@@ -920,22 +907,6 @@ fn absence_test_case(expectation: SuccessExpectation) -> TestCaseSpec {
         contract: None,
         role: None,
         backend_id: BackendId::Html,
-        entry_path: PathBuf::from("."),
-        flags: Vec::new(),
-        expected: ExpectedOutcome::Success(expectation),
-    }
-}
-
-fn success_test_case(backend_id: BackendId, expectation: SuccessExpectation) -> TestCaseSpec {
-    TestCaseSpec {
-        display_name: "success-contract".to_string(),
-        case_id: "success-contract".to_string(),
-        manifest_relative_path: "success-contract".to_string(),
-        fixture_root: PathBuf::from("."),
-        tags: Vec::new(),
-        contract: None,
-        role: None,
-        backend_id,
         entry_path: PathBuf::from("."),
         flags: Vec::new(),
         expected: ExpectedOutcome::Success(expectation),
@@ -959,50 +930,6 @@ fn acceptance_only_html_baseline_rejects_broken_html() {
             .failure_reason
             .as_deref()
             .is_some_and(|reason| reason.contains("html baseline contract"))
-    );
-}
-
-#[test]
-fn acceptance_only_html_wasm_baseline_rejects_missing_output() {
-    let expectation = acceptance_only_expectation();
-    let case = success_test_case(BackendId::HtmlWasm, expectation.clone());
-    let build_result = build_result_with_output_files(Vec::new());
-
-    let result = validate_success_result(&case, build_result, &expectation);
-
-    assert!(!result.passed);
-    assert!(
-        result
-            .failure_reason
-            .as_deref()
-            .is_some_and(|reason| reason.contains("html_wasm baseline contract"))
-    );
-}
-
-#[test]
-fn acceptance_only_html_wasm_baseline_rejects_invalid_wasm() {
-    let expectation = acceptance_only_expectation();
-    let case = success_test_case(BackendId::HtmlWasm, expectation.clone());
-    let build_result = build_result_with_output_files(vec![
-        (
-            PathBuf::from("index.html"),
-            FileKind::Html(VALID_HTML_WASM.to_owned()),
-        ),
-        (
-            PathBuf::from("page.js"),
-            FileKind::Js(VALID_PAGE_JS.to_owned()),
-        ),
-        (PathBuf::from("page.wasm"), FileKind::Wasm(vec![0, 1, 2])),
-    ]);
-
-    let result = validate_success_result(&case, build_result, &expectation);
-
-    assert!(!result.passed);
-    assert!(
-        result
-            .failure_reason
-            .as_deref()
-            .is_some_and(|reason| reason.contains("valid wasm bytes"))
     );
 }
 
@@ -1101,267 +1028,9 @@ fn normalized_comparison_strips_core_css_after_crlf_normalization() {
 }
 
 #[test]
-fn rendered_output_fragment_validation_reports_semantic_mismatch_kind() {
-    let expectation = RenderedOutputExpectation {
-        contains: vec!["missing-fragment".to_string()],
-        ..Default::default()
-    };
-    let result = validate_rendered_output_fragments("rendered text", &expectation)
-        .expect("missing required fragment should fail");
-    assert_eq!(result.1, FailureKind::RenderedOutputMismatch);
-}
-
-#[test]
-fn rendered_output_order_allows_repeated_fragments_at_distinct_occurrences() {
-    let expectation = RenderedOutputExpectation {
-        contains_in_order: vec!["first".to_owned(), "second".to_owned(), "first".to_owned()],
-        ..Default::default()
-    };
-
-    assert!(validate_rendered_output_fragments("first\nsecond\nfirst", &expectation).is_none());
-}
-
-#[test]
-fn rendered_output_order_reports_distinct_failure_kind() {
-    let expectation = RenderedOutputExpectation {
-        contains_in_order: vec!["second".to_owned(), "first".to_owned()],
-        ..Default::default()
-    };
-
-    let result = validate_rendered_output_fragments("first\nsecond", &expectation)
-        .expect("out-of-order fragments should fail");
-    assert_eq!(result.1, FailureKind::RenderedOutputOrderMismatch);
-}
-
-#[test]
-fn rendered_output_exactly_once_accepts_one_occurrence_and_rejects_missing_or_duplicate() {
-    let expectation = RenderedOutputExpectation {
-        contains_exactly_once: vec!["once".to_owned()],
-        ..Default::default()
-    };
-
-    assert!(validate_rendered_output_fragments("before\nonce\nafter", &expectation).is_none());
-
-    let missing = validate_rendered_output_fragments("before\nafter", &expectation)
-        .expect("missing exact-once fragment should fail");
-    assert_eq!(missing.1, FailureKind::RenderedOutputMultiplicityMismatch);
-
-    let duplicate = validate_rendered_output_fragments("once\nonce", &expectation)
-        .expect("duplicate exact-once fragment should fail");
-    assert_eq!(duplicate.1, FailureKind::RenderedOutputMultiplicityMismatch);
-}
-
-#[test]
-fn rendered_output_exact_normalizes_only_line_endings() {
-    let expectation = RenderedOutputExpectation {
-        exact: Some("first\nsecond\nthird".to_owned()),
-        ..Default::default()
-    };
-
-    assert!(validate_rendered_output_fragments("first\r\nsecond\rthird", &expectation).is_none());
-
-    let whitespace_difference =
-        validate_rendered_output_fragments("first\r\n second\rthird", &expectation)
-            .expect("ordinary whitespace differences should fail exact output");
-    assert_eq!(
-        whitespace_difference.1,
-        FailureKind::RenderedOutputExactMismatch
-    );
-}
-
-#[test]
-fn rendered_output_exact_accepts_empty_captured_text_only() {
-    let expectation = RenderedOutputExpectation {
-        exact: Some(String::new()),
-        ..Default::default()
-    };
-
-    assert!(validate_rendered_output_fragments("", &expectation).is_none());
-    let result = validate_rendered_output_fragments("\n", &expectation)
-        .expect("a captured newline is not empty exact output");
-    assert_eq!(result.1, FailureKind::RenderedOutputExactMismatch);
-}
-
-#[test]
-fn rendered_output_extracts_nonempty_script_blocks_in_source_order() {
-    let html = r#"
-<script>first</script>
-<script type="module">second</script>
-<script>   </script>
-"#;
-
-    assert_eq!(
-        extract_script_blocks(html),
-        vec!["first".to_owned(), "second".to_owned()]
-    );
-}
-
-#[test]
-fn html_wasm_rendered_output_waits_for_bootstrap_completion() {
-    let temp_dir = tempfile::tempdir().expect("temporary Wasm harness directory should exist");
-    fs::write(
-        temp_dir.path().join("page.js"),
-        r#"(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 80));
-    document.getElementById("delayed-slot").insertAdjacentHTML("beforeend", "delayed");
-})();
-"#,
-    )
-    .expect("delayed bootstrap fixture should be written");
-
-    let output = execute_wasm_harness_for_test(temp_dir.path())
-        .expect("HTML-Wasm harness should await delayed bootstrap completion");
-    assert_eq!(output.combined_output(), "delayed");
-}
-
-#[test]
-fn rendered_output_decodes_typed_runtime_events() {
-    let output = parse_harness_output(
-        r#"{"events":[{"type":"console","text":"hello"},{"type":"fragment_insert","id":"root","html":"<p>hi</p>"}]}"#,
-    )
-    .expect("valid runtime events should decode");
-
-    assert_eq!(
-        output.events(),
-        &[
-            RuntimeEvent::Console {
-                text: "hello".to_owned(),
-            },
-            RuntimeEvent::FragmentInsert {
-                id: "root".to_owned(),
-                html: "<p>hi</p>".to_owned(),
-            },
-        ]
-    );
-}
-
-#[test]
-fn rendered_output_preserves_interleaved_event_chronology() {
-    let output = parse_harness_output(
-        r#"{"events":[{"type":"console","text":"before"},{"type":"fragment_insert","id":"root","html":"<b>one</b>"},{"type":"console","text":"after"},{"type":"fragment_insert","id":"root","html":"<b>two</b>"}]}"#,
-    )
-    .expect("interleaved runtime events should decode");
-
-    assert_eq!(
-        output.events(),
-        &[
-            RuntimeEvent::Console {
-                text: "before".to_owned(),
-            },
-            RuntimeEvent::FragmentInsert {
-                id: "root".to_owned(),
-                html: "<b>one</b>".to_owned(),
-            },
-            RuntimeEvent::Console {
-                text: "after".to_owned(),
-            },
-            RuntimeEvent::FragmentInsert {
-                id: "root".to_owned(),
-                html: "<b>two</b>".to_owned(),
-            },
-        ]
-    );
-}
-
-#[test]
-fn rendered_output_derives_channel_views_in_event_order() {
-    let output = parse_harness_output(
-        r#"{"events":[{"type":"console","text":"before"},{"type":"fragment_insert","id":"root","html":"<b>one</b>"},{"type":"console","text":"after"},{"type":"fragment_insert","id":"root","html":"<b>two</b>"}]}"#,
-    )
-    .expect("interleaved runtime events should decode");
-
-    assert_eq!(
-        output.console_lines(),
-        vec!["before".to_owned(), "after".to_owned()]
-    );
-    assert_eq!(
-        output.slot_outputs(),
-        vec![
-            SlotOutput {
-                id: "root".to_owned(),
-                html: "<b>one</b>".to_owned(),
-            },
-            SlotOutput {
-                id: "root".to_owned(),
-                html: "<b>two</b>".to_owned(),
-            },
-        ]
-    );
-    assert_eq!(
-        output.combined_output(),
-        "before\n<b>one</b>\nafter\n<b>two</b>"
-    );
-}
-
-#[test]
-fn rendered_output_rejects_unknown_or_malformed_runtime_events() {
-    for (json, expected_reason) in [
-        (
-            r#"{"events":[{"type":"unknown","text":"value"}]}"#,
-            "unknown type",
-        ),
-        (
-            r#"{"events":[{"type":"fragment_insert","id":"root"}]}"#,
-            "missing string field 'html'",
-        ),
-        (
-            r#"{"events":[{"type":"console","text":"value","extra":true}]}"#,
-            "unknown field 'extra'",
-        ),
-    ] {
-        let reason =
-            parse_harness_output(json).expect_err("malformed runtime events must fail decoding");
-        assert!(reason.contains(expected_reason), "{reason}");
-    }
-}
-
-#[test]
-fn rendered_output_validation_reports_harness_failure_without_script_blocks() {
-    let expectation = SuccessExpectation {
-        warnings: WarningExpectation::Forbid,
-        success_contract: None,
-        artifact_assertions: Vec::new(),
-        golden: GoldenExpectation::default(),
-        rendered_output: super::super::types::RenderedOutputExpectation {
-            contains: vec!["anything".to_string()],
-            ..Default::default()
-        },
-        artifacts_must_not_exist: Vec::new(),
-    };
-    let case = success_test_case(BackendId::Html, expectation.clone());
-    let build_result = build_result_with_index_html(VALID_HTML);
-
-    let result = validate_success_result(&case, build_result, &expectation);
-
-    assert_eq!(result.failure_kind, Some(FailureKind::HarnessFailed));
-}
-
-#[test]
-fn rendered_output_node_is_not_invoked_without_a_rendered_assertion() {
-    let expectation = SuccessExpectation {
-        warnings: WarningExpectation::Forbid,
-        success_contract: None,
-        artifact_assertions: Vec::new(),
-        golden: GoldenExpectation::default(),
-        rendered_output: RenderedOutputExpectation::default(),
-        artifacts_must_not_exist: Vec::new(),
-    };
-    let case = success_test_case(BackendId::Html, expectation.clone());
-    let result = validate_success_result(
-        &case,
-        build_result_with_index_html(VALID_HTML),
-        &expectation,
-    );
-
-    assert!(
-        result.passed,
-        "Node should not be needed without assertions"
-    );
-}
-
-#[test]
 fn strict_golden_validation_treats_crlf_and_lf_as_equivalent_for_text() {
-    let root = temp_dir("strict_golden_line_endings");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let golden_dir = root.join("golden");
     fs::create_dir_all(&golden_dir).expect("should create golden dir");
     fs::write(golden_dir.join("index.html"), "<p>a\r\nb</p>\r\n")
@@ -1375,13 +1044,12 @@ fn strict_golden_validation_treats_crlf_and_lf_as_equivalent_for_text() {
         mismatch.is_none(),
         "strict text golden checks should ignore line-ending-only differences"
     );
-
-    fs::remove_dir_all(&root).expect("should clean temp directory");
 }
 
 #[test]
 fn normalized_golden_validation_treats_crlf_and_lf_as_equivalent_for_text() {
-    let root = temp_dir("normalized_golden_line_endings");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let golden_dir = root.join("golden");
     fs::create_dir_all(&golden_dir).expect("should create golden dir");
     fs::write(golden_dir.join("index.html"), "moth_rhs_and_fn0\r\n")
@@ -1395,42 +1063,588 @@ fn normalized_golden_validation_treats_crlf_and_lf_as_equivalent_for_text() {
         mismatch.is_none(),
         "normalized golden checks should ignore counter and line-ending drift"
     );
-
-    fs::remove_dir_all(&root).expect("should clean temp directory");
 }
 
 #[test]
 fn nested_golden_validation_compares_relative_paths() {
-    let root = temp_dir("nested_golden_comparison");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let golden_dir = root.join("golden");
     let golden_file = golden_dir.join("nested").join("page.html");
     fs::create_dir_all(golden_file.parent().expect("nested parent should exist"))
         .expect("should create nested golden directory");
     fs::write(&golden_file, "<p>nested</p>\n").expect("should write nested golden");
 
-    let build_result = BuildResult {
-        project: Project {
-            output_files: vec![OutputFile::new(
-                PathBuf::from("nested/page.html"),
-                FileKind::Html("<p>nested</p>\n".to_owned()),
-            )],
-            entry_page_rel: None,
-            cleanup_policy: CleanupPolicy::html(),
-            warnings: Vec::new(),
-        },
-        config: Config::new(PathBuf::from("main.moth")),
-        warnings: Vec::new(),
-        string_table: StringTable::new(),
-        output_owner: OutputOwner {
-            builder: BuilderKind::Html,
-            profile: BuildProfile::Dev,
-        },
-        directory_output_plan: None,
-    };
+    let build_result = build_result_with_output_files(vec![(
+        PathBuf::from("nested/page.html"),
+        FileKind::Html("<p>nested</p>\n".to_owned()),
+    )]);
     let golden = discover_golden_expectation(&golden_dir, None)
         .expect("golden inventory should be discovered");
 
     assert!(validate_golden_outputs(&build_result, &golden).is_none());
+}
 
-    fs::remove_dir_all(&root).expect("should clean temp directory");
+// --- Built-artifact index identity contracts ------------------------------------------------
+//
+// Every success assertion reads artifacts through one index. These tests own the index's
+// construction contract: an ambiguous artifact set must be rejected before any assertion
+// consumes it, because a first-match lookup would otherwise inspect one artifact and ignore
+// the rest. Rejections are identified by their variant, not by their wording; one separate
+// test owns the rendered text.
+
+/// Rejects and returns the typed reason, so each test names the variant it is about.
+#[track_caller]
+fn artifact_index_rejection(build_result: &BuildResult, why: &str) -> ArtifactIndexError {
+    match build_artifact_index_error(build_result) {
+        Some(error) => error,
+        None => panic!("{why}"),
+    }
+}
+
+#[test]
+fn artifact_index_rejects_duplicate_normalized_paths() {
+    let build_result = build_result_with_output_files(vec![
+        (
+            PathBuf::from("index.html"),
+            FileKind::Html(VALID_HTML.to_owned()),
+        ),
+        (
+            PathBuf::from("index.html"),
+            FileKind::Html(
+                "<!DOCTYPE html><html><head></head><body>second</body></html>".to_owned(),
+            ),
+        ),
+    ]);
+
+    let error =
+        artifact_index_rejection(&build_result, "two artifacts at one path must be rejected");
+    let ArtifactIndexError::DuplicatePath { path } = error else {
+        panic!("a repeated spelling is a duplicate path, not {error:?}");
+    };
+    assert_eq!(path, "index.html");
+}
+
+#[test]
+fn artifact_index_rejects_paths_that_differ_only_by_ascii_case() {
+    let build_result = build_result_with_output_files(vec![
+        (
+            PathBuf::from("assets/Page.js"),
+            FileKind::Js("// first".to_owned()),
+        ),
+        (
+            PathBuf::from("assets/page.js"),
+            FileKind::Js("// second".to_owned()),
+        ),
+    ]);
+
+    let error = artifact_index_rejection(&build_result, "case-aliasing artifacts must be rejected");
+    let ArtifactIndexError::PortabilityAlias { first, second } = error else {
+        panic!("two spellings of one output identity are an alias, not {error:?}");
+    };
+    assert_eq!(first, "assets/Page.js");
+    assert_eq!(second, "assets/page.js");
+}
+
+#[test]
+fn artifact_index_keeps_non_ascii_case_differences_distinct() {
+    // The canonical output-path identity folds ASCII case only, so the harness must not apply
+    // broader Unicode folding and reject a pair production treats as two destinations.
+    let build_result = build_result_with_output_files(vec![
+        (PathBuf::from("Å.js"), FileKind::Js("// upper".to_owned())),
+        (PathBuf::from("å.js"), FileKind::Js("// lower".to_owned())),
+    ]);
+
+    assert!(
+        build_artifact_index_error(&build_result).is_none(),
+        "non-ASCII case differences are distinct output destinations"
+    );
+}
+
+#[test]
+fn artifact_index_rejects_paths_the_output_writer_would_reject() {
+    // The writer refuses parent segments in a relative output path. The harness must refuse the
+    // same destinations instead of indexing something that could never be emitted.
+    let build_result = build_result_with_output_files(vec![(
+        PathBuf::from("assets/../page.js"),
+        FileKind::Js("// escaped".to_owned()),
+    )]);
+
+    let error = artifact_index_rejection(
+        &build_result,
+        "an artifact path the writer rejects must not be indexed",
+    );
+    let ArtifactIndexError::InvalidOutputPath { path, reason } = error else {
+        panic!("a parent segment is an invalid output path, not {error:?}");
+    };
+    assert_eq!(path, "assets/../page.js");
+    assert_eq!(reason, InvalidOutputFolderReason::ParentDirectorySegment);
+}
+
+#[test]
+fn artifact_index_rejects_reserved_device_artifact_names() {
+    // `CON.js` cannot be written on Windows, so a build that emits it is not portable and the
+    // harness must not silently accept it on Unix.
+    let build_result = build_result_with_output_files(vec![(
+        PathBuf::from("CON.js"),
+        FileKind::Js("// reserved".to_owned()),
+    )]);
+
+    let error = artifact_index_rejection(
+        &build_result,
+        "a reserved device basename must not be indexed",
+    );
+    let ArtifactIndexError::InvalidOutputPath { path, reason } = error else {
+        panic!("a reserved device name is an invalid output path, not {error:?}");
+    };
+    assert_eq!(path, "CON.js");
+    assert_eq!(reason, InvalidOutputFolderReason::InvalidPathComponent);
+}
+
+#[test]
+fn artifact_index_accepts_distinct_paths_with_separator_differences() {
+    // Windows-style separators normalize to the portable form; that is normalization, not
+    // aliasing, and must not be rejected.
+    let build_result = build_result_with_output_files(vec![
+        (
+            PathBuf::from("assets").join("one.js"),
+            FileKind::Js("// one".to_owned()),
+        ),
+        (
+            PathBuf::from("assets").join("two.js"),
+            FileKind::Js("// two".to_owned()),
+        ),
+    ]);
+
+    assert!(build_artifact_index_error(&build_result).is_none());
+}
+
+#[test]
+fn artifact_index_ignores_not_built_outputs() {
+    // A NotBuilt entry is a decision not to emit, not an artifact, so it can share a path
+    // with nothing and must not create a duplicate.
+    let build_result = build_result_with_output_files(vec![
+        (PathBuf::from("index.html"), FileKind::NotBuilt),
+        (
+            PathBuf::from("index.html"),
+            FileKind::Html(VALID_HTML.to_owned()),
+        ),
+    ]);
+
+    assert!(build_artifact_index_error(&build_result).is_none());
+}
+
+#[test]
+#[cfg(unix)]
+fn artifact_index_rejects_non_utf8_artifact_paths() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    let invalid_name = OsString::from_vec(vec![b'b', b'a', 0xff, b'd', b'.', b'j', b's']);
+    let build_result = build_result_with_output_files(vec![(
+        PathBuf::from(invalid_name),
+        FileKind::Js("// invalid".to_owned()),
+    )]);
+
+    let error = artifact_index_rejection(
+        &build_result,
+        "a non-UTF-8 artifact path must be rejected, not lossily replaced",
+    );
+    assert!(
+        matches!(error, ArtifactIndexError::NonUtf8Path { .. }),
+        "a non-UTF-8 path is an encoding rejection, not {error:?}"
+    );
+}
+
+#[test]
+fn artifact_index_rejections_name_the_offending_paths() {
+    // The variants above carry the identity; this test owns the operator-facing wording, so a
+    // reworded message cannot silently make every other rejection test unreadable.
+    let duplicate = ArtifactIndexError::DuplicatePath {
+        path: "index.html".to_owned(),
+    }
+    .to_string();
+    assert!(
+        duplicate.contains("more than one artifact at 'index.html'"),
+        "duplicate rejection must name the duplicated path: {duplicate}"
+    );
+
+    let alias = ArtifactIndexError::PortabilityAlias {
+        first: "assets/Page.js".to_owned(),
+        second: "assets/page.js".to_owned(),
+    }
+    .to_string();
+    assert!(
+        alias.contains("assets/Page.js") && alias.contains("assets/page.js"),
+        "alias rejection must name both spellings: {alias}"
+    );
+
+    let invalid = ArtifactIndexError::InvalidOutputPath {
+        path: "assets/../page.js".to_owned(),
+        reason: InvalidOutputFolderReason::ParentDirectorySegment,
+    }
+    .to_string();
+    assert!(
+        invalid.contains("assets/../page.js") && invalid.contains("ParentDirectorySegment"),
+        "invalid-destination rejection must name the path and the writer's reason: {invalid}"
+    );
+}
+
+#[test]
+fn duplicate_artifact_paths_fail_the_case_as_a_harness_failure() {
+    let expectation = acceptance_only_expectation();
+    let case = success_test_case(BackendId::Html, expectation.clone());
+    let build_result = build_result_with_output_files(vec![
+        (
+            PathBuf::from("index.html"),
+            FileKind::Html(VALID_HTML.to_owned()),
+        ),
+        (
+            PathBuf::from("index.html"),
+            FileKind::Html(VALID_HTML.to_owned()),
+        ),
+    ]);
+
+    let result = validate_success_result(&case, build_result, &expectation);
+
+    assert!(!result.passed, "an ambiguous artifact set cannot pass");
+    assert_eq!(
+        result.failure_kind,
+        Some(FailureKind::HarnessFailed),
+        "artifact ambiguity is a harness fact, not an expectation violation"
+    );
+    assert!(
+        result
+            .failure_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("Artifact inventory is ambiguous")),
+        "failure must explain the ambiguity: {:?}",
+        result.failure_reason
+    );
+}
+
+#[test]
+fn artifact_absence_contract_normalizes_the_authored_path() {
+    // The authored path is normalized before lookup, so a Windows-style authored path cannot
+    // silently miss an artifact the build really produced.
+    let expectation = absence_expectation(vec!["assets\\page.js".to_string()]);
+    let case = absence_test_case(expectation.clone());
+    let build_result = build_result_with_output_files(vec![
+        (
+            PathBuf::from("index.html"),
+            FileKind::Html(VALID_HTML.to_owned()),
+        ),
+        (
+            PathBuf::from("assets").join("page.js"),
+            FileKind::Js("// page".to_owned()),
+        ),
+    ]);
+
+    let result = validate_success_result(&case, build_result, &expectation);
+
+    assert!(!result.passed, "the forbidden artifact was produced");
+    assert!(
+        result
+            .failure_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("to not exist")),
+        "failure must report the absence violation: {:?}",
+        result.failure_reason
+    );
+}
+
+// --- Document shell contract ----------------------------------------------------------------
+//
+// The HTML and HTML-Wasm baselines both claim to check document structure. These tests own what
+// that claim means: the shell markers appear exactly once, in order, with the doctype first and
+// the closing html tag last. An unordered "contains" loop proved none of that.
+
+#[test]
+fn html_shell_contract_accepts_the_emitted_document_shell() {
+    assert_eq!(html_shell_violation(VALID_HTML), None);
+    assert_eq!(html_shell_violation(VALID_HTML_WASM), None);
+}
+
+#[test]
+fn html_shell_contract_requires_the_doctype_to_open_the_document() {
+    // A leading comment or stray text before the doctype changes how a browser parses the page.
+    let with_leading_comment = format!("<!-- generated -->{VALID_HTML}");
+
+    assert_eq!(
+        html_shell_violation(&with_leading_comment),
+        Some(HtmlShellViolation::MissingDoctypePrefix)
+    );
+}
+
+#[test]
+fn html_shell_contract_requires_the_document_to_close() {
+    let truncated = VALID_HTML.replace("</html>\n", "");
+
+    assert_eq!(
+        html_shell_violation(&truncated),
+        Some(HtmlShellViolation::MissingClosingHtml)
+    );
+}
+
+#[test]
+fn html_shell_contract_reports_a_missing_marker() {
+    let without_head = VALID_HTML.replace("  <head>\n", "");
+
+    assert_eq!(
+        html_shell_violation(&without_head),
+        Some(HtmlShellViolation::MissingMarker { marker: "<head>" })
+    );
+}
+
+#[test]
+fn html_shell_contract_rejects_a_repeated_marker() {
+    // Two heads is not a document; the previous check accepted it because one `<head>` existed.
+    let duplicated_head = VALID_HTML.replace("  <head>\n", "  <head>\n  <head>\n");
+
+    assert_eq!(
+        html_shell_violation(&duplicated_head),
+        Some(HtmlShellViolation::RepeatedMarker {
+            marker: "<head>",
+            occurrences: 2,
+        })
+    );
+}
+
+#[test]
+fn html_shell_contract_rejects_an_inverted_head_and_body() {
+    let inverted = "<!DOCTYPE html>\n<html lang=\"en\">\n  <body style=\"\">\n  </body>\n  <head>\n  </head>\n</html>\n";
+
+    assert_eq!(
+        html_shell_violation(inverted),
+        Some(HtmlShellViolation::OutOfOrderMarker {
+            marker: "<body style=\"",
+            must_follow: "</head>",
+        })
+    );
+}
+
+#[test]
+fn html_shell_contract_ignores_marker_text_inside_script_and_style_content() {
+    // The shell inserts script sources and the core stylesheet as opaque payloads. A JavaScript
+    // string that happens to spell `</body>` is a string, not a second closing-body element, and
+    // rejecting the document for it would fail a page whose structure is correct.
+    let with_marker_like_payload = VALID_HTML.replace(
+        "  </body>",
+        "<style>/* <head> */</style>\n<script>const text = \"</body>\";</script>\n  </body>",
+    );
+
+    assert_eq!(html_shell_violation(&with_marker_like_payload), None);
+}
+
+#[test]
+fn html_shell_contract_still_rejects_a_marker_repeated_in_markup() {
+    // The opaque-content allowance must not extend to real markup: a second closing-body element
+    // outside any script or style is still a structural violation.
+    let duplicated_body_close = VALID_HTML.replace("  </body>", "  </body>\n  </body>");
+
+    assert_eq!(
+        html_shell_violation(&duplicated_body_close),
+        Some(HtmlShellViolation::RepeatedMarker {
+            marker: "</body>",
+            occurrences: 2,
+        })
+    );
+}
+
+// --- Golden artifact kind and encoding contracts ---------------------------------------------
+//
+// A golden names a file. Comparing a directory or an unbuilt path as empty bytes let an empty
+// golden pass against a path that holds no file, and lossy UTF-8 silently rewrote the expected
+// text before comparing it.
+
+/// Writes one golden file and returns the discovered expectation for it.
+#[track_caller]
+fn golden_expectation_with(
+    golden_dir: &Path,
+    relative_path: &str,
+    contents: impl AsRef<[u8]>,
+    mode: Option<GoldenMode>,
+) -> GoldenExpectation {
+    let golden_file = golden_dir.join(relative_path);
+    fs::create_dir_all(
+        golden_file
+            .parent()
+            .expect("golden file should have a parent"),
+    )
+    .expect("should create golden directory");
+    fs::write(&golden_file, contents).expect("should write golden file");
+
+    discover_golden_expectation(golden_dir, mode).expect("golden inventory should be discovered")
+}
+
+#[test]
+fn golden_validation_rejects_a_directory_where_a_file_is_expected() {
+    let root = tempfile::tempdir().expect("should create temp dir");
+    let golden_dir = root.path().join("golden");
+    // An empty golden is exactly the case the old empty-bytes conversion could satisfy.
+    let golden = golden_expectation_with(&golden_dir, "index.html", "", None);
+
+    let build_result =
+        build_result_with_output_files(vec![(PathBuf::from("index.html"), FileKind::Directory)]);
+
+    let (reason, kind) = validate_golden_outputs(&build_result, &golden)
+        .expect("a directory cannot satisfy a file golden");
+    assert_eq!(kind, FailureKind::StrictGoldenMismatch);
+    assert!(reason.contains("produced a directory"), "{reason}");
+}
+
+#[test]
+fn golden_validation_rejects_a_path_the_build_did_not_emit() {
+    let root = tempfile::tempdir().expect("should create temp dir");
+    let golden_dir = root.path().join("golden");
+    let golden = golden_expectation_with(&golden_dir, "index.html", "", None);
+
+    let build_result =
+        build_result_with_output_files(vec![(PathBuf::from("index.html"), FileKind::NotBuilt)]);
+
+    let (reason, kind) = validate_golden_outputs(&build_result, &golden)
+        .expect("an unbuilt path cannot satisfy a file golden");
+    assert_eq!(kind, FailureKind::StrictGoldenMismatch);
+    assert!(reason.contains("index.html"), "{reason}");
+}
+
+#[test]
+fn golden_validation_rejects_invalid_utf8_text_goldens() {
+    let root = tempfile::tempdir().expect("should create temp dir");
+    let golden_dir = root.path().join("golden");
+    let golden = golden_expectation_with(&golden_dir, "index.html", [0x66, 0x6f, 0xff, 0x6f], None);
+
+    let build_result = build_result_with_index_html("fo\u{fffd}o");
+
+    let (reason, kind) = validate_golden_outputs(&build_result, &golden)
+        .expect("an invalid-UTF-8 text golden is a harness failure, not a silent match");
+    assert_eq!(kind, FailureKind::HarnessFailed);
+    assert!(reason.contains("not valid UTF-8"), "{reason}");
+}
+
+#[test]
+fn golden_validation_compares_binary_goldens_by_bytes() {
+    let root = tempfile::tempdir().expect("should create temp dir");
+    let golden_dir = root.path().join("golden");
+    let golden = golden_expectation_with(&golden_dir, "page.wasm", [0x00, 0x61, 0x73, 0x6d], None);
+
+    let matching = build_result_with_output_files(vec![(
+        PathBuf::from("page.wasm"),
+        FileKind::Wasm(vec![0x00, 0x61, 0x73, 0x6d]),
+    )]);
+    assert!(validate_golden_outputs(&matching, &golden).is_none());
+
+    let differing = build_result_with_output_files(vec![(
+        PathBuf::from("page.wasm"),
+        FileKind::Wasm(vec![0x00, 0x61, 0x73, 0x00]),
+    )]);
+    let (_, kind) = validate_golden_outputs(&differing, &golden)
+        .expect("different bytes must fail a binary golden");
+    assert_eq!(kind, FailureKind::StrictGoldenMismatch);
+}
+
+#[test]
+fn golden_validation_rejects_an_ambiguous_artifact_set_before_comparing() {
+    let root = tempfile::tempdir().expect("should create temp dir");
+    let golden_dir = root.path().join("golden");
+    let golden = golden_expectation_with(&golden_dir, "index.html", VALID_HTML, None);
+
+    let build_result = build_result_with_output_files(vec![
+        (
+            PathBuf::from("index.html"),
+            FileKind::Html(VALID_HTML.to_owned()),
+        ),
+        (
+            PathBuf::from("index.html"),
+            FileKind::Html(VALID_HTML.to_owned()),
+        ),
+    ]);
+
+    let (reason, kind) = validate_golden_outputs(&build_result, &golden)
+        .expect("duplicate artifact paths must be rejected before content comparison");
+    assert_eq!(kind, FailureKind::HarnessFailed);
+    assert!(
+        reason.contains("Artifact inventory is ambiguous"),
+        "{reason}"
+    );
+}
+
+#[test]
+fn golden_validation_rejects_a_js_golden_satisfied_by_generic_bytes() {
+    // Identical bytes emitted as a generic byte artifact are not the JavaScript artifact the
+    // golden names. Deciding the comparison from the produced kind let this pass.
+    let root = tempfile::tempdir().expect("should create temp dir");
+    let golden_dir = root.path().join("golden");
+    let golden = golden_expectation_with(&golden_dir, "page.js", "console.log(1);", None);
+
+    let build_result = build_result_with_output_files(vec![(
+        PathBuf::from("page.js"),
+        FileKind::Bytes(b"console.log(1);".to_vec()),
+    )]);
+
+    let (reason, kind) = validate_golden_outputs(&build_result, &golden)
+        .expect("a byte artifact cannot satisfy a JavaScript golden");
+    assert_eq!(kind, FailureKind::StrictGoldenMismatch);
+    assert!(
+        reason.contains("expects a js artifact") && reason.contains("binary artifact"),
+        "{reason}"
+    );
+}
+
+#[test]
+fn golden_validation_rejects_a_wasm_golden_satisfied_by_generic_bytes() {
+    let root = tempfile::tempdir().expect("should create temp dir");
+    let golden_dir = root.path().join("golden");
+    let golden = golden_expectation_with(&golden_dir, "page.wasm", [0x00, 0x61, 0x73, 0x6d], None);
+
+    let build_result = build_result_with_output_files(vec![(
+        PathBuf::from("page.wasm"),
+        FileKind::Bytes(vec![0x00, 0x61, 0x73, 0x6d]),
+    )]);
+
+    let (reason, kind) = validate_golden_outputs(&build_result, &golden)
+        .expect("a byte artifact cannot satisfy a wasm golden");
+    assert_eq!(kind, FailureKind::StrictGoldenMismatch);
+    assert!(
+        reason.contains("expects a wasm artifact") && reason.contains("binary artifact"),
+        "{reason}"
+    );
+}
+
+#[test]
+fn golden_validation_rejects_an_html_golden_produced_as_javascript() {
+    // The golden lives outside the universal `index.html` baseline path, so nothing else would
+    // have noticed that the build emitted the wrong artifact kind at this destination.
+    let root = tempfile::tempdir().expect("should create temp dir");
+    let golden_dir = root.path().join("golden");
+    let golden = golden_expectation_with(&golden_dir, "fragment.html", "<p>a</p>", None);
+
+    let build_result = build_result_with_output_files(vec![(
+        PathBuf::from("fragment.html"),
+        FileKind::Js("<p>a</p>".to_owned()),
+    )]);
+
+    let (reason, kind) = validate_golden_outputs(&build_result, &golden)
+        .expect("a JavaScript artifact cannot satisfy an HTML golden");
+    assert_eq!(kind, FailureKind::StrictGoldenMismatch);
+    assert!(
+        reason.contains("expects a html artifact") && reason.contains("js artifact"),
+        "{reason}"
+    );
+}
+
+#[test]
+fn golden_validation_accepts_a_binary_golden_produced_as_bytes() {
+    // The mismatch checks above must not make every byte artifact unmatchable: a golden with no
+    // text or wasm extension claims exactly the writer's generic byte artifact.
+    let root = tempfile::tempdir().expect("should create temp dir");
+    let golden_dir = root.path().join("golden");
+    let golden = golden_expectation_with(&golden_dir, "logo.png", [0x89, 0x50, 0x4e, 0x47], None);
+
+    let build_result = build_result_with_output_files(vec![(
+        PathBuf::from("logo.png"),
+        FileKind::Bytes(vec![0x89, 0x50, 0x4e, 0x47]),
+    )]);
+
+    assert!(validate_golden_outputs(&build_result, &golden).is_none());
 }

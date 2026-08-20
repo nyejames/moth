@@ -5,6 +5,7 @@
 //! WHY:  the enabled expansion must mirror the disabled one for control flow
 //!       while adding collector evidence.
 
+use crate::compiler_tests::test_support::{assert_panics_with, surface_thread_panic};
 use crate::timing::{
     TimingCommandKind, TimingMetric, TimingMetricAggregate, start_benchmark_collection,
     start_raw_benchmark_collection,
@@ -28,16 +29,6 @@ fn timings_named(
         .iter()
         .filter(|aggregate| aggregate.metric == metric && aggregate.samples > 0)
         .collect()
-}
-
-fn wait_for_timing_flag(mut observed: impl FnMut() -> bool) -> bool {
-    for _ in 0..1_000_000 {
-        if observed() {
-            return true;
-        }
-        std::thread::yield_now();
-    }
-    false
 }
 
 #[test]
@@ -245,22 +236,23 @@ fn admitted_attribution_policy_survives_session_drain() {
             context,
         );
     });
-    if !wait_for_timing_flag(|| {
-        crate::timing::enabled::runtime::record_admission_reached_for_test()
-    }) {
+    if let Err(observed) =
+        crate::timing::enabled::runtime::wait_for_paused_record_admission_for_test()
+    {
         pause.release();
-        let _ = recorder.join();
-        panic!("the recorder should pause after admission");
+        surface_thread_panic("recorder", recorder);
+        panic!("the recorder should pause after admission; observed {observed}");
     }
 
     let finisher = std::thread::spawn(move || timing_session.finish());
-    if !wait_for_timing_flag(|| {
-        crate::timing::enabled::runtime::record_session_deactivated_for_test()
-    }) {
+    if let Err(observed) = crate::timing::enabled::runtime::wait_for_session_deactivation_for_test()
+    {
         pause.release();
-        let _ = recorder.join();
-        let _ = finisher.join();
-        panic!("session finish should deactivate the fast-path bits before waiting");
+        surface_thread_panic("recorder", recorder);
+        surface_thread_panic("finisher", finisher);
+        panic!(
+            "session finish should deactivate the fast-path bits before waiting; observed {observed}"
+        );
     }
 
     pause.release();
@@ -314,13 +306,13 @@ fn attributed_duration_context_uses_admitted_session_policy() {
             }
         )
     });
-    if !wait_for_timing_flag(|| {
-        crate::timing::enabled::runtime::record_admission_reached_for_test()
-    }) {
+    if let Err(observed) =
+        crate::timing::enabled::runtime::wait_for_paused_record_admission_for_test()
+    {
         pause.release();
-        let _ = recorder.join();
+        surface_thread_panic("recorder", recorder);
         let _ = timing_session.finish();
-        panic!("the direct-duration recorder should pause after admission");
+        panic!("the direct-duration recorder should pause after admission; observed {observed}");
     }
     let context_ran_before_admission = context_receiver.try_recv().is_ok();
 
@@ -330,13 +322,14 @@ fn attributed_duration_context_uses_admitted_session_policy() {
             .send(timing_session.finish())
             .expect("the finish receiver should remain available");
     });
-    if !wait_for_timing_flag(|| {
-        crate::timing::enabled::runtime::record_session_deactivated_for_test()
-    }) {
+    if let Err(observed) = crate::timing::enabled::runtime::wait_for_session_deactivation_for_test()
+    {
         pause.release();
-        let _ = recorder.join();
-        let _ = finisher.join();
-        panic!("session finish should deactivate the fast-path bits before waiting");
+        surface_thread_panic("recorder", recorder);
+        surface_thread_panic("finisher", finisher);
+        panic!(
+            "session finish should deactivate the fast-path bits before waiting; observed {observed}"
+        );
     }
     assert!(
         matches!(
@@ -409,13 +402,13 @@ fn admitted_attribution_survives_session_drain() {
             Some(crate::timing::TimingContext::for_module(module)),
         )
     });
-    if !wait_for_timing_flag(|| {
-        crate::timing::enabled::runtime::record_admission_reached_for_test()
-    }) {
+    if let Err(observed) =
+        crate::timing::enabled::runtime::wait_for_paused_record_admission_for_test()
+    {
         pause.release();
-        let _ = recorder.join();
+        surface_thread_panic("recorder", recorder);
         let _ = timing_session.finish();
-        panic!("the recorder should pause after admission");
+        panic!("the recorder should pause after admission; observed {observed}");
     }
 
     let (finish_sender, finish_receiver) = std::sync::mpsc::channel();
@@ -424,13 +417,14 @@ fn admitted_attribution_survives_session_drain() {
             .send(timing_session.finish())
             .expect("the finish receiver should remain available");
     });
-    if !wait_for_timing_flag(|| {
-        crate::timing::enabled::runtime::record_session_deactivated_for_test()
-    }) {
+    if let Err(observed) = crate::timing::enabled::runtime::wait_for_session_deactivation_for_test()
+    {
         pause.release();
-        let _ = recorder.join();
-        let _ = finisher.join();
-        panic!("session finish should deactivate the fast-path bits before waiting");
+        surface_thread_panic("recorder", recorder);
+        surface_thread_panic("finisher", finisher);
+        panic!(
+            "session finish should deactivate the fast-path bits before waiting; observed {observed}"
+        );
     }
     assert!(
         matches!(
@@ -1018,11 +1012,14 @@ fn conflicting_module_registration_panics_without_mutating_the_record() {
     );
     let first_key = crate::timing::register_timing_module(boundary, 0, "", 1, 512);
 
-    let conflict = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        crate::timing::register_timing_module(boundary, 0, "", 2, 2048)
-    }));
-
-    assert!(conflict.is_err(), "conflicting metadata must be rejected");
+    // The exact rejection message proves the source-fact conflict was detected,
+    // not some unrelated panic inside registration.
+    assert_panics_with(
+        "timing module registration changed source file count",
+        || {
+            crate::timing::register_timing_module(boundary, 0, "", 2, 2048);
+        },
+    );
     let snapshot = session.finish();
 
     assert_eq!(snapshot.modules.len(), 1);
@@ -1044,13 +1041,13 @@ fn staged_module_registration_finalizes_source_facts_once() {
     crate::timing::finalize_timing_module_source_facts(key, 2, 1024);
     crate::timing::finalize_timing_module_source_facts(key, 2, 1024);
 
-    let conflict = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        crate::timing::finalize_timing_module_source_facts(key, 3, 2048)
-    }));
-
-    assert!(
-        conflict.is_err(),
-        "conflicting finalization must be rejected"
+    // The exact rejection message proves the re-finalization conflict was
+    // detected, not some unrelated panic inside finalization.
+    assert_panics_with(
+        "timing module finalization changed source file count",
+        || {
+            crate::timing::finalize_timing_module_source_facts(key, 3, 2048);
+        },
     );
     let snapshot = session.finish();
     assert_eq!(snapshot.modules[0].source_file_count, 2);

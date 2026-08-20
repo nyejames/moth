@@ -204,23 +204,6 @@ fn timed_stage_passes_error_through_unchanged() {
 }
 
 #[test]
-fn timer_facade_sources_never_use_cfg_timer_macro() {
-    let facade_sources = [
-        include_str!("../../timing.rs"),
-        include_str!("../enabled/mod.rs"),
-        include_str!("../enabled/runtime.rs"),
-        include_str!("../enabled/collector.rs"),
-    ];
-
-    for source in facade_sources {
-        assert!(
-            !source.contains("cfg!(feature = \"timers\")"),
-            "timer facade must use #[cfg] macro definitions, not runtime cfg! checks"
-        );
-    }
-}
-
-#[test]
 fn command_timing_scope_does_not_evaluate_command_expression() {
     let command_evaluated = evaluation_counter();
     command_timing_scope!(timing_session, {

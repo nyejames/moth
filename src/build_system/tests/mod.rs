@@ -7,8 +7,8 @@ use crate::build_system::build::{
     BackendBuilder, FileKind, ModuleRootActivity, OutputFile, Project,
 };
 use crate::build_system::output::{
-    BuilderKind, CleanupPolicy, OutputOwner, OutputPlan, SingleFileOutputPlan, WriteMode,
-    WriteOptions, write_project_outputs as write_project_outputs_with_table,
+    BuilderKind, CleanupPolicy, OutputOwner, OutputPlan, OutputWriteSummary, SingleFileOutputPlan,
+    WriteMode, WriteOptions, write_project_outputs as write_project_outputs_with_table,
 };
 use crate::builder_surface::BuilderSurface;
 use crate::compiler_frontend::Flag;
@@ -20,12 +20,19 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::style_directives::StyleDirectiveSpec;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::projects::settings::{Config, ProjectConfigError};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, OnceLock};
+
+#[cfg(test)]
+type RestoreFn = Box<dyn Fn(&Path) -> Result<(), std::io::Error> + Send>;
 
 struct CurrentDirGuard {
     _lock: MutexGuard<'static, ()>,
-    previous: PathBuf,
+    previous: Option<PathBuf>,
+    /// Optional injection seam for testing restore failures. When set, this
+    /// function is called instead of `std::env::set_current_dir`.
+    #[cfg(test)]
+    restore_override: Option<RestoreFn>,
 }
 
 impl CurrentDirGuard {
@@ -40,14 +47,69 @@ impl CurrentDirGuard {
         std::env::set_current_dir(path).expect("should change current directory for test");
         Self {
             _lock: lock,
-            previous,
+            previous: Some(previous),
+            #[cfg(test)]
+            restore_override: None,
         }
     }
+
+    /// Explicitly restore the previous directory, returning an error if restoration fails.
+    ///
+    /// WHAT: takes ownership of the restore responsibility so `Drop` will not retry it.
+    /// WHY: without this, `Drop` would run after `finish` and attempt restoration again.
+    ///   `Drop` cannot return errors, so the normal path must use `finish()` when the
+    ///   caller cares about restore success.
+    fn finish(mut self) -> Result<(), std::io::Error> {
+        if let Some(previous) = self.previous.take() {
+            restore_directory(&previous, &self.restore_override)?;
+        }
+        Ok(())
+    }
+
+    /// Set a custom restore function for testing restore-failure scenarios.
+    #[cfg(test)]
+    fn with_restore_override(mut self, f: RestoreFn) -> Self {
+        self.restore_override = Some(f);
+        self
+    }
+}
+
+/// Restore the working directory, using the override if set (test seam).
+#[cfg(test)]
+fn restore_directory(path: &Path, override_fn: &Option<RestoreFn>) -> Result<(), std::io::Error> {
+    if let Some(f) = override_fn {
+        f(path)
+    } else {
+        std::env::set_current_dir(path)
+    }
+}
+
+#[cfg(not(test))]
+fn restore_directory(path: &Path, _override_fn: &Option<()>) -> Result<(), std::io::Error> {
+    std::env::set_current_dir(path)
 }
 
 impl Drop for CurrentDirGuard {
     fn drop(&mut self) {
-        let _ = std::env::set_current_dir(&self.previous);
+        // If `finish()` already restored, `previous` is `None` and we do nothing.
+        if let Some(previous) = self.previous.take() {
+            let restore_result = restore_directory(&previous, &self.restore_override);
+            if let Err(ref error) = restore_result
+                && !std::thread::panicking()
+            {
+                panic!(
+                    "CurrentDirGuard failed to restore directory to {:?}: {}",
+                    previous, error
+                );
+            } else if let Err(ref error) = restore_result
+                && std::thread::panicking()
+            {
+                eprintln!(
+                    "CurrentDirGuard failed to restore directory to {:?}: {}",
+                    previous, error
+                );
+            }
+        }
     }
 }
 
@@ -93,7 +155,7 @@ fn module_root_activity_html_policy_requires_any_root_activity() {
 fn write_project_outputs(
     project: &Project,
     options: &WriteOptions,
-) -> Result<(), CompilerMessages> {
+) -> Result<OutputWriteSummary, CompilerMessages> {
     write_project_outputs_with_table(project, options, &StringTable::default())
 }
 
@@ -180,7 +242,7 @@ impl BackendBuilder for WarningBuilder {
         _config: &Config,
         _build_profile: BuildProfile,
         _flags: &[Flag],
-        _string_table: &mut StringTable,
+        string_table: &mut StringTable,
     ) -> Result<Project, CompilerMessages> {
         Ok(Project {
             output_files: vec![OutputFile::new(
@@ -190,7 +252,7 @@ impl BackendBuilder for WarningBuilder {
             entry_page_rel: None,
             cleanup_policy: CleanupPolicy::generic([".js"]),
             warnings: vec![unused_variable_warning(
-                StringTable::new().get_or_intern("x".to_string()),
+                string_table.get_or_intern("x".to_string()),
                 SourceLocation::default(),
             )],
         })

@@ -39,10 +39,6 @@ pub(crate) fn test_source_location(line: i32) -> SourceLocation {
     }
 }
 
-pub(crate) fn test_location(line: i32) -> SourceLocation {
-    test_source_location(line)
-}
-
 pub(crate) fn node(kind: NodeKind, location: SourceLocation) -> AstNode {
     AstNode {
         kind,
@@ -99,7 +95,12 @@ pub(crate) fn symbol(name: &str, string_table: &mut StringTable) -> InternedPath
     InternedPath::from_single_str(name, string_table)
 }
 
-pub(crate) fn reference_expr(
+/// A reference expression whose value mode is fixed to `ImmutableReference`.
+///
+/// The caller supplies the diagnostic `DataType`. Named for the mode it fixes so it cannot be
+/// confused with `type_id_fixture_support::inferred_type_reference_expr`, which fixes the
+/// `DataType` instead and lets the caller choose the mode.
+pub(crate) fn immutable_reference_expr(
     name: InternedPath,
     data_type: DataType,
     id: TypeId,

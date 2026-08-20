@@ -3,4 +3,4 @@ entry = "."
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = "receiver_method_nested_struct_success value=11\n"
+rendered_output_exact = "receiver_method_nested_struct_success value=11"

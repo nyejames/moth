@@ -6,6 +6,7 @@ use crate::benchmark_manifest::{
     BenchmarkCase, BenchmarkEntryKind, BenchmarkExpectation, BenchmarkFingerprintMode,
     BenchmarkManifest, BenchmarkRunner, BenchmarkWorkload, CliBenchmarkCommand,
 };
+use crate::test_fs::assert_path_missing;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -240,8 +241,8 @@ fn directory_build_case_registers_declared_roots_and_finish_removes_them() {
         .finish()
         .expect("finish should remove registered run-owned roots");
 
-    assert!(!entry_path.join("dev").exists());
-    assert!(!entry_path.join("release").exists());
+    assert_path_missing(&entry_path.join("dev"));
+    assert_path_missing(&entry_path.join("release"));
 }
 
 #[test]
@@ -439,7 +440,7 @@ fn finish_is_idempotent() {
     workspace
         .finish()
         .expect("second finish must be idempotent");
-    assert!(!entry_path.join("dev").exists());
+    assert_path_missing(&entry_path.join("dev"));
 }
 
 #[test]
@@ -473,11 +474,11 @@ fn drop_is_not_required_for_a_successful_run() {
     workspace
         .finish()
         .expect("explicit finish must define success");
-    assert!(!entry_path.join("dev").exists());
+    assert_path_missing(&entry_path.join("dev"));
 
     // Dropping afterwards must not change anything.
     drop(workspace);
-    assert!(!entry_path.join("dev").exists());
+    assert_path_missing(&entry_path.join("dev"));
 }
 
 #[test]
@@ -722,7 +723,7 @@ fn finalise_workspace_preserves_successful_operation_value() {
     let value = finalise_workspace(&workspace, Ok(42usize))
         .expect("a successful operation with successful cleanup should pass through");
     assert_eq!(value, 42);
-    assert!(!entry_path.join("dev").exists());
+    assert_path_missing(&entry_path.join("dev"));
 }
 
 #[test]

@@ -13,10 +13,25 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 pub(crate) fn execute_test_case(case: &TestCaseSpec) -> CaseExecutionResult {
     let builder = backend_builder_for_case(case.backend_id);
     let flags = case.flags.clone();
-    let entry_path = case.entry_path.to_string_lossy().to_string();
+
+    // `build_project` takes a UTF-8 entry path. Converting lossily would hand the compiler a
+    // different path than the fixture owns, so an unrepresentable entry is a harness failure.
+    let Some(entry_path) = case.entry_path.to_str() else {
+        return CaseExecutionResult {
+            passed: false,
+            panic_message: None,
+            build_result: None,
+            messages: None,
+            failure_reason: Some(format!(
+                "Case entry path {:?} is not valid UTF-8, and the build entry protocol requires UTF-8.",
+                case.entry_path
+            )),
+            failure_kind: Some(FailureKind::HarnessFailed),
+        };
+    };
 
     let execution = catch_unwind(AssertUnwindSafe(|| {
-        build_project(&builder, &entry_path, &flags)
+        build_project(&builder, entry_path, &flags)
     }));
 
     // Policy: unsupported or incomplete user input must surface structured compiler diagnostics.

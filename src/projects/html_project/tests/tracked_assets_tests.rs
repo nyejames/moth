@@ -8,7 +8,6 @@ use crate::compiler_frontend::paths::compile_time_paths::{
     CompileTimePathBase, CompileTimePathKind,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_tests::test_support::temp_dir;
 use crate::projects::html_project::tests::test_support::{
     RenderedPathUsageInput, create_test_module, expect_bytes_output, rendered_path_usage,
 };
@@ -21,7 +20,8 @@ use std::path::Path;
 
 #[test]
 fn relative_one_segment_underflow_returns_escapes_project_root() {
-    let root = temp_dir("tracked_assets_underflow_one");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("img")).expect("should create img dir");
     fs::write(root.join("img/logo.png"), [7_u8, 8, 9]).expect("should write asset");
 
@@ -65,13 +65,12 @@ fn relative_one_segment_underflow_returns_escapes_project_root() {
         payload => panic!("expected invalid compile-time path payload, got {payload:?}"),
     }
     assert_eq!(diagnostic.primary_location, expected_render_location);
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn relative_repeated_underflow_returns_escapes_project_root() {
-    let root = temp_dir("tracked_assets_underflow_repeated");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("img")).expect("should create img dir");
     fs::write(root.join("img/logo.png"), [10_u8, 11, 12]).expect("should write asset");
 
@@ -111,13 +110,12 @@ fn relative_repeated_underflow_returns_escapes_project_root() {
         payload => panic!("expected invalid compile-time path payload, got {payload:?}"),
     }
     assert_eq!(diagnostic.primary_location, expected_render_location);
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn duplicate_same_source_and_output_dedupes_within_module() {
-    let root = temp_dir("tracked_assets_dedupe");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("assets")).expect("should create assets dir");
     fs::write(root.join("assets/logo.png"), [1_u8, 2, 3]).expect("should write asset");
 
@@ -142,13 +140,12 @@ fn duplicate_same_source_and_output_dedupes_within_module() {
         .expect("planning succeeds");
 
     assert_eq!(planned.assets.len(), 1);
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn public_root_directory_usage_is_ignored() {
-    let root = temp_dir("tracked_assets_public_root_directory");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("src")).expect("should create entry root");
 
     let mut string_table = StringTable::new();
@@ -174,13 +171,12 @@ fn public_root_directory_usage_is_ignored() {
 
     assert!(planned.assets.is_empty());
     assert!(planned.warnings.is_empty());
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn non_asset_directory_link_is_ignored() {
-    let root = temp_dir("tracked_assets_directory_link");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("src/docs/guide/subdir")).expect("should create nested dir");
 
     let mut string_table = StringTable::new();
@@ -210,13 +206,12 @@ fn non_asset_directory_link_is_ignored() {
 
     assert!(planned.assets.is_empty());
     assert!(planned.warnings.is_empty());
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn large_asset_warning_dedupes_to_first_render_location() {
-    let root = temp_dir("tracked_assets_large_warning");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("assets")).expect("should create assets dir");
     fs::write(
         root.join("assets/video.mp4"),
@@ -267,13 +262,12 @@ fn large_asset_warning_dedupes_to_first_render_location() {
         planned.warnings[0].primary_location.start_pos.line_number,
         2
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }
 
 #[test]
 fn emit_tracked_assets_reads_source_bytes_into_binary_outputs() {
-    let root = temp_dir("tracked_assets_emit");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("assets")).expect("should create assets dir");
     fs::write(root.join("assets/logo.png"), [9_u8, 8, 7, 6]).expect("should write asset");
 
@@ -303,6 +297,4 @@ fn emit_tracked_assets_reads_source_bytes_into_binary_outputs() {
         expect_bytes_output(&output_files, "assets/logo.png"),
         [9_u8, 8, 7, 6]
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp dir");
 }

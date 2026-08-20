@@ -4,9 +4,13 @@
 //! WHY: fixture validation and comparison must consume the same deterministic file set.
 
 use super::super::FailureKind;
-use super::super::types::{GoldenExpectation, GoldenFile, GoldenFileInventory, GoldenMode};
-use crate::build_system::build::{BuildResult, FileKind};
+use super::super::types::{
+    ArtifactKind, GoldenExpectation, GoldenFile, GoldenFileInventory, GoldenMode,
+};
+use super::artifacts::BuiltArtifactIndex;
+use crate::build_system::build::FileKind;
 use crate::compiler_frontend::utilities::basic::portable_path_text;
+use crate::compiler_tests::integration_test_runner::errors::FixtureLoadError;
 use std::fs;
 use std::path::Path;
 
@@ -14,16 +18,16 @@ use std::path::Path;
 pub(crate) fn discover_golden_expectation(
     golden_dir: &Path,
     authored_mode: Option<GoldenMode>,
-) -> Result<GoldenExpectation, String> {
+) -> Result<GoldenExpectation, FixtureLoadError> {
     let inventory = discover_golden_files(golden_dir)?;
 
     if inventory.is_empty() {
         if let Some(mode) = authored_mode {
-            return Err(format!(
+            return Err(FixtureLoadError::fixture_contract(format!(
                 "Golden directory '{}' has golden_mode = \"{}\" but contains no golden files.",
                 golden_dir.display(),
                 golden_mode_label(mode)
-            ));
+            )));
         }
 
         return Ok(GoldenExpectation {
@@ -45,7 +49,7 @@ pub(crate) fn discover_golden_expectation(
 ///      silently treated as absent. Symlink entries are rejected so a golden tree
 ///      cannot follow an authored link outside its owning backend or inventory the same
 ///      file twice.
-fn discover_golden_files(root: &Path) -> Result<GoldenFileInventory, String> {
+fn discover_golden_files(root: &Path) -> Result<GoldenFileInventory, FixtureLoadError> {
     // The direct golden parent (e.g. case/golden) must not be a symlink. Without
     // this guard, a symlinked parent whose target contains the backend directory
     // would bypass the backend-root symlink rejection below and let outside files
@@ -55,18 +59,18 @@ fn discover_golden_files(root: &Path) -> Result<GoldenFileInventory, String> {
     if let Some(parent) = root.parent() {
         match fs::symlink_metadata(parent) {
             Ok(parent_metadata) if parent_metadata.file_type().is_symlink() => {
-                return Err(format!(
+                return Err(FixtureLoadError::filesystem(format!(
                     "Golden parent '{}' is a symlink. Golden trees must live inside the owning fixture.",
                     parent.display()
-                ));
+                )));
             }
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => {
-                return Err(format!(
+                return Err(FixtureLoadError::filesystem(format!(
                     "Failed to inspect golden parent '{}': {error}",
                     parent.display()
-                ));
+                )));
             }
         }
     }
@@ -77,25 +81,25 @@ fn discover_golden_files(root: &Path) -> Result<GoldenFileInventory, String> {
             return Ok(GoldenFileInventory::default());
         }
         Err(error) => {
-            return Err(format!(
+            return Err(FixtureLoadError::filesystem(format!(
                 "Failed to inspect golden directory '{}': {error}",
                 root.display()
-            ));
+            )));
         }
     };
 
     if root_metadata.file_type().is_symlink() {
-        return Err(format!(
+        return Err(FixtureLoadError::filesystem(format!(
             "Golden path '{}' is a symlink. Golden trees must contain only regular files and directories.",
             root.display()
-        ));
+        )));
     }
 
     if !root_metadata.is_dir() {
-        return Err(format!(
+        return Err(FixtureLoadError::filesystem(format!(
             "Golden path '{}' exists but is not a directory.",
             root.display()
-        ));
+        )));
     }
 
     let mut files = Vec::new();
@@ -109,21 +113,21 @@ fn visit_golden_directory(
     directory: &Path,
     root: &Path,
     files: &mut Vec<GoldenFile>,
-) -> Result<(), String> {
+) -> Result<(), FixtureLoadError> {
     let entries = fs::read_dir(directory).map_err(|error| {
-        format!(
+        FixtureLoadError::filesystem(format!(
             "Failed to read golden directory '{}': {error}",
             directory.display()
-        )
+        ))
     })?;
 
     let mut paths = Vec::new();
     for entry in entries {
         let entry = entry.map_err(|error| {
-            format!(
+            FixtureLoadError::filesystem(format!(
                 "Failed to read an entry in golden directory '{}': {error}",
                 directory.display()
-            )
+            ))
         })?;
         paths.push(entry.path());
     }
@@ -131,18 +135,18 @@ fn visit_golden_directory(
 
     for path in paths {
         let entry_metadata = fs::symlink_metadata(&path).map_err(|error| {
-            format!(
+            FixtureLoadError::filesystem(format!(
                 "Failed to inspect golden entry '{}': {error}",
                 path.display()
-            )
+            ))
         })?;
 
         if entry_metadata.file_type().is_symlink() {
-            return Err(format!(
+            return Err(FixtureLoadError::filesystem(format!(
                 "Golden directory '{}' contains a symlink entry '{}'. Golden trees must contain only regular files and directories.",
                 root.display(),
                 path.display()
-            ));
+            )));
         }
 
         if entry_metadata.is_dir() {
@@ -155,19 +159,41 @@ fn visit_golden_directory(
         }
 
         let relative_path = path.strip_prefix(root).map_err(|error| {
-            format!(
+            FixtureLoadError::filesystem(format!(
                 "Failed to make golden entry '{}' relative to '{}': {error}",
                 path.display(),
                 root.display()
-            )
+            ))
         })?;
+        let relative_text = portable_path_text(relative_path);
         files.push(GoldenFile {
-            relative_path: portable_path_text(relative_path),
+            expected_kind: golden_artifact_kind(&relative_text),
+            relative_path: relative_text,
             absolute_path: path,
         });
     }
 
     Ok(())
+}
+
+/// The artifact kind an authored golden file claims.
+///
+/// WHAT: maps the golden's own extension to the artifact kind the build must produce at that path.
+/// WHY: the expected kind has to be owned by the authored fixture. Reading it from the produced
+///      artifact instead would make the check circular: a `page.wasm` golden would be satisfied by
+///      a generic byte artifact, and a `.js` golden by any artifact whose bytes matched. Every
+///      other extension is a byte artifact, which is what the writer emits for non-text output.
+fn golden_artifact_kind(relative_path: &str) -> ArtifactKind {
+    let extension = relative_path
+        .rsplit_once('.')
+        .map(|(_, extension)| extension.to_ascii_lowercase());
+
+    match extension.as_deref() {
+        Some("html") => ArtifactKind::Html,
+        Some("js") => ArtifactKind::Js,
+        Some("wasm") => ArtifactKind::Wasm,
+        _ => ArtifactKind::Binary,
+    }
 }
 
 fn golden_mode_label(mode: GoldenMode) -> &'static str {
@@ -178,7 +204,7 @@ fn golden_mode_label(mode: GoldenMode) -> &'static str {
 }
 
 pub(super) fn validate_golden_outputs(
-    build_result: &BuildResult,
+    index: &BuiltArtifactIndex<'_>,
     golden: &GoldenExpectation,
 ) -> Option<(String, FailureKind)> {
     if golden.inventory.is_empty() {
@@ -199,18 +225,58 @@ pub(super) fn validate_golden_outputs(
         .map(|file| file.relative_path.clone())
         .collect::<Vec<_>>();
 
-    if let Some(reason) = validate_expected_artifact_paths(build_result, &expected_paths) {
+    if let Some(reason) = validate_expected_artifact_paths(index, &expected_paths) {
         return Some((reason, FailureKind::StrictGoldenMismatch));
     }
 
     for file in &golden.inventory.files {
         let relative = &file.relative_path;
 
-        let Some(output) = super::artifacts::find_output_file(build_result, relative) else {
+        let Some(output) = index.get(relative) else {
             return Some((
                 format!("Golden output '{relative}' was not produced."),
                 FailureKind::StrictGoldenMismatch,
             ));
+        };
+
+        // The authored golden's artifact kind decides the comparison before any content is read.
+        // A directory or an unbuilt entry is a kind mismatch, never an empty file: comparing them
+        // as empty bytes let an empty golden pass against a path that holds no file at all. A
+        // produced kind the golden did not claim is a mismatch too, so identical bytes emitted as
+        // a different artifact kind cannot satisfy the golden.
+        let produced = match (file.expected_kind, output.file_kind()) {
+            (ArtifactKind::Html, FileKind::Html(content))
+            | (ArtifactKind::Js, FileKind::Js(content)) => ProducedGolden::Text(content.as_str()),
+            (ArtifactKind::Wasm, FileKind::Wasm(bytes))
+            | (ArtifactKind::Binary, FileKind::Bytes(bytes)) => {
+                ProducedGolden::Binary(bytes.as_slice())
+            }
+            (_, FileKind::Directory) => {
+                return Some((
+                    format!(
+                        "Golden output '{relative}' expects a file artifact, but the build produced a directory at that path."
+                    ),
+                    FailureKind::StrictGoldenMismatch,
+                ));
+            }
+            (_, FileKind::NotBuilt) => {
+                return Some((
+                    format!(
+                        "Golden output '{relative}' expects a file artifact, but the build reported that path as not built."
+                    ),
+                    FailureKind::StrictGoldenMismatch,
+                ));
+            }
+            (expected_kind, produced_kind) => {
+                return Some((
+                    format!(
+                        "Golden output '{relative}' expects a {} artifact, but the build produced a {} artifact at that path.",
+                        super::artifacts::artifact_kind_name(expected_kind),
+                        produced_file_kind_name(produced_kind)
+                    ),
+                    FailureKind::StrictGoldenMismatch,
+                ));
+            }
         };
 
         let expected_bytes = match fs::read(&file.absolute_path) {
@@ -226,63 +292,84 @@ pub(super) fn validate_golden_outputs(
             }
         };
 
-        let actual_bytes = match output.file_kind() {
-            FileKind::Html(content) | FileKind::Js(content) => content.as_bytes().to_vec(),
-            FileKind::Wasm(bytes) | FileKind::Bytes(bytes) => bytes.clone(),
-            FileKind::Directory | FileKind::NotBuilt => Vec::new(),
-        };
-
-        // Text artifacts support normalized comparison; binary/wasm always use strict.
-        let is_text = matches!(output.file_kind(), FileKind::Html(_) | FileKind::Js(_));
-        if is_text {
-            let expected_str = String::from_utf8_lossy(&expected_bytes);
-            let actual_str = match output.file_kind() {
-                FileKind::Html(s) | FileKind::Js(s) => s.as_str(),
-                _ => unreachable!("is_text is true"),
-            };
-
-            if let Some(detail) = compare_text_golden(expected_str.as_ref(), actual_str, mode) {
-                let failure_kind = if mode == GoldenMode::Normalized {
-                    FailureKind::NormalizedSemanticMismatch
-                } else {
-                    FailureKind::StrictGoldenMismatch
+        match produced {
+            // Text artifacts support normalized comparison; binary and wasm always compare bytes.
+            ProducedGolden::Text(actual_text) => {
+                let expected_text = match std::str::from_utf8(&expected_bytes) {
+                    Ok(text) => text,
+                    Err(error) => {
+                        return Some((
+                            format!(
+                                "Golden output '{}' is not valid UTF-8 but '{relative}' is a text artifact: {error}",
+                                file.absolute_path.display()
+                            ),
+                            FailureKind::HarnessFailed,
+                        ));
+                    }
                 };
-                let context = if mode == GoldenMode::Normalized {
-                    "did not match after normalization"
-                } else {
-                    "did not match the produced artifact"
-                };
-                return Some((
-                    format!("Golden output '{relative}' {context}.\n{detail}"),
-                    failure_kind,
-                ));
+
+                if let Some(detail) = compare_text_golden(expected_text, actual_text, mode) {
+                    let failure_kind = if mode == GoldenMode::Normalized {
+                        FailureKind::NormalizedSemanticMismatch
+                    } else {
+                        FailureKind::StrictGoldenMismatch
+                    };
+                    let context = if mode == GoldenMode::Normalized {
+                        "did not match after normalization"
+                    } else {
+                        "did not match the produced artifact"
+                    };
+                    return Some((
+                        format!("Golden output '{relative}' {context}.\n{detail}"),
+                        failure_kind,
+                    ));
+                }
             }
-            continue;
-        }
 
-        if actual_bytes != expected_bytes {
-            let detail = format!(
-                "expected {} bytes, got {} bytes",
-                expected_bytes.len(),
-                actual_bytes.len()
-            );
-            return Some((
-                format!(
-                    "Golden output '{relative}' did not match the produced artifact ({detail})."
-                ),
-                FailureKind::StrictGoldenMismatch,
-            ));
+            ProducedGolden::Binary(actual_bytes) => {
+                if actual_bytes != expected_bytes.as_slice() {
+                    let detail = format!(
+                        "expected {} bytes, got {} bytes",
+                        expected_bytes.len(),
+                        actual_bytes.len()
+                    );
+                    return Some((
+                        format!(
+                            "Golden output '{relative}' did not match the produced artifact ({detail})."
+                        ),
+                        FailureKind::StrictGoldenMismatch,
+                    ));
+                }
+            }
         }
     }
 
     None
 }
 
+/// The produced artifact seen as the golden comparison sees it: text or bytes, never absence.
+enum ProducedGolden<'a> {
+    Text(&'a str),
+    Binary(&'a [u8]),
+}
+
+/// Names the produced file kind for a golden kind-mismatch report.
+fn produced_file_kind_name(kind: &FileKind) -> &'static str {
+    match kind {
+        FileKind::Html(_) => "html",
+        FileKind::Js(_) => "js",
+        FileKind::Wasm(_) => "wasm",
+        FileKind::Bytes(_) => "binary",
+        FileKind::Directory => "directory",
+        FileKind::NotBuilt => "not-built",
+    }
+}
+
 fn validate_expected_artifact_paths(
-    build_result: &BuildResult,
+    index: &BuiltArtifactIndex<'_>,
     expected_paths: &[String],
 ) -> Option<String> {
-    let actual_paths = super::artifacts::collect_built_artifact_paths(build_result);
+    let actual_paths = index.paths();
 
     let mut expected = expected_paths
         .iter()

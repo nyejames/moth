@@ -60,6 +60,11 @@ infrastructure, suite policy, broad fixture cleanup or audits.
     ]
 
     [td:
+        [: Threads, shared state, timing or repeated execution]
+        [: `Concurrency and repetition`]
+    ]
+
+    [td:
         [: Diagnostics or warnings]
         [:
             - `Diagnostics assertions`
@@ -82,6 +87,16 @@ infrastructure, suite policy, broad fixture cleanup or audits.
             - `Successful backend intent`
             - `Focused integration selection and inventory`
         ]
+    ]
+
+    [td:
+        [: Adding or changing a Cargo feature, or a feature- or platform-gated test]
+        [: `Feature and platform lanes`]
+    ]
+
+    [td:
+        [: Asserting on source text, or adding an architecture ban]
+        [: `Source-text assertions`]
     ]
 
     [td:
@@ -342,12 +357,32 @@ Audit cannot be combined with filters or `--list`. It writes the reporting-owned
 expectation facts, hard-policy violations and primary-less contract-family advisories. The report
 is review input only; it never deletes, merges or rewrites fixtures.
 
-The schema 6 inventory reports acceptance-only, rendered-output, artifact, golden, absence and
+The schema 8 inventory reports acceptance-only, rendered-output, artifact, golden, absence and
 expected-warning backend counts, plus the zero baseline-only invariant. It reports exact, ordered
 and exact-once runtime contracts separately. Per-backend fields keep `baseline_applied`,
 `acceptance_only`, `assertion_kinds`, `golden_present`, `golden_mode`, every rendered-output form,
 exact warning codes, diagnostic match mode and any contains-mode reason separate so the report
 matches what ran.
+
+Schema 7 added the weak-contract review fields. `smoke_role_cases`, `warning_ignore_backend_blocks`
+and `diagnostic_contains_backend_blocks` count the three legal weak contracts, and
+`weak_contract_review_backend_blocks` counts blocks carrying at least one of them. Every backend
+block lists its own `weak_contract_reviews`. These are review fields, not policy: a smoke case, an
+ignored warning contract and a contains-mode failure all remain valid. The canonical suite
+currently declares none of them, so any non-zero count is a new weaker contract to review rather
+than an inherited one to explain.
+
+Schema 8 added report identity. Every report carries `run` — a run id, the command, the host OS and
+architecture, the features the binary was built with, the runner thread count and whether the run
+finished — and the inventory replaced `repository_commit` with `repository_revision`, which reports
+a discovered `commit`, `not_a_repository`, or `unknown` with the reason discovery failed. A failed
+discovery and a genuine absence are different facts, and a report that names neither its command
+nor its build cannot be told apart from a stale one.
+
+Reports are written to a sibling temporary file and renamed into place, so a reader never sees a
+partial file. Before the work begins, each report is replaced by one whose run says `completed:
+false`; an interrupted run therefore leaves a report that says it did not finish rather than the
+previous run's passing output.
 
 Hard policy has one suite-policy owner. Missing roles, missing non-smoke contracts, duplicate
 primary contracts, a primary without a contract and a whole-case acceptance-only fixture without
@@ -389,6 +424,60 @@ Choose the narrowest field that owns the behaviour:
 Use exact output for small deterministic behaviours such as loop or map operation results. Use
 ordered and exact-once fragments when unrelated output may coexist. Prefer these runtime contracts
 over generated JavaScript text or a whole-page golden when execution is the real owner.
+
+An exact mismatch is reported escaped, post-normalization, with the byte offset of the first
+difference, so a whitespace-only difference does not print as two identical lines.
+
+#### What the harness will execute
+
+The harness parses the emitted page for a supported script shape and rejects everything else rather
+than guessing:
+
+- a classic inline script is executed
+- `type="module"` is rejected as unsupported. The harness materializes no emitted glue, provider or
+  runtime module and no import map, so it cannot run the module graph the HTML backend emits when a
+  bundle import preamble is present. Executing it as a classic script would report a failure that
+  did not happen
+- an external `src`, an unknown `type`, `nomodule`, `async`, and a malformed or unterminated tag are
+  each rejected by name
+- the page script include must appear exactly once inside the body
+
+#### Harness failure classes
+
+A harness problem is never reported as a case failure. `RenderHarnessError` names which boundary
+broke: `Artifact`, `Workspace`, `Spawn`, `Timeout`, `ExitStatus`, `OutputDecoding`,
+`OutputProtocol`, `ScriptShape` or `Cleanup`. Execution is bounded by a 30-second deadline with
+kill-and-reap, stdout and stderr are drained on their own threads under a 4 MiB bound, and a stderr
+decode failure never replaces the boundary that actually failed.
+
+#### Goldens carry their own artifact kind
+
+A golden file's extension decides the artifact kind it expects, and a cross-kind match is rejected
+before content is read. Identical bytes emitted as a different artifact kind do not satisfy a
+golden. Text goldens require strict UTF-8; invalid UTF-8 is a harness failure, not a rewrite.
+
+### Concurrency and repetition
+
+A test that waits for a thread to reach a state must observe that state, not guess how long
+reaching it takes.
+
+- Use a condition variable or a channel for an expected transition.
+- Use a bounded wall-clock deadline only as deadlock protection, never as the thing being measured.
+- A deadline failure must name the observed state, so the report says what did not happen.
+- Join every spawned worker, so a panic inside one is the reported cause rather than a discarded
+  result.
+- Do not make an arbitrary sleep, a yield count or a machine-speed threshold part of a contract.
+
+Stateful owners — the timing collector, the frontend counter stores, output writes,
+current-directory guards and the Node harness — only misbehave under a thread schedule or a repeat
+that one default-parallelism run never produces. That schedule has an owned command:
+
+[codeblock, $code("bash"):
+    just stress
+]
+
+It repeats the unit and integration suites at one thread, default parallelism and sixteen threads,
+and keeps running after a failing lane so the whole matrix is visible.
 
 ### Diagnostics assertions
 
@@ -517,6 +606,146 @@ Use one `expect.toml` per case with backend-specific assertion blocks.
 - Do not make temporary lowering order part of the public test contract.
 - For HIR validation, distinguish malformed-HIR invariant tests from user-facing source diagnostic tests.
 
+### Feature and platform lanes
+
+A feature-gated test that no command runs is not a test. Every declared Cargo feature belongs to a
+lane, and every lane is one executed command:
+
+[codeblock, $code("bash"):
+    just test-feature-matrix
+]
+
+[table:
+    [th:
+        [: **Lane**]
+        [: **Features**]
+        [: **Only this lane covers**]
+    ]
+
+    [td:
+        [: `default`]
+        [: none]
+        [: the shipped configuration and every `cfg(not(feature = ...))` branch]
+    ]
+
+    [td:
+        [: `timers`]
+        [: `timers`]
+        [: the timing collector, boundary identities and command/build timing tests]
+    ]
+
+    [td:
+        [: `detailed-timers`]
+        [: `detailed_timers`]
+        [: AST substage timings and the detailed-only summary shape]
+    ]
+
+    [td:
+        [: `counters`]
+        [: `benchmark_counters`]
+        [: counter-only builds, where counters record without a timing collector]
+    ]
+
+    [td:
+        [: `timers-counters`]
+        [: `timers`, `benchmark_counters`]
+        [: collector-backed counters and the counter summary carried by a timing session]
+    ]
+
+    [td:
+        [: `scoped-blocks`]
+        [: `checked_blocks`, `async_blocks`]
+        [: the deferred-feature diagnostics for `checked:` and `async:` blocks]
+    ]
+
+    [td:
+        [: `dev-output`]
+        [: every `show_*` feature]
+        [: the developer stage-dump branches, which no other lane compiles]
+    ]
+
+    [td:
+        [: `xtask`]
+        [: none]
+        [: the benchmark, profiling and process-runner tests in the `xtask` package]
+    ]
+]
+
+Lanes are package-scoped, and that is not a stylistic choice. Cargo unifies features across one
+resolve graph, and `xtask` depends on `moth` with `features = ["timers"]`, so
+`cargo test --workspace` always builds the compiler with `timers` enabled. It can never run the
+default configuration, and `--features benchmark_counters` on a workspace command is really
+`timers` plus counters. Only `cargo test -p moth` with an explicit feature list configures the
+crate the way a lane claims.
+
+Feature coverage is checked mechanically, without running a lane:
+
+[codeblock, $code("bash"):
+    just feature-lane-check
+]
+
+The check reads `Cargo.toml` and every `cfg` attribute in `src` and `xtask/src`, then fails when a
+declared feature has no lane, when a lane names a feature its package does not declare, or when a
+`cfg` names a feature that does not exist. A misspelled feature name in a `cfg` is a test that can
+never compile and never reports, which is why the check reads the tree instead of a list in prose.
+It writes `target/test-reports/feature_lane_coverage.json`, which names, for every feature, the
+lanes that enable it and the files whose `cfg` attributes mention it. That report is a coverage
+map and states no lane outcome, because the check that writes it runs no lane. Running the lanes
+is `just test-feature-matrix`, which writes the outcome for every lane to
+`target/test-reports/feature_matrix_results.json`.
+
+Adding a Cargo feature means adding it to a lane in the same change. The gate fails otherwise.
+
+Platform-gated tests are owned by the platform that has the API:
+
+[table:
+    [th:
+        [: **Gate**]
+        [: **Runs on**]
+        [: **Owns**]
+    ]
+
+    [td:
+        [: `cfg(unix)`]
+        [: Linux and macOS]
+        [: symlink identity and retargeting, non-regular nodes, unreadable paths and non-UTF-8 names]
+    ]
+
+    [td:
+        [: `cfg(windows)`]
+        [: Windows]
+        [: extended-length path prefixes, Windows canonicalisation and hard-link inspection]
+    ]
+
+    [td:
+        [: `cfg(any(unix, windows))`]
+        [: all three]
+        [: the portable policy shared by both families, asserted on each]
+    ]
+
+    [td:
+        [: `cfg(target_os = "linux")`]
+        [: Linux]
+        [: non-UTF-8 filesystem identity, which macOS rejects at the filesystem boundary]
+    ]
+]
+
+CI runs every gate on Linux, macOS and Windows, so a platform-gated owner executes wherever its API
+exists. A platform-specific test may be absent only when the underlying API does not exist there;
+an equivalent portable policy test should still run everywhere. Windows results are currently
+non-blocking — `validation.mtf` owns that status and the conditions that end it.
+
+### Source-text assertions
+
+A test that reads source text and asserts on it proves what the text says, not what the code does.
+An alias, a reformat or an equivalent reimplementation all pass it.
+
+- Do not make a source-text assertion the only evidence for runtime or semantic behaviour.
+- A ban whose scope is "no file anywhere may contain this" belongs to `just source-audit`, which
+  walks the tree once and reports typed findings. `validation.mtf > Source audit` owns it.
+- Reading a non-Rust asset a test then parses or executes is not a source-text assertion. The asset
+  is the input, and the behaviour under test is the parse or the execution.
+
 ### Fixtures and temporary files
 
 - Prefer `tempfile::tempdir()` for temporary directories and files.
@@ -560,3 +789,7 @@ Before considering test coverage complete, check:
 - Temporary files use owned cleanup.
 - No benchmark fixture is being used as a correctness substitute.
 - Redundant or obsolete coverage has been removed.
+- Every new Cargo feature was added to a lane in the same change.
+- Every platform-gated test names the API that makes the gate necessary.
+- No source-text assertion is the only evidence for a behaviour.
+- No concurrency test waits on a sleep or a machine-speed threshold.

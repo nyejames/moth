@@ -4,7 +4,6 @@ use super::{
     FileFingerprint, WatchScope, WatchSession, WatchTarget, collect_fingerprints, detect_changes,
     fingerprint_from_modified, should_ignore_path,
 };
-use crate::compiler_tests::test_support::temp_dir;
 use crate::projects::settings::{CONFIG_FILE_NAME, Config};
 use std::collections::HashMap;
 use std::fs;
@@ -70,7 +69,8 @@ fn detects_modified_file_fingerprints() {
 
 #[test]
 fn directory_scope_ignores_legacy_package_folders() {
-    let root = temp_dir("directory_scope");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
     let output_dir = root.join("dev");
     fs::create_dir_all(root.join("src")).expect("should create src dir");
     fs::create_dir_all(root.join("assets/vendor")).expect("should create assets dir");
@@ -96,13 +96,12 @@ fn directory_scope_ignores_legacy_package_folders() {
     assert!(!scope.watches_path(&canonical_root.join("assets/vendor/lib.js")));
     assert!(!scope.watches_path(&canonical_root.join("target/debug/app")));
     assert!(!scope.watches_path(&canonical_root.join("dev/bundle.js")));
-
-    fs::remove_dir_all(&root).expect("should remove temp test dir");
 }
 
 #[test]
 fn directory_scope_without_config_watches_entry_directory() {
-    let root = temp_dir("directory_scope_without_config");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
     let output_dir = root.join("dev");
     fs::create_dir_all(root.join("src")).expect("should create src dir");
     fs::create_dir_all(&output_dir).expect("should create output dir");
@@ -112,13 +111,12 @@ fn directory_scope_without_config_watches_entry_directory() {
 
     assert!(scope.watches_path(&canonical_root.join("src/main.moth")));
     assert!(!scope.watches_path(&canonical_root.join("dev/main.html")));
-
-    fs::remove_dir_all(&root).expect("should remove temp test dir");
 }
 
 #[test]
 fn scanner_only_scans_declared_watch_targets() {
-    let root = temp_dir("watch_scan");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let output_dir = root.join("dev");
     let src_dir = root.join("src");
     let unrelated_dir = root.join("target");
@@ -148,8 +146,6 @@ fn scanner_only_scans_declared_watch_targets() {
             .all(|path| !path.starts_with(&output_dir)),
         "scanner should ignore output directory files"
     );
-
-    fs::remove_dir_all(&root).expect("should remove temp test dir");
 }
 
 #[test]
@@ -196,9 +192,10 @@ fn ignore_rules_cover_git_output_and_editor_temp_files() {
 
 #[test]
 fn exact_file_target_collects_single_fingerprint() {
-    let root = temp_dir("watch_exact_file");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
     let output_dir = root.join("dev");
-    fs::create_dir_all(&root).expect("should create temp test dir");
+
     let source_file = root.join("page.moth");
     fs::write(&source_file, "hello").expect("should write source file");
 
@@ -221,13 +218,12 @@ fn exact_file_target_collects_single_fingerprint() {
         .get(&source_file)
         .expect("source file should be fingerprinted");
     assert_eq!(fingerprint.len, 5);
-
-    fs::remove_dir_all(&root).expect("should remove temp test dir");
 }
 
 #[test]
 fn recursive_directory_target_collects_nested_files() {
-    let root = temp_dir("watch_recursive_directory");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
     let output_dir = root.join("dev");
     let src_dir = root.join("src");
     let nested_dir = src_dir.join("pages");
@@ -252,8 +248,6 @@ fn recursive_directory_target_collects_nested_files() {
     );
     assert!(fingerprints.keys().any(|path| path.ends_with("main.moth")));
     assert!(fingerprints.keys().any(|path| path.ends_with("about.moth")));
-
-    fs::remove_dir_all(&root).expect("should remove temp test dir");
 }
 
 #[test]
@@ -275,9 +269,10 @@ fn timestamp_failure_propagates_with_path_context() {
 
 #[test]
 fn same_length_edit_detected_via_timestamp_change() {
-    let root = temp_dir("watch_same_length_edit");
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
     let output_dir = root.join("dev");
-    fs::create_dir_all(&root).expect("should create temp test dir");
+
     let source_file = root.join("page.moth");
     fs::write(&source_file, "first value").expect("should write initial content");
 
@@ -308,7 +303,6 @@ fn same_length_edit_detected_via_timestamp_change() {
     drop(file);
     if let Err(error) = set_times_result {
         if error.kind() == io::ErrorKind::Unsupported {
-            fs::remove_dir_all(&root).expect("should remove temp test dir");
             return;
         }
         panic!("supported modified-time update should succeed: {error}");

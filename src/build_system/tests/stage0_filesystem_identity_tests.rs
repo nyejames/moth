@@ -11,7 +11,6 @@
 use super::*;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_tests::test_support::temp_dir;
 
 #[cfg(target_os = "linux")]
 mod non_utf8_filesystem_identity {
@@ -38,7 +37,8 @@ mod non_utf8_filesystem_identity {
 
     #[test]
     fn source_tree_rejects_non_utf8_file_name() {
-        let root = temp_dir("source_tree_non_utf8_file");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let entry_root = root.join("src");
         fs::create_dir_all(&entry_root).expect("should create entry root");
         fs::write(entry_root.join("@home.moth"), "").expect("should write entry root");
@@ -69,12 +69,12 @@ mod non_utf8_filesystem_identity {
         .expect_err("non-UTF-8 file name should be rejected");
 
         assert_file_infrastructure_error(&messages);
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn source_tree_rejects_non_utf8_folder_name() {
-        let root = temp_dir("source_tree_non_utf8_folder");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let entry_root = root.join("src");
         fs::create_dir_all(&entry_root).expect("should create entry root");
         fs::write(entry_root.join("@home.moth"), "").expect("should write entry root");
@@ -105,12 +105,12 @@ mod non_utf8_filesystem_identity {
         .expect_err("non-UTF-8 folder name should be rejected");
 
         assert_file_infrastructure_error(&messages);
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn facade_discovery_rejects_non_utf8_direct_child_of_project_root() {
-        let root = temp_dir("facade_non_utf8_child");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let entry_root = root.join("src");
         fs::create_dir_all(&entry_root).expect("should create entry root");
         fs::write(entry_root.join("@page.moth"), "").expect("should write entry root");
@@ -143,12 +143,12 @@ mod non_utf8_filesystem_identity {
         .expect_err("non-UTF-8 project-root child should be rejected during facade discovery");
 
         assert_file_infrastructure_error(&messages);
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn package_boundary_traversal_rejects_non_utf8_name() {
-        let root = temp_dir("package_boundary_non_utf8_name");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let package_root = root.join("pkg");
         fs::create_dir_all(&package_root).expect("should create package root");
 
@@ -174,12 +174,12 @@ mod non_utf8_filesystem_identity {
         .expect_err("non-UTF-8 name in package boundary traversal should be rejected");
 
         assert_file_infrastructure_error(&messages);
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn legacy_package_folder_does_not_scan_non_utf8_names() {
-        let root = temp_dir("package_prefix_non_utf8");
+        let _temp = tempfile::tempdir().expect("should create temp dir");
+        let root = _temp.path().to_path_buf();
         let packages_folder = root.join("packages");
         fs::create_dir_all(&packages_folder).expect("should create packages folder");
 
@@ -204,7 +204,6 @@ mod non_utf8_filesystem_identity {
         .expect("legacy package folders must not be scanned");
 
         assert!(resolver.source_package_roots().is_empty());
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 }
 
@@ -233,7 +232,8 @@ mod non_utf8_single_file_identity {
 
     #[test]
     fn single_file_rejects_non_utf8_extension() {
-        let root = temp_dir("single_file_non_utf8_ext");
+        let temp = tempfile::tempdir().expect("should create temp dir");
+        let root = temp.path().to_path_buf();
         let entry = root.join("main.");
         let bad_ext = OsString::from_vec(vec![0xC3, 0x28]);
         let entry_with_bad_ext = entry.with_extension(bad_ext);
@@ -259,12 +259,12 @@ mod non_utf8_single_file_identity {
         };
 
         assert_file_infrastructure_error(&messages);
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn single_file_rejects_non_utf8_entry_name() {
-        let root = temp_dir("single_file_non_utf8_name");
+        let temp = tempfile::tempdir().expect("should create temp dir");
+        let root = temp.path().to_path_buf();
         let bad_name = OsString::from_vec(vec![0xC3, 0x28]);
         let bad_file = root.join(bad_name).with_extension("moth");
         fs::write(&bad_file, "x ~= 1\n").expect("should write entry file");
@@ -289,7 +289,6 @@ mod non_utf8_single_file_identity {
         };
 
         assert_file_infrastructure_error(&messages);
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 }
 
@@ -341,7 +340,8 @@ mod source_package_boundary_indexes_tests {
 
     #[test]
     fn canonical_root_with_single_hash_file_derives_unique_view() {
-        let root = temp_dir("package_boundary_canonical_success");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let package_root = root.join("pkg");
         fs::create_dir_all(&package_root).expect("should create package root");
         fs::write(package_root.join("@home.moth"), "").expect("should write normal module root");
@@ -388,14 +388,13 @@ mod source_package_boundary_indexes_tests {
             Some(canonical_root_file.as_path()),
             "package root module file should match the derived public surface"
         );
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn canonicalization_failure_returns_file_error() {
-        let root = temp_dir("package_boundary_canonical_failure");
-        fs::create_dir_all(&root).expect("should create temp root");
+        let _temp = tempfile::tempdir().expect("should create temp dir");
+        let root = _temp.path().to_path_buf();
+
         let nonexistent = root.join("does_not_exist");
 
         let mut source_packages = SourcePackageRegistry::new();
@@ -413,13 +412,12 @@ mod source_package_boundary_indexes_tests {
             message.contains("canonicalize"),
             "error message should mention canonicalization: {message}"
         );
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn missing_normal_module_root_rejected_during_boundary_indexing() {
-        let root = temp_dir("package_boundary_missing_root");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let package_root = root.join("pkg");
         fs::create_dir_all(&package_root).expect("should create package root");
 
@@ -433,13 +431,12 @@ mod source_package_boundary_indexes_tests {
         assert_invalid_config_reason(&messages, |reason| {
             matches!(reason, InvalidConfigReason::SourcePackageMissingRoot { .. })
         });
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn support_root_does_not_satisfy_package_normal_module_root_requirement() {
-        let root = temp_dir("package_boundary_support_only");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let package_root = root.join("pkg");
         fs::create_dir_all(&package_root).expect("should create package root");
         fs::write(package_root.join("+support.moth"), "").expect("should write support root");
@@ -454,13 +451,12 @@ mod source_package_boundary_indexes_tests {
         assert_invalid_config_reason(&messages, |reason| {
             matches!(reason, InvalidConfigReason::SourcePackageMissingRoot { .. })
         });
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn support_root_beside_package_normal_module_root_uses_shared_root_collision_diagnostic() {
-        let root = temp_dir("package_boundary_hash_and_support");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let package_root = root.join("pkg");
         fs::create_dir_all(&package_root).expect("should create package root");
         fs::write(package_root.join("@mod.moth"), "").expect("should write normal module root");
@@ -476,13 +472,12 @@ mod source_package_boundary_indexes_tests {
         assert_invalid_config_reason(&messages, |reason| {
             matches!(reason, InvalidConfigReason::MultipleModuleRootFiles { .. })
         });
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn multiple_normal_module_roots_rejected_during_boundary_indexing() {
-        let root = temp_dir("package_boundary_multiple_roots");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let package_root = root.join("pkg");
         fs::create_dir_all(&package_root).expect("should create package root");
         fs::write(package_root.join("@home.moth"), "")
@@ -504,8 +499,6 @@ mod source_package_boundary_indexes_tests {
                 InvalidConfigReason::SourcePackageMultipleRoots { .. }
             )
         });
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[cfg(unix)]
@@ -513,7 +506,8 @@ mod source_package_boundary_indexes_tests {
     fn unreadable_normal_module_root_returns_file_error() {
         use std::os::unix::fs::PermissionsExt;
 
-        let root = temp_dir("package_boundary_unreadable");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let package_root = root.join("pkg");
         fs::create_dir_all(&package_root).expect("should create package root");
         fs::write(package_root.join("@home.moth"), "").expect("should write normal module root");
@@ -538,12 +532,12 @@ mod source_package_boundary_indexes_tests {
         // Restore permissions so cleanup can remove the directory.
         fs::set_permissions(&package_root, fs::Permissions::from_mode(0o755))
             .expect("should restore permissions");
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn independent_package_indexes_have_boundary_local_module_ids() {
-        let root = temp_dir("package_boundary_local_ids");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let alpha_root = root.join("alpha");
         let beta_root = root.join("beta");
         fs::create_dir_all(&alpha_root).expect("should create alpha root");
@@ -593,13 +587,12 @@ mod source_package_boundary_indexes_tests {
                 "module root directory should be the package root"
             );
         }
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn package_boundary_indexes_classify_provider_files_under_nearest_module() {
-        let root = temp_dir("package_boundary_provider_file");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let package_root = root.join("pkg");
         fs::create_dir_all(&package_root).expect("should create package root");
         fs::write(package_root.join("@mod.moth"), "").expect("should write package root");
@@ -645,8 +638,6 @@ mod source_package_boundary_indexes_tests {
             provider_record.ownership(),
             super::source_tree_index::SourceOwnership::Owned(module_id)
         );
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 }
 
@@ -694,8 +685,9 @@ mod non_utf8_package_boundary_candidate_tests {
         )
     }
 
-    fn package_with_non_utf8_child() -> (PathBuf, PathBuf) {
-        let root = temp_dir("package_boundary_non_utf8_candidate");
+    fn package_with_non_utf8_child() -> (tempfile::TempDir, PathBuf) {
+        let temp = tempfile::tempdir().expect("should create package temp dir");
+        let root = temp.path().to_path_buf();
         let package_root = root.join("pkg");
         fs::create_dir_all(&package_root).expect("should create package root");
 
@@ -703,7 +695,7 @@ mod non_utf8_package_boundary_candidate_tests {
         let bad_file = package_root.join(bad_name);
         fs::write(&bad_file, b"").expect("should write non-UTF-8 named file");
 
-        (root, package_root)
+        (temp, package_root)
     }
 
     #[test]
@@ -722,7 +714,7 @@ mod non_utf8_package_boundary_candidate_tests {
             .expect_err("non-UTF-8 candidate should fail boundary indexing");
 
         assert_non_utf8_file_error(&messages);
-        fs::remove_dir_all(&root).expect("should remove temp root");
+        drop(root);
     }
 
     #[test]
@@ -743,7 +735,7 @@ mod non_utf8_package_boundary_candidate_tests {
             .expect_err("valid root plus invalid candidate should still fail");
 
         assert_non_utf8_file_error(&messages);
-        fs::remove_dir_all(&root).expect("should remove temp root");
+        drop(root);
     }
 }
 
@@ -801,7 +793,8 @@ mod module_identity_tests {
 
     #[test]
     fn assigns_module_ids_in_canonical_logical_path_order() {
-        let root = temp_dir("module_id_canonical_order");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
         fs::create_dir_all(src.join("zeta")).expect("should create zeta");
         fs::create_dir_all(src.join("alpha")).expect("should create alpha");
@@ -835,8 +828,6 @@ mod module_identity_tests {
             .module_id_for_directory(&entry_root)
             .expect("entry root should have a module id");
         assert_eq!(table.record(entry_root_id).role(), ModuleRootRole::Normal);
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
@@ -857,7 +848,8 @@ mod module_identity_tests {
 
     #[test]
     fn module_identity_is_independent_of_cosmetic_root_filename_suffix() {
-        let root = temp_dir("module_id_cosmetic_suffix");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
         fs::create_dir_all(src.join("page")).expect("should create page module");
         fs::create_dir_all(src.join("other")).expect("should create sibling module");
@@ -914,13 +906,12 @@ mod module_identity_tests {
             other_id_two, other_id,
             "sibling ModuleId must also be stable across the cosmetic rename"
         );
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn records_explicit_root_roles_for_normal_and_support_roots() {
-        let root = temp_dir("module_root_roles");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
         fs::create_dir_all(src.join("page")).expect("should create page module");
         fs::create_dir_all(src.join("components")).expect("should create support module");
@@ -966,13 +957,12 @@ mod module_identity_tests {
             !entry_root_files.contains(&support_root_file.as_path()),
             "support root {support_root_file:?} must not be an entry module: {entry_root_files:?}"
         );
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn records_structural_ancestry_by_nearest_module_containment() {
-        let root = temp_dir("module_ancestry");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
         fs::create_dir_all(src.join("outer/inner")).expect("should create nested modules");
         fs::write(src.join("@page.moth"), "").expect("should write entry root");
@@ -1015,13 +1005,12 @@ mod module_identity_tests {
             table.direct_child_modules(inner_id).is_empty(),
             "inner should have no children"
         );
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn support_roots_participate_in_structural_ancestry() {
-        let root = temp_dir("module_support_ancestry");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
         fs::create_dir_all(src.join("page/components")).expect("should create modules");
         fs::write(src.join("page/@page.moth"), "").expect("should write normal root");
@@ -1046,13 +1035,12 @@ mod module_identity_tests {
             Some(page_id),
             "support root's nearest ancestor should be the enclosing normal module"
         );
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn discovers_project_package_facade_outside_entry_root_containment() {
-        let root = temp_dir("module_facade_separation");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
         fs::create_dir_all(&src).expect("should create entry root");
         fs::write(src.join("@page.moth"), "").expect("should write entry module");
@@ -1107,13 +1095,12 @@ mod module_identity_tests {
             index.stats().project_package_facade_found,
             "facade discovery should be recorded in stats"
         );
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn missing_project_root_surfaces_file_error_not_missing_facade() {
-        let root = temp_dir("facade_missing_project_root");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let entry_root = root.join("src");
         fs::create_dir_all(&entry_root).expect("should create entry root");
         fs::write(entry_root.join("@page.moth"), "").expect("should write entry root");
@@ -1140,8 +1127,6 @@ mod module_identity_tests {
         .expect_err("missing project root should surface a file error, not a missing facade");
 
         assert_file_infrastructure_error(&messages, "discovering package facade");
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[cfg(unix)]
@@ -1149,7 +1134,8 @@ mod module_identity_tests {
     fn unreadable_project_root_surfaces_file_error_not_missing_facade() {
         use std::os::unix::fs::PermissionsExt;
 
-        let root = temp_dir("facade_unreadable_project_root");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let entry_root = root.join("src");
         fs::create_dir_all(&entry_root).expect("should create entry root");
         fs::write(entry_root.join("@page.moth"), "").expect("should write entry root");
@@ -1185,7 +1171,6 @@ mod module_identity_tests {
         // Restore permissions so cleanup can remove the directory.
         fs::set_permissions(&root, fs::Permissions::from_mode(0o755))
             .expect("should restore permissions");
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     fn assert_file_infrastructure_error(messages: &CompilerMessages, expected_text: &str) {
@@ -1207,7 +1192,8 @@ mod module_identity_tests {
 
     #[test]
     fn facade_outside_entry_root_is_not_classified_as_a_support_root() {
-        let root = temp_dir("module_facade_not_support");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
         fs::create_dir_all(&src).expect("should create entry root");
         fs::write(src.join("@page.moth"), "").expect("should write entry module");
@@ -1230,13 +1216,12 @@ mod module_identity_tests {
             .filter(|id| table.record(*id).role() == ModuleRootRole::ProjectPackageFacade)
             .count();
         assert_eq!(facade_count, 1, "exactly one facade should be discovered");
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn rejects_multiple_normal_module_roots_in_one_directory() {
-        let root = temp_dir("module_multiple_normal_module_roots");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
         fs::create_dir_all(&src).expect("should create entry root");
         fs::write(src.join("@page.moth"), "").expect("should write first root");
@@ -1265,13 +1250,12 @@ mod module_identity_tests {
         .expect_err("multiple normal module roots should be rejected");
 
         assert_eq!(first_diagnostic_code(&messages), "MOTH-CONFIG-0001");
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn rejects_mixed_normal_and_support_roots_in_one_directory() {
-        let root = temp_dir("module_mixed_roots");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
         fs::create_dir_all(&src).expect("should create entry root");
         fs::write(src.join("@page.moth"), "").expect("should write normal root");
@@ -1300,13 +1284,12 @@ mod module_identity_tests {
         .expect_err("mixed normal and support roots should be rejected");
 
         assert_eq!(first_diagnostic_code(&messages), "MOTH-CONFIG-0001");
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn rejects_multiple_support_roots_in_one_directory() {
-        let root = temp_dir("module_multiple_support_roots");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
         fs::create_dir_all(src.join("pkg")).expect("should create support directory");
         fs::write(src.join("pkg/+one.moth"), "").expect("should write first support root");
@@ -1335,8 +1318,6 @@ mod module_identity_tests {
         .expect_err("multiple support roots should be rejected");
 
         assert_eq!(first_diagnostic_code(&messages), "MOTH-CONFIG-0001");
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
@@ -1401,8 +1382,10 @@ mod module_identity_tests {
     /// source-file path.
     #[test]
     fn stable_identity_is_equal_across_distinct_checkout_roots() {
-        let root_a = temp_dir("stable_identity_root_a");
-        let root_b = temp_dir("stable_identity_root_b");
+        let _tmp_root_a = tempfile::tempdir().expect("should create temp dir");
+        let root_a = _tmp_root_a.path().to_path_buf();
+        let _tmp1_root_b = tempfile::tempdir().expect("should create temp dir");
+        let root_b = _tmp1_root_b.path().to_path_buf();
         for root in [&root_a, &root_b] {
             let src = root.join("src");
             fs::create_dir_all(src.join("alpha/inner")).expect("should create nested modules");
@@ -1457,15 +1440,14 @@ mod module_identity_tests {
             "alpha",
             "logical module path must be the portable forward-slash spelling"
         );
-
-        fs::remove_dir_all(&root_a).expect("should remove root a");
-        fs::remove_dir_all(&root_b).expect("should remove root b");
     }
 
     #[test]
     fn changing_project_name_changes_stable_identity() {
-        let root_a = temp_dir("stable_identity_name_a");
-        let root_b = temp_dir("stable_identity_name_b");
+        let _tmp_root_a = tempfile::tempdir().expect("should create temp dir");
+        let root_a = _tmp_root_a.path().to_path_buf();
+        let _tmp1_root_b = tempfile::tempdir().expect("should create temp dir");
+        let root_b = _tmp1_root_b.path().to_path_buf();
         for root in [&root_a, &root_b] {
             let src = root.join("src");
             fs::create_dir_all(&src).expect("should create entry root");
@@ -1484,14 +1466,12 @@ mod module_identity_tests {
         assert_eq!(origin_a.package().name(), "first");
         assert_eq!(origin_b.package().name(), "second");
         assert_eq!(origin_a.package().origin(), PackageOrigin::ProjectLocal);
-
-        fs::remove_dir_all(&root_a).expect("should remove root a");
-        fs::remove_dir_all(&root_b).expect("should remove root b");
     }
 
     #[test]
     fn changing_logical_module_path_changes_stable_identity() {
-        let root = temp_dir("stable_identity_path_change");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
         fs::create_dir_all(src.join("alpha")).expect("should create nested module");
         fs::write(src.join("@home.moth"), "").expect("should write entry root");
@@ -1512,16 +1492,16 @@ mod module_identity_tests {
         );
         assert_eq!(entry_origin.logical_module_path(), "");
         assert_eq!(alpha_origin.logical_module_path(), "alpha");
-
-        fs::remove_dir_all(&root).expect("should remove root");
     }
 
     #[test]
     fn changing_root_role_changes_stable_identity() {
         // The facade shares the project root directory, whose logical path is empty just like the
         // entry root's, so role is the differentiator.
-        let root_a = temp_dir("stable_identity_role_a");
-        let root_b = temp_dir("stable_identity_role_b");
+        let _tmp_root_a = tempfile::tempdir().expect("should create temp dir");
+        let root_a = _tmp_root_a.path().to_path_buf();
+        let _tmp1_root_b = tempfile::tempdir().expect("should create temp dir");
+        let root_b = _tmp1_root_b.path().to_path_buf();
         for root in [&root_a, &root_b] {
             let src = root.join("src");
             fs::create_dir_all(&src).expect("should create entry root");
@@ -1564,15 +1544,14 @@ mod module_identity_tests {
             entry_module_origin(&table_b, &entry_b),
             "facade and entry identities must differ in the second tree too"
         );
-
-        fs::remove_dir_all(&root_a).expect("should remove root a");
-        fs::remove_dir_all(&root_b).expect("should remove root b");
     }
 
     #[test]
     fn cosmetic_root_suffix_rename_does_not_change_stable_identity() {
-        let root_a = temp_dir("stable_identity_cosmetic_a");
-        let root_b = temp_dir("stable_identity_cosmetic_b");
+        let _temp = tempfile::tempdir().expect("should create temp dir");
+        let root_a = _temp.path().to_path_buf();
+        let _temp = tempfile::tempdir().expect("should create temp dir");
+        let root_b = _temp.path().to_path_buf();
         fs::create_dir_all(root_a.join("src")).expect("should create entry root a");
         fs::create_dir_all(root_b.join("src")).expect("should create entry root b");
         fs::write(root_a.join("src/@page.moth"), "").expect("should write page-named root");
@@ -1586,9 +1565,6 @@ mod module_identity_tests {
             entry_module_origin(&table_b, &entry_b),
             "cosmetic root filename suffix rename must not change the stable identity"
         );
-
-        fs::remove_dir_all(&root_a).expect("should remove root a");
-        fs::remove_dir_all(&root_b).expect("should remove root b");
     }
 
     #[test]
@@ -1856,7 +1832,8 @@ mod owned_source_inventory_tests {
 
     #[test]
     fn root_and_nested_files_receive_correct_nearest_owner() {
-        let root = temp_dir("owned_source_nearest_owner");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         build_nested_module_tree(&root);
 
         let index =
@@ -1911,13 +1888,12 @@ mod owned_source_inventory_tests {
             entry_root_identity, inner_root_identity,
             "two @page.moth root files in different modules must keep distinct identities"
         );
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn nested_module_files_transfer_to_nested_module_not_ancestor() {
-        let root = temp_dir("owned_source_nested_transfer");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         build_nested_module_tree(&root);
 
         let index =
@@ -1937,13 +1913,12 @@ mod owned_source_inventory_tests {
                 && !alpha_paths.contains(&"deep.moth".to_owned()),
             "files beneath a nested module root must transfer to the nested module: {alpha_paths:?}"
         );
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn registered_bd_and_md_kinds_are_included() {
-        let root = temp_dir("owned_source_registered_kinds");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
         fs::create_dir_all(&src).expect("should create entry root");
         fs::write(src.join("@page.moth"), "").expect("should write root file");
@@ -1978,13 +1953,12 @@ mod owned_source_inventory_tests {
             vec!["@page.moth", "content.md", "page.mtf"],
             "registered builder-supported kinds are owned and sorted by relative path"
         );
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn known_but_unselected_sources_are_indexed_as_unsupported() {
-        let root = temp_dir("owned_source_excluded_kinds");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
         fs::create_dir_all(&src).expect("should create entry root");
         fs::write(src.join("@page.moth"), "").expect("should write root file");
@@ -2023,13 +1997,12 @@ mod owned_source_inventory_tests {
             index.unrooted_source_ids().is_empty(),
             "excluded files are not unrooted facts"
         );
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn owned_entries_have_deterministic_logical_order_independent_of_creation() {
-        let root = temp_dir("owned_source_deterministic_order");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
         fs::create_dir_all(src.join("internal")).expect("should create internal dir");
         fs::write(src.join("@page.moth"), "").expect("should write root file");
@@ -2064,13 +2037,12 @@ mod owned_source_inventory_tests {
             ],
             "owned entries must be sorted by portable module-relative path, not creation order"
         );
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn project_facade_owns_its_root_source() {
-        let root = temp_dir("owned_source_facade_root");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
         fs::create_dir_all(&src).expect("should create entry root");
         fs::write(src.join("@page.moth"), "").expect("should write entry root file");
@@ -2100,13 +2072,12 @@ mod owned_source_inventory_tests {
             facade_record.classification(),
             &SourceClassification::CompilerSemantic(SourceFileKind::Moth)
         );
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn unrooted_supported_candidates_remain_explicit_facts() {
-        let root = temp_dir("owned_source_unrooted");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
         fs::create_dir_all(&src).expect("should create entry root");
         // No module root file in the entry root: the .moth files are unrooted.
@@ -2138,14 +2109,14 @@ mod owned_source_inventory_tests {
             unrooted_paths[0], "orphan.moth",
             "the logical candidate path is entry-root-relative and portable"
         );
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn owned_source_identity_is_independent_of_checkout_root() {
-        let root_a = temp_dir("owned_source_checkout_a");
-        let root_b = temp_dir("owned_source_checkout_b");
+        let _tmp_root_a = tempfile::tempdir().expect("should create temp dir");
+        let root_a = _tmp_root_a.path().to_path_buf();
+        let _tmp1_root_b = tempfile::tempdir().expect("should create temp dir");
+        let root_b = _tmp1_root_b.path().to_path_buf();
         for root in [&root_a, &root_b] {
             build_nested_module_tree(root);
         }
@@ -2186,14 +2157,12 @@ mod owned_source_inventory_tests {
                 && !debug.contains(root_b.to_str().expect("root_b is UTF-8")),
             "owned-source identity must not embed an absolute checkout root: {debug}"
         );
-
-        fs::remove_dir_all(&root_a).expect("should remove root a");
-        fs::remove_dir_all(&root_b).expect("should remove root b");
     }
 
     #[test]
     fn unknown_registered_extension_is_excluded() {
-        let root = temp_dir("owned_source_unknown_registered_extension");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
         fs::create_dir_all(&src).expect("should create entry root");
         fs::write(src.join("@page.moth"), "").expect("should write root file");
@@ -2225,13 +2194,12 @@ mod owned_source_inventory_tests {
             index.unrooted_source_ids().is_empty(),
             "an excluded unknown registered extension is not an unrooted fact"
         );
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn mismatched_known_extension_mapping_is_indexed_as_unsupported() {
-        let root = temp_dir("owned_source_mismatched_mapping");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
         fs::create_dir_all(&src).expect("should create entry root");
         fs::write(src.join("@page.moth"), "").expect("should write root file");
@@ -2270,8 +2238,6 @@ mod owned_source_inventory_tests {
             index.unrooted_source_ids().is_empty(),
             "an excluded mismatched mapping is not an unrooted fact"
         );
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
@@ -2279,8 +2245,10 @@ mod owned_source_inventory_tests {
         // Two distinct checkout roots with unrooted files created in reverse-logical order.
         // The unrooted source IDs must sort by portable entry-root-relative logical path,
         // not by absolute checkout path or creation order.
-        let root_a = temp_dir("unrooted_logical_order_a");
-        let root_b = temp_dir("unrooted_logical_order_b");
+        let _tmp_root_a = tempfile::tempdir().expect("should create temp dir");
+        let root_a = _tmp_root_a.path().to_path_buf();
+        let _tmp1_root_b = tempfile::tempdir().expect("should create temp dir");
+        let root_b = _tmp1_root_b.path().to_path_buf();
 
         let build_tree = |root: &Path| {
             let src = root.join("src");
@@ -2311,9 +2279,6 @@ mod owned_source_inventory_tests {
             paths_a, paths_b,
             "unrooted logical ordering must be identical across distinct checkout roots"
         );
-
-        fs::remove_dir_all(&root_a).expect("should remove root a");
-        fs::remove_dir_all(&root_b).expect("should remove root b");
     }
 
     #[test]
@@ -2321,8 +2286,9 @@ mod owned_source_inventory_tests {
         // The current compatibility case: project root equals entry root, so the facade root
         // file lies inside the traversal. It must appear exactly once, owned only by the facade
         // module, and must not also appear in the entry-root module's owned source set.
-        let root = temp_dir("facade_exact_once_same_root");
-        fs::create_dir_all(&root).expect("should create entry root");
+        let _temp = tempfile::tempdir().expect("should create temp dir");
+        let root = _temp.path().to_path_buf();
+
         fs::write(root.join("@page.moth"), "").expect("should write entry root file");
         fs::write(root.join("+package.moth"), "").expect("should write facade root file");
 
@@ -2384,14 +2350,13 @@ mod owned_source_inventory_tests {
             facade_record_count, 1,
             "the facade source must appear exactly once in the central source table"
         );
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn compilation_root_table_excludes_facade_when_it_shares_entry_root() {
-        let root = temp_dir("facade_resolver_root_table");
-        fs::create_dir_all(&root).expect("should create entry root");
+        let _temp = tempfile::tempdir().expect("should create temp dir");
+        let root = _temp.path().to_path_buf();
+
         fs::write(root.join("@page.moth"), "").expect("should write entry root file");
         fs::write(root.join("+package.moth"), "").expect("should write facade root file");
 
@@ -2409,13 +2374,12 @@ mod owned_source_inventory_tests {
             !compilation_roots.is_root_file(&canonical_root.join("+package.moth")),
             "the project facade must not become a resolver module root"
         );
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn source_ids_equal_their_contiguous_table_index() {
-        let root = temp_dir("source_id_contiguous_index");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         build_nested_module_tree(&root);
         let index =
             discover_index_with_kinds(&root, "src", "my-project", &html_source_file_kinds());
@@ -2428,13 +2392,12 @@ mod owned_source_inventory_tests {
                 "each SourceId must equal its contiguous table index"
             );
         }
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn every_supported_file_appears_exactly_once() {
-        let root = temp_dir("source_id_exact_once");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         build_nested_module_tree(&root);
         let index =
             discover_index_with_kinds(&root, "src", "my-project", &html_source_file_kinds());
@@ -2475,13 +2438,12 @@ mod owned_source_inventory_tests {
             total,
             "no canonical path may appear in two source records"
         );
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn owned_and_unrooted_sets_reference_valid_records_with_matching_state() {
-        let root = temp_dir("source_id_matching_state");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         build_nested_module_tree(&root);
         let index =
             discover_index_with_kinds(&root, "src", "my-project", &html_source_file_kinds());
@@ -2502,7 +2464,8 @@ mod owned_source_inventory_tests {
             }
         }
 
-        let unrooted_root = temp_dir("source_id_matching_unrooted_state");
+        let _tmp1_unrooted_root = tempfile::tempdir().expect("should create temp dir");
+        let unrooted_root = _tmp1_unrooted_root.path().to_path_buf();
         let unrooted_src = unrooted_root.join("src");
         fs::create_dir_all(&unrooted_src).expect("should create unrooted source directory");
         fs::write(unrooted_src.join("orphan.moth"), "").expect("should write unrooted source");
@@ -2533,9 +2496,6 @@ mod owned_source_inventory_tests {
                 "an unrooted source record must carry an unrooted logical identity"
             );
         }
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
-        fs::remove_dir_all(&unrooted_root).expect("should remove unrooted temp root");
     }
 
     #[test]
@@ -2543,8 +2503,10 @@ mod owned_source_inventory_tests {
         // The same logical tree built in two distinct checkout roots with reverse creation order
         // must assign identical SourceId -> logical identity mappings, because SourceIds are
         // derived from portable logical identity, not traversal or absolute paths.
-        let root_a = temp_dir("source_id_deterministic_a");
-        let root_b = temp_dir("source_id_deterministic_b");
+        let _tmp_root_a = tempfile::tempdir().expect("should create temp dir");
+        let root_a = _tmp_root_a.path().to_path_buf();
+        let _tmp1_root_b = tempfile::tempdir().expect("should create temp dir");
+        let root_b = _tmp1_root_b.path().to_path_buf();
 
         let build_tree_reverse = |root: &Path| {
             let src = root.join("src");
@@ -2601,9 +2563,6 @@ mod owned_source_inventory_tests {
                 "source logical identity must not embed an absolute checkout root: {identity_debug}"
             );
         }
-
-        fs::remove_dir_all(&root_a).expect("should remove root a");
-        fs::remove_dir_all(&root_b).expect("should remove root b");
     }
 
     /// A minimal external import provider that supports `.js` files and declines every request.
@@ -2675,7 +2634,8 @@ mod owned_source_inventory_tests {
 
     #[test]
     fn provider_owned_files_are_classified_and_owned_by_nearest_module() {
-        let root = temp_dir("provider_owned_classification");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
         let feature = src.join("feature");
         fs::create_dir_all(&feature).expect("should create feature module");
@@ -2770,13 +2730,12 @@ mod owned_source_inventory_tests {
             helper_id.index() < util_id.index(),
             "provider SourceIds must follow deterministic logical identity order"
         );
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn provider_owned_files_without_a_registered_provider_are_not_indexed() {
-        let root = temp_dir("provider_owned_unregistered_extension");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
         fs::create_dir_all(&src).expect("should create entry root");
         fs::write(src.join("@page.moth"), "").expect("should write entry root");
@@ -2805,8 +2764,6 @@ mod owned_source_inventory_tests {
             owned_source_for_path(&index, entry_id, "drawing.wit").is_none(),
             "files whose extension has no registered provider must not be indexed"
         );
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 }
 
@@ -2875,7 +2832,8 @@ mod project_module_graph_tests {
 
     #[test]
     fn nodes_are_stored_in_deterministic_module_id_order() {
-        let root = temp_dir("graph_node_order");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
         fs::create_dir_all(src.join("zeta")).expect("should create zeta");
         fs::create_dir_all(src.join("alpha")).expect("should create alpha");
@@ -2922,13 +2880,12 @@ mod project_module_graph_tests {
                 );
             }
         }
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn entry_modules_are_normal_only_and_facade_is_separate() {
-        let root = temp_dir("graph_entries_and_facade");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
         fs::create_dir_all(src.join("pages")).expect("should create pages");
         fs::create_dir_all(src.join("components")).expect("should create components");
@@ -2978,13 +2935,12 @@ mod project_module_graph_tests {
             None,
             "facade stays outside the normal ancestry tree"
         );
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn support_visibility_is_visible_to_owner_and_normal_descendants_outside_subtree() {
-        let root = temp_dir("graph_support_visibility");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
         fs::create_dir_all(src.join("markdown/parser")).expect("should create markdown parser");
         fs::create_dir_all(src.join("pages/article")).expect("should create pages article");
@@ -3018,13 +2974,12 @@ mod project_module_graph_tests {
             graph.is_support_visible_to_consumer(support_id, article_id),
             "support is visible to a deeper normal descendant of the owner"
         );
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn support_visibility_enforces_private_same_scope_and_outer_scope_boundaries() {
-        let root = temp_dir("graph_support_visibility_rejections");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
         fs::create_dir_all(src.join("markdown/parser")).expect("should create markdown parser");
         fs::create_dir_all(src.join("assets")).expect("should create same-scope support");
@@ -3071,13 +3026,12 @@ mod project_module_graph_tests {
             !graph.is_support_visible_to_consumer(parser_id, support_id),
             "querying visibility for a non-support module returns false"
         );
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn support_visibility_rejects_modules_outside_owner_subtree() {
-        let root = temp_dir("graph_support_visibility_outside");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
         fs::create_dir_all(src.join("other")).expect("should create other branch");
         fs::create_dir_all(src.join("pages/components")).expect("should create pages components");
@@ -3097,13 +3051,12 @@ mod project_module_graph_tests {
             !graph.is_support_visible_to_consumer(support_id, other_id),
             "support must not be visible outside the owning normal module's subtree"
         );
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn independent_ready_modules_share_wave_zero_in_module_id_order() {
-        let root = temp_dir("graph_independent_waves");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
         fs::create_dir_all(src.join("alpha")).expect("should create alpha");
         fs::create_dir_all(src.join("beta")).expect("should create beta");
@@ -3169,13 +3122,12 @@ mod project_module_graph_tests {
             waves[1].contains(&beta_id),
             "consumer must compile after its provider"
         );
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn facade_is_ordered_by_real_edges_not_a_fake_dependency() {
-        let root = temp_dir("graph_facade_order");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
         fs::create_dir_all(src.join("pages")).expect("should create pages");
 
@@ -3240,13 +3192,12 @@ mod project_module_graph_tests {
             facade_wave > pages_wave && facade_wave > site_wave,
             "facade must compile after both providers that target it"
         );
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn dependency_cycle_reports_blocked_modules_as_internal_error() {
-        let root = temp_dir("graph_cycle_detection");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
         fs::create_dir_all(src.join("alpha")).expect("should create alpha");
         fs::create_dir_all(src.join("beta")).expect("should create beta");
@@ -3289,13 +3240,12 @@ mod project_module_graph_tests {
             message.contains("alpha") && message.contains("beta"),
             "cycle error must name the involved modules: {message}"
         );
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
     fn self_edge_and_invalid_ids_are_rejected_without_panicking() {
-        let root = temp_dir("graph_edge_validation");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
         fs::create_dir_all(src.join("alpha")).expect("should create alpha");
 
@@ -3327,8 +3277,6 @@ mod project_module_graph_tests {
             .compile_waves()
             .expect("rejected edges do not mutate the graph");
         assert_eq!(waves.len(), 1, "no accepted edges means one ready wave");
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
@@ -3337,7 +3285,8 @@ mod project_module_graph_tests {
         // `Vec<ModuleId>` storage, so the consumer wave preserves `ModuleId` order regardless of
         // edge insertion order. The frozen order is observable through the wave that follows the
         // provider.
-        let root = temp_dir("graph_frozen_consumer_order");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
         fs::create_dir_all(src.join("alpha")).expect("should create alpha");
         fs::create_dir_all(src.join("beta")).expect("should create beta");
@@ -3394,8 +3343,6 @@ mod project_module_graph_tests {
             consumer_wave, &sorted_consumers,
             "frozen consumer adjacency must be in ModuleId order"
         );
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 
     #[test]
@@ -3404,7 +3351,8 @@ mod project_module_graph_tests {
         // Scheduling before completion, mutation after completion and double completion all
         // surface as internal `CompilerError`s without panicking, and a completed graph still
         // schedules cleanly from its frozen adjacency.
-        let root = temp_dir("graph_phase_validation");
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
         fs::create_dir_all(src.join("alpha")).expect("should create alpha");
         fs::create_dir_all(src.join("beta")).expect("should create beta");
@@ -3468,7 +3416,5 @@ mod project_module_graph_tests {
         );
         assert!(waves[0].contains(&alpha_id));
         assert!(waves[1].contains(&beta_id));
-
-        fs::remove_dir_all(&root).expect("should remove temp root");
     }
 }

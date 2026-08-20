@@ -31,7 +31,7 @@ use crate::compiler_frontend::ast::templates::template_control_flow::{
 };
 use crate::compiler_frontend::ast::templates::tir::{
     TemplateConstructionContext, TemplateIrBranch, TemplateIrNodeId, TemplateIrNodeKind,
-    TemplateTirPhase, TemplateWrapperReference,
+    TemplatePreparationMode, TemplateTirPhase, TemplateWrapperReference,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
@@ -143,6 +143,10 @@ pub(crate) struct TemplateBodyParseRequest<'a, 'types> {
 pub(crate) struct NestedTemplateParseOptions {
     pub(crate) parsing_mode: TemplateParsingMode,
     pub(crate) control_flow_validation: TemplateControlFlowValidationMode,
+    /// Preparation mode for this template node only. Nested nodes stay in value mode so a
+    /// const-required parent performs the single authoritative const traversal over its complete
+    /// composed view.
+    pub(crate) preparation_mode: TemplatePreparationMode,
     pub(crate) control_context: TemplateBodyControlContext,
     pub(crate) default_style: Option<Style>,
     /// Allows a nested template whose sole content is a stored `$insert(...)`
@@ -158,6 +162,7 @@ impl NestedTemplateParseOptions {
         Self {
             parsing_mode: TemplateParsingMode::Standard,
             control_flow_validation: TemplateControlFlowValidationMode::RuntimeCapable,
+            preparation_mode: TemplatePreparationMode::Value,
             control_context: TemplateBodyControlContext::normal(),
             default_style: None,
             allow_stored_insert_carrier: false,
@@ -168,6 +173,7 @@ impl NestedTemplateParseOptions {
         Self {
             parsing_mode: TemplateParsingMode::Standard,
             control_flow_validation: TemplateControlFlowValidationMode::ConstRequired,
+            preparation_mode: TemplatePreparationMode::ConstRequired,
             control_context: TemplateBodyControlContext::normal(),
             default_style: None,
             allow_stored_insert_carrier: false,
@@ -579,12 +585,13 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
                 TemplateParsingMode::Standard
             },
             control_flow_validation: self.control_flow_validation,
+            preparation_mode: TemplatePreparationMode::Value,
             control_context: input.control_context,
             default_style: self.default_style.clone(),
             allow_stored_insert_carrier: true,
         };
 
-        let child_template = Template::new_nested_template(
+        let child_construction = Template::new_nested_template(
             self.token_stream,
             input.context,
             self.type_interner,
@@ -592,6 +599,7 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
             self.string_table,
             parse_options,
         )?;
+        let child_template = child_construction.template;
 
         // The child was just constructed in this context's store. Read its
         // authoritative kind before mutating the construction context again.

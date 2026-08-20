@@ -1,0 +1,2245 @@
+{
+  "schema_version": 1,
+  "run": {
+    "id": "c915-0-18cd7d6506758180",
+    "command": "honesty-audit",
+    "os": "macos",
+    "arch": "aarch64",
+    "features": [
+      "timers"
+    ],
+    "thread_count": null,
+    "completed": true
+  },
+  "generated_at": "2026-08-20T10:41:48Z",
+  "work_id": "test-suite-honesty",
+  "base_revision": "f41f93a7a",
+  "scanned_roots": [
+    "src",
+    "xtask/src"
+  ],
+  "scanned_file_count": 1173,
+  "test_owning_file_count": 564,
+  "hard_findings": [],
+  "review_findings": [
+    {
+      "code": "broad_failure_assertions",
+      "description": "is_err, is_ok, catch_unwind or should_panic, which accept any failure rather than the failure the case is about",
+      "disposition": "hardened",
+      "rationale": "Phase 2 replaced every broad is_err assertion on a wide API with a typed expected-failure assertion carrying a structured rejection reason. What remains is on APIs whose failure set has one member.",
+      "scope": "test_owning_files",
+      "view": "code",
+      "occurrences": 237,
+      "files": [
+        {
+          "file": "src/backends/js/tests/numeric_statements.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/backends/tests/backend_feature_validation_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/backends/wasm/tests/lowering/lowering_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/build_system/create_project_modules/generated_summary_convergence.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/build_system/create_project_modules/source_tree_index.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/build_system/output/tests/writer_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/build_system/tests/build_cleanup_tests.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "src/build_system/tests/build_infrastructure_tests.rs",
+          "occurrences": 6
+        },
+        {
+          "file": "src/build_system/tests/build_orchestration_tests.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "src/build_system/tests/compile_project_frontend_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/build_system/tests/create_project_modules_tests.rs",
+          "occurrences": 4
+        },
+        {
+          "file": "src/build_system/tests/generated_worklist_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/build_system/tests/module_lane_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/ast/expressions/tests/expression_dispatch_tests.rs",
+          "occurrences": 4
+        },
+        {
+          "file": "src/compiler_frontend/ast/generic_functions/tests/frozen_body_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/ast/module_ast/finalization/debug_type_validation.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/ast/module_ast/finalization/reactive_templates/annotation.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "src/compiler_frontend/ast/module_ast/finalization/tests/normalize_ast_tests.rs",
+          "occurrences": 8
+        },
+        {
+          "file": "src/compiler_frontend/ast/templates/tests/create_template_node/directive_style_tests.rs",
+          "occurrences": 14
+        },
+        {
+          "file": "src/compiler_frontend/ast/templates/tests/create_template_node/head_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/ast/templates/tir/expression_overlays.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "src/compiler_frontend/ast/templates/tir/tests/view_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_frontend/datatypes/tests/generics_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/external_packages/tests/external_packages_tests.rs",
+          "occurrences": 12
+        },
+        {
+          "file": "src/compiler_frontend/headers/tests/parse_file_headers_tests.rs",
+          "occurrences": 23
+        },
+        {
+          "file": "src/compiler_frontend/hir/tests/hir_function_origin_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_frontend/hir/tests/hir_function_provenance_tests.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "src/compiler_frontend/paths/tests/path_resolution_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_frontend/public_interface/tests/declaration_record_tests.rs",
+          "occurrences": 12
+        },
+        {
+          "file": "src/compiler_frontend/public_interface/tests/dependency_bindings_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_frontend/public_interface/tests/direct_projection_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_frontend/public_interface/tests/export_projection_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_frontend/public_interface/tests/folded_value_tests.rs",
+          "occurrences": 5
+        },
+        {
+          "file": "src/compiler_frontend/public_interface/tests/local_finalization_tests.rs",
+          "occurrences": 7
+        },
+        {
+          "file": "src/compiler_frontend/public_interface/tests/trait_projection_tests.rs",
+          "occurrences": 9
+        },
+        {
+          "file": "src/compiler_frontend/tests/external_packages_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/tests/public_call_summary_tests.rs",
+          "occurrences": 12
+        },
+        {
+          "file": "src/compiler_frontend/tests/source_module_origin_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/tokenizer/lexer.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/tokenizer/tests/lexer_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_tests/integration_test_runner/assertions/node_harness.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_tests/integration_test_runner/tests/fixture.rs",
+          "occurrences": 7
+        },
+        {
+          "file": "src/compiler_tests/integration_test_runner/tests/manifest.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_tests/integration_test_runner/tests/runner.rs",
+          "occurrences": 6
+        },
+        {
+          "file": "src/projects/dev_server/sse.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/projects/dev_server/tests/mod_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/projects/dev_server/watch.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/projects/html_project/new_html_project/tests/prompt_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/projects/html_project/new_html_project/tests/scaffold_tests.rs",
+          "occurrences": 4
+        },
+        {
+          "file": "src/projects/tests/cli_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/timing/tests/enabled_tests.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "xtask/src/bench_history/tests.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "xtask/src/bench_summary/tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "xtask/src/bench_system/tests.rs",
+          "occurrences": 5
+        },
+        {
+          "file": "xtask/src/benchmark_manifest/tests.rs",
+          "occurrences": 16
+        },
+        {
+          "file": "xtask/src/benchmark_workspace.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "xtask/src/process_runner/tests.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "xtask/src/profile/parse_tests.rs",
+          "occurrences": 5
+        },
+        {
+          "file": "xtask/src/profile/runner_tests.rs",
+          "occurrences": 6
+        },
+        {
+          "file": "xtask/src/test_fs.rs",
+          "occurrences": 2
+        }
+      ]
+    },
+    {
+      "code": "filesystem_existence_predicates",
+      "description": "exists, is_file or is_dir, each of which reports an IO failure as absence",
+      "disposition": "moved_to_structured_audit",
+      "rationale": "Phase 1 migrated every assertion about the filesystem to the test_fs helpers, which use symlink_metadata and fail on an IO error instead of reading it as a missing file. Remaining uses inside test files are setup guards, where absence and failure lead to the same next step.",
+      "scope": "test_owning_files",
+      "view": "code",
+      "occurrences": 130,
+      "files": [
+        {
+          "file": "src/build_system/build.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/build_system/create_project_modules/mod.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/build_system/create_project_modules/project_roots.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/build_system/create_project_modules/source_tree_index.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "src/build_system/output/writer.rs",
+          "occurrences": 4
+        },
+        {
+          "file": "src/build_system/tests/build_cleanup_tests.rs",
+          "occurrences": 34
+        },
+        {
+          "file": "src/compiler_frontend/paths/path_resolution.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_tests/integration_test_runner/fixture.rs",
+          "occurrences": 6
+        },
+        {
+          "file": "src/compiler_tests/test_fs.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/projects/cli.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/projects/dev_server/build_loop.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/projects/dev_server/static_files.rs",
+          "occurrences": 4
+        },
+        {
+          "file": "src/projects/dev_server/tests/build_loop_tests.rs",
+          "occurrences": 5
+        },
+        {
+          "file": "src/projects/dev_server/watch.rs",
+          "occurrences": 6
+        },
+        {
+          "file": "src/projects/html_project/new_html_project/tests/scaffold_tests.rs",
+          "occurrences": 7
+        },
+        {
+          "file": "src/projects/tests/cli_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "xtask/src/bench_history.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "xtask/src/bench_summary.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "xtask/src/bench_system.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "xtask/src/bench_system/tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "xtask/src/benchmark_fingerprint.rs",
+          "occurrences": 6
+        },
+        {
+          "file": "xtask/src/benchmark_manifest.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "xtask/src/benchmark_repository/tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "xtask/src/benchmark_suite.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "xtask/src/benchmark_suite/tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "xtask/src/benchmark_workspace.rs",
+          "occurrences": 6
+        },
+        {
+          "file": "xtask/src/benchmark_workspace/tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "xtask/src/compiler_binary.rs",
+          "occurrences": 4
+        },
+        {
+          "file": "xtask/src/profile/artifacts_tests.rs",
+          "occurrences": 5
+        },
+        {
+          "file": "xtask/src/profile/history.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "xtask/src/profile/history_tests.rs",
+          "occurrences": 9
+        },
+        {
+          "file": "xtask/src/profile/runner.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "xtask/src/profile/tests.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "xtask/src/source_tree.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "xtask/src/test_fs.rs",
+          "occurrences": 2
+        }
+      ]
+    },
+    {
+      "code": "lossy_text_conversion",
+      "description": "to_string_lossy or from_utf8_lossy, which replace unsupported input with a substitute character and then assert on the substitute",
+      "disposition": "hardened",
+      "rationale": "Phase 5 removed lossy conversion from every assertion path. Remaining uses are in rendered diagnostic output, where a replacement character is what a reader should see rather than a failure.",
+      "scope": "test_owning_files",
+      "view": "code",
+      "occurrences": 34,
+      "files": [
+        {
+          "file": "src/build_system/tests/compile_project_frontend_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/build_system/tests/create_project_modules_tests.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "src/build_system/tests/frontend_orchestration_tests.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "src/compiler_frontend/compiler_messages/tests/display_messages_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_frontend/symbols/interned_path.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/projects/html_project/new_html_project/tests/scaffold_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/projects/html_project/new_html_project/tests/target_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "xtask/src/benchmark_manifest.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "xtask/src/benchmark_repository.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "xtask/src/benchmark_repository/tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "xtask/src/benchmark_run/tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "xtask/src/compiler_binary.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "xtask/src/process_runner.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "xtask/src/profile/runner.rs",
+          "occurrences": 5
+        },
+        {
+          "file": "xtask/src/profile/tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "xtask/src/stress/tests.rs",
+          "occurrences": 3
+        }
+      ]
+    },
+    {
+      "code": "weak_positive_assertions",
+      "description": "a bound comparison, a negated emptiness check or an any() assertion, each of which passes on more states than the one the case is about",
+      "disposition": "hardened",
+      "rationale": "Phase 4 replaced the positive assertions that only proved something existed with exact counts and exact identities. What remains asserts a genuine bound or a genuine existential, where the exact value is not the contract.",
+      "scope": "test_owning_files",
+      "view": "code",
+      "occurrences": 536,
+      "files": [
+        {
+          "file": "src/backends/js/tests/control_flow.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "src/backends/js/tests/emission_policy.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/backends/wasm/tests/emit/emit_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/backends/wasm/tests/lowering/lowering_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/build_system/output/tests/policy_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/build_system/tests/build_dependency_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/build_system/tests/build_orchestration_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/build_system/tests/build_profile_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/build_system/tests/compile_project_frontend_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/build_system/tests/create_project_modules_tests.rs",
+          "occurrences": 9
+        },
+        {
+          "file": "src/build_system/tests/mod.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/build_system/tests/stage0_filesystem_identity_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/builder_surface/tests/provider_registry_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/builder_surface/tests/source_file_kind_registry_tests.rs",
+          "occurrences": 7
+        },
+        {
+          "file": "src/builder_surface/tests/source_package_registry_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/analysis/borrow_checker/state.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/analysis/borrow_checker/tests/borrow_checker_call_summary_tests.rs",
+          "occurrences": 6
+        },
+        {
+          "file": "src/compiler_frontend/arena/tests/capacity_tests.rs",
+          "occurrences": 10
+        },
+        {
+          "file": "src/compiler_frontend/ast/expressions/tests/expression_dispatch_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/ast/expressions/tests/parse_expression_literals_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_frontend/ast/generic_functions/tests/frozen_body_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/ast/module_ast/environment/traits_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/ast/statements/tests/loop_parsing_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/ast/statements/tests/struct_parsing_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/ast/templates/tests/create_template_node/children_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_frontend/ast/templates/tests/create_template_node/directive_built_in_tests.rs",
+          "occurrences": 7
+        },
+        {
+          "file": "src/compiler_frontend/ast/templates/tests/create_template_node/directive_style_tests.rs",
+          "occurrences": 11
+        },
+        {
+          "file": "src/compiler_frontend/ast/templates/tests/create_template_node/head_tests.rs",
+          "occurrences": 7
+        },
+        {
+          "file": "src/compiler_frontend/ast/templates/tests/create_template_node/markdown_tests.rs",
+          "occurrences": 8
+        },
+        {
+          "file": "src/compiler_frontend/ast/templates/tests/create_template_node/parser_tir_tests.rs",
+          "occurrences": 4
+        },
+        {
+          "file": "src/compiler_frontend/ast/templates/tests/create_template_node/slot_constant_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/ast/templates/tests/create_template_node/whitespace_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/ast/templates/tests/reactive_template_metadata_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/ast/templates/tir/tests/expression_traversal_tests.rs",
+          "occurrences": 4
+        },
+        {
+          "file": "src/compiler_frontend/ast/templates/tir/tests/preparation_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/ast/templates/tir/tests/slot_composition_tests.rs",
+          "occurrences": 11
+        },
+        {
+          "file": "src/compiler_frontend/ast/templates/tir/tests/summary_tests.rs",
+          "occurrences": 4
+        },
+        {
+          "file": "src/compiler_frontend/ast/templates/tir/tests/view_tests.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "src/compiler_frontend/ast/templates/tir/tests/wrapper_context_construction_tests.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "src/compiler_frontend/ast/templates/tir/tests/wrapper_context_fold_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_frontend/ast/tests/import_projection_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/builtins/casts/tests/policies_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_frontend/builtins/casts/tests/trait_metadata_tests.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "src/compiler_frontend/builtins/tests/error_type_tests.rs",
+          "occurrences": 4
+        },
+        {
+          "file": "src/compiler_frontend/compiler_messages/tests/diagnostic_model_tests.rs",
+          "occurrences": 21
+        },
+        {
+          "file": "src/compiler_frontend/compiler_messages/tests/display_messages_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_frontend/compiler_messages/tests/type_rendering_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_frontend/datatypes/tests/environment_tests.rs",
+          "occurrences": 11
+        },
+        {
+          "file": "src/compiler_frontend/external_packages/symbol_path.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/external_packages/tests/external_packages_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/headers/binding_environment/tests/namespace_bindings_tests.rs",
+          "occurrences": 4
+        },
+        {
+          "file": "src/compiler_frontend/headers/tests/moth_template_prepare_tests.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "src/compiler_frontend/headers/tests/parse_file_headers_tests.rs",
+          "occurrences": 54
+        },
+        {
+          "file": "src/compiler_frontend/headers/tests/top_level_classifier_tests.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "src/compiler_frontend/hir/tests/hir_const_facts_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/hir/tests/hir_match_lowering_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_frontend/paths/tests/paths_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/source_packages/tests/root_file_tests.rs",
+          "occurrences": 24
+        },
+        {
+          "file": "src/compiler_frontend/symbols/tests/identifier_policy_tests.rs",
+          "occurrences": 6
+        },
+        {
+          "file": "src/compiler_frontend/symbols/tests/string_interning_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_frontend/tests/keyword_tests.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "src/compiler_frontend/tests/synthetic_interface_provenance_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/tokenizer/tests/lexer_tests.rs",
+          "occurrences": 4
+        },
+        {
+          "file": "src/compiler_frontend/type_coercion/tests/compatibility_tests.rs",
+          "occurrences": 15
+        },
+        {
+          "file": "src/compiler_frontend/utilities/tests/token_scan_tests.rs",
+          "occurrences": 6
+        },
+        {
+          "file": "src/compiler_tests/integration_test_runner/tests/assertions.rs",
+          "occurrences": 10
+        },
+        {
+          "file": "src/compiler_tests/integration_test_runner/tests/execution.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_tests/integration_test_runner/tests/fixture.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "src/compiler_tests/integration_test_runner/tests/reporting.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_tests/integration_test_runner/tests/runner.rs",
+          "occurrences": 4
+        },
+        {
+          "file": "src/compiler_tests/integration_test_runner/tests/terse_reporting.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_tests/integration_test_runner/tests/wasm_baseline.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/projects/dev_server/tests/build_loop_tests.rs",
+          "occurrences": 6
+        },
+        {
+          "file": "src/projects/dev_server/tests/error_page_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/projects/dev_server/tests/http_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/projects/dev_server/tests/mod_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/projects/dev_server/tests/watch_tests.rs",
+          "occurrences": 9
+        },
+        {
+          "file": "src/projects/html_project/external_js/parser/tests/parser_tests.rs",
+          "occurrences": 6
+        },
+        {
+          "file": "src/projects/html_project/external_js/tests/runtime_glue_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/projects/html_project/new_html_project/tests/scaffold_tests.rs",
+          "occurrences": 4
+        },
+        {
+          "file": "src/projects/html_project/new_html_project/tests/summary_tests.rs",
+          "occurrences": 4
+        },
+        {
+          "file": "src/projects/html_project/new_html_project/tests/target_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/projects/html_project/styles/code.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/projects/html_project/tests/code_tests.rs",
+          "occurrences": 14
+        },
+        {
+          "file": "src/projects/html_project/tests/document_config_tests.rs",
+          "occurrences": 4
+        },
+        {
+          "file": "src/projects/html_project/tests/document_shell_tests.rs",
+          "occurrences": 8
+        },
+        {
+          "file": "src/projects/html_project/tests/runtime_module_registry_tests.rs",
+          "occurrences": 5
+        },
+        {
+          "file": "src/projects/tests/check_tests.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "src/projects/tests/cli_tests.rs",
+          "occurrences": 8
+        },
+        {
+          "file": "src/projects/tests/routing_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/timing/enabled/runtime.rs",
+          "occurrences": 13
+        },
+        {
+          "file": "src/timing/tests/enabled_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/timing/tests/erasure_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/timing/tests/schema_tests.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "src/timing/tests/summary_tests.rs",
+          "occurrences": 8
+        },
+        {
+          "file": "xtask/src/bench_ci/tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "xtask/src/bench_report/tests.rs",
+          "occurrences": 10
+        },
+        {
+          "file": "xtask/src/bench_summary/tests.rs",
+          "occurrences": 13
+        },
+        {
+          "file": "xtask/src/bench_system/tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "xtask/src/bench_time/tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "xtask/src/bench_types.rs",
+          "occurrences": 5
+        },
+        {
+          "file": "xtask/src/bench_types/tests.rs",
+          "occurrences": 7
+        },
+        {
+          "file": "xtask/src/benchmark_repository/tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "xtask/src/benchmark_suite/tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "xtask/src/feature_matrix/tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "xtask/src/mode/tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "xtask/src/process_runner/tests.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "xtask/src/profile/artifacts_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "xtask/src/profile/drift_tests.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "xtask/src/profile/history_tests.rs",
+          "occurrences": 10
+        },
+        {
+          "file": "xtask/src/profile/hotspots_tests.rs",
+          "occurrences": 4
+        },
+        {
+          "file": "xtask/src/profile/options_tests.rs",
+          "occurrences": 5
+        },
+        {
+          "file": "xtask/src/profile/parse_tests.rs",
+          "occurrences": 6
+        },
+        {
+          "file": "xtask/src/profile/runner_tests.rs",
+          "occurrences": 4
+        },
+        {
+          "file": "xtask/src/profile/summary_tests.rs",
+          "occurrences": 9
+        },
+        {
+          "file": "xtask/src/profile/tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "xtask/src/report_file/tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "xtask/src/rust_scanner/tests.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "xtask/src/source_audit/tests.rs",
+          "occurrences": 1
+        }
+      ]
+    },
+    {
+      "code": "first_match_artifact_selection",
+      "description": "find_map selection, which silently picks one of several matches",
+      "disposition": "hardened",
+      "rationale": "Phase 4 gave artifact lookup a typed inventory that rejects a duplicate path instead of returning whichever entry came first.",
+      "scope": "test_owning_files",
+      "view": "code",
+      "occurrences": 70,
+      "files": [
+        {
+          "file": "src/build_system/create_project_modules/frontend_orchestration.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/build_system/tests/frontend_orchestration_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/build_system/tests/stage0_filesystem_identity_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/analysis/borrow_checker/tests/borrow_checker_call_summary_tests.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "src/compiler_frontend/analysis/borrow_checker/tests/borrow_checker_fact_tests.rs",
+          "occurrences": 5
+        },
+        {
+          "file": "src/compiler_frontend/analysis/borrow_checker/tests/borrow_checker_loop_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_frontend/analysis/borrow_checker/tests/borrow_checker_reactivity_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/analysis/borrow_checker/tests/borrow_checker_scope_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/ast/templates/tests/create_template_node/head_tests.rs",
+          "occurrences": 5
+        },
+        {
+          "file": "src/compiler_frontend/ast/templates/tests/create_template_node/parser_tir_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_frontend/ast/templates/tir/store.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/ast/tests/choice_expression_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_frontend/ast/tests/type_resolution_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_frontend/headers/tests/parse_file_headers_tests.rs",
+          "occurrences": 7
+        },
+        {
+          "file": "src/compiler_frontend/hir/tests/checked_numeric_lowering_tests.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "src/compiler_frontend/hir/tests/hir_branch_lowering_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/hir/tests/hir_function_origin_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/hir/tests/hir_match_lowering_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/hir/tests/hir_reactivity_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/hir/tests/loop_lowering_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/hir/tests/value_block_lowering_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/paths/tests/paths_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_frontend/public_interface/export_projection.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/public_interface/tests/trait_projection_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/tokenizer/tests/lexer_tests.rs",
+          "occurrences": 14
+        },
+        {
+          "file": "src/compiler_tests/frontend_pipeline_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/timing/tests/summary_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "xtask/src/bench_report.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "xtask/src/profile/drift.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "xtask/src/profile/runner_tests.rs",
+          "occurrences": 1
+        }
+      ]
+    },
+    {
+      "code": "broad_contains_assertions",
+      "description": "an assertion that some output contains a fragment, which passes on any output that happens to include it",
+      "disposition": "rendered_prose_is_the_contract",
+      "rationale": "The integration suite has zero contains-mode diagnostic contracts after Phase 7. Remaining contains assertions are over rendered prose and over error messages, where the wording a reader sees is the contract and an exact whole-output match would pin unrelated formatting.",
+      "scope": "test_owning_files",
+      "view": "code",
+      "occurrences": 993,
+      "files": [
+        {
+          "file": "src/backends/js/tests/control_flow.rs",
+          "occurrences": 10
+        },
+        {
+          "file": "src/backends/js/tests/emission_policy.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/backends/js/tests/host.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/backends/js/tests/symbols.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/backends/wasm/tests/emit/emit_tests.rs",
+          "occurrences": 9
+        },
+        {
+          "file": "src/backends/wasm/tests/lowering/lowering_tests.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "src/build_system/tests/build_dependency_tests.rs",
+          "occurrences": 30
+        },
+        {
+          "file": "src/build_system/tests/build_orchestration_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/build_system/tests/compilation_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/build_system/tests/create_project_modules_tests.rs",
+          "occurrences": 30
+        },
+        {
+          "file": "src/build_system/tests/generated_summary_convergence_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/build_system/tests/generated_worklist_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/build_system/tests/module_lane_tests.rs",
+          "occurrences": 8
+        },
+        {
+          "file": "src/build_system/tests/stage0_filesystem_identity_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/builder_surface/tests/provider_registry_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_frontend/analysis/borrow_checker/state.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_frontend/analysis/borrow_checker/tests/borrow_checker_call_summary_tests.rs",
+          "occurrences": 7
+        },
+        {
+          "file": "src/compiler_frontend/ast/module_ast/finalization/tests/reactive_templates_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_frontend/ast/module_ast/finalization/tests/validate_types_tests.rs",
+          "occurrences": 5
+        },
+        {
+          "file": "src/compiler_frontend/ast/templates/tests/create_template_node/children_tests.rs",
+          "occurrences": 8
+        },
+        {
+          "file": "src/compiler_frontend/ast/templates/tests/create_template_node/directive_style_tests.rs",
+          "occurrences": 23
+        },
+        {
+          "file": "src/compiler_frontend/ast/templates/tests/create_template_node/head_tests.rs",
+          "occurrences": 12
+        },
+        {
+          "file": "src/compiler_frontend/ast/templates/tests/create_template_node/markdown_tests.rs",
+          "occurrences": 16
+        },
+        {
+          "file": "src/compiler_frontend/ast/templates/tests/create_template_node/slot_constant_tests.rs",
+          "occurrences": 4
+        },
+        {
+          "file": "src/compiler_frontend/ast/templates/tests/create_template_node/whitespace_tests.rs",
+          "occurrences": 4
+        },
+        {
+          "file": "src/compiler_frontend/ast/templates/tests/markdown_tests.rs",
+          "occurrences": 6
+        },
+        {
+          "file": "src/compiler_frontend/ast/templates/tests/reactive_template_metadata_tests.rs",
+          "occurrences": 11
+        },
+        {
+          "file": "src/compiler_frontend/ast/templates/tir/tests/expression_traversal_tests.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "src/compiler_frontend/ast/templates/tir/tests/fold_cache_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/ast/templates/tir/tests/hir_handoff_tests.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "src/compiler_frontend/ast/templates/tir/tests/preparation_tests.rs",
+          "occurrences": 4
+        },
+        {
+          "file": "src/compiler_frontend/ast/templates/tir/tests/store_tests.rs",
+          "occurrences": 14
+        },
+        {
+          "file": "src/compiler_frontend/ast/templates/tir/tests/view_tests.rs",
+          "occurrences": 6
+        },
+        {
+          "file": "src/compiler_frontend/ast/templates/tir/tests/wrapper_context_construction_tests.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "src/compiler_frontend/compiler_messages/tests/diagnostic_model_tests.rs",
+          "occurrences": 28
+        },
+        {
+          "file": "src/compiler_frontend/compiler_messages/tests/display_messages_tests.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "src/compiler_frontend/compiler_messages/tests/type_rendering_tests.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "src/compiler_frontend/headers/binding_environment/tests/namespace_bindings_tests.rs",
+          "occurrences": 6
+        },
+        {
+          "file": "src/compiler_frontend/headers/tests/parse_file_headers_tests.rs",
+          "occurrences": 11
+        },
+        {
+          "file": "src/compiler_frontend/hir/tests/hir_expression_lowering_tests.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "src/compiler_frontend/hir/tests/hir_local_lowering_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/hir/tests/hir_match_lowering_tests.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "src/compiler_frontend/hir/tests/hir_module_lowering_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_frontend/hir/tests/hir_validation_tests.rs",
+          "occurrences": 22
+        },
+        {
+          "file": "src/compiler_frontend/hir/tests/reachability_tests.rs",
+          "occurrences": 5
+        },
+        {
+          "file": "src/compiler_frontend/instrumentation/tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_frontend/paths/tests/paths_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_frontend/public_interface/tests/declaration_record_tests.rs",
+          "occurrences": 4
+        },
+        {
+          "file": "src/compiler_frontend/public_interface/tests/dependency_bindings_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_frontend/public_interface/tests/direct_projection_tests.rs",
+          "occurrences": 6
+        },
+        {
+          "file": "src/compiler_frontend/public_interface/tests/interface_validation_tests.rs",
+          "occurrences": 18
+        },
+        {
+          "file": "src/compiler_frontend/public_interface/tests/trait_projection_tests.rs",
+          "occurrences": 5
+        },
+        {
+          "file": "src/compiler_frontend/tests/canonical_type_identity_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_frontend/tests/plain_markdown_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_frontend/tokenizer/tests/lexer_tests.rs",
+          "occurrences": 6
+        },
+        {
+          "file": "src/compiler_frontend/type_coercion/tests/string_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_tests/integration_test_runner/tests/assertions.rs",
+          "occurrences": 24
+        },
+        {
+          "file": "src/compiler_tests/integration_test_runner/tests/expectations.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_tests/integration_test_runner/tests/fixture.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "src/compiler_tests/integration_test_runner/tests/manifest.rs",
+          "occurrences": 7
+        },
+        {
+          "file": "src/compiler_tests/integration_test_runner/tests/policy.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_tests/integration_test_runner/tests/rendered_output.rs",
+          "occurrences": 13
+        },
+        {
+          "file": "src/compiler_tests/integration_test_runner/tests/reporting.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_tests/integration_test_runner/tests/terse_reporting.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_tests/integration_test_runner/tests/wasm_baseline.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "src/projects/dev_server/tests/error_page_tests.rs",
+          "occurrences": 17
+        },
+        {
+          "file": "src/projects/dev_server/tests/http_tests.rs",
+          "occurrences": 4
+        },
+        {
+          "file": "src/projects/dev_server/tests/mod_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/projects/dev_server/tests/static_files_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/projects/html_project/external_js/tests/runtime_emission_plan_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/projects/html_project/external_js/tests/runtime_glue_tests.rs",
+          "occurrences": 16
+        },
+        {
+          "file": "src/projects/html_project/new_html_project/tests/scaffold_tests.rs",
+          "occurrences": 25
+        },
+        {
+          "file": "src/projects/html_project/new_html_project/tests/summary_tests.rs",
+          "occurrences": 20
+        },
+        {
+          "file": "src/projects/html_project/new_html_project/tests/target_tests.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "src/projects/html_project/tests/code_tests.rs",
+          "occurrences": 81
+        },
+        {
+          "file": "src/projects/html_project/tests/document_shell_tests.rs",
+          "occurrences": 14
+        },
+        {
+          "file": "src/projects/html_project/tests/html_project_builder_tests.rs",
+          "occurrences": 28
+        },
+        {
+          "file": "src/projects/tests/cli_tests.rs",
+          "occurrences": 25
+        },
+        {
+          "file": "src/projects/tests/routing_tests.rs",
+          "occurrences": 5
+        },
+        {
+          "file": "src/timing/tests/summary_tests.rs",
+          "occurrences": 15
+        },
+        {
+          "file": "xtask/src/bench_history/tests.rs",
+          "occurrences": 15
+        },
+        {
+          "file": "xtask/src/bench_report/tests.rs",
+          "occurrences": 28
+        },
+        {
+          "file": "xtask/src/bench_summary/tests.rs",
+          "occurrences": 63
+        },
+        {
+          "file": "xtask/src/bench_system/tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "xtask/src/bench_types/tests.rs",
+          "occurrences": 11
+        },
+        {
+          "file": "xtask/src/benchmark_execution/tests.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "xtask/src/benchmark_manifest/tests.rs",
+          "occurrences": 13
+        },
+        {
+          "file": "xtask/src/benchmark_repository/tests.rs",
+          "occurrences": 4
+        },
+        {
+          "file": "xtask/src/benchmark_run/tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "xtask/src/benchmark_workspace/tests.rs",
+          "occurrences": 4
+        },
+        {
+          "file": "xtask/src/frontend_bench/tests.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "xtask/src/mode/tests.rs",
+          "occurrences": 9
+        },
+        {
+          "file": "xtask/src/process_runner/tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "xtask/src/profile/artifacts_tests.rs",
+          "occurrences": 47
+        },
+        {
+          "file": "xtask/src/profile/drift_tests.rs",
+          "occurrences": 13
+        },
+        {
+          "file": "xtask/src/profile/history_tests.rs",
+          "occurrences": 19
+        },
+        {
+          "file": "xtask/src/profile/options_tests.rs",
+          "occurrences": 20
+        },
+        {
+          "file": "xtask/src/profile/parse_tests.rs",
+          "occurrences": 9
+        },
+        {
+          "file": "xtask/src/profile/runner_tests.rs",
+          "occurrences": 5
+        },
+        {
+          "file": "xtask/src/profile/summary_tests.rs",
+          "occurrences": 27
+        },
+        {
+          "file": "xtask/src/profile/tests.rs",
+          "occurrences": 5
+        }
+      ]
+    },
+    {
+      "code": "wall_clock_and_sleep_dependence",
+      "description": "a sleep, a spin loop or a wall-clock reading, each of which can make the result depend on how fast the machine is",
+      "disposition": "hardened",
+      "rationale": "Phase 6 replaced every expected transition with a condition variable or a channel. A remaining wall-clock deadline is deadlock protection whose failure names the observed state, not the thing being asserted.",
+      "scope": "test_owning_files",
+      "view": "code",
+      "occurrences": 21,
+      "files": [
+        {
+          "file": "src/compiler_tests/integration_test_runner/assertions/node_harness.rs",
+          "occurrences": 4
+        },
+        {
+          "file": "src/projects/check.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/projects/cli.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/projects/dev_server/build_loop.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/projects/dev_server/tests/sse_tests.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "src/projects/dev_server/watch.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "src/timing/enabled/guard.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/timing/enabled/runtime.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/timing/tests/enabled_tests.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "src/timing/tests/erasure_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "xtask/src/process_runner.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "xtask/src/profile/runner.rs",
+          "occurrences": 1
+        }
+      ]
+    },
+    {
+      "code": "source_text_assertions",
+      "description": "an assertion over source text read at compile time, which proves what a file says rather than what the code does",
+      "disposition": "moved_to_structured_audit",
+      "rationale": "Phase 8 moved the tree-wide source bans into the source audit, which reports typed findings and says plainly that source text is not behaviour evidence. Remaining include_str! uses are fixtures and manifests, not claims about behaviour.",
+      "scope": "test_owning_files",
+      "view": "code",
+      "occurrences": 0,
+      "files": []
+    },
+    {
+      "code": "platform_gated_tests",
+      "description": "a test item gated to one platform family, which no other platform's lane executes",
+      "disposition": "platform_specific_by_real_api_ownership",
+      "rationale": "These own behaviour of a real platform API — symlinks, permission bits, non-UTF-8 filenames — that the other platforms do not have. Phase 8 makes them visible instead of silent by running the Linux, macOS and Windows CI gates, so a platform-owned test is executed somewhere rather than nowhere.",
+      "scope": "test_owning_files",
+      "view": "code",
+      "occurrences": 133,
+      "files": [
+        {
+          "file": "src/build_system/output/tests/policy_tests.rs",
+          "occurrences": 6
+        },
+        {
+          "file": "src/build_system/output/tests/writer_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/build_system/output/writer.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "src/build_system/tests/build_cleanup_tests.rs",
+          "occurrences": 4
+        },
+        {
+          "file": "src/build_system/tests/build_orchestration_tests.rs",
+          "occurrences": 15
+        },
+        {
+          "file": "src/build_system/tests/stage0_filesystem_identity_tests.rs",
+          "occurrences": 6
+        },
+        {
+          "file": "src/compiler_frontend/compiler_messages/tests/display_messages_tests.rs",
+          "occurrences": 4
+        },
+        {
+          "file": "src/compiler_frontend/paths/tests/path_resolution_tests.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "src/compiler_frontend/symbols/tests/interned_path_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/utilities/tests/basic_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_tests/integration_test_runner/tests/assertions.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_tests/integration_test_runner/tests/fixture.rs",
+          "occurrences": 11
+        },
+        {
+          "file": "src/compiler_tests/integration_test_runner/tests/manifest.rs",
+          "occurrences": 4
+        },
+        {
+          "file": "src/compiler_tests/integration_test_runner/tests/rendered_output.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_tests/test_fs.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "src/projects/dev_server/tests/mod_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/projects/html_project/tests/output_plan_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/projects/tests/check_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "xtask/src/benchmark_execution/tests.rs",
+          "occurrences": 8
+        },
+        {
+          "file": "xtask/src/benchmark_fingerprint/tests.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "xtask/src/benchmark_manifest/tests.rs",
+          "occurrences": 4
+        },
+        {
+          "file": "xtask/src/benchmark_run/tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "xtask/src/benchmark_suite/tests.rs",
+          "occurrences": 3
+        },
+        {
+          "file": "xtask/src/benchmark_workspace/tests.rs",
+          "occurrences": 5
+        },
+        {
+          "file": "xtask/src/compiler_binary.rs",
+          "occurrences": 10
+        },
+        {
+          "file": "xtask/src/process_runner/tests.rs",
+          "occurrences": 14
+        },
+        {
+          "file": "xtask/src/profile/tests.rs",
+          "occurrences": 14
+        },
+        {
+          "file": "xtask/src/test_fs.rs",
+          "occurrences": 1
+        }
+      ]
+    },
+    {
+      "code": "inert_tmp_path_literals",
+      "description": "a hardcoded /tmp literal that no filesystem call on the same line acts on",
+      "disposition": "narrow_api_with_one_valid_outcome",
+      "rationale": "These are path values handed to pure path logic — rejection rules, prefix comparison, command argument assembly — which never touch the filesystem. A /tmp literal that does reach the filesystem is the hard rule tmp_literal_reaching_the_filesystem, which fails this audit.",
+      "scope": "test_owning_files",
+      "view": "literal",
+      "occurrences": 38,
+      "files": [
+        {
+          "file": "src/compiler_frontend/compiler_messages/tests/diagnostic_model_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_tests/integration_test_runner/tests/expectations.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/projects/dev_server/tests/static_files_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/projects/dev_server/tests/watch_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/projects/html_project/new_html_project/tests/target_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/timing/tests/summary_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "xtask/src/benchmark_manifest/tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "xtask/src/profile/artifacts_tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "xtask/src/profile/runner_tests.rs",
+          "occurrences": 27
+        }
+      ]
+    },
+    {
+      "code": "shared_system_temp_directory_values",
+      "description": "std::env::temp_dir(), which names a directory every process on the machine shares",
+      "disposition": "narrow_api_with_one_valid_outcome",
+      "rationale": "Used as an existing-directory value for path logic that must not create anything, in tests that assert on the resulting path rather than on disk. An owned workspace comes from tempfile::tempdir.",
+      "scope": "test_owning_files",
+      "view": "code",
+      "occurrences": 4,
+      "files": [
+        {
+          "file": "src/compiler_frontend/ast/expressions/tests/eval_expression_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/ast/templates/tests/create_template_node/directive_style_tests.rs",
+          "occurrences": 1
+        },
+        {
+          "file": "src/compiler_frontend/headers/tests/moth_template_prepare_tests.rs",
+          "occurrences": 2
+        }
+      ]
+    }
+  ],
+  "declared_findings": [
+    {
+      "code": "temp_dir_uncreated_paths",
+      "severity": "hard",
+      "status": "resolved",
+      "description": "test_support::temp_dir returned uncreated paths; callers had to create_dir_all manually",
+      "disposition": "fixed: renamed to unused_temp_path with non-existence contract; ALL created-workspace fixtures migrated to tempfile::tempdir() with owned cleanup; remaining 3 uses (validate_dangerous_project, output_defaults, output_overrides) are genuine uncreated-path contracts",
+      "owning_phase": "Phase 1"
+    },
+    {
+      "code": "hardcoded_tmp_paths",
+      "severity": "hard",
+      "status": "resolved",
+      "description": "Hardcoded /tmp/ paths in test files",
+      "disposition": "fixed: all hardcoded /tmp/ paths removed and replaced with tempfile::tempdir() or unused_temp_path",
+      "owning_phase": "Phase 1"
+    },
+    {
+      "code": "exists_isfile_isdir_hiding_io_failures",
+      "severity": "hard",
+      "status": "resolved",
+      "description": "exists()/is_file()/is_dir() mask IO errors as absence",
+      "disposition": "fixed: test_fs helpers use symlink_metadata; all negative exists() assertions in build_orchestration_tests, build_cleanup_tests, check_tests, and cli_tests migrated to assert_path_missing; fixture discovery uses symlink_metadata with fail-closed on metadata errors",
+      "owning_phase": "Phase 1"
+    },
+    {
+      "code": "broad_iserr_assertions",
+      "severity": "review",
+      "status": "resolved",
+      "description": "Broad is_err()/error_count()>0 assertions accept wrong failure at multi-lane boundaries; String-only transport in integration fixture/expectation/runner forced substring error identity",
+      "disposition": "fixed: all 26 build_orchestration is_err() assertions migrated to assert_output_rejection; benchmark errors carry typed FrontendBenchmarkFailureKind + diagnostic_codes; fixture/expectation loading returns FixtureLoadError{kind,message} (Filesystem/Manifest/ExpectationParse/ExpectationContract/FixtureContract/PathBoundary); runner returns TestRunnerError with Options/SuitePolicy/InventoryReport/TriageReport/Selection/ThreadPool/Fixture kinds; negative self-tests assert error.kind; compile_project_frontend broad is_err() seeds made exact; containment test uses assert_output_rejection; busy benchmark test uses owned entry + TimingSession kind",
+      "owning_phase": "Phase 2"
+    },
+    {
+      "code": "infrastructure_error_inspection_missing_later_errors",
+      "severity": "hard",
+      "status": "resolved",
+      "description": "first_infrastructure_error_for_tests only returned the first infrastructure error",
+      "disposition": "fixed: infrastructure_errors_for_tests() iterator scans all error diagnostics",
+      "owning_phase": "Phase 2"
+    },
+    {
+      "code": "synthetic_test_data_violating_identity_rules",
+      "severity": "hard",
+      "status": "resolved",
+      "description": "WarningBuilder created StringId from fresh StringTable; CaseExecutionResult had impossible states",
+      "disposition": "fixed: WarningBuilder uses active string_table; CaseExecutionResult constructors removed from production; runner tests use panic_if_called; terse_reporting uses valid BuildResult and CompilerMessages in all synthetic fixtures",
+      "owning_phase": "Phase 3"
+    },
+    {
+      "code": "current_dir_restoration_failures_discarded",
+      "severity": "hard",
+      "status": "resolved",
+      "description": "CurrentDirGuard::Drop discarded restoration failures",
+      "disposition": "fixed: Option<PathBuf> take pattern prevents double-restore; finish() returns Result; Drop panics on restore failure (non-unwinding) or reports to stderr (unwinding); restore-failure injection seam; regression tests for both finish-error and unwind-report paths; obsolete test_restore seam removed in favor of finish() called directly under an injected restore that actually restores CWD then returns the synthetic error",
+      "owning_phase": "Phase 3"
+    },
+    {
+      "code": "lossy_path_text_conversion",
+      "severity": "review",
+      "status": "resolved",
+      "description": "to_string_lossy/from_utf8_lossy across ~30 files",
+      "disposition": "resolved in Phase 5 for every boundary finding 8 names: integration entry-path execution, the rendered-output harness paths and process output, golden text comparison, MOTH_TEST_THREADS and the module-discovery test helpers' file_name().unwrap_or_default(). The HTML-Wasm harness now resolves its artifacts through __dirname so no workspace path crosses a text boundary at all. Remaining to_string_lossy/from_utf8_lossy uses are failure-report rendering (xtask process output echo, path display), never assertion inputs",
+      "owning_phase": "Phase 5"
+    },
+    {
+      "code": "weak_positive_assertions",
+      "severity": "review",
+      "status": "resolved",
+      "description": "Tests use >= or > assertions where exact counts are needed",
+      "disposition": "fixed in Phase 4: BuiltArtifactIndex (integration) and BuiltOutputs (build-system tests) replace first-match find_map with unique-path lookup and exactly-one selectors; reachable-dependency test asserts the exact emitted path set plus the lowered dependency body and its call site; JS glue, runtime-module and canvas tests assert exactly-one glue/canvas/runtime artifacts at exact paths and that the page imports the module actually emitted; frontend pipeline tests assert exact function-origin multisets and side-table coverage instead of functions_analyzed >= N; borrow-checker pipeline test asserts statement/terminator fact sets equal the lowered statements/blocks and an exact snapshot count; source-package benchmark warning test asserts an exact warning multiset; HIR local lowering tests assert exact authored locals and exactly one assignment to the authored local",
+      "owning_phase": "Phase 4"
+    },
+    {
+      "code": "golden_comparison_accepting_directories_as_empty_files",
+      "severity": "review",
+      "status": "resolved",
+      "description": "Golden comparison accepts directory entries as empty golden files",
+      "disposition": "resolved in Phase 5: the golden comparison decides the artifact kind before reading content. A Directory or NotBuilt entry is a kind mismatch instead of empty bytes, text goldens require strict UTF-8 (invalid UTF-8 is a HarnessFailed, not a silent rewrite), and binary/wasm goldens compare bytes only. Phase 5 closeout: the expected artifact kind is owned by the authored golden's own extension (GoldenFile.expected_kind), so a cross-kind match is rejected before content is read and identical bytes emitted as a different artifact kind cannot satisfy the golden. Regressions cover directory-vs-empty-file, an unbuilt path, invalid UTF-8, binary byte comparison, a duplicate-path artifact set, a JS golden against generic bytes, a wasm golden against generic bytes, an HTML golden produced as JavaScript outside the universal index.html baseline path, and a binary golden that must still match generic bytes",
+      "owning_phase": "Phase 5"
+    },
+    {
+      "code": "html_wasm_baseline_broad_fragments",
+      "severity": "review",
+      "status": "resolved",
+      "description": "HTML/Wasm baseline tests rely on broad fragment matching",
+      "disposition": "resolved in Phase 5: the HTML shell contract is now ordered, bounded and unique (html_shell_violation, one owner shared with the HTML builder's own shell tests), and the HTML-Wasm baseline derives its required exports from the emitted page.js (instance.exports.<name>) and checks each against the module's typed export kind, with an explicit ABI floor including moth_start. Duplicate exports and imports are rejected, and the page script include must appear exactly once inside the body. Phase 5 closeout: the shell contract is structural rather than a raw substring count. Script and style content is opaque payload the shell inserts, so marker-like text such as a JavaScript string spelling '</body>' no longer counts as a second element, while a marker repeated in real markup is still rejected",
+      "owning_phase": "Phase 5"
+    },
+    {
+      "code": "node_runtime_harness_can_hang",
+      "severity": "review",
+      "status": "resolved",
+      "description": "Node runtime harness tests can hang without timeout",
+      "disposition": "resolved in Phase 5: the harness owns a tempfile workspace whose removal failure is reported, runs Node under a 30s deadline with kill-and-reap, drains stdout/stderr on their own threads with a 4 MiB bound, decodes protocol output strictly, and parses only supported <script> shapes. Typed RenderHarnessError{kind,message} separates Artifact/Workspace/Spawn/Timeout/ExitStatus/OutputDecoding/OutputProtocol/ScriptShape/Cleanup. Phase 5 closeout: both capture threads are joined before any result is inspected so no failure path drops a live thread; termination always attempts the reap and reports the kill and wait outcomes separately; type=\"module\" is rejected rather than executed under classic semantics because the harness materializes no glue, provider or runtime module and no import map; nameless or malformed attribute tokens fail closed instead of being skipped; and every failure class now has a focused self-test, including Artifact (missing and wrong-kind), Workspace (write collision) and Spawn (a nonexistent interpreter through the process owner's executable seam, not a PATH mutation)",
+      "owning_phase": "Phase 5"
+    },
+    {
+      "code": "fixture_discovery_fail_open",
+      "severity": "hard",
+      "status": "resolved",
+      "description": "Fixture discovery used is_dir/is_file which fail open; non-UTF-8 identities silently skipped",
+      "disposition": "fixed: symlink_metadata with NotFound-only continue; non-UTF-8 names return error; manifest_path and expect_path checks use symlink_metadata",
+      "owning_phase": "Phase 1"
+    },
+    {
+      "code": "timing_concurrency_tests_machine_speed",
+      "severity": "review",
+      "status": "resolved",
+      "description": "Timing/concurrency tests depend on machine speed",
+      "disposition": "resolved in Phase 6: the collector drain seam is a condition variable with a bounded deadline used only as deadlock protection, and its waits report the observed state; wait_for_timing_flag's 1,000,000-iteration yield loop is deleted, the dev-server SSE and partial-request tests own and join their server threads, and the SSE registration wait is a bounded deadline that names the observed client count",
+      "owning_phase": "Phase 6"
+    },
+    {
+      "code": "feature_gated_tests_not_executed",
+      "severity": "review",
+      "status": "resolved",
+      "description": "Feature-gated test modules need explicit execution lane mapping",
+      "disposition": "fixed in Phase 8: eight package-scoped lanes in xtask feature_matrix, run by `just test-feature-matrix`, cover every declared feature. `just feature-lane-check` (part of `just validate`) reads Cargo.toml and every cfg attribute in src and xtask/src, and fails when a declared feature has no lane, when a lane names an undeclared feature, or when a cfg names a feature that does not exist; it writes target/test-reports/feature_lane_coverage.json. The check also exposed that the previous workspace-wide feature commands never ran the default configuration, because xtask depends on moth with features = [\"timers\"] and Cargo unifies features across one resolve graph",
+      "owning_phase": "Phase 8"
+    },
+    {
+      "code": "filesystem_timestamp_tests",
+      "severity": "review",
+      "status": "resolved",
+      "description": "Tests rely on filesystem timestamps",
+      "disposition": "resolved in Phase 6: write_project_outputs returns a typed OutputWriteSummary and the two skip-unchanged tests assert Written / SkippedUnchanged directly, so both 30ms sleeps and both modification-time comparisons are gone; the remaining timestamp reads are the dev-server watch fingerprints, whose tests set modification times explicitly",
+      "owning_phase": "Phase 6"
+    },
+    {
+      "code": "counters_only_lane_dead_code",
+      "severity": "review",
+      "status": "resolved",
+      "description": "The counters-only feature configuration compiles a test helper no caller can reach",
+      "disposition": "found in Phase 8 when the counters lane became an executed command; routed to Phase 11. frontend_counters::capture_frontend_counters_for_test, FrontendCounterTestCaptureGuard and the re-export are gated on benchmark_counters, while every caller is gated on all(timers, benchmark_counters), so the counters-only lane emits three dead-code warnings. Nothing fails. It was invisible because `just ci-clippy-native` lints with --all-features and never builds that configuration. The correction is a cfg gate, not a behaviour change, so it is left outside the Patch A evidence boundary. Resolved in Phase 11: FrontendCounterTestCaptureGuard, capture_frontend_counters_for_test and the re-export are now gated on all(test, feature = \"timers\") inside the benchmark_counters module, matching every caller. The counters-only lane is warning-free under cargo clippy -p moth --features benchmark_counters --all-targets.",
+      "owning_phase": "Phase 11"
+    },
+    {
+      "code": "monolithic_ci_steps",
+      "severity": "review",
+      "status": "resolved",
+      "description": "CI steps are monolithic",
+      "disposition": "fixed in Phase 8: the validation workflow runs nine gates (clippy, unit-tests, feature-matrix, integration, docs, benchmarks, timers-erasure, source-audit, honesty-audit) as independent jobs on Linux, macOS and Windows with fail-fast disabled, so one failed family never stops another from reporting. Windows stays non-blocking through a job-level continue-on-error, and validation.mtf > Platform policy now states the two conditions that end that status. The integration, feature-matrix and honesty-audit gates upload target/test-reports/ whether they passed or failed. `just validate` keeps the fail-fast local ordering, and the release workflow deliberately keeps it too. validation.mtf also lost its claim that `just ci-clippy` lints Linux and Windows x64 targets: that recipe does not exist and never did the cross-target work",
+      "owning_phase": "Phase 8"
+    },
+    {
+      "code": "acceptance_only_smoke_overclaiming",
+      "severity": "review",
+      "status": "resolved",
+      "description": "Acceptance-only smoke cases overclaim coverage",
+      "disposition": "fixed in Phase 7: all 12 acceptance-only backend blocks (exactly the 12 smoke-role cases) promoted to rendered_output_exact runtime contracts with a manifest contract and a non-smoke role, and each fixture comment rewritten to state what the case proves; the suite now declares zero acceptance-only blocks and zero smoke roles. Acceptance-only and the smoke role remain legal; schema 7 of the suite inventory reports smoke_role_cases and per-backend weak_contract_reviews so a returning weak contract stays findable",
+      "owning_phase": "Phase 7"
+    },
+    {
+      "code": "ignored_tests_needing_governance",
+      "severity": "review",
+      "status": "resolved",
+      "description": "Any #[ignore] tests would lack governance",
+      "disposition": "confirmed: 0 #[ignore] attributes in src or xtask",
+      "owning_phase": "Phase 7"
+    },
+    {
+      "code": "source_text_tests_false_confidence",
+      "severity": "review",
+      "status": "resolved",
+      "description": "Tests comparing source text create false confidence",
+      "disposition": "fixed in Phase 8: xtask source_audit is now the one owner of broad-source architecture bans. It walks src and xtask/src once, fails closed on unreadable paths, reports typed findings (timer-erasure, removed-legacy-conversion-name, removed-legacy-payload-variant, unreadable-source) and writes target/test-reports/source_audit.json. Three source-text tests were deleted into it: the diagnostics conversion-name tripwire, old_error_payload_has_been_removed_from_diagnostic_payloads (which read one file) and timer_facade_sources_never_use_cfg_timer_macro (which read four). The audit applies both removed-name bans across the whole tree rather than to the single file each test read. timers-erasure-check kept only its compiled-artifact half and now defines the timer rules that source_audit applies, so no second walk exists to skip a file silently. The remaining include_str! uses in src are CSS and JS assets that a test then parses or executes, which is input, not a source-text assertion",
+      "owning_phase": "Phase 8"
+    },
+    {
+      "code": "stale_partial_machine_readable_reports",
+      "severity": "review",
+      "status": "resolved",
+      "description": "Machine-readable reports can become stale or partial",
+      "disposition": "fixed in Phase 8: every report is written to a sibling temporary file, flushed and renamed into place, and a failed write removes the temporary file so the previous report survives instead of a partial new one. Each report carries a RunIdentity (run id, command, host OS and architecture, the features the binary was built with, runner thread count and completion state), and the inventory and triage reports are replaced by a completed:false report before the work starts, so an interrupted run leaves a report that says it did not finish. repository_commit became a typed repository_revision that distinguishes a discovered commit, a run outside a repository, and a failed discovery with its reason, instead of collapsing all three into null. Suite inventory schema 7 to 8; the triage report gained a schema version. Self-tests cover the started/completed transition observed from inside execution, the absence of a partial sibling, a blocked write leaving the previous report intact, and each revision classification",
+      "owning_phase": "Phase 8"
+    },
+    {
+      "code": "env_mutation_not_panic_safe",
+      "severity": "hard",
+      "status": "resolved",
+      "description": "xtask bench_history tests manually save/set/restore RAYON_NUM_THREADS without panic-safe guard",
+      "disposition": "fixed: ScopedEnvVar guard restores on drop including during unwinding",
+      "owning_phase": "Phase 3"
+    },
+    {
+      "code": "discarded_thread_joins",
+      "severity": "hard",
+      "status": "resolved",
+      "description": "Timing tests discarded thread join results",
+      "disposition": "fixed: surface_thread_panic helper replaces discarded joins",
+      "owning_phase": "Phase 3"
+    },
+    {
+      "code": "diagnostic_reason_parallel_taxonomy",
+      "severity": "hard",
+      "status": "resolved",
+      "description": "assert_diagnostic_reason used manual payload_variant_name mapping instead of reason_key",
+      "disposition": "fixed: uses diagnostic.identity().reason_key with unwrap_or fallback",
+      "owning_phase": "Phase 2"
+    },
+    {
+      "code": "case_execution_result_impossible_states",
+      "severity": "hard",
+      "status": "resolved",
+      "description": "Test fixtures created CaseExecutionResult with impossible states (passed=true with build_result=None, failure with no build_result or messages)",
+      "disposition": "fixed: all synthetic CaseExecutionResult fixtures now carry valid build_result or messages; triage test uses valid messages; terse_reporting uses valid BuildResult and CompilerMessages",
+      "owning_phase": "Phase 4"
+    },
+    {
+      "code": "assert_exact_infrastructure_error_too_loose",
+      "severity": "review",
+      "status": "resolved",
+      "description": "assert_exact_infrastructure_error only checked infrastructure error count, not total error count",
+      "disposition": "fixed: now requires exactly one error diagnostic overall, and that error must be the expected infrastructure type",
+      "owning_phase": "Phase 2"
+    },
+    {
+      "code": "string_transport_typed_error_seams",
+      "severity": "hard",
+      "status": "resolved",
+      "description": "Integration fixture/expectation loading and runner harness failures travelled as String, forcing negative self-tests to match error identity by prose substrings (fragile; could match the fixture path)",
+      "disposition": "fixed: added FixtureLoadError{kind,message} (Filesystem/Manifest/ExpectationParse/ExpectationContract/FixtureContract/PathBoundary) across fixture.rs, expectations.rs, manifest.rs and golden discovery; added TestRunnerError with Options/SuitePolicy/InventoryReport/TriageReport/Selection/ThreadPool/Fixture kinds across run_all_test_cases/run_loaded_suite/options.validate/report persistence/selection/thread-pool/env parsing; migrated all negative self-tests in runner.rs, manifest.rs, expectations.rs, fixture.rs to assert error.kind while retaining message prose checks; CLI reads error.message for display",
+      "owning_phase": "Phase 2"
+    },
+    {
+      "code": "first_match_artifact_selection",
+      "severity": "hard",
+      "status": "resolved",
+      "description": "find_output_file returned the first matching artifact and collect_built_artifact_paths accepted duplicate normalized paths, so every later assertion inspected one artifact of an ambiguous set",
+      "disposition": "fixed in Phase 4: BuiltArtifactIndex is built once in validate_success_result before any success assertion and consumed by the HTML/HTML-Wasm baselines, artifact assertions, absence checks, goldens and rendered-output harnesses; validity and collision identity come from the canonical output_path_identity used by the output writer, so the harness rejects exactly the destinations production rejects and folds ASCII case only; an ambiguous or invalid set fails the case as FailureKind::HarnessFailed; self-tests match the typed ArtifactIndexError variants (with one separate test owning the rendered wording) and cover duplicates, ASCII case aliases, non-ASCII case distinctness, parent segments, reserved device basenames, separator normalization, NotBuilt entries and non-UTF-8 paths",
+      "owning_phase": "Phase 4"
+    },
+    {
+      "code": "unused_temp_path_unverified_absence",
+      "severity": "review",
+      "status": "resolved",
+      "description": "unused_temp_path promised a nonexistent path without proving it; PID reuse after an interrupted run could return a stale node",
+      "disposition": "fixed in the pre-Phase-4 review pass: the helper verifies absence with symlink_metadata before returning",
+      "owning_phase": "Phase 1"
+    },
+    {
+      "code": "panic_assertions_without_reason",
+      "severity": "review",
+      "status": "resolved",
+      "description": "Helper self-tests and timers conflict tests asserted only catch_unwind(...).is_err(), so an unrelated panic satisfied them",
+      "disposition": "fixed in the pre-Phase-4 review pass: assert_panics_with requires the panic payload to contain the intended message; migrated test_fs, test_diagnostics, timers conflict tests and the new BuiltOutputs self-tests",
+      "owning_phase": "Phase 2"
+    },
+    {
+      "code": "xtask_negative_exists_assertions",
+      "severity": "hard",
+      "status": "resolved",
+      "description": "Phase 1's absence migration covered only the compiler crate; 14 negative Path::exists assertions remained in xtask tests",
+      "disposition": "fixed in the pre-Phase-4 review pass: added xtask/src/test_fs.rs (assert_path_missing/assert_regular_file/assert_directory with a dangling-symlink regression) and migrated bench_history and benchmark_workspace call sites",
+      "owning_phase": "Phase 1"
+    },
+    {
+      "code": "unanchored_output_path_predicates",
+      "severity": "review",
+      "status": "resolved",
+      "description": "Build-system glue selectors matched path.contains(\"_moth/js/glue/\"), so a glue module emitted under an unexpected parent directory satisfied an assertion about the glue directory",
+      "disposition": "fixed in the Phase 4 closeout: glue predicates use a shared GLUE_MODULE_PREFIX with starts_with, matching the already-anchored provider, canvas and runtime selectors, with a self-test proving a nested vendor/_moth/js/glue path does not match",
+      "owning_phase": "Phase 4"
+    },
+    {
+      "code": "global_timing_collector_observed_flake",
+      "severity": "review",
+      "status": "resolved",
+      "description": "frontend_benchmark_rejects_a_busy_raw_session_before_compilation failed once during Phase 5 validation and did not reproduce in 24 subsequent full-suite runs (including 6 at --test-threads=16)",
+      "disposition": "resolved in Phase 6: the flake reproduced on the Phase 6 baseline run and was the test's evidence, not the compiler. The outer-session 'every aggregate has zero samples' proxy is replaced by two deterministic ordering tests — a missing entry path must fail as TimingSession rather than PathValidation, and invalid source must fail as TimingSession rather than Compilation — neither of which depends on the process-global collector being quiet. The collector stays process-global because cross-thread recording is its production contract",
+      "owning_phase": "Phase 6"
+    }
+  ],
+  "ledger_integrity_findings": [],
+  "declared_measurements": [
+    {
+      "name": "unit_tests",
+      "command": "cargo test --workspace -- --format terse",
+      "result": "4397 moth + 17 cli_exit_status + 760 xtask passed, 0 failed, 0 ignored",
+      "recorded_by_phase": "Phase 10"
+    },
+    {
+      "name": "integration_cases",
+      "command": "cargo run --quiet -- tests --terse",
+      "result": "1851/1851 backend executions correct across 1699 cases; EF-0001 closed in Phase 10",
+      "recorded_by_phase": "Phase 10"
+    },
+    {
+      "name": "linux_lane",
+      "command": "GitHub Actions validate-linux",
+      "result": "passed via GitHub Actions validate-linux (4324 unit tests incl. Linux-only non-UTF-8 filesystem identity tests, 1851/1851 integration cases)",
+      "recorded_by_phase": "Phase 8"
+    },
+    {
+      "name": "open_exposed_failures",
+      "command": "cargo run --package xtask --bin xtask -- honesty-audit",
+      "result": "0 — EF-0001 (borrow_checker_string_memory, integration) and EF-0002 (const_required_construction_preparation_is_reused_by_folding, counter lanes) were both closed by Phase 10, and the exposed-failure ledger was deleted as the phase requires",
+      "recorded_by_phase": "Phase 10"
+    },
+    {
+      "name": "feature_lane:default",
+      "command": "cargo run --package xtask --bin xtask -- feature-matrix",
+      "result": "pass (4285 moth + 17 cli_exit_status)",
+      "recorded_by_phase": "Phase 10"
+    },
+    {
+      "name": "feature_lane:timers",
+      "command": "cargo run --package xtask --bin xtask -- feature-matrix",
+      "result": "pass (4397 + 17)",
+      "recorded_by_phase": "Phase 10"
+    },
+    {
+      "name": "feature_lane:detailed_timers",
+      "command": "cargo run --package xtask --bin xtask -- feature-matrix",
+      "result": "pass (4399 + 17)",
+      "recorded_by_phase": "Phase 10"
+    },
+    {
+      "name": "feature_lane:benchmark_counters",
+      "command": "cargo run --package xtask --bin xtask -- feature-matrix",
+      "result": "pass (4288 + 17) — EF-0002 closed in Phase 10",
+      "recorded_by_phase": "Phase 10"
+    },
+    {
+      "name": "feature_lane:timers+benchmark_counters",
+      "command": "cargo run --package xtask --bin xtask -- feature-matrix",
+      "result": "pass (4416 + 17) — EF-0002 closed in Phase 10",
+      "recorded_by_phase": "Phase 10"
+    },
+    {
+      "name": "feature_lane:checked_blocks+async_blocks",
+      "command": "cargo run --package xtask --bin xtask -- feature-matrix",
+      "result": "pass (4287 + 17)",
+      "recorded_by_phase": "Phase 10"
+    },
+    {
+      "name": "feature_lane:show_* (dev-output)",
+      "command": "cargo run --package xtask --bin xtask -- feature-matrix",
+      "result": "pass (4285 + 17) — adds no tests; it is the only lane that compiles the developer stage-dump branches",
+      "recorded_by_phase": "Phase 10"
+    },
+    {
+      "name": "feature_lane:xtask",
+      "command": "cargo run --package xtask --bin xtask -- feature-matrix",
+      "result": "pass (765)",
+      "recorded_by_phase": "Phase 10"
+    },
+    {
+      "name": "feature_lanes_note",
+      "command": "cargo run --package xtask --bin xtask -- feature-matrix",
+      "result": "Phase 8 replaced the workspace-wide feature commands with package-scoped lanes. cargo test --workspace unifies features across the resolve graph and always enables timers through xtask's dependency on moth, so the pre-Phase-8 'default' and 'benchmark_counters' rows measured the timers-unified configuration, not the ones they named. Every row below is `cargo test -p moth --features <lane>` measured on macOS 23.6.0 arm64, and every lane is executed by `just test-feature-matrix`",
+      "recorded_by_phase": "Phase 8"
+    }
+  ],
+  "infrastructure_added": [
+    "src/compiler_tests/test_fs.rs: assert_path_missing, assert_regular_file, assert_directory, assert_symlink, read_bytes, read_utf8",
+    "src/compiler_tests/test_diagnostics.rs: assert_exact_diagnostic_codes, assert_no_infrastructure_errors, assert_exact_infrastructure_error (tightened), assert_diagnostic_reason, error_code_counts",
+    "infrastructure_errors_for_tests() iterator in CompilerMessages",
+    "ScopedEnvVar guard in xtask bench_history/tests.rs",
+    "surface_thread_panic helper in timing/tests/enabled_tests.rs",
+    "CurrentDirGuard::finish() with Option<PathBuf> take pattern",
+    "CurrentDirGuard restore-failure injection seam (with_restore_override, RestoreFn type)",
+    "CurrentDirGuard Drop reports restore failure to stderr during unwinding",
+    "src/compiler_tests/test_support.rs: assert_panics_with (panic-reason assertion), unused_temp_path absence verification",
+    "xtask/src/test_fs.rs: assert_path_missing, assert_regular_file, assert_directory",
+    "BuiltArtifactIndex + typed ArtifactIndexError in the integration assertion owner; validity and collision identity come from the canonical output_path_identity, so the harness applies the writer's destination policy instead of a second path taxonomy",
+    "BuiltOutputs index with at/exactly_one/exactly_one_path/none_matching plus html_text/js_text kind accessors, owned by build_system/tests/build_dependency_tests.rs and using the same canonical output_path_identity collision check",
+    "assertions/node_harness.rs: HarnessWorkspace (owned tempfile workspace with reported cleanup), with_harness_workspace, run_node_script/run_node_script_within (bounded deadline, kill and reap, threaded bounded capture, strict stdout decoding) and typed RenderHarnessError/RenderHarnessErrorKind",
+    "assertions/html_scripts.rs: extract_executable_scripts, a supported-shape <script> parser that skips recognised data blocks and rejects external src, unknown types, execution-changing attributes and malformed or unterminated tags",
+    "assertions/artifacts.rs: html_shell_violation + HtmlShellViolation, the single ordered/unique document-shell contract shared with html_project's assert_has_basic_shell",
+    "assertions/wasm.rs: typed export map (BTreeMap<String, ExternalKind>) with duplicate rejection, duplicate import rejection and required_runtime_exports derived from the emitted bootstrap",
+    "tests/synthetic_build_results.rs: shared success-shaped BuildResult and TestCaseSpec fixtures for the assertion, rendered-output and wasm-baseline self-tests"
+  ],
+  "composed": {
+    "source_audit": {
+      "report_path": "target/test-reports/source_audit.json",
+      "finding_count": 0,
+      "findings": []
+    },
+    "feature_lane_coverage": {
+      "report_path": "target/test-reports/feature_lane_coverage.json",
+      "finding_count": 0,
+      "findings": []
+    },
+    "integration_suite_inventory": {
+      "state": "present",
+      "path": "target/test-reports/integration_suite_inventory.json",
+      "schema_version": 8,
+      "run_id": "c8fd-18cd7d64998d8bf8",
+      "run_command": "tests --audit",
+      "run_completed": true,
+      "hard_policy_violation_count": 0,
+      "advisory_finding_count": 84,
+      "summary": {
+        "absence_backend_blocks": 2,
+        "acceptance_only_backend_blocks": 0,
+        "artifact_backend_blocks": 279,
+        "baseline_only_backend_blocks": 0,
+        "diagnostic_contains_backend_blocks": 0,
+        "expected_warning_backend_blocks": 14,
+        "golden_backend_blocks": 0,
+        "rendered_output_backend_blocks": 617,
+        "rendered_output_exact_backend_blocks": 62,
+        "rendered_output_exactly_once_backend_blocks": 18,
+        "rendered_output_order_backend_blocks": 4,
+        "smoke_role_cases": 0,
+        "warning_ignore_backend_blocks": 0,
+        "weak_contract_review_backend_blocks": 0
+      }
+    },
+    "suite_weak_contract_reviews": [
+      {
+        "counter": "smoke_role_cases",
+        "occurrences": 0,
+        "disposition": "intentionally_smoke_level",
+        "rationale": "A case whose every backend claims only that compilation succeeded is legal when its role says so. Phase 7 promoted every acceptance-only block whose behaviour was observable and renamed the cases that overclaimed, so what this counts is smoke that admits to being smoke."
+      },
+      {
+        "counter": "warning_ignore_backend_blocks",
+        "occurrences": 0,
+        "disposition": "intentionally_smoke_level",
+        "rationale": "A block that makes warnings non-contractual accepts every future warning on that case. Phase 7 replaced all four with forbid or exact warning sets; the counter stays so a returning one is a number a reviewer sees rather than a silent weakening."
+      },
+      {
+        "counter": "diagnostic_contains_backend_blocks",
+        "occurrences": 0,
+        "disposition": "rendered_prose_is_the_contract",
+        "rationale": "A failure block matching diagnostics by containment accepts diagnostics beyond the authored multiset. Phase 7 re-measured every one under exact matching and left none; the counter stays because a stale authored reason keeps the weaker contract alive."
+      },
+      {
+        "counter": "acceptance_only_backend_blocks",
+        "occurrences": 0,
+        "disposition": "intentionally_smoke_level",
+        "rationale": "Phase 7 promoted all 12 acceptance-only blocks to observable contracts. The counter is the gate on that staying true."
+      }
+    ]
+  },
+  "gate": {
+    "scan_hard_finding_count": 0,
+    "ledger_integrity_finding_count": 0,
+    "open_hard_ledger_finding_count": 0,
+    "composed_finding_count": 0,
+    "review_finding_count": 11,
+    "review_occurrence_count": 2196,
+    "passed": true
+  }
+}

@@ -90,9 +90,11 @@ fn render_check_outcome(
 /// Test-only boundary seam for proving check work, capture and rendering order.
 ///
 /// WHAT: classifies a completed check outcome, records a scripted command
-///       duration, runs an injected renderer delay, then renders the outcome.
-/// WHY:  focused tests need an exact duration and observable post-capture work
-///       without introducing a general clock abstraction into production.
+///       duration, hands the classified outcome to an injected renderer, then
+///       renders it.
+/// WHY:  focused tests need an exact duration and an observation point after
+///       capture without introducing a general clock abstraction into
+///       production.
 #[cfg(all(test, feature = "timers"))]
 fn run_check_for_tests(
     outcome: CheckOutcome,

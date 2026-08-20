@@ -4,39 +4,26 @@
 //!       console and fragment output.
 //! WHY: runtime semantics belong to one harness so rendered assertions do not inspect generated
 //!      JavaScript structure or create a second execution path.
+//!
+//! Workspace ownership, process bounds and output decoding belong to `node_harness`; supported
+//! script shapes belong to `html_scripts`. This module owns the harness JavaScript, the event
+//! protocol and the expectation checks.
 
 use super::super::{ArtifactKind, FailureKind};
-use crate::build_system::build::BuildResult;
+use super::artifacts::BuiltArtifactIndex;
+use super::html_scripts::extract_executable_scripts;
+use super::node_harness::{RenderHarnessError, run_node_script, with_harness_workspace};
+use crate::build_system::build::OutputFile;
 use crate::compiler_tests::integration_test_runner::types::RenderedOutputExpectation;
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
-
-static RENDER_HARNESS_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub(super) fn validate_rendered_output(
-    build_result: &BuildResult,
+    index: &BuiltArtifactIndex<'_>,
     expectation: &RenderedOutputExpectation,
 ) -> Option<(String, FailureKind)> {
-    let Some(index_html_file) = super::artifacts::find_output_file(build_result, "index.html")
-    else {
-        return Some((
-            "rendered_output assertion requires 'index.html', but it was not produced.".to_string(),
-            FailureKind::HarnessFailed,
-        ));
-    };
-
-    let Some(html) = super::artifacts::output_text_content(index_html_file, ArtifactKind::Html)
-    else {
-        return Some((
-            "rendered_output assertion requires 'index.html' to be an HTML artifact.".to_string(),
-            FailureKind::HarnessFailed,
-        ));
-    };
-
-    let rendered = match execute_html_in_node(html) {
+    let rendered = match execute_html_in_node(index) {
         Ok(output) => output,
-        Err(reason) => return Some((reason, FailureKind::HarnessFailed)),
+        Err(error) => return Some((error.message, FailureKind::HarnessFailed)),
     };
 
     validate_rendered_output_fragments(&rendered.combined_output(), expectation)
@@ -47,127 +34,114 @@ pub(super) fn validate_rendered_output(
 /// WHAT: runs the emitted `page.js` against its sibling `page.wasm` in Node with a small DOM and
 ///       fetch adapter, then applies the same rendered-output assertions as HTML mode.
 /// WHY: HTML-Wasm backend tests must observe runtime semantics such as content-based String
-///       equality; Wasm validity and lowering-shape assertions alone cannot prove that behavior.
+///      equality; Wasm validity and lowering-shape assertions alone cannot prove that behavior.
 pub(super) fn validate_wasm_rendered_output(
-    build_result: &BuildResult,
+    index: &BuiltArtifactIndex<'_>,
     expectation: &RenderedOutputExpectation,
 ) -> Option<(String, FailureKind)> {
-    let Some(page_js_file) = super::artifacts::find_output_file(build_result, "page.js") else {
-        return Some((
-            "rendered_output assertion for HTML-Wasm requires 'page.js', but it was not produced."
-                .to_string(),
-            FailureKind::HarnessFailed,
-        ));
-    };
-    let Some(page_js) = super::artifacts::output_text_content(page_js_file, ArtifactKind::Js)
-    else {
-        return Some((
-            "rendered_output assertion for HTML-Wasm requires 'page.js' as a JS artifact."
-                .to_string(),
-            FailureKind::HarnessFailed,
-        ));
-    };
-
-    let Some(page_wasm_file) = super::artifacts::find_output_file(build_result, "page.wasm") else {
-        return Some((
-            "rendered_output assertion for HTML-Wasm requires 'page.wasm', but it was not produced."
-                .to_string(),
-            FailureKind::HarnessFailed,
-        ));
-    };
-    let Some(page_wasm) = super::artifacts::output_wasm_bytes(page_wasm_file) else {
-        return Some((
-            "rendered_output assertion for HTML-Wasm requires 'page.wasm' as a Wasm artifact."
-                .to_string(),
-            FailureKind::HarnessFailed,
-        ));
-    };
-
-    let unique = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or(0);
-    let sequence = RENDER_HARNESS_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let temp_dir = std::env::temp_dir().join(format!(
-        "moth_wasm_render_harness_{}_{}_{}",
-        std::process::id(),
-        unique,
-        sequence
-    ));
-
-    if let Err(error) = std::fs::create_dir(&temp_dir) {
-        return Some((
-            format!("rendered_output: failed to create HTML-Wasm harness directory: {error}"),
-            FailureKind::HarnessFailed,
-        ));
-    }
-
-    let page_js_path = temp_dir.join("page.js");
-    let page_wasm_path = temp_dir.join("page.wasm");
-    let write_result = std::fs::write(&page_js_path, page_js)
-        .and_then(|()| std::fs::write(&page_wasm_path, page_wasm));
-    if let Err(error) = write_result {
-        let _ = std::fs::remove_file(&page_js_path);
-        let _ = std::fs::remove_file(&page_wasm_path);
-        let _ = std::fs::remove_dir(&temp_dir);
-        return Some((
-            format!("rendered_output: failed to write HTML-Wasm harness artifacts: {error}"),
-            FailureKind::HarnessFailed,
-        ));
-    }
-
-    let result = execute_node_wasm_harness(&temp_dir);
-
-    let _ = std::fs::remove_file(&page_js_path);
-    let _ = std::fs::remove_file(&page_wasm_path);
-    let _ = std::fs::remove_dir(&temp_dir);
-
-    let rendered = match result {
+    let rendered = match execute_wasm_page_in_node(index) {
         Ok(output) => output,
-        Err(reason) => return Some((reason, FailureKind::HarnessFailed)),
+        Err(error) => return Some((error.message, FailureKind::HarnessFailed)),
     };
 
     validate_rendered_output_fragments(&rendered.combined_output(), expectation)
 }
 
-fn execute_node_wasm_harness(temp_dir: &Path) -> Result<RenderedOutput, String> {
-    let temp_dir_literal =
-        serde_json::to_string(temp_dir.to_string_lossy().as_ref()).map_err(|error| {
-            format!("rendered_output: failed to encode HTML-Wasm harness path: {error}")
-        })?;
-    let harness = build_node_wasm_harness(&temp_dir_literal);
-    let harness_path = temp_dir.join("harness.js");
-    let result = std::fs::write(&harness_path, harness)
-        .map_err(|error| format!("rendered_output: failed to write Node harness: {error}"))
-        .and_then(|()| {
-            let output = std::process::Command::new("node")
-                .arg(&harness_path)
-                .output()
-                .map_err(|error| {
-                    format!(
-                        "rendered_output: failed to invoke Node for HTML-Wasm output: {error}. \
-                         Ensure 'node' is on PATH to use rendered-output assertions."
-                    )
-                })?;
+fn execute_wasm_page_in_node(
+    index: &BuiltArtifactIndex<'_>,
+) -> Result<RenderedOutput, RenderHarnessError> {
+    let page_js = required_text_artifact(index, "page.js", ArtifactKind::Js)?;
+    let page_wasm = required_wasm_artifact(index, "page.wasm")?;
 
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(format!(
-                    "rendered_output: HTML-Wasm Node harness failed:\n{stderr}"
-                ));
-            }
-
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            parse_harness_output(stdout.trim())
-        });
-
-    let _ = std::fs::remove_file(&harness_path);
-    result
+    with_harness_workspace(|workspace| {
+        workspace.write("page.js", page_js)?;
+        workspace.write("page.wasm", page_wasm)?;
+        run_wasm_harness_in(workspace.path())
+    })
 }
 
+/// Writes and runs the HTML-Wasm harness inside an already-populated directory.
+///
+/// The harness resolves `page.js` and `page.wasm` through `__dirname`, so no path ever crosses a
+/// text boundary and a non-UTF-8 workspace path cannot be lossily rewritten.
+fn run_wasm_harness_in(directory: &Path) -> Result<RenderedOutput, RenderHarnessError> {
+    let harness_path = directory.join("harness.js");
+    std::fs::write(&harness_path, NODE_WASM_HARNESS).map_err(|error| {
+        RenderHarnessError::workspace(format!(
+            "rendered_output: failed to write the HTML-Wasm Node harness '{}': {error}",
+            harness_path.display()
+        ))
+    })?;
+
+    let run = run_node_script(&harness_path, directory)?;
+    parse_harness_output(run.stdout.trim())
+}
+
+/// Runs the HTML-Wasm harness against a caller-supplied directory of page artifacts.
+///
+/// Self-tests use this to drive the harness with a hand-written `page.js` instead of a full build.
 #[cfg(test)]
-pub(crate) fn execute_wasm_harness_for_test(temp_dir: &Path) -> Result<RenderedOutput, String> {
-    execute_node_wasm_harness(temp_dir)
+pub(crate) fn execute_wasm_harness_for_test(
+    directory: &Path,
+) -> Result<RenderedOutput, RenderHarnessError> {
+    run_wasm_harness_in(directory)
+}
+
+/// Test-only view of the artifact-requirement boundary.
+///
+/// The harness reaches this boundary only through a full build, where the universal baselines
+/// reject a missing or mis-kinded `index.html` first, so the boundary itself is exercised here
+/// directly. Index construction is test setup: an ambiguous set has its own owner and cannot be
+/// what this seam reports.
+#[cfg(test)]
+pub(crate) fn required_text_artifact_for_test(
+    build_result: &crate::build_system::build::BuildResult,
+    relative_path: &str,
+    kind: ArtifactKind,
+) -> Result<(), RenderHarnessError> {
+    let index = BuiltArtifactIndex::build(build_result)
+        .expect("the artifact-boundary seam needs an unambiguous artifact set");
+
+    required_text_artifact(&index, relative_path, kind).map(|_| ())
+}
+
+fn required_artifact<'index>(
+    index: &BuiltArtifactIndex<'index>,
+    relative_path: &str,
+) -> Result<&'index OutputFile, RenderHarnessError> {
+    index.get(relative_path).ok_or_else(|| {
+        RenderHarnessError::artifact(format!(
+            "rendered_output assertion requires '{relative_path}', but it was not produced."
+        ))
+    })
+}
+
+fn required_text_artifact<'index>(
+    index: &BuiltArtifactIndex<'index>,
+    relative_path: &str,
+    kind: ArtifactKind,
+) -> Result<&'index str, RenderHarnessError> {
+    let output = required_artifact(index, relative_path)?;
+
+    super::artifacts::output_text_content(output, kind).ok_or_else(|| {
+        RenderHarnessError::artifact(format!(
+            "rendered_output assertion requires '{relative_path}' to be a {} artifact.",
+            super::artifacts::artifact_kind_name(kind)
+        ))
+    })
+}
+
+fn required_wasm_artifact<'index>(
+    index: &BuiltArtifactIndex<'index>,
+    relative_path: &str,
+) -> Result<&'index [u8], RenderHarnessError> {
+    let output = required_artifact(index, relative_path)?;
+
+    super::artifacts::output_wasm_bytes(output).ok_or_else(|| {
+        RenderHarnessError::artifact(format!(
+            "rendered_output assertion requires '{relative_path}' to be a wasm artifact."
+        ))
+    })
 }
 
 /// Validates rendered fragments independently of harness execution.
@@ -183,9 +157,18 @@ pub(super) fn validate_rendered_output_fragments(
         let normalized_expected = normalize_line_endings(expected);
         let normalized_actual = normalize_line_endings(rendered_output);
         if normalized_expected != normalized_actual {
+            // Both sides are reported escaped and post-normalization, and the first differing
+            // byte is named. Printing the raw text makes a whitespace-only mismatch — an extra
+            // captured newline, a trailing space — look like two identical lines, which is a
+            // failure report that cannot be acted on. Reporting the authored text instead of the
+            // normalized text would also describe a difference the comparison never made.
+            let difference_offset =
+                first_difference_offset(&normalized_expected, &normalized_actual);
             return Some((
                 format!(
-                    "Rendered output did not exactly match.\nExpected output:\n{expected}\nActual output:\n{rendered_output}"
+                    "Rendered output did not exactly match; first difference at byte \
+                     {difference_offset}.\nExpected output:\n{normalized_expected:?}\nActual \
+                     output:\n{normalized_actual:?}"
                 ),
                 FailureKind::RenderedOutputExactMismatch,
             ));
@@ -243,6 +226,19 @@ pub(super) fn validate_rendered_output_fragments(
 
 fn normalize_line_endings(text: &str) -> String {
     text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+/// Byte offset of the first difference between two already-normalized outputs.
+///
+/// When one side is a prefix of the other the offset is the shorter length, which is where the
+/// extra bytes begin. Callers use this only after establishing the two differ.
+fn first_difference_offset(expected: &str, actual: &str) -> usize {
+    expected
+        .as_bytes()
+        .iter()
+        .zip(actual.as_bytes())
+        .position(|(expected_byte, actual_byte)| expected_byte != actual_byte)
+        .unwrap_or_else(|| expected.len().min(actual.len()))
 }
 
 #[derive(Debug)]
@@ -312,82 +308,27 @@ impl RenderedOutput {
 /// The harness stubs `document.getElementById` to capture `insertAdjacentHTML` calls, intercepts
 /// `console.log` and emits a JSON summary after one microtask tick so runtime assertions can
 /// observe batched reactive flushes queued by the page bundle.
-fn execute_html_in_node(html: &str) -> Result<RenderedOutput, String> {
-    let scripts = extract_script_blocks(html);
+fn execute_html_in_node(
+    index: &BuiltArtifactIndex<'_>,
+) -> Result<RenderedOutput, RenderHarnessError> {
+    let html = required_text_artifact(index, "index.html", ArtifactKind::Html)?;
+
+    let scripts = extract_executable_scripts(html)?;
     if scripts.is_empty() {
-        return Err(
-            "rendered_output: no <script> blocks found in 'index.html'. \
+        return Err(RenderHarnessError::script_shape(
+            "rendered_output: no executable <script> blocks found in 'index.html'. \
              Ensure the fixture produces runtime output."
-                .to_string(),
-        );
+                .to_owned(),
+        ));
     }
 
     let harness = build_node_harness(&scripts);
 
-    let unique = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or(0);
-    let sequence = RENDER_HARNESS_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let temp_path = std::env::temp_dir().join(format!(
-        "moth_render_harness_{}_{}_{}.js",
-        std::process::id(),
-        unique,
-        sequence
-    ));
-
-    std::fs::write(&temp_path, &harness)
-        .map_err(|error| format!("rendered_output: failed to write node harness: {error}"))?;
-
-    let output = std::process::Command::new("node")
-        .arg(&temp_path)
-        .output()
-        .map_err(|error| {
-            let _ = remove_temp_harness_file_with_retry(&temp_path);
-            format!(
-                "rendered_output: failed to invoke node: {error}. \
-                 Ensure 'node' is on PATH to use rendered-output assertions."
-            )
-        })?;
-
-    let _ = remove_temp_harness_file_with_retry(&temp_path);
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!(
-            "rendered_output: node harness execution failed:\n{stderr}"
-        ));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    parse_harness_output(stdout.trim())
-}
-
-/// Best-effort cleanup for temporary Node harness files.
-///
-/// WHAT: retries removal briefly to tolerate Windows file-sharing race windows after process exit.
-/// WHY: cleanup races must not surface as semantic rendered-output mismatches.
-fn remove_temp_harness_file_with_retry(path: &Path) -> Result<(), std::io::Error> {
-    const MAX_ATTEMPTS: usize = 6;
-    const BASE_RETRY_DELAY_MS: u64 = 8;
-
-    let mut last_error = None;
-    for attempt in 0..MAX_ATTEMPTS {
-        match std::fs::remove_file(path) {
-            Ok(()) => return Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(error) => {
-                last_error = Some(error);
-                if attempt + 1 < MAX_ATTEMPTS {
-                    std::thread::sleep(Duration::from_millis(
-                        BASE_RETRY_DELAY_MS * (attempt as u64 + 1),
-                    ));
-                }
-            }
-        }
-    }
-
-    Err(last_error.unwrap_or_else(|| std::io::Error::other("failed to remove file")))
+    with_harness_workspace(|workspace| {
+        let harness_path = workspace.write("harness.js", &harness)?;
+        let run = run_node_script(&harness_path, workspace.path())?;
+        parse_harness_output(run.stdout.trim())
+    })
 }
 
 fn build_node_harness(scripts: &[String]) -> String {
@@ -423,97 +364,72 @@ Promise.resolve().then(() => {
     format!("{prefix}{}\n{suffix}", scripts.join("\n"))
 }
 
-fn build_node_wasm_harness(temp_dir_literal: &str) -> String {
-    format!(
-        r#"const fs = require("fs");
+/// HTML-Wasm harness source.
+///
+/// It resolves its artifacts through `__dirname` rather than an interpolated path, so the
+/// workspace location never has to survive a UTF-8 text boundary.
+const NODE_WASM_HARNESS: &str = r#"const fs = require("fs");
 const path = require("path");
-const __moth_wasm_dir = {temp_dir_literal};
+const __moth_wasm_dir = __dirname;
 const __moth_events = [];
 const __moth_slot_by_id = new Map();
 
-console.log = (...args) => __moth_events.push({{ type: 'console', text: args.map(String).join(' ') }});
-function __moth_get_slot(id) {{
-    if (!__moth_slot_by_id.has(id)) {{
-        const slot = {{
+console.log = (...args) => __moth_events.push({ type: 'console', text: args.map(String).join(' ') });
+function __moth_get_slot(id) {
+    if (!__moth_slot_by_id.has(id)) {
+        const slot = {
             id,
             innerHTML: "",
             textContent: "",
-            insertAdjacentHTML: (_, html) => {{
+            insertAdjacentHTML: (_, html) => {
                 const text = String(html);
                 slot.innerHTML += text;
-                __moth_events.push({{ type: 'fragment_insert', id: String(id), html: text }});
-            }}
-        }};
+                __moth_events.push({ type: 'fragment_insert', id: String(id), html: text });
+            }
+        };
         __moth_slot_by_id.set(id, slot);
-    }}
+    }
     return __moth_slot_by_id.get(id);
-}}
+}
 
-globalThis.document = {{
+globalThis.document = {
     getElementById: __moth_get_slot,
-    createTextNode: (text) => ({{ textContent: String(text) }})
-}};
-globalThis.fetch = async (url) => {{
+    createTextNode: (text) => ({ textContent: String(text) })
+};
+globalThis.fetch = async (url) => {
     const relative_path = String(url).replace(/^\.\//, "");
     const bytes = fs.readFileSync(path.join(__moth_wasm_dir, relative_path));
-    return {{
+    return {
         arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
-    }};
-}};
+    };
+};
 
-(async () => {{
-    try {{
+(async () => {
+    try {
         const page_js = fs.readFileSync(path.join(__moth_wasm_dir, "page.js"), "utf8");
         const page_completion = (0, eval)(page_js);
         await page_completion;
         await Promise.resolve();
-        process.stdout.write(JSON.stringify({{ events: __moth_events }}) + '\n');
-    }} catch (error) {{
+        process.stdout.write(JSON.stringify({ events: __moth_events }) + '\n');
+    } catch (error) {
         console.error(error);
         process.exitCode = 1;
-    }}
-}})();
-"#
-    )
-}
-
-/// Extracts the text content between `<script>` and `</script>` tag pairs.
-pub(crate) fn extract_script_blocks(html: &str) -> Vec<String> {
-    let mut blocks = Vec::new();
-    let mut search_from = 0;
-
-    while let Some(open_end) = find_script_open_end(html, search_from) {
-        let close_tag = "</script>";
-        let Some(close_start) = html[open_end..].find(close_tag) else {
-            break;
-        };
-        let block = &html[open_end..open_end + close_start];
-        if !block.trim().is_empty() {
-            blocks.push(block.to_owned());
-        }
-        search_from = open_end + close_start + close_tag.len();
     }
+})();
+"#;
 
-    blocks
-}
-
-/// Finds the end position of a `<script>` opening tag starting from `from`.
-fn find_script_open_end(html: &str, from: usize) -> Option<usize> {
-    let slice = &html[from..];
-    let tag_start = slice.find("<script")?;
-    let tag_slice = &slice[tag_start..];
-    let close_bracket = tag_slice.find('>')?;
-    Some(from + tag_start + close_bracket + 1)
-}
-
-pub(crate) fn parse_harness_output(json: &str) -> Result<RenderedOutput, String> {
-    let value: serde_json::Value = serde_json::from_str(json).map_err(|error| {
-        format!("rendered_output: failed to parse node harness JSON output: {error}\nRaw: {json}")
-    })?;
-
+pub(crate) fn parse_harness_output(json: &str) -> Result<RenderedOutput, RenderHarnessError> {
     let invalid_harness_output = |reason: String| {
-        format!("rendered_output: invalid node harness output: {reason}\nRaw: {json}")
+        RenderHarnessError::output_protocol(format!(
+            "rendered_output: invalid node harness output: {reason}\nRaw: {json}"
+        ))
     };
+
+    let value: serde_json::Value = serde_json::from_str(json).map_err(|error| {
+        RenderHarnessError::output_protocol(format!(
+            "rendered_output: failed to parse node harness JSON output: {error}\nRaw: {json}"
+        ))
+    })?;
 
     let Some(object) = value.as_object() else {
         return Err(invalid_harness_output(

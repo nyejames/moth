@@ -4,11 +4,71 @@ use crate::bench_types::{
     BenchmarkComparison, BenchmarkMeasurementIdentity, BenchmarkSystem, GitRevision, SuiteStats,
     calculate_group_stats,
 };
+use crate::test_fs::assert_path_missing;
 use std::fs;
 use std::sync::Mutex;
 use tempfile::tempdir;
 
 static THREAD_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+/// Panic-safe scoped environment variable guard.
+///
+/// WHAT: saves the current value of an env var, sets a new one (or removes it),
+///   and restores the original on drop — even during unwinding.
+/// WHY: direct `set_var`/`remove_var` without a guard leaves the environment
+///   modified if an assertion panics, poisoning the test mutex and breaking
+///   every subsequent test that depends on the same variable.
+struct ScopedEnvVar {
+    key: &'static str,
+    saved: Option<std::ffi::OsString>,
+    /// Once consumed by `restore`, the guard will not restore again on drop.
+    restored: bool,
+}
+
+impl ScopedEnvVar {
+    fn set(key: &'static str, value: &str) -> Self {
+        let saved = std::env::var_os(key);
+        // SAFETY: no other thread accesses this env var while we hold THREAD_ENV_LOCK.
+        unsafe {
+            std::env::set_var(key, value);
+        }
+        Self {
+            key,
+            saved,
+            restored: false,
+        }
+    }
+
+    fn remove(key: &'static str) -> Self {
+        let saved = std::env::var_os(key);
+        // SAFETY: no other thread accesses this env var while we hold THREAD_ENV_LOCK.
+        unsafe {
+            std::env::remove_var(key);
+        }
+        Self {
+            key,
+            saved,
+            restored: false,
+        }
+    }
+}
+
+impl Drop for ScopedEnvVar {
+    fn drop(&mut self) {
+        if self.restored {
+            return;
+        }
+        // SAFETY: no other thread accesses this env var while we hold THREAD_ENV_LOCK.
+        match &self.saved {
+            Some(value) => unsafe {
+                std::env::set_var(self.key, value);
+            },
+            None => unsafe {
+                std::env::remove_var(self.key);
+            },
+        }
+    }
+}
 
 fn cli_runner() -> BenchmarkRunner {
     BenchmarkRunner::Cli {
@@ -271,7 +331,7 @@ fn append_rejects_dirty_record() {
     let error =
         append_local_run(&path, &record).expect_err("a dirty record must not enter normal history");
     assert!(error.contains("clean and committed"));
-    assert!(!path.exists());
+    assert_path_missing(&path);
 }
 
 #[test]
@@ -284,7 +344,7 @@ fn append_rejects_unknown_revision_record() {
     let error = append_local_run(&path, &record)
         .expect_err("an unknown-revision record must not enter normal history");
     assert!(error.contains("clean and committed"));
-    assert!(!path.exists());
+    assert_path_missing(&path);
 }
 
 #[test]
@@ -371,7 +431,7 @@ fn current_append_rejects_legacy_or_incomplete_records() {
 
     let error = append_local_run(&path, &record).expect_err("protocol zero must not append");
     assert!(error.contains("legacy protocol"));
-    assert!(!path.exists());
+    assert_path_missing(&path);
 }
 
 #[test]
@@ -384,7 +444,7 @@ fn current_append_rejects_a_different_timing_schema() {
     let error = append_local_run(&path, &record)
         .expect_err("new records must use the current timing schema");
     assert!(error.contains("incompatible current timing schema"));
-    assert!(!path.exists());
+    assert_path_missing(&path);
 }
 
 #[test]
@@ -397,7 +457,7 @@ fn current_history_rejects_obsolete_timing_metric_names() {
     let error = append_local_run(&path, &record)
         .expect_err("current history must reject provisional timing names");
     assert!(error.contains("unknown timing schema metric 'ast_ms'"));
-    assert!(!path.exists());
+    assert_path_missing(&path);
 
     let invalid_line = serde_json::to_string(&record).expect("record should serialize");
     fs::write(&path, invalid_line).expect("invalid history fixture should be written");
@@ -419,7 +479,7 @@ fn current_history_rejects_empty_timing_evidence_on_append_and_read() {
     let error = append_local_run(&path, &record)
         .expect_err("current history must reject empty timing evidence");
     assert!(error.contains("no metrics"), "unexpected error: {error}");
-    assert!(!path.exists());
+    assert_path_missing(&path);
 
     let invalid_line = serde_json::to_string(&record).expect("record should serialize");
     fs::write(&path, invalid_line).expect("invalid history fixture should be written");
@@ -447,7 +507,7 @@ fn current_history_rejects_missing_command_total_on_append_and_read() {
         error.contains("command.check.total"),
         "unexpected error: {error}"
     );
-    assert!(!path.exists());
+    assert_path_missing(&path);
 
     let invalid_line = serde_json::to_string(&record).expect("record should serialize");
     fs::write(&path, invalid_line).expect("invalid history fixture should be written");
@@ -471,10 +531,8 @@ fn assert_non_finite_append_rejected(
     let error = append_local_run(&path, &record)
         .expect_err("non-finite current history values must not append");
     assert!(error.contains("finite"), "{field}: {error}");
-    assert!(
-        !path.exists(),
-        "{field}: malformed history must not create a file"
-    );
+    // Absence must be `NotFound`, not a metadata failure that merely looks absent.
+    assert_path_missing(&path);
 }
 
 #[test]
@@ -560,25 +618,18 @@ fn effective_thread_count_distinguishes_unset_and_fixed() {
     let _guard = THREAD_ENV_LOCK
         .lock()
         .expect("environment lock should work");
-    let saved = std::env::var_os("RAYON_NUM_THREADS");
 
-    unsafe {
-        std::env::remove_var("RAYON_NUM_THREADS");
+    // The scoped guards restore the original env value on drop, including
+    // during unwinding, so a panicking assertion cannot leave the environment
+    // modified or poison the mutex for subsequent tests.
+    {
+        let _env = ScopedEnvVar::remove("RAYON_NUM_THREADS");
+        assert_eq!(effective_thread_count(), Ok(None));
     }
-    assert_eq!(effective_thread_count(), Ok(None));
 
-    unsafe {
-        std::env::set_var("RAYON_NUM_THREADS", "4");
-    }
-    assert_eq!(effective_thread_count(), Ok(Some(4)));
-
-    match saved {
-        Some(value) => unsafe {
-            std::env::set_var("RAYON_NUM_THREADS", value);
-        },
-        None => unsafe {
-            std::env::remove_var("RAYON_NUM_THREADS");
-        },
+    {
+        let _env = ScopedEnvVar::set("RAYON_NUM_THREADS", "4");
+        assert_eq!(effective_thread_count(), Ok(Some(4)));
     }
 }
 

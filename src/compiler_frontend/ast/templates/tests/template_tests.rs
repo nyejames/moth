@@ -20,29 +20,16 @@ use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::headers::parse_file_headers::TopLevelConstFragment;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tests::ast_fixture_support::test_source_location;
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
-use crate::compiler_frontend::tokenizer::tokens::{CharPosition, SourceLocation};
+use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::projects::settings::{DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS, IMPLICIT_START_FUNC_NAME};
 use rustc_hash::FxHashMap;
 use std::cell::RefCell;
 use std::rc::Rc;
-
-fn test_location(line: i32) -> SourceLocation {
-    SourceLocation {
-        scope: InternedPath::new(),
-        start_pos: CharPosition {
-            line_number: line,
-            char_column: 0,
-        },
-        end_pos: CharPosition {
-            line_number: line,
-            char_column: 120,
-        },
-    }
-}
 
 fn start_function_node(
     entry_dir: &InternedPath,
@@ -199,7 +186,7 @@ fn formatted_doc_template_with_direct_tir(
     text: &str,
     string_table: &mut StringTable,
 ) -> (Template, Rc<RefCell<TemplateIrStore>>) {
-    let location = test_location(2);
+    let location = test_source_location(2);
     let text_id = string_table.intern(text);
     let byte_len = text.len();
 
@@ -282,10 +269,10 @@ fn doc_fragment_folding_reads_directly_constructed_formatted_tir_root() {
         &entry_dir,
         vec![push_start_runtime_fragment_node(
             doc_template,
-            test_location(2),
+            test_source_location(2),
             entry_scope,
         )],
-        test_location(1),
+        test_source_location(1),
         &mut string_table,
     )];
 
@@ -338,7 +325,7 @@ fn collects_const_top_level_fragments_from_tir_result_record() {
     let fragments = vec![TopLevelConstFragment {
         runtime_insertion_index: 0,
         header_path: path,
-        location: test_location(2),
+        location: test_source_location(2),
     }];
 
     let collected =
@@ -361,7 +348,7 @@ fn collects_const_top_level_fragments_from_folded_value() {
     let fragments = vec![TopLevelConstFragment {
         runtime_insertion_index: 2,
         header_path: path,
-        location: test_location(4),
+        location: test_source_location(4),
     }];
 
     let collected =
@@ -395,12 +382,12 @@ fn collects_mixed_const_top_level_fragments_in_source_order() {
         TopLevelConstFragment {
             runtime_insertion_index: 1,
             header_path: first_path,
-            location: test_location(2),
+            location: test_source_location(2),
         },
         TopLevelConstFragment {
             runtime_insertion_index: 3,
             header_path: second_path,
-            location: test_location(5),
+            location: test_source_location(5),
         },
     ];
 
@@ -423,7 +410,7 @@ fn missing_const_top_level_fragment_result_returns_compiler_error() {
     let fragments = vec![TopLevelConstFragment {
         runtime_insertion_index: 0,
         header_path: path,
-        location: test_location(2),
+        location: test_source_location(2),
     }];
 
     let error = collect_const_top_level_fragments(&fragments, &results)

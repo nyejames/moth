@@ -22,24 +22,24 @@ use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    function_node, make_test_variable, node, test_location,
+    function_node, make_test_variable, node, test_source_location,
 };
 
 use crate::compiler_frontend::tests::type_id_fixture_support::{
-    error_return_slot, fresh_success_returns, multi_bind_target, param_with_type_id,
-    reference_expr, runtime_expr, runtime_handled_function_call_item, runtime_operand_item,
+    error_return_slot, fresh_success_returns, inferred_type_reference_expr, multi_bind_target,
+    param_with_type_id, runtime_expr, runtime_handled_function_call_item, runtime_operand_item,
     runtime_operator_item, success_return_slot,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 
-use crate::compiler_frontend::hir::hir_builder::{build_ast, lower_ast};
+use crate::compiler_frontend::hir::hir_builder::{build_ast_with_registered_types, lower_ast};
 
 #[test]
 fn statement_result_propagation_with_unit_success_lowers_to_explicit_error_edge() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
     let can_fail_name = super::symbol("can_fail", &mut string_table);
-    let location = test_location(1);
+    let location = test_source_location(1);
 
     let can_fail_function = function_node(
         can_fail_name.clone(),
@@ -78,7 +78,7 @@ fn statement_result_propagation_with_unit_success_lowers_to_explicit_error_edge(
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast(vec![can_fail_function, start_function], entry_path),
+        build_ast_with_registered_types(vec![can_fail_function, start_function], entry_path),
         &mut string_table,
     )
     .expect("statement propagation lowering should succeed");
@@ -120,7 +120,7 @@ fn direct_return_result_propagation_lowers_to_explicit_success_and_error_edges()
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
     let can_fail_name = super::symbol("can_fail", &mut string_table);
     let forward_name = super::symbol("forward", &mut string_table);
-    let location = test_location(3);
+    let location = test_source_location(3);
 
     let can_fail_function = function_node(
         can_fail_name.clone(),
@@ -179,7 +179,7 @@ fn direct_return_result_propagation_lowers_to_explicit_success_and_error_edges()
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast(
+        build_ast_with_registered_types(
             vec![can_fail_function, forward_function, start_function],
             entry_path,
         ),
@@ -253,7 +253,7 @@ fn direct_return_result_propagation_allows_alias_success_return() {
     let source_input = super::symbol("input", &mut string_table);
     let forward_name = super::symbol("forward", &mut string_table);
     let forward_input = super::symbol("input", &mut string_table);
-    let location = test_location(4);
+    let location = test_source_location(4);
 
     let source_function = function_node(
         source_name.clone(),
@@ -270,7 +270,7 @@ fn direct_return_result_propagation_allows_alias_success_return() {
             ],
         },
         vec![node(
-            NodeKind::Return(vec![reference_expr(
+            NodeKind::Return(vec![inferred_type_reference_expr(
                 source_input,
                 builtin_type_ids::STRING,
                 location.clone(),
@@ -285,7 +285,7 @@ fn direct_return_result_propagation_allows_alias_success_return() {
     let propagated_call = Expression::handled_fallible_function_call_with_typed_arguments(
         source_name,
         vec![CallArgument::positional(
-            reference_expr(
+            inferred_type_reference_expr(
                 forward_input.clone(),
                 builtin_type_ids::STRING,
                 location.clone(),
@@ -332,7 +332,7 @@ fn direct_return_result_propagation_allows_alias_success_return() {
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast(
+        build_ast_with_registered_types(
             vec![source_function, forward_function, start_function],
             entry_path,
         ),
@@ -384,7 +384,7 @@ fn declaration_result_propagation_assigns_unwrapped_success_on_success_edge() {
     let can_fail_name = super::symbol("can_fail", &mut string_table);
     let forward_name = super::symbol("forward", &mut string_table);
     let value_name = forward_name.join_str("value", &mut string_table);
-    let location = test_location(4);
+    let location = test_source_location(4);
 
     let can_fail_function = function_node(
         can_fail_name.clone(),
@@ -434,7 +434,7 @@ fn declaration_result_propagation_assigns_unwrapped_success_on_success_edge() {
                 location.clone(),
             ),
             node(
-                NodeKind::Return(vec![reference_expr(
+                NodeKind::Return(vec![inferred_type_reference_expr(
                     value_name,
                     builtin_type_ids::STRING,
                     location.clone(),
@@ -457,7 +457,7 @@ fn declaration_result_propagation_assigns_unwrapped_success_on_success_edge() {
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast(
+        build_ast_with_registered_types(
             vec![can_fail_function, forward_function, start_function],
             entry_path,
         ),
@@ -528,7 +528,7 @@ fn multi_bind_result_propagation_projects_tuple_slots_after_success_edge() {
     let forward_name = super::symbol("forward", &mut string_table);
     let first_id = forward_name.join_str("first", &mut string_table);
     let count_id = forward_name.join_str("count", &mut string_table);
-    let location = test_location(6);
+    let location = test_source_location(6);
 
     let pair_function = function_node(
         pair_name.clone(),
@@ -599,13 +599,13 @@ fn multi_bind_result_propagation_projects_tuple_slots_after_success_edge() {
             ),
             node(
                 NodeKind::Return(vec![
-                    reference_expr(
+                    inferred_type_reference_expr(
                         first_id,
                         builtin_type_ids::STRING,
                         location.clone(),
                         ValueMode::ImmutableReference,
                     ),
-                    reference_expr(
+                    inferred_type_reference_expr(
                         count_id,
                         builtin_type_ids::INT,
                         location.clone(),
@@ -629,7 +629,7 @@ fn multi_bind_result_propagation_projects_tuple_slots_after_success_edge() {
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast(
+        build_ast_with_registered_types(
             vec![pair_function, forward_function, start_function],
             entry_path,
         ),
@@ -707,7 +707,7 @@ fn call_argument_result_propagation_lowers_before_outer_call() {
     let consume_input = consume_name.join_str("input", &mut string_table);
     let forward_name = super::symbol("forward", &mut string_table);
     let value_name = forward_name.join_str("value", &mut string_table);
-    let location = test_location(8);
+    let location = test_source_location(8);
 
     let can_fail_function = function_node(
         can_fail_name.clone(),
@@ -741,7 +741,7 @@ fn call_argument_result_propagation_lowers_before_outer_call() {
             returns: vec![success_return_slot(builtin_type_ids::STRING)],
         },
         vec![node(
-            NodeKind::Return(vec![reference_expr(
+            NodeKind::Return(vec![inferred_type_reference_expr(
                 consume_input,
                 builtin_type_ids::STRING,
                 location.clone(),
@@ -788,7 +788,7 @@ fn call_argument_result_propagation_lowers_before_outer_call() {
                 location.clone(),
             ),
             node(
-                NodeKind::Return(vec![reference_expr(
+                NodeKind::Return(vec![inferred_type_reference_expr(
                     value_name,
                     builtin_type_ids::STRING,
                     location.clone(),
@@ -811,7 +811,7 @@ fn call_argument_result_propagation_lowers_before_outer_call() {
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast(
+        build_ast_with_registered_types(
             vec![
                 can_fail_function,
                 consume_function,
@@ -890,7 +890,7 @@ fn runtime_binary_result_propagation_lowers_before_operator() {
     let can_fail_name = super::symbol("can_fail", &mut string_table);
     let forward_name = super::symbol("forward", &mut string_table);
     let value_name = forward_name.join_str("value", &mut string_table);
-    let location = test_location(9);
+    let location = test_source_location(9);
 
     let can_fail_function = function_node(
         can_fail_name.clone(),
@@ -950,7 +950,7 @@ fn runtime_binary_result_propagation_lowers_before_operator() {
                 location.clone(),
             ),
             node(
-                NodeKind::Return(vec![reference_expr(
+                NodeKind::Return(vec![inferred_type_reference_expr(
                     value_name,
                     builtin_type_ids::INT,
                     location.clone(),
@@ -973,7 +973,7 @@ fn runtime_binary_result_propagation_lowers_before_operator() {
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast(
+        build_ast_with_registered_types(
             vec![can_fail_function, forward_function, start_function],
             entry_path,
         ),
@@ -1030,7 +1030,7 @@ fn return_bang_lowers_to_explicit_error_terminator() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
     let can_fail_name = super::symbol("can_fail", &mut string_table);
-    let location = test_location(5);
+    let location = test_source_location(5);
 
     let can_fail_function = function_node(
         can_fail_name.clone(),
@@ -1060,7 +1060,7 @@ fn return_bang_lowers_to_explicit_error_terminator() {
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast(vec![can_fail_function, start_function], entry_path),
+        build_ast_with_registered_types(vec![can_fail_function, start_function], entry_path),
         &mut string_table,
     )
     .expect("return! lowering should succeed");
@@ -1087,7 +1087,7 @@ fn fallible_success_return_lowers_to_explicit_success_terminator() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
     let can_succeed_name = super::symbol("can_succeed", &mut string_table);
-    let location = test_location(7);
+    let location = test_source_location(7);
 
     let can_succeed_function = function_node(
         can_succeed_name.clone(),
@@ -1120,7 +1120,7 @@ fn fallible_success_return_lowers_to_explicit_success_terminator() {
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast(vec![can_succeed_function, start_function], entry_path),
+        build_ast_with_registered_types(vec![can_succeed_function, start_function], entry_path),
         &mut string_table,
     )
     .expect("fallible success return lowering should succeed");
@@ -1150,7 +1150,7 @@ fn statement_catch_handler_lowering_builds_explicit_result_branching() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
     let can_fail_name = super::symbol("can_fail", &mut string_table);
-    let location = test_location(10);
+    let location = test_source_location(10);
     let error_binding = start_name.join_str("err", &mut string_table);
 
     let can_fail_function = function_node(
@@ -1200,7 +1200,7 @@ fn statement_catch_handler_lowering_builds_explicit_result_branching() {
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast(vec![can_fail_function, start_function], entry_path),
+        build_ast_with_registered_types(vec![can_fail_function, start_function], entry_path),
         &mut string_table,
     )
     .expect("catch-handler statement lowering should succeed");
@@ -1239,7 +1239,7 @@ fn multi_bind_lowering_projects_tuple_slots_from_single_rhs_call() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
     let pair_name = super::symbol("pair", &mut string_table);
-    let location = test_location(20);
+    let location = test_source_location(20);
 
     let pair_function = function_node(
         pair_name.clone(),
@@ -1301,7 +1301,7 @@ fn multi_bind_lowering_projects_tuple_slots_from_single_rhs_call() {
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast(vec![pair_function, start_function], entry_path),
+        build_ast_with_registered_types(vec![pair_function, start_function], entry_path),
         &mut string_table,
     )
     .expect("multi-bind lowering should succeed");

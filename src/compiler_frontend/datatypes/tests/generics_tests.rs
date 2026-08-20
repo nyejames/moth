@@ -20,10 +20,6 @@ use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::traits::ids::TraitId;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-fn location() -> SourceLocation {
-    SourceLocation::default()
-}
-
 fn register_environment_parameter(
     type_environment: &mut TypeEnvironment,
     string_table: &mut StringTable,
@@ -42,7 +38,7 @@ fn register_single_parameter_list(
         parameters: vec![GenericParameter {
             id: TypeParameterId(0),
             name: string_table.intern(name),
-            location: location(),
+            location: SourceLocation::default(),
             trait_bounds: Vec::new(),
         }],
     };
@@ -87,19 +83,19 @@ fn generic_scope_accepts_pascal_case_and_single_uppercase_names() {
             GenericParameter {
                 id: TypeParameterId(0),
                 name: item_name,
-                location: location(),
+                location: SourceLocation::default(),
                 trait_bounds: Vec::new(),
             },
             GenericParameter {
                 id: TypeParameterId(1),
                 name: t_name,
-                location: location(),
+                location: SourceLocation::default(),
                 trait_bounds: Vec::new(),
             },
             GenericParameter {
                 id: TypeParameterId(2),
                 name: error_kind_name,
-                location: location(),
+                location: SourceLocation::default(),
                 trait_bounds: Vec::new(),
             },
         ],
@@ -202,13 +198,13 @@ fn type_bindings_collect_arguments_in_parameter_order() {
             GenericParameter {
                 id: TypeParameterId(0),
                 name: string_table.intern("First"),
-                location: location(),
+                location: SourceLocation::default(),
                 trait_bounds: Vec::new(),
             },
             GenericParameter {
                 id: TypeParameterId(1),
                 name: string_table.intern("Second"),
-                location: location(),
+                location: SourceLocation::default(),
                 trait_bounds: Vec::new(),
             },
         ],
@@ -245,7 +241,7 @@ fn type_environment_allocates_distinct_canonical_ids_for_local_parameter_ids() {
         parameters: vec![GenericParameter {
             id: TypeParameterId(0),
             name: first_name,
-            location: location(),
+            location: SourceLocation::default(),
             trait_bounds: Vec::new(),
         }],
     };
@@ -253,7 +249,7 @@ fn type_environment_allocates_distinct_canonical_ids_for_local_parameter_ids() {
         parameters: vec![GenericParameter {
             id: TypeParameterId(0),
             name: second_name,
-            location: location(),
+            location: SourceLocation::default(),
             trait_bounds: Vec::new(),
         }],
     };
@@ -585,13 +581,13 @@ fn trait_bounds_lookup_succeeds_after_registration() {
             GenericParameter {
                 id: TypeParameterId(0),
                 name: string_table.intern("T"),
-                location: location(),
+                location: SourceLocation::default(),
                 trait_bounds: Vec::new(),
             },
             GenericParameter {
                 id: TypeParameterId(1),
                 name: string_table.intern("U"),
-                location: location(),
+                location: SourceLocation::default(),
                 trait_bounds: Vec::new(),
             },
         ],
@@ -625,7 +621,7 @@ fn trait_bounds_lookup_succeeds_after_update() {
         parameters: vec![GenericParameter {
             id: TypeParameterId(0),
             name: string_table.intern("T"),
-            location: location(),
+            location: SourceLocation::default(),
             trait_bounds: Vec::new(),
         }],
     };
@@ -831,13 +827,13 @@ fn register_two_parameter_list(
             GenericParameter {
                 id: TypeParameterId(0),
                 name: string_table.intern(first_name),
-                location: location(),
+                location: SourceLocation::default(),
                 trait_bounds: Vec::new(),
             },
             GenericParameter {
                 id: TypeParameterId(1),
                 name: string_table.intern(second_name),
-                location: location(),
+                location: SourceLocation::default(),
                 trait_bounds: Vec::new(),
             },
         ],

@@ -35,8 +35,6 @@ use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use std::collections::HashSet;
 use std::path::Path;
 
-const DIAGNOSTIC_PAYLOAD_SOURCE: &str = include_str!("../diagnostic_payload/mod.rs");
-
 fn location(path: InternedPath) -> SourceLocation {
     SourceLocation::new(
         path,
@@ -196,14 +194,6 @@ fn every_diagnostic_descriptor_has_a_unique_category_code() {
             descriptor.code,
         );
     }
-}
-
-#[test]
-fn old_error_payload_has_been_removed_from_diagnostic_payloads() {
-    assert!(
-        !DIAGNOSTIC_PAYLOAD_SOURCE.contains(concat!("Legacy", "Error")),
-        "diagnostic payloads should no longer expose the old error variant",
-    );
 }
 
 fn expected_code_prefix(category: DiagnosticCategory) -> &'static str {

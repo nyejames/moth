@@ -1,7 +1,10 @@
--- White space after variable declarations should be ignored
--- But not ignore the final newline if there is one to break out of the expression
--- This has been a bug in the frontend
+-- Trailing whitespace after a top-level declaration is skipped, but the line
+-- break still ends the expression, so the next declaration is not folded into
+-- the previous one. A whitespace-only line between declarations is also
+-- skipped. Each declared value is named so a swallowed line break cannot pass.
                     
 normal_var_after_tabs = 123
 var_with_whitespace_after = 123     
 var_after_whitespace = normal_var_after_tabs
+
+[:white_space first=[normal_var_after_tabs] second=[var_with_whitespace_after] third=[var_after_whitespace]]

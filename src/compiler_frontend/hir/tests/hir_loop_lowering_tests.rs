@@ -10,11 +10,13 @@ use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tests::ast_fixture_support::{function_node, node, test_location};
+use crate::compiler_frontend::tests::ast_fixture_support::{
+    function_node, node, test_source_location,
+};
 
 use crate::compiler_frontend::value_mode::ValueMode;
 
-use crate::compiler_frontend::hir::hir_builder::{build_ast, lower_ast};
+use crate::compiler_frontend::hir::hir_builder::{build_ast_with_registered_types, lower_ast};
 
 #[test]
 fn lowers_while_to_header_body_exit_shape() {
@@ -23,17 +25,17 @@ fn lowers_while_to_header_body_exit_shape() {
 
     let while_node = node(
         NodeKind::WhileLoop(
-            Expression::bool(false, test_location(2), ValueMode::ImmutableOwned),
+            Expression::bool(false, test_source_location(2), ValueMode::ImmutableOwned),
             vec![node(
                 NodeKind::ExpressionStatement(Expression::int(
                     10,
-                    test_location(2),
+                    test_source_location(2),
                     ValueMode::ImmutableOwned,
                 )),
-                test_location(2),
+                test_source_location(2),
             )],
         ),
-        test_location(2),
+        test_source_location(2),
     );
 
     let start_fn = function_node(
@@ -43,10 +45,10 @@ fn lowers_while_to_header_body_exit_shape() {
             returns: vec![],
         },
         vec![while_node],
-        test_location(1),
+        test_source_location(1),
     );
 
-    let ast = build_ast(vec![start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
 
@@ -88,10 +90,10 @@ fn break_in_while_targets_loop_exit_block() {
 
     let while_node = node(
         NodeKind::WhileLoop(
-            Expression::bool(true, test_location(20), ValueMode::ImmutableOwned),
-            vec![node(NodeKind::Break, test_location(21))],
+            Expression::bool(true, test_source_location(20), ValueMode::ImmutableOwned),
+            vec![node(NodeKind::Break, test_source_location(21))],
         ),
-        test_location(20),
+        test_source_location(20),
     );
 
     let start_fn = function_node(
@@ -101,10 +103,10 @@ fn break_in_while_targets_loop_exit_block() {
             returns: vec![],
         },
         vec![while_node],
-        test_location(19),
+        test_source_location(19),
     );
 
-    let ast = build_ast(vec![start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
 

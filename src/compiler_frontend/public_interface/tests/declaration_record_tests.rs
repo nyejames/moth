@@ -123,10 +123,6 @@ fn trait_origin(name: &str) -> OriginTraitId {
     OriginTraitId::new(module_origin("traits"), name.to_owned())
 }
 
-fn location() -> SourceLocation {
-    SourceLocation::default()
-}
-
 fn empty_fields() -> Box<[FieldDefinition]> {
     Box::new([])
 }
@@ -135,7 +131,7 @@ fn param_declaration(name: &str, type_id: TypeId, string_table: &mut StringTable
     Declaration {
         id: path(name, string_table),
         value: Expression::no_value_with_type_id(
-            location(),
+            SourceLocation::default(),
             DataType::Inferred,
             type_id,
             ValueMode::default(),
@@ -170,7 +166,7 @@ fn field_declaration(name: &str, type_id: TypeId, string_table: &mut StringTable
     Declaration {
         id: path(name, string_table),
         value: Expression::no_value_with_type_id(
-            location(),
+            SourceLocation::default(),
             DataType::Inferred,
             type_id,
             ValueMode::ImmutableOwned,
@@ -182,7 +178,7 @@ fn field_def(name: &str, type_id: TypeId, string_table: &mut StringTable) -> Fie
     FieldDefinition {
         name: path(name, string_table),
         type_id,
-        location: location(),
+        location: SourceLocation::default(),
     }
 }
 
@@ -318,7 +314,7 @@ fn unit_variant(name: &str, string_table: &mut StringTable) -> ChoiceVariantDefi
         name: string_table.intern(name),
         tag: 0,
         payload: ChoiceVariantPayloadDefinition::Unit,
-        location: location(),
+        location: SourceLocation::default(),
     }
 }
 
@@ -331,7 +327,7 @@ fn record_variant(
         name: string_table.intern(name),
         tag: 0,
         payload: ChoiceVariantPayloadDefinition::Record { fields },
-        location: location(),
+        location: SourceLocation::default(),
     }
 }
 
@@ -346,7 +342,7 @@ fn register_param_list(
         .map(|(position, name)| GenericParameter {
             id: TypeParameterId(position as u32),
             name: string_table.intern(name),
-            location: location(),
+            location: SourceLocation::default(),
             trait_bounds: Vec::new(),
         })
         .collect();
@@ -372,7 +368,7 @@ fn register_param_list_with_bounds(
     let parameters = vec![GenericParameter {
         id: TypeParameterId(0),
         name: string_table.intern(param_name),
-        location: location(),
+        location: SourceLocation::default(),
         trait_bounds: Vec::new(),
     }];
     let list = GenericParameterList { parameters };
@@ -2241,7 +2237,7 @@ fn struct_record_rejects_field_type_id_mismatch() {
     let field_definitions = Box::new([field_def("x", int_id, &mut string_table)]);
     let default_value = Expression::string_slice(
         string_table.intern("wrong"),
-        location(),
+        SourceLocation::default(),
         ValueMode::ImmutableOwned,
     );
     let retained_fields = vec![field_declaration_with_default(

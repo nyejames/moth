@@ -1,6 +1,9 @@
 //! Tests for SSE payload formatting and disconnected-client pruning.
 
 use super::{broadcast_reload, format_reload_event, handle_sse_connection_with_timeouts};
+use crate::compiler_tests::test_support::{
+    WORKER_COMPLETION_DEADLINE, await_worker_completion, surface_thread_panic,
+};
 use crate::projects::dev_server::state::{DevServerState, SseClient};
 use std::io::Read;
 use std::net::{Shutdown, TcpListener, TcpStream};
@@ -9,7 +12,10 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+/// How long a disconnected SSE client may remain registered after a broadcast.
+const SSE_PRUNE_DEADLINE: Duration = Duration::from_secs(1);
 
 fn bind_loopback_listener() -> Option<TcpListener> {
     match TcpListener::bind("127.0.0.1:0") {
@@ -81,7 +87,7 @@ fn loopback_disconnect_prunes_sse_client_promptly() {
     let (done_sender, done_receiver) = mpsc::channel();
 
     let server_state = Arc::clone(&state);
-    thread::spawn(move || {
+    let server_thread = thread::spawn(move || {
         let (stream, _) = listener.accept().expect("should accept client");
         handle_sse_connection_with_timeouts(
             stream,
@@ -102,17 +108,11 @@ fn loopback_disconnect_prunes_sse_client_promptly() {
         .expect("client should read initial sse headers");
     assert!(bytes_read > 0);
 
-    for _ in 0..20 {
-        if state
-            .clients
-            .lock()
-            .expect("clients mutex should not be poisoned")
-            .len()
-            == 1
-        {
-            break;
-        }
-        thread::sleep(Duration::from_millis(10));
+    // The handler registers the client after writing the SSE headers, so reading them does not
+    // prove registration and there is no in-process signal to wait on.
+    if let Err(observed) = wait_for_registered_client_count(&state, 1) {
+        surface_thread_panic("sse server", server_thread);
+        panic!("the connected client should register exactly once; observed {observed} clients");
     }
 
     client
@@ -122,9 +122,15 @@ fn loopback_disconnect_prunes_sse_client_promptly() {
 
     let notified = broadcast_reload(&state, 3);
     assert_eq!(notified, 1);
-    done_receiver
-        .recv_timeout(Duration::from_secs(1))
-        .expect("disconnected SSE client should be pruned promptly");
+    // "Promptly" is the contract this test owns: the handler's keep-alive interval is 50ms, so a
+    // broadcast to a disconnected client must prune it inside this bound rather than waiting for
+    // some later event.
+    await_worker_completion(
+        "sse server",
+        &done_receiver,
+        server_thread,
+        SSE_PRUNE_DEADLINE,
+    );
     assert!(
         state
             .clients
@@ -132,4 +138,28 @@ fn loopback_disconnect_prunes_sse_client_promptly() {
             .expect("clients mutex should not be poisoned")
             .is_empty()
     );
+}
+
+/// Wait for the SSE registry to hold `expected` clients, reporting the last count on failure.
+///
+/// WHAT: polls the registry until the count matches, bounded by the shared worker deadline.
+/// WHY: registration happens inside the handler thread with no observable signal. The deadline
+///      is deadlock protection only; a test that continued on a wrong count would exercise the
+///      wrong precondition and still report a pruning failure.
+fn wait_for_registered_client_count(state: &DevServerState, expected: usize) -> Result<(), usize> {
+    let deadline = Instant::now() + WORKER_COMPLETION_DEADLINE;
+    loop {
+        let observed = state
+            .clients
+            .lock()
+            .expect("clients mutex should not be poisoned")
+            .len();
+        if observed == expected {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(observed);
+        }
+        thread::sleep(Duration::from_millis(1));
+    }
 }

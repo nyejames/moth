@@ -1,4 +1,13 @@
-ref1 ~= "yo"
-ref2 ~= "whats up"
-result = [ref1, ref2]
-trailing = [ref1, ref2,]
+-- A trailing comma after the final template argument is accepted and produces
+-- the same string as the same argument list without it. Both concatenations are
+-- reported so an accepted-but-different lowering cannot pass as equal.
+
+render_commas || -> String:
+    ref1 ~= "yo"
+    ref2 ~= "whats up"
+    result = [ref1, ref2]
+    trailing = [ref1, ref2,]
+    return [:commas result=[result] trailing=[trailing]]
+;
+
+[:[render_commas()]]

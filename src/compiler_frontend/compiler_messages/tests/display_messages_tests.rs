@@ -19,14 +19,10 @@ use std::ffi::OsString;
 #[cfg(unix)]
 use std::os::unix::ffi::OsStringExt;
 
-fn temp_dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "moth_display_messages_{name}_{}",
-        std::process::id()
-    ));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).expect("should create temp test dir");
-    dir
+fn temp_dir(_name: &str) -> (tempfile::TempDir, PathBuf) {
+    let temp = tempfile::tempdir().expect("should create temp test dir");
+    let path = temp.path().to_path_buf();
+    (temp, path)
 }
 
 #[test]
@@ -298,7 +294,7 @@ fn normalize_display_path_strips_windows_extended_prefix() {
 
 #[test]
 fn resolve_source_file_path_strips_header_suffix_before_lookup() {
-    let root: PathBuf = temp_dir("header_scope");
+    let (_temp, root) = temp_dir("header_scope");
     let source_file = root.join("main.moth");
     fs::write(&source_file, "page #= []").expect("should write source file");
 
@@ -323,7 +319,7 @@ fn resolve_source_file_path_strips_header_suffix_before_lookup() {
 
 #[test]
 fn formatted_warning_uses_resolved_source_file_path_for_header_scopes() {
-    let root: PathBuf = temp_dir("header_warning_scope");
+    let (_temp, root) = temp_dir("header_warning_scope");
     let source_file = root.join("main.moth");
     fs::write(&source_file, "page #= []").expect("should write source file");
 
@@ -345,7 +341,7 @@ fn formatted_warning_uses_resolved_source_file_path_for_header_scopes() {
 
 #[test]
 fn resolve_source_file_path_normalizes_canonical_windows_paths() {
-    let root: PathBuf = temp_dir("resolve_normalize");
+    let (_temp, root) = temp_dir("resolve_normalize");
     let source_file = root.join("main.moth");
     fs::write(&source_file, "page #= []").expect("should write source file");
 

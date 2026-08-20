@@ -4,6 +4,4 @@ entry = "."
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0041"]
-diagnostic_match = "contains"
-diagnostic_match_reason = "Current pre-canonical directory frontend compiles the dependency-bound child module as both a root candidate and a reachable dependency."
 message_contains = ["Receiver methods are not dependency-bound, exported, or aliased independently"]
