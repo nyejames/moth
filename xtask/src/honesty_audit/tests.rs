@@ -12,13 +12,17 @@
 use super::{
     ANY, DeclaredMeasurement, Disposition, HARD_RULES, HONESTY_INVENTORY_SCHEMA_VERSION,
     HonestyLedger, LedgerFinding, LineMatcher, REVIEW_RULES, RuleScope, RuleView,
-    SUITE_WEAK_CONTRACT_REVIEWS, SuiteInventoryEvidence, ViewTest, check_ledger_integrity,
-    civil_from_days, disposition_suite_counters, in_scope, owns_tests, scan_lines, started_report,
-    utc_timestamp,
+    SUITE_WEAK_CONTRACT_REVIEWS, SuiteInventoryEvidence, ViewTest, check_declared_measurements,
+    check_ledger_integrity, civil_from_days, disposition_suite_counters, in_scope, owns_tests,
+    scan_lines, started_report, utc_timestamp,
 };
 use crate::report_file::ReportRunIdentity;
+use crate::source_tree::workspace_root;
 use std::collections::BTreeSet;
+use std::fs;
+use std::path::PathBuf;
 use std::time::{Duration, UNIX_EPOCH};
+use tempfile::tempdir;
 
 /// The codes of every hard rule that matches `content`, treated as a test-owning file.
 fn hard_hits(content: &str) -> Vec<&'static str> {
@@ -354,6 +358,15 @@ fn rule_scope_decides_which_files_a_rule_reads() {
 // Ledger integrity.
 // ---------------------------------------------------------------------------
 
+/// A root for ledger fixtures whose measurements cite no repository paths.
+///
+/// Path citation is checked against a real checkout, so a fixture that cites nothing needs a
+/// root that exists but is otherwise irrelevant. The workspace root serves; the assertion is
+/// that nothing in the fixture is looked up under it.
+fn no_cited_paths_root() -> PathBuf {
+    workspace_root().expect("the tests run inside the workspace")
+}
+
 fn ledger_with(findings: Vec<LedgerFinding>) -> HonestyLedger {
     HonestyLedger {
         schema_version: 1,
@@ -388,7 +401,10 @@ fn a_complete_ledger_has_no_integrity_findings() {
         finding("two", "review", "open"),
     ]);
 
-    assert_eq!(check_ledger_integrity(&ledger), Vec::new());
+    assert_eq!(
+        check_ledger_integrity(&no_cited_paths_root(), &ledger),
+        Vec::new()
+    );
 }
 
 /// A finding with no disposition is the exact thing this campaign removes.
@@ -397,7 +413,7 @@ fn a_finding_with_no_disposition_is_an_integrity_finding() {
     let mut entry = finding("undecided", "review", "resolved");
     entry.disposition = "   ".to_string();
 
-    let findings = check_ledger_integrity(&ledger_with(vec![entry]));
+    let findings = check_ledger_integrity(&no_cited_paths_root(), &ledger_with(vec![entry]));
 
     assert_eq!(findings.len(), 1);
     assert_eq!(findings[0].code, "undecided");
@@ -406,10 +422,13 @@ fn a_finding_with_no_disposition_is_an_integrity_finding() {
 
 #[test]
 fn a_duplicate_finding_code_is_an_integrity_finding() {
-    let findings = check_ledger_integrity(&ledger_with(vec![
-        finding("same", "review", "resolved"),
-        finding("same", "hard", "resolved"),
-    ]));
+    let findings = check_ledger_integrity(
+        &no_cited_paths_root(),
+        &ledger_with(vec![
+            finding("same", "review", "resolved"),
+            finding("same", "hard", "resolved"),
+        ]),
+    );
 
     assert_eq!(findings.len(), 1);
     assert!(findings[0].problem.contains("declared 2 times"));
@@ -417,10 +436,13 @@ fn a_duplicate_finding_code_is_an_integrity_finding() {
 
 #[test]
 fn an_unknown_severity_or_status_is_an_integrity_finding() {
-    let findings = check_ledger_integrity(&ledger_with(vec![
-        finding("bad_severity", "critical", "resolved"),
-        finding("bad_status", "hard", "wontfix"),
-    ]));
+    let findings = check_ledger_integrity(
+        &no_cited_paths_root(),
+        &ledger_with(vec![
+            finding("bad_severity", "critical", "resolved"),
+            finding("bad_status", "hard", "wontfix"),
+        ]),
+    );
 
     let problems: Vec<&str> = findings
         .iter()
@@ -431,6 +453,134 @@ fn an_unknown_severity_or_status_is_an_integrity_finding() {
     assert!(problems[1].contains("status 'wontfix'"));
 }
 
+// ---------------------------------------------------------------------------
+//  Declared measurements
+// ---------------------------------------------------------------------------
+
+fn measurement(name: &str, command: &str, result: &str) -> DeclaredMeasurement {
+    DeclaredMeasurement {
+        name: name.to_string(),
+        command: command.to_string(),
+        result: result.to_string(),
+        recorded_by_phase: "Phase 1".to_string(),
+    }
+}
+
+/// The failure this check exists for: a campaign closes an entry, deletes the file that recorded
+/// it, and leaves the citation behind. Nothing else in the audit reads declared text, so without
+/// this the inventory keeps publishing a pointer to evidence that is gone.
+#[test]
+fn a_measurement_citing_a_deleted_file_is_an_integrity_finding() {
+    let workspace = tempdir().expect("temp dir");
+    let measurements = vec![measurement(
+        "open_exposed_failures",
+        "docs/roadmap/plans/gone.md",
+        "2 open; see docs/roadmap/plans/gone.md",
+    )];
+
+    let findings = check_declared_measurements(workspace.path(), &measurements);
+
+    assert_eq!(
+        findings.len(),
+        2,
+        "both the command and the result cite the missing file: {findings:?}"
+    );
+    assert!(
+        findings
+            .iter()
+            .all(|finding| finding.problem.contains("docs/roadmap/plans/gone.md")),
+        "{findings:?}"
+    );
+}
+
+#[test]
+fn a_measurement_citing_a_file_that_exists_is_not_a_finding() {
+    let workspace = tempdir().expect("temp dir");
+    fs::create_dir_all(workspace.path().join("docs/roadmap/evidence"))
+        .expect("the cited directory should be created");
+    fs::write(
+        workspace.path().join("docs/roadmap/evidence/present.json"),
+        "{}",
+    )
+    .expect("the cited file should be written");
+
+    let findings = check_declared_measurements(
+        workspace.path(),
+        &[measurement(
+            "ledger",
+            "docs/roadmap/evidence/present.json",
+            "34 findings",
+        )],
+    );
+
+    assert_eq!(findings, Vec::new());
+}
+
+/// An ordinary command line names no repository path, and must not be treated as one.
+#[test]
+fn a_shell_command_is_not_read_as_a_repository_path() {
+    let workspace = tempdir().expect("temp dir");
+
+    let findings = check_declared_measurements(
+        workspace.path(),
+        &[
+            measurement(
+                "unit",
+                "cargo test --workspace -- --format terse",
+                "4397 passed",
+            ),
+            measurement(
+                "integration",
+                "cargo run --quiet -- tests --terse",
+                "1851/1851",
+            ),
+            measurement("lanes", "just test-feature-matrix", "8 lanes pass"),
+        ],
+    );
+
+    assert_eq!(findings, Vec::new(), "{findings:?}");
+}
+
+#[test]
+fn a_measurement_missing_a_field_is_an_integrity_finding() {
+    let workspace = tempdir().expect("temp dir");
+
+    let findings = check_declared_measurements(
+        workspace.path(),
+        &[
+            measurement("no_result", "cargo test", "  "),
+            DeclaredMeasurement {
+                recorded_by_phase: String::new(),
+                ..measurement("no_phase", "cargo test", "ok")
+            },
+        ],
+    );
+
+    let problems: Vec<&str> = findings
+        .iter()
+        .map(|finding| finding.problem.as_str())
+        .collect();
+    assert_eq!(problems.len(), 2, "{findings:?}");
+    assert!(problems[0].contains("no result"), "{problems:?}");
+    assert!(problems[1].contains("no recorded_by_phase"), "{problems:?}");
+}
+
+#[test]
+fn a_duplicate_measurement_name_is_an_integrity_finding() {
+    let workspace = tempdir().expect("temp dir");
+
+    let findings = check_declared_measurements(
+        workspace.path(),
+        &[
+            measurement("unit_tests", "cargo test", "4397 passed"),
+            measurement("unit_tests", "cargo test -p moth", "4285 passed"),
+        ],
+    );
+
+    assert_eq!(findings.len(), 1);
+    assert!(findings[0].problem.contains("declared 2 times"));
+}
+
 /// The tracked ledger this repository ships must itself be complete.
 #[test]
 fn the_tracked_ledger_parses_and_is_internally_consistent() {
@@ -439,7 +589,10 @@ fn the_tracked_ledger_parses_and_is_internally_consistent() {
     ))
     .expect("the tracked ledger should parse");
 
-    assert_eq!(check_ledger_integrity(&ledger), Vec::new());
+    // Checked against the real checkout, so a measurement that cites a file this repository no
+    // longer ships fails here rather than surviving into the published inventory.
+    let workspace_root = workspace_root().expect("the tests run inside the workspace");
+    assert_eq!(check_ledger_integrity(&workspace_root, &ledger), Vec::new());
     assert!(
         !ledger.findings.is_empty(),
         "an empty ledger would pass every check by declaring nothing"

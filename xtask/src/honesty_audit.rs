@@ -806,7 +806,7 @@ pub fn build_inventory(
     run: ReportRunIdentity,
 ) -> Result<HonestyInventoryReport, String> {
     let ledger = read_ledger(workspace_root)?;
-    let ledger_integrity_findings = check_ledger_integrity(&ledger);
+    let ledger_integrity_findings = check_ledger_integrity(workspace_root, &ledger);
     let open_hard_ledger_finding_count = ledger
         .findings
         .iter()
@@ -1224,8 +1224,118 @@ const LEDGER_STATUSES: &[&str] = &["open", "resolved"];
 ///
 /// A ledger entry with no disposition is the exact thing this campaign exists to remove: a known
 /// weakness recorded without a decision about it.
-fn check_ledger_integrity(ledger: &HonestyLedger) -> Vec<LedgerIntegrityFinding> {
+/// Repository paths a declared measurement names, in its command and in its result text.
+///
+/// A measurement is allowed to cite the file that records it. When that file is deleted the
+/// citation becomes a claim about evidence that no longer exists, which is the failure this
+/// extraction exists to make findable. A token counts as a workspace-relative path when it has
+/// a directory component and a short file extension, and is neither absolute, nor a flag, nor a
+/// URL — `cargo run --quiet -- tests --terse` yields nothing, `docs/roadmap/evidence/x.json`
+/// yields itself.
+fn cited_repository_paths(text: &str) -> Vec<&str> {
+    text.split_whitespace()
+        .map(|token| {
+            token.trim_matches(|character: char| {
+                matches!(character, ',' | ';' | ')' | '(' | '"' | '\'')
+            })
+        })
+        .filter(|token| {
+            !token.starts_with('-')
+                && !token.starts_with('/')
+                && !token.starts_with("http")
+                && token.contains('/')
+                && file_extension_of(token).is_some_and(|extension| {
+                    (2..=4).contains(&extension.len())
+                        && extension
+                            .chars()
+                            .all(|character| character.is_ascii_alphanumeric())
+                })
+        })
+        .collect()
+}
+
+/// The extension of the final path segment, when it has one.
+fn file_extension_of(token: &str) -> Option<&str> {
+    let last_segment = token.rsplit('/').next()?;
+    let (name, extension) = last_segment.rsplit_once('.')?;
+    (!name.is_empty()).then_some(extension)
+}
+
+/// Checks the declared half of the ledger for the ways it can silently go stale.
+///
+/// The findings themselves are validated below. These are not measured by this audit — a suite
+/// count comes from running the suite — so the only integrity this run can enforce is that each
+/// one names something, names it once, and does not cite evidence that has been deleted. That
+/// last check is what turns a closed campaign's leftover citation into a gate failure instead of
+/// a sentence nobody re-reads.
+fn check_declared_measurements(
+    workspace_root: &Path,
+    measurements: &[DeclaredMeasurement],
+) -> Vec<LedgerIntegrityFinding> {
     let mut findings = Vec::new();
+    let mut seen: BTreeMap<&str, usize> = BTreeMap::new();
+
+    for measurement in measurements {
+        let code = format!("declared_measurement '{}'", measurement.name);
+        *seen.entry(measurement.name.as_str()).or_default() += 1;
+
+        if measurement.name.trim().is_empty() {
+            findings.push(LedgerIntegrityFinding {
+                code: code.clone(),
+                problem: "has no name".to_string(),
+            });
+        }
+        for (field, value) in [
+            ("command", &measurement.command),
+            ("result", &measurement.result),
+            ("recorded_by_phase", &measurement.recorded_by_phase),
+        ] {
+            if value.trim().is_empty() {
+                findings.push(LedgerIntegrityFinding {
+                    code: code.clone(),
+                    problem: format!(
+                        "has no {field}; a declared measurement that does not say what produced \
+                         it, what it found, or who recorded it cannot be checked by anyone"
+                    ),
+                });
+            }
+        }
+
+        for cited in cited_repository_paths(&measurement.command)
+            .into_iter()
+            .chain(cited_repository_paths(&measurement.result))
+        {
+            if !workspace_root.join(cited).exists() {
+                findings.push(LedgerIntegrityFinding {
+                    code: code.clone(),
+                    problem: format!(
+                        "cites '{cited}', which does not exist in this checkout; a measurement \
+                         may not point at deleted evidence"
+                    ),
+                });
+            }
+        }
+    }
+
+    for (name, count) in seen {
+        if count > 1 {
+            findings.push(LedgerIntegrityFinding {
+                code: format!("declared_measurement '{name}'"),
+                problem: format!(
+                    "is declared {count} times; a measurement name records one measurement"
+                ),
+            });
+        }
+    }
+
+    findings
+}
+
+fn check_ledger_integrity(
+    workspace_root: &Path,
+    ledger: &HonestyLedger,
+) -> Vec<LedgerIntegrityFinding> {
+    let mut findings = check_declared_measurements(workspace_root, &ledger.declared_measurements);
     let mut seen: BTreeMap<&str, usize> = BTreeMap::new();
 
     for finding in &ledger.findings {

@@ -2,15 +2,15 @@
 //!
 //! Runtime-capable templates are validated for escaped helper artifacts that
 //! should have been composed or routed into AST-owned slot application plans.
-//! Const-required templates are validated for full foldability while still
-//! allowing slot/helper structure that a parent const template may compose
-//! before folding.
+//!
+//! Const-required foldability has no entry point here. Construction prepares the
+//! const view once through `TemplatePreparationMode::ConstRequired` and carries
+//! that proof into folding, so a second validation entry would be a second
+//! classifier of the same view.
 
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template::TemplateType;
-#[cfg(test)]
-use crate::compiler_frontend::ast::templates::tir::TemplatePreparation;
 use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrNodeId, TemplateIrNodeKind, TemplateIrStore, TemplatePreparationMode,
     TemplateTirPhase, TirView, TirViewIdentity, prepare_tir_view,
@@ -21,41 +21,12 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use std::collections::HashSet;
 
-/// Test-only direct validation entry point for a const-required TIR view.
-///
-/// Production const construction now performs this preparation once through
-/// `TemplatePreparationMode::ConstRequired` and carries the result into folding.
-/// Tests retain this narrow entry point for exercising view authority and
-/// diagnostic propagation independently of the construction call path.
-///
-/// WHAT: validates through the template's module-store Composed-or-later
-///       `TirView` so expression overlays and module-local children are authoritative.
-/// WHY: every production const-required template has completed construction before
-///      this entry runs. Missing view authority is therefore a compiler invariant,
-///      not permission to fall back to a raw store walk.
-#[cfg(test)]
-pub(crate) fn validate_const_required_template_control_flow(
-    template: &Template,
-    tir_store: &TemplateIrStore,
-) -> Result<TemplatePreparation, TemplateError> {
-    let reference = &template.tir_reference;
-    let view = TirView::with_minimum_phase(
-        tir_store,
-        reference.root,
-        reference.phase,
-        TemplateTirPhase::Composed,
-        reference.context,
-    )
-    .map_err(TemplateError::from)?;
-
-    prepare_tir_view(&view, TemplatePreparationMode::ConstRequired)
-}
-
 /// Rejects slot composition artifacts that would otherwise reach runtime
 /// control-flow lowering.
 ///
-/// Compile-time-required callers use the const validator above because slots can
-/// still be resolved or folded before runtime. This runtime-only check runs
+/// Compile-time-required callers do not run this check, because slots can still
+/// be resolved or folded before runtime; their proof is the const-mode
+/// preparation construction already performed. This runtime-only check runs
 /// after composition/formatting, when any remaining slot or insertion inside a
 /// control-flow body would otherwise become a HIR invariant failure.
 ///

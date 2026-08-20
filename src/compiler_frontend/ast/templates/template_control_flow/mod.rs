@@ -26,6 +26,4 @@ pub(crate) use types::{
     TemplateControlFlowValidationMode, TemplateIfBodyParseInput, TemplateLoopBodyParseInput,
     TemplateLoopControlKind, TemplateLoopHeader,
 };
-#[cfg(test)]
-pub(crate) use validation::validate_const_required_template_control_flow;
 pub(crate) use validation::validate_runtime_template_control_flow_slot_artifacts;

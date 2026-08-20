@@ -12,7 +12,6 @@ use crate::compiler_frontend::ast::templates::template_body_sentinels::TemplateB
 use crate::compiler_frontend::ast::templates::template_build_state::TemplateBuildState;
 use crate::compiler_frontend::ast::templates::template_control_flow::{
     TemplateBranchSelector, TemplateControlFlowValidationMode, TemplateLoopHeader,
-    validate_const_required_template_control_flow,
     validate_runtime_template_control_flow_slot_artifacts,
 };
 #[cfg(feature = "benchmark_counters")]
@@ -2084,8 +2083,11 @@ fn const_required_template_loop_reports_non_const_body() {
 }
 
 #[test]
-fn const_required_template_if_validates_from_body_tir_roots() {
-    let (template, context, _string_table) = parse_const_required_template(
+fn const_required_template_if_prepares_a_foldable_view_from_body_tir_roots() {
+    // Construction owns the single const preparation, so the outcome it carries is the contract.
+    // Asserting `Foldable` rather than "parsing returned Ok" proves the branch bodies were read
+    // through their module-local TIR roots and classified, not merely accepted.
+    let construction = const_required_construction(
         "[if true:
             Visible
         [else]
@@ -2093,22 +2095,26 @@ fn const_required_template_if_validates_from_body_tir_roots() {
         ]",
     );
 
-    let store = context.template_ir_store.borrow();
-    validate_const_required_template_control_flow(&template, &store)
-        .expect("const-required branch validation should use module-local TIR body roots");
+    assert_eq!(
+        construction.preparation.outcome,
+        TemplatePreparationOutcome::Foldable,
+        "a const-required branch over module-local TIR body roots should prepare as foldable"
+    );
 }
 
 #[test]
-fn const_required_template_loop_validates_from_body_tir_root() {
-    let (template, context, _string_table) = parse_const_required_template(
+fn const_required_template_loop_prepares_a_foldable_view_from_its_body_tir_root() {
+    let construction = const_required_construction(
         "[loop 0 to 1 |i|:
             [i]
         ]",
     );
 
-    let store = context.template_ir_store.borrow();
-    validate_const_required_template_control_flow(&template, &store)
-        .expect("const-required loop validation should use module-local TIR body roots");
+    assert_eq!(
+        construction.preparation.outcome,
+        TemplatePreparationOutcome::Foldable,
+        "a const-required loop over its module-local TIR body root should prepare as foldable"
+    );
 }
 
 #[cfg(feature = "benchmark_counters")]
@@ -2243,7 +2249,7 @@ fn const_required_template_option_capture_present_folds_then_branch() {
 
     {
         let store = context.template_ir_store.borrow();
-        validate_const_required_template_control_flow(&template, &store)
+        prepare_const_required_view_directly(&template, &store)
             .expect("present const option capture should validate");
     }
 
@@ -2281,7 +2287,7 @@ fn const_required_template_option_capture_absent_folds_else_branch() {
 
     {
         let store = context.template_ir_store.borrow();
-        validate_const_required_template_control_flow(&template, &store)
+        prepare_const_required_view_directly(&template, &store)
             .expect("absent const option capture should validate");
     }
 
@@ -2778,6 +2784,48 @@ fn parse_runtime_template_without_validation(
     (template, context, string_table)
 }
 
+/// Prepares an already-constructed template's const view the way construction does.
+///
+/// WHAT: builds the same Composed-or-later `TirView` from the template's durable reference that
+///       `Template::new_nested_template` builds at its preparation stage, then runs the same
+///       production `prepare_tir_view` in `ConstRequired` mode.
+/// WHY:  production reaches const preparation exactly once, inside construction, and carries the
+///       result into folding. A test that mutates a template after construction — installing an
+///       expression overlay, or corrupting a root node — has no production entry point that will
+///       re-classify it. This helper composes the two production functions rather than
+///       duplicating their logic, and lives in the test module so no production module carries a
+///       validation entry that production never calls.
+fn prepare_const_required_view_directly(
+    template: &Template,
+    tir_store: &TemplateIrStore,
+) -> Result<TemplatePreparation, TemplateError> {
+    let reference = &template.tir_reference;
+    let view = TirView::with_minimum_phase(
+        tir_store,
+        reference.root,
+        reference.phase,
+        TemplateTirPhase::Composed,
+        reference.context,
+    )
+    .map_err(TemplateError::from)?;
+
+    prepare_tir_view(&view, TemplatePreparationMode::ConstRequired)
+}
+
+/// Constructs a const-required template and keeps the preparation construction carried.
+///
+/// `parse_const_required_template` drops the preparation because most callers only need the
+/// handle. A test whose subject is the const classification itself must keep it: it is the
+/// value production passes to folding.
+fn const_required_construction(source: &str) -> PreparedTemplateConstruction {
+    let mut string_table = StringTable::new();
+    let mut token_stream = template_tokens_from_source(source, &mut string_table);
+    let context = new_constant_context(token_stream.src_path.clone());
+
+    Template::new_const_required(&mut token_stream, &context, vec![], &mut string_table)
+        .expect("const-required template should parse")
+}
+
 fn parse_const_required_template(source: &str) -> (Template, ScopeContext, StringTable) {
     let mut string_table = StringTable::new();
     let mut token_stream = template_tokens_from_source(source, &mut string_table);
@@ -2840,7 +2888,7 @@ fn const_required_template_if_validates_branch_condition_through_tir_view_overla
 
     drop(store);
     let store = context.template_ir_store.borrow();
-    let error = validate_const_required_template_control_flow(&template, &store)
+    let error = prepare_const_required_view_directly(&template, &store)
         .expect_err("TirView overlay should make the branch condition non-const");
     let TemplateError::Diagnostic(error) = error else {
         panic!("non-const branch should remain a source diagnostic");
@@ -2888,7 +2936,7 @@ fn const_required_template_loop_validates_header_through_tir_view_overlay() {
 
     drop(store);
     let store = context.template_ir_store.borrow();
-    let error = validate_const_required_template_control_flow(&template, &store)
+    let error = prepare_const_required_view_directly(&template, &store)
         .expect_err("TirView overlay should turn the conditional loop into const true");
     let TemplateError::Diagnostic(error) = error else {
         panic!("non-const loop should remain a source diagnostic");
@@ -2922,7 +2970,7 @@ fn const_required_validation_reports_missing_effective_node_as_internal_error() 
     template.tir_reference.root = malformed_template_id;
 
     let store = context.template_ir_store.borrow();
-    let error = validate_const_required_template_control_flow(&template, &store)
+    let error = prepare_const_required_view_directly(&template, &store)
         .expect_err("missing root node should be an internal error, not a silent success");
 
     let TemplateError::Infrastructure(error) = error else {
@@ -3024,7 +3072,7 @@ fn const_required_validation_ignores_referenced_child_expression_overlay() {
     };
 
     let store = context.template_ir_store.borrow();
-    let error = validate_const_required_template_control_flow(&recursive_template, &store)
+    let error = prepare_const_required_view_directly(&recursive_template, &store)
         .expect_err("exact-view child cycles must be CompilerError");
     let TemplateError::Infrastructure(error) = error else {
         panic!("exact-view child cycles must stay on the infrastructure lane, got {error:?}");

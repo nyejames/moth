@@ -6,9 +6,10 @@
 WORK_ID: test-suite-honesty
 WORK_SOURCE: docs/roadmap/plans/test-suite-honesty-and-infrastructure-hardening-plan.md
 BASE_REVISION: f41f93a7a (post-TIR, post-benchmark-counters-timers)
-STATUS: active — Phase 10 implementation, validation and interim audit are complete; paused at user
-  request before Phase 11 final review
-CURRENT_SCOPE: Phase 10 closed out for EF-0001 and EF-0002; no Phase 11 work has started
+STATUS: active — Phase 10 is complete and its post-checkpoint review corrections have landed;
+  Phase 11 final review is next
+CURRENT_SCOPE: Phase 10 closed out for EF-0001 and EF-0002, then corrected for two review findings
+  the checkpoint's own interim audits did not catch
 COMPLETED:
   Phase 0: baseline established (4314 unit tests, 0 ignored, 1699 integration cases correct,
     1851 backend executions); durable inventory at docs/roadmap/evidence/test_honesty_inventory.json;
@@ -297,9 +298,37 @@ COMPLETED:
   to remove the empty mount separators that EF-0001 had exposed. The interim audit findings were
   resolved, both entries were closed against this validating checkpoint, and the exposed-failure
   ledger was removed as required by Phase 10.
-NEXT_ACTION: continue the remaining plan work when resumed, preserving the Phase 11 final-review
-  boundary; do not start Phase 11 final review until explicitly requested
-VALIDATION: Phase 9 baseline (macOS 23.6.0 arm64) — cargo fmt --all -- --check clean;
+  Phase 10 review corrections (post-checkpoint). Two findings were raised against the Phase 10
+  checkpoint and fixed. First, every declared measurement in the tracked ledger was still stamped
+  Phase 8 and had become false: the unit count, the integration result, both counter lanes and
+  open_exposed_failures all described a repository that Phase 10 had already changed, and
+  open_exposed_failures cited docs/roadmap/plans/test-suite-honesty-exposed-failures.md, which
+  Phase 10 deleted. `just test-honesty-evidence` reproduced all of it verbatim, because
+  check_ledger_integrity validated the ledger's findings and never looked at its declared
+  measurements. The measurements were re-measured and re-stamped, and the audit gained an
+  integrity floor for the declared half: empty fields, duplicate names, and any repository path
+  cited in a command or result that does not exist in the checkout. The tracked ledger is now
+  checked against the real workspace root, so this class of staleness fails the gate instead of
+  being published. Second, EF-0002 left
+  validate_const_required_template_control_flow in the production module under cfg(test) with nine
+  test call sites, so those tests proved a path production no longer runs — and the module counted
+  as a test-owning file for it. The entry point moved into the test module as
+  prepare_const_required_view_directly, composing the same two production functions, and the two
+  tests that only needed the construction result now assert the carried preparation outcome from
+  Template::new_const_required instead. Test-owning file count returns to 564.
+NEXT_ACTION: run Phase 11 final audit, pruning and roadmap release
+VALIDATION: Phase 10 review corrections (macOS 23.6.0 arm64) — cargo fmt --all -- --check clean;
+  cargo clippy --workspace --all-targets --all-features -D warnings clean; cargo test --workspace
+  4397 + 17 + 765, 0 failed, 0 ignored (xtask 760 to 765: five new declared-measurement integrity
+  tests); cargo run --quiet -- tests --terse 1851/1851; just source-audit 1172 files, 0 findings;
+  just feature-lane-check 0 findings; just test-honesty-audit 1173 files, 564 test-owning, 0 hard
+  findings, 2196 dispositioned review occurrences, 0 composed findings, 34 ledger findings with 0
+  open hard and 0 integrity findings; just test-honesty-evidence refreshed the durable inventory;
+  just test-feature-matrix all 8 lanes pass outside the sandbox; just stress 1 all six lanes pass;
+  cargo run -- check docs --terse clean. The new integrity check was proved to fail closed on the
+  real repository before the ledger was corrected: it reported the deleted exposed-failure ledger
+  by name from both the command and the result field of open_exposed_failures.
+  Phase 9 baseline (macOS 23.6.0 arm64) — cargo fmt --all -- --check clean;
   just feature-lane-check (0 findings); cargo run --quiet -- tests --audit (1699 cases, 1851
   backend executions); just source-audit (1172 files, 0 findings); just test-honesty-audit
   (0 hard findings, 2196 dispositioned review occurrences, 0 composed findings, 34 ledger
@@ -425,9 +454,9 @@ AUDITS: Phase 9 interim auditor pass 2 is audit_clean after resolving two low-se
   remaining report-rendering uses dispositioned; AUD-0001 (Redundancy over tests.support) —
   F01, F02 and F03 corrected on this branch, F04 routed to Phase 11, and F05 decided in Phase 7
   (both helpers retired, deletion left to Phase 11)
-BLOCKERS: none. The user pause is intentional, and Phase 11 final review remains deferred. Phase 10
-  has complete implementation, validation, interim audit and ledger closeout; no Phase 11 work has
-  started.
+BLOCKERS: none. Phase 10 has complete implementation, validation, interim audit, ledger closeout
+  and post-checkpoint review corrections. The Linux and Windows legs of the gate matrix have not
+  run against this branch tip; CI owns them and Phase 11 must not claim them as measured here.
 NOTES: Phase 10 closeout notes. EF-0001 is fixed in
   src/compiler_frontend/headers/top_level_classifier.rs by requiring `at_statement_boundary` for
   `TokenKind::TemplateHead` to become `HeaderFileItem::RuntimeTemplate`; assigned, returned and
@@ -574,9 +603,10 @@ Implementation ownership and review points:
   exact. The affected cases are `char_in_template`, the four return/result-binding cases and the
   seven receiver-method cases visible in `git diff --name-only`.
 - `docs/roadmap/evidence/test_honesty_inventory.json` was refreshed by
-  `just test-honesty-evidence`; the owning-file count is now 565 because of the new header test.
-  Keep the generated identity and count changes with Phase 10, and do not manually edit the report
-  back to its Phase 9 value.
+  `just test-honesty-evidence`. The owning-file count rose to 565 with the new header test, then
+  returned to 564 when the review correction removed the `cfg(test)` validator that made
+  `template_control_flow/validation.rs` count as a test owner. Keep the generated identity and
+  count changes with their phase, and do not manually edit the report back to an earlier value.
 
 Validation already completed for this slice on macOS 23.6.0 arm64: formatting, feature-lane
 coverage, source audit, honesty audit, durable honesty evidence, all eight feature lanes, the

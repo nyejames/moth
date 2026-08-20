@@ -5,15 +5,15 @@
   "declared_measurements": [
     {
       "name": "unit_tests",
-      "command": "cargo test --workspace --quiet -- --format terse",
-      "result": "4396 passed, 0 failed, 0 ignored",
-      "recorded_by_phase": "Phase 8"
+      "command": "cargo test --workspace -- --format terse",
+      "result": "4397 moth + 17 cli_exit_status + 760 xtask passed, 0 failed, 0 ignored",
+      "recorded_by_phase": "Phase 10"
     },
     {
       "name": "integration_cases",
       "command": "cargo run --quiet -- tests --terse",
-      "result": "1698 cases correct of 1851 backend executions; the single failure is EF-0001",
-      "recorded_by_phase": "Phase 8"
+      "result": "1851/1851 backend executions correct across 1699 cases; EF-0001 closed in Phase 10",
+      "recorded_by_phase": "Phase 10"
     },
     {
       "name": "linux_lane",
@@ -23,57 +23,57 @@
     },
     {
       "name": "open_exposed_failures",
-      "command": "docs/roadmap/plans/test-suite-honesty-exposed-failures.md",
-      "result": "2 \u2014 EF-0001 (borrow_checker_string_memory, integration) and EF-0002 (const_required_construction_preparation_is_reused_by_folding, counter lanes); see docs/roadmap/plans/test-suite-honesty-exposed-failures.md",
-      "recorded_by_phase": "Phase 8"
+      "command": "cargo run --package xtask --bin xtask -- honesty-audit",
+      "result": "0 — EF-0001 (borrow_checker_string_memory, integration) and EF-0002 (const_required_construction_preparation_is_reused_by_folding, counter lanes) were both closed by Phase 10, and the exposed-failure ledger was deleted as the phase requires",
+      "recorded_by_phase": "Phase 10"
     },
     {
       "name": "feature_lane:default",
       "command": "cargo run --package xtask --bin xtask -- feature-matrix",
-      "result": "pass (4284 moth + 17 cli_exit_status)",
-      "recorded_by_phase": "Phase 8"
+      "result": "pass (4285 moth + 17 cli_exit_status)",
+      "recorded_by_phase": "Phase 10"
     },
     {
       "name": "feature_lane:timers",
       "command": "cargo run --package xtask --bin xtask -- feature-matrix",
-      "result": "pass (4396 + 17)",
-      "recorded_by_phase": "Phase 8"
+      "result": "pass (4397 + 17)",
+      "recorded_by_phase": "Phase 10"
     },
     {
       "name": "feature_lane:detailed_timers",
       "command": "cargo run --package xtask --bin xtask -- feature-matrix",
-      "result": "pass (4398 + 17)",
-      "recorded_by_phase": "Phase 8"
+      "result": "pass (4399 + 17)",
+      "recorded_by_phase": "Phase 10"
     },
     {
       "name": "feature_lane:benchmark_counters",
       "command": "cargo run --package xtask --bin xtask -- feature-matrix",
-      "result": "fail: const_required_construction_preparation_is_reused_by_folding (4286 passed, 1 failed) \u2014 ledgered as EF-0002",
-      "recorded_by_phase": "Phase 8"
+      "result": "pass (4288 + 17) — EF-0002 closed in Phase 10",
+      "recorded_by_phase": "Phase 10"
     },
     {
       "name": "feature_lane:timers+benchmark_counters",
       "command": "cargo run --package xtask --bin xtask -- feature-matrix",
-      "result": "fail: const_required_construction_preparation_is_reused_by_folding (4414 passed, 1 failed) \u2014 the same single failure as the counters lane, ledgered as EF-0002. Phase 0 recorded four failures in this lane; the other three are gone, and the remaining one reproduces identically at one thread and at default parallelism, so none of the set is race-dependent",
-      "recorded_by_phase": "Phase 8"
+      "result": "pass (4416 + 17) — EF-0002 closed in Phase 10",
+      "recorded_by_phase": "Phase 10"
     },
     {
       "name": "feature_lane:checked_blocks+async_blocks",
       "command": "cargo run --package xtask --bin xtask -- feature-matrix",
-      "result": "pass (4286 + 17)",
-      "recorded_by_phase": "Phase 8"
+      "result": "pass (4287 + 17)",
+      "recorded_by_phase": "Phase 10"
     },
     {
       "name": "feature_lane:show_* (dev-output)",
       "command": "cargo run --package xtask --bin xtask -- feature-matrix",
-      "result": "pass (4284 + 17) \u2014 adds no tests; it is the only lane that compiles the developer stage-dump branches",
-      "recorded_by_phase": "Phase 8"
+      "result": "pass (4285 + 17) — adds no tests; it is the only lane that compiles the developer stage-dump branches",
+      "recorded_by_phase": "Phase 10"
     },
     {
       "name": "feature_lane:xtask",
       "command": "cargo run --package xtask --bin xtask -- feature-matrix",
-      "result": "pass (699)",
-      "recorded_by_phase": "Phase 8"
+      "result": "pass (765)",
+      "recorded_by_phase": "Phase 10"
     },
     {
       "name": "feature_lanes_note",
@@ -352,7 +352,7 @@
       "severity": "review",
       "status": "resolved",
       "description": "frontend_benchmark_rejects_a_busy_raw_session_before_compilation failed once during Phase 5 validation and did not reproduce in 24 subsequent full-suite runs (including 6 at --test-threads=16)",
-      "disposition": "resolved in Phase 6: the flake reproduced on the Phase 6 baseline run and was the test's evidence, not the compiler. The outer-session 'every aggregate has zero samples' proxy is replaced by two deterministic ordering tests \u2014 a missing entry path must fail as TimingSession rather than PathValidation, and invalid source must fail as TimingSession rather than Compilation \u2014 neither of which depends on the process-global collector being quiet. The collector stays process-global because cross-thread recording is its production contract",
+      "disposition": "resolved in Phase 6: the flake reproduced on the Phase 6 baseline run and was the test's evidence, not the compiler. The outer-session 'every aggregate has zero samples' proxy is replaced by two deterministic ordering tests — a missing entry path must fail as TimingSession rather than PathValidation, and invalid source must fail as TimingSession rather than Compilation — neither of which depends on the process-global collector being quiet. The collector stays process-global because cross-thread recording is its production contract",
       "owning_phase": "Phase 6"
     }
   ],
