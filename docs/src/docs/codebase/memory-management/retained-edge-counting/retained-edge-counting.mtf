@@ -6,6 +6,8 @@ Retained Edge Counting, abbreviated REC, is a selective physical representation 
 
 **REC is a physical representation, not source semantics.** Moth has no source-visible reference counting, no counter type, no retain or release syntax and no way for a program to observe a count.
 
+Retained-edge analysis supplies candidate, cardinality, edge-effect and cleanup-frontier facts. The memory-strategy planner owns the decision to select REC or elide it. REC lowering consumes that decision and owns tags, counter layout, transitions and the destruction plan.
+
 ## Status
 
 Accepted end-state design with implementation deferred. This page is the canonical technical authority for REC inside the memory model. Detailed phase sequencing lives in `docs/roadmap/plans/retained-edge-counting-design-and-implementation-plan.md`. Current implementation support lives in the progress matrix.
@@ -134,9 +136,9 @@ Future collection APIs must preserve narrow, analysable destruction effects.
 
 The summary vocabulary preserves this distinction so a caller can receive affine cleanup responsibility, keep a borrowed alias under another owner, or reclassify a counted persistent-edge obligation into an affine root obligation. This applies to maps, collections, stacks, queues, deques, caches and tree-node detachment.
 
-## REC elision and strategy selection
+## REC elision ladder
 
-Strategy selection is deterministic for one compile and backend configuration. The planner uses this order and stops at the first mechanism that answers.
+The memory-strategy planner uses this order and stops at the first mechanism that answers. The ladder supplies REC candidates and elision reasons. It does not move strategy ownership into this page.
 
 1. **No dynamic retained multiplicity.** Use affine cleanup or an inferred region.
 2. **Static fixed cardinality with a known cleanup path.** Use affine or region handling. More than one possible edge is not by itself a reason to count.
@@ -145,6 +147,12 @@ Strategy selection is deterministic for one compile and backend configuration. T
 5. **Field-sensitive allocation splitting.** Split an expensive parent family when a small retained field can legally become independent, then rerun selection for the new families.
 6. **Statically cheap bounded retention.** A simple, conservative compiler-owned heuristic may accept the fallback region when retained-family size, allocation-site repetition, known maximum cardinality, fallback lifecycle breadth and distance to a frontier are all bounded enough. This heuristic must not become a user-facing `config.moth` contract.
 7. **REC.** Select REC when runtime-many persistent edges disappear independently and region retention would be materially broader than useful lifetime.
+
+### Static fallback-region invariant
+
+Every REC family keeps its statically proven fallback lifetime region. REC can only reclaim that family earlier than the fallback region frontier. If counting did not exist or failed to improve precision, the static region would still make the program collector-free and correct.
+
+The selected representation remains fixed for the allocation family. An uncounted strategy never upgrades to REC at runtime, and an REC-selected strategy never abandons counting or downgrades to an uncounted representation at runtime.
 
 The cleanup-frontier case is the most common elision:
 
@@ -236,7 +244,7 @@ Invariants:
 
 The tags belong to the allocation-family handle, not to an arbitrary interior address. A projection must carry the family base alongside its offset, use a canonical handle that can recover the base, or use another representation preserving the same two logical bits and family identity. Masking an arbitrary interior pointer is not sufficient.
 
-An uncounted allocation is never upgraded to REC at runtime. The planner selects the layout before code generation.
+The planner selects the layout before code generation. An uncounted allocation is never upgraded to REC at runtime, and a REC-selected allocation never downgrades to an uncounted representation at runtime.
 
 ## Counter representation and invariant
 

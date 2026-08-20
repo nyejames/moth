@@ -100,7 +100,7 @@ Inferred transfer is optional. When safe transfer is not proven on every relevan
 
 Transfer proof failure is not a source diagnostic. Path-dependent optional transfer always backs off to borrowing in the accepted design.
 
-The current checker precomputes per-block may/must future-use facts and runs a forward fixed-point transfer over reachable HIR blocks. Current path-dependent rejection behaviour is implementation drift tracked for a later compiler plan.
+The current checker precomputes per-block may/must future-use facts and runs a forward fixed-point transfer over reachable HIR blocks. The progress matrix records the remaining precision gaps without changing this accepted fallback rule.
 
 ## No ordinary mandatory-consuming operation
 
@@ -126,13 +126,12 @@ Borrow validation consumes and produces:
 - parameter access mode
 - mutation effects
 - transfer eligibility / effect category
-- result provenance, distinguishing at least a fresh result root, an alias of one or more parameters, a projection of a parameter, an extracted or detached result, an alias of another result, and an independent result graph
-- retained-parameter and outlives constraints
+- preliminary return-root alias evidence for lifetime analysis
 - reactive effects
 - external function access rules
 - external return-alias metadata
 
-A final successful public or generated summary must not leave topology-relevant result provenance unknown. Lifetime constraints themselves are produced and validated by the separate lifetime-region analysis.
+Borrow validation does not produce final result provenance, retained-parameter constraints, retention cardinality, extraction effects, whole-domain kills, cleanup-frontier facts or outlives summaries. Lifetime and retained-edge analysis owns those final summaries and validates their topology.
 
 All runtime value parameters, immutable or mutable, may be eligible for inferred responsibility transfer. Parameter access mode remains separate from optional ownership effect. An immutable parameter receiving ownership remains read-only. A mutable parameter receiving ownership may mutate according to the source contract.
 
@@ -154,7 +153,7 @@ Call transfer uses resolved metadata, not source dependencies or runtime names.
 - statement-entry states
 - source access facts
 - transfer eligibility facts
-- return alias facts
+- preliminary return-root alias evidence
 - reactive invalidation facts
 - advisory drop candidates
 - aggregate statistics where useful for tooling
@@ -187,7 +186,7 @@ Borrow validation supplies the next analysis with:
 
 - validated access and alias facts
 - optional-transfer eligibility facts
-- return-alias and projection facts
+- preliminary return-root alias and projection evidence
 - reactive invalidation and observability facts
 - external boundary classifications already resolved for access
 

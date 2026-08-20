@@ -24,8 +24,8 @@ GC is a permitted runtime representation for a statically legal lifetime topolog
 - Borrow validation and lifetime-region validation precede target lowering.
 - Invalid source access or topology is rejected before backend codegen.
 - Backend doesn't infer access or topology from source syntax.
-- Backend consumes HIR plus borrow facts plus validated lifetime facts.
-- Backend consumes a validated memory plan rather than rediscovering strategy.
+- Backend consumes HIR plus borrow facts plus validated lifetime facts and validated affine cleanup decisions.
+- Backend consumes a complete `ValidatedMemoryPlan` rather than rediscovering or selecting strategy.
 - Backend representation can't affect `copy`, alias or `~` semantics.
 - Imprecise planning results in conservative retention, never in rejecting legal source.
 - Missing topology proof is not a backend fallback.
@@ -43,6 +43,12 @@ The memory planner selects one strategy per validated allocation family. Backend
 - host or runtime collection on debug profiles and GC-native backends
 
 Arenas, handles, slabs, pools, grouped drop lists and hybrid representations are permitted for valid topology. Source-visible RC, weak references, finalizers and hidden unrestricted dynamic sharing are not.
+
+### Semantic intervals and physical coalescing
+
+Semantic lifetime analysis chooses the narrowest proven useful interval for each allocation family. Physical memory planning may choose a slightly wider storage interval to reduce allocation and cleanup overhead, but that choice stays below the semantic proof.
+
+Physical coalescing never widens semantic topology. It never changes an outlives relationship, makes an illegal retained edge legal or changes diagnostics. A coalesced arena or grouped drop may keep storage available longer than the semantic interval while preserving the same validated lifetime facts.
 
 ## Collection as a representation
 
@@ -191,7 +197,9 @@ A future resource-capable profile requires a separate complete design for identi
 - The unified ownership ABI applies across ownership-aware calls.
 - Source semantics remain backend independent.
 
-`src/backends/wasm/hir_to_lir/ownership.rs` is the ownership projection seam, and Wasm LIR includes conditional `DropIfOwned` plus reserved retain support. The current direct path from borrow-checker advisory drop sites to `DropIfOwned` is GC-first scaffolding: final lowering must consume a validated memory plan and support affine, region, group and REC strategies. Treat the present implementation as migration debt, not as the accepted architecture.
+### Current implementation debt
+
+`src/backends/wasm/hir_to_lir/ownership.rs` is the ownership projection seam, and Wasm LIR includes conditional `DropIfOwned` plus reserved retain support. The current direct path from borrow-checker advisory drop sites to `DropIfOwned` remains scaffolding: final lowering must consume a validated memory plan and support affine, region, group and REC strategies. Treat the present implementation as migration debt, not as the accepted architecture.
 
 ## Runtime ownership metadata
 
@@ -223,14 +231,17 @@ Backends may consume:
 
 - value access classifications
 - call effects
-- return-alias summaries
+- complete result, retention and outlives summaries
 - validated transfer decisions
-- advisory drop sites
+- validated affine cleanup decisions
+- `ValidatedMemoryPlan`, including allocation-family layout, selected representation, cleanup plans, destruction plans, REC decisions and physical coalescing decisions
 - validated lifetime topology and allocation-family facts
 - builder lifecycle roots
 - region/exit information
 - reactive invalidation and liveness metadata
 - external boundary classifications
+
+Advisory drop sites never form final backend input. The current Wasm path that consumes them remains explicitly labelled implementation debt above.
 
 Backends must not:
 
@@ -242,7 +253,7 @@ Backends must not:
 
 ## Reactive and mounted-fragment liveness
 
-Live reactive subscriptions and mounted fragments can keep state observable. Ownership-aware lowering must not free a source or template instance while it remains observable. GC reachability is the semantic reference behaviour for already-legal topology. Finer invalidation granularity may improve performance but not lifetime semantics. Runtime fragment and reactive mount behaviour remain separate concerns.
+Live reactive subscriptions and mounted fragments can keep state observable. Ownership-aware lowering must not free a source or template instance while its builder lifecycle or reactive subscription keeps it observable. A GC representation may realise those already-proven lifecycle and observability facts with reachability, but reachability does not define the semantic lifetime. Finer invalidation granularity may improve performance but not lifetime semantics. Runtime fragment and reactive mount behaviour remain separate concerns.
 
 ## Backend specialisation
 
@@ -253,8 +264,8 @@ Allowed optimisations include:
 - retain elimination
 - region allocation
 - stack or arena allocation
-- GC elision
-- internal RC for legal topology
+- collector-free release lowering and artefact verification
+- physical drop coalescing after semantic proof
 - devirtualized runtime helpers
 - target-specific handle representation
 

@@ -16,13 +16,13 @@
 
 - every copyable allocation in the graph is duplicated into the destination lifetime region
 - internal alias topology is preserved: repeated source references to one allocation become repeated references to one copied allocation
-- same-region cycles are preserved in the copied graph
+- internal cycles are preserved in the copied graph
+- a copied acyclic graph may be allocated into an inferred or declared destination region
+- a copied cyclic graph must be allocated wholly into one explicit declared group. Copying a cycle into an ordinary inferred region is invalid. Preserving internal alias topology does not override the group-only cycle rule
 - the copied graph shares no mutable allocation with the source graph
 - a reactive source is copied as its current value, not as the same reactive source identity
 - an external opaque handle or resource that doesn't define a genuine independent-copy operation produces a source diagnostic
 - a non-copyable graph member produces a source diagnostic, and the compiler won't silently retain an alias instead
-
-A copy result may be allocated directly into an inferred or declared destination region.
 
 `copy` accepts a visible binding, field projection or parenthesised place. Literals, templates, calls and computed expressions aren't copy places and are rejected.
 

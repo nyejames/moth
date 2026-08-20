@@ -167,9 +167,17 @@ pub struct CompiledModuleArtifact {
 `PublicSemanticInterface` also exports lifetime and effect summaries conceptually, including:
 
 - fresh result roots
-- alias and projection results
-- result-to-result alias relationships
+- aliases of one or more parameters
+- projection results
+- extracted or detached results
+- aliases of another result
+- independent result graphs
 - retained-parameter relationships
+- retention cardinality
+- persistent-edge creation and destruction effects
+- extraction effects
+- whole-domain kill effects
+- cleanup-frontier facts
 - outlives constraints
 - external boundary classification
 
@@ -371,8 +379,11 @@ A public interface contains only facts a semantic consumer may observe:
 - receiver surfaces and visible methods
 - function parameter access modes
 - mutation, optional transfer eligibility and effect categories
-- return-alias and projection-alias summaries
+- complete result provenance: fresh roots, parameter aliases, projections, extracted or detached results, result-to-result aliases and independent result graphs
 - retained-parameter and outlives summaries
+- retention cardinality and persistent-edge creation or destruction effects
+- extraction effects and whole-domain kill effects
+- cleanup-frontier facts
 - external-boundary classifications
 - relevant reactive effect summaries
 - project-context provenance for every exported fact
@@ -397,7 +408,7 @@ Semantic surface validation covers:
 - trait requirements
 - receiver methods
 - reusable conformance evidence
-- access, optional-transfer, alias, retention, outlives, external-boundary and reactive summaries
+- access, optional-transfer, complete result provenance, retention, cardinality, extraction, whole-domain kill, cleanup-frontier, outlives, external-boundary and reactive summaries
 
 An exported semantic surface cannot leak:
 
@@ -444,7 +455,7 @@ Covers the canonical semantic contents of `PublicSemanticInterface`:
 - generic template semantics and bounds
 - trait and conformance evidence
 - receiver surfaces
-- access, optional-transfer, alias, retention, outlives and external-boundary summaries
+- access, optional-transfer, complete result provenance, retention, cardinality, extraction, whole-domain kill, cleanup-frontier, outlives and external-boundary summaries
 - relevant reactive effect summaries
 - project-context provenance
 
@@ -1026,23 +1037,9 @@ Borrow validation reads validated HIR and writes read-only side tables. It does 
 
 Optional inferred transfer is an optimisation path. When proof is unavailable on every relevant path, the operation remains a borrow. Failure to prove transfer must not reject an otherwise valid program. Immutable and mutable parameters may both receive inferred destruction responsibility at a proven final-use call site.
 
+Borrow validation may emit preliminary return-root alias evidence for the later lifetime analysis. It does not own final result provenance, retained-edge summaries or topology constraints.
+
 Closed external boundary profiles override this general rule. WIT value-only calls and restricted host-value crossings are non-consuming. Mutable opaque-handle access does not transfer Moth storage through the ordinary Moth ownership ABI.
-
-Public function interfaces export:
-
-- parameter access modes
-- mutation effects
-- transfer eligibility and effect categories
-- complete result provenance: fresh result root, alias of one or more parameters, projection of a parameter, extracted or detached result, alias of another result, or independent result graph
-- retained-parameter and outlives constraints
-- retention effects, including persistent-edge creation and destruction
-- extraction effects, distinguishing a detached result from a fresh root and an ordinary alias
-- retained-edge cardinality where statically known
-- whole-domain kill effects such as `clear`, aggregate destruction and definite whole-value replacement
-- cleanup-frontier facts
-- relevant reactive effects
-
-A final successful public or generated summary must not leave topology-relevant result provenance unknown.
 
 Interfaces and fingerprints carry stable semantic identities and summaries only. Donor-local `TypeId`, HIR, allocation-family, region and counter indexes never cross module boundaries, and REC is never exposed as source semantics.
 
@@ -1065,7 +1062,8 @@ Lifetime-region and escape validation is a distinct backend-neutral analysis aft
 Local per-function and module work:
 
 - reads validated HIR and read-only borrow/effect facts
-- produces allocation, alias, retention, escape, result and outlives constraints
+- owns allocation-family identity, complete result provenance, retention, escape and outlives constraints
+- owns retention cardinality, extraction, whole-domain kill and cleanup-frontier candidate facts
 - produces compiler-generated non-lexical lifetime intervals
 - writes immutable side-table facts and exported lifetime summaries
 - does not rewrite HIR
@@ -1096,7 +1094,7 @@ Canonical REC design lives under `docs/src/docs/codebase/memory-management/retai
 
 ### Backend handoff
 
-Backends receive validated HIR, borrow facts, validated lifetime topology and the memory plan. They realise the plan and never reconsider source legality, recompute topology or select their own strategy. A backend that advertises full memory control must lower every accepted topology in a release build without a tracing collector; a missing strategy at that point is `CompilerError`.
+Backends receive validated HIR, borrow facts, validated affine cleanup decisions, validated lifetime topology and a complete `ValidatedMemoryPlan`. That plan carries allocation-family layout, selected physical strategies, region and group placement, cleanup and destruction plans, REC decisions and physical coalescing decisions. Backends realise the plan and never reconsider source legality, recompute topology or select their own strategy. A backend that advertises full memory control must lower every accepted topology in a release build without a tracing collector; a missing strategy at that point is `CompilerError`.
 
 Canonical design lives under `docs/src/docs/codebase/memory-management/lifetime-regions-and-escape-validation/`. Declared `group` / `into` is accepted end-state syntax with implementation deferred; see `docs/src/docs/codebase/memory-management/declared-memory-groups/` for the canonical semantic contract and `docs/roadmap/plans/final-memory-management-redesign-and-implementation-plan.md` for implementation sequencing.
 
@@ -1164,6 +1162,8 @@ Backend lowerers receive only explicit validated inputs:
 - stable local, cross-module and binding-backed call targets
 - borrow facts
 - validated lifetime-region facts and exported lifetime summaries
+- validated affine cleanup decisions
+- `ValidatedMemoryPlan` with allocation-family layouts, selected strategies, cleanup plans, destruction plans, REC decisions and physical coalescing decisions
 - external boundary classifications
 - per-function link facts
 - selected-function, import and capability plans

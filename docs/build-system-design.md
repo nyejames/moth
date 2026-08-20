@@ -1169,10 +1169,13 @@ entry or package roots
 -> exact reachable function and effect union
 -> instantiate local lifetime summaries with builder lifecycle roots
 -> validate complete lifetime topology
--> target-affinity and capability analysis
--> deterministic target partition
--> validate assigned functions and permitted cross-target edges
+-> complete intervals, frontiers and epochs
+-> field-sensitive family splitting where implemented
+-> memory-strategy planning
+-> target-affinity analysis and partition
+-> target validation for assigned functions and permitted cross-target edges
 -> lower selected functions
+-> collector-free artefact verification when required
 ```
 
 `check` runs the same sequence and stops before lowering.
@@ -1226,9 +1229,9 @@ External boundary profile and capability metadata belong on the builder surface 
 
 ### Memory-strategy plans
 
-After link-level topology validation succeeds, memory-strategy planning selects one physical strategy per allocation family: stack or inline placement, static affine cleanup, inferred region allocation, explicit-group bulk reclamation, Retained Edge Counting, or host collection.
+After link-level topology validation succeeds, memory-strategy planning selects one physical strategy per allocation family: stack or inline placement, static affine cleanup, inferred region allocation, explicit-group bulk reclamation, Retained Edge Counting, or host collection. The planner produces a `ValidatedMemoryPlan` containing allocation-family layouts, selected representations, affine cleanup decisions, region and group placement, cleanup and destruction plans, REC decisions and physical coalescing decisions.
 
-The link plan conceptually carries this memory plan alongside validated topology. Backends consume it and never select their own strategy or reconsider source legality. Imprecise planning retains conservatively; a missing physical strategy after successful topology validation is `CompilerError`.
+The link plan conceptually carries this `ValidatedMemoryPlan` alongside validated topology. Backends consume it and never select their own strategy or reconsider source legality. Imprecise planning retains conservatively; a missing physical strategy after successful topology validation is `CompilerError`.
 
 ### Backend capability metadata and collector-free verification
 
@@ -1251,7 +1254,7 @@ This one-page runtime/memory contract applies to linked Moth Wasm variants. It d
 
 Project-level runtime bytes may be emitted once and instantiated separately for each page.
 
-Wasm lowering consumes explicit selected-function, import, export, capability, layout, validated lifetime and memory-strategy plans.
+Wasm lowering consumes explicit selected-function, import, export, capability, layout, validated lifetime and `ValidatedMemoryPlan` inputs.
 
 Full-control runtime memory support must eventually cover allocator, inferred region, explicit-group, REC counter and destruction-plan behaviour. The current basic linear-memory page and heap-base planning is migration debt, not the accepted end state.
 

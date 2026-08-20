@@ -1,6 +1,6 @@
 # Final Memory Management Redesign and Implementation Plan
 
-**Status:** documentation migration active, compiler implementation deferred
+**Status:** documentation migration consistency pass complete, compiler implementation deferred
 **Repository:** `nyejames/moth`  
 **Baseline reviewed:** `main` at `34afc996b746bfe93281dad115c40083a9106ac8`  
 **Activation branch:** `main`  
@@ -10,7 +10,7 @@
 **Required final code gate:** `just validate`  
 **Required documentation-only gate:** `moth build docs --release` or `cargo run --quiet -- build docs --release`  
 
-This plan is the parent roadmap for Moth's final memory-management model. It replaces the old GC-fallback direction with mandatory static lifetime topology and a hard collector-free release guarantee for capable backends.
+This plan is the parent roadmap for Moth's final memory-management model. It replaces the old GC-fallback direction with mandatory static lifetime topology and a hard collector-free release guarantee for capable backends. The initial Phase 1 migration reopened for one focused consistency pass after review, and that closure pass now completes Milestone A.
 
 The Retained Edge Counting plan owns the detailed REC analysis, ABI, counter and lowering contract. This plan owns the complete source semantics, analysis boundaries, inferred regions, cleanup frontiers, explicit groups, field-sensitive allocation splitting, physical memory planning, backend/profile parity, channel prerequisites and repository-wide documentation migration.
 
@@ -19,12 +19,14 @@ The former `docs/roadmap/plans/grouped-memory-design.md` plan is superseded as t
 ## Current state
 
 ```text
-STATUS: documentation slice complete — Milestone A landed. The canonical memory documentation,
-  compiler and build authorities, roadmap and progress matrix now describe the accepted
-  collector-free model. Compiler implementation remains deferred and no phase is active.
+STATUS: documentation slice complete after the Phase 1 consistency closure pass — Milestone A
+  landed. The canonical memory documentation, compiler and build authorities, roadmap and
+  progress matrix now describe the accepted collector-free model. Compiler implementation
+  remains deferred and no phase is active.
 CURRENT_SCOPE: none active. Milestone A (Phases 0 and 1) is closed; Phases 2 through 18 are
   deferred implementation work awaiting explicit activation.
-NEXT_ACTION: Phase 0 and Phase 1 are complete. Milestone A is closed. Do not begin Phase 2 until
+NEXT_ACTION: Phase 0 and the reopened Phase 1 consistency pass are complete. Milestone A is
+  closed. Do not begin Phase 2 until
   the borrow and last-use implementation slice is explicitly activated on the roadmap.
 BLOCKERS: none for the documentation slice; implementation phases remain gated on its completion.
 ```
@@ -105,6 +107,10 @@ The final summary vocabulary must distinguish at least:
 - alias of another result
 - independent result graph
 - retained-parameter and outlives constraints
+- retention cardinality
+- persistent-edge creation and destruction effects
+- whole-domain kill effects
+- cleanup-frontier facts
 
 A fresh result root may be allocated directly into a caller-selected hidden destination when every retained edge is legal for that destination.
 
@@ -388,9 +394,12 @@ Borrow validation writes side tables and does not rewrite HIR.
 A new backend-neutral analysis owner after borrow validation owns:
 
 - allocation-family identity
-- result provenance
+- complete result provenance
 - persistent retained-edge creation and destruction
 - retention domains
+- retention cardinality
+- extraction and detached-result classification
+- whole-domain kill effects
 - retained-edge liveness
 - cleanup-frontier candidates
 - local escape and outlives constraints
@@ -513,7 +522,7 @@ Current scaffolding must be replaced in place. Do not add compatibility adapters
 
 ### Milestone A: accepted design migration — complete
 
-The canonical docs, roadmap and progress matrix describe the final model while clearly marking implementation as deferred or partial. Delivered by Phases 0 and 1. No compiler or backend behaviour changed in this milestone.
+The canonical docs, roadmap and progress matrix describe the final model while clearly marking implementation as deferred or partial. Review reopened Phase 1 for a focused consistency closure pass, and the pass now completes the milestone. No compiler or backend behaviour changed in this milestone.
 
 ### Milestone B: collector-free correctness baseline
 
@@ -574,7 +583,7 @@ The repository currently has a completed historical memory documentation plan, a
 
 ### Summary and reasoning
 
-Accepted design must be authoritative before implementation starts. This phase deliberately documents the end state while the progress matrix records current gaps.
+Accepted design must be authoritative before implementation starts. This phase deliberately documents the end state while the progress matrix records current gaps. Review reopened Phase 1 for one consistency closure pass, which now completes the migration without changing compiler behaviour.
 
 ### Memory authority tasks
 
@@ -590,6 +599,8 @@ Accepted design must be authoritative before implementation starts. This phase d
 - [x] Rename the ownership page title to `Affine ownership and drops`. The existing `ownership-and-drops/` path is kept; no file move was needed.
 - [x] Update `ownership-and-drops` with affine cleanup responsibility, memory-plan ownership and the two-bit logical extension.
 - [x] Update `runtime-and-backend-lowering` with the collector-free release invariant and all physical strategies.
+- [x] Restrict copied cyclic graphs to one explicit declared group across access, copy and lifetime authorities.
+- [x] Make physical coalescing distinct from semantic lifetime widening.
 - [x] Add the canonical REC documentation directory and page required by the companion plan.
 - [x] Route the REC page from the memory index.
 
@@ -618,7 +629,7 @@ Accepted design must be authoritative before implementation starts. This phase d
 
 - [x] Update `docs/roadmap/roadmap.md` with this parent plan and the REC companion.
 - [x] Remove `GC-first correctness` as the accepted direction.
-- [x] Not applicable: `final-memory-management-documentation-consistency-cleanup-plan.md` no longer exists in the repository, so there is nothing to annotate.
+- [x] Confirm `final-memory-management-documentation-consistency-cleanup-plan.md` no longer exists in the repository and record that no historical annotation is required.
 - [x] Remove or supersede stale collector-elision wording in other roadmap plans, and add a historical banner to `docs/wasm-notes/future-wasm-components-report.md`, which described the model as GC-first.
 
 ### Progress-matrix tasks
@@ -635,6 +646,9 @@ Create or update separate rows for:
 - [x] memory-strategy planning
 - [x] REC analysis and selection
 - [x] REC backend lowering
+- [x] Physical coalescing
+- [x] Builder lifecycle regions
+- [x] Channels
 - [x] field-sensitive allocation splitting
 - [x] inferred-region and group backend lowering
 - [x] collector-free release verification
@@ -1367,7 +1381,7 @@ Do not collapse these rows into one generic "memory management" status.
 | `docs/src/docs/progress/@page.moth` | separate accepted-design and implementation rows |
 | `docs/roadmap/roadmap.md` | parent and companion plan sequencing, no GC-first wording |
 | `docs/roadmap/plans/grouped-memory-design.md` | superseded and deleted; its group implementation detail now lives in Phases 7 and 8, and every live link points at this plan |
-| historical memory cleanup plan | mark as historical relative to this redesign |
+| historical memory cleanup plan | confirm the file is absent and record that no historical annotation is required |
 | `README.md` | collector-free capable release goal |
 | `AGENTS.md` | update memory route and invariant wording where needed |
 | generated `docs/release/**` | regenerate only through docs build |

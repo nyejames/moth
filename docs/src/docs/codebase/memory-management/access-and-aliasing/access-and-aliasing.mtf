@@ -187,14 +187,14 @@ A mutable declaration initialized from a fresh value creates an independent muta
 
 - Every copyable allocation in the graph is duplicated into the destination lifetime region.
 - Internal alias topology is preserved: repeated source references to one allocation become repeated references to one copied allocation.
-- Same-region cycles are preserved in the copied graph.
+- Internal cycles are preserved in the copied graph.
+- A copied acyclic graph may be allocated into an inferred or declared destination region.
+- A copied cyclic graph must be allocated wholly into one explicit declared group. Copying a cycle into an ordinary inferred region is invalid. Preserving internal alias topology does not override the group-only cycle rule.
 - The copied graph shares no mutable allocation with the source graph.
 - Immutable scalar storage may be physically reused only where identity and alias behaviour are unobservable.
 - A reactive source is copied as its current value, not as the same reactive source identity.
 - External opaque handles and resources are non-copyable unless their semantic profile defines a genuine independent-copy operation.
 - A non-copyable graph member produces a source diagnostic. The compiler must not silently retain an alias.
-- A copy result may be allocated directly into an inferred or declared destination region.
-
 Expressions can construct new values from shared inputs: constructing a result doesn't implicitly copy the inputs. Template interpolation reads inputs and produces a new output string.
 
 [codeblock, $code("moth"):

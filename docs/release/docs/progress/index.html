@@ -746,7 +746,7 @@ td {
  <td style="padding: 0.1em 0.5em; "> Experimental</td>
  <td style="padding: 0.1em 0.5em; "> Targeted Wasm ownership-projection and conditional-drop coverage.</td>
  <td style="padding: 0.1em 0.5em; "> Wasm</td>
- <td style="padding: 0.1em 0.5em; "> Present but not part of the Alpha stability promise. Borrow-checker advisory drop sites currently emit Wasm <code>DropIfOwned</code> directly under GC-first scaffolding, and the LIR carries a reserved retain instruction. This direct path is migration debt, not accepted final architecture. Complete when memory-plan-driven full-control lowering replaces it.</td>
+ <td style="padding: 0.1em 0.5em; "> Present but not part of the Alpha stability promise. Borrow-checker advisory drop sites currently emit Wasm <code>DropIfOwned</code> directly under current scaffolding, and the LIR carries a reserved retain instruction. This direct path is migration debt, not accepted final architecture. Complete when memory-plan-driven full-control lowering replaces it.</td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">
@@ -790,11 +790,35 @@ td {
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Physical coalescing</td>
+ <td style="padding: 0.1em 0.5em; "> Deferred</td>
+ <td style="padding: 0.1em 0.5em; "> None</td>
+ <td style="padding: 0.1em 0.5em; "> Backend-neutral planning / full-control backends</td>
+ <td style="padding: 0.1em 0.5em; "> Accepted optional optimisation only. Physical coalescing may keep storage slightly longer than the maximally precise semantic interval, but it never widens semantic topology or changes diagnostics. Complete when the narrow straight-line heuristic is implemented and verified.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Builder lifecycle regions</td>
+ <td style="padding: 0.1em 0.5em; "> Deferred</td>
+ <td style="padding: 0.1em 0.5em; "> None</td>
+ <td style="padding: 0.1em 0.5em; "> Project/link planning / full-control backends</td>
+ <td style="padding: 0.1em 0.5em; "> Accepted design only. Page, mount, request, frame and arena roots must participate in ordinary lifetime-topology validation for reactive and mounted storage. Complete when builder lifecycle roots instantiate validated topology and memory plans.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Collector-free release verification</td>
  <td style="padding: 0.1em 0.5em; "> Deferred</td>
  <td style="padding: 0.1em 0.5em; "> None</td>
  <td style="padding: 0.1em 0.5em; "> Full-control backends / project builders</td>
  <td style="padding: 0.1em 0.5em; "> Accepted design only. Backends must declare collector-free release capability, and a capable backend must not fall back to a tracing collector. This is a backend capability and an artefact property, never a source-visible or project-visible mode. Complete when a capable backend proves no tracing runtime remains.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Channels</td>
+ <td style="padding: 0.1em 0.5em; "> Deferred</td>
+ <td style="padding: 0.1em 0.5em; "> None</td>
+ <td style="padding: 0.1em 0.5em; "> Async / lifetime planning / full-control backends</td>
+ <td style="padding: 0.1em 0.5em; "> Accepted prerequisites are mandatory affine transfer on successful send, responsibility preservation on failed send, bounded channel or task lifetimes, independent graphs across task boundaries and non-atomic REC under the cooperative task model. Complete when the final memory prerequisites and a separate channel implementation plan are accepted.</td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">

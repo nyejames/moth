@@ -6,6 +6,14 @@ groups. This page explains what they are so you know the concept exists.
 A `group` lets you control where values are allocated and how long they live.
 When you put a value into a group, that value cannot outlive the group.
 
+Every group-owned value stays with the group until the group exits. Last-use
+analysis still checks access, but it never releases one group child early.
+The group reclaims its contents together in one bulk cleanup.
+
+A group also provides Moth's only source mechanism for direct reference cycles.
+Every member of a cycle must belong to the same group. Inferred regions never
+become cyclic.
+
 ### Current status
 
 Group syntax is **accepted but deferred**. Current programs don't use it. The

@@ -19,6 +19,12 @@ A declaration can target a group with the `into` keyword:
     name [access/type] into group_name = expression
 ]
 
+### Bulk cleanup and cycles
+
+A group forms one deliberate allocation and cleanup domain. Every group-owned allocation remains under that group until group exit. Last-use analysis still checks access inside the group, but it never shortens group storage or releases one child early. The group reclaims its contents together in one bulk cleanup.
+
+The group-only cycle rule follows from that bulk lifetime. A declared group provides the only source mechanism for constructing a direct reference cycle. Every member of the cycle must belong to the same group. Inferred regions never become cyclic, and a copied cyclic graph must enter one explicit group as a whole.
+
 ### Placement rules
 
 - `group name:` is valid only in runtime executable bodies
@@ -62,7 +68,7 @@ A declaration may be placed into a group when its result root is fresh and every
 
 An alias result cannot become new group-owned storage through `into`.
 
-A fresh result root may retain parameters or other pre-existing values only when every retained edge satisfies the destination lifetime's outlives constraints. An independent result graph can enter an unrelated destination lifetime without retained-edge constraints to its source graph.
+A fresh result root may retain parameters or other pre-existing values only when every retained edge satisfies the destination lifetime's outlives constraints. An independent acyclic result graph can enter an unrelated destination lifetime without retained-edge constraints to its source graph. A copied cyclic graph must enter one explicit declared group as a whole.
 
 ### Nested groups and retained edges
 
@@ -124,9 +130,9 @@ V1 has no `into group` syntax on reassignment. A mutable binding already owned b
 
 - a fresh result root valid for that same group
 - an independent copy allocated into that group
-- a same-group value transferred at a proven final use
+- a same-group value reused or rebound at a proven final use
 
-Reassignment doesn't let a group-owned binding switch into a borrowed alias of ancestor, sibling or external storage. Use a separate ordinary alias binding for that purpose.
+Reassignment doesn't let a group-owned binding switch into a borrowed alias of ancestor, sibling or external storage. Reusing or rebinding a same-group value at final use doesn't transfer individual cleanup responsibility. The group remains responsible for cleanup. Use a separate ordinary alias binding for an ancestor or external value.
 
 ### Reactive storage restrictions
 
@@ -159,7 +165,7 @@ Hidden result destinations don't become source signature parameters.
 
 ### Why groups exist
 
-Groups give authors explicit control over allocation lifetime without exposing reference types, pointer syntax or manual memory management. The compiler validates group topology as part of its mandatory lifetime-region analysis.
+Groups give authors explicit control over one allocation and cleanup domain without exposing reference types, pointer syntax or manual memory management. Their defining performance property comes from predictable bulk cleanup: the compiler can reclaim the group together at exit instead of releasing children one by one. The compiler validates group topology as part of its mandatory lifetime-region analysis.
 
 ### Read next
 

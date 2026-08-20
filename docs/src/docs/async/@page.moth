@@ -121,9 +121,11 @@ page_head #= theme_head
 
     Channels are the point where Moth's memory model and its concurrency model meet, so the memory rules are locked even though async itself is deferred.
 
-    **Send is a mandatory transfer.** `>>` is not an optional last-use optimisation and not a borrow. A sent value's affine cleanup responsibility moves into the channel, and the sender has no later use of it on any path. This is the one place Moth requires transfer rather than inferring it opportunistically, because the receiving coroutine may outlive the sender.
+    **Static owner and runtime responsibility stay separate.** Before runtime send, the compiler assigns an independently owned graph to a channel-compatible bounded channel or task lifetime. A successful send does not rewrite semantic lifetime topology. It transfers affine cleanup responsibility to the channel, which owns the queued value until receive or channel teardown. A receive transfers that responsibility out to the receiver lifecycle.
 
-    **The channel owns queued values.** Between send and receive, a queued value's lifetime owner is the channel itself, not the sending coroutine's region. A receive transfers cleanup responsibility out to the receiver. If a channel is destroyed with values still queued, the channel destroys them.
+    **Send is a mandatory transfer.** `>>` is not an optional last-use optimisation and not a borrow. The sender has no later use of the sent value on any path. This is the one place Moth requires transfer rather than inferring it opportunistically, because the receiving coroutine may outlive the sender. If a send fails before commit, the value was not queued, so cleanup responsibility remains with or returns to the sender. The channel cannot destroy a value that it never accepted.
+
+    **Channels transfer independent graphs.** A channel does not create a shared graph spanning two task lifetimes. Arbitrary shared Moth reference graphs do not cross task boundaries. The sent value must already satisfy the channel-compatible lifetime contract, and queued values belong to the bounded channel or task lifecycle.
 
     **Group-owned values cannot be sent.** A value owned by a declared `group` is released in bulk at group exit and never individually, so it cannot become an independently transferable channel value. Send a fresh value, or an independent `copy`, instead.
 
@@ -407,4 +409,3 @@ page_head #= theme_head
 
     The important part is to keep the source model explicit and structured.
 ]
-

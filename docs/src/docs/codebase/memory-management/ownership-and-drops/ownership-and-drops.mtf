@@ -181,7 +181,7 @@ These are analysis/lowering facts only, not required exact Rust enum names and n
 - `MayConsume` retains conditional ownership handling.
 - `NeverConsumes` can omit drop responsibility.
 - `AlwaysConsumes` may remove ownership-condition branches only after call-path proof.
-- Specialisation must not create source-visible overloads or mandatory-consuming APIs.
+- Specialisation must not create source-visible overloads or ordinary mandatory-consuming function APIs.
 - Exact monomorphisation extent remains a backend and benchmarking decision.
 - The unified semantic contract remains fixed even if implementation encoding evolves.
 
@@ -218,7 +218,7 @@ These must preserve source-language semantics and the unified ownership contract
 - Using advisory sites as exact lifetimes or complete topology proof.
 - Requiring ownership proof for correctness.
 - Allowing ownership optimisation to change alias behaviour.
-- Introducing a source-visible mandatory-consuming API.
+- Introducing an ordinary source-visible mandatory-consuming function API. Channel send remains the accepted deferred mandatory-transfer boundary.
 
 ## Related reading
 

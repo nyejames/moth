@@ -102,7 +102,7 @@ from its old allocation without rebinding another alias.
 
 ### Independent result graphs
 
-An independent result graph has no retained Moth reference to pre-existing storage. `copy` produces independent results. WIT value-only lifting produces independent results. An independent graph may enter an unrelated destination lifetime without retained-edge constraints to its source graph.
+An independent result graph has no retained Moth reference to pre-existing storage. `copy` produces independent results. WIT value-only lifting produces independent results. An independent acyclic graph may enter an unrelated destination lifetime without retained-edge constraints to its source graph. A copied cyclic graph preserves its internal alias topology, so the whole graph must enter one explicit declared group. It cannot enter an ordinary inferred region.
 
 ### Aggregate storage
 
@@ -122,7 +122,7 @@ that more precise per-result analysis could prove independent.
 
 ### Cycles
 
-Cross-region cycles are invalid. Every strongly connected allocation graph must belong to one lifetime region. Same-region cycles are lifetime-safe, and a declared `group` is the only source mechanism for building one: the compiler never invents a cyclic region on your behalf. Direct source construction of cyclic graphs is deferred with the rest of declared-group implementation.
+Cross-region cycles are invalid. Every strongly connected allocation graph must belong to one lifetime region. A declared `group` is the only source mechanism for building a direct cycle: the compiler never invents a cyclic region on your behalf. `copy` preserves internal alias topology, but copying a cycle into an ordinary inferred region remains invalid. Direct source construction of cyclic graphs is deferred with the rest of declared-group implementation.
 
 ### Reactive and builder-owned lifetimes
 

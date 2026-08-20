@@ -211,7 +211,7 @@ Existing values may transfer destruction responsibility only at a proven final u
 
 Inferred transfer is optional. When safe transfer is not proven on every relevant path, the operation remains a borrow. Failure to prove an ownership optimisation must not make an otherwise valid source program invalid.
 
-`copy place` creates independent storage that may be allocated directly into an inferred or declared destination region. See @../access-and-aliasing (Access and aliasing) for the complete graph-level copy contract.
+`copy place` creates independent storage. A copied acyclic graph may be allocated directly into an inferred or declared destination region. A copied cyclic graph must be allocated wholly into one explicit declared group. Copying a cycle into an ordinary inferred region is invalid. Preserving internal alias topology does not override the group-only cycle rule. See @../access-and-aliasing (Access and aliasing) for the complete graph-level copy contract.
 
 ## Interior projections and allocation families
 
@@ -226,15 +226,40 @@ Field-sensitive allocation splitting may prove that a projected field is an inde
 Function lifetime summaries cover:
 
 - fresh result roots
-- parameter aliases
+- aliases of one or more parameters
 - projection aliases
-- result-to-result aliases
+- extracted or detached results
+- aliases of another result
+- independent result graphs
 - retained-parameter constraints
+- retention cardinality
+- persistent-edge creation and destruction
+- extraction effects
+- whole-domain kill effects
+- cleanup-frontier facts
 - required outlives relationships
 
 Multiple return values may alias one allocation when they remain under one caller lifetime owner.
 
-A caller may place a fresh result root directly into a destination region only when every retained edge in the result is legal for that destination. An alias result remains tied to its existing lifetime owner. An independent result graph may enter an unrelated destination lifetime without retained edges to its source graph.
+A caller may place a fresh result root directly into a destination region only when every retained edge in the result is legal for that destination. An alias result remains tied to its existing lifetime owner. An independent acyclic result graph may enter an unrelated destination lifetime without retained edges to its source graph. A copied cyclic result graph must instead enter one explicit declared group.
+
+### Final result and retention summary ownership
+
+Borrow validation supplies preliminary return-root alias evidence. It does not publish final result provenance or retained-edge summaries.
+
+Lifetime and retained-edge analysis owns the final summary vocabulary:
+
+- allocation-family identity
+- complete result provenance
+- retained parameters and outlives constraints
+- retention cardinality
+- extraction and detached-result classification
+- persistent retained-edge creation and destruction
+- whole-domain kills
+- cleanup-frontier candidates
+- exported lifetime and retention summaries
+
+The final summary distinguishes fresh roots, parameter aliases, projections, extracted or detached results, result-to-result aliases and independent result graphs. These stable semantic facts cross module and package boundaries. Donor-local family, region and counter indexes do not.
 
 ## Retained-edge liveness and cleanup frontiers
 
@@ -304,7 +329,7 @@ Reactive subscriptions are read-only dependencies, not active borrow lifetimes.
 
 Builder-supplied page, mount, request, frame and arena roots are lifecycle inputs. They obey the same retained-edge rule as source regions. Builders supply lifecycle roots but cannot change source legality.
 
-Reactive storage that outlives a lexical function must still satisfy one lifetime owner and the stored-edge outlives rule. A collector-free path may use builder-owned lifecycle regions; a GC path may use ordinary reachability for a topology already proven legal.
+Reactive storage that outlives a lexical function must still satisfy one lifetime owner and the stored-edge outlives rule. A collector-free path may use builder-owned lifecycle regions. A GC path may represent the same already-proven topology with ordinary reachability.
 
 ## External lifetime boundaries
 

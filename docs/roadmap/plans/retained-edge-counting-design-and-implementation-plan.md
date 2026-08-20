@@ -4,13 +4,13 @@ Status: accepted final design, implementation deferred
 
 Repository baseline: `nyejames/moth` `main` at `356d0666fa16507a5690aa8451f8c5616d01d00c`
 
-Proposed repository path:
+Repository path:
 
 ```text
 docs/roadmap/plans/retained-edge-counting-design-and-implementation-plan.md
 ```
 
-Proposed canonical implementation authority after the plan lands:
+Canonical implementation authority:
 
 ```text
 docs/src/docs/codebase/memory-management/retained-edge-counting/retained-edge-counting.mtf
@@ -24,6 +24,8 @@ Companion to:
 - `docs/src/docs/codebase/memory-management/lifetime-regions-and-escape-validation/`
 - `docs/src/docs/codebase/memory-management/declared-memory-groups/`
 - `docs/src/docs/codebase/memory-management/runtime-and-backend-lowering/`
+
+The canonical REC page now exists. REC implementation remains deferred and follows the phases in this plan.
 
 This plan owns the detailed compiler and runtime contract for Retained Edge Counting, abbreviated REC. The main memory-management plan should explain when REC exists and link here. It should not duplicate the implementation details in this document.
 
@@ -1513,7 +1515,7 @@ The repository currently contains old GC-baseline and one-bit-ABI wording. Final
 - [ ] Update lifetime-region docs with retained-edge liveness, cleanup frontiers, region epochs and REC eligibility.
 - [ ] Update declared-group docs with hard count-free group ownership and cycle policy.
 - [ ] Update runtime/backend docs with the strategy planner, two-bit tags, REC layout and collector-free release invariant.
-- [ ] Add the canonical REC technical page.
+- [x] Add the canonical REC technical page.
 - [ ] Update language collection docs to explain why builtin destructive operations remain narrow and compiler-known.
 - [ ] Update `docs/compiler-design-overview.md` public summaries, analysis boundaries and backend handoff.
 - [ ] Update `docs/build-system-design.md` physical-strategy plans, capability metadata and release verification.
