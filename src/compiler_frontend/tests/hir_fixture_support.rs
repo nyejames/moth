@@ -7,7 +7,6 @@
 //!      target-owned and both backends consume these constructors instead of copying them.
 
 use crate::compiler_frontend::ast::Ast;
-use crate::compiler_frontend::ast::ast_nodes::AstNode;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template::{Style, TemplateType};
@@ -32,10 +31,6 @@ use crate::compiler_frontend::value_mode::ValueMode;
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 use std::cell::RefCell;
 use std::rc::Rc;
-
-pub(crate) fn build_ast(nodes: Vec<AstNode>, entry_path: InternedPath) -> Ast {
-    crate::compiler_frontend::hir::hir_builder::build_ast(nodes, entry_path)
-}
 
 pub(crate) fn entry_and_start(string_table: &mut StringTable) -> (InternedPath, InternedPath) {
     let entry_path = InternedPath::from_single_str("main.moth", string_table);

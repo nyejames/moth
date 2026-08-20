@@ -30,13 +30,13 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
 };
 
 use crate::compiler_frontend::tests::type_id_fixture_support::{
-    choice_type_id, fresh_success_returns, param_with_type_id, reference_expr,
+    choice_type_id, fresh_success_returns, inferred_type_reference_expr, param_with_type_id,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 
 use crate::compiler_frontend::hir::hir_builder::{
-    HirTestChoiceDefinition, assert_no_placeholder_terminators, build_ast, build_ast_with_choices,
-    lower_ast,
+    HirTestChoiceDefinition, assert_no_placeholder_terminators, build_ast_with_choices,
+    build_ast_with_registered_types, lower_ast,
 };
 
 #[test]
@@ -59,7 +59,7 @@ fn non_unit_function_with_terminal_match_default_does_not_report_fallthrough() {
         },
         vec![node(
             NodeKind::Match {
-                scrutinee: reference_expr(
+                scrutinee: inferred_type_reference_expr(
                     x,
                     builtin_type_ids::INT,
                     test_source_location(11),
@@ -106,7 +106,7 @@ fn non_unit_function_with_terminal_match_default_does_not_report_fallthrough() {
         test_source_location(1),
     );
 
-    let ast = build_ast(vec![start_fn, chooser_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn, chooser_fn], entry_path);
     let (module, _type_environment) = lower_ast(ast, &mut string_table)
         .expect("all-terminal match arms should not trigger fallthrough");
 
@@ -156,7 +156,7 @@ fn non_unit_function_with_exhaustive_choice_match_returns_on_all_arms() {
         },
         vec![node(
             NodeKind::Match {
-                scrutinee: reference_expr(
+                scrutinee: inferred_type_reference_expr(
                     status_local,
                     status_type_id,
                     test_source_location(21),
@@ -249,7 +249,7 @@ fn lowers_match_with_literal_arms_and_explicit_default_wildcard() {
 
     let match_node = node(
         NodeKind::Match {
-            scrutinee: reference_expr(
+            scrutinee: inferred_type_reference_expr(
                 x.clone(),
                 builtin_type_ids::INT,
                 test_source_location(3),
@@ -317,7 +317,7 @@ fn lowers_match_with_literal_arms_and_explicit_default_wildcard() {
         test_source_location(2),
     );
 
-    let ast = build_ast(vec![start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
 
@@ -346,7 +346,7 @@ fn lowers_match_with_guarded_arm_into_hir_guard_expression() {
 
     let match_node = node(
         NodeKind::Match {
-            scrutinee: reference_expr(
+            scrutinee: inferred_type_reference_expr(
                 x.clone(),
                 builtin_type_ids::INT,
                 test_source_location(3),
@@ -400,7 +400,7 @@ fn lowers_match_with_guarded_arm_into_hir_guard_expression() {
         test_source_location(2),
     );
 
-    let ast = build_ast(vec![start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
     let start = &module.functions[module
@@ -461,7 +461,7 @@ fn match_guard_rejects_lowering_when_guard_emits_prelude_statements() {
         },
         vec![node(
             NodeKind::Match {
-                scrutinee: reference_expr(
+                scrutinee: inferred_type_reference_expr(
                     x,
                     builtin_type_ids::INT,
                     test_source_location(3),
@@ -476,7 +476,7 @@ fn match_guard_rejects_lowering_when_guard_emits_prelude_statements() {
         test_source_location(2),
     );
 
-    let ast = build_ast(vec![start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let err = lower_ast(ast, &mut string_table)
         .expect_err("guard expressions with preludes should fail HIR lowering");
 
@@ -509,14 +509,14 @@ fn match_rejects_non_literal_pattern_expressions() {
         },
         vec![node(
             NodeKind::Match {
-                scrutinee: reference_expr(
+                scrutinee: inferred_type_reference_expr(
                     x.clone(),
                     builtin_type_ids::INT,
                     test_source_location(3),
                     ValueMode::ImmutableReference,
                 ),
                 arms: vec![MatchArm {
-                    pattern: MatchPattern::Literal(reference_expr(
+                    pattern: MatchPattern::Literal(inferred_type_reference_expr(
                         x,
                         builtin_type_ids::INT,
                         test_source_location(3),
@@ -533,7 +533,7 @@ fn match_rejects_non_literal_pattern_expressions() {
         test_source_location(2),
     );
 
-    let ast = build_ast(vec![start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let err = lower_ast(ast, &mut string_table)
         .expect_err("non-literal match pattern should fail HIR lowering");
 
@@ -562,7 +562,7 @@ fn break_outside_loop_reports_hir_transformation_error() {
         test_source_location(1),
     );
 
-    let ast = build_ast(vec![start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let err = lower_ast(ast, &mut string_table).expect_err("break outside loop should fail");
     let (error_type, message, _location) = err
         .first_infrastructure_error_for_tests()
@@ -586,7 +586,7 @@ fn continue_outside_loop_reports_hir_transformation_error() {
         test_source_location(1),
     );
 
-    let ast = build_ast(vec![start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let err = lower_ast(ast, &mut string_table).expect_err("continue outside loop should fail");
     let (error_type, message, _location) = err
         .first_infrastructure_error_for_tests()
@@ -612,7 +612,7 @@ fn top_level_return_reports_hir_transformation_error() {
 
     let top_level_return = node(NodeKind::Return(vec![]), test_source_location(2));
 
-    let ast = build_ast(vec![start_fn, top_level_return], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn, top_level_return], entry_path);
     let err = lower_ast(ast, &mut string_table).expect_err("top-level return should fail");
 
     let (error_type, message, _location) = err
@@ -637,7 +637,7 @@ fn unit_implicit_return_lowers_to_return_terminator() {
         test_source_location(1),
     );
 
-    let ast = build_ast(vec![start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("unit fallthrough should succeed");
     let start = &module.functions[module
@@ -676,7 +676,7 @@ fn side_table_maps_statement_and_terminator_locations() {
         test_source_location(3),
     );
 
-    let ast = build_ast(vec![start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
 
@@ -695,7 +695,7 @@ fn lowers_relational_pattern_to_hir_relational() {
 
     let match_node = node(
         NodeKind::Match {
-            scrutinee: reference_expr(
+            scrutinee: inferred_type_reference_expr(
                 x.clone(),
                 builtin_type_ids::INT,
                 test_source_location(3),
@@ -745,7 +745,7 @@ fn lowers_relational_pattern_to_hir_relational() {
         test_source_location(2),
     );
 
-    let ast = build_ast(vec![start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
 
@@ -789,7 +789,7 @@ fn lowers_guarded_relational_pattern_preserving_guard_separation() {
 
     let match_node = node(
         NodeKind::Match {
-            scrutinee: reference_expr(
+            scrutinee: inferred_type_reference_expr(
                 x.clone(),
                 builtin_type_ids::INT,
                 test_source_location(3),
@@ -843,7 +843,7 @@ fn lowers_guarded_relational_pattern_preserving_guard_separation() {
         test_source_location(2),
     );
 
-    let ast = build_ast(vec![start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
 
@@ -900,7 +900,7 @@ fn lowers_choice_match_arms_to_hir_choice_variant_patterns() {
 
     let match_node = node(
         NodeKind::Match {
-            scrutinee: reference_expr(
+            scrutinee: inferred_type_reference_expr(
                 status_local.clone(),
                 status_type_id,
                 test_source_location(3),
@@ -1030,7 +1030,7 @@ fn lowers_option_present_capture_to_payload_assignment() {
 
     let match_node = node(
         NodeKind::Match {
-            scrutinee: reference_expr(
+            scrutinee: inferred_type_reference_expr(
                 maybe_name.clone(),
                 option_int_type_id,
                 test_source_location(2),
@@ -1046,7 +1046,7 @@ fn lowers_option_present_capture_to_payload_assignment() {
                 },
                 guard: None,
                 body: vec![node(
-                    NodeKind::ExpressionStatement(reference_expr(
+                    NodeKind::ExpressionStatement(inferred_type_reference_expr(
                         capture_path,
                         builtin_type_ids::INT,
                         test_source_location(3),
@@ -1083,7 +1083,7 @@ fn lowers_option_present_capture_to_payload_assignment() {
         test_source_location(1),
     );
 
-    let mut ast = build_ast(vec![start_fn], entry_path);
+    let mut ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let registered_option_type_id = ast.type_environment.intern_option(builtin_type_ids::INT);
     assert_eq!(
         registered_option_type_id, option_int_type_id,

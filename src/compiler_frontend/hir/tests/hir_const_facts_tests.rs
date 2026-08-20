@@ -12,7 +12,7 @@ use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::compiler_messages::source_location::{CharPosition, SourceLocation};
 use crate::compiler_frontend::hir::const_facts::HirConstFacts;
-use crate::compiler_frontend::hir::hir_builder::{build_ast, lower_ast};
+use crate::compiler_frontend::hir::hir_builder::{build_ast_with_registered_types, lower_ast};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{function_node, test_source_location};
@@ -34,7 +34,7 @@ fn projects_ast_const_facts_into_hir_metadata() {
         test_source_location(1),
     );
 
-    let mut ast = build_ast(vec![start_function], entry_path.clone());
+    let mut ast = build_ast_with_registered_types(vec![start_function], entry_path.clone());
 
     let explicit_path = InternedPath::from_single_str("site_name", &mut string_table);
     let private_path = InternedPath::from_single_str("page_title", &mut string_table);
@@ -114,7 +114,7 @@ fn empty_ast_const_facts_produces_empty_hir_const_facts() {
         test_source_location(1),
     );
 
-    let ast = build_ast(vec![start_function], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_function], entry_path);
 
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");

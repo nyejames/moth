@@ -28,12 +28,12 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
 };
 
 use crate::compiler_frontend::tests::type_id_fixture_support::{
-    param_with_type_id, reference_expr,
+    inferred_type_reference_expr, param_with_type_id,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 
 use crate::compiler_frontend::hir::hir_builder::{
-    assert_no_placeholder_terminators, build_ast, lower_ast,
+    assert_no_placeholder_terminators, build_ast_with_registered_types, lower_ast,
 };
 
 /// Extracts the result-local assignment and merge target from a value-block arm block.
@@ -124,7 +124,7 @@ fn value_match_lowering_uses_shared_result_local_and_merge_block() {
     let value_match_expr = Expression::new(
         ExpressionKind::ValueBlock {
             block: Box::new(ValueBlock::Match(ValueMatchBlock {
-                scrutinee: reference_expr(
+                scrutinee: inferred_type_reference_expr(
                     x.clone(),
                     builtin_type_ids::INT,
                     test_source_location(2),
@@ -161,9 +161,11 @@ fn value_match_lowering_uses_shared_result_local_and_merge_block() {
         test_source_location(1),
     );
 
-    let (module, _type_environment) =
-        lower_ast(build_ast(vec![start_fn], entry_path), &mut string_table)
-            .expect("value-match lowering should succeed");
+    let (module, _type_environment) = lower_ast(
+        build_ast_with_registered_types(vec![start_fn], entry_path),
+        &mut string_table,
+    )
+    .expect("value-match lowering should succeed");
 
     let start = super::start_function(&module);
     let entry_block = &module.blocks[start.entry.0 as usize];
@@ -233,8 +235,11 @@ fn then_value_without_active_target_is_hir_invariant_failure() {
         test_source_location(1),
     );
 
-    let err = lower_ast(build_ast(vec![start_fn], entry_path), &mut string_table)
-        .expect_err("ThenValue outside active value-block target should fail HIR lowering");
+    let err = lower_ast(
+        build_ast_with_registered_types(vec![start_fn], entry_path),
+        &mut string_table,
+    )
+    .expect_err("ThenValue outside active value-block target should fail HIR lowering");
 
     let (error_type, message, _location) = err
         .first_infrastructure_error_for_tests()

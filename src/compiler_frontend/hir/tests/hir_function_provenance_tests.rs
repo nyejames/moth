@@ -10,7 +10,7 @@
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
-use crate::compiler_frontend::hir::hir_builder::{build_ast, lower_ast};
+use crate::compiler_frontend::hir::hir_builder::{build_ast_with_registered_types, lower_ast};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
@@ -57,7 +57,7 @@ fn retains_direct_provenance_per_function() {
         node(NodeKind::Return(vec![]), test_source_location(3)),
     ];
 
-    let ast = build_ast(
+    let ast = build_ast_with_registered_types(
         vec![
             function_node(
                 start_name,
@@ -131,7 +131,7 @@ fn empty_function_has_explicit_empty_provenance() {
 
     let start_body = vec![node(NodeKind::Return(vec![]), test_source_location(1))];
 
-    let ast = build_ast(
+    let ast = build_ast_with_registered_types(
         vec![function_node(
             start_name,
             FunctionSignature {
@@ -166,7 +166,7 @@ fn validation_rejects_missing_provenance_coverage() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
 
-    let ast = build_ast(
+    let ast = build_ast_with_registered_types(
         vec![function_node(
             start_name,
             FunctionSignature {
@@ -203,7 +203,7 @@ fn validation_rejects_extra_provenance_entry() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
 
-    let ast = build_ast(
+    let ast = build_ast_with_registered_types(
         vec![function_node(
             start_name,
             FunctionSignature {
@@ -242,7 +242,7 @@ fn validation_rejects_replaced_out_of_range_provenance_key() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
 
-    let ast = build_ast(
+    let ast = build_ast_with_registered_types(
         vec![function_node(
             start_name,
             FunctionSignature {

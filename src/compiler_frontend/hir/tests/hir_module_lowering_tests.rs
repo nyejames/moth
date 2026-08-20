@@ -25,8 +25,12 @@ use crate::compiler_frontend::tests::hir_fixture_support::raw_template_expressio
 
 use crate::compiler_frontend::value_mode::ValueMode;
 
-use crate::compiler_frontend::hir::hir_builder::{build_ast, lower_ast, lower_ast_with_metadata};
-use crate::compiler_frontend::tests::type_id_fixture_support::{no_value_expr, reference_expr};
+use crate::compiler_frontend::hir::hir_builder::{
+    build_ast_with_registered_types, lower_ast, lower_ast_with_metadata,
+};
+use crate::compiler_frontend::tests::type_id_fixture_support::{
+    inferred_type_reference_expr, no_value_expr,
+};
 
 #[test]
 fn registers_declarations_and_resolves_start_function() {
@@ -61,7 +65,7 @@ fn registers_declarations_and_resolves_start_function() {
         test_source_location(2),
     );
 
-    let ast = build_ast(vec![struct_node, start_function], entry_path);
+    let ast = build_ast_with_registered_types(vec![struct_node, start_function], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
 
@@ -98,7 +102,7 @@ fn api_only_root_roles_lower_without_implicit_start() {
             vec![],
             test_source_location(1),
         );
-        let mut ast = build_ast(vec![declaration], entry_path);
+        let mut ast = build_ast_with_registered_types(vec![declaration], entry_path);
         ast.root_role = root_role;
 
         let (module, _type_environment) =
@@ -131,7 +135,7 @@ fn lowers_module_constants_into_hir_const_pool() {
         test_source_location(1),
     );
 
-    let mut ast = build_ast(vec![start_function], entry_path);
+    let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
     let const_name = super::symbol("SITE_NAME", &mut string_table);
     ast.module_constants.push(make_test_variable(
         const_name,
@@ -167,7 +171,7 @@ fn start_function_can_reference_module_constant() {
             returns: vec![],
         },
         vec![node(
-            NodeKind::ExpressionStatement(reference_expr(
+            NodeKind::ExpressionStatement(inferred_type_reference_expr(
                 third_const.clone(),
                 builtin_type_ids::INT,
                 test_source_location(2),
@@ -178,7 +182,7 @@ fn start_function_can_reference_module_constant() {
         test_source_location(1),
     );
 
-    let mut ast = build_ast(vec![start_function], entry_path);
+    let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
     ast.module_constants.push(make_test_variable(
         third_const,
         Expression::int(3, test_source_location(1), ValueMode::ImmutableOwned),
@@ -224,7 +228,7 @@ fn rejects_unmaterialized_template_constants_in_hir_module_constant_lowering() {
         ValueMode::ImmutableOwned,
     );
 
-    let mut ast = build_ast(vec![start_function], entry_path);
+    let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
     ast.module_constants.push(make_test_variable(
         super::symbol("WRAPPER", &mut string_table),
         template_constant,
@@ -264,7 +268,7 @@ fn rejects_nested_unmaterialized_template_constants_in_hir_module_constant_lower
     let page_const_name = super::symbol("PAGE", &mut string_table);
     let body_field = page_const_name.append(string_table.intern("body"));
 
-    let mut ast = build_ast(vec![start_function], entry_path);
+    let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
     ast.module_constants.push(make_test_variable(
         page_const_name,
         Expression::struct_instance(
@@ -331,7 +335,7 @@ fn lowers_struct_module_constant_into_record_with_ordered_fields() {
         test_source_location(2),
     );
 
-    let mut ast = build_ast(vec![struct_node, start_function], entry_path);
+    let mut ast = build_ast_with_registered_types(vec![struct_node, start_function], entry_path);
     let const_name = super::symbol("POINT", &mut string_table);
 
     ast.module_constants.push(make_test_variable(
@@ -400,7 +404,7 @@ fn extracts_ast_doc_fragments_into_module_metadata() {
         test_source_location(1),
     );
 
-    let mut ast = build_ast(vec![start_function], entry_path);
+    let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
     ast.doc_fragments = vec![
         AstDocFragment {
             kind: AstDocFragmentKind::Doc,

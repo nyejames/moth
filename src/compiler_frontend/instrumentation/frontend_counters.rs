@@ -322,19 +322,23 @@ mod detailed {
         static TEST_COUNTER_CAPTURE_ACTIVE: Cell<bool> = const { Cell::new(false) };
     }
 
-    #[cfg(test)]
+    /// Gated on `timers` as well as this module's `benchmark_counters` because every test that
+    /// opts in also opens a timing session through `start_benchmark_collection`, which only
+    /// exists with `timers`. Without the extra gate the counters-only lane compiles a guard no
+    /// caller in that configuration can reach, and reports it as dead code.
+    #[cfg(all(test, feature = "timers"))]
     pub(crate) struct FrontendCounterTestCaptureGuard {
         previous: bool,
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, feature = "timers"))]
     impl Drop for FrontendCounterTestCaptureGuard {
         fn drop(&mut self) {
             TEST_COUNTER_CAPTURE_ACTIVE.with(|active| active.set(self.previous));
         }
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, feature = "timers"))]
     pub(crate) fn capture_frontend_counters_for_test() -> FrontendCounterTestCaptureGuard {
         let previous = TEST_COUNTER_CAPTURE_ACTIVE.with(|active| {
             let previous = active.get();
@@ -1192,7 +1196,7 @@ pub(crate) use detailed::{
     reset_frontend_counters,
 };
 
-#[cfg(all(test, feature = "benchmark_counters"))]
+#[cfg(all(test, feature = "benchmark_counters", feature = "timers"))]
 pub(crate) use detailed::capture_frontend_counters_for_test;
 
 #[cfg(not(feature = "benchmark_counters"))]

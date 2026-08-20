@@ -15,14 +15,15 @@ use crate::compiler_frontend::hir::ids::{HirNodeId, HirValueId};
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    assignment_target, function_node, make_test_variable, node, reference_expr, symbol,
+    assignment_target, function_node, immutable_reference_expr, make_test_variable, node, symbol,
     test_source_location,
 };
 use crate::compiler_frontend::tests::borrow_fixture_support::{
     assert_borrow_error_kind, run_borrow_checker,
 };
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
-use crate::compiler_frontend::tests::hir_fixture_support::{build_ast, entry_and_start, lower_hir};
+use crate::compiler_frontend::tests::hir_fixture_support::{entry_and_start, lower_hir};
+use crate::compiler_frontend::tests::type_id_fixture_support::build_ast_with_registered_types;
 
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -55,7 +56,12 @@ fn if_branch_local_alias_does_not_escape_merge() {
                     vec![node(
                         NodeKind::VariableDeclaration(make_test_variable(
                             y,
-                            reference_expr(x.clone(), DataType::Int, BOOL, test_source_location(3)),
+                            immutable_reference_expr(
+                                x.clone(),
+                                DataType::Int,
+                                BOOL,
+                                test_source_location(3),
+                            ),
                         )),
                         test_source_location(3),
                     )],
@@ -74,7 +80,10 @@ fn if_branch_local_alias_does_not_escape_merge() {
         test_source_location(1),
     );
 
-    let hir = lower_hir(build_ast(vec![start_fn], entry_path), &mut string_table);
+    let hir = lower_hir(
+        build_ast_with_registered_types(vec![start_fn], entry_path),
+        &mut string_table,
+    );
     run_borrow_checker(&hir, &external_package_registry, &string_table)
         .expect("branch-local alias should not be visible after merge");
 }
@@ -98,7 +107,7 @@ fn match_arm_local_alias_does_not_escape_merge() {
         body: vec![node(
             NodeKind::VariableDeclaration(make_test_variable(
                 y,
-                reference_expr(x.clone(), DataType::Int, BOOL, test_source_location(4)),
+                immutable_reference_expr(x.clone(), DataType::Int, BOOL, test_source_location(4)),
             )),
             test_source_location(4),
         )],
@@ -142,7 +151,10 @@ fn match_arm_local_alias_does_not_escape_merge() {
         test_source_location(1),
     );
 
-    let hir = lower_hir(build_ast(vec![start_fn], entry_path), &mut string_table);
+    let hir = lower_hir(
+        build_ast_with_registered_types(vec![start_fn], entry_path),
+        &mut string_table,
+    );
     run_borrow_checker(&hir, &external_package_registry, &string_table)
         .expect("match-arm local alias should not be visible after merge");
 }
@@ -176,7 +188,12 @@ fn while_body_local_alias_does_not_escape_exit() {
                     vec![node(
                         NodeKind::VariableDeclaration(make_test_variable(
                             y,
-                            reference_expr(x.clone(), DataType::Int, BOOL, test_source_location(3)),
+                            immutable_reference_expr(
+                                x.clone(),
+                                DataType::Int,
+                                BOOL,
+                                test_source_location(3),
+                            ),
                         )),
                         test_source_location(3),
                     )],
@@ -194,7 +211,10 @@ fn while_body_local_alias_does_not_escape_exit() {
         test_source_location(1),
     );
 
-    let hir = lower_hir(build_ast(vec![start_fn], entry_path), &mut string_table);
+    let hir = lower_hir(
+        build_ast_with_registered_types(vec![start_fn], entry_path),
+        &mut string_table,
+    );
     run_borrow_checker(&hir, &external_package_registry, &string_table)
         .expect("while-body local alias should not be visible in exit block");
 }
@@ -228,7 +248,12 @@ fn dead_local_access_reports_borrow_error() {
                     vec![node(
                         NodeKind::VariableDeclaration(make_test_variable(
                             y.clone(),
-                            reference_expr(x.clone(), DataType::Int, BOOL, test_source_location(3)),
+                            immutable_reference_expr(
+                                x.clone(),
+                                DataType::Int,
+                                BOOL,
+                                test_source_location(3),
+                            ),
                         )),
                         test_source_location(3),
                     )],
@@ -247,7 +272,10 @@ fn dead_local_access_reports_borrow_error() {
         test_source_location(1),
     );
 
-    let mut hir = lower_hir(build_ast(vec![start_fn], entry_path), &mut string_table);
+    let mut hir = lower_hir(
+        build_ast_with_registered_types(vec![start_fn], entry_path),
+        &mut string_table,
+    );
 
     let start = &hir.functions[hir
         .start_function

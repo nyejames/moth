@@ -16,7 +16,7 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
 use crate::compiler_frontend::value_mode::ValueMode;
 
 use crate::compiler_frontend::hir::hir_builder::{
-    assert_no_placeholder_terminators, build_ast, lower_ast,
+    assert_no_placeholder_terminators, build_ast_with_registered_types, lower_ast,
 };
 
 fn local_by_name<'a>(
@@ -69,7 +69,7 @@ fn scoped_block_lowers_through_child_region_and_rejoins_parent() {
         test_source_location(1),
     );
 
-    let ast = build_ast(vec![start_function], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_function], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
     assert_no_placeholder_terminators(&module);

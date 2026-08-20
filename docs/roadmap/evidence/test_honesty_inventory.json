@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "run": {
-    "id": "2775-0-18cd7ca856641728",
+    "id": "c915-0-18cd7d6506758180",
     "command": "honesty-audit",
     "os": "macos",
     "arch": "aarch64",
@@ -11,7 +11,7 @@
     "thread_count": null,
     "completed": true
   },
-  "generated_at": "2026-08-20T10:28:18Z",
+  "generated_at": "2026-08-20T10:41:48Z",
   "work_id": "test-suite-honesty",
   "base_revision": "f41f93a7a",
   "scanned_roots": [
@@ -1927,10 +1927,10 @@
     {
       "code": "counters_only_lane_dead_code",
       "severity": "review",
-      "status": "open",
+      "status": "resolved",
       "description": "The counters-only feature configuration compiles a test helper no caller can reach",
-      "disposition": "found in Phase 8 when the counters lane became an executed command; routed to Phase 11. frontend_counters::capture_frontend_counters_for_test, FrontendCounterTestCaptureGuard and the re-export are gated on benchmark_counters, while every caller is gated on all(timers, benchmark_counters), so the counters-only lane emits three dead-code warnings. Nothing fails. It was invisible because `just ci-clippy-native` lints with --all-features and never builds that configuration. The correction is a cfg gate, not a behaviour change, so it is left outside the Patch A evidence boundary",
-      "owning_phase": "Phase 10 (EF-0002)"
+      "disposition": "found in Phase 8 when the counters lane became an executed command; routed to Phase 11. frontend_counters::capture_frontend_counters_for_test, FrontendCounterTestCaptureGuard and the re-export are gated on benchmark_counters, while every caller is gated on all(timers, benchmark_counters), so the counters-only lane emits three dead-code warnings. Nothing fails. It was invisible because `just ci-clippy-native` lints with --all-features and never builds that configuration. The correction is a cfg gate, not a behaviour change, so it is left outside the Patch A evidence boundary. Resolved in Phase 11: FrontendCounterTestCaptureGuard, capture_frontend_counters_for_test and the re-export are now gated on all(test, feature = \"timers\") inside the benchmark_counters module, matching every caller. The counters-only lane is warning-free under cargo clippy -p moth --features benchmark_counters --all-targets.",
+      "owning_phase": "Phase 11"
     },
     {
       "code": "monolithic_ci_steps",
@@ -2184,7 +2184,7 @@
       "state": "present",
       "path": "target/test-reports/integration_suite_inventory.json",
       "schema_version": 8,
-      "run_id": "275a-18cd7ca7f0586b00",
+      "run_id": "c8fd-18cd7d64998d8bf8",
       "run_command": "tests --audit",
       "run_completed": true,
       "hard_policy_violation_count": 0,

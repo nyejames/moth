@@ -39,8 +39,8 @@ use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    assignment_target, fresh_success_returns, function_node, make_test_variable, node, param,
-    reference_expr, symbol, test_source_location,
+    assignment_target, fresh_success_returns, function_node, immutable_reference_expr,
+    make_test_variable, node, param, symbol, test_source_location,
 };
 use crate::compiler_frontend::tests::borrow_fixture_support::{
     assert_borrow_error_kind, assert_infrastructure_error_contains,
@@ -49,8 +49,9 @@ use crate::compiler_frontend::tests::borrow_fixture_support::{
 use crate::compiler_frontend::tests::external_package_support::{
     default_external_package_registry, register_external_function,
 };
-use crate::compiler_frontend::tests::hir_fixture_support::{build_ast, entry_and_start, lower_hir};
+use crate::compiler_frontend::tests::hir_fixture_support::{entry_and_start, lower_hir};
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
+use crate::compiler_frontend::tests::type_id_fixture_support::build_ast_with_registered_types;
 use crate::compiler_frontend::tests::type_id_fixture_support::param_with_type_id;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
@@ -168,7 +169,7 @@ fn public_call_summaries_cover_zero_parameter_and_parameter_effects() {
     );
 
     let hir = lower_hir(
-        build_ast(vec![target, start], entry_path),
+        build_ast_with_registered_types(vec![target, start], entry_path),
         &mut string_table,
     );
     let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
@@ -288,7 +289,10 @@ fn incomplete_public_call_summary_metadata_uses_infrastructure_lane() {
         test_source_location(1),
     );
 
-    let mut hir = lower_hir(build_ast(vec![start], entry_path), &mut string_table);
+    let mut hir = lower_hir(
+        build_ast_with_registered_types(vec![start], entry_path),
+        &mut string_table,
+    );
     hir.functions[0].params.push(LocalId(999_999));
 
     let error = run_borrow_checker(&hir, &external_package_registry, &string_table)
@@ -341,7 +345,7 @@ fn public_call_summary_keeps_mutable_but_unwritten_call_path_read_only() {
             function_call_node(
                 mutator_name,
                 vec![CallArgument::positional(
-                    reference_expr(
+                    immutable_reference_expr(
                         parameter_name,
                         DataType::Int,
                         builtin_type_ids::INT,
@@ -368,7 +372,7 @@ fn public_call_summary_keeps_mutable_but_unwritten_call_path_read_only() {
     );
 
     let hir = lower_hir(
-        build_ast(vec![mutator, wrapper, start], entry_path),
+        build_ast_with_registered_types(vec![mutator, wrapper, start], entry_path),
         &mut string_table,
     );
     let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
@@ -596,7 +600,7 @@ fn immutable_shared_parameter_optional_transfer_remains_legal() {
                 function_call_node(
                     reader_name,
                     vec![CallArgument::positional(
-                        reference_expr(
+                        immutable_reference_expr(
                             value_name,
                             DataType::Int,
                             builtin_type_ids::INT,
@@ -615,7 +619,7 @@ fn immutable_shared_parameter_optional_transfer_remains_legal() {
     );
 
     let hir = lower_hir(
-        build_ast(vec![reader, start], entry_path),
+        build_ast_with_registered_types(vec![reader, start], entry_path),
         &mut string_table,
     );
     run_borrow_checker(&hir, &external_package_registry, &string_table)
@@ -784,7 +788,7 @@ fn user_function_returning_param_alias_allows_caller_rebinding() {
             }],
         },
         vec![node(
-            NodeKind::Return(vec![reference_expr(
+            NodeKind::Return(vec![immutable_reference_expr(
                 p,
                 DataType::Int,
                 builtin_type_ids::INT,
@@ -814,7 +818,7 @@ fn user_function_returning_param_alias_allows_caller_rebinding() {
                     y,
                     Expression::function_call(
                         alias_fn,
-                        vec![reference_expr(
+                        vec![immutable_reference_expr(
                             x.clone(),
                             DataType::Int,
                             builtin_type_ids::INT,
@@ -843,7 +847,7 @@ fn user_function_returning_param_alias_allows_caller_rebinding() {
     );
 
     let hir = lower_hir(
-        build_ast(vec![callee, caller], entry_path),
+        build_ast_with_registered_types(vec![callee, caller], entry_path),
         &mut string_table,
     );
     run_borrow_checker(&hir, &external_package_registry, &string_table)
@@ -925,7 +929,7 @@ fn fallible_alias_return_propagation_validates_success_alias_metadata() {
             ],
         },
         vec![node(
-            NodeKind::Return(vec![reference_expr(
+            NodeKind::Return(vec![immutable_reference_expr(
                 source_unused,
                 DataType::StringSlice,
                 builtin_type_ids::STRING,
@@ -950,7 +954,7 @@ fn fallible_alias_return_propagation_validates_success_alias_metadata() {
                 test_source_location(30),
             ),
             CallArgument::positional(
-                reference_expr(
+                immutable_reference_expr(
                     forward_param.clone(),
                     DataType::StringSlice,
                     builtin_type_ids::STRING,
@@ -1009,7 +1013,7 @@ fn fallible_alias_return_propagation_validates_success_alias_metadata() {
     );
 
     let hir = lower_hir(
-        build_ast(vec![source, forward, start], entry_path),
+        build_ast_with_registered_types(vec![source, forward, start], entry_path),
         &mut string_table,
     );
     let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
@@ -1098,7 +1102,7 @@ fn fresh_user_return_does_not_alias_caller_roots() {
                     y,
                     Expression::function_call(
                         fresh_fn,
-                        vec![reference_expr(
+                        vec![immutable_reference_expr(
                             x.clone(),
                             DataType::Int,
                             builtin_type_ids::INT,
@@ -1127,7 +1131,7 @@ fn fresh_user_return_does_not_alias_caller_roots() {
     );
 
     let hir = lower_hir(
-        build_ast(vec![callee, caller], entry_path),
+        build_ast_with_registered_types(vec![callee, caller], entry_path),
         &mut string_table,
     );
     let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
@@ -1268,7 +1272,7 @@ fn multi_return_fallible_external_retains_unknown_alias_summary() {
     );
 
     let hir = lower_hir(
-        build_ast(vec![imprecise_return, forward, start], entry_path),
+        build_ast_with_registered_types(vec![imprecise_return, forward, start], entry_path),
         &mut string_table,
     );
     let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
@@ -1486,7 +1490,7 @@ fn inferred_alias_return_from_parameter_reference_allows_caller_rebinding() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     q.clone(),
-                    reference_expr(
+                    immutable_reference_expr(
                         p,
                         DataType::Int,
                         builtin_type_ids::INT,
@@ -1496,7 +1500,7 @@ fn inferred_alias_return_from_parameter_reference_allows_caller_rebinding() {
                 test_source_location(2),
             ),
             node(
-                NodeKind::Return(vec![reference_expr(
+                NodeKind::Return(vec![immutable_reference_expr(
                     q,
                     DataType::Int,
                     builtin_type_ids::INT,
@@ -1527,7 +1531,7 @@ fn inferred_alias_return_from_parameter_reference_allows_caller_rebinding() {
                     y,
                     Expression::function_call(
                         unknown_fn,
-                        vec![reference_expr(
+                        vec![immutable_reference_expr(
                             x.clone(),
                             DataType::Int,
                             builtin_type_ids::INT,
@@ -1556,7 +1560,7 @@ fn inferred_alias_return_from_parameter_reference_allows_caller_rebinding() {
     );
 
     let hir = lower_hir(
-        build_ast(vec![callee, caller], entry_path),
+        build_ast_with_registered_types(vec![callee, caller], entry_path),
         &mut string_table,
     );
     run_borrow_checker(&hir, &external_package_registry, &string_table)
@@ -1607,7 +1611,7 @@ fn mutable_user_argument_is_accepted_without_false_shared_conflict() {
                 function_call_node(
                     mut_sink,
                     vec![CallArgument::positional(
-                        reference_expr(
+                        immutable_reference_expr(
                             x,
                             DataType::Int,
                             builtin_type_ids::INT,
@@ -1626,7 +1630,7 @@ fn mutable_user_argument_is_accepted_without_false_shared_conflict() {
     );
 
     let hir = lower_hir(
-        build_ast(vec![callee, caller], entry_path),
+        build_ast_with_registered_types(vec![callee, caller], entry_path),
         &mut string_table,
     );
     run_borrow_checker(&hir, &external_package_registry, &string_table)
@@ -1688,7 +1692,7 @@ fn mutable_user_call_with_fresh_mutable_arg_does_not_alias_existing_place_argume
                     mut2,
                     vec![
                         CallArgument::positional(
-                            reference_expr(
+                            immutable_reference_expr(
                                 x,
                                 DataType::Int,
                                 builtin_type_ids::INT,
@@ -1714,7 +1718,7 @@ fn mutable_user_call_with_fresh_mutable_arg_does_not_alias_existing_place_argume
     );
 
     let hir = lower_hir(
-        build_ast(vec![callee, caller], entry_path),
+        build_ast_with_registered_types(vec![callee, caller], entry_path),
         &mut string_table,
     );
     run_borrow_checker(&hir, &external_package_registry, &string_table).expect(
@@ -1754,7 +1758,7 @@ fn host_mutable_parameter_requires_mutable_access() {
                 host_function_call_node(
                     host_fn,
                     vec![CallArgument::positional(
-                        reference_expr(
+                        immutable_reference_expr(
                             x,
                             DataType::Int,
                             builtin_type_ids::INT,
@@ -1772,7 +1776,10 @@ fn host_mutable_parameter_requires_mutable_access() {
         test_source_location(1),
     );
 
-    let hir = lower_hir(build_ast(vec![start], entry_path), &mut string_table);
+    let hir = lower_hir(
+        build_ast_with_registered_types(vec![start], entry_path),
+        &mut string_table,
+    );
     let error = run_borrow_checker(&hir, &external_package_registry, &string_table)
         .expect_err("mutable host parameter should enforce mutable access");
     assert_invalid_mutable_access_reason(&error, InvalidMutableAccessReason::ImmutablePlace);
@@ -1810,7 +1817,7 @@ fn host_mutable_parameter_accepts_mutable_local_argument() {
                 host_function_call_node(
                     host_fn,
                     vec![CallArgument::positional(
-                        reference_expr(
+                        immutable_reference_expr(
                             x,
                             DataType::Int,
                             builtin_type_ids::INT,
@@ -1828,7 +1835,10 @@ fn host_mutable_parameter_accepts_mutable_local_argument() {
         test_source_location(1),
     );
 
-    let hir = lower_hir(build_ast(vec![start], entry_path), &mut string_table);
+    let hir = lower_hir(
+        build_ast_with_registered_types(vec![start], entry_path),
+        &mut string_table,
+    );
     run_borrow_checker(&hir, &external_package_registry, &string_table)
         .expect("mutable host parameter should accept mutable local argument");
 }
@@ -1865,7 +1875,7 @@ fn host_shared_parameter_is_shared_only() {
                 host_function_call_node(
                     host_fn,
                     vec![CallArgument::positional(
-                        reference_expr(
+                        immutable_reference_expr(
                             x,
                             DataType::Int,
                             builtin_type_ids::INT,
@@ -1883,7 +1893,10 @@ fn host_shared_parameter_is_shared_only() {
         test_source_location(1),
     );
 
-    let hir = lower_hir(build_ast(vec![start], entry_path), &mut string_table);
+    let hir = lower_hir(
+        build_ast_with_registered_types(vec![start], entry_path),
+        &mut string_table,
+    );
     run_borrow_checker(&hir, &external_package_registry, &string_table)
         .expect("shared host parameter should not force mutable access");
 }
@@ -1944,7 +1957,7 @@ fn two_mutable_args_to_same_root_are_rejected() {
                     mut2,
                     vec![
                         CallArgument::positional(
-                            reference_expr(
+                            immutable_reference_expr(
                                 x.clone(),
                                 DataType::Int,
                                 builtin_type_ids::INT,
@@ -1954,7 +1967,7 @@ fn two_mutable_args_to_same_root_are_rejected() {
                             test_source_location(11),
                         ),
                         CallArgument::positional(
-                            reference_expr(
+                            immutable_reference_expr(
                                 x.clone(),
                                 DataType::Int,
                                 builtin_type_ids::INT,
@@ -1972,7 +1985,7 @@ fn two_mutable_args_to_same_root_are_rejected() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     y,
-                    reference_expr(
+                    immutable_reference_expr(
                         x,
                         DataType::Int,
                         builtin_type_ids::INT,
@@ -1986,7 +1999,7 @@ fn two_mutable_args_to_same_root_are_rejected() {
     );
 
     let hir = lower_hir(
-        build_ast(vec![callee, caller], entry_path),
+        build_ast_with_registered_types(vec![callee, caller], entry_path),
         &mut string_table,
     );
     let error = run_borrow_checker(&hir, &external_package_registry, &string_table)
@@ -2049,7 +2062,7 @@ fn shared_then_mutable_args_to_same_root_are_rejected() {
                     read_then_mut,
                     vec![
                         CallArgument::positional(
-                            reference_expr(
+                            immutable_reference_expr(
                                 x.clone(),
                                 DataType::Int,
                                 builtin_type_ids::INT,
@@ -2059,7 +2072,7 @@ fn shared_then_mutable_args_to_same_root_are_rejected() {
                             test_source_location(11),
                         ),
                         CallArgument::positional(
-                            reference_expr(
+                            immutable_reference_expr(
                                 x,
                                 DataType::Int,
                                 builtin_type_ids::INT,
@@ -2079,7 +2092,7 @@ fn shared_then_mutable_args_to_same_root_are_rejected() {
     );
 
     let hir = lower_hir(
-        build_ast(vec![callee, caller], entry_path),
+        build_ast_with_registered_types(vec![callee, caller], entry_path),
         &mut string_table,
     );
     let error = run_borrow_checker(&hir, &external_package_registry, &string_table)
@@ -2117,7 +2130,7 @@ fn external_alias_args_result_stays_slot_backed_after_rebinding() {
     let returned_call = Expression::host_function_call_with_arguments(
         host_alias,
         vec![CallArgument::positional(
-            reference_expr(
+            immutable_reference_expr(
                 original.clone(),
                 DataType::Int,
                 builtin_type_ids::INT,
@@ -2176,7 +2189,10 @@ fn external_alias_args_result_stays_slot_backed_after_rebinding() {
         test_source_location(10),
     );
 
-    let hir = lower_hir(build_ast(vec![start], entry_path), &mut string_table);
+    let hir = lower_hir(
+        build_ast_with_registered_types(vec![start], entry_path),
+        &mut string_table,
+    );
     let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
         .expect("external AliasArgs result should remain rebindable as a caller slot");
     let original_local = hir
@@ -2320,7 +2336,7 @@ fn unresolved_or_mismatched_host_signature_errors() {
     );
 
     let hir = lower_hir(
-        build_ast(vec![start_missing, start_mismatch], entry_path),
+        build_ast_with_registered_types(vec![start_missing, start_mismatch], entry_path),
         &mut string_table,
     );
 
@@ -2378,7 +2394,7 @@ fn mutable_user_parameter_rejects_immutable_argument_reused_after_call() {
                 function_call_node(
                     mut_user,
                     vec![CallArgument::positional(
-                        reference_expr(
+                        immutable_reference_expr(
                             x.clone(),
                             DataType::Int,
                             builtin_type_ids::INT,
@@ -2395,7 +2411,7 @@ fn mutable_user_parameter_rejects_immutable_argument_reused_after_call() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     y,
-                    reference_expr(
+                    immutable_reference_expr(
                         x,
                         DataType::Int,
                         builtin_type_ids::INT,
@@ -2409,7 +2425,7 @@ fn mutable_user_parameter_rejects_immutable_argument_reused_after_call() {
     );
 
     let hir = lower_hir(
-        build_ast(vec![callee, caller], entry_path),
+        build_ast_with_registered_types(vec![callee, caller], entry_path),
         &mut string_table,
     );
     let error = run_borrow_checker(&hir, &external_package_registry, &string_table)
@@ -2449,7 +2465,7 @@ fn out_of_range_return_alias_metadata_is_reported_at_call_site() {
                 host_function_call_node(
                     bad_alias_host,
                     vec![CallArgument::positional(
-                        reference_expr(
+                        immutable_reference_expr(
                             x,
                             DataType::Int,
                             builtin_type_ids::INT,
@@ -2467,7 +2483,10 @@ fn out_of_range_return_alias_metadata_is_reported_at_call_site() {
         test_source_location(10),
     );
 
-    let hir = lower_hir(build_ast(vec![start], entry_path), &mut string_table);
+    let hir = lower_hir(
+        build_ast_with_registered_types(vec![start], entry_path),
+        &mut string_table,
+    );
 
     let error = run_borrow_checker(&hir, &external_package_registry, &string_table)
         .expect_err("out-of-range return alias metadata should fail at call site");
@@ -2526,7 +2545,7 @@ fn same_line_mutable_call_then_reuse_uses_order_keys() {
                 function_call_node(
                     mut_user,
                     vec![CallArgument::positional(
-                        reference_expr(
+                        immutable_reference_expr(
                             x.clone(),
                             DataType::Int,
                             builtin_type_ids::INT,
@@ -2543,7 +2562,12 @@ fn same_line_mutable_call_then_reuse_uses_order_keys() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     y,
-                    reference_expr(x, DataType::Int, builtin_type_ids::INT, same_line.clone()),
+                    immutable_reference_expr(
+                        x,
+                        DataType::Int,
+                        builtin_type_ids::INT,
+                        same_line.clone(),
+                    ),
                 )),
                 same_line,
             ),
@@ -2552,7 +2576,7 @@ fn same_line_mutable_call_then_reuse_uses_order_keys() {
     );
 
     let hir = lower_hir(
-        build_ast(vec![callee, caller], entry_path),
+        build_ast_with_registered_types(vec![callee, caller], entry_path),
         &mut string_table,
     );
     run_borrow_checker(&hir, &external_package_registry, &string_table).expect(
@@ -2712,7 +2736,7 @@ fn short_circuit_rhs_mutable_call_with_later_merge_use_borrows_instead_of_moving
     );
 
     let hir = lower_hir(
-        build_ast(vec![rhs_function, start_function], entry_path),
+        build_ast_with_registered_types(vec![rhs_function, start_function], entry_path),
         &mut string_table,
     );
     run_borrow_checker(&hir, &external_package_registry, &string_table)

@@ -36,7 +36,7 @@ use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::hir::tests::symbol;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::test_source_location;
-use crate::compiler_frontend::tests::type_id_fixture_support::reference_expr;
+use crate::compiler_frontend::tests::type_id_fixture_support::inferred_type_reference_expr;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 fn float_expr(
@@ -290,7 +290,7 @@ fn runtime_float_template_interpolation_lowers_to_format_float_statement() {
     let mut string_table = StringTable::new();
     let loc = test_source_location(1);
     let value_name = symbol("value", &mut string_table);
-    let value_ref = reference_expr(
+    let value_ref = inferred_type_reference_expr(
         value_name.clone(),
         builtin_type_ids::FLOAT,
         loc.clone(),
@@ -352,7 +352,7 @@ fn reactive_float_template_subscription_keeps_lazy_formatter_expression() {
         kind: ReactiveSourceKind::Declaration,
     };
 
-    let value_ref = reference_expr(
+    let value_ref = inferred_type_reference_expr(
         value_path.clone(),
         builtin_type_ids::FLOAT,
         loc.clone(),

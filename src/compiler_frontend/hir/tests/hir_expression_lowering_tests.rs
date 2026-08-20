@@ -67,8 +67,8 @@ use crate::compiler_frontend::tests::ast_fixture_support::test_source_location;
 use crate::compiler_frontend::tests::hir_fixture_support::raw_template_expression_for_hir_invariant;
 use crate::compiler_frontend::tests::type_id_fixture_support::{
     choice_construct_expr, const_record_reference_expr, field_access_node, handled_result_expr,
-    option_none_expr, reference_expr, result_carrier_type_id, runtime_expr, runtime_operand_item,
-    runtime_operator_item,
+    inferred_type_reference_expr, option_none_expr, result_carrier_type_id, runtime_expr,
+    runtime_operand_item, runtime_operator_item,
 };
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -527,7 +527,7 @@ fn lowers_reference_to_registered_local() {
         location.clone(),
     );
 
-    let expr = reference_expr(
+    let expr = inferred_type_reference_expr(
         x,
         builtin_type_ids::INT,
         location.clone(),
@@ -557,7 +557,7 @@ fn lowers_reference_to_module_constant_when_local_is_missing() {
         Expression::int(3, location.clone(), ValueMode::ImmutableOwned),
     );
 
-    let expr = reference_expr(
+    let expr = inferred_type_reference_expr(
         third_const,
         builtin_type_ids::INT,
         location.clone(),
@@ -582,7 +582,7 @@ fn rejects_cyclic_module_constant_dependencies() {
 
     builder.test_register_module_constant(
         const_a.clone(),
-        reference_expr(
+        inferred_type_reference_expr(
             const_b.clone(),
             builtin_type_ids::INT,
             location.clone(),
@@ -591,7 +591,7 @@ fn rejects_cyclic_module_constant_dependencies() {
     );
     builder.test_register_module_constant(
         const_b.clone(),
-        reference_expr(
+        inferred_type_reference_expr(
             const_a.clone(),
             builtin_type_ids::INT,
             location.clone(),
@@ -600,7 +600,7 @@ fn rejects_cyclic_module_constant_dependencies() {
     );
 
     let err = builder
-        .lower_expression(&reference_expr(
+        .lower_expression(&inferred_type_reference_expr(
             const_a,
             builtin_type_ids::INT,
             location.clone(),
@@ -636,7 +636,7 @@ fn lowers_runtime_rpn_arithmetic_stack_correctly() {
     );
 
     let items = vec![
-        runtime_operand_item(reference_expr(
+        runtime_operand_item(inferred_type_reference_expr(
             x,
             builtin_type_ids::INT,
             location.clone(),
@@ -647,7 +647,7 @@ fn lowers_runtime_rpn_arithmetic_stack_correctly() {
             location.clone(),
             ValueMode::ImmutableOwned,
         )),
-        runtime_operand_item(reference_expr(
+        runtime_operand_item(inferred_type_reference_expr(
             y,
             builtin_type_ids::INT,
             location.clone(),
@@ -1240,7 +1240,7 @@ fn lowers_receiver_method_call_with_receiver_as_first_argument() {
     );
 
     let method_expression = Expression::method_call_with_typed_arguments(
-        reference_expr(
+        inferred_type_reference_expr(
             receiver_name,
             receiver_type_id,
             location.clone(),
@@ -1296,7 +1296,7 @@ fn lowers_builtin_scalar_receiver_method_call_with_receiver_as_first_argument() 
     );
 
     let method_expression = Expression::method_call_with_typed_arguments(
-        reference_expr(
+        inferred_type_reference_expr(
             receiver_name,
             builtin_type_ids::INT,
             location.clone(),
@@ -1621,7 +1621,7 @@ fn reactive_linear_template_keeps_subscription_chunks_lazy() {
         location: location.clone(),
     });
 
-    let count_expression = reference_expr(
+    let count_expression = inferred_type_reference_expr(
         count_path,
         builtin_type_ids::INT,
         location.clone(),
@@ -1731,7 +1731,7 @@ fn runtime_template_control_flow_bool_if_lowers_inline_without_helper_call() {
         location.clone(),
     );
 
-    let condition = reference_expr(
+    let condition = inferred_type_reference_expr(
         show_name,
         builtin_type_ids::BOOL,
         location.clone(),
@@ -1839,7 +1839,7 @@ fn runtime_template_control_flow_bool_if_branch_preserves_fallible_propagation_c
         location.clone(),
     );
 
-    let condition = reference_expr(
+    let condition = inferred_type_reference_expr(
         show_name,
         builtin_type_ids::BOOL,
         location.clone(),
@@ -1924,7 +1924,7 @@ fn runtime_template_control_flow_bool_if_without_else_appends_nothing_on_false_p
         location.clone(),
     );
 
-    let condition = reference_expr(
+    let condition = inferred_type_reference_expr(
         show_name,
         builtin_type_ids::BOOL,
         location.clone(),
@@ -1996,7 +1996,7 @@ fn runtime_template_control_flow_bool_if_coerces_dynamic_branch_chunks() {
         location.clone(),
     );
 
-    let condition = reference_expr(
+    let condition = inferred_type_reference_expr(
         show_name,
         builtin_type_ids::BOOL,
         location.clone(),
@@ -2059,13 +2059,13 @@ fn runtime_template_control_flow_option_capture_lowers_match_and_payload_binding
         location.clone(),
     );
 
-    let scrutinee = reference_expr(
+    let scrutinee = inferred_type_reference_expr(
         maybe_name,
         option_string,
         location.clone(),
         ValueMode::ImmutableOwned,
     );
-    let then_content = vec![reference_expr(
+    let then_content = vec![inferred_type_reference_expr(
         capture_path.clone(),
         builtin_type_ids::STRING,
         location.clone(),
@@ -2182,13 +2182,13 @@ fn runtime_template_control_flow_option_capture_without_else_appends_nothing_whe
         location.clone(),
     );
 
-    let scrutinee = reference_expr(
+    let scrutinee = inferred_type_reference_expr(
         maybe_name,
         option_string,
         location.clone(),
         ValueMode::ImmutableOwned,
     );
-    let then_content = vec![reference_expr(
+    let then_content = vec![inferred_type_reference_expr(
         capture_path.clone(),
         builtin_type_ids::STRING,
         location.clone(),
@@ -2253,7 +2253,7 @@ fn runtime_template_control_flow_loop_range_lowers_inline_and_wraps_aggregate_wh
         builtin_type_ids::INT,
         location.clone(),
     );
-    let body_content = vec![reference_expr(
+    let body_content = vec![inferred_type_reference_expr(
         item_path,
         builtin_type_ids::INT,
         location.clone(),
@@ -2261,7 +2261,7 @@ fn runtime_template_control_flow_loop_range_lowers_inline_and_wraps_aggregate_wh
     )];
     let range = RangeLoopSpec {
         start: Expression::int(0, location.clone(), ValueMode::ImmutableOwned),
-        end: reference_expr(
+        end: inferred_type_reference_expr(
             limit_path,
             builtin_type_ids::INT,
             location.clone(),
@@ -2334,13 +2334,13 @@ fn runtime_template_control_flow_loop_collection_materializes_iterable_and_lengt
         collection_type,
         location.clone(),
     );
-    let body_content = vec![reference_expr(
+    let body_content = vec![inferred_type_reference_expr(
         item_path,
         builtin_type_ids::INT,
         location.clone(),
         ValueMode::ImmutableReference,
     )];
-    let iterable = reference_expr(
+    let iterable = inferred_type_reference_expr(
         items_path,
         collection_type,
         location.clone(),
@@ -2410,7 +2410,7 @@ fn runtime_template_control_flow_conditional_loop_rechecks_condition_and_wraps_w
         location.clone(),
         ValueMode::ImmutableOwned,
     )];
-    let condition = reference_expr(
+    let condition = inferred_type_reference_expr(
         keep_going_path,
         builtin_type_ids::BOOL,
         location.clone(),
@@ -2462,7 +2462,7 @@ fn runtime_template_control_flow_loop_empty_body_does_not_mark_iteration_emitted
     let body_content: Vec<Expression> = vec![];
     let range = RangeLoopSpec {
         start: Expression::int(0, location.clone(), ValueMode::ImmutableOwned),
-        end: reference_expr(
+        end: inferred_type_reference_expr(
             limit_path,
             builtin_type_ids::INT,
             location.clone(),
@@ -2646,7 +2646,7 @@ fn local_resolution_uses_full_path_identity_not_leaf_name() {
         location.clone(),
     );
 
-    let expr = reference_expr(
+    let expr = inferred_type_reference_expr(
         local_b,
         builtin_type_ids::INT,
         location.clone(),
@@ -2788,7 +2788,7 @@ fn temp_locals_are_not_resolvable_as_user_symbols() {
         }
     ));
 
-    let temp_reference = reference_expr(
+    let temp_reference = inferred_type_reference_expr(
         temp_name,
         builtin_type_ids::INT,
         location.clone(),
@@ -2842,7 +2842,7 @@ fn field_access_uses_base_struct_identity_not_global_leaf_lookup() {
         location.clone(),
     );
 
-    let base_expression = reference_expr(
+    let base_expression = inferred_type_reference_expr(
         local_name,
         local_struct_type_id,
         location.clone(),
@@ -2917,7 +2917,7 @@ fn field_access_from_module_constant_base_materializes_temp_place() {
 
     builder.test_register_module_constant(format_name.clone(), format_constant);
 
-    let format_reference = reference_expr(
+    let format_reference = inferred_type_reference_expr(
         format_name,
         format_type_id,
         location.clone(),
@@ -3045,7 +3045,7 @@ fn lowers_collection_builtin_host_calls_from_explicit_ast_nodes() {
         location.clone(),
     );
 
-    let receiver_expression = reference_expr(
+    let receiver_expression = inferred_type_reference_expr(
         receiver_name,
         receiver_type_id,
         location.clone(),
@@ -3229,7 +3229,7 @@ fn map_builtin_calls_lower_to_first_class_hir_ops() {
         location.clone(),
     );
 
-    let receiver_expression = reference_expr(
+    let receiver_expression = inferred_type_reference_expr(
         scores_name,
         map_type,
         location.clone(),

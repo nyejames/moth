@@ -16,7 +16,7 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
 
 use crate::compiler_frontend::value_mode::ValueMode;
 
-use crate::compiler_frontend::hir::hir_builder::{build_ast, lower_ast};
+use crate::compiler_frontend::hir::hir_builder::{build_ast_with_registered_types, lower_ast};
 
 #[test]
 fn lowers_while_to_header_body_exit_shape() {
@@ -48,7 +48,7 @@ fn lowers_while_to_header_body_exit_shape() {
         test_source_location(1),
     );
 
-    let ast = build_ast(vec![start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
 
@@ -106,7 +106,7 @@ fn break_in_while_targets_loop_exit_block() {
         test_source_location(19),
     );
 
-    let ast = build_ast(vec![start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
 

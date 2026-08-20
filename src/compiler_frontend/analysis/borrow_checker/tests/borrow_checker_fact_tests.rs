@@ -28,13 +28,14 @@ use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::public_call_summary::FunctionReturnAliasSummary;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    assignment_target, function_node, make_test_variable, node, param, reference_expr, symbol,
-    test_source_location,
+    assignment_target, function_node, immutable_reference_expr, make_test_variable, node, param,
+    symbol, test_source_location,
 };
 use crate::compiler_frontend::tests::borrow_fixture_support::run_borrow_checker;
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
-use crate::compiler_frontend::tests::hir_fixture_support::{build_ast, entry_and_start, lower_hir};
+use crate::compiler_frontend::tests::hir_fixture_support::{entry_and_start, lower_hir};
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
+use crate::compiler_frontend::tests::type_id_fixture_support::build_ast_with_registered_types;
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::FxHashSet;
 use std::collections::VecDeque;
@@ -112,7 +113,10 @@ fn statement_terminator_and_value_facts_are_populated() {
         test_source_location(1),
     );
 
-    let hir = lower_hir(build_ast(vec![start_fn], entry_path), &mut string_table);
+    let hir = lower_hir(
+        build_ast_with_registered_types(vec![start_fn], entry_path),
+        &mut string_table,
+    );
     let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
         .expect("borrow checking should succeed");
 
@@ -189,7 +193,10 @@ fn drop_statement_produces_statement_fact() {
         test_source_location(1),
     );
 
-    let mut hir = lower_hir(build_ast(vec![start_fn], entry_path), &mut string_table);
+    let mut hir = lower_hir(
+        build_ast_with_registered_types(vec![start_fn], entry_path),
+        &mut string_table,
+    );
     let start = &hir.functions[hir
         .start_function
         .expect("normal test module should have start")
@@ -266,7 +273,7 @@ fn statement_entry_state_reflects_last_use_reborrow_window() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     sink,
-                    reference_expr(
+                    immutable_reference_expr(
                         first_ref,
                         DataType::Int,
                         builtin_type_ids::INT,
@@ -291,7 +298,10 @@ fn statement_entry_state_reflects_last_use_reborrow_window() {
         test_source_location(1),
     );
 
-    let hir = lower_hir(build_ast(vec![start_fn], entry_path), &mut string_table);
+    let hir = lower_hir(
+        build_ast_with_registered_types(vec![start_fn], entry_path),
+        &mut string_table,
+    );
     let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
         .expect("reborrow after last-use should pass");
 
@@ -363,7 +373,10 @@ fn optional_assignment_transfer_keeps_source_state_and_records_advisory_fact() {
         test_source_location(2),
     );
 
-    let hir = lower_hir(build_ast(vec![start_fn], entry_path), &mut string_table);
+    let hir = lower_hir(
+        build_ast_with_registered_types(vec![start_fn], entry_path),
+        &mut string_table,
+    );
     let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
         .expect("inferred assignment transfer should pass");
 
@@ -972,7 +985,7 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
         HandledFallibleHostFunctionCallInput {
             id: external_id,
             args: vec![CallArgument::positional(
-                reference_expr(
+                immutable_reference_expr(
                     input_name.clone(),
                     DataType::StringSlice,
                     builtin_type_ids::STRING,
@@ -1068,7 +1081,7 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
                     Expression::handled_fallible_function_call_with_typed_arguments(
                         unknown_name.clone(),
                         vec![CallArgument::positional(
-                            reference_expr(
+                            immutable_reference_expr(
                                 argument_name,
                                 DataType::StringSlice,
                                 builtin_type_ids::STRING,
@@ -1120,7 +1133,7 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
         test_source_location(9),
     );
     let hir = lower_hir(
-        build_ast(vec![unknown, caller, start], entry_path),
+        build_ast_with_registered_types(vec![unknown, caller, start], entry_path),
         &mut string_table,
     );
     let report = run_borrow_checker(&hir, &external_package_registry, &string_table)

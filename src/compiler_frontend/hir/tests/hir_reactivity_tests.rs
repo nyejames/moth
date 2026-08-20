@@ -13,7 +13,7 @@ use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::templates::template::ReactiveSubscription;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
-use crate::compiler_frontend::hir::hir_builder::{build_ast, lower_ast};
+use crate::compiler_frontend::hir::hir_builder::{build_ast_with_registered_types, lower_ast};
 use crate::compiler_frontend::hir::ids::LocalId;
 use crate::compiler_frontend::hir::reachability::{
     HirReachability, ReachableReactiveSinkKind, collect_module_function_link_facts,
@@ -27,7 +27,7 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
     function_node, make_test_variable, node, test_source_location,
 };
 use crate::compiler_frontend::tests::type_id_fixture_support::{
-    param_with_type_id, reference_expr,
+    inferred_type_reference_expr, param_with_type_id,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -55,7 +55,7 @@ fn reactive_declaration_metadata_is_bound_to_local() {
         test_source_location(1),
     );
 
-    let ast = build_ast(vec![start_function], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_function], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should preserve source metadata");
 
@@ -101,7 +101,7 @@ fn reactive_parameter_metadata_is_bound_to_function_param() {
         test_source_location(1),
     );
 
-    let ast = build_ast(vec![start_function], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_function], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should preserve parameter metadata");
 
@@ -159,7 +159,7 @@ fn reactive_template_dependency_metadata_is_bound_to_hir_value() {
             ),
             node(
                 NodeKind::PushStartRuntimeFragment(
-                    reference_expr(
+                    inferred_type_reference_expr(
                         view_path,
                         builtin_type_ids::STRING,
                         test_source_location(4),
@@ -173,7 +173,7 @@ fn reactive_template_dependency_metadata_is_bound_to_hir_value() {
         test_source_location(1),
     );
 
-    let ast = build_ast(vec![start_function], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_function], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should preserve template metadata");
 
@@ -205,7 +205,7 @@ fn reachability_records_reactive_runtime_fragment_and_external_sinks() {
         metadata_with_subscription(count_source.clone(), test_source_location(5));
 
     let reactive_view_reference = || {
-        reference_expr(
+        inferred_type_reference_expr(
             view_path.clone(),
             builtin_type_ids::STRING,
             test_source_location(5),
@@ -261,7 +261,7 @@ fn reachability_records_reactive_runtime_fragment_and_external_sinks() {
         test_source_location(1),
     );
 
-    let ast = build_ast(vec![start_function], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_function], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should preserve sink metadata");
     let reachability = collect_test_reachability(

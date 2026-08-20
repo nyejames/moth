@@ -31,10 +31,10 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
 use crate::compiler_frontend::value_mode::ValueMode;
 
 use crate::compiler_frontend::hir::hir_builder::{
-    assert_no_placeholder_terminators, build_ast, lower_ast,
+    assert_no_placeholder_terminators, build_ast_with_registered_types, lower_ast,
 };
 use crate::compiler_frontend::tests::type_id_fixture_support::{
-    fresh_success_returns, reference_expr, runtime_expr, runtime_function_call_item,
+    fresh_success_returns, inferred_type_reference_expr, runtime_expr, runtime_function_call_item,
     runtime_operand_item, runtime_operator_item,
 };
 
@@ -120,7 +120,7 @@ fn lowers_if_to_then_else_merge_blocks() {
         test_source_location(1),
     );
 
-    let ast = build_ast(vec![start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
 
@@ -214,7 +214,7 @@ fn short_circuit_and_keeps_rhs_call_off_always_run_path() {
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast(vec![rhs_fn, start_fn], entry_path),
+        build_ast_with_registered_types(vec![rhs_fn, start_fn], entry_path),
         &mut string_table,
     )
     .expect("short-circuit and lowering should succeed");
@@ -342,7 +342,7 @@ fn short_circuit_or_keeps_rhs_call_off_true_short_path() {
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast(vec![rhs_fn, start_fn], entry_path),
+        build_ast_with_registered_types(vec![rhs_fn, start_fn], entry_path),
         &mut string_table,
     )
     .expect("short-circuit or lowering should succeed");
@@ -404,13 +404,13 @@ fn short_circuit_place_rhs_materializes_copy_before_merge_assignment() {
 
     let condition = runtime_expr(
         vec![
-            runtime_operand_item(reference_expr(
+            runtime_operand_item(inferred_type_reference_expr(
                 lhs_name.clone(),
                 builtin_type_ids::BOOL,
                 location.clone(),
                 ValueMode::ImmutableReference,
             )),
-            runtime_operand_item(reference_expr(
+            runtime_operand_item(inferred_type_reference_expr(
                 rhs_name.clone(),
                 builtin_type_ids::BOOL,
                 location.clone(),
@@ -463,9 +463,11 @@ fn short_circuit_place_rhs_materializes_copy_before_merge_assignment() {
         location.clone(),
     );
 
-    let (module, _type_environment) =
-        lower_ast(build_ast(vec![start_fn], entry_path), &mut string_table)
-            .expect("short-circuit place rhs lowering should succeed");
+    let (module, _type_environment) = lower_ast(
+        build_ast_with_registered_types(vec![start_fn], entry_path),
+        &mut string_table,
+    )
+    .expect("short-circuit place rhs lowering should succeed");
     let start_function = super::start_function(&module);
     let start_entry_block = &module.blocks[start_function.entry.0 as usize];
     let (rhs_block, _short_block) = match start_entry_block.terminator {
@@ -505,7 +507,7 @@ fn value_if_then_place_materializes_copy_before_hidden_result_assignment() {
 
     let then_body = vec![node(
         NodeKind::ThenValue(ProducedValues {
-            expressions: vec![reference_expr(
+            expressions: vec![inferred_type_reference_expr(
                 left_name.clone(),
                 builtin_type_ids::INT,
                 location.clone(),
@@ -518,7 +520,7 @@ fn value_if_then_place_materializes_copy_before_hidden_result_assignment() {
 
     let else_body = vec![node(
         NodeKind::ThenValue(ProducedValues {
-            expressions: vec![reference_expr(
+            expressions: vec![inferred_type_reference_expr(
                 right_name.clone(),
                 builtin_type_ids::INT,
                 location.clone(),
@@ -574,9 +576,11 @@ fn value_if_then_place_materializes_copy_before_hidden_result_assignment() {
         location.clone(),
     );
 
-    let (module, _type_environment) =
-        lower_ast(build_ast(vec![start_fn], entry_path), &mut string_table)
-            .expect("value-if place production should lower successfully");
+    let (module, _type_environment) = lower_ast(
+        build_ast_with_registered_types(vec![start_fn], entry_path),
+        &mut string_table,
+    )
+    .expect("value-if place production should lower successfully");
     let start_function = super::start_function(&module);
     let entry_block = &module.blocks[start_function.entry.0 as usize];
     let (then_block, else_block) = match entry_block.terminator {
@@ -658,7 +662,7 @@ fn non_unit_function_with_terminal_if_does_not_report_fallthrough() {
         test_source_location(1),
     );
 
-    let ast = build_ast(vec![start_fn, chooser_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn, chooser_fn], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("all-terminal if should not trigger fallthrough");
 

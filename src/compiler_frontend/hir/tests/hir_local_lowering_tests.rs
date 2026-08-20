@@ -22,10 +22,10 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
 use crate::compiler_frontend::value_mode::ValueMode;
 
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
-use crate::compiler_frontend::hir::hir_builder::{build_ast, lower_ast};
+use crate::compiler_frontend::hir::hir_builder::{build_ast_with_registered_types, lower_ast};
 
 use crate::compiler_frontend::tests::type_id_fixture_support::{
-    fresh_success_returns, param_with_type_id, reference_expr,
+    fresh_success_returns, inferred_type_reference_expr, param_with_type_id,
 };
 
 /// The authored (non-generated) local names a block owns, in declaration order.
@@ -55,7 +55,7 @@ fn allocates_parameter_locals_and_binds_names() {
     let x = super::symbol("x", &mut string_table);
 
     let body = vec![node(
-        NodeKind::Return(vec![reference_expr(
+        NodeKind::Return(vec![inferred_type_reference_expr(
             x.clone(),
             builtin_type_ids::INT,
             test_source_location(3),
@@ -79,7 +79,7 @@ fn allocates_parameter_locals_and_binds_names() {
         test_source_location(2),
     );
 
-    let ast = build_ast(vec![start_function], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_function], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
 
@@ -136,7 +136,7 @@ fn variable_declaration_emits_local_and_assign_statement() {
         test_source_location(3),
     );
 
-    let ast = build_ast(vec![start_function], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_function], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
 
@@ -215,7 +215,7 @@ fn duplicate_local_declarations_in_same_scope_fail() {
         test_source_location(1),
     );
 
-    let ast = build_ast(vec![start_function], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_function], entry_path);
     let error = lower_ast(ast, &mut string_table).expect_err("duplicate symbol should fail");
     let (_error_type, message, _location) = error
         .first_infrastructure_error_for_tests()
@@ -280,7 +280,7 @@ fn assignment_lowers_value_prelude_before_assign() {
         test_source_location(4),
     );
 
-    let ast = build_ast(vec![helper_fn, start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![helper_fn, start_fn], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
 
@@ -371,7 +371,7 @@ fn call_expression_statements_materialize_result_values() {
         test_source_location(2),
     );
 
-    let ast = build_ast(vec![callee_fn, start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![callee_fn, start_fn], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
 
@@ -447,7 +447,7 @@ fn return_lowering_handles_zero_one_and_many_values() {
         test_source_location(3),
     );
 
-    let ast = build_ast(vec![start_fn, one_fn, many_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn, one_fn, many_fn], entry_path);
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
 

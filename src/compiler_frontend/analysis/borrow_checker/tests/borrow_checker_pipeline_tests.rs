@@ -16,12 +16,13 @@ use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    assignment_target, function_node, make_test_variable, node, reference_expr, symbol,
+    assignment_target, function_node, immutable_reference_expr, make_test_variable, node, symbol,
     test_source_location,
 };
 use crate::compiler_frontend::tests::borrow_fixture_support::run_borrow_checker;
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
-use crate::compiler_frontend::tests::hir_fixture_support::{build_ast, entry_and_start, lower_hir};
+use crate::compiler_frontend::tests::hir_fixture_support::{entry_and_start, lower_hir};
+use crate::compiler_frontend::tests::type_id_fixture_support::build_ast_with_registered_types;
 use std::sync::Arc;
 
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -65,7 +66,7 @@ fn frontend_check_borrows_propagates_failures() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     z,
-                    reference_expr(
+                    immutable_reference_expr(
                         x,
                         DataType::Int,
                         builtin_type_ids::INT,
@@ -78,7 +79,10 @@ fn frontend_check_borrows_propagates_failures() {
         test_source_location(1),
     );
 
-    let hir = lower_hir(build_ast(vec![start_fn], entry_path), &mut string_table);
+    let hir = lower_hir(
+        build_ast_with_registered_types(vec![start_fn], entry_path),
+        &mut string_table,
+    );
 
     let config = Config::default();
     let frontend = CompilerFrontend::new(
@@ -138,7 +142,10 @@ fn successful_borrow_report_can_be_stored_on_module() {
         test_source_location(1),
     );
 
-    let hir = lower_hir(build_ast(vec![start_fn], entry_path), &mut string_table);
+    let hir = lower_hir(
+        build_ast_with_registered_types(vec![start_fn], entry_path),
+        &mut string_table,
+    );
     let borrow_analysis = run_borrow_checker(&hir, &external_package_registry, &string_table)
         .expect("borrow checking should pass");
     let function_link_facts =

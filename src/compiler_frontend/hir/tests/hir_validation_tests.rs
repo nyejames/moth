@@ -20,8 +20,8 @@ use crate::compiler_frontend::hir::expressions::{
     HirExpression, HirExpressionKind, HirVariantCarrier, HirVariantField, ValueKind,
 };
 use crate::compiler_frontend::hir::hir_builder::{
-    HirTestChoiceDefinition, build_ast, build_ast_with_choices, lower_ast, lower_ast_with_metadata,
-    validate_module_for_tests,
+    HirTestChoiceDefinition, build_ast_with_choices, build_ast_with_registered_types, lower_ast,
+    lower_ast_with_metadata, validate_module_for_tests,
 };
 use crate::compiler_frontend::hir::ids::{
     ChoiceId, FieldId, HirNodeId, HirValueId, LocalId, RegionId, StructId,
@@ -101,7 +101,7 @@ fn minimal_lowered_hir_module() -> (StringTable, HirModule, TypeEnvironment) {
         test_source_location(1),
     );
 
-    let ast = build_ast(vec![start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let (module, type_environment) =
         lower_ast(ast, &mut string_table).expect("lowering should succeed");
 
@@ -218,7 +218,7 @@ fn valid_module_passes_explicit_validation() {
         test_source_location(1),
     );
 
-    let ast = build_ast(vec![start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let (module, type_environment) =
         lower_ast(ast, &mut string_table).expect("lowering should succeed");
     validate_module_for_tests(&module, &string_table, &type_environment)
@@ -834,7 +834,7 @@ fn validator_rejects_invalid_jump_target() {
         test_source_location(1),
     );
 
-    let ast = build_ast(vec![start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let (mut module, type_environment) =
         lower_ast(ast, &mut string_table).expect("lowering should succeed");
     let entry_block = module.functions[module
@@ -874,7 +874,7 @@ fn validator_rejects_non_literal_match_pattern() {
         test_source_location(2),
     );
 
-    let ast = build_ast(vec![start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let (mut module, type_environment) =
         lower_ast(ast, &mut string_table).expect("lowering should succeed");
     let start = &module.functions[module
@@ -948,7 +948,7 @@ fn validator_rejects_missing_side_table_mappings() {
         test_source_location(3),
     );
 
-    let ast = build_ast(vec![start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let (mut module, type_environment) =
         lower_ast(ast, &mut string_table).expect("lowering should succeed");
     module.side_table.clear();
@@ -974,7 +974,7 @@ fn validator_rejects_unresolved_generic_parameter_types() {
         test_source_location(1),
     );
 
-    let ast = build_ast(vec![start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let (mut module, mut type_environment) =
         lower_ast(ast, &mut string_table).expect("lowering should succeed");
     let parameter_name = string_table.intern("T");
@@ -1092,7 +1092,7 @@ fn validator_rejects_struct_field_type_containing_generic_parameter() {
         test_source_location(1),
     );
 
-    let ast = build_ast(vec![start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let (mut module, mut type_environment) =
         lower_ast(ast, &mut string_table).expect("lowering should succeed");
     let generic_type_id = generic_parameter_type_id(&mut string_table, &mut type_environment);
@@ -1156,7 +1156,7 @@ fn validator_rejects_function_parameter_type_containing_generic_parameter() {
         test_source_location(1),
     );
 
-    let ast = build_ast(vec![start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let (mut module, mut type_environment) =
         lower_ast(ast, &mut string_table).expect("lowering should succeed");
     let generic_type_id = generic_parameter_type_id(&mut string_table, &mut type_environment);
@@ -1247,7 +1247,7 @@ fn module_metadata_validation_rejects_invalid_doc_fragment_location() {
         test_source_location(1),
     );
 
-    let mut ast = build_ast(vec![start_fn], entry_path);
+    let mut ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let mut invalid_location = test_source_location(10);
     invalid_location.end_pos.line_number = 9;
     ast.doc_fragments.push(AstDocFragment {
@@ -1281,7 +1281,7 @@ fn validator_rejects_placeholder_terminator() {
         test_source_location(1),
     );
 
-    let ast = build_ast(vec![start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let (mut module, type_environment) =
         lower_ast(ast, &mut string_table).expect("lowering should succeed");
     let entry = module.functions[module
@@ -1312,7 +1312,7 @@ fn validator_rejects_region_cycle() {
         test_source_location(1),
     );
 
-    let ast = build_ast(vec![start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let (mut module, type_environment) =
         lower_ast(ast, &mut string_table).expect("lowering should succeed");
     let region_id = module.regions[0].id();
@@ -1339,7 +1339,7 @@ fn validator_rejects_missing_region_parent() {
         test_source_location(1),
     );
 
-    let ast = build_ast(vec![start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let (mut module, type_environment) =
         lower_ast(ast, &mut string_table).expect("lowering should succeed");
     let region_id = module.regions[0].id();
@@ -1376,7 +1376,7 @@ fn validator_rejects_cross_function_cfg_edges() {
         test_source_location(1),
     );
 
-    let ast = build_ast(vec![helper, start], entry_path);
+    let ast = build_ast_with_registered_types(vec![helper, start], entry_path);
     let (mut module, type_environment) =
         lower_ast(ast, &mut string_table).expect("lowering should succeed");
     let start_entry = module.functions[module
@@ -1434,8 +1434,11 @@ fn lowering_errors_preserve_string_table_context() {
         test_source_location(1),
     );
 
-    let messages = lower_ast(build_ast(vec![start_fn], entry_path), &mut string_table)
-        .expect_err("unknown function call should fail HIR lowering");
+    let messages = lower_ast(
+        build_ast_with_registered_types(vec![start_fn], entry_path),
+        &mut string_table,
+    )
+    .expect_err("unknown function call should fail HIR lowering");
 
     let resolved_scope = messages
         .first_error()
@@ -1468,7 +1471,7 @@ fn hir_variant_construct_option_invalid_index_rejected() {
         test_source_location(1),
     );
 
-    let ast = build_ast(vec![start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let (mut module, type_environment) =
         lower_ast(ast, &mut string_table).expect("lowering should succeed");
     let entry_block = &mut module.blocks[module.functions[module
@@ -1539,7 +1542,7 @@ fn hir_variant_construct_result_invalid_index_rejected() {
         test_source_location(1),
     );
 
-    let ast = build_ast(vec![start_fn], entry_path);
+    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
     let (mut module, type_environment) =
         lower_ast(ast, &mut string_table).expect("lowering should succeed");
     let entry_block = &mut module.blocks[module.functions[module

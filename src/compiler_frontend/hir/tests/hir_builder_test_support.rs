@@ -33,8 +33,8 @@ use crate::compiler_frontend::value_mode::ValueMode;
 // Re-export TypeId-first AST construction helpers from the bridge module so existing
 // HIR test imports continue to work without mentioning parse-era type syntax.
 pub(crate) use crate::compiler_frontend::tests::type_id_fixture_support::{
-    HirTestChoiceDefinition, assert_no_placeholder_terminators, build_ast, build_ast_with_choices,
-    lower_ast, lower_ast_with_metadata,
+    HirTestChoiceDefinition, assert_no_placeholder_terminators, build_ast_with_choices,
+    build_ast_with_registered_types, lower_ast, lower_ast_with_metadata,
 };
 
 pub(crate) fn validate_module_for_tests(

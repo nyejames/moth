@@ -10,7 +10,6 @@ use crate::compiler_frontend::compiler_errors::{
     CompilerErrorMetadataKey, CompilerMessages, ErrorType,
 };
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
-use std::collections::BTreeMap;
 
 /// Assert that the diagnostic codes of all error-severity diagnostics match
 /// the expected multiset exactly.
@@ -118,77 +117,6 @@ pub fn assert_output_rejection(messages: &CompilerMessages, expected_reason: &st
         actual_reason, expected_reason,
         "output rejection reason mismatch: expected '{expected_reason}', got '{actual_reason}'"
     );
-}
-
-/// Assert that the error diagnostic with the given `code` and 1-based
-/// `occurrence` carries the expected stable reason key.
-///
-/// WHAT: finds the n-th occurrence of `code` among error diagnostics and checks
-///   that its `diagnostic.identity().reason_key` matches the expected value.
-/// WHY: broad `is_err()` accepts any failure. Reason assertions prove the
-///   correct diagnostic lane, not just that an error was emitted. Reason keys
-///   come from compiler payload identity — this helper does not invent a
-///   parallel reason taxonomy.
-#[track_caller]
-// Retired by Phase 7 of the test-suite-honesty campaign (AUD-0001-F05): reason-key contracts are
-// owned by the integration suite's `diagnostic_assertions[].reason` field, which 192 canonical
-// cases author and whose absent-reason behaviour has its own self-test. No Rust-level test needs a
-// second reason assertion, so Phase 11 deletes this. Do not add a token caller to retire the lint.
-#[allow(dead_code)]
-pub fn assert_diagnostic_reason(
-    messages: &CompilerMessages,
-    code: &str,
-    occurrence: usize,
-    expected_reason: &str,
-) {
-    let matching: Vec<_> = messages
-        .diagnostics()
-        .filter(|d| d.severity == DiagnosticSeverity::Error && d.kind.code() == code)
-        .collect();
-
-    assert!(
-        occurrence >= 1 && occurrence <= matching.len(),
-        "diagnostic code '{code}' has {} occurrence(s), cannot select occurrence {occurrence}",
-        matching.len()
-    );
-
-    let diagnostic = matching[occurrence - 1];
-    let identity = diagnostic.identity();
-    // A payload with no reason key cannot satisfy a reason contract. Comparing a placeholder
-    // string would let `expected_reason = "<none>"` pass against an unclassified diagnostic.
-    let actual_reason = identity.reason_key.unwrap_or_else(|| {
-        panic!(
-            "diagnostic '{code}' occurrence {occurrence} carries no reason key, so reason \
-             '{expected_reason}' cannot be proved"
-        )
-    });
-    assert_eq!(
-        actual_reason, expected_reason,
-        "diagnostic '{code}' occurrence {occurrence} has reason '{actual_reason}', \
-         expected '{expected_reason}'"
-    );
-}
-
-/// Build an exact count map of error diagnostic codes.
-///
-/// WHAT: returns a `BTreeMap` from code to occurrence count.
-/// WHY: useful for comparing multisets in tests that need exact cardinality.
-#[track_caller]
-// Retired by Phase 7 of the test-suite-honesty campaign (AUD-0001-F05): exact cardinality is
-// already owned by `assert_exact_diagnostic_codes` here and by the integration suite's
-// `diagnostic_codes` multiset, so a second count map has nothing left to prove. Phase 11 deletes
-// this. Do not add a token caller to retire the lint.
-#[allow(dead_code)]
-pub fn error_code_counts(messages: &CompilerMessages) -> BTreeMap<String, usize> {
-    let mut counts = BTreeMap::new();
-    for diagnostic in messages.diagnostics() {
-        if diagnostic.severity == DiagnosticSeverity::Error {
-            *counts
-                .entry(diagnostic.kind.code().to_string())
-                .or_insert(0) += 1;
-        }
-    }
-    counts
 }
 
 #[cfg(test)]

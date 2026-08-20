@@ -14,7 +14,8 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
 };
 use crate::compiler_frontend::tests::borrow_fixture_support::run_borrow_checker;
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
-use crate::compiler_frontend::tests::hir_fixture_support::{build_ast, entry_and_start, lower_hir};
+use crate::compiler_frontend::tests::hir_fixture_support::{entry_and_start, lower_hir};
+use crate::compiler_frontend::tests::type_id_fixture_support::build_ast_with_registered_types;
 
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -41,7 +42,10 @@ fn emits_advisory_return_drop_sites() {
         test_source_location(1),
     );
 
-    let hir = lower_hir(build_ast(vec![start_fn], entry_path), &mut string_table);
+    let hir = lower_hir(
+        build_ast_with_registered_types(vec![start_fn], entry_path),
+        &mut string_table,
+    );
     let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
         .expect("borrow checking should succeed");
 
@@ -136,7 +140,10 @@ fn emits_advisory_break_and_region_exit_drop_sites() {
         test_source_location(1),
     );
 
-    let hir = lower_hir(build_ast(vec![start_fn], entry_path), &mut string_table);
+    let hir = lower_hir(
+        build_ast_with_registered_types(vec![start_fn], entry_path),
+        &mut string_table,
+    );
     let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
         .expect("borrow checking should succeed");
 

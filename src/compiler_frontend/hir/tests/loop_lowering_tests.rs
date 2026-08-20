@@ -20,7 +20,7 @@ use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::test_source_location;
 use crate::compiler_frontend::tests::type_id_fixture_support::{
-    loop_binding_with_type_id as loop_binding, reference_expr,
+    inferred_type_reference_expr, loop_binding_with_type_id as loop_binding,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -56,7 +56,7 @@ fn range_loop_spec(
 }
 
 use crate::compiler_frontend::hir::hir_builder::{
-    assert_no_placeholder_terminators, build_ast, lower_ast,
+    assert_no_placeholder_terminators, build_ast_with_registered_types, lower_ast,
 };
 
 fn range_loop_cfg_blocks(module: &HirModule) -> (BlockId, BlockId, BlockId, BlockId, BlockId) {
@@ -148,9 +148,11 @@ fn lowers_range_loop_with_new_syntax() {
         test_source_location(1),
     );
 
-    let (module, _type_environment) =
-        lower_ast(build_ast(vec![start_fn], entry_path), &mut string_table)
-            .expect("range loop lowering should succeed");
+    let (module, _type_environment) = lower_ast(
+        build_ast_with_registered_types(vec![start_fn], entry_path),
+        &mut string_table,
+    )
+    .expect("range loop lowering should succeed");
 
     let (_, header_selector_block, header_ascending_block, _, _) = range_loop_cfg_blocks(&module);
 
@@ -213,9 +215,11 @@ fn lowers_range_loop_without_user_bindings() {
         test_source_location(5),
     );
 
-    let (module, _type_environment) =
-        lower_ast(build_ast(vec![start_fn], entry_path), &mut string_table)
-            .expect("range loop lowering without user bindings should succeed");
+    let (module, _type_environment) = lower_ast(
+        build_ast_with_registered_types(vec![start_fn], entry_path),
+        &mut string_table,
+    )
+    .expect("range loop lowering without user bindings should succeed");
 
     let (_, _, header_ascending_block, _, _) = range_loop_cfg_blocks(&module);
     let body_block = match module.blocks[header_ascending_block.0 as usize].terminator {
@@ -271,9 +275,11 @@ fn lowers_range_loop_with_index_binding() {
         test_source_location(9),
     );
 
-    let (module, _type_environment) =
-        lower_ast(build_ast(vec![start_fn], entry_path), &mut string_table)
-            .expect("range loop lowering with index should succeed");
+    let (module, _type_environment) = lower_ast(
+        build_ast_with_registered_types(vec![start_fn], entry_path),
+        &mut string_table,
+    )
+    .expect("range loop lowering with index should succeed");
 
     let (_, _, header_ascending_block, _, _) = range_loop_cfg_blocks(&module);
 
@@ -345,7 +351,7 @@ fn preserves_runtime_zero_step_guard_for_dynamic_step() {
                 Expression::int(0, location.clone(), ValueMode::ImmutableOwned),
                 Expression::int(10, location.clone(), ValueMode::ImmutableOwned),
                 RangeEndKind::Exclusive,
-                Some(reference_expr(
+                Some(inferred_type_reference_expr(
                     step_symbol,
                     builtin_type_ids::INT,
                     location.clone(),
@@ -367,9 +373,11 @@ fn preserves_runtime_zero_step_guard_for_dynamic_step() {
         test_source_location(19),
     );
 
-    let (module, _type_environment) =
-        lower_ast(build_ast(vec![start_fn], entry_path), &mut string_table)
-            .expect("dynamic-step range loop lowering should succeed");
+    let (module, _type_environment) = lower_ast(
+        build_ast_with_registered_types(vec![start_fn], entry_path),
+        &mut string_table,
+    )
+    .expect("dynamic-step range loop lowering should succeed");
 
     let (step_zero_check_block, _, _, _, _) = range_loop_cfg_blocks(&module);
 
@@ -445,9 +453,11 @@ fn range_loop_nested_if_body_routes_tail_to_step_block() {
         test_source_location(23),
     );
 
-    let (module, _type_environment) =
-        lower_ast(build_ast(vec![start_fn], entry_path), &mut string_table)
-            .expect("range loop lowering with nested body control-flow should succeed");
+    let (module, _type_environment) = lower_ast(
+        build_ast_with_registered_types(vec![start_fn], entry_path),
+        &mut string_table,
+    )
+    .expect("range loop lowering with nested body control-flow should succeed");
 
     let (_, header_selector_block, header_ascending_block, _, _) = range_loop_cfg_blocks(&module);
     let body_block = match module.blocks[header_ascending_block.0 as usize].terminator {
@@ -534,9 +544,11 @@ fn lowers_collection_loop_to_explicit_cfg() {
         test_source_location(29),
     );
 
-    let (module, _type_environment) =
-        lower_ast(build_ast(vec![start_fn], entry_path), &mut string_table)
-            .expect("collection loop lowering should succeed");
+    let (module, _type_environment) = lower_ast(
+        build_ast_with_registered_types(vec![start_fn], entry_path),
+        &mut string_table,
+    )
+    .expect("collection loop lowering should succeed");
 
     let start = &module.functions[module
         .start_function
@@ -600,9 +612,11 @@ fn lowers_collection_loop_without_user_bindings() {
         test_source_location(34),
     );
 
-    let (module, _type_environment) =
-        lower_ast(build_ast(vec![start_fn], entry_path), &mut string_table)
-            .expect("collection loop lowering without user bindings should succeed");
+    let (module, _type_environment) = lower_ast(
+        build_ast_with_registered_types(vec![start_fn], entry_path),
+        &mut string_table,
+    )
+    .expect("collection loop lowering without user bindings should succeed");
 
     let start = &module.functions[module
         .start_function
@@ -656,9 +670,11 @@ fn lowers_collection_loop_item_binding_from_indexed_place() {
         test_source_location(39),
     );
 
-    let (module, _type_environment) =
-        lower_ast(build_ast(vec![start_fn], entry_path), &mut string_table)
-            .expect("collection loop lowering should succeed");
+    let (module, _type_environment) = lower_ast(
+        build_ast_with_registered_types(vec![start_fn], entry_path),
+        &mut string_table,
+    )
+    .expect("collection loop lowering should succeed");
 
     let start = &module.functions[module
         .start_function
@@ -733,9 +749,11 @@ fn lowers_collection_loop_optional_index_binding() {
         test_source_location(49),
     );
 
-    let (module, _type_environment) =
-        lower_ast(build_ast(vec![start_fn], entry_path), &mut string_table)
-            .expect("collection loop lowering with index should succeed");
+    let (module, _type_environment) = lower_ast(
+        build_ast_with_registered_types(vec![start_fn], entry_path),
+        &mut string_table,
+    )
+    .expect("collection loop lowering with index should succeed");
 
     let start = &module.functions[module
         .start_function
@@ -822,9 +840,11 @@ fn lowers_range_loop_user_bindings_as_immutable_locals() {
         test_source_location(54),
     );
 
-    let (module, _type_environment) =
-        lower_ast(build_ast(vec![start_fn], entry_path), &mut string_table)
-            .expect("range loop lowering should succeed");
+    let (module, _type_environment) = lower_ast(
+        build_ast_with_registered_types(vec![start_fn], entry_path),
+        &mut string_table,
+    )
+    .expect("range loop lowering should succeed");
 
     let (_, _, header_ascending_block, _, _) = range_loop_cfg_blocks(&module);
     let body_block = match module.blocks[header_ascending_block.0 as usize].terminator {
@@ -875,9 +895,11 @@ fn lowers_collection_loop_user_bindings_as_immutable_locals() {
         test_source_location(55),
     );
 
-    let (module, _type_environment) =
-        lower_ast(build_ast(vec![start_fn], entry_path), &mut string_table)
-            .expect("collection loop lowering should succeed");
+    let (module, _type_environment) = lower_ast(
+        build_ast_with_registered_types(vec![start_fn], entry_path),
+        &mut string_table,
+    )
+    .expect("collection loop lowering should succeed");
 
     let start = &module.functions[module
         .start_function
@@ -939,9 +961,11 @@ fn break_targets_exit_block_in_collection_loop() {
         test_source_location(59),
     );
 
-    let (module, _type_environment) =
-        lower_ast(build_ast(vec![start_fn], entry_path), &mut string_table)
-            .expect("collection loop lowering should succeed");
+    let (module, _type_environment) = lower_ast(
+        build_ast_with_registered_types(vec![start_fn], entry_path),
+        &mut string_table,
+    )
+    .expect("collection loop lowering should succeed");
 
     let start = &module.functions[module
         .start_function
@@ -1007,9 +1031,11 @@ fn direct_break_in_collection_loop_does_not_leave_unreachable_step_block() {
         test_source_location(64),
     );
 
-    let (module, _type_environment) =
-        lower_ast(build_ast(vec![start_fn], entry_path), &mut string_table)
-            .expect("direct break collection loop lowering should succeed");
+    let (module, _type_environment) = lower_ast(
+        build_ast_with_registered_types(vec![start_fn], entry_path),
+        &mut string_table,
+    )
+    .expect("direct break collection loop lowering should succeed");
 
     assert_no_placeholder_terminators(&module);
 }
@@ -1051,9 +1077,11 @@ fn direct_break_in_range_loop_does_not_leave_unreachable_step_block() {
         test_source_location(65),
     );
 
-    let (module, _type_environment) =
-        lower_ast(build_ast(vec![start_fn], entry_path), &mut string_table)
-            .expect("direct break range loop lowering should succeed");
+    let (module, _type_environment) = lower_ast(
+        build_ast_with_registered_types(vec![start_fn], entry_path),
+        &mut string_table,
+    )
+    .expect("direct break range loop lowering should succeed");
 
     assert_no_placeholder_terminators(&module);
 }
@@ -1090,9 +1118,11 @@ fn continue_targets_step_block_in_collection_loop() {
         test_source_location(69),
     );
 
-    let (module, _type_environment) =
-        lower_ast(build_ast(vec![start_fn], entry_path), &mut string_table)
-            .expect("collection loop lowering should succeed");
+    let (module, _type_environment) = lower_ast(
+        build_ast_with_registered_types(vec![start_fn], entry_path),
+        &mut string_table,
+    )
+    .expect("collection loop lowering should succeed");
 
     let start = &module.functions[module
         .start_function
@@ -1168,9 +1198,11 @@ fn nested_loop_targets_remain_correct() {
         test_source_location(79),
     );
 
-    let (module, _type_environment) =
-        lower_ast(build_ast(vec![start_fn], entry_path), &mut string_table)
-            .expect("nested collection loop lowering should succeed");
+    let (module, _type_environment) = lower_ast(
+        build_ast_with_registered_types(vec![start_fn], entry_path),
+        &mut string_table,
+    )
+    .expect("nested collection loop lowering should succeed");
 
     let continue_targets = module
         .blocks
