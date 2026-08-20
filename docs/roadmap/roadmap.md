@@ -11,11 +11,10 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 
 ## Active implementation work
 
-- [Test-suite honesty and infrastructure hardening](./plans/test-suite-honesty-and-infrastructure-hardening-plan.md) — all phases implemented; local gates and every non-Windows CI gate pass. The only known CI failure is the non-blocking Windows leg, which is caused by the remaining large-error variants and is intentionally deferred to the [diagnostics and tokens optimised memory layout plan](./plans/compiler-source-token-and-diagnostic-data-layout-plan.md). That plan owns the refactor needed to make Windows green; this is not an unresolved test-honesty defect. Keep the handoff recorded when this plan is deleted.
+- [New memory management design — documentation updates](./plans/final-memory-management-redesign-and-implementation-plan.md) — first active slice after test-suite hardening. This slice migrates the canonical memory-management documentation and roadmap status to the accepted final model; compiler implementation remains deferred until the documentation authority is current.
 
 ## Queued implementation chain
 
-- [New memory mangement design - documentation updates](./plans/final-memory-management-redesign-and-implementation-plan.md) — gated behind the test-suite-honesty platform legs above, per that plan's final item.
 - [Frontend module compilation ownership cleanup](./plans/frontend-module-compilation-ownership-cleanup-plan.md)
 - [Constant evaluation, static control-flow specialisation and type-system architecture](./plans/constant-folding-and-type-system-hot-path-optimization-plan.md)
 - [Path values and resource linking](./plans/path-values-and-resource-linking-plan.md)
