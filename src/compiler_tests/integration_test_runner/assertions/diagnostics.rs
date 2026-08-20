@@ -158,14 +158,17 @@ fn validate_structured_diagnostic_assertions(
 
         let identity = diagnostic.identity();
         if let Some(expected_reason) = &assertion.reason {
-            let actual_reason = identity.reason_key.unwrap_or("<none>");
-            if actual_reason != expected_reason {
+            // A diagnostic with no reason key cannot satisfy a reason contract, whatever the
+            // authored text says. Comparing a rendered placeholder instead would let an
+            // unclassified diagnostic match a case that authored that placeholder as its reason.
+            let actual_reason = identity.reason_key;
+            if actual_reason != Some(expected_reason.as_str()) {
                 append_structured_mismatch(
                     &mut mismatches,
                     assertion,
                     "reason",
                     expected_reason.clone(),
-                    actual_reason.to_owned(),
+                    actual_reason.map_or_else(|| String::from("<no reason key>"), str::to_owned),
                 );
             }
         }

@@ -157,9 +157,18 @@ pub(super) fn validate_rendered_output_fragments(
         let normalized_expected = normalize_line_endings(expected);
         let normalized_actual = normalize_line_endings(rendered_output);
         if normalized_expected != normalized_actual {
+            // Both sides are reported escaped and post-normalization, and the first differing
+            // byte is named. Printing the raw text makes a whitespace-only mismatch — an extra
+            // captured newline, a trailing space — look like two identical lines, which is a
+            // failure report that cannot be acted on. Reporting the authored text instead of the
+            // normalized text would also describe a difference the comparison never made.
+            let difference_offset =
+                first_difference_offset(&normalized_expected, &normalized_actual);
             return Some((
                 format!(
-                    "Rendered output did not exactly match.\nExpected output:\n{expected}\nActual output:\n{rendered_output}"
+                    "Rendered output did not exactly match; first difference at byte \
+                     {difference_offset}.\nExpected output:\n{normalized_expected:?}\nActual \
+                     output:\n{normalized_actual:?}"
                 ),
                 FailureKind::RenderedOutputExactMismatch,
             ));
@@ -217,6 +226,19 @@ pub(super) fn validate_rendered_output_fragments(
 
 fn normalize_line_endings(text: &str) -> String {
     text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+/// Byte offset of the first difference between two already-normalized outputs.
+///
+/// When one side is a prefix of the other the offset is the shorter length, which is where the
+/// extra bytes begin. Callers use this only after establishing the two differ.
+fn first_difference_offset(expected: &str, actual: &str) -> usize {
+    expected
+        .as_bytes()
+        .iter()
+        .zip(actual.as_bytes())
+        .position(|(expected_byte, actual_byte)| expected_byte != actual_byte)
+        .unwrap_or_else(|| expected.len().min(actual.len()))
 }
 
 #[derive(Debug)]

@@ -29,7 +29,7 @@ None.
   - Gated on the TypeId-first migration decision. Owned by [test-suite-honesty plan](./plans/test-suite-honesty-and-infrastructure-hardening-plan.md) Phase 11 item 3.
 - [AUD-0001-F05: Two dead assertion helpers retained behind `#[allow(dead_code)]`](./audits/AUD-0001-test-support-redundancy.md#aud-0001-f05-two-dead-assertion-helpers-retained-behind-allowdead_code)
   - `Redundancy` | `tests.support`
-  - Suppressions justified; the delete-or-adopt decision is owned by [test-suite-honesty plan](./plans/test-suite-honesty-and-infrastructure-hardening-plan.md) Phase 7 item 8, then Phase 11 item 2.
+  - Decided by [test-suite-honesty plan](./plans/test-suite-honesty-and-infrastructure-hardening-plan.md) Phase 7 item 8: both helpers are retired, not adopted — reason-key and exact-cardinality contracts are already owned by the integration suite and by `assert_exact_diagnostic_codes`. Each suppression now names that decision; Phase 11 item 2 deletes both.
 
 ## Awaiting verification
 

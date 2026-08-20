@@ -25,7 +25,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-const SUITE_INVENTORY_SCHEMA_VERSION: u32 = 6;
+const SUITE_INVENTORY_SCHEMA_VERSION: u32 = 7;
 
 pub(crate) fn format_case_listing(cases: &[TestCaseSpec]) -> String {
     if cases.is_empty() {
@@ -98,6 +98,17 @@ pub(crate) struct InventorySummary {
     // Fixture loading rejects baseline-only success backends before policy and reporting. Keep
     // this canonical audit invariant visible without reimplementing completeness classification.
     pub baseline_only_backend_blocks: usize,
+    /// Cases whose every backend is acceptance-only. Legal, and counted so a reviewer sees how
+    /// much of the suite claims only that compilation succeeded.
+    pub smoke_role_cases: usize,
+    /// Backend blocks that made warnings non-contractual. Legal, and counted because an
+    /// unnecessary `ignore` silently accepts every future warning on that case.
+    pub warning_ignore_backend_blocks: usize,
+    /// Failure blocks that accept diagnostics beyond the authored multiset. Legal with an
+    /// authored reason, and counted because a stale reason keeps the weaker contract alive.
+    pub diagnostic_contains_backend_blocks: usize,
+    /// Backend blocks carrying at least one weak-contract review reason.
+    pub weak_contract_review_backend_blocks: usize,
     pub rendered_output_backend_blocks: usize,
     pub rendered_output_exact_backend_blocks: usize,
     pub rendered_output_order_backend_blocks: usize,
@@ -130,6 +141,12 @@ pub(crate) struct InventoryBackend {
     pub diagnostic_match_reason: Option<String>,
     pub structured_diagnostic_assertions: bool,
     pub assertion_kinds: Vec<&'static str>,
+    /// Why this block is worth a weak-contract review, empty when nothing applies.
+    ///
+    /// These are review prompts, not policy violations: acceptance-only smoke, ignored warnings
+    /// and justified contains-matching are all legal. Hard policy stays in the suite policy
+    /// evaluator; this field only makes the weak contracts findable in one pass.
+    pub weak_contract_reviews: Vec<&'static str>,
     pub golden_mode: Option<&'static str>,
     pub golden_present: bool,
     pub artifact_assertion_count: usize,
@@ -183,6 +200,13 @@ fn build_inventory_summary(cases: &[InventoryCase]) -> InventorySummary {
     let mut summary = InventorySummary {
         acceptance_only_backend_blocks: 0,
         baseline_only_backend_blocks: 0,
+        smoke_role_cases: cases
+            .iter()
+            .filter(|case| case.role == Some(CaseRole::Smoke))
+            .count(),
+        warning_ignore_backend_blocks: 0,
+        diagnostic_contains_backend_blocks: 0,
+        weak_contract_review_backend_blocks: 0,
         rendered_output_backend_blocks: 0,
         rendered_output_exact_backend_blocks: 0,
         rendered_output_order_backend_blocks: 0,
@@ -199,9 +223,19 @@ fn build_inventory_summary(cases: &[InventoryCase]) -> InventorySummary {
         let has_golden = backend.golden_present;
         let has_absence = backend.artifact_absence_assertion_count > 0;
         let has_expected_warning = backend.assertion_kinds.contains(&"expected_warning");
+        let ignores_warnings = backend.weak_contract_reviews.contains(&"warnings_ignored");
 
         if backend.acceptance_only {
             summary.acceptance_only_backend_blocks += 1;
+        }
+        if ignores_warnings {
+            summary.warning_ignore_backend_blocks += 1;
+        }
+        if backend.diagnostic_match == Some(DiagnosticMatchMode::Contains) {
+            summary.diagnostic_contains_backend_blocks += 1;
+        }
+        if !backend.weak_contract_reviews.is_empty() {
+            summary.weak_contract_review_backend_blocks += 1;
         }
         if has_rendered_output {
             summary.rendered_output_backend_blocks += 1;
@@ -245,6 +279,7 @@ fn build_backend_inventory(case: &TestCaseSpec) -> InventoryBackend {
             diagnostic_match_reason: None,
             structured_diagnostic_assertions: false,
             assertion_kinds: success_assertion_kinds(case, expectation),
+            weak_contract_reviews: success_weak_contract_reviews(expectation),
             golden_mode: expectation.golden.mode.map(golden_mode_label),
             golden_present: expectation.golden.is_present(),
             artifact_assertion_count: expectation.artifact_assertions.len(),
@@ -273,6 +308,7 @@ fn build_backend_inventory(case: &TestCaseSpec) -> InventoryBackend {
             diagnostic_match_reason: expectation.diagnostic_match_reason.clone(),
             structured_diagnostic_assertions: !expectation.diagnostic_assertions.is_empty(),
             assertion_kinds: failure_assertion_kinds(expectation),
+            weak_contract_reviews: failure_weak_contract_reviews(expectation),
             golden_mode: None,
             golden_present: false,
             artifact_assertion_count: 0,
@@ -331,6 +367,38 @@ fn success_assertion_kinds(
         kinds.push("expected_warning");
     }
     kinds
+}
+
+/// Weak-contract review reasons for one successful backend block.
+///
+/// Each reason names a contract that is legal but proves less than a case-specific assertion
+/// would. Reporting them keeps the review list in one place instead of re-deriving it from the
+/// field combinations on every audit.
+fn success_weak_contract_reviews(expectation: &SuccessExpectation) -> Vec<&'static str> {
+    let mut reviews = Vec::new();
+
+    if expectation.success_contract == Some(SuccessContract::AcceptanceOnly) {
+        reviews.push("acceptance_only_success");
+    }
+    if matches!(expectation.warnings, WarningExpectation::Ignore) {
+        reviews.push("warnings_ignored");
+    }
+
+    reviews
+}
+
+/// Weak-contract review reasons for one failing backend block.
+fn failure_weak_contract_reviews(expectation: &FailureExpectation) -> Vec<&'static str> {
+    let mut reviews = Vec::new();
+
+    if expectation.diagnostic_match == DiagnosticMatchMode::Contains {
+        reviews.push("diagnostic_match_contains");
+    }
+    if matches!(expectation.warnings, WarningExpectation::Ignore) {
+        reviews.push("warnings_ignored");
+    }
+
+    reviews
 }
 
 fn failure_assertion_kinds(expectation: &FailureExpectation) -> Vec<&'static str> {

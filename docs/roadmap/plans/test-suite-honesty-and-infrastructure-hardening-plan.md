@@ -6,8 +6,8 @@
 WORK_ID: test-suite-honesty
 WORK_SOURCE: docs/roadmap/plans/test-suite-honesty-and-infrastructure-hardening-plan.md
 BASE_REVISION: f41f93a7a (post-TIR, post-benchmark-counters-timers)
-STATUS: active — Phase 6 complete, ready for Phase 7
-CURRENT_SCOPE: Phase 6 deterministic timing and concurrency tests (paused before Phase 7)
+STATUS: active — Phase 7 complete, ready for Phase 8; one exposed failure is open in the ledger
+CURRENT_SCOPE: Phase 7 integration contract honesty (paused before Phase 8)
 COMPLETED:
   Phase 0: baseline established (4314 unit tests, 0 ignored, 1699 integration cases correct,
     1851 backend executions); durable inventory at docs/roadmap/evidence/test_honesty_inventory.json;
@@ -181,8 +181,48 @@ COMPLETED:
     and a private lock left them racing the collector's other owners — that removes the
     CollectorBusy failure of synthetic_traversal_prepares_retained_clauses_without_a_token_rescan
     from the timers+benchmark_counters lane, leaving one genuine pre-existing failure there
-NEXT_ACTION: run Phase 7 (integration contract honesty)
-VALIDATION: Phase 6 — just validate (pass: clippy --workspace --all-targets --all-features
+  Phase 7: every weak integration contract in the canonical suite is gone. All 12 acceptance-only
+    backend blocks (which were exactly the 12 smoke-role cases) were promoted to
+    rendered_output_exact runtime contracts, each with a manifest contract and a non-smoke role,
+    and each fixture's comment rewritten to state what the case now proves — the stale
+    "Tests requirement 7.x" claims on the three borrow_checker_* cases are gone, and
+    complex_borrowing_scenarios no longer claims field access it never exercised; the promoted
+    cases moved to the suite's house pattern (one render function returning one named top-level
+    fragment) except where a top-level binding is the subject; all 17 diagnostic_match = "contains"
+    cases were re-measured under exact matching and every one passes, so the shared recovery reason
+    ("current pre-canonical directory frontend compiles the imported child module as both a root
+    candidate and a reachable dependency") is stale — contains-mode and its reason were removed
+    from all 19 backend blocks and the redundant explicit exact declarations dropped with them;
+    all 4 warnings = "ignore" blocks were re-measured too — path_escape_project_root_error and
+    path_missing_error emit no warning at all and became forbid, external_import_constant_alias_success
+    and direct_selection_external_import_alias_success each emit exactly one MOTH-IMPORT-0003 and
+    became exact with that code; the suite now declares zero acceptance-only, zero contains-mode
+    and zero warning-ignore contracts; schema 7 of the audit inventory adds the weak-contract review
+    seam that keeps them findable if they return — summary counters smoke_role_cases,
+    warning_ignore_backend_blocks, diagnostic_contains_backend_blocks and
+    weak_contract_review_backend_blocks, plus a per-backend weak_contract_reviews list
+    (acceptance_only_success / warnings_ignored / diagnostic_match_contains) with its own self-test,
+    all of it review-only so a valid smoke case stays legal and hard policy keeps its single owner;
+    the structured reason assertion no longer compares a "<none>" placeholder — a diagnostic with no
+    reason key can satisfy no authored reason whatever its text, proved by a self-test that authors
+    the rendered absent-reason wording as its reason; the rendered_output_exact mismatch report now
+    escapes both sides post-normalization and names the first differing byte, because the previous
+    report printed a whitespace-only mismatch as two identical lines; manifest ownership rechecked
+    after the changes (0 hard policy findings, advisory set unchanged at 84, no new primary-less
+    contract family); AUD-0001-F05 decided — both test_diagnostics.rs helpers are retired, not
+    adopted, because the integration suite's diagnostic_assertions[].reason owns reason-key
+    contracts (192 cases) and assert_exact_diagnostic_codes plus the suite's diagnostic_codes
+    multiset own exact cardinality; each suppression now names that decision for Phase 11 to delete
+NEXT_ACTION: clear ledger entry EF-0001 in Phase 10, and run Phase 8 (feature, platform and CI
+  visibility)
+VALIDATION: Phase 7 — cargo fmt --all --check clean; clippy --workspace --all-targets
+  --all-features -D warnings clean; cargo test --workspace 4391+17+658, 0 failed, 0 ignored;
+  timers lane 4391+17+658; detailed_timers lane 4393+17+658; docs check clean; bench-ci preflight;
+  timers-erasure-check clean; integration 1850/1851 with the single failure being ledger entry
+  EF-0001, reproduced identically at MOTH_TEST_THREADS=1 and MOTH_TEST_THREADS=8. `just validate`
+  was not run to completion because its integration step stops on EF-0001; every gate it chains was
+  run individually and is reported above.
+  Phase 6 — just validate (pass: clippy --workspace --all-targets --all-features
   -D warnings clean; cargo test --workspace 4388+17+658, 0 failed, 0 ignored; integration
   1851/1851; docs check clean; bench-ci 60/60 preflight; timers-erasure-check clean).
   Phase 6 stress — just stress 1 (six lanes: unit and integration at 1, default and 16 threads,
@@ -211,7 +251,10 @@ VALIDATION: Phase 6 — just validate (pass: clippy --workspace --all-targets --
   pre-existing benchmark_counters failure unchanged; Linux lane passed via GitHub Actions
   validate-linux (4324 unit tests incl. Linux-only non-UTF-8 filesystem identity tests,
   1851/1851 integration cases)
-AUDITS: Phase 6 sweep of every thread::sleep, yield_now, spin_loop, Instant::now,
+AUDITS: Phase 7 inventory of every acceptance-only backend block, smoke role,
+  diagnostic_match = "contains" reason and warnings = "ignore" block in the canonical suite, each
+  re-measured against the compiler rather than accepted from its authored justification; Phase 6
+  sweep of every thread::sleep, yield_now, spin_loop, Instant::now,
   SystemTime::now and filesystem-timestamp read across src and xtask, with a disposition for each
   survivor (recorded under NOTES); pre-Phase-4 review of the Phase 0-3 work (helper contracts,
   panic-reason assertions, xtask absence assertions); Phase 4 sweep of >=, non-empty, any and find_map survivors across
@@ -220,9 +263,32 @@ AUDITS: Phase 6 sweep of every thread::sleep, yield_now, spin_loop, Instant::now
   ownership, just validate as the final gate); Phase 5 sweep of to_string_lossy/from_utf8_lossy and
   path unwrap_or_default across src and xtask, with every assertion-boundary use removed and the
   remaining report-rendering uses dispositioned; AUD-0001 (Redundancy over tests.support) —
-  F01, F02 and F03 corrected on this branch, F04 routed to Phase 11 and F05 to Phase 7/11
-BLOCKERS: none (Phase 6 complete)
-NOTES: Phase 6 timing-and-clock sweep dispositions. Remaining sleeps: node_harness workspace
+  F01, F02 and F03 corrected on this branch, F04 routed to Phase 11, and F05 decided in Phase 7
+  (both helpers retired, deletion left to Phase 11)
+BLOCKERS: none for Phase 8. One exposed failure is open —
+  docs/roadmap/plans/test-suite-honesty-exposed-failures.md entry EF-0001 (assigned top-level
+  templates are counted as page fragments). Phase 10 owns the correction; the suite stays red until
+  it lands, which is Patch A's intended state.
+NOTES: Phase 7 exposed one defect, ledgered as EF-0001: a template head that opens the
+  right-hand side of a top-level assignment is classified as a top-level runtime fragment, because
+  top_level_classifier.rs maps TokenKind::TemplateHead to HeaderFileItem::RuntimeTemplate with no
+  at_statement_boundary guard, unlike every other statement-level classification in that match. The
+  emitted page therefore mounts one slot per assigned top-level template and inserts an empty
+  fragment into each, contradicting entry-runtime-and-fragments.mtf ("Assigned or returned
+  templates are not page fragments by themselves"). borrow_checker_string_memory reports it because
+  a top-level mutable template buffer is that case's own subject; the other promoted cases use the
+  house render-function pattern, so one owner reports the defect instead of eleven.
+  Phase 7 carry-over for Phase 8: testing.mtf should record schema 7 of the suite inventory (the
+  weak_contract_reviews field and the four new summary counters), and that the canonical suite now
+  declares no acceptance-only, contains-mode or warning-ignore contract — all three remain legal and
+  keep their parser, policy and reporting self-tests, but no fixture authors one.
+  Phase 7 carry-over for Phase 11: three boundary cases now share
+  language.bindings.implicit_shared_borrowing_acceptance (borrow_checker_basic_variables,
+  borrow_checker_string_memory, immutable_alias_while_borrowed) beside its primary owner
+  implicit_borrowing, and choice_dependency_visibility_exported restates
+  choice_cross_file_runtime's shape. Both groups are candidates for the duplicate-test pruning in
+  Phase 11 item 2; Phase 7 promoted rather than deleted them because deletion is that phase's call.
+  Phase 6 timing-and-clock sweep dispositions. Remaining sleeps: node_harness workspace
   removal retry and exit poll (subprocess deadline owners, documented in Phase 5),
   dev_server/watch.rs poll interval (production polling backend, not a test) and the SSE
   registration wait (bounded deadline as deadlock protection, reports the observed client
@@ -313,7 +379,7 @@ Patch A should remain a distinct commit or stacked review unit even when reposit
 
 ### Exposed-failure ledger
 
-Create `docs/roadmap/plans/test-suite-honesty-exposed-failures.md` only when Patch A exposes failures. Keep it until Patch B clears the final entry. Each entry records:
+Create `docs/roadmap/plans/test-suite-honesty-exposed-failures.md` only when Patch A exposes failures. Keep it until Patch B clears the final entry. Phase 7 created it with entry `EF-0001`. Each entry records:
 
 - stable entry ID
 - test or integration case ID

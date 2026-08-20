@@ -482,6 +482,42 @@ fn structured_diagnostic_mismatches_report_code_occurrence_field_expected_and_ac
 }
 
 #[test]
+fn structured_reason_assertion_is_not_satisfied_by_a_reasonless_diagnostic() {
+    let fixture_root = std::env::current_dir().expect("test should have a current directory");
+    // The authored reason is the exact text the report renders for an absent reason key. A
+    // placeholder comparison would let this pass, which is the whole failure this guards.
+    let expectation = FailureExpectation {
+        warnings: WarningExpectation::Ignore,
+        message_contains: Vec::new(),
+        diagnostic_codes: vec!["MOTH-SYNTAX-0003".to_owned()],
+        diagnostic_assertions: vec![DiagnosticAssertion {
+            code: "MOTH-SYNTAX-0003".to_owned(),
+            occurrence: 1,
+            reason: Some("no reason key".to_owned()),
+            path: None,
+            line: None,
+            column: None,
+            count: None,
+            secondary_labels: Vec::new(),
+        }],
+        diagnostic_match: DiagnosticMatchMode::Exact,
+        diagnostic_match_reason: None,
+    };
+
+    let result = validate_failure_result(
+        diagnostic_messages(&["MOTH-SYNTAX-0003"]),
+        &expectation,
+        &fixture_root,
+    );
+    let reason = result
+        .failure_reason
+        .expect("a diagnostic with no reason key cannot satisfy a reason contract");
+
+    assert!(reason.contains("field 'reason'"), "{reason}");
+    assert!(reason.contains("actual '<no reason key>'"), "{reason}");
+}
+
+#[test]
 fn structured_secondary_label_matching_ignores_primary_labels_and_reports_missing_occurrences() {
     let expectation = structured_diagnostic_expectation(DiagnosticAssertion {
         code: "MOTH-RULE-0044".to_owned(),

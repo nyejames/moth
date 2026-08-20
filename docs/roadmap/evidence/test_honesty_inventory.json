@@ -6,19 +6,20 @@
   "branch": "test-suite-honesty",
   "host_platform": "macOS",
   "summary": {
-    "unit_tests_passed": 4388,
+    "unit_tests_passed": 4391,
     "unit_tests_failed": 0,
     "unit_tests_ignored": 0,
-    "integration_cases_correct": 1699,
+    "integration_cases_correct": 1698,
     "integration_backend_executions": 1851,
     "feature_lanes": {
       "default": "pass",
       "timers": "pass",
       "benchmark_counters": "pre-existing failure: const_required_construction_preparation_is_reused_by_folding",
       "timers+benchmark_counters": "pre-existing failure: const_required_construction_preparation_is_reused_by_folding. Phase 6 also removed a CollectorBusy failure of synthetic_traversal_prepares_retained_clauses_without_a_token_rescan by giving the source-read counter tests the shared instrumentation lock. Phase 0 recorded four failures in this lane; two were observed on this machine before the fix and one after, so the race-dependent members of that set need re-measuring in Phase 8",
-      "detailed_timers": "pass (4390+17+658)"
+      "detailed_timers": "pass (4393+17+658)"
     },
-    "linux_lane": "passed via GitHub Actions validate-linux (4324 unit tests incl. Linux-only non-UTF-8 filesystem identity tests, 1851/1851 integration cases)"
+    "linux_lane": "passed via GitHub Actions validate-linux (4324 unit tests incl. Linux-only non-UTF-8 filesystem identity tests, 1851/1851 integration cases)",
+    "integration_open_exposed_failures": "1 (EF-0001, borrow_checker_string_memory) \u2014 see docs/roadmap/plans/test-suite-honesty-exposed-failures.md"
   },
   "findings": [
     {
@@ -144,8 +145,8 @@
       "code": "acceptance_only_smoke_overclaiming",
       "severity": "review",
       "description": "Acceptance-only smoke cases overclaim coverage",
-      "disposition": "deferred to Phase 7",
-      "status": "open"
+      "disposition": "fixed in Phase 7: all 12 acceptance-only backend blocks (exactly the 12 smoke-role cases) promoted to rendered_output_exact runtime contracts with a manifest contract and a non-smoke role, and each fixture comment rewritten to state what the case proves; the suite now declares zero acceptance-only blocks and zero smoke roles. Acceptance-only and the smoke role remain legal; schema 7 of the suite inventory reports smoke_role_cases and per-backend weak_contract_reviews so a returning weak contract stays findable",
+      "status": "resolved"
     },
     {
       "code": "ignored_tests_needing_governance",

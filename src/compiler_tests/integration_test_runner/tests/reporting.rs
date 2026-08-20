@@ -154,7 +154,7 @@ fn inventory_json_groups_backend_metadata_under_one_canonical_case() {
     let report = report_for_cases(&[html_case, wasm_case], Some("0123456789abcdef".to_owned()));
     let json = serde_json::to_value(&report).expect("inventory should serialize");
 
-    assert_eq!(json["schema_version"], 6);
+    assert_eq!(json["schema_version"], 7);
     assert_eq!(json["repository_commit"], "0123456789abcdef");
     assert_eq!(json["manifest_case_count"], 1);
     assert_eq!(json["expanded_backend_execution_count"], 2);
@@ -191,6 +191,18 @@ fn inventory_json_groups_backend_metadata_under_one_canonical_case() {
         serde_json::Value::Null
     );
     assert_eq!(json["summary"]["rendered_output_backend_blocks"], 1);
+    assert_eq!(
+        json["cases"][0]["backends"][0]["weak_contract_reviews"],
+        serde_json::json!(["diagnostic_match_contains"])
+    );
+    assert_eq!(
+        json["cases"][0]["backends"][1]["weak_contract_reviews"],
+        serde_json::json!([])
+    );
+    assert_eq!(json["summary"]["diagnostic_contains_backend_blocks"], 1);
+    assert_eq!(json["summary"]["weak_contract_review_backend_blocks"], 1);
+    assert_eq!(json["summary"]["warning_ignore_backend_blocks"], 0);
+    assert_eq!(json["summary"]["smoke_role_cases"], 0);
     assert_eq!(
         json["hard_policy_violations"].as_array().map(Vec::len),
         Some(0)
@@ -292,7 +304,7 @@ fn inventory_reports_each_rendered_output_form_and_schema_six_summary_counts() {
     let json =
         serde_json::to_value(report_for_cases(&cases, None)).expect("report should serialize");
 
-    assert_eq!(json["schema_version"], 6);
+    assert_eq!(json["schema_version"], 7);
     assert_eq!(json["summary"]["rendered_output_backend_blocks"], 3);
     assert_eq!(json["summary"]["rendered_output_exact_backend_blocks"], 1);
     assert_eq!(json["summary"]["rendered_output_order_backend_blocks"], 1);
@@ -525,5 +537,84 @@ fn report_serializes_contains_policy_finding_once_with_typed_reason_fact() {
     assert_eq!(
         json["cases"][0]["backends"][0]["diagnostic_match_reason"],
         "  "
+    );
+}
+
+#[test]
+fn inventory_reports_every_weak_contract_a_case_may_legally_declare() {
+    // Acceptance-only smoke, ignored warnings and contains-matching are all legal contracts. The
+    // audit's job is to make them findable in one pass, so each is counted and named even when
+    // the canonical suite currently declares none of them.
+    let cases = [
+        case(
+            "smoke_case",
+            BackendId::Html,
+            &["integration"],
+            None,
+            Some(CaseRole::Smoke),
+            ExpectedOutcome::Success(SuccessExpectation {
+                warnings: WarningExpectation::Forbid,
+                success_contract: Some(SuccessContract::AcceptanceOnly),
+                artifact_assertions: Vec::new(),
+                golden: GoldenExpectation::default(),
+                rendered_output: RenderedOutputExpectation::default(),
+                artifacts_must_not_exist: Vec::new(),
+            }),
+        ),
+        case(
+            "warning_ignoring_case",
+            BackendId::Html,
+            &["integration"],
+            Some("language.warning_ignoring_case"),
+            Some(CaseRole::Primary),
+            ExpectedOutcome::Success(SuccessExpectation {
+                warnings: WarningExpectation::Ignore,
+                success_contract: None,
+                artifact_assertions: Vec::new(),
+                golden: GoldenExpectation::default(),
+                rendered_output: RenderedOutputExpectation {
+                    contains: vec!["ok".to_owned()],
+                    ..Default::default()
+                },
+                artifacts_must_not_exist: Vec::new(),
+            }),
+        ),
+        case(
+            "recovering_failure_case",
+            BackendId::Html,
+            &["integration"],
+            Some("language.recovering_failure_case"),
+            Some(CaseRole::Primary),
+            ExpectedOutcome::Failure(FailureExpectation {
+                warnings: WarningExpectation::Ignore,
+                message_contains: Vec::new(),
+                diagnostic_codes: vec!["MOTH-RULE-0001".to_owned()],
+                diagnostic_assertions: Vec::new(),
+                diagnostic_match: DiagnosticMatchMode::Contains,
+                diagnostic_match_reason: Some("independent recovery".to_owned()),
+            }),
+        ),
+    ];
+
+    let json =
+        serde_json::to_value(report_for_cases(&cases, None)).expect("report should serialize");
+
+    assert_eq!(json["summary"]["smoke_role_cases"], 1);
+    assert_eq!(json["summary"]["acceptance_only_backend_blocks"], 1);
+    assert_eq!(json["summary"]["warning_ignore_backend_blocks"], 2);
+    assert_eq!(json["summary"]["diagnostic_contains_backend_blocks"], 1);
+    assert_eq!(json["summary"]["weak_contract_review_backend_blocks"], 3);
+
+    assert_eq!(
+        json["cases"][0]["backends"][0]["weak_contract_reviews"],
+        serde_json::json!(["acceptance_only_success"])
+    );
+    assert_eq!(
+        json["cases"][1]["backends"][0]["weak_contract_reviews"],
+        serde_json::json!(["warnings_ignored"])
+    );
+    assert_eq!(
+        json["cases"][2]["backends"][0]["weak_contract_reviews"],
+        serde_json::json!(["diagnostic_match_contains", "warnings_ignored"])
     );
 }

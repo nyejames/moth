@@ -1,3 +1,7 @@
+-- Optional-typed multi-return slots bind by position and survive a round trip
+-- through a call that takes and returns the same optional slots. Each slot is
+-- reported as present or absent so a silently dropped slot cannot pass.
+
 pair_opt || -> String?, Int?:
     return none, none
 ;
@@ -6,5 +10,21 @@ consume_pair |name String?, count Int?| -> String?, Int?:
     return name, count
 ;
 
-name String?, count Int? = pair_opt()
-consume_pair(name, count)
+render_optional_slots || -> String:
+    name String?, count Int? = pair_opt()
+    echoed_name String?, echoed_count Int? = consume_pair(name, count)
+
+    name_state ~= "present"
+    if echoed_name is none:
+        name_state = "absent"
+    ;
+
+    count_state ~= "present"
+    if echoed_count is none:
+        count_state = "absent"
+    ;
+
+    return [:multi_bind_optional_slots name=[name_state] count=[count_state]]
+;
+
+[:[render_optional_slots()]]

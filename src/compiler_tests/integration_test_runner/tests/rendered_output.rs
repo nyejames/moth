@@ -95,6 +95,29 @@ fn rendered_output_exact_normalizes_only_line_endings() {
 }
 
 #[test]
+fn rendered_output_exact_mismatch_reports_escaped_text_and_first_difference() {
+    let expectation = RenderedOutputExpectation {
+        exact: Some("value=1".to_owned()),
+        ..Default::default()
+    };
+
+    let (message, kind) = validate_rendered_output_fragments("value=1\n\n", &expectation)
+        .expect("trailing captured newlines are not exact output");
+
+    assert_eq!(kind, FailureKind::RenderedOutputExactMismatch);
+    // A whitespace-only mismatch must stay readable: the escaped forms differ even though the
+    // raw text renders identically, and the offset names where the extra bytes start.
+    assert!(
+        message.contains("first difference at byte 7"),
+        "mismatch report must name the first differing byte: {message}"
+    );
+    assert!(
+        message.contains("\"value=1\"") && message.contains("\"value=1\\n\\n\""),
+        "mismatch report must escape both sides: {message}"
+    );
+}
+
+#[test]
 fn rendered_output_exact_accepts_empty_captured_text_only() {
     let expectation = RenderedOutputExpectation {
         exact: Some(String::new()),

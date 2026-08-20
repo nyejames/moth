@@ -1,3 +1,12 @@
--- Test with mixed types
-int_var = 42
-float_var = 3.14159
+-- An integer literal and a float literal in the same module keep their own
+-- numeric types through interpolation: the integer renders without a fraction
+-- and the float keeps its authored digits.
+
+render_numeric_literals || -> String:
+    int_var = 42
+    float_var = 3.14159
+
+    return [:mixed_numeric_literals int=[int_var] float=[float_var]]
+;
+
+[:[render_numeric_literals()]]

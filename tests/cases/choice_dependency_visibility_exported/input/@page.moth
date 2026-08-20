@@ -1,5 +1,17 @@
+-- A choice type and a function over it are declared in a dependency file and
+-- selected by the entry root. The variant observed after the cross-file call is
+-- the evidence that both the exported type and the exported function resolved.
+
 @choices PublicStatus
 @choices identity_status
 
 selected PublicStatus = PublicStatus::Ready
 echoed = identity_status(selected)
+
+label ~= "unset"
+if echoed is:
+    Ready => label = "ready"
+    Busy => label = "busy"
+;
+
+[:choice_dependency_visibility_exported label=[label]]

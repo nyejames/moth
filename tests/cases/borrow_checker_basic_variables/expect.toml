@@ -1,4 +1,4 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-success_contract = "acceptance_only"
+rendered_output_exact = "borrow_checker_basic_variables result=test data ref1=test data ref2=test data counter=1"

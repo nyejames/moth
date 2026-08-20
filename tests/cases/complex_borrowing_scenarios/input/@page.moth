@@ -1,47 +1,35 @@
--- Test file: Complex borrowing scenarios (should pass)
--- Tests combinations of nested borrowing, field access, and templates
+-- Alias chains, template reads and branch-scoped aliases combined: reading an
+-- alias inside a template does not keep it live afterwards, an alias created
+-- inside a branch does not outlive the branch, and a mutable binding can be
+-- rebound after the last shared read on each side. Every value that proves one
+-- of those steps is named in one output event.
 
--- Initialize complex data structure (simulated)
-user_name = "Bob"
-user_score ~= 100
-user_active = true
+render_complex_borrowing || -> String:
+    user_name = "Bob"
+    user_score ~= 100
+    user_active = true
 
--- Create nested borrowing chains
-name_ref1 = user_name
-name_ref2 = name_ref1
-name_ref3 = name_ref2
+    name_ref1 = user_name
+    name_ref2 = name_ref1
+    name_ref3 = name_ref2
 
--- Use in templates (should not interfere with borrowing)
-welcome_msg = [:[name_ref1] welcome]
-status_msg = [:[name_ref2] is active]
+    welcome_msg = [:[name_ref1] welcome]
+    status_msg = [:[name_ref2] is active]
 
--- After template usage, continue borrowing chain
-name_ref4 = name_ref3
+    name_ref4 = name_ref3
 
--- Test complex control flow with borrowing
-if user_active:
-    -- Create local references within scope
-    local_name_ref = name_ref4
-    local_score_ref = user_score
-    
-    -- Use references in templates within scope
-    scope_msg = [:[local_name_ref] has score [local_score_ref]]
-    
-    -- Modify mutable data within scope
-    user_score = user_score + 10
+    scope_msg ~= [:no branch]
+    if user_active:
+        local_name_ref = name_ref4
+        local_score_ref = user_score
+        scope_msg = [:[local_name_ref] has score [local_score_ref]]
+        user_score = user_score + 10
+    ;
+
+    final_name = name_ref1
+    final_score = user_score
+
+    return [:complex_borrowing_scenarios welcome=[welcome_msg] status=[status_msg] scope=[scope_msg] final_name=[final_name] final_score=[final_score]]
 ;
 
--- After scope, original references should still work
-final_name = name_ref1
-final_score = user_score
-
--- Test sequential mutable access after shared references are done
-user_score_mut1 ~= user_score
-user_score_mut1 = user_score_mut1 + 5
-
--- After last use, another mutable access should work
-user_score_mut2 ~= user_score
-user_score_mut2 = 200
-
--- Final template usage should work with all data
-summary = [:[user_name] final summary]
+[:[render_complex_borrowing()]]

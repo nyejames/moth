@@ -1,18 +1,14 @@
--- Test file: String memory management with borrow checker
--- Tests requirement 7.2: borrow checker integration with string memory management
+-- String and template values flow through shared aliases without copying and
+-- without blocking a later mutable rebinding of a separate template buffer.
+-- Every alias and the rebound buffer is named in one top-level output event.
 
--- Basic string slice declaration and assignment
 message = "Hello, world!"
 
--- String variable usage (should be fine)
 greeting = message
-
--- Mutable string declaration
-buffer ~= [:initial content]
-
--- String mutation (should be fine)
-buffer = [:updated content]
-
--- Multiple string references (should be allowed)
 ref1 = message
 ref2 = message
+
+buffer ~= [:initial content]
+buffer = [:updated content]
+
+[:borrow_checker_string_memory greeting=[greeting] ref1=[ref1] ref2=[ref2] buffer=[buffer]]
