@@ -11,11 +11,11 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 
 ## Active implementation work
 
-- [Test-suite honesty and infrastructure hardening](./plans/test-suite-honesty-and-infrastructure-hardening-plan.md)
+- [Test-suite honesty and infrastructure hardening](./plans/test-suite-honesty-and-infrastructure-hardening-plan.md) — all phases implemented; every local gate passes. Held open for one thing: its final completion criterion names the platform matrix, and the Linux and Windows legs have not run against this branch tip. The gate workflow triggers on a push to `main` or a manual dispatch, so a maintainer owns that run. Delete this plan once those legs pass.
 
 ## Queued implementation chain
 
-- [New memory mangement design - documentation updates](./plans/final-memory-management-redesign-and-implementation-plan.md)
+- [New memory mangement design - documentation updates](./plans/final-memory-management-redesign-and-implementation-plan.md) — gated behind the test-suite-honesty platform legs above, per that plan's final item.
 - [Frontend module compilation ownership cleanup](./plans/frontend-module-compilation-ownership-cleanup-plan.md)
 - [Constant evaluation, static control-flow specialisation and type-system architecture](./plans/constant-folding-and-type-system-hot-path-optimization-plan.md)
 - [Path values and resource linking](./plans/path-values-and-resource-linking-plan.md)

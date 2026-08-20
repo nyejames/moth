@@ -428,7 +428,7 @@ deleted with no compatibility re-export left behind.
 
 ### AUD-0001-F04: Sibling fixture supports export colliding names with different semantics
 
-- State: `deferred`
+- State: `resolved`
 - Kind: `Redundancy`
 - Scope: `tests.support`
 - Priority: `unassigned`
@@ -544,9 +544,44 @@ Phase 11 item 3, with a matching completion criterion ("no two fixture-support h
 name with different fixture semantics"). The plan entry carries the finding's constraint that a
 rename must be a pure rename and that a mis-imported consumer is a separate exposed defect.
 
+#### Resolution, with a correction to the evidence above
+
+Resolved in Phase 11 of the owning plan, and the design gate turned out not to apply, because
+one half of the evidence was wrong.
+
+The evidence states that `hir_fixture_support`'s `build_ast` "forwards unchanged to the
+production `hir::hir_builder::build_ast`", making it a second implementation with different
+behaviour from the `type_id_fixture_support` one. `hir::hir_builder::build_ast` is not
+production. It is a `#[cfg(test)] pub(crate) use` re-export of `hir_builder_test_support`, which
+is itself a re-export of `type_id_fixture_support::build_ast`. There was one implementation
+reached through four names, so every one of the fourteen consumers was already calling the same
+function and no consumer could have selected the wrong semantics. There is no exposed defect to
+ledger, and finishing or abandoning the TypeId-first migration was never required to fix this.
+
+The `reference_expr` half of the evidence stands, with the same caveat: the two shapes take
+different parameter types in different positions, so a mis-import is a compile error rather than
+a silent semantic swap.
+
+Corrected as a pure rename, verified by an unchanged test count:
+
+- `type_id_fixture_support::build_ast` is now `build_ast_with_registered_types`, named for the
+  struct and choice registration that HIR lowering's declaration pass depends on.
+- The bare `hir_fixture_support::build_ast` forward is deleted. Its six borrow-checker consumers
+  import the canonical module directly.
+- `ast_fixture_support::reference_expr` is now `immutable_reference_expr` and
+  `type_id_fixture_support::reference_expr` is now `inferred_type_reference_expr`, each named
+  for the policy it fixes.
+
+Left in place deliberately: the `#[cfg(test)] pub(crate) use hir_builder_test_support::{...}`
+re-export in `hir_builder.rs`, which twenty-two HIR test files import through. It is a migration
+adapter by its own comment and worth removing, but it re-exports test helpers under `cfg(test)`
+and cannot misrepresent production behaviour, and unwinding it means moving a `#[path]` module
+declaration and rewriting twenty-two import paths. That is a separate cleanup, not part of this
+finding.
+
 ### AUD-0001-F05: Two dead assertion helpers retained behind `#[allow(dead_code)]`
 
-- State: `partially resolved`
+- State: `resolved`
 - Kind: `Redundancy`
 - Scope: `tests.support`
 - Priority: `unassigned`
@@ -633,6 +668,12 @@ the ban on adding a token caller, matching the justified style used elsewhere in
 The delete-or-adopt decision itself was routed into the owning plan — Phase 7 item 8 decides
 adoption, Phase 11 item 2 deletes them if nothing adopted them. Note for that decision: both
 helpers also have no self-tests, so adopting either one means proving it works first.
+
+Resolved: Phase 7 decided retire, not adopt, on the grounds that reason-key contracts are owned
+by the integration suite's `diagnostic_assertions[].reason` field and exact cardinality by
+`assert_exact_diagnostic_codes` and the suite's `diagnostic_codes` multiset. Phase 11 deleted
+both functions and the now-unused `BTreeMap` import. Nothing had adopted either one, and no
+token caller was added.
 
 ## No-finding checks
 

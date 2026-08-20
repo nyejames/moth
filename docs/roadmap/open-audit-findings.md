@@ -24,12 +24,7 @@ None.
 
 ## Blocked or design-gated findings
 
-- [AUD-0001-F04: Sibling fixture supports export colliding names with different semantics](./audits/AUD-0001-test-support-redundancy.md#aud-0001-f04-sibling-fixture-supports-export-colliding-names-with-different-semantics)
-  - `Redundancy` | `tests.support`
-  - Gated on the TypeId-first migration decision. Owned by [test-suite-honesty plan](./plans/test-suite-honesty-and-infrastructure-hardening-plan.md) Phase 11 item 3.
-- [AUD-0001-F05: Two dead assertion helpers retained behind `#[allow(dead_code)]`](./audits/AUD-0001-test-support-redundancy.md#aud-0001-f05-two-dead-assertion-helpers-retained-behind-allowdead_code)
-  - `Redundancy` | `tests.support`
-  - Decided by [test-suite-honesty plan](./plans/test-suite-honesty-and-infrastructure-hardening-plan.md) Phase 7 item 8: both helpers are retired, not adopted — reason-key and exact-cardinality contracts are already owned by the integration suite and by `assert_exact_diagnostic_codes`. Each suppression now names that decision; Phase 11 item 2 deletes both.
+None.
 
 ## Awaiting verification
 
@@ -38,3 +33,5 @@ None.
 ## Resolved in this branch
 
 - AUD-0001-F01, AUD-0001-F02 and AUD-0001-F03 were corrected on branch `test-suite-honesty`. See each finding's triage record in [AUD-0001](./audits/AUD-0001-test-support-redundancy.md).
+- AUD-0001-F04 was resolved in Phase 11 of the test-suite-honesty campaign, and its design gate turned out not to apply: the evidence recorded two `build_ast` implementations with different semantics, but there was one implementation reached through four names, so no consumer could have selected the wrong one. Corrected as a pure rename to `build_ast_with_registered_types`, `immutable_reference_expr` and `inferred_type_reference_expr`, with the bare forward deleted. See the resolution note in [AUD-0001](./audits/AUD-0001-test-support-redundancy.md#aud-0001-f04-sibling-fixture-supports-export-colliding-names-with-different-semantics).
+- AUD-0001-F05 was resolved in the same phase: Phase 7 decided retire rather than adopt, and Phase 11 deleted `assert_diagnostic_reason` and `error_code_counts`. No token caller was added.
