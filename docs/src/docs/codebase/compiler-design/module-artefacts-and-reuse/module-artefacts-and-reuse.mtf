@@ -67,7 +67,9 @@ A diagnosed provider cannot expose "half of `greet`" for experimental linking. P
 
 Base module artefacts remain immutable. Concrete generic functions live in **generated sidecars** owned by the consuming project or package compilation.
 
-Each sidecar carries its request identity, generated-local type context, concrete HIR, borrow facts, lifetime facts and summaries, link facts and fingerprints. A generated function may request further instances. The build system runs a worklist to a fixed point.
+Each sidecar carries its request identity, generated-local type context, concrete HIR, borrow facts, lifetime facts and summaries, link facts and fingerprints. A generated function may request further instances.
+
+Two owners meet here, and the split matters. The **compiler** materialises each request, validates its HIR, borrow-checks it, converges call summaries and returns a completed generated delta for one module compilation. The **build system** aggregates requests across the boundary, deduplicates them against already published sidecars, stores completed sidecars and publishes them transactionally. Its worklist reaches a fixed point by scheduling more compiler work, not by driving semantic stages itself.
 
 This avoids mutating the declaring module every time a consumer monomorphises a call. New concrete code grows beside the base. The base stays put.
 

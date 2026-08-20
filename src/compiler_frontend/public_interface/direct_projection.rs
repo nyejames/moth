@@ -59,7 +59,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 /// WHAT: keeps the stable public draft separate from the `InternedPath` values needed only to
 /// seed the HIR stable-origin/local-`FunctionId` relationship and validate generic body joins.
 /// The path side table is consumed before HIR lowering and never enters `PublicInterfaceDraft` or
-/// `ModuleSemanticDraft`.
+/// `ModuleSemanticResult`.
 /// WHY: the origin join must be established while exact AST declaration identity is available;
 /// later stages must not reconstruct it from rendered names, paths or declaration order.
 pub(crate) struct PublicInterfaceDraftBuildResult {

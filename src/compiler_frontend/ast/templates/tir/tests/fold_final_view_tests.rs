@@ -47,6 +47,7 @@ use crate::compiler_frontend::ast::templates::{
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
@@ -54,7 +55,6 @@ use crate::compiler_frontend::synthetic_interface_provenance::{
 };
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
-use crate::projects::settings::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -63,7 +63,7 @@ fn build_test_fold_context<'a>(string_table: &'a mut StringTable) -> TirFoldCont
     TirFoldContext {
         string_table,
         template_const_loop_iteration_limit:
-            crate::projects::settings::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+            crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         bindings: vec![],
         fold_cache: TirFoldCache::new(),
     }

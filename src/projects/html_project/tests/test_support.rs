@@ -5,10 +5,7 @@
 //! WHY: the refactor split tests by module responsibility, so common scaffolding should
 //!      live in one place instead of being redefined in every test file.
 
-use crate::build_system::build::{
-    FileKind, Module, ModuleCompilerMetadata, ModuleExecutable, ModuleExternalImport,
-    ModuleLinkFacts, ModuleRootActivity, OutputFile,
-};
+use crate::build_system::build::{FileKind, OutputFile};
 use crate::builder_surface::PackageOrigin;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -25,6 +22,12 @@ use crate::compiler_frontend::hir::reachability::collect_module_function_link_fa
 use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::module_compilation::artefact::{
+    ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts,
+};
+use crate::compiler_frontend::module_compilation::{
+    Module, ModuleExternalImport, ModuleRootActivity,
+};
 use crate::compiler_frontend::paths::compile_time_paths::{
     CompileTimePathBase, CompileTimePathKind,
 };

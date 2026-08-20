@@ -1,7 +1,7 @@
 use super::compiled_boundary::{
     CompiledGraphBoundary, CompiledSourcePackage, CompletedSourcePackageRegistry,
 };
-use super::generated_worklist::BoundaryGeneratedFunctionStore;
+use super::generated_store::BoundaryGeneratedFunctionStore;
 use super::module_artifact_store::ModuleArtifactStore;
 use super::module_identity::ModuleId;
 use super::prepared_source::PreparedSourceInput;
@@ -9,9 +9,6 @@ use super::project_module_graph::ProjectModuleGraph;
 use super::source_discovery::{ResolvedDependencyEdge, ResolvedSourcePackageDependency};
 use super::*;
 use crate::build_system::build::BackendBuilder;
-use crate::build_system::build::{
-    CompiledModuleArtifact, Module, ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts,
-};
 use crate::build_system::create_project_modules::module_namespace::{
     DirectoryDependencyResolution, ModuleNamespaceSet, ResolvedDependency,
 };
@@ -41,6 +38,10 @@ use crate::compiler_frontend::external_packages::{ExternalFunctionId, ExternalTy
 use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::reachability::HirModuleLinkFacts;
+use crate::compiler_frontend::module_compilation::artefact::{
+    ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts,
+};
+use crate::compiler_frontend::module_compilation::{CompiledModuleArtifact, Module};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
@@ -138,12 +139,14 @@ fn module_prepared_source_names(
 ) -> Vec<String> {
     let prepared_logical_paths = &module
         .prepared
+        .semantic
         .prepared_header_syntax
         .module_symbols
         .module_file_paths;
 
     module
         .prepared
+        .semantic
         .source_files
         .iter()
         .filter(|source| prepared_logical_paths.contains(&source.logical_path))
@@ -161,6 +164,7 @@ fn module_prepared_source_names(
 fn module_source_paths(module: &super::module_inventory::ModuleCompilationJob) -> HashSet<PathBuf> {
     module
         .prepared
+        .semantic
         .source_files
         .iter()
         .map(|source| source.canonical_os_path.clone())
@@ -449,14 +453,16 @@ struct SyntheticPreparedIdentitySnapshot {
 fn synthetic_prepared_identity_snapshot(
     prepared: &super::prepared_module::PreparedModule,
 ) -> Vec<SyntheticPreparedIdentitySnapshot> {
-    let module_symbols = &prepared.prepared_header_syntax.module_symbols;
+    let module_symbols = &prepared.semantic.prepared_header_syntax.module_symbols;
     let mut snapshot = prepared
+        .semantic
         .source_files
         .iter()
         .map(|identity| {
             let logical_path = &identity.logical_path;
             let file_id = identity.file_id;
             for header in prepared
+                .semantic
                 .prepared_header_syntax
                 .headers
                 .iter()
@@ -515,6 +521,7 @@ fn synthetic_prepared_identity_snapshot(
                         assert_eq!(alias.location.scope, *logical_path);
                     }
                     prepared
+                        .semantic
                         .string_table
                         .resolve(selection.source_name)
                         .to_owned()
@@ -522,7 +529,7 @@ fn synthetic_prepared_identity_snapshot(
                 .collect::<Vec<_>>();
 
             SyntheticPreparedIdentitySnapshot {
-                logical_path: logical_path.to_portable_string(&prepared.string_table),
+                logical_path: logical_path.to_portable_string(&prepared.semantic.string_table),
                 file_id,
                 shell_ids,
                 selected_source_names,
@@ -562,7 +569,7 @@ fn synthetic_identity_fixture(dependency_order: &[&str]) -> Vec<SyntheticPrepare
         .map(PreparedSourceInput::source_byte_len)
         .sum();
     let local_string_table = string_table.fork_source().fork_for_module().into_parts().0;
-    let preparation_context = super::frontend_orchestration::ModulePreparationContext {
+    let preparation_context = super::module_preparation::ModulePreparationContext {
         style_directives: &style_directives,
         project_path_resolver: Some(resolver),
     };
@@ -692,7 +699,7 @@ fn synthetic_preparation_reuses_complete_outputs_for_one_final_header_pass() {
         .map(PreparedSourceInput::source_byte_len)
         .sum();
     let local_string_table = string_table.fork_source().fork_for_module().into_parts().0;
-    let preparation_context = super::frontend_orchestration::ModulePreparationContext {
+    let preparation_context = super::module_preparation::ModulePreparationContext {
         style_directives: &style_directives,
         project_path_resolver: Some(resolver),
     };
@@ -725,10 +732,11 @@ fn synthetic_preparation_reuses_complete_outputs_for_one_final_header_pass() {
         )
         .expect("retained synthetic outputs should prepare once");
 
-    assert_eq!(prepared.source_file_count, 2);
-    assert_eq!(prepared.source_files.iter().count(), 2);
+    assert_eq!(prepared.semantic.source_file_count, 2);
+    assert_eq!(prepared.semantic.source_files.iter().count(), 2);
     assert_eq!(
         prepared
+            .semantic
             .prepared_header_syntax
             .module_symbols
             .module_file_paths
@@ -2455,10 +2463,18 @@ fn discover_modules_uses_reachable_files_only() {
 
     let page_module = modules
         .iter()
-        .find(|module| module.entry_point.file_name() == Some(OsStr::new("@page.moth")))
+        .find(|module| {
+            module
+                .prepared
+                .semantic
+                .entry_file_path()
+                .expect("prepared module retains its entry file identity")
+                .file_name()
+                == Some(OsStr::new("@page.moth"))
+        })
         .expect("should include #page module");
     assert_eq!(
-        page_module.prepared.source_file_count, 2,
+        page_module.prepared.semantic.source_file_count, 2,
         "frontend preparation should retain only the reachable entry and provider sources"
     );
     let page_paths: HashSet<_> = module_prepared_source_names(page_module)
@@ -2758,7 +2774,10 @@ fn discover_all_modules_finds_normal_roots_across_multiple_directories() {
         .iter()
         .map(|module| {
             module
-                .entry_point
+                .prepared
+                .semantic
+                .entry_file_path()
+                .expect("prepared module retains its entry file identity")
                 .file_name()
                 .and_then(OsStr::to_str)
                 .unwrap_or_default()
@@ -3899,7 +3918,10 @@ fn reachable_moth_template_queues_same_directory_root_file() {
         .iter()
         .find(|module| {
             module
-                .entry_point
+                .prepared
+                .semantic
+                .entry_file_path()
+                .expect("prepared module retains its entry file identity")
                 .file_name()
                 .is_some_and(|name| name == "@page.moth")
         })
@@ -3915,7 +3937,10 @@ fn reachable_moth_template_queues_same_directory_root_file() {
         .iter()
         .find(|module| {
             module
-                .entry_point
+                .prepared
+                .semantic
+                .entry_file_path()
+                .expect("prepared module retains its entry file identity")
                 .file_name()
                 .is_some_and(|name| name == "@docs.moth")
         })
@@ -4759,7 +4784,10 @@ fn canonical_multi_entry_discovery_is_deterministic_and_reads_each_source_once()
         .iter()
         .map(|module| {
             module
-                .entry_point
+                .prepared
+                .semantic
+                .entry_file_path()
+                .expect("prepared module retains its entry file identity")
                 .file_name()
                 .and_then(OsStr::to_str)
                 .unwrap_or_default()
@@ -5229,7 +5257,10 @@ fn canonical_discovery_preserves_cross_module_root_queuing() {
         .iter()
         .find(|module| {
             module
-                .entry_point
+                .prepared
+                .semantic
+                .entry_file_path()
+                .expect("prepared module retains its entry file identity")
                 .file_name()
                 .is_some_and(|name| name == "@pageA.moth")
         })
@@ -5238,7 +5269,10 @@ fn canonical_discovery_preserves_cross_module_root_queuing() {
         .iter()
         .find(|module| {
             module
-                .entry_point
+                .prepared
+                .semantic
+                .entry_file_path()
+                .expect("prepared module retains its entry file identity")
                 .file_name()
                 .is_some_and(|name| name == "@api.moth")
         })
@@ -5488,7 +5522,7 @@ fn stage0_consumes_moth_tokens_into_retained_header_syntax() {
     let modules = discover_modules_for_test(&config, &resolver, &style_directives)
         .expect("header discovery should pass");
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
-    assert_eq!(modules[0].prepared.source_file_count, 3);
+    assert_eq!(modules[0].prepared.semantic.source_file_count, 3);
     assert_eq!(
         module_prepared_source_names(modules[0]),
         vec!["@page.moth", "helper.moth", "intro.mtf"]
@@ -5497,12 +5531,14 @@ fn stage0_consumes_moth_tokens_into_retained_header_syntax() {
     let entry_path = fs::canonicalize(src.join("@page.moth")).expect("entry should canonicalize");
     let entry_identity = modules[0]
         .prepared
+        .semantic
         .source_files
         .get_by_canonical_path(&entry_path)
         .expect("entry should retain a source identity");
     assert_eq!(
         modules[0]
             .prepared
+            .semantic
             .prepared_header_syntax
             .module_symbols
             .file_dependency_clauses_by_source
@@ -5562,6 +5598,7 @@ fn canonical_discovery_consumes_moth_tokens_for_every_reachable_file() {
     assert!(modules.iter().all(|module| {
         module
             .prepared
+            .semantic
             .prepared_header_syntax
             .module_symbols
             .file_dependency_clauses_by_source
@@ -5661,15 +5698,29 @@ fn local_dependency_edge_is_recorded_provider_before_consumer() {
     let provider_wave = waves
         .iter()
         .position(|wave| {
-            wave.iter()
-                .any(|module| module.entry_point.file_name() == Some(OsStr::new("@api.moth")))
+            wave.iter().any(|module| {
+                module
+                    .prepared
+                    .semantic
+                    .entry_file_path()
+                    .expect("prepared module retains its entry file identity")
+                    .file_name()
+                    == Some(OsStr::new("@api.moth"))
+            })
         })
         .expect("module_b should appear in a compile wave");
     let consumer_wave = waves
         .iter()
         .position(|wave| {
-            wave.iter()
-                .any(|module| module.entry_point.file_name() == Some(OsStr::new("@pageA.moth")))
+            wave.iter().any(|module| {
+                module
+                    .prepared
+                    .semantic
+                    .entry_file_path()
+                    .expect("prepared module retains its entry file identity")
+                    .file_name()
+                    == Some(OsStr::new("@pageA.moth"))
+            })
         })
         .expect("module_a should appear in a compile wave");
     assert!(
@@ -5813,7 +5864,10 @@ fn independent_no_edge_entries_are_grouped_in_one_ready_wave() {
         .iter()
         .map(|module| {
             module
-                .entry_point
+                .prepared
+                .semantic
+                .entry_file_path()
+                .expect("prepared module retains its entry file identity")
                 .file_name()
                 .unwrap()
                 .to_string_lossy()
@@ -5909,7 +5963,10 @@ fn duplicate_dependency_deduplicates_edge_and_orders_provider_first() {
     );
     assert!(
         inventory_waves[0][0]
-            .entry_point
+            .prepared
+            .semantic
+            .entry_file_path()
+            .expect("prepared module retains its entry file identity")
             .file_name()
             .is_some_and(|name| name == "@api.moth"),
         "module_b is the provider in the first wave"
@@ -5921,7 +5978,10 @@ fn duplicate_dependency_deduplicates_edge_and_orders_provider_first() {
     );
     assert!(
         inventory_waves[1][0]
-            .entry_point
+            .prepared
+            .semantic
+            .entry_file_path()
+            .expect("prepared module retains its entry file identity")
             .file_name()
             .is_some_and(|name| name == "@pageA.moth"),
         "module_a is the consumer in the second wave"
@@ -6045,10 +6105,14 @@ fn discovered_modules_carry_both_graph_assigned_identities() {
     );
 
     for module in modules.waves().iter().flatten() {
-        let matching_node = graph
-            .nodes()
-            .iter()
-            .find(|node| node.root_file() == module.entry_point);
+        let matching_node = graph.nodes().iter().find(|node| {
+            node.root_file()
+                == module
+                    .prepared
+                    .semantic
+                    .entry_file_path()
+                    .expect("prepared module retains its entry file identity")
+        });
         let matching_node = matching_node.expect(
             "every discovered module entry point must match a graph node's canonical root file",
         );
@@ -6056,13 +6120,21 @@ fn discovered_modules_carry_both_graph_assigned_identities() {
             module.module_id,
             matching_node.module_id(),
             "discovered module ID must equal its graph-assigned dense identity (entry {:?})",
-            module.entry_point,
+            module
+                .prepared
+                .semantic
+                .entry_file_path()
+                .expect("prepared module retains its entry file identity"),
         );
         assert_eq!(
             module.stable_origin,
             *matching_node.stable_origin(),
             "discovered module stable origin must equal its graph-assigned origin (entry {:?})",
-            module.entry_point,
+            module
+                .prepared
+                .semantic
+                .entry_file_path()
+                .expect("prepared module retains its entry file identity"),
         );
     }
 }
@@ -6187,7 +6259,15 @@ fn canonical_module_job_excludes_cross_module_donor_sources() {
         .waves()
         .iter()
         .flatten()
-        .find(|module| module.entry_point.file_name() == Some(OsStr::new("@page.moth")))
+        .find(|module| {
+            module
+                .prepared
+                .semantic
+                .entry_file_path()
+                .expect("prepared module retains its entry file identity")
+                .file_name()
+                == Some(OsStr::new("@page.moth"))
+        })
         .expect("consumer module should be discovered");
     let input_names = module_prepared_source_names(consumer);
 
@@ -6415,7 +6495,8 @@ fn empty_module() -> Module {
             entry_point: PathBuf::new(),
             warnings: Vec::new(),
             const_top_level_fragments: Vec::new(),
-            root_activity: crate::build_system::build::ModuleRootActivity::default(),
+            root_activity:
+                crate::compiler_frontend::module_compilation::ModuleRootActivity::default(),
             doc_fragments: Vec::new(),
             rendered_path_usages: Vec::new(),
             materialisation_context: None,
@@ -6795,7 +6876,7 @@ fn directory_discovery_counts_resolved_clauses_by_language_family() {
     );
     let selected_source_count = modules
         .iter()
-        .map(|module| module.prepared.source_file_count)
+        .map(|module| module.prepared.semantic.source_file_count)
         .sum::<usize>() as f64;
 
     crate::compiler_frontend::instrumentation::log_frontend_counters();

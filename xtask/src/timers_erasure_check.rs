@@ -363,7 +363,7 @@ mod tests {
     #[test]
     fn rejects_function_wrapper_form_of_frontend_substep() {
         let failures = audit_timer_source_fragment(
-            "src/build_system/create_project_modules/frontend_orchestration.rs",
+            "src/build_system/create_project_modules/module_preparation.rs",
             "fn timed_frontend_substep<T>(_m: &'static str, _l: &str, s: impl FnOnce() -> T) -> T {\n  s()\n}",
         );
 

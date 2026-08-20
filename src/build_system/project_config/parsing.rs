@@ -20,6 +20,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{
     FileFrontendPrepareFailure, FileFrontendPrepareOutput, Header, HeaderKind, HeaderParseOptions,
     bind_module_headers, prepare_file_from_tokens, prepare_header_syntax,
 };
+use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::compiler_frontend::module_dependencies::resolve_module_dependencies;
 use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
@@ -28,7 +29,6 @@ use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
-use crate::projects::settings::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 
 use std::collections::HashMap;
 use std::path::Path;

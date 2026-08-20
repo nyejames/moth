@@ -26,9 +26,9 @@ use rustc_hash::FxHashMap;
 use std::collections::{BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 
-use super::frontend_orchestration::ModulePreparationContext;
 use super::module_identity::ModuleId;
 use super::module_namespace::{DirectoryDependencyResolution, ResolvedDependency};
+use super::module_preparation::ModulePreparationContext;
 use super::prepared_module::PreparedModule;
 use super::project_module_graph::ProjectModuleGraph;
 use super::project_structure_diagnostics::{config_diagnostic_messages, path_id};
@@ -58,7 +58,6 @@ struct ModuleEntrySeed {
 /// is lifted to the consumer-facing [`ModuleCompilationJob`].
 struct ModuleCompilationJobDraft {
     module_id: ModuleId,
-    entry_point: PathBuf,
     string_table_base_len: usize,
     prepared: PreparedModule,
     #[cfg(feature = "timers")]
@@ -76,7 +75,6 @@ pub(crate) struct ModuleCompilationJob {
     /// The graph-assigned cross-build origin identity for this canonical module.
     #[cfg(test)]
     pub(crate) stable_origin: StableModuleOriginIdentity,
-    pub(crate) entry_point: PathBuf,
     pub(crate) string_table_base_len: usize,
     pub(crate) prepared: PreparedModule,
     #[cfg(feature = "timers")]
@@ -431,7 +429,6 @@ fn order_discovered_modules_by_compile_waves(
                 module_id: *module_id,
                 #[cfg(test)]
                 stable_origin,
-                entry_point: draft.entry_point,
                 string_table_base_len: draft.string_table_base_len,
                 prepared: draft.prepared,
                 #[cfg(feature = "timers")]
@@ -673,17 +670,16 @@ fn discover_modules_serial_provider_capable(
         #[cfg(feature = "timers")]
         crate::timing::finalize_timing_module_source_facts(
             timing_module_key,
-            prepared.source_file_count as u64,
-            prepared.source_byte_count as u64,
+            prepared.semantic.source_file_count as u64,
+            prepared.semantic.source_byte_count as u64,
         );
         let graph_location_remap =
-            string_table.merge_delta_from(&prepared.string_table, string_table_base_len);
+            string_table.merge_delta_from(&prepared.semantic.string_table, string_table_base_len);
         for edge in &mut resolved_edges[module_edge_start..] {
             edge.graph_location.remap_string_ids(&graph_location_remap);
         }
         drafts.push(ModuleCompilationJobDraft {
             module_id: seed.module_id,
-            entry_point: seed.entry_path.clone(),
             string_table_base_len,
             prepared,
             #[cfg(feature = "timers")]

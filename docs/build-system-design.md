@@ -48,6 +48,7 @@ refactors or thorough reviews.
 - Stage 0 owns one canonical graph, file ownership, legal project/module graph topology and deterministic scheduling for each project or package boundary.
 - A physical module is semantically compiled once inside that boundary.
 - Tokenization and declaration-shell parsing happen once. Stage 0 reuses prepared syntax for graph construction, later interface binding and module compilation.
+- Stage 0 schedules one compiler-owned module compilation service and consumes its outcome. It does not sequence interface binding, declaration ordering, AST, HIR or borrow stages, and it does not mutate compiler semantic state.
 - Structural provider references, dependency symbol bindings and module-local declaration-ordering edges are different data classes.
 - Successful module and dependency artefacts are immutable.
 - A diagnosed module exposes no partial public interface.
@@ -114,7 +115,7 @@ Config bootstrap operates on exactly one authored source identity. It does not c
 
 An authored dependency clause is rejected before path resolution with a structured diagnostic.
 
-Config uses the ordinary compiler owners for its one file:
+Config uses the ordinary compiler owners for its one file, through one named compiler service:
 
 ```text
 tokenization
@@ -125,6 +126,8 @@ tokenization
 ```
 
 Config stops after the folded AST boundary. It produces no HIR or borrow facts.
+
+That sequence is compiler-owned. The build system is a client of the config compilation service: it supplies the one authored source and consumes folded values, authored key locations and diagnostics. It does not compose the stages itself, and config bootstrap is not a second build-owned frontend pipeline. Config schema definition, validation policy and application to the project record stay build-owned. See `docs/compiler-design-overview.md` > `Frontend stages > Stage 2: header syntax and interface binding > Project config compilation service`.
 
 Allowed source includes:
 
@@ -596,6 +599,8 @@ Provider-backed discovery remains serial while it mutates shared package identit
 
 Stage 0 produces structure, resolved build-input contracts and compiler inputs. It does not type-check executable bodies, generate HIR or perform borrow validation.
 
+Provider-independent source preparation is Stage 0's only reach into the compiler before a module is ready. Stage 0 decides which source candidate to prepare, when to prepare it and how to schedule preparation work across threads. Tokenization and header-preparation semantics stay compiler-owned behind one preparation call, and the exception ends at prepared syntax: Stage 0 consumes structural provider references and does not bind source symbols, order declarations or enter AST, HIR or borrow stages.
+
 ## Project and package topology
 
 Terminology is strict:
@@ -915,18 +920,19 @@ Within a ready wave, parallel work is allowed only when:
 - diagnostics and warnings are ordered independently of completion time
 - completed payloads are remapped before consumers use them
 
-For each module job:
+For each module job, Stage 0 calls one compiler-owned module compilation service and handles its outcome:
 
 ```text
-receive retained syntax and completed provider interfaces
--> bind dependency clauses
--> order local declarations
--> run AST semantics
--> lower and validate HIR
--> borrow-validate
--> produce local lifetime constraints, lifetime facts and exported summaries
--> return Success or Diagnosed
+ready module + completed provider interfaces
+-> build one compiler input value
+-> call the compiler module compilation service
+-> Success / Diagnosed / CompilerError
+-> deterministic string-identity remap and atomic publication
 ```
+
+The compiler's own local semantic sequence inside that call is interface binding, local declaration ordering, AST semantics, public-interface projection, HIR lowering and validation, borrow validation, generated semantic completion and lifetime facts. That sequence is compiler-owned. Stage 0 never invokes its steps individually, constructs a public-interface draft, mutates HIR or reruns a compiler analysis. See `docs/compiler-design-overview.md` > `Compiler input and result boundary > Canonical module compilation service`.
+
+Directory modules and synthetic single-file compilation use the same service after their own Stage 0 preparation path.
 
 Local module compilation cannot validate every cross-module or builder-lifecycle relationship by itself. Project and link planning instantiate lifetime summaries over the reachable call graph and builder-supplied lifecycle roots.
 
@@ -1038,14 +1044,19 @@ The compiler owns generic template validation, call-site inference, request iden
 The build system owns:
 
 - project-wide or package-wide request aggregation
-- deterministic deduplication
-- worklist scheduling
+- deterministic deduplication against already published sidecars
+- worklist scheduling and request availability
+- completed sidecar storage and transactional publication
 - sidecar placement
 - reuse across entries
 
+Build-owned generated scheduling means boundary request availability, deduplication, publication and reuse. It does not include generated HIR materialisation, HIR mutation, borrow rechecks or call-summary convergence. Those are compiler semantics completed inside one module compilation transaction, from an immutable view of already published generated identities and summaries that the build system supplies.
+
 Requests are keyed by stable generic declaration identity, canonical concrete type identities and required evidence identities.
 
-The worklist continues until no generated function requests another instance.
+The worklist continues until no generated function requests another instance. It reaches that fixed point by scheduling
+further compiler work, not by driving semantic stages itself. Requests raised while one module compiles converge inside
+that module's compiler transaction and reach the boundary as one completed generated delta.
 
 Each successful generated sidecar entry carries its own generated-local type context, HIR, borrow facts, lifetime facts and summaries, link facts and fingerprints. It does not mutate a base module artefact.
 

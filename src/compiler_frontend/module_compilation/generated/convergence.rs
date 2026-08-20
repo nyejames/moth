@@ -1,23 +1,29 @@
-//! HIR-derived generated-summary convergence for one compilation boundary.
+//! HIR-derived generated-summary convergence for one module compilation.
 //!
 //! WHAT: builds the transient call-dependency model and runs the monotone dirty queue that
-//!       propagates exact base and generated borrow summaries through materialised sidecars.
-//! WHY: validated HIR owns executable call topology; keeping its construction, queue and summary
-//!       publication here prevents request registration and generated-sidecar storage from
-//!       becoming a second dependency owner.
+//!       propagates exact base and generated borrow summaries through materialised sidecars, plus
+//!       the exact-summary installation each pass depends on.
+//! WHY: validated HIR owns executable call topology, so convergence reads it rather than becoming
+//!       a second dependency owner. Reaching this fixed point mutates base and generated HIR
+//!       summaries and reruns borrow analysis, which is compiler semantics: the build system's
+//!       generated store never performs either.
 
 use crate::compiler_frontend::CompilerFrontend;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
+use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationPreparationBuilder;
 use crate::compiler_frontend::compiler_errors::{
     CompilerError, CompilerMessages, merge_stage_messages,
 };
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::external_packages::CallTarget;
+use crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::reachability::HirModuleLinkFacts;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
+use crate::compiler_frontend::module_compilation::artefact::Module;
+use crate::compiler_frontend::public_call_summary::validate_public_call_summary_transition;
 use crate::compiler_frontend::public_call_summary::{
-    PublicCallSummary, PublicCallSummaryTransition, validate_public_call_summary_transition,
+    PublicCallSummary, PublicCallSummaryTransition,
 };
 use crate::compiler_frontend::semantic_identity::{
     GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, OriginFunctionId,
@@ -27,19 +33,19 @@ use crate::timed_stage_attributed;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::VecDeque;
 
-use super::generated_worklist::GeneratedFunctionWorklist;
+use crate::compiler_frontend::module_compilation::generated::transaction::GeneratedFunctionTransaction;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(super) enum ConvergenceNode {
+pub(crate) enum ConvergenceNode {
     BaseModule,
     Generated(Box<GeneratedFunctionIdentity>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(super) struct ConvergenceNodeId(pub(super) usize);
+pub(crate) struct ConvergenceNodeId(pub(crate) usize);
 
 impl ConvergenceNodeId {
-    pub(super) fn index(self) -> usize {
+    pub(crate) fn index(self) -> usize {
         self.0
     }
 }
@@ -60,21 +66,21 @@ struct ConvergenceNodeRecord {
 ///      link facts. It is never retained in an artefact and owns only this module's transient
 ///      queue inputs.
 #[derive(Debug)]
-pub(super) struct ConvergenceModel {
+pub(crate) struct ConvergenceModel {
     nodes: Vec<ConvergenceNodeRecord>,
     callers: Vec<Vec<ConvergenceNodeId>>,
 }
 
 impl ConvergenceModel {
     #[cfg(test)]
-    pub(super) fn from_link_facts<'a>(
+    pub(crate) fn from_link_facts<'a>(
         base: &HirModuleLinkFacts,
         generated: impl IntoIterator<Item = (&'a GeneratedFunctionIdentity, &'a HirModuleLinkFacts)>,
     ) -> Result<Self, CompilerError> {
         Self::build(base, generated, &FxHashSet::default(), None)
     }
 
-    pub(super) fn from_link_facts_for_base_callees<'a>(
+    pub(crate) fn from_link_facts_for_base_callees<'a>(
         base: &HirModuleLinkFacts,
         generated: impl IntoIterator<Item = (&'a GeneratedFunctionIdentity, &'a HirModuleLinkFacts)>,
         base_public_origins: &FxHashSet<OriginFunctionId>,
@@ -163,31 +169,31 @@ impl ConvergenceModel {
         Ok(Self { nodes, callers })
     }
 
-    pub(super) fn node_count(&self) -> usize {
+    pub(crate) fn node_count(&self) -> usize {
         self.nodes.len()
     }
 
-    pub(super) fn node(&self, id: ConvergenceNodeId) -> Option<&ConvergenceNode> {
+    pub(crate) fn node(&self, id: ConvergenceNodeId) -> Option<&ConvergenceNode> {
         self.nodes.get(id.index()).map(|record| &record.node)
     }
 
     #[cfg(test)]
-    pub(super) fn node_id(&self, node: &ConvergenceNode) -> Option<ConvergenceNodeId> {
+    pub(crate) fn node_id(&self, node: &ConvergenceNode) -> Option<ConvergenceNodeId> {
         self.nodes
             .iter()
             .position(|record| &record.node == node)
             .map(ConvergenceNodeId)
     }
 
-    pub(super) fn callers(&self, node: ConvergenceNodeId) -> Option<&[ConvergenceNodeId]> {
+    pub(crate) fn callers(&self, node: ConvergenceNodeId) -> Option<&[ConvergenceNodeId]> {
         self.callers.get(node.index()).map(Vec::as_slice)
     }
 
-    pub(super) fn all_node_ids(&self) -> impl Iterator<Item = ConvergenceNodeId> + '_ {
+    pub(crate) fn all_node_ids(&self) -> impl Iterator<Item = ConvergenceNodeId> + '_ {
         (0..self.nodes.len()).map(ConvergenceNodeId)
     }
 
-    pub(super) fn generated_callees(
+    pub(crate) fn generated_callees(
         &self,
         node: ConvergenceNodeId,
     ) -> Option<&[GeneratedFunctionIdentity]> {
@@ -196,7 +202,7 @@ impl ConvergenceModel {
             .map(|record| record.generated_callees.as_slice())
     }
 
-    pub(super) fn module_private_callees(
+    pub(crate) fn module_private_callees(
         &self,
         node: ConvergenceNodeId,
     ) -> Option<&[ModulePrivateExecutableIdentity]> {
@@ -205,7 +211,7 @@ impl ConvergenceModel {
             .map(|record| record.module_private_callees.as_slice())
     }
 
-    pub(super) fn active_public_callees(
+    pub(crate) fn active_public_callees(
         &self,
         node: ConvergenceNodeId,
     ) -> Option<&[OriginFunctionId]> {
@@ -214,13 +220,13 @@ impl ConvergenceModel {
             .map(|record| record.active_public_callees.as_slice())
     }
 
-    pub(super) fn generated_node_ids(&self) -> impl Iterator<Item = ConvergenceNodeId> + '_ {
+    pub(crate) fn generated_node_ids(&self) -> impl Iterator<Item = ConvergenceNodeId> + '_ {
         (1..self.nodes.len()).map(ConvergenceNodeId)
     }
 
     /// Return the changed nodes and every reverse-reachable caller in dense ID order.
     #[cfg(test)]
-    pub(super) fn dirty_nodes(
+    pub(crate) fn dirty_nodes(
         &self,
         changed_nodes: impl IntoIterator<Item = ConvergenceNodeId>,
     ) -> Vec<ConvergenceNodeId> {
@@ -299,11 +305,11 @@ fn add_model_edges(
 }
 
 /// Run monotone summary convergence for one base HIR and its completed local sidecars.
-pub(super) fn run_generated_summary_convergence(
+pub(crate) fn run_generated_summary_convergence(
     compiler: &CompilerFrontend,
     hir_module: &mut HirModule,
     function_link_facts: &HirModuleLinkFacts,
-    generated_worklist: &mut GeneratedFunctionWorklist<'_>,
+    generated_transaction: &mut GeneratedFunctionTransaction<'_>,
     bootstrap_borrow_analysis: BorrowCheckReport,
     warnings: &[CompilerDiagnostic],
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
@@ -320,7 +326,7 @@ pub(super) fn run_generated_summary_convergence(
         .collect::<FxHashSet<_>>();
     let convergence_model = ConvergenceModel::from_link_facts_for_base_callees(
         function_link_facts,
-        generated_worklist.completed_link_facts(),
+        generated_transaction.completed_link_facts(),
         &base_public_origins,
         &base_private_identities,
     )
@@ -354,7 +360,7 @@ pub(super) fn run_generated_summary_convergence(
         let direct_summaries = direct_convergence_summaries(
             &convergence_model,
             node_id,
-            generated_worklist,
+            generated_transaction,
             hir_module,
             current_borrow_analysis,
         )
@@ -394,9 +400,12 @@ pub(super) fn run_generated_summary_convergence(
             ConvergenceNode::Generated(identity) => {
                 let identity = *identity;
                 let summary = {
-                    let sidecar = generated_worklist.sidecar_mut(&identity).map_err(|error| {
-                        CompilerMessages::from_error_ref(error, &compiler.string_table)
-                    })?;
+                    let sidecar =
+                        generated_transaction
+                            .sidecar_mut(&identity)
+                            .map_err(|error| {
+                                CompilerMessages::from_error_ref(error, &compiler.string_table)
+                            })?;
                     install_convergence_summaries(
                         &mut sidecar.module.executable.hir,
                         &direct_summaries.generated,
@@ -420,7 +429,7 @@ pub(super) fn run_generated_summary_convergence(
                         |error| CompilerMessages::from_error_ref(error, &compiler.string_table),
                     )?
                 };
-                if update_generated_summary(generated_worklist, &identity, summary).map_err(
+                if update_generated_summary(generated_transaction, &identity, summary).map_err(
                     |error| CompilerMessages::from_error_ref(error, &compiler.string_table),
                 )? {
                     enqueue_convergence_callers(
@@ -457,28 +466,28 @@ fn check_borrows_with_warnings(
 
 /// Stable base identities whose exact summaries widened during one borrow pass.
 #[derive(Debug)]
-pub(super) struct BaseSummaryChanges {
-    pub(super) public: Vec<OriginFunctionId>,
-    pub(super) module_private: Vec<ModulePrivateExecutableIdentity>,
+pub(crate) struct BaseSummaryChanges {
+    pub(crate) public: Vec<OriginFunctionId>,
+    pub(crate) module_private: Vec<ModulePrivateExecutableIdentity>,
 }
 
 impl BaseSummaryChanges {
-    pub(super) fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.public.is_empty() && self.module_private.is_empty()
     }
 }
 
 /// Exact direct-call summaries needed to analyze one convergence node.
-pub(super) struct DirectConvergenceSummaries {
-    pub(super) generated: Vec<(GeneratedFunctionIdentity, PublicCallSummary)>,
-    pub(super) active_public: Vec<(OriginFunctionId, PublicCallSummary)>,
-    pub(super) module_private: Vec<(ModulePrivateExecutableIdentity, PublicCallSummary)>,
+pub(crate) struct DirectConvergenceSummaries {
+    pub(crate) generated: Vec<(GeneratedFunctionIdentity, PublicCallSummary)>,
+    pub(crate) active_public: Vec<(OriginFunctionId, PublicCallSummary)>,
+    pub(crate) module_private: Vec<(ModulePrivateExecutableIdentity, PublicCallSummary)>,
 }
 
-pub(super) fn direct_convergence_summaries(
+pub(crate) fn direct_convergence_summaries(
     model: &ConvergenceModel,
     node_id: ConvergenceNodeId,
-    worklist: &GeneratedFunctionWorklist<'_>,
+    transaction: &GeneratedFunctionTransaction<'_>,
     base_hir: &HirModule,
     base_borrow_analysis: &BorrowCheckReport,
 ) -> Result<DirectConvergenceSummaries, CompilerError> {
@@ -490,7 +499,7 @@ pub(super) fn direct_convergence_summaries(
     let generated_summaries = generated_callees
         .iter()
         .map(|identity| {
-            worklist
+            transaction
                 .summary(identity)
                 .cloned()
                 .ok_or_else(|| {
@@ -571,7 +580,7 @@ pub(super) fn direct_convergence_summaries(
     })
 }
 
-pub(super) fn install_convergence_summaries(
+pub(crate) fn install_convergence_summaries(
     hir: &mut HirModule,
     generated_summaries: &[(GeneratedFunctionIdentity, PublicCallSummary)],
     active_public_summaries: &[(OriginFunctionId, PublicCallSummary)],
@@ -599,7 +608,7 @@ pub(super) fn install_convergence_summaries(
     }
 }
 
-pub(super) fn base_summary_changes(
+pub(crate) fn base_summary_changes(
     hir: &HirModule,
     previous: &BorrowCheckReport,
     next: &BorrowCheckReport,
@@ -658,7 +667,7 @@ pub(super) fn base_summary_changes(
     Ok(changes)
 }
 
-pub(super) fn enqueue_convergence_node(
+pub(crate) fn enqueue_convergence_node(
     node_id: ConvergenceNodeId,
     queue: &mut VecDeque<ConvergenceNodeId>,
     queued_nodes: &mut [bool],
@@ -675,7 +684,7 @@ pub(super) fn enqueue_convergence_node(
     Ok(())
 }
 
-pub(super) fn enqueue_base_dependents(
+pub(crate) fn enqueue_base_dependents(
     model: &ConvergenceModel,
     changes: &BaseSummaryChanges,
     queue: &mut VecDeque<ConvergenceNodeId>,
@@ -707,7 +716,7 @@ pub(super) fn enqueue_base_dependents(
     Ok(())
 }
 
-pub(super) fn enqueue_convergence_callers(
+pub(crate) fn enqueue_convergence_callers(
     model: &ConvergenceModel,
     changed_node: ConvergenceNodeId,
     queue: &mut VecDeque<ConvergenceNodeId>,
@@ -725,13 +734,13 @@ pub(super) fn enqueue_convergence_callers(
 }
 
 fn update_generated_summary(
-    worklist: &mut GeneratedFunctionWorklist<'_>,
+    transaction: &mut GeneratedFunctionTransaction<'_>,
     identity: &GeneratedFunctionIdentity,
     summary: PublicCallSummary,
 ) -> Result<bool, CompilerError> {
-    let current = worklist.summary(identity).ok_or_else(|| {
+    let current = transaction.summary(identity).ok_or_else(|| {
         CompilerError::compiler_error(format!(
-            "Generated worklist cannot update unknown completed request {identity:?}"
+            "Generated transaction cannot update unknown completed request {identity:?}"
         ))
     })?;
     add_frontend_counter(FrontendCounter::ConvergenceSummaryComparisons, 1);
@@ -741,7 +750,7 @@ fn update_generated_summary(
     }
 
     add_frontend_counter(FrontendCounter::ConvergenceSummaryChanges, 1);
-    *worklist.summary_mut(identity)? = summary;
+    *transaction.summary_mut(identity)? = summary;
     Ok(true)
 }
 
@@ -749,9 +758,9 @@ fn increment_convergence_counter(counter: FrontendCounter) {
     add_frontend_counter(counter, 1);
 }
 
-pub(super) fn exact_generated_sidecar_summary(
+pub(crate) fn exact_generated_sidecar_summary(
     identity: &GeneratedFunctionIdentity,
-    module: &crate::build_system::build::Module,
+    module: &Module,
 ) -> Result<PublicCallSummary, CompilerError> {
     let function_id = module
         .executable
@@ -783,6 +792,51 @@ pub(super) fn exact_generated_sidecar_summary(
         })
 }
 
+pub(crate) fn install_exact_concrete_call_summaries(
+    context: &mut ModuleMaterialisationPreparationBuilder,
+    hir: &HirModule,
+    borrow_analysis: &BorrowCheckReport,
+) -> Result<(), CompilerError> {
+    for contract in context.imported_functions_mut().values_mut() {
+        let function_id = match &contract.target {
+            SourceFunctionTarget::Imported { origin, .. } => {
+                let Some(function_id) = hir.function_ids_by_origin.get(origin).copied() else {
+                    continue;
+                };
+                function_id
+            }
+            SourceFunctionTarget::ModulePrivate { identity, .. } => hir
+                .function_ids_by_private_origin
+                .get(identity)
+                .copied()
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(format!(
+                        "Module materialisation context could not resolve private executable {identity:?}"
+                    ))
+                })?,
+            SourceFunctionTarget::Local(_) | SourceFunctionTarget::Generated { .. } => continue,
+        };
+        let exact_summary = borrow_analysis
+            .analysis
+            .public_call_summaries
+            .get(&function_id)
+            .cloned()
+            .ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "Module materialisation context is missing the exact call summary for {function_id:?}"
+                ))
+            })?;
+        add_frontend_counter(FrontendCounter::ConvergenceSummaryComparisons, 1);
+        let transition =
+            validate_public_call_summary_transition(&contract.summary, &exact_summary)?;
+        if transition == PublicCallSummaryTransition::Widened {
+            add_frontend_counter(FrontendCounter::ConvergenceSummaryChanges, 1);
+            contract.summary = exact_summary;
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
-#[path = "../tests/generated_summary_convergence_tests.rs"]
+#[path = "tests/convergence_tests.rs"]
 mod tests;

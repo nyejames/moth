@@ -5,15 +5,15 @@
 ```text
 WORK_ID: frontend-module-compilation-ownership-cleanup
 WORK_SOURCE: docs/roadmap/plans/frontend-module-compilation-ownership-cleanup-plan.md
-BASE_REVISION: d670b1b25dcf6edb534fc9b67b91291f168bac24
-STATUS: queued
-CURRENT_SCOPE: plan authored from the current main branch ownership audit
-COMPLETED: planning audit, target boundary definition and roadmap sequencing
-NEXT_ACTION: after test-suite honesty completes, re-anchor Phase 0 against the then-current main branch before changing production code
-VALIDATION: plan-only authoring change, implementation validation is defined per phase below
+BASE_REVISION: f3b4178118069e857034dc2ba0e9f71864980721
+STATUS: active
+CURRENT_SCOPE: Phases 0-4 complete; the compiler owns the canonical module compilation service and all generated semantic completion, and the build system's remaining preparation owner is named for what it does
+COMPLETED: Phase 0 re-anchor and documentation hardening, Phase 1 data-ownership move, Phases 2-3 implemented as one slice, Phase 4 preparation-owner reduction and rename
+NEXT_ACTION: Phase 5, move project config and direct Moth-template compilation behind compiler services and add the architecture-boundary guard
+VALIDATION: `just validate` passes at the Phase 0, Phase 1, Phase 2/3 and Phase 4 gates
 AUDITS: compiler/build ownership, generated-function ownership, module artefact ownership, config and direct Moth-template compiler clients, canonical docs and style-guide boundary rules
-BLOCKERS: TIR corrections is active, then test-suite honesty must complete
-NOTES: this plan must complete before command timing accounting corrections because that plan references and measures frontend/build boundaries that this plan moves
+BLOCKERS: none
+NOTES: the previously named command timing accounting plan was deleted from the roadmap on 2026-08-18, so its references in this plan are historical only; the next queued plan is runtime assertion messages and call-argument parser consolidation
 ```
 
 ## Purpose
@@ -35,15 +35,15 @@ This plan runs after:
 1. TIR corrections and simplification
 2. test-suite honesty and infrastructure hardening
 
+Both are complete and their plans have been removed from `docs/roadmap/plans/`.
+
 It runs before:
 
-1. command timing accounting and reporting corrections
+1. runtime assertion messages and call-argument parser consolidation
 2. constant evaluation and static control-flow optimisation
 3. the remaining queued roadmap chain
 
-This ordering is deliberate. The command timing plan currently references `src/build_system/create_project_modules/frontend_orchestration.rs` and measures frontend/build boundaries that this plan will relocate. Repairing timing ownership first would create avoidable churn and could make the timing plan encode the wrong architectural boundary.
-
-The test-suite honesty plan stays first because this refactor needs trustworthy failure identity, platform coverage and orchestration tests before moving a large compiler/build seam.
+The command timing accounting and reporting correction plan referenced throughout the original authoring no longer exists. It was deleted from the roadmap on 2026-08-18, after this plan was authored. Its sequencing constraint is therefore satisfied by absence; every later reference to that plan in this document is historical context, not an outstanding action.
 
 ## Planning snapshot and confirmed current shape
 
@@ -397,6 +397,118 @@ If the test-suite honesty plan introduces stronger canonical validation commands
 
 ---
 
+# Phase 0 re-anchor findings
+
+Recorded against `f3b4178118069e857034dc2ba0e9f71864980721` on 2026-08-20.
+
+## Planning snapshot verification
+
+Every shape described under `Planning snapshot and confirmed current shape` still holds. No newly added
+semantic owner appeared between the planning revision and the implementation start revision. `pipeline.rs`
+is 474 lines and still exposes `sort_headers`, `headers_to_ast`, `generate_hir` and `check_borrows` beside
+tokenization and per-file preparation, and still constructs `CompilerFrontend` from
+`crate::projects::settings::Config`.
+
+`src/build_system/create_project_modules/source_preparation.rs` already exists but owns single-pass source
+tokenization and retained dependency-clause preparation for Stage 0 discovery, not module preparation
+scheduling. Phase 4 must not collide with that name.
+
+## Production raw-stage callers outside `compiler_frontend`
+
+| Owner | Raw stage entry points used |
+|---|---|
+| `src/build_system/create_project_modules/frontend_orchestration.rs` | `prepare_header_syntax`, `bind_module_headers`, `CompilerFrontend::sort_headers`, `CompilerFrontend::headers_to_ast`, `CompilerFrontend::generate_hir`, `CompilerFrontend::check_borrows`, `PublicInterfaceDraftBuilder`, `build_direct_export_seed`, `build_public_source_nominal_origin_index`, `build_public_source_trait_origin_index`, `validate_materialisation_context_templates`, `collect_module_function_link_facts` |
+| `src/build_system/create_project_modules/generated_summary_convergence.rs` | `CompilerFrontend::check_borrows`, `validate_public_call_summary_transition`, direct mutation of base and generated `HirModule` call summaries |
+| `src/build_system/project_config/parsing.rs` | `prepare_file_from_tokens`, `prepare_header_syntax`, `bind_module_headers`, `resolve_module_dependencies`, `Ast::new` |
+| `src/projects/html_project/moth_template/compile.rs` | `prepare_header_syntax`, `bind_module_headers`, `CompilerFrontend::sort_headers`, `CompilerFrontend::headers_to_ast` |
+
+Test callers are `src/build_system/tests/frontend_orchestration_tests.rs` and
+`src/compiler_tests/frontend_pipeline_tests.rs`. Both are allowed to target stage-local APIs, but
+`frontend_pipeline_tests.rs` currently reassembles the whole sequence and should follow the production
+owner as it moves.
+
+## Build-owned types that are semantically compiler module results
+
+Declared in `src/build_system/build.rs`: `ResolvedConstFragment`, `ModuleExternalImport`,
+`ModuleRootActivity`, `ModuleExecutable`, `ModuleLinkFacts`, `ModuleCompilerMetadata`, `Module`,
+`GeneratedFunctionSidecar`, `CompiledModuleArtifact`, `ModuleSemanticDraft`.
+
+Declared in `src/build_system/create_project_modules/frontend_orchestration.rs`:
+`ModuleCompilationOutcome`, `FrontendModuleBuildContext`, `SourceProviderMaterialisationSet`.
+
+Declared in `src/build_system/create_project_modules/prepared_module.rs`: `PreparedModule`, which mixes the
+compiler semantic input payload with the Stage 0-only `contains_moth_template` activation fact.
+
+Staying build-owned: `ProjectCompilation`, `EntryAssembly`, `LinkedModuleAssembly`, `ProjectEntry`,
+`ProjectLinkedModule`, `BuildBootstrap`, `OutputFile`, `FileKind`, `Project`, `BuildResult`,
+`ProjectBuilder`, the graph boundaries in `compiled_boundary.rs`, `ModuleArtifactStore` and
+`BoundaryGeneratedFunctionStore`.
+
+## Generated data flow at the start revision
+
+```text
+AST deferred_generic_requests
+-> install_generated_request_contracts (frontend_orchestration.rs)
+-> GeneratedRequestFacts -> GeneratedFunctionWorklist::register_requests (build-owned)
+-> materialise_generated_request_roots / materialise_generated_request (frontend_orchestration.rs)
+-> GeneratedFunctionWorklist::enter / complete with PublicCallSummary + GeneratedFunctionSidecar
+-> run_generated_summary_convergence (build-owned, mutates base and generated HIR, reruns borrows)
+-> GeneratedFunctionWorklist::finish -> GeneratedFunctionWorklistDelta
+-> ModuleSemanticDraft.generated_worklist_delta
+-> BoundaryGeneratedFunctionStore::preflight / reserve_commit / commit (atomic with the artefact)
+```
+
+`SourceProviderMaterialisationSet` currently borrows the mutable build stores `ModuleArtifactStore` and
+`CompletedSourcePackageRegistry` to resolve a declaring module's materialisation context, and falls back to
+the requester's own in-progress `ModuleMaterialisationPreparation`. Phase 2 replaces the store access with an
+immutable compiler-facing view and keeps requester-local materialisation as a compiler-local case.
+
+## Current targeted tests
+
+- module preparation and file-preparation strategy: `src/build_system/tests/frontend_orchestration_tests.rs`
+- module compilation and boundary waves: `src/build_system/tests/compilation_tests.rs`, `src/build_system/tests/compile_project_frontend_tests.rs`, `src/build_system/tests/create_project_modules_tests.rs`
+- generated convergence: `src/build_system/tests/generated_summary_convergence_tests.rs`
+- generated worklist and publication: `src/build_system/tests/generated_worklist_tests.rs`, `src/build_system/tests/module_artifact_store_tests.rs`
+- artefact lanes: `src/build_system/tests/module_lane_tests.rs`
+- Stage 0 source identity: `src/build_system/tests/stage0_filesystem_identity_tests.rs`
+- single-file and end-to-end frontend: `src/compiler_tests/frontend_pipeline_tests.rs`
+- public-interface projection: `src/compiler_frontend/public_interface/tests/`
+- generic materialisation: `src/compiler_frontend/ast/generic_functions/tests/`
+- direct Moth template: `src/projects/html_project/moth_template/tests.rs`
+- project config parsing: `tests/cases/` config coverage plus `src/build_system/tests/build_dependency_tests.rs`
+- user-visible behaviour: `tests/cases/` through `cargo run -- tests`
+
+## Baseline validation authority
+
+The test-suite honesty plan landed before this plan started, so the validation authority is the `justfile`
+plus `docs/src/docs/codebase/style-guide/validation.mtf`, not the static command list authored with this
+plan. The canonical gate is:
+
+```bash
+just validate
+```
+
+which runs clippy, the feature-lane check, `just source-audit`, `cargo test --workspace`,
+`cargo run -- tests --terse`, the docs build, `xtask bench-ci` and the timers-erasure check.
+
+The canonical non-recording frontend performance comparison for this plan is:
+
+```bash
+just bench-frontend-check
+```
+
+with `just bench-check` as the broader non-recording command.
+
+## Roadmap references to re-check in Phase 6
+
+- `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md` lines 108-117 name `frontend_orchestration.rs` and `compiler_frontend/pipeline.rs::CompilerFrontend`.
+- `docs/roadmap/plans/frontend-arena-semantic-invariant-optimization-plan.md` names `frontend_orchestration.rs` twice and `compiler_frontend/pipeline.rs` once.
+- `docs/roadmap/plans/post-tir-template-parser-optimization-plan.md` names `compiler_frontend/pipeline.rs`.
+- `docs/roadmap/evidence/test_honesty_inventory.json` records suite paths that move with the tests.
+- `docs/roadmap/plans/constant-folding-and-type-system-hot-path-optimization-plan.md` still gates itself on the deleted command timing plan. That staleness predates this refactor; record it rather than silently rewriting another plan's gate.
+
+---
+
 # Implementation phases
 
 ## Phase 0: Re-anchor the repository and lock the ownership contract
@@ -409,29 +521,37 @@ This phase should make the intended dependency direction unambiguous enough that
 
 ### Checklist
 
-- [ ] Resolve the then-current `main` commit and record it as the implementation start revision in this plan.
-- [ ] Compare the current versions of `compiler_frontend/pipeline.rs`, `build_system/create_project_modules/`, `build_system/build.rs`, project config parsing and direct Moth-template compilation against the planning snapshot above.
-- [ ] Record every production caller outside `compiler_frontend` that directly invokes or imports raw binding, ordering, AST construction, HIR lowering, public-interface draft or borrow-analysis owners.
-- [ ] Record every build-owned type that is semantically part of the compiler module artefact or generated sidecar result.
-- [ ] Record the current generated request, summary, sidecar and materialisation-context data flow from requester AST through boundary publication.
-- [ ] Record the exact current targeted tests for module preparation, module compilation, generated convergence, public-interface publication, single-file compilation, project config and direct Moth-template compilation.
-- [ ] Record the current canonical benchmark/timing command used to detect gross frontend performance regressions after pure ownership moves.
-- [ ] Update `docs/compiler-design-overview.md` with the hardened local module compilation service boundary described above.
-- [ ] Update `docs/build-system-design.md` so Stage 0 compile waves clearly invoke one compiler semantic service rather than owning the stage sequence.
-- [ ] Update generated-function ownership wording in both canonical architecture docs.
-- [ ] Update config and direct Moth-template service wording in the canonical docs where it is currently permissive.
-- [ ] Add the explicit compiler/build layering rule to `style-guide.mtf`.
-- [ ] Update educational compiler-design pages that already describe this ownership boundary, including `module-artefacts-and-reuse.mtf`.
-- [ ] Audit queued roadmap plans for paths or assumptions that this refactor will invalidate and record the required edits in this plan before code moves.
-- [ ] Update this plan's current-state capsule with confirmed paths, blockers and baseline validation.
+- [x] Resolve the then-current `main` commit and record it as the implementation start revision in this plan.
+- [x] Compare the current versions of `compiler_frontend/pipeline.rs`, `build_system/create_project_modules/`, `build_system/build.rs`, project config parsing and direct Moth-template compilation against the planning snapshot above.
+- [x] Record every production caller outside `compiler_frontend` that directly invokes or imports raw binding, ordering, AST construction, HIR lowering, public-interface draft or borrow-analysis owners.
+- [x] Record every build-owned type that is semantically part of the compiler module artefact or generated sidecar result.
+- [x] Record the current generated request, summary, sidecar and materialisation-context data flow from requester AST through boundary publication.
+- [x] Record the exact current targeted tests for module preparation, module compilation, generated convergence, public-interface publication, single-file compilation, project config and direct Moth-template compilation.
+- [x] Record the current canonical benchmark/timing command used to detect gross frontend performance regressions after pure ownership moves.
+- [x] Update `docs/compiler-design-overview.md` with the hardened local module compilation service boundary described above.
+- [x] Update `docs/build-system-design.md` so Stage 0 compile waves clearly invoke one compiler semantic service rather than owning the stage sequence.
+- [x] Update generated-function ownership wording in both canonical architecture docs.
+- [x] Update config and direct Moth-template service wording in the canonical docs where it is currently permissive.
+- [x] Add the explicit compiler/build layering rule to `style-guide.mtf`.
+- [x] Update educational compiler-design pages that already describe this ownership boundary, including `module-artefacts-and-reuse.mtf`.
+- [x] Audit queued roadmap plans for paths or assumptions that this refactor will invalidate and record the required edits in this plan before code moves.
+- [x] Update this plan's current-state capsule with confirmed paths, blockers and baseline validation.
 
 ### Phase 0 gate
 
-- [ ] Ownership audit confirms the plan matches the current tree and no newly added semantic owner was missed.
-- [ ] Style-guide review confirms the new documentation states a concrete enforceable rule rather than only a preference for separation.
-- [ ] Documentation checks and full validation pass with no production behavior changes.
+- [x] Ownership audit confirms the plan matches the current tree and no newly added semantic owner was missed.
+- [x] Style-guide review confirms the new documentation states a concrete enforceable rule rather than only a preference for separation.
+- [x] Documentation checks and full validation pass with no production behavior changes.
 
 Exit state: the current repository is re-anchored and the accepted docs already forbid the architecture this plan is about to remove.
+
+Phase 0 result: documentation-only. `docs/compiler-design-overview.md` gained `Canonical module compilation service`
+and `Project config compilation service`, hardened generated-function ownership and a new architectural invariant.
+`docs/build-system-design.md` gained the scheduling invariant, the compile-wave service call, the generated
+boundary/semantic split, the Stage 0 preparation exception and the config-service client wording.
+`style-guide.mtf` gained `Production layering and stage ownership`. Educational pages updated:
+`module-artefacts-and-reuse.mtf`, `project-graphs-and-modules.mtf`, `templates-and-tir.mtf` and
+`starting-a-build.mtf`.
 
 ## Phase 1: Move compiler semantic payloads and options to the compiler boundary
 
@@ -443,26 +563,45 @@ This phase fixes data ownership before control-flow ownership.
 
 ### Checklist
 
-- [ ] Add a focused compiler-owned module compilation area, expected to be `src/compiler_frontend/module_compilation/` unless Phase 0 finds a better existing owner.
-- [ ] Move the compiler-produced module artefact vocabulary out of `build_system/build.rs`.
-- [ ] Include `ModuleExecutable`, `ModuleLinkFacts`, `ModuleCompilerMetadata`, `ModuleRootActivity`, resolved const-fragment metadata, module external-import facts, `Module`, `GeneratedFunctionSidecar` and `CompiledModuleArtifact` or their current equivalents.
-- [ ] Move `ModuleSemanticDraft` to the compiler boundary or replace it with one compiler-owned named result that carries the same transient remap/publication facts.
-- [ ] Keep `ProjectCompilation`, graph boundaries, entry assembly, builders, output records and publication stores build-owned.
-- [ ] Replace `CompilerFrontend::new(&Config, ...)` with a compiler-owned options/input value containing only the settings the frontend actually consumes.
-- [ ] Remove the `crate::projects::settings::Config` dependency from `compiler_frontend/pipeline.rs`.
-- [ ] Split the current build-owned `PreparedModule` if needed so Stage 0-only facts such as implicit Moth-template provider activation stay build-owned while the semantic compilation payload is a compiler-owned input value.
-- [ ] Preserve one exact string-table ownership path through preparation, semantic compilation, deterministic merge and publication.
-- [ ] Remove loose duplicate active-root inputs where the same fact can be derived from the retained `FileId`, source table and source-origin table.
-- [ ] Update call sites directly to the new owner and delete old type definitions in the same phase.
-- [ ] Add or update tests for artefact remapping, lane coherence and successful publication using the compiler-owned types.
+- [x] Add a focused compiler-owned module compilation area, expected to be `src/compiler_frontend/module_compilation/` unless Phase 0 finds a better existing owner.
+- [x] Move the compiler-produced module artefact vocabulary out of `build_system/build.rs`.
+- [x] Include `ModuleExecutable`, `ModuleLinkFacts`, `ModuleCompilerMetadata`, `ModuleRootActivity`, resolved const-fragment metadata, module external-import facts, `Module`, `GeneratedFunctionSidecar` and `CompiledModuleArtifact` or their current equivalents.
+- [x] Move `ModuleSemanticDraft` to the compiler boundary or replace it with one compiler-owned named result that carries the same transient remap/publication facts.
+- [x] Keep `ProjectCompilation`, graph boundaries, entry assembly, builders, output records and publication stores build-owned.
+- [x] Replace `CompilerFrontend::new(&Config, ...)` with a compiler-owned options/input value containing only the settings the frontend actually consumes.
+- [x] Remove the `crate::projects::settings::Config` dependency from `compiler_frontend/pipeline.rs`.
+- [x] Split the current build-owned `PreparedModule` if needed so Stage 0-only facts such as implicit Moth-template provider activation stay build-owned while the semantic compilation payload is a compiler-owned input value.
+- [x] Preserve one exact string-table ownership path through preparation, semantic compilation, deterministic merge and publication.
+- [x] Remove loose duplicate active-root inputs where the same fact can be derived from the retained `FileId`, source table and source-origin table.
+- [x] Update call sites directly to the new owner and delete old type definitions in the same phase.
+- [x] Add or update tests for artefact remapping, lane coherence and successful publication using the compiler-owned types.
 
 ### Phase 1 gate
 
-- [ ] Ownership audit finds no compiler semantic result type left in `build_system/build.rs` solely because the old orchestration lived there.
-- [ ] Style-guide review confirms the new module is split by real data responsibility and does not become a generic dumping ground.
-- [ ] Targeted artefact/publication tests and full validation pass.
+- [x] Ownership audit finds no compiler semantic result type left in `build_system/build.rs` solely because the old orchestration lived there.
+- [x] Style-guide review confirms the new module is split by real data responsibility and does not become a generic dumping ground.
+- [x] Targeted artefact/publication tests and full validation pass.
 
 Exit state: compiler semantic values can move through compiler code without a dependency back into `build_system`.
+
+Phase 1 result: `src/compiler_frontend/module_compilation/` now owns `options.rs` (`FrontendOptions`,
+`DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS`), `prepared.rs` (`PreparedModuleInput`), `artefact.rs` (`Module`,
+`ModuleExecutable`, `ModuleLinkFacts`, `ModuleCompilerMetadata`, `ModuleRootActivity`,
+`ResolvedConstFragment`, `ModuleExternalImport`, `CompiledModuleArtifact`), `generated.rs`
+(`GeneratedFunctionSidecar`, `CompletedGeneratedFunction`, `GeneratedFunctionDelta`,
+`validate_completed_generated_record`) and `outcome.rs` (`ModuleCompilationOutcome`,
+`ModuleSemanticResult`).
+
+`ModuleSemanticDraft` was renamed to `ModuleSemanticResult` and `GeneratedFunctionWorklistDelta` to
+`GeneratedFunctionDelta`; both old definitions are deleted. `build_system/build.rs` dropped from 1,259 to
+998 lines and now declares only project aggregation, entry assembly, builder and output types.
+`create_project_modules/prepared_module.rs` is the Stage 0 record pairing `PreparedModuleInput` with the
+build-owned `contains_moth_template` scheduling fact. `Config::frontend_options()` is the one project-side
+projection into compiler options, covered by `src/projects/tests/settings_tests.rs`.
+
+The duplicate active-root path was removed in two places: `compile_module_semantic` no longer takes an
+`entry_file_path` argument and `ModuleCompilationJob` no longer stores `entry_point`. Both now read
+`PreparedModuleInput::entry_file_path()`, asserted in `frontend_orchestration_tests.rs`.
 
 ## Phase 2: Separate generated boundary publication from generated semantic completion
 
@@ -476,26 +615,26 @@ It deliberately does not perform the separate cleanup of `ast/generic_functions/
 
 ### Checklist
 
-- [ ] Define a compiler-owned immutable input/view containing the already published generated identities and summaries a module compile may reuse.
-- [ ] Define one compiler-owned generated delta containing newly completed generated identities, exact summaries and sidecars produced by a successful module transaction.
-- [ ] Keep the boundary generated store, duplicate prevention, deterministic publication and boundary placement under `build_system/create_project_modules`.
-- [ ] Remove semantic HIR and borrow responsibilities from the build-owned generated worklist/store APIs.
-- [ ] Move generated request canonicalisation, semantic materialisation coordination and generated-summary convergence under `compiler_frontend`.
-- [ ] Move `generated_summary_convergence.rs` out of the build system and delete the old file once the compiler owner is wired.
-- [ ] Ensure the compiler, not Stage 0, installs summaries into base/generated HIR and decides when a borrow recheck is required.
-- [ ] Replace `SourceProviderMaterialisationSet` access to mutable build stores with an immutable compiler-facing provider materialisation registry/view built from already completed providers.
-- [ ] Preserve requester-local materialisation as a compiler-local case rather than making Stage 0 fake a completed provider.
-- [ ] Ensure a diagnosed module publishes neither its base artefact nor any generated delta.
-- [ ] Ensure a successful module publishes its base artefact and generated delta through the existing atomic boundary transaction.
-- [ ] Preserve boundary-local identity rules so equal generated identities in unrelated project/package boundaries do not collide.
-- [ ] Preserve recursive generic diagnostics and exact call-summary transition validation.
-- [ ] Add focused tests for known-generated reuse, duplicate suppression, recursive requests, cross-package materialisation, generated borrow convergence and transactional publication.
+- [x] Define a compiler-owned immutable input/view containing the already published generated identities and summaries a module compile may reuse.
+- [x] Define one compiler-owned generated delta containing newly completed generated identities, exact summaries and sidecars produced by a successful module transaction.
+- [x] Keep the boundary generated store, duplicate prevention, deterministic publication and boundary placement under `build_system/create_project_modules`.
+- [x] Remove semantic HIR and borrow responsibilities from the build-owned generated worklist/store APIs.
+- [x] Move generated request canonicalisation, semantic materialisation coordination and generated-summary convergence under `compiler_frontend`.
+- [x] Move `generated_summary_convergence.rs` out of the build system and delete the old file once the compiler owner is wired.
+- [x] Ensure the compiler, not Stage 0, installs summaries into base/generated HIR and decides when a borrow recheck is required.
+- [x] Replace `SourceProviderMaterialisationSet` access to mutable build stores with an immutable compiler-facing provider materialisation registry/view built from already completed providers.
+- [x] Preserve requester-local materialisation as a compiler-local case rather than making Stage 0 fake a completed provider.
+- [x] Ensure a diagnosed module publishes neither its base artefact nor any generated delta.
+- [x] Ensure a successful module publishes its base artefact and generated delta through the existing atomic boundary transaction.
+- [x] Preserve boundary-local identity rules so equal generated identities in unrelated project/package boundaries do not collide.
+- [x] Preserve recursive generic diagnostics and exact call-summary transition validation.
+- [x] Add focused tests for known-generated reuse, duplicate suppression, recursive requests, cross-package materialisation, generated borrow convergence and transactional publication.
 
 ### Phase 2 gate
 
-- [ ] Ownership audit confirms no build-system function mutates generated/base HIR or directly reruns borrow analysis.
-- [ ] Style-guide review confirms the compiler generated owner is focused and does not absorb boundary storage/publication policy.
-- [ ] Generated, generic, borrow, public-interface and boundary publication tests pass, followed by full validation.
+- [x] Ownership audit confirms no build-system function mutates generated/base HIR or directly reruns borrow analysis.
+- [x] Style-guide review confirms the compiler generated owner is focused and does not absorb boundary storage/publication policy.
+- [x] Generated, generic, borrow, public-interface and boundary publication tests pass, followed by full validation.
 
 Exit state: Stage 0 owns generated availability and publication while the compiler owns generated semantic completion.
 
@@ -509,28 +648,122 @@ This is the central phase. The build system should become a client that supplies
 
 ### Checklist
 
-- [ ] Introduce one compiler-owned `compile_module` service input containing prepared semantic syntax, completed provider interfaces, compiler options, immutable generated/provider materialisation views and required capability inputs.
-- [ ] Move `FrontendModuleBuildContext` or replace it with a compiler-owned module compilation context.
-- [ ] Move `compile_module_semantic` under the compiler owner.
-- [ ] Move the pre-AST export seed and public source origin coordination that exists only to build the compiler public interface into the compiler module compilation flow.
-- [ ] Keep public-interface projection implementation in `compiler_frontend/public_interface`, but make the compiler module service its production caller.
-- [ ] Keep AST construction in `compiler_frontend/ast`, HIR construction in `compiler_frontend/hir` and borrow analysis in its current compiler owner.
-- [ ] Make the module service sequence those owners without duplicating their implementation.
-- [ ] Keep successful warnings, diagnostic identity context and string-table state inside the compiler result until the build boundary performs its deterministic merge.
-- [ ] Keep `ModuleCompilationOutcome::Success`, `Diagnosed` and `CompilerError` classification at the compiler semantic boundary.
-- [ ] Update directory-module compilation so it builds provider inputs, calls the compiler once and only handles success/diagnosed/infrastructure publication state.
-- [ ] Update synthetic single-file compilation to use the same canonical compiler semantic service after its Stage 0 preparation path.
-- [ ] Remove build-owned helpers for AST construction, HIR lowering, borrow checking, public-interface finalisation and generated semantic completion as their compiler replacements land.
-- [ ] Preserve existing timing metric identities during the move. Do not redesign command or metric accounting in this phase.
-- [ ] Add focused tests proving directory and single-file clients receive the same semantic outcome classes and that diagnosed providers still block consumers without partial interfaces.
+- [x] Introduce one compiler-owned `compile_module` service input containing prepared semantic syntax, completed provider interfaces, compiler options, immutable generated/provider materialisation views and required capability inputs.
+- [x] Move `FrontendModuleBuildContext` or replace it with a compiler-owned module compilation context.
+- [x] Move `compile_module_semantic` under the compiler owner.
+- [x] Move the pre-AST export seed and public source origin coordination that exists only to build the compiler public interface into the compiler module compilation flow.
+- [x] Keep public-interface projection implementation in `compiler_frontend/public_interface`, but make the compiler module service its production caller.
+- [x] Keep AST construction in `compiler_frontend/ast`, HIR construction in `compiler_frontend/hir` and borrow analysis in its current compiler owner.
+- [x] Make the module service sequence those owners without duplicating their implementation.
+- [x] Keep successful warnings, diagnostic identity context and string-table state inside the compiler result until the build boundary performs its deterministic merge.
+- [x] Keep `ModuleCompilationOutcome::Success`, `Diagnosed` and `CompilerError` classification at the compiler semantic boundary.
+- [x] Update directory-module compilation so it builds provider inputs, calls the compiler once and only handles success/diagnosed/infrastructure publication state.
+- [x] Update synthetic single-file compilation to use the same canonical compiler semantic service after its Stage 0 preparation path.
+- [x] Remove build-owned helpers for AST construction, HIR lowering, borrow checking, public-interface finalisation and generated semantic completion as their compiler replacements land.
+- [x] Preserve existing timing metric identities during the move. Do not redesign command or metric accounting in this phase.
+- [x] Add focused tests proving directory and single-file clients receive the same semantic outcome classes and that diagnosed providers still block consumers without partial interfaces.
 
 ### Phase 3 gate
 
-- [ ] Ownership audit confirms `build_system/create_project_modules` no longer sequences binding -> ordering -> AST -> HIR -> borrow for a module.
-- [ ] Style-guide review confirms the new compiler module orchestration reads as a short sequence of named semantic steps and large helpers live in focused child files.
-- [ ] Module, public-interface, generated, borrow, single-file and graph-blocking tests pass, followed by timers-feature validation where applicable and full validation.
+- [x] Ownership audit confirms `build_system/create_project_modules` no longer sequences binding -> ordering -> AST -> HIR -> borrow for a module.
+- [x] Style-guide review confirms the new compiler module orchestration reads as a short sequence of named semantic steps and large helpers live in focused child files.
+- [x] Module, public-interface, generated, borrow, single-file and graph-blocking tests pass, followed by timers-feature validation where applicable and full validation.
 
 Exit state: the compiler is the one production owner of canonical local module semantic compilation.
+
+
+---
+
+## Phases 2 and 3 were implemented as one slice
+
+Phase 2 moves generated semantic completion into the compiler, and Phase 3 moves the module
+compilation service that drives it. Splitting them would have required a transitional compiler-side
+context that Phase 3 immediately replaced, which `AGENTS.md` forbids. They were therefore implemented
+as one coherent slice with both gates applied at the end.
+
+### What moved
+
+`src/compiler_frontend/module_compilation/` gained:
+
+- `context.rs`: `ModuleCompilationContext`, replacing the deleted `FrontendModuleBuildContext`
+- `service.rs`: `compile_module`, the one production owner of binding -> ordering -> AST ->
+  public-interface projection -> HIR -> borrow -> generated completion -> interface closure
+- `stages.rs`: the warning-preserving `lower_hir` and `check_borrows` wrappers both the service and
+  generated materialisation use
+- `external_imports.rs`: provider and builder runtime import candidates
+- `generated/artefacts.rs`, `generated/known.rs`, `generated/transaction.rs`,
+  `generated/requests.rs`, `generated/provider_materialisations.rs`,
+  `generated/materialisation.rs`, `generated/convergence.rs`
+
+`build_system/create_project_modules/generated_summary_convergence.rs` is deleted.
+`generated_worklist.rs` is renamed `generated_store.rs` and reduced from 521 to 136 lines: it owns
+preflight, commit, sidecar storage and the `known_generated()` view, and nothing else.
+
+### Ownership decisions worth recording
+
+- `GeneratedFunctionWorklist` became the compiler-owned `GeneratedFunctionTransaction`. The boundary
+  store lends it a `KnownGeneratedFunctions` view built from its own records and identity index, so
+  the compiler reads published work without touching a build store.
+- `SourceProviderMaterialisationSet` is replaced by `ProviderMaterialisationRegistry`, a
+  compiler-owned identity-keyed map the build system populates. `ModuleCompilerMetadata`'s frozen
+  materialisation context is now an `Arc`, so registry entries keep resolving as the artefact store
+  grows behind them. `seed_completed_package_materialisations` seeds each boundary from completed
+  packages; `publish_module_and_generated` extends it as each module publishes.
+- `ModuleArtifactStore` keeps its own declaration index for publication provenance and duplicate
+  detection. That is build policy with precise artefact/row diagnostics, distinct from the
+  compiler's template lookup.
+- Test ownership followed the code: `generated/tests/transaction_tests.rs` and
+  `generated/tests/convergence_tests.rs` attach to their compiler owners, `generated/tests/fixtures.rs`
+  is the shared fixture owner, and `build_system/tests/generated_store_tests.rs` keeps only the
+  build-owned publication tests.
+
+### Deferred to later phases
+
+- `service.rs` is 786 lines and `generated/convergence.rs` is 844. Both are under the style guide's
+  ~2,000-line guidance, but Phase 6 should review whether `compile_module` reads as named steps.
+- Focused tests proving directory and single-file clients receive the same outcome classes are
+  Phase 6/7 work; existing suites already cover both paths end to end.
+
+## Self-audit corrections applied before Phase 4
+
+A correctness and style pass over the Phases 0-3 result found no defect in the moved semantics. The
+two highest-risk changes were verified rather than assumed:
+
+- Deriving the entry file from `PreparedModuleInput::entry_file_path()` instead of a stored
+  `ModuleCompilationJob::entry_point` is exactly behaviour-preserving. `SourceFileTable` keys
+  `canonical_to_id` with the same `PathBuf` it stores as `canonical_os_path`, so the
+  `path -> FileId -> path` round-trip is identity whenever the lookup succeeds, and preparation
+  already fails when it does not.
+- Wrapping `materialisation_context` in `Arc` dropped no string-ID remapping.
+  `ModuleCompilerMetadata::remap_string_ids` never remapped that field at `f3b41781` either; the
+  materialisation context owns self-contained strings and stable identities.
+
+Five corrections were applied:
+
+- `install_exact_concrete_call_summaries` returned a `changed` flag no caller ever read. The return
+  type is now `Result<(), CompilerError>` and the dead local is gone, which also removed the
+  `let _ =` at one of its two call sites that had made the two sites look different.
+- `service.rs` built module external-import candidates inline with the type spelled as a full
+  `crate::...` path three times, while `external_imports.rs` already existed as the named owner for
+  exactly that data and claimed to cover "one compiled module or generated sidecar". The collection
+  moved into `collect_external_import_candidates_for_source_files`, so the file now owns both
+  candidate shapes and `compile_module` reads as one named step.
+- `ProviderMaterialisationRegistry::publish` documented replacement-on-duplicate as reachable "when
+  a project module republishes over a completed package seed". It is not:
+  `GeneratedDeclarationIdentity` carries its owning package and module origin, and all three
+  producers prove uniqueness first. The comment now states the real invariant.
+- `GeneratedFunctionTransaction::complete` cloned the same identity twice.
+- Two spellings of the same borrowed-registry clone were unified.
+
+Challenged and left unchanged:
+
+- `#[cfg(test)]` accessors on production stores (`push_completed_for_test`,
+  `materialisation_context_for`, `BoundaryGeneratedFunctionStore::publish`) match the existing
+  convention in `compiled_boundary.rs`, and their test modules are siblings under
+  `build_system/tests` rather than child modules, so they cannot reach private state another way.
+- The duplicated request-materialisation loop in `materialisation.rs` predates this plan and
+  factoring it out would need seven parameters to express which context and compiler each loop
+  drives, which is worse than the repetition.
 
 ## Phase 4: Reduce build `frontend_orchestration` to Stage 0 preparation ownership and delete the misleading owner
 
@@ -542,24 +775,46 @@ That work should be named for what it does. Keeping a file called `frontend_orch
 
 ### Checklist
 
-- [ ] Inventory the exact code remaining in `frontend_orchestration.rs` after Phase 3.
-- [ ] Move Stage 0 source preparation scheduling into a narrowly named owner such as `module_preparation.rs` or `source_preparation.rs`.
-- [ ] Keep serial/per-file/chunked Rayon policy build-owned because it is scheduling policy, not language semantics.
-- [ ] Keep actual tokenization/header-preparation semantics compiler-owned and called through one provider-independent preparation API.
-- [ ] Keep incremental `ModuleSyntaxDiscovery` behavior needed for Stage 0 to consume structural provider references without a second scanner.
-- [ ] Preserve deterministic merge/remap order and the single-preparation invariant.
-- [ ] Remove semantic compilation context types from the build preparation module.
-- [ ] Delete `frontend_orchestration.rs` once no valid owner remains there.
-- [ ] Update `create_project_modules/mod.rs` documentation so its module map names Stage 0 discovery, preparation, scheduling, publication and graph outcomes only.
-- [ ] Update focused tests for serial/parallel preparation selection, deterministic remapping, exactly-once source preparation and structural provider discovery.
+- [x] Inventory the exact code remaining in `frontend_orchestration.rs` after Phase 3.
+- [x] Move Stage 0 source preparation scheduling into a narrowly named owner such as `module_preparation.rs` or `source_preparation.rs`.
+- [x] Keep serial/per-file/chunked Rayon policy build-owned because it is scheduling policy, not language semantics.
+- [x] Keep actual tokenization/header-preparation semantics compiler-owned and called through one provider-independent preparation API.
+- [x] Keep incremental `ModuleSyntaxDiscovery` behavior needed for Stage 0 to consume structural provider references without a second scanner.
+- [x] Preserve deterministic merge/remap order and the single-preparation invariant.
+- [x] Remove semantic compilation context types from the build preparation module.
+- [x] Delete `frontend_orchestration.rs` once no valid owner remains there.
+- [x] Update `create_project_modules/mod.rs` documentation so its module map names Stage 0 discovery, preparation, scheduling, publication and graph outcomes only.
+- [x] Update focused tests for serial/parallel preparation selection, deterministic remapping, exactly-once source preparation and structural provider discovery.
 
 ### Phase 4 gate
 
-- [ ] Ownership audit confirms the replacement build module contains no AST, HIR, public-interface draft or borrow semantic orchestration.
-- [ ] Style-guide review confirms the preparation file has one responsibility and the old broad name is gone.
-- [ ] Source preparation, Stage 0 graph and parallelism tests pass, followed by full validation.
+- [x] Ownership audit confirms the replacement build module contains no AST, HIR, public-interface draft or borrow semantic orchestration.
+- [x] Style-guide review confirms the preparation file has one responsibility and the old broad name is gone.
+- [x] Source preparation, Stage 0 graph and parallelism tests pass, followed by full validation.
 
 Exit state: the old build-owned frontend orchestration owner no longer exists.
+
+Result: `frontend_orchestration.rs` became `module_preparation.rs` (1173 lines, preparation only) and
+`frontend_orchestration_tests.rs` became `module_preparation_tests.rs`. The rename is the whole
+change: Phase 3 had already emptied the file of semantic orchestration, and the ownership grep
+confirms the only remaining mention of a semantic stage is a doc comment naming
+`bind_module_headers` as the downstream consumer of retained syntax. `create_project_modules/mod.rs`
+now groups its map under discovery/structure, source preparation, scheduling/publication and
+diagnostics, and states that local semantic compilation is not owned there.
+
+`source_preparation.rs` kept its name: it owns single-pass per-file tokenisation, while
+`module_preparation.rs` owns the per-module scheduling of that work. Its own file documentation
+already used the term "final module preparation" for the consumer, so the two names now match the
+vocabulary the code was already using.
+
+`xtask/src/timers_erasure_check.rs` hard-codes the preparation file path and was updated with the
+rename; `just validate` would otherwise have failed on a missing path rather than a real regression.
+
+Two tests in `module_preparation_tests.rs` deliberately call `compile_module`. They own the
+preparation/semantic seam itself — that retained syntax reaches semantic compilation without a
+second file preparation, and that a Stage 0 root role reaches interface projection intact — so they
+stay, and the module documentation now says so instead of claiming the file contains no semantic
+coverage.
 
 ## Phase 5: Move specialised frontend clients behind compiler services and lock down raw stage APIs
 

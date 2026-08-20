@@ -15,6 +15,7 @@ use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::parse_file_headers::{
     HeaderParseOptions, bind_module_headers, prepare_header_syntax,
 };
+use crate::compiler_frontend::module_compilation::FrontendOptions;
 use crate::compiler_frontend::module_dependencies::SortedHeaders;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
@@ -32,7 +33,6 @@ use crate::projects::html_project::moth_template::output::{
     CompiledMothTemplateDocument, MothTemplateCompileOutput,
 };
 use crate::projects::html_project::style_directives::html_project_style_directives;
-use crate::projects::settings::Config;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -162,7 +162,7 @@ fn new_direct_moth_template_frontend(
         .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
 
     Ok(CompilerFrontend::new(
-        &Config::default(),
+        FrontendOptions::default(),
         string_table,
         style_directives,
         Arc::new(ExternalPackageRegistry::new()),

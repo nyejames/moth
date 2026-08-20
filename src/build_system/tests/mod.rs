@@ -3,9 +3,7 @@
 // Or these tests will fail on Windows due to attempts to delete non-empty temp directories while files are still open.
 
 use crate::build_system::BuildProfile;
-use crate::build_system::build::{
-    BackendBuilder, FileKind, ModuleRootActivity, OutputFile, Project,
-};
+use crate::build_system::build::{BackendBuilder, FileKind, OutputFile, Project};
 use crate::build_system::output::{
     BuilderKind, CleanupPolicy, OutputOwner, OutputPlan, OutputWriteSummary, SingleFileOutputPlan,
     WriteMode, WriteOptions, write_project_outputs as write_project_outputs_with_table,
@@ -17,6 +15,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, InvalidConfigReason,
     NameNamespace, RuleDiagnosticKind,
 };
+use crate::compiler_frontend::module_compilation::ModuleRootActivity;
 use crate::compiler_frontend::style_directives::StyleDirectiveSpec;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::projects::settings::{Config, ProjectConfigError};

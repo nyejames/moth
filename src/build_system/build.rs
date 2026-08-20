@@ -1,8 +1,14 @@
 //! Core build orchestration for Moth projects.
 //!
-//! This module provides the canonical project build flow (`build_project`). Build tools can
-//! compile once and pass the resulting project to the output subsystem without reimplementing
-//! frontend/backend orchestration.
+//! WHAT: the canonical project build flow (`build_project`), the success-only
+//!       `ProjectCompilation` aggregate, entry and linked-module assembly, the backend builder
+//!       trait and the output records those builders return.
+//! WHY: build tools compile once and pass the resulting project to the output subsystem without
+//!       reimplementing frontend or backend orchestration.
+//!
+//! This module aggregates compiler results; it does not produce them. The module artefact lanes,
+//! generated sidecars and semantic result values are owned by
+//! `compiler_frontend::module_compilation`.
 use crate::timing_scope;
 
 use crate::build_system::BuildProfile;
@@ -20,33 +26,23 @@ use crate::build_system::path_validation::check_if_valid_path;
 use crate::build_system::project_config::{ProjectConfigParseServices, load_project_config};
 
 use crate::compiler_frontend::Flag;
-use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
-use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
-use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::hir::ids::FunctionId;
-use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::reachability::{
-    HirModuleLinkFacts, HirReachability, collect_reachability_from_function_link_facts,
+    HirReachability, collect_reachability_from_function_link_facts,
 };
-use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
-use crate::compiler_frontend::module_metadata::{HirLoweringMetadata, ModuleDocFragment};
-use crate::compiler_frontend::public_interface::PublicSemanticInterface;
+use crate::compiler_frontend::module_compilation::{Module, ModuleExternalImport};
 use crate::compiler_frontend::semantic_identity::{
     GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, OriginFunctionId,
 };
 
 use crate::compiler_frontend::style_directives::{StyleDirectiveRegistry, StyleDirectiveSpec};
 use crate::compiler_frontend::symbols::compiler_symbols::CompilerSymbolSet;
-use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use crate::builder_surface::BuilderSurface;
-use crate::builder_surface::external_import_providers::provider::{
-    RequiredRuntimeImport, RuntimeAssetIdentity,
-};
 use crate::compiler_frontend::external_packages::{ExternalPackageId, ExternalPackageRegistry};
-use crate::compiler_frontend::paths::rendered_path_usage::RenderedPathUsage;
 use crate::projects::settings::{Config, ProjectConfigError};
 
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -57,227 +53,15 @@ use std::sync::Arc;
 const FILE_MIN_UNIQUE_SYMBOLS_CAPACITY: usize = 32;
 
 // -------------------------
-//  Build Payload Types
+//  Project Aggregation
 // -------------------------
-
-/// A resolved const top-level fragment: a static string and its runtime insertion index.
-///
-/// WHAT: carries a fully resolved (not interned) const fragment string plus the count of
-/// runtime fragments that precede it in source order.
-/// WHY: builders merge const strings with the runtime fragment list returned by entry start()
-/// using the insertion index to reconstruct source-order interleaving.
-pub struct ResolvedConstFragment {
-    /// Number of runtime fragments preceding this const fragment in source order.
-    pub runtime_insertion_index: usize,
-    /// The rendered text content of this const fragment.
-    pub rendered_text: String,
-}
-
-/// Build-system-owned metadata for one external import used by a compiled module.
-///
-/// WHAT: carries the backend-facing identity for a provider-resolved external import after
-///       deduplication across a module's source files.
-/// WHY: backends emit runtime assets and generated glue based on this metadata without needing
-///      the full per-source-file resolution table.
-#[derive(Debug, Clone)]
-// Kept ahead of the backend handoff: external provider/runtime metadata is recorded by the
-// frontend today, while the current HTML path only reads the subset it can lower.
-pub(crate) struct ModuleExternalImport {
-    pub(crate) package_id: ExternalPackageId,
-    pub(crate) runtime_asset: Option<RuntimeAssetIdentity>,
-    pub(crate) required_runtime_imports: Vec<RequiredRuntimeImport>,
-}
-
-/// Header-derived root activity metadata passed to backend builders.
-///
-/// WHAT: records the builder-relevant dormant activity of one compiled module root.
-/// WHY: header parsing already classifies root bodies and page fragments, so builders can apply
-///      artifact policy without scanning tokens or HIR for the same facts.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct ModuleRootActivity {
-    pub(crate) has_non_trivial_root_body: bool,
-    pub(crate) const_fragment_count: usize,
-    pub(crate) runtime_fragment_count: usize,
-}
-
-impl ModuleRootActivity {
-    /// Return whether the HTML builder has any root activity from which to assemble a page.
-    pub(crate) fn has_html_artifact_activity(&self) -> bool {
-        self.has_non_trivial_root_body
-            || self.const_fragment_count > 0
-            || self.runtime_fragment_count > 0
-    }
-}
-
-/// Module-local executable semantic state: validated HIR, paired type environment and borrow
-/// facts.
-///
-/// WHAT: the sole owner of the typed HIR, its paired `TypeEnvironment` and the
-///       `BorrowCheckReport` produced by borrow validation.
-/// WHY: keeping these together in one executable lane makes the HIR/type/borrow pairing obvious
-///      at every backend call site and lets string-ID remapping cover HIR, type identity and
-///      source locations retained by borrow facts exactly once.
-pub(crate) struct ModuleExecutable {
-    pub(crate) hir: HirModule,
-    pub(crate) type_environment: TypeEnvironment,
-    pub(crate) borrow_analysis: BorrowCheckReport,
-}
-
-impl ModuleExecutable {
-    /// Remap interned string IDs after string-table merging.
-    ///
-    /// WHY: HIR, type identity and borrow-fact source locations remap exactly once here.
-    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        self.hir.remap_string_ids(remap);
-        self.type_environment.remap_string_ids(remap);
-        self.borrow_analysis.remap_string_ids(remap);
-    }
-}
-
-/// Backend-neutral link facts for one compiled module.
-///
-/// WHAT: owns deterministic base-function facts, available external runtime import candidates
-///       and the effective external package registry resolved for this module.
-/// WHY: entry assembly derives exact reachable unions from the function facts while backend
-///      validation and lowering still need the same external symbol definitions the frontend used.
-pub(crate) struct ModuleLinkFacts {
-    /// Effective external package registry after provider resolution for this module.
-    ///
-    /// WHY: provider-backed import discovery mutates the registry during Stage 0; the module
-    ///      must carry the effective registry so backends validate and lower against the same
-    ///      symbols the frontend resolved, rather than reconstructing a fresh registry that
-    ///      loses provider-created packages. R6A replaces this temporary complete registry with
-    ///      stable binding identities after the canonical provider path exists.
-    pub(crate) external_package_registry: Arc<ExternalPackageRegistry>,
-    /// All provider and builder runtime imports available to this module's executable functions.
-    /// Entry assembly filters these candidates through per-function reachability before any
-    /// runtime asset, import-map or glue consumer sees them.
-    pub(crate) external_import_candidates: Vec<ModuleExternalImport>,
-    /// Direct facts for every base HIR function in deterministic function-ID order.
-    pub(crate) functions: HirModuleLinkFacts,
-}
-
-/// Non-HIR compiler and builder-facing metadata for one compiled module.
-///
-/// WHAT: owns the resolved root-local entry path, module warnings, resolved const top-level
-///       fragments, header-derived root activity, resolved documentation fragments, and
-///       rendered-path usages.
-/// WHY: these are compiler-metadata lanes, not executable HIR state or link facts. Consolidating
-///      them into one owned lane on the `Module` payload keeps HIR limited to executable/semantic
-///      IR and gives string-ID remapping, warning collection, and tracked-asset planning a single
-///      owner. The architecture assigns resolved root-local entry metadata to this lane.
-pub(crate) struct ModuleCompilerMetadata {
-    /// Canonical entry file for the compiled module.
-    pub(crate) entry_point: PathBuf,
-    pub(crate) warnings: Vec<CompilerDiagnostic>,
-    pub(crate) const_top_level_fragments: Vec<ResolvedConstFragment>,
-    pub(crate) root_activity: ModuleRootActivity,
-    pub(crate) doc_fragments: Vec<ModuleDocFragment>,
-    pub(crate) rendered_path_usages: Vec<RenderedPathUsage>,
-    /// Self-contained declaring-module semantics used by generated-function materialisation.
-    pub(crate) materialisation_context: Option<ModuleMaterialisationContext>,
-}
-
-impl ModuleCompilerMetadata {
-    pub(crate) fn from_hir_lowering(
-        entry_point: PathBuf,
-        warnings: Vec<CompilerDiagnostic>,
-        lowering_metadata: HirLoweringMetadata,
-        const_top_level_fragments: Vec<ResolvedConstFragment>,
-        root_activity: ModuleRootActivity,
-        materialisation_context: Option<ModuleMaterialisationContext>,
-    ) -> Self {
-        Self {
-            entry_point,
-            warnings,
-            doc_fragments: lowering_metadata.doc_fragments,
-            rendered_path_usages: lowering_metadata.rendered_path_usages,
-            const_top_level_fragments,
-            root_activity,
-            materialisation_context,
-        }
-    }
-
-    /// Remap interned string IDs after string-table merging.
-    ///
-    /// WHY: warnings, documentation locations, and rendered-path interned fields must all remap
-    ///      exactly once. Const fragment rendered text is already a resolved `String`, root
-    ///      activity carries no interned fields, and the entry path is a `PathBuf`.
-    ///
-    /// Materialisation metadata owns self-contained strings and stable semantic identities, so
-    /// this remap covers only executable presentation fields that retain local `StringId` values.
-    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        for warning in &mut self.warnings {
-            warning.remap_string_ids(remap);
-        }
-
-        for fragment in &mut self.doc_fragments {
-            fragment.location.remap_string_ids(remap);
-        }
-
-        for usage in &mut self.rendered_path_usages {
-            usage.source_path.remap_string_ids(remap);
-            usage.public_path.remap_string_ids(remap);
-            usage.source_file_scope.remap_string_ids(remap);
-            usage.render_location.remap_string_ids(remap);
-        }
-    }
-}
-
-/// Frontend output for one module root ready for backend lowering.
-///
-/// WHAT: a lane container with exactly an executable lane (typed HIR, paired type environment
-///       and borrow facts), a link-facts lane (per-function runtime facts, external imports and
-///       the effective registry), and a compiler-metadata lane (entry path, warnings, fragments,
-///       root activity, docs and rendered paths).
-/// WHY: backends consume one stable module payload shape regardless of project type, with
-///      explicit ownership keeping HIR/type/borrow pairing obvious at call sites.
-pub struct Module {
-    pub(crate) executable: ModuleExecutable,
-    pub(crate) link_facts: ModuleLinkFacts,
-    pub(crate) metadata: ModuleCompilerMetadata,
-}
-
-/// One independently lowered concrete generic executable.
-///
-/// The stable identity is stored beside, rather than rediscovered from, its HIR module. Base
-/// canonical modules and generated sidecars therefore remain distinct project-compilation lanes.
-pub(crate) struct GeneratedFunctionSidecar {
-    pub(crate) identity: crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity,
-    pub(crate) module: Module,
-}
-
-impl GeneratedFunctionSidecar {
-    pub(crate) fn new(
-        identity: crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity,
-        module: Module,
-    ) -> Self {
-        Self { identity, module }
-    }
-
-    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        self.module.remap_string_ids(remap);
-    }
-}
-
-/// One successful canonical module artefact.
-///
-/// WHAT: pairs the backend-neutral executable/link/metadata lanes with the immutable semantic
-/// interface published to later graph waves.
-/// WHY: provider publication must point at a complete success value. Keeping both lanes in one
-/// artefact prevents the scheduler from publishing a local draft or dropping the interface while
-/// retaining only backend state.
-pub(crate) struct CompiledModuleArtifact {
-    pub(crate) module: Module,
-    pub(crate) interface: PublicSemanticInterface,
-}
 
 /// Success-only frontend payload consumed by project builders.
 ///
 /// WHAT: owns the retained project and source-package graph boundaries, the explicit entry
 ///       assemblies selected from dormant root activity, and the generated sidecar lane inside
-///       each boundary. It retains immutable [`CompiledModuleArtifact`] values and their dense
-///       `ModuleId` mapping so the published [`PublicSemanticInterface`] and boundary identity
+///       each boundary. It retains immutable compiler module artefacts and their dense
+///       `ModuleId` mapping so the published public semantic interface and boundary identity
 ///       survive into builders and link owners.
 /// WHY: project builders need a coherent project boundary with build-owned entry selection. A
 ///      diagnosed frontend never constructs this value, and backends no longer infer entries by
@@ -887,51 +671,6 @@ pub(crate) struct ProjectEntry<'a> {
     >,
     /// Every generated symbol name assigned to this compilation, for JS identifier reservation.
     pub(crate) all_generated_function_names: Arc<Vec<String>>,
-}
-
-impl Module {
-    pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        increment_frontend_counter(FrontendCounter::ModuleRemapStringIdsCalls);
-
-        self.executable.remap_string_ids(remap);
-        self.link_facts.functions.remap_string_ids(remap);
-        self.metadata.remap_string_ids(remap);
-    }
-}
-
-/// Internal semantic draft for one module after local semantic compilation and before provider
-/// publication.
-///
-/// WHAT: carries the semantic lanes produced by one module frontend compilation before the
-/// canonical graph publishes a completed provider artefact. It owns the
-/// validated base HIR, paired local type environment and borrow facts (inside `module`), the
-/// complete base-function link facts (`module.link_facts`), compiler metadata
-/// (`module.metadata`), the completed direct public interface and the module-local string
-/// table that carries every diagnostic render identity for remap.
-/// WHY: naming this internal phase separately from the backend `Module` handoff gives provider
-/// completion and the generated-function worklist one build-owned result to evolve. This draft
-/// is not a completed provider artefact or backend module result.
-/// It implements no provider lookup and must not enter any successful
-/// `GraphCompilationOutcome`. The stable module origin is retained through
-/// `public_interface.draft.module_origin`; no dense `ModuleId` crosses this boundary
-/// because standalone compilation has no graph-assigned identity. The current legacy generic
-/// path still materialises requests inside AST before HIR lowering. R5F replaces that owner and
-/// adds stable unresolved requests to this draft instead of introducing a placeholder field here.
-pub(crate) struct ModuleSemanticDraft {
-    /// Current executable, link-fact and compiler-metadata lanes: validated base HIR, paired type
-    /// environment, borrow facts, complete base-function link facts and compiler metadata.
-    pub module: Module,
-    /// New generated identities, summaries and sidecars produced transactionally for this
-    /// module. The boundary scheduler remaps and publishes this delta only after module success.
-    pub generated_worklist_delta: crate::build_system::create_project_modules::generated_worklist::GeneratedFunctionWorklistDelta,
-    /// The module-local string table carrying every diagnostic render identity produced during
-    /// semantic compilation. Merged into the build table once per module at the compilation
-    /// boundary so downstream consumers see a single remapped table.
-    pub string_table: StringTable,
-    /// The closed and publication-validated semantic interface. Provider-owned re-export facts
-    /// have already joined through immutable completed interfaces, so the graph can publish this
-    /// value directly after deterministic string-table merge.
-    pub public_interface: PublicSemanticInterface,
 }
 
 // -------------------------

@@ -6,7 +6,7 @@
 //! already-resolved facts consumed by public-surface validation.
 //! WHY: canonical type projection needs resolved roots available immediately before HIR
 //! lowering without reconstructing public semantics from HIR or source. This is transient
-//! donor-local AST data consumed before HIR; it never enters `ModuleSemanticDraft`,
+//! donor-local AST data consumed before HIR; it never enters `ModuleSemanticResult`,
 //! `Module`, or a cross-module interface.
 
 use crate::compiler_frontend::ast::ast_nodes::Declaration;

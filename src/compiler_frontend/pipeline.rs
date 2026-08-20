@@ -25,8 +25,8 @@ use crate::compiler_frontend::hir::functions::HirFunctionOriginLookup;
 use crate::compiler_frontend::hir::hir_builder::lower_module;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
+use crate::compiler_frontend::module_compilation::FrontendOptions;
 use crate::compiler_frontend::module_dependencies::{SortedHeaders, resolve_module_dependencies};
-use crate::compiler_frontend::paths::path_format::{OutputPathStyle, PathStringFormatConfig};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -35,7 +35,6 @@ use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8Path
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenizerEntryMode};
-use crate::projects::settings::Config;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -100,8 +99,7 @@ pub struct CompilerFrontend {
     pub(crate) style_directives: StyleDirectiveRegistry,
     pub(crate) string_table: StringTable,
     pub(crate) project_path_resolver: Option<ProjectPathResolver>,
-    pub(crate) path_format_config: PathStringFormatConfig,
-    pub(crate) template_const_loop_iteration_limit: usize,
+    pub(crate) options: FrontendOptions,
     pub(crate) source_files: SourceFileTable,
 }
 
@@ -206,29 +204,18 @@ fn source_file_identity(
 
 impl CompilerFrontend {
     pub(crate) fn new(
-        project_config: &Config,
+        options: FrontendOptions,
         string_table: StringTable,
         style_directives: StyleDirectiveRegistry,
         external_package_registry: Arc<ExternalPackageRegistry>,
         project_path_resolver: Option<ProjectPathResolver>,
     ) -> Self {
-        let origin = project_config
-            .settings
-            .get("origin")
-            .cloned()
-            .unwrap_or_else(|| String::from("/"));
-        let path_format_config = PathStringFormatConfig {
-            origin,
-            output_style: OutputPathStyle::Portable,
-        };
-
         Self {
             external_package_registry,
             style_directives,
             string_table,
             project_path_resolver,
-            path_format_config,
-            template_const_loop_iteration_limit: project_config.template_const_loop_iteration_limit,
+            options,
             source_files: SourceFileTable::empty(),
         }
     }
@@ -421,8 +408,10 @@ impl CompilerFrontend {
                 root_role,
                 build_profile,
                 project_path_resolver: self.project_path_resolver.clone(),
-                path_format_config: self.path_format_config.clone(),
-                template_const_loop_iteration_limit: self.template_const_loop_iteration_limit,
+                path_format_config: self.options.path_format_config.clone(),
+                template_const_loop_iteration_limit: self
+                    .options
+                    .template_const_loop_iteration_limit,
                 capacity_estimate,
                 #[cfg(feature = "timers")]
                 timing_context,
@@ -444,7 +433,7 @@ impl CompilerFrontend {
         lower_module(
             ast,
             &mut self.string_table,
-            self.path_format_config.clone(),
+            self.options.path_format_config.clone(),
             function_origin_lookup,
         )
     }

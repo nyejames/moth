@@ -6,16 +6,19 @@
 //! WHY: dependency waves need one build-owned authority that can publish only complete semantic
 //! interfaces, and later entry selection and warning collection must resolve by dense `ModuleId`
 //! without rebuilding an index or relying on vector layout.
-//! MUST NOT: store `ModuleSemanticDraft`, resolve source names or perform semantic compilation.
+//! MUST NOT: store `ModuleSemanticResult`, resolve source names or perform semantic compilation.
 
 use super::module_identity::ModuleId;
-use crate::build_system::build::CompiledModuleArtifact;
+use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext;
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::module_compilation::CompiledModuleArtifact;
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, StableModuleOriginIdentity,
 };
+
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CompiledModuleArtifactId(usize);
@@ -254,21 +257,23 @@ impl ModuleArtifactStore {
     }
 
     /// Resolve one published materialisation context by its generic declaration identity.
+    #[cfg(test)]
     pub(crate) fn materialisation_context_for(
         &self,
         identity: &GeneratedDeclarationIdentity,
-    ) -> Result<Option<MaterialisationContextLocation>, CompilerError> {
-        Ok(self.contexts_by_declaration.get(identity).copied())
+    ) -> Option<MaterialisationContextLocation> {
+        self.contexts_by_declaration.get(identity).copied()
     }
 
     /// Resolve the exact published context for one indexed location.
+    ///
+    /// WHY: the boundary registry seeds itself from completed package boundaries through this
+    ///      lookup. Modules inside the boundary being compiled resolve through the registry
+    ///      instead, so they never read a live store.
     pub(crate) fn materialisation_context_at(
         &self,
         location: MaterialisationContextLocation,
-    ) -> Result<
-        &crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext,
-        CompilerError,
-    > {
+    ) -> Result<&Arc<ModuleMaterialisationContext>, CompilerError> {
         let artifact = self.artifacts.get(location.artifact_id.0).ok_or_else(|| {
             CompilerError::compiler_error(format!(
                 "Materialisation context index references missing artifact {}",

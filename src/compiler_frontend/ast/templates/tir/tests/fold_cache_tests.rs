@@ -41,6 +41,7 @@ use crate::compiler_frontend::ast::templates::tir::view::{
 use crate::compiler_frontend::ast::templates::tir::{
     TemplatePreparation, TemplatePreparationMode, TemplatePreparationOutcome, prepare_tir_view,
 };
+use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
@@ -48,7 +49,6 @@ use crate::compiler_frontend::synthetic_interface_provenance::{
 };
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
-use crate::projects::settings::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use std::cell::RefCell;
 use std::rc::Rc;
 

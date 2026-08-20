@@ -1,9 +1,13 @@
-//! Per-module frontend orchestration regression tests.
+//! Stage 0 module preparation regression tests.
 //!
-//! WHAT: validates Stage 0/frontend boundary helpers such as deterministic local-table file
-//!       preparation.
-//! WHY: these tests exercise infrastructure invariants that integration cases cannot inspect
-//!      directly, while keeping test code out of the production orchestration module.
+//! WHAT: file-preparation strategy selection, deterministic local-table merging and remapping, the
+//!       exactly-once preparation invariant, and the prepared payload one module compile receives.
+//! WHY: these tests exercise scheduling and merge invariants that integration cases cannot inspect
+//!      directly, while keeping test code out of the production preparation module. Two cases
+//!      deliberately cross into `compile_module` because they own the preparation/semantic seam
+//!      itself: that retained syntax reaches semantic compilation without a second file
+//!      preparation, and that a Stage 0 root role reaches interface projection intact. The
+//!      semantic stages behind that call are tested with their own owners.
 
 use super::super::prepared_source::PreparedSourceInput;
 use crate::builder_surface::SourceFileKindRegistry;
@@ -16,6 +20,10 @@ use crate::compiler_frontend::headers::parse_file_headers::{
     FileFrontendPrepareError, FileFrontendPrepareOutput, HeaderKind, HeaderParseOptions,
     PreparedHeaderSyntax, bind_module_headers, parse_file_headers_with_table,
     prepare_header_syntax,
+};
+use crate::compiler_frontend::module_compilation::{
+    ModuleCompilationContext, ModuleCompilationOutcome, ProviderMaterialisationRegistry,
+    compile_module,
 };
 use crate::compiler_frontend::paths::module_roots::{ModuleRootRecord, ModuleRootTable};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
@@ -132,7 +140,7 @@ fn frontend_preparation_fixture(file_sources: &[(&str, &str)]) -> FrontendPrepar
         .collect();
 
     let mut frontend = CompilerFrontend::new(
-        &Config::new(temp_dir.path().to_path_buf()),
+        Config::new(temp_dir.path().to_path_buf()).frontend_options(),
         string_table,
         style_directives,
         Arc::new(ExternalPackageRegistry::new()),
@@ -211,7 +219,7 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
     let module_table_size_before = string_table.len();
 
     let mut frontend = CompilerFrontend::new(
-        &Config::new(temp_dir.path().to_path_buf()),
+        Config::new(temp_dir.path().to_path_buf()).frontend_options(),
         string_table,
         StyleDirectiveRegistry::built_ins(),
         Arc::new(ExternalPackageRegistry::new()),
@@ -514,6 +522,7 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
 
     assert!(
         prepared
+            .semantic
             .prepared_header_syntax
             .headers
             .iter()
@@ -521,50 +530,57 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
         "retained PreparedHeaderSyntax should carry the parsed public generic function declaration"
     );
     assert_eq!(
-        prepared.source_files.iter().count(),
+        prepared.semantic.source_files.iter().count(),
         1,
         "retained source identity table should carry the one source file"
     );
-    assert_eq!(prepared.source_file_count, 1);
-    assert_eq!(prepared.source_byte_count, source_byte_count);
+    assert_eq!(prepared.semantic.source_file_count, 1);
+    assert_eq!(prepared.semantic.source_byte_count, source_byte_count);
+    assert_eq!(
+        prepared
+            .semantic
+            .entry_file_path()
+            .expect("preparation retains the active root identity"),
+        canonical_entry.as_path(),
+        "the entry file is derived from the retained active root, not carried as a second argument"
+    );
 
-    // Phase 2: semantic compilation is provider-dependent. A separately constructed
-    // `FrontendModuleBuildContext` owns the provider interfaces, binds the retained
-    // `PreparedHeaderSyntax`, then resolves dependencies, builds AST, lowers HIR and runs borrow
-    // validation. It receives no `PreparedSourceInput`, source text or tokens.
+    // Semantic compilation is one compiler service call. Stage 0 supplies completed provider
+    // interfaces and immutable generated views; the retained payload carries no source text or
+    // tokens, so the service cannot rerun file preparation.
     let source_provider_dependencies = Default::default();
-    let compile_context = super::FrontendModuleBuildContext {
-        config: &Config::new(temp_dir.path().to_path_buf()),
+    let provider_materialisations = ProviderMaterialisationRegistry::default();
+    let compile_context = ModuleCompilationContext {
+        options: Config::new(temp_dir.path().to_path_buf()).frontend_options(),
         build_profile: FrontendBuildProfile::Dev,
         project_path_resolver: Some(project_path_resolver),
         style_directives: &style_directives,
         external_packages: Arc::clone(&external_packages),
         external_dependency_resolution_table: &resolution_table,
         source_provider_dependencies: &source_provider_dependencies,
-        source_provider_materialisations: &super::SourceProviderMaterialisationSet::default(),
+        provider_materialisations: &provider_materialisations,
         builder_runtime_packages: &[],
     };
 
-    let generated_store =
-        super::super::generated_worklist::BoundaryGeneratedFunctionStore::default();
+    let generated_store = super::super::generated_store::BoundaryGeneratedFunctionStore::default();
     #[cfg(feature = "timers")]
-    let semantic_result = compile_context.compile_module_semantic(
-        prepared,
-        &canonical_entry,
+    let semantic_result = compile_module(
+        &compile_context,
+        prepared.semantic,
+        generated_store.known_generated(),
         None,
-        generated_store.session(),
     );
     #[cfg(not(feature = "timers"))]
-    let semantic_result = compile_context.compile_module_semantic(
-        prepared,
-        &canonical_entry,
-        generated_store.session(),
+    let semantic_result = compile_module(
+        &compile_context,
+        prepared.semantic,
+        generated_store.known_generated(),
     );
     let draft = semantic_result.expect("semantic compilation should succeed");
 
     let draft = match draft {
-        super::ModuleCompilationOutcome::Success(draft) => draft,
-        super::ModuleCompilationOutcome::Diagnosed(diagnostics) => panic!(
+        ModuleCompilationOutcome::Success(draft) => draft,
+        ModuleCompilationOutcome::Diagnosed(diagnostics) => panic!(
             "a generic free-function declaration should compile, not diagnose: {diagnostics:?}"
         ),
     };
@@ -688,37 +704,37 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
     let external_packages = Arc::new(ExternalPackageRegistry::new());
     let resolution_table = ExternalImportResolutionTable::default();
     let source_provider_dependencies = Default::default();
-    let compile_context = super::FrontendModuleBuildContext {
-        config: &Config::new(temp_dir.path().to_path_buf()),
+    let provider_materialisations = ProviderMaterialisationRegistry::default();
+    let compile_context = ModuleCompilationContext {
+        options: Config::new(temp_dir.path().to_path_buf()).frontend_options(),
         build_profile: FrontendBuildProfile::Dev,
         project_path_resolver: Some(project_path_resolver),
         style_directives: &style_directives,
         external_packages,
         external_dependency_resolution_table: &resolution_table,
         source_provider_dependencies: &source_provider_dependencies,
-        source_provider_materialisations: &super::SourceProviderMaterialisationSet::default(),
+        provider_materialisations: &provider_materialisations,
         builder_runtime_packages: &[],
     };
-    let generated_store =
-        super::super::generated_worklist::BoundaryGeneratedFunctionStore::default();
+    let generated_store = super::super::generated_store::BoundaryGeneratedFunctionStore::default();
     #[cfg(feature = "timers")]
-    let semantic_result = compile_context.compile_module_semantic(
-        prepared,
-        &canonical_entry,
+    let semantic_result = compile_module(
+        &compile_context,
+        prepared.semantic,
+        generated_store.known_generated(),
         None,
-        generated_store.session(),
     );
     #[cfg(not(feature = "timers"))]
-    let semantic_result = compile_context.compile_module_semantic(
-        prepared,
-        &canonical_entry,
-        generated_store.session(),
+    let semantic_result = compile_module(
+        &compile_context,
+        prepared.semantic,
+        generated_store.known_generated(),
     );
     let outcome =
         semantic_result.expect("API-only semantic compilation should not fail internally");
     let draft = match outcome {
-        super::ModuleCompilationOutcome::Success(draft) => draft,
-        super::ModuleCompilationOutcome::Diagnosed(diagnostics) => {
+        ModuleCompilationOutcome::Success(draft) => draft,
+        ModuleCompilationOutcome::Diagnosed(diagnostics) => {
             panic!("API-only declarations should compile without diagnostics: {diagnostics:?}")
         }
     };
@@ -857,7 +873,7 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
     let module_table_size_before = string_table.len();
 
     let mut frontend = CompilerFrontend::new(
-        &Config::new(temp_dir.path().to_path_buf()),
+        Config::new(temp_dir.path().to_path_buf()).frontend_options(),
         string_table,
         StyleDirectiveRegistry::built_ins(),
         Arc::new(ExternalPackageRegistry::new()),
@@ -1088,7 +1104,7 @@ fn parallel_file_preparation_produces_deterministic_ordered_output() {
         .collect::<Vec<PreparedSourceInput>>();
 
     let mut frontend = CompilerFrontend::new(
-        &Config::new(temp_dir.path().to_path_buf()),
+        Config::new(temp_dir.path().to_path_buf()).frontend_options(),
         string_table,
         style_directives,
         Arc::new(ExternalPackageRegistry::new()),

@@ -11,13 +11,13 @@ use crate::backends::external_package_validation::{
 };
 use crate::build_system::BuildProfile;
 use crate::build_system::build::{
-    BackendBuilder, Module, ModuleExternalImport, OutputFile, Project, ProjectCompilation,
-    ProjectLinkedModule,
+    BackendBuilder, OutputFile, Project, ProjectCompilation, ProjectLinkedModule,
 };
 use crate::build_system::output::{BuilderKind, CleanupPolicy};
 use crate::builder_surface::{BuilderSurface, SourceFileKind};
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::module_compilation::{Module, ModuleExternalImport};
 use crate::compiler_frontend::style_directives::StyleDirectiveSpec;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::binding_packages::web::canvas::register_web_canvas_package;

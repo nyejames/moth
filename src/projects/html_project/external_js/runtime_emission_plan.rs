@@ -9,8 +9,8 @@
 //! This module must not decide per-module glue or import-map content. Those remain
 //! module-local concerns owned by `runtime_glue`.
 
-use crate::build_system::build::ModuleExternalImport;
 use crate::builder_surface::external_import_providers::provider::RuntimeAssetIdentity;
+use crate::compiler_frontend::module_compilation::ModuleExternalImport;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 

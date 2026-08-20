@@ -52,6 +52,7 @@ or thorough reviews.
 - A physical module is compiled once per project or package compilation boundary and owns local type, HIR, borrow and lifetime-analysis identity/facts.
 - Every normal module included in a command's semantic graph has its dormant root work parsed, type-checked, lowered, borrow-validated and lifetime-analysed before any entry can activate it.
 - Tokenization and declaration-shell parsing happen once. Later phases bind and consume retained syntax rather than reparsing source.
+- Local semantic compilation is one compiler-owned service. The build system schedules it and consumes its outcome; it never sequences binding, ordering, AST, HIR or borrow stages itself.
 - Each semantic fact has one source owner. A later stage does not reconstruct the same fact from source or an earlier IR.
 - Module interfaces use stable semantic identities rather than donor-local indexes.
 - AST resolves constants, generic call inference, traits, casts and template semantics, then emits concrete generic requests. Generated functions are materialised, HIR-validated, borrow-validated and lifetime-analysed before backend handoff.
@@ -76,6 +77,39 @@ or thorough reviews.
 The build system owns discovery, source ownership, graph construction, provider scheduling and command-specific module selection. The compiler owns source preparation, interface binding, local semantic compilation and target-contract validation.
 
 Exact Rust names may change. The ownership boundaries may not.
+
+### Canonical module compilation service
+
+Local semantic compilation is one compiler-owned service, not a stage sequence the build system assembles.
+
+Stage 0 schedules that service. It builds one compiler input value for a ready module and receives one typed outcome. It does not invoke interface binding, local declaration ordering, AST construction, public-interface projection, HIR lowering, borrow validation or generated semantic completion as separate steps.
+
+The service owns the whole local semantic sequence:
+
+```text
+bind provider interfaces
+-> order local declarations
+-> run AST semantics
+-> build the public semantic projection
+-> lower and validate HIR
+-> collect compiler-owned link facts
+-> run borrow validation
+-> complete generated semantic work
+-> finalise the public semantic interface
+-> assemble the compiler-owned module artefact and generated delta
+```
+
+Rules:
+
+- Compiler-owned module compilation is the only production owner of binding -> ordering -> AST -> HIR -> borrow sequencing.
+- Build-system and project code must not construct public-interface drafts, install call summaries, mutate HIR or rerun compiler analyses.
+- Compiler module artefact lanes are produced and owned by the compiler boundary even when the build system stores, remaps and publishes them.
+- A new local semantic stage is added inside this service, never beside it in Stage 0.
+- The compiler receives compiler-owned option values. It does not depend on the project tool's configuration container to compile a module.
+- Normal modules, support modules, project package facades and synthetic single-file compilation use this one service after provider-independent preparation.
+- Specialised shorter paths are separate named compiler services, not permission for build or project code to assemble raw stages.
+
+Stage 0 keeps one narrow exception. It asks the compiler to prepare provider-independent source before any provider interface exists, because it needs the retained structural provider references to finish the graph. That exception ends at prepared syntax: Stage 0 decides which source candidate to prepare and when, and reads structural provider references from the result. It does not bind source symbols, order declarations or enter AST, HIR or borrow stages.
 
 ### Module compilation input
 
@@ -517,8 +551,30 @@ A generated request is keyed by:
 
 The declaring module owns and validates the immutable generic template. AST in a consumer emits requests
 from the active specialised executable AST. Calls in inactive static branches may be frontend-validated
-but do not enter the generated-function worklist. The build system deduplicates and schedules requests.
-The compiler materialises each accepted request.
+but do not enter the generated-function worklist.
+
+Generated boundary scheduling and generated semantic completion are different owners.
+
+The build system owns the compilation boundary around generated functions:
+
+- boundary-wide generated identity aggregation
+- deterministic deduplication against already published sidecars
+- completed sidecar storage and transactional publication
+- boundary placement and reuse across entries
+
+The compiler owns every generated semantic fact:
+
+- canonicalising a concrete request from AST facts
+- generated AST and HIR materialisation
+- generated HIR validation
+- generated borrow analysis
+- call-summary installation and semantic convergence
+- the local semantic fixed point required to complete one module compilation transaction
+- construction of the final generated sidecar delta
+
+The build system supplies an immutable view of already published generated identities and summaries. The
+compiler never mutates a build-owned store while semantic analysis is running, and the build system never
+mutates base or generated HIR or reruns a compiler analysis.
 
 Each generated function artefact owns:
 
@@ -533,13 +589,17 @@ Each generated function artefact owns:
 
 Generated HIR does not borrow the mutable local type environment of the requesting module and does not extend the declaring dependency artefact. Cross-module calls use stable targets.
 
-A generated function may request further instances. Materialisation continues until the build-system worklist reaches a fixed point.
+A generated function may request further instances. Requests raised while one module compiles converge inside that
+module's compiler transaction. Requests that cross module boundaries converge through the build-system worklist,
+which reaches a fixed point by scheduling further compiler module jobs rather than by driving semantic stages itself.
 
 A diagnosed generated request exposes no partial generated artefact. It blocks only entries or package surfaces that require it. An internal generated-function `CompilerError` aborts the owning project or package compilation.
 
 ## Frontend stages
 
 Stage 0 belongs to the build system. It selects the project and package graph, semantic source sets, provider order and command roots. See `docs/build-system-design.md`.
+
+Stage 1 preparation is provider-independent and may be scheduled by Stage 0 for one selected source at a time. Stages 2 through 6 run inside the one compiler-owned module compilation service described in `Compiler input and result boundary > Canonical module compilation service`. The sections below describe what each stage owns, not a menu of entry points for build or project code.
 
 ### Stage 1: tokenization
 
@@ -652,7 +712,15 @@ A recognised source kind unsupported by the active builder is rejected with a ty
 
 The direct Moth template compiler service uses the same tokenizer, synthetic-header preparation, local declaration ordering and AST folding owners as integrated `.mtf` dependencies. It extracts the folded `content` constant and stops before HIR generation, borrow validation, target validation, backend lowering and output writing.
 
-This service is a narrow compiler entry point, not a second Moth template parser or compiler mode.
+This service is a narrow compiler entry point, not a second Moth template parser or compiler mode. The compiler owns the whole stage sequence behind it. Project tooling supplies the source and receives the folded `content` result and warnings; it does not prepare, bind, order or fold the template itself.
+
+#### Project config compilation service
+
+Build-system config bootstrap is the other sanctioned short compiler path. The compiler owns one named service that runs tokenization, synthetic-free declaration-shell preparation, interface binding for the single authored config source, local declaration ordering and AST semantic checking, then stops at folded AST values.
+
+It produces no HIR, borrow facts, link facts or public interface. Config-specific diagnostics, authored key locations and the folded value boundary are preserved by the service. Config schema and application policy stay build-owned; the build system supplies the source and consumes folded values, and does not compose the stages itself.
+
+Both services stop earlier than canonical module compilation. Neither exists so that build or project code may reach raw stage functions.
 
 ### Stage 3: local declaration ordering
 

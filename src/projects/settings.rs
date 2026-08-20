@@ -7,6 +7,10 @@
 
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, SourceLocation};
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidConfigReason};
+use crate::compiler_frontend::module_compilation::{
+    DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS, FrontendOptions,
+};
+use crate::compiler_frontend::paths::path_format::{OutputPathStyle, PathStringFormatConfig};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -37,7 +41,6 @@ pub const TOP_LEVEL_TEMPLATE_NAME: &str = "#template";
 pub const TOP_LEVEL_CONST_TEMPLATE_NAME: &str = "#const_template";
 pub const IMPLICIT_START_FUNC_NAME: &str = "start";
 pub const TEMPLATE_CONST_LOOP_ITERATION_LIMIT_KEY: &str = "template_const_loop_iteration_limit";
-pub const DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS: usize = 10_000;
 pub const MAX_TEMPLATE_CONST_LOOP_ITERATIONS: usize = 1_000_000;
 
 // This is a guess about how much should be initially allocated for vecs in the compiler.
@@ -119,6 +122,25 @@ impl Config {
             // Custom settings for any project builder to use
             settings: HashMap::new(),
             setting_locations: HashMap::new(),
+        }
+    }
+
+    /// Project the settings the compiler frontend consumes.
+    ///
+    /// WHY: the frontend must not read this configuration container. The project tool owns the
+    ///      translation, so only the rendered path origin and the template loop ceiling cross the
+    ///      boundary.
+    pub(crate) fn frontend_options(&self) -> FrontendOptions {
+        FrontendOptions {
+            path_format_config: PathStringFormatConfig {
+                origin: self
+                    .settings
+                    .get("origin")
+                    .cloned()
+                    .unwrap_or_else(|| String::from("/")),
+                output_style: OutputPathStyle::Portable,
+            },
+            template_const_loop_iteration_limit: self.template_const_loop_iteration_limit,
         }
     }
 
@@ -226,3 +248,7 @@ impl Default for Config {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "tests/settings_tests.rs"]
+mod tests;

@@ -8,13 +8,14 @@
 //! path facts, then the HTML builder decides which rendered file paths become emitted artifacts
 //! and which directory-like links remain plain rendered URLs.
 
-use crate::build_system::build::{FileKind, Module, OutputFile};
+use crate::build_system::build::{FileKind, OutputFile};
 use crate::build_system::output::validate_relative_output_path;
 use crate::build_system::utils::file_error_messages;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidCompileTimePathReason,
 };
+use crate::compiler_frontend::module_compilation::Module;
 use crate::compiler_frontend::paths::compile_time_paths::{
     CompileTimePathBase, CompileTimePathKind,
 };

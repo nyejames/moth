@@ -5,7 +5,7 @@
 //! WHY: the browser resolves ES module imports relative to the importing module's URL, so
 //!      glue-to-asset and HTML-to-glue paths must be computed carefully.
 
-use crate::build_system::build::Module;
+use crate::compiler_frontend::module_compilation::Module;
 use crate::projects::html_project::external_js::path_identity::stable_path_hash_hex;
 use std::path::{Path, PathBuf};
 

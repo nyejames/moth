@@ -1,42 +1,57 @@
-//! Frontend compilation coordinator for Moth projects.
+//! Stage 0 discovery, source preparation scheduling and publication for Moth projects.
 //!
-//! Dispatches to single-file or directory-project flows, then delegates to focused submodules:
-//! - `frontend_orchestration`   — provider-independent file/header preparation and per-module
-//!   semantic orchestration
-//! - `generated_worklist`       — boundary-local generated request state and sidecar publication
-//! - `generated_summary_convergence` — transient HIR call topology and dirty-queue propagation
+//! Dispatches to single-file or directory-project flows, then delegates to focused submodules.
+//!
+//! # Discovery and structure
 //! - `project_roots`            — config root interpretation and path-resolver setup
-//! - `source_package_discovery` — source-package registration, boundary indexes and prefix checks
-//! - `source_tree_index`        — project and source-package boundary source-tree indexing with
-//!   root discovery and collision checks
-//! - `module_identity`          — Stage 0 durable module identity and structural topology
-//! - `module_namespace`         — boundary-aware indexed module namespaces for dependency resolution
-//! - `project_module_graph`      — canonical structural project module graph and compile order
-//! - `module_inventory`         — project-level module assembly
-//! - `prepared_source`          — state-safe source-kind input handoff
-//! - `prepared_module`          — retained module-preparation payload handed to semantic compilation
-//! - `module_artifact_store`    — completed immutable artefacts, dense slot mapping and outcomes
-//! - `compiled_boundary`        — retained project/source-package graph boundaries and frontend outcome
 //! - `source_discovery`         — Stage 0 source traversal, owned-input preparation and
 //!   structural provider resolution
+//! - `source_tree_index`        — project and source-package boundary source-tree indexing with
+//!   root discovery and collision checks
+//! - `source_package_discovery` — source-package registration, boundary indexes and prefix checks
+//! - `module_identity`          — Stage 0 durable module identity and structural topology
+//! - `module_namespace`         — boundary-aware indexed module namespaces for dependency resolution
+//! - `project_module_graph`     — canonical structural project module graph and compile order
+//! - `module_inventory`         — project-level module assembly
+//!
+//! # Source preparation
+//! - `source_loading`           — raw file I/O
 //! - `source_preparation`       — retained single-pass source tokenisation and complete Moth-file
 //!   preparation
+//! - `module_preparation`       — per-module preparation scheduling, parallel file-preparation
+//!   policy and deterministic string-table merging
+//! - `prepared_source`          — state-safe source-kind input handoff
+//! - `prepared_module`          — Stage 0 handoff record pairing the compiler-owned prepared
+//!   input with build-owned scheduling facts
+//!
+//! # Scheduling and publication
+//! - `compilation`              — readiness waves, one compiler module compilation call per ready
+//!   module, and atomic publication of what it returns
+//! - `module_artifact_store`    — completed immutable artefacts, dense slot mapping and outcomes
+//! - `generated_store`          — boundary-local generated record storage and sidecar publication
+//! - `compiled_boundary`        — retained project/source-package graph boundaries and frontend outcome
+//!
+//! # Diagnostics
 //! - `project_structure_diagnostics` — typed Stage 0 project diagnostics
 //! - `source_discovery_error`   — Stage 0 boundary between diagnostics and file/tooling errors
-//! - `source_loading`           — raw file I/O
 //!
 //! Stage 0 config loading lives in `project_config`. This module begins after config has been
 //! applied to `Config`.
+//!
+//! Local semantic compilation is not owned here. Interface binding, declaration ordering, AST,
+//! public-interface projection, HIR, borrow validation and generated completion belong to
+//! `compiler_frontend::module_compilation`, along with the prepared inputs, artefact lanes,
+//! generated deltas and semantic results it defines. This module builds those inputs, schedules the
+//! compiler and publishes what it returns.
 
 mod compilation;
 pub(crate) mod compiled_boundary;
-mod frontend_orchestration;
-mod generated_summary_convergence;
-pub(crate) mod generated_worklist;
+pub(crate) mod generated_store;
 pub(crate) mod module_artifact_store;
 pub(crate) mod module_identity;
 mod module_inventory;
 mod module_namespace;
+mod module_preparation;
 mod prepared_module;
 mod prepared_source;
 pub(crate) mod project_module_graph;

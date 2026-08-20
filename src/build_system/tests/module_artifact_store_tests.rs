@@ -5,12 +5,8 @@
 //!       are covered by `compilation_tests` instead.
 
 use super::{CompiledModuleArtifactId, ModuleArtifactStore, ModuleId, ProviderSlot};
-use crate::build_system::build::{
-    CompiledModuleArtifact, Module, ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts,
-    ModuleRootActivity,
-};
 use crate::build_system::create_project_modules::compiled_boundary::CompiledGraphBoundary;
-use crate::build_system::create_project_modules::generated_worklist::BoundaryGeneratedFunctionStore;
+use crate::build_system::create_project_modules::generated_store::BoundaryGeneratedFunctionStore;
 use crate::build_system::create_project_modules::project_module_graph::ProjectModuleGraph;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext;
@@ -18,6 +14,12 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::reachability::HirModuleLinkFacts;
+use crate::compiler_frontend::module_compilation::artefact::{
+    ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts,
+};
+use crate::compiler_frontend::module_compilation::{
+    CompiledModuleArtifact, Module, ModuleRootActivity,
+};
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, ModulePrivateExecutableCategory, ModulePrivateExecutableIdentity,
@@ -65,7 +67,7 @@ fn artifact_with_context(context: ModuleMaterialisationContext) -> CompiledModul
                 root_activity: ModuleRootActivity::default(),
                 doc_fragments: Vec::new(),
                 rendered_path_usages: Vec::new(),
-                materialisation_context: Some(context),
+                materialisation_context: Some(Arc::new(context)),
             },
         },
         interface: PublicSemanticInterface {

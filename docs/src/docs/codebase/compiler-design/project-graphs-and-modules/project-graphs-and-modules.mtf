@@ -59,6 +59,8 @@ A module waits until every required provider interface exists. Binding-backed in
 
 One physical module compiles **once** per project or package compilation boundary. Entries later activate roots. They do not recompile the same module once per page.
 
+Scheduling is where the build system stops. When a module is ready it builds one compiler input and calls **one** compiler module compilation service, then handles the outcome: success, diagnosed or an internal compiler error. Binding, ordering, AST, HIR and borrow validation happen inside that call. The build system never runs those stages step by step from its own code.
+
 For the greeting project, `greeting.moth`'s module compiles and publishes an interface. Only then does `@page.moth` bind `@greeting greet`.
 
 **Diagram placeholder:** Providers finish before consumers bind

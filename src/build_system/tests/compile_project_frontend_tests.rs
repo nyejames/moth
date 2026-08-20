@@ -1406,7 +1406,9 @@ fn builder_surface_with_dummy_js_provider(calls: Arc<AtomicUsize>) -> BuilderSur
     frontend_surface
 }
 
-fn module_contains_external_call(module: &crate::build_system::build::Module) -> bool {
+fn module_contains_external_call(
+    module: &crate::compiler_frontend::module_compilation::Module,
+) -> bool {
     module.executable.hir.blocks.iter().any(|block| {
         block.statements.iter().any(|statement| {
             matches!(
@@ -1421,7 +1423,7 @@ fn module_contains_external_call(module: &crate::build_system::build::Module) ->
 }
 
 fn module_contains_external_module_export(
-    module: &crate::build_system::build::Module,
+    module: &crate::compiler_frontend::module_compilation::Module,
     export_name: &str,
 ) -> bool {
     module.executable.hir.blocks.iter().any(|block| {

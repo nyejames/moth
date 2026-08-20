@@ -27,6 +27,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{
     bind_module_headers, prepare_file_from_tokens, prepare_header_syntax,
 };
 use crate::compiler_frontend::headers::types::{FileRole, HeaderExportMode};
+use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::compiler_frontend::module_dependencies::resolve_module_dependencies;
 use crate::compiler_frontend::paths::module_roots::{ModuleRootRecord, ModuleRootTable};
 use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
@@ -51,7 +52,6 @@ use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
-use crate::projects::settings::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};

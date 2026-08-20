@@ -127,6 +127,22 @@ Be grammatical and readable. Do not narrate syntax, repeat a descriptive name or
     }
 ]
 
+### Production layering and stage ownership
+
+Stage separation is a dependency rule, not only a naming preference. Production code must respect these directions.
+
+- `compiler_frontend` must not depend on `build_system`, project builders or the project tool's configuration containers to perform local semantic compilation. It receives compiler-owned option and input values instead.
+- `build_system/create_project_modules` must not assemble interface binding, declaration ordering, AST, public-interface or borrow stages. It builds one compiler input, calls the compiler's module compilation service and handles the returned outcome.
+- Build and project code must not mutate compiler semantic state. No build-owned function installs call summaries, rewrites HIR or reruns a compiler analysis.
+- A build or project client that needs a shorter compiler path must call a named compiler service, such as project config compilation or direct Moth template compilation. Composing raw stage functions to make a new short path is not allowed.
+- Values whose meaning is "the compiler produced this semantic result" belong to the compiler owner, even when the build system stores, remaps and publishes them. Project aggregation, entry assembly and output records stay build-owned.
+- Moving a stage owner means moving its data contracts and deleting the old owner. Do not leave forwarding wrappers, aliases or parallel payload types behind.
+- Exceptions are documented on the canonical architecture boundary in `docs/compiler-design-overview.md` or `docs/build-system-design.md`. Do not introduce a local exception in a comment.
+
+Prefer narrowed Rust visibility for these rules wherever the module tree can express them. Use a repository source check only for dependency directions Rust visibility cannot encode.
+
+Tests may target stage-local APIs from their owning module. Later build, link and backend code may still consume completed HIR, function IDs, link facts and borrow results where the architecture documents that handoff. The rule bans external orchestration of the stages, not legitimate consumption of their final data.
+
 ### Refactor moves
 
 When moving code across compiler stages, do not copy the old module shape unchanged. Use the move to correct ownership, names, APIs, comments and data flow.

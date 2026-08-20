@@ -4,8 +4,12 @@
 //! WHY: separating the two flows keeps each path readable as orchestration over named steps.
 use crate::{timing_scope, timing_scope_attributed};
 
-use crate::build_system::build::{CompiledModuleArtifact, ModuleSemanticDraft};
 use crate::build_system::output::ValidatedDirectoryOutputSettings;
+use crate::compiler_frontend::module_compilation::{
+    CompiledModuleArtifact, GeneratedFunctionDelta, KnownGeneratedFunctions,
+    ModuleCompilationContext, ModuleCompilationOutcome, ModuleSemanticResult,
+    ProviderMaterialisationRegistry, compile_module,
+};
 
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
@@ -41,12 +45,9 @@ use super::compiled_boundary::{
     BlockedModule, BlockedProvider, CompiledGraphBoundary, CompiledSourcePackage,
     CompletedSourcePackageRegistry, DiagnosedModule, PackageBoundaryId, ProjectFrontendCompilation,
 };
-use super::frontend_orchestration::{
-    FrontendModuleBuildContext, ModuleCompilationOutcome, ModulePreparationContext,
-    SourceProviderMaterialisationSet, record_module_input_counters,
-};
+use super::module_preparation::{ModulePreparationContext, record_module_input_counters};
 
-use super::generated_worklist::{BoundaryGeneratedFunctionStore, GeneratedFunctionWorklistDelta};
+use super::generated_store::BoundaryGeneratedFunctionStore;
 use super::module_artifact_store::{ModuleArtifactStore, ProviderSlot};
 use super::module_identity::ModuleId;
 use super::module_inventory;
@@ -73,18 +74,61 @@ mod tests;
 pub(super) fn publish_module_and_generated(
     modules: &mut ModuleArtifactStore,
     generated: &mut BoundaryGeneratedFunctionStore,
+    materialisations: &mut ProviderMaterialisationRegistry,
     module_id: ModuleId,
     expected_origin: &StableModuleOriginIdentity,
     artifact: CompiledModuleArtifact,
-    generated_delta: GeneratedFunctionWorklistDelta,
+    generated_delta: GeneratedFunctionDelta,
 ) -> Result<(), CompilerError> {
     let generated_publication = generated.preflight(&generated_delta)?;
     let module_publication = modules.preflight_success(module_id, &artifact, expected_origin)?;
     modules.reserve_success_commit(&module_publication);
     generated.reserve_commit(&generated_publication);
+    publish_materialisation_templates(materialisations, &artifact);
     modules.commit_success(module_publication, artifact);
     generated.commit(generated_publication, generated_delta);
     Ok(())
+}
+
+/// Add one newly published module's generic templates to the boundary materialisation registry.
+///
+/// WHY: later modules in this boundary materialise concrete generics from their declaring module's
+///      validated templates. The registry is the compiler's immutable lookup for that; the store's
+///      own declaration index stays behind for publication provenance and duplicate detection.
+fn publish_materialisation_templates(
+    materialisations: &mut ProviderMaterialisationRegistry,
+    artifact: &CompiledModuleArtifact,
+) {
+    let Some(context) = artifact.module.metadata.materialisation_context.as_ref() else {
+        return;
+    };
+
+    for (identity, template_index) in context.declaration_rows() {
+        materialisations.publish(identity.clone(), Arc::clone(context), template_index);
+    }
+}
+
+/// Seed a boundary registry with every generic template completed source packages already expose.
+///
+/// WHY: a project module may instantiate a generic declared in a package it depends on, and those
+///      packages finished before this boundary started.
+fn seed_completed_package_materialisations(
+    completed_packages: &CompletedSourcePackageRegistry,
+) -> Result<ProviderMaterialisationRegistry, CompilerError> {
+    let mut registry = ProviderMaterialisationRegistry::default();
+    for (identity, location) in completed_packages.materialisation_locations() {
+        let package = completed_packages.package(location.package_id)?;
+        let context = package
+            .boundary
+            .modules
+            .materialisation_context_at(location.location)?;
+        registry.publish(
+            identity.clone(),
+            Arc::clone(context),
+            location.location.template_index,
+        );
+    }
+    Ok(registry)
 }
 
 // -------------------------
@@ -349,21 +393,20 @@ pub(crate) fn compile_single_file_frontend(
         }
     };
 
-    // Semantic compilation is provider-dependent: it binds retained `PreparedHeaderSyntax`
-    // against provider interfaces, then resolves dependencies, builds AST, lowers HIR and runs
-    // borrow validation.
+    // Semantic compilation is one compiler service call. A synthetic single-file module has no
+    // completed providers, so it binds against empty provider and materialisation views.
     let source_provider_dependencies = SourceProviderDependencySet::default();
-    let source_provider_materialisations = SourceProviderMaterialisationSet::default();
+    let mut provider_materialisations = ProviderMaterialisationRegistry::default();
     let mut generated_store = BoundaryGeneratedFunctionStore::default();
-    let compile_context = FrontendModuleBuildContext {
-        config,
+    let compile_context = ModuleCompilationContext {
+        options: config.frontend_options(),
         build_profile,
         project_path_resolver: Some(project_path_resolver),
         style_directives,
         external_packages: Arc::clone(&external_packages),
         external_dependency_resolution_table: &builder_surface.external_dependency_resolution_table,
         source_provider_dependencies: &source_provider_dependencies,
-        source_provider_materialisations: &source_provider_materialisations,
+        provider_materialisations: &provider_materialisations,
         builder_runtime_packages: &builder_surface.builder_runtime_packages,
     };
 
@@ -373,15 +416,18 @@ pub(crate) fn compile_single_file_frontend(
         timing_module_context,
     );
     #[cfg(feature = "timers")]
-    let semantic_result = compile_context.compile_module_semantic(
-        prepared,
-        &entry_path,
+    let semantic_result = compile_module(
+        &compile_context,
+        prepared.semantic,
+        generated_store.known_generated(),
         timing_module_context,
-        generated_store.session(),
     );
     #[cfg(not(feature = "timers"))]
-    let semantic_result =
-        compile_context.compile_module_semantic(prepared, &entry_path, generated_store.session());
+    let semantic_result = compile_module(
+        &compile_context,
+        prepared.semantic,
+        generated_store.known_generated(),
+    );
     #[cfg(feature = "timers")]
     timing_guard_frontend_module_semantic_total.finish();
     let result = match semantic_result {
@@ -436,15 +482,15 @@ pub(crate) fn compile_single_file_frontend(
 
     // 6. Merge local results back into the global build context.
     let remap = string_table.merge_delta_from(&result.string_table, base_len);
-    let ModuleSemanticDraft {
+    let ModuleSemanticResult {
         mut module,
-        mut generated_worklist_delta,
+        mut generated_delta,
         string_table: _,
         public_interface,
     } = result;
     if !remap.is_identity() {
         module.remap_string_ids(&remap);
-        generated_worklist_delta.remap_string_ids(&remap);
+        generated_delta.remap_string_ids(&remap);
     }
     let graph = ProjectModuleGraph::from_normal_roots(vec![(
         graph_stable_origin.clone(),
@@ -464,10 +510,11 @@ pub(crate) fn compile_single_file_frontend(
     publish_module_and_generated(
         &mut modules,
         &mut generated_store,
+        &mut provider_materialisations,
         module_id,
         &graph_stable_origin,
         artifact,
-        generated_worklist_delta,
+        generated_delta,
     )
     .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
@@ -498,7 +545,7 @@ struct DirectoryModuleTaskResult {
 }
 
 enum DirectoryModuleTaskOutcome {
-    Success(Box<ModuleSemanticDraft>),
+    Success(Box<ModuleSemanticResult>),
     Diagnosed(ModuleDiagnostics),
     Infrastructure(CompilerError),
 }
@@ -554,6 +601,8 @@ impl<'a> BoundaryCompilationContext<'a> {
 struct DirectoryModuleCompileContext<'boundary, 'services> {
     boundary: &'boundary BoundaryCompilationContext<'services>,
     provider_store: &'boundary ModuleArtifactStore,
+    /// Declaring-module generic templates already published in this boundary.
+    provider_materialisations: &'boundary ProviderMaterialisationRegistry,
     provider_bindings: &'boundary [ResolvedDependencyEdge],
     provider_binding_index: &'boundary FxHashMap<(ModuleId, DependencyShellId), usize>,
     source_package_dependencies: &'boundary [ResolvedSourcePackageDependency],
@@ -677,6 +726,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
     ) -> Result<SourceProviderDependencySet<'boundary>, CompilerError> {
         let mut dependencies = Vec::new();
         for file_dependency_clauses in prepared
+            .semantic
             .prepared_header_syntax
             .module_symbols
             .file_dependency_clauses_by_source
@@ -763,11 +813,10 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
     fn compile(
         &self,
         job: module_inventory::ModuleCompilationJob,
-        generated_worklist: super::generated_worklist::GeneratedFunctionWorklist<'_>,
+        known_generated: KnownGeneratedFunctions<'_>,
     ) -> DirectoryModuleTaskResult {
         let module_inventory::ModuleCompilationJob {
             module_id,
-            entry_point,
             string_table_base_len: base_len,
             prepared,
             #[cfg(feature = "timers")]
@@ -794,8 +843,8 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                     };
                 }
             };
-        let compile_context = FrontendModuleBuildContext {
-            config: self.boundary.config,
+        let compile_context = ModuleCompilationContext {
+            options: self.boundary.config.frontend_options(),
             build_profile: self.boundary.build_profile,
             project_path_resolver: Some(self.boundary.project_path_resolver.clone()),
             style_directives: self.boundary.style_directives,
@@ -805,10 +854,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                 .builder_surface
                 .external_dependency_resolution_table,
             source_provider_dependencies: &source_provider_dependencies,
-            source_provider_materialisations: &SourceProviderMaterialisationSet::new(
-                self.provider_store,
-                self.boundary.completed_packages,
-            ),
+            provider_materialisations: self.provider_materialisations,
             builder_runtime_packages: &self.boundary.builder_surface.builder_runtime_packages,
         };
 
@@ -820,15 +866,14 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
             module_context,
         );
         #[cfg(feature = "timers")]
-        let semantic_result = compile_context.compile_module_semantic(
-            prepared,
-            &entry_point,
+        let semantic_result = compile_module(
+            &compile_context,
+            prepared.semantic,
+            known_generated,
             module_context,
-            generated_worklist,
         );
         #[cfg(not(feature = "timers"))]
-        let semantic_result =
-            compile_context.compile_module_semantic(prepared, &entry_point, generated_worklist);
+        let semantic_result = compile_module(&compile_context, prepared.semantic, known_generated);
         #[cfg(feature = "timers")]
         timing_guard_frontend_module_semantic_total_2.finish();
         let outcome = match semantic_result {
@@ -858,6 +903,12 @@ fn compile_module_waves(
 ) -> Result<CompiledGraphBoundary, CompilerMessages> {
     let mut provider_store = ModuleArtifactStore::new(graph.nodes().len());
     let mut generated_store = BoundaryGeneratedFunctionStore::default();
+    // The compiler resolves declaring generic templates through this registry, so it never reads a
+    // live build store while semantic analysis runs. Completed packages seed it; each successful
+    // module in this boundary extends it as it publishes.
+    let mut provider_materialisations =
+        seed_completed_package_materialisations(context.completed_packages)
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
     // One direct lookup index per boundary so module binding never scans every provider edge,
     // source-package dependency or completed package for each retained dependency shell.
@@ -964,27 +1015,28 @@ fn compile_module_waves(
                 let compile_context = DirectoryModuleCompileContext {
                     boundary: &context,
                     provider_store: &provider_store,
+                    provider_materialisations: &provider_materialisations,
                     provider_bindings,
                     provider_binding_index: &provider_binding_index,
                     source_package_dependencies,
                     source_package_dependency_index: &source_package_dependency_index,
                 };
-                compile_context.compile(job, generated_store.session())
+                compile_context.compile(job, generated_store.known_generated())
             };
             match outcome.outcome {
                 DirectoryModuleTaskOutcome::Success(compiled) => {
                     let compiled = *compiled;
                     let remap = string_table
                         .merge_delta_from(&compiled.string_table, outcome.string_table_base_len);
-                    let ModuleSemanticDraft {
+                    let ModuleSemanticResult {
                         mut module,
-                        mut generated_worklist_delta,
+                        mut generated_delta,
                         string_table: _,
                         public_interface,
                     } = compiled;
                     if !remap.is_identity() {
                         module.remap_string_ids(&remap);
-                        generated_worklist_delta.remap_string_ids(&remap);
+                        generated_delta.remap_string_ids(&remap);
                     }
                     let artifact = CompiledModuleArtifact {
                         module,
@@ -993,10 +1045,11 @@ fn compile_module_waves(
                     publish_module_and_generated(
                         &mut provider_store,
                         &mut generated_store,
+                        &mut provider_materialisations,
                         outcome.module_id,
                         graph.node(outcome.module_id).stable_origin(),
                         artifact,
-                        generated_worklist_delta,
+                        generated_delta,
                     )
                     .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
                 }

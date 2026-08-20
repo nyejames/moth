@@ -1,10 +1,10 @@
 //! Tests for `HtmlExternalRuntimeEmissionPlan`.
 
-use crate::build_system::build::ModuleExternalImport;
 use crate::builder_surface::external_import_providers::provider::{
     RequiredRuntimeImport, RuntimeAssetIdentity,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageId;
+use crate::compiler_frontend::module_compilation::ModuleExternalImport;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::external_js::runtime_emission_plan::HtmlExternalRuntimeEmissionPlan;
 use crate::projects::html_project::tests::test_support::create_test_module;

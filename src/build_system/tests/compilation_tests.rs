@@ -5,13 +5,7 @@
 //!       preflight. Single-store publication invariants belong to `module_artifact_store_tests`.
 
 use super::publish_module_and_generated;
-use crate::build_system::build::{
-    CompiledModuleArtifact, GeneratedFunctionSidecar, Module, ModuleCompilerMetadata,
-    ModuleExecutable, ModuleLinkFacts, ModuleRootActivity,
-};
-use crate::build_system::create_project_modules::generated_worklist::{
-    BoundaryGeneratedFunctionStore, CompletedGeneratedFunction, GeneratedFunctionWorklistDelta,
-};
+use crate::build_system::create_project_modules::generated_store::BoundaryGeneratedFunctionStore;
 use crate::build_system::create_project_modules::module_artifact_store::{
     ModuleArtifactStore, ProviderSlot,
 };
@@ -27,6 +21,13 @@ use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::reachability::HirModuleLinkFacts;
+use crate::compiler_frontend::module_compilation::artefact::{
+    ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts,
+};
+use crate::compiler_frontend::module_compilation::{
+    CompiledModuleArtifact, CompletedGeneratedFunction, GeneratedFunctionDelta,
+    GeneratedFunctionSidecar, Module, ModuleRootActivity, ProviderMaterialisationRegistry,
+};
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallSummary,
 };
@@ -79,12 +80,12 @@ fn invalid_artifact() -> CompiledModuleArtifact {
                 root_activity: ModuleRootActivity::default(),
                 doc_fragments: Vec::new(),
                 rendered_path_usages: Vec::new(),
-                materialisation_context: Some(
+                materialisation_context: Some(Arc::new(
                     ModuleMaterialisationContext::from_identities_for_test(vec![
                         identity.clone(),
                         identity,
                     ]),
-                ),
+                )),
             },
         },
         interface: PublicSemanticInterface {
@@ -175,19 +176,19 @@ fn generated_sidecar(
     GeneratedFunctionSidecar::new(identity, module)
 }
 
-fn generated_delta_with_valid_record() -> GeneratedFunctionWorklistDelta {
+fn generated_delta_with_valid_record() -> GeneratedFunctionDelta {
     let identity = generated_identity("valid");
     let summary = generated_summary();
-    GeneratedFunctionWorklistDelta::from_records_for_test(vec![CompletedGeneratedFunction {
+    GeneratedFunctionDelta::from_records(vec![CompletedGeneratedFunction {
         identity: identity.clone(),
         summary: summary.clone(),
         sidecar: generated_sidecar(identity, summary),
     }])
 }
 
-fn generated_delta_with_identity_mismatch() -> GeneratedFunctionWorklistDelta {
+fn generated_delta_with_identity_mismatch() -> GeneratedFunctionDelta {
     let summary = generated_summary();
-    GeneratedFunctionWorklistDelta::from_records_for_test(vec![CompletedGeneratedFunction {
+    GeneratedFunctionDelta::from_records(vec![CompletedGeneratedFunction {
         identity: generated_identity("record"),
         summary,
         sidecar: generated_sidecar(generated_identity("sidecar"), generated_summary()),
@@ -198,16 +199,15 @@ fn generated_delta_with_identity_mismatch() -> GeneratedFunctionWorklistDelta {
 fn combined_publication_preflights_both_lanes_before_mutation() {
     let mut modules = ModuleArtifactStore::new(1);
     let mut generated = BoundaryGeneratedFunctionStore::default();
-    let generated_delta = generated
-        .session()
-        .finish()
-        .expect("an empty generated session should finish");
+    let generated_delta = GeneratedFunctionDelta::from_records(Vec::new());
     let artifact = invalid_artifact();
     let expected_origin = artifact.interface.module_origin.clone();
 
+    let mut materialisations = ProviderMaterialisationRegistry::default();
     let error = publish_module_and_generated(
         &mut modules,
         &mut generated,
+        &mut materialisations,
         ModuleId::from_index(0),
         &expected_origin,
         artifact,
@@ -233,10 +233,7 @@ fn combined_publication_preflights_both_lanes_before_mutation() {
 fn combined_publication_rejects_expected_origin_mismatch_without_mutation() {
     let mut modules = ModuleArtifactStore::new(1);
     let mut generated = BoundaryGeneratedFunctionStore::default();
-    let generated_delta = generated
-        .session()
-        .finish()
-        .expect("an empty generated session should finish");
+    let generated_delta = GeneratedFunctionDelta::from_records(Vec::new());
     let artifact = artifact_without_context();
     let wrong_origin = StableModuleOriginIdentity::from_portable_path(
         StablePackageIdentity::project_local("combined-publication-tests"),
@@ -244,9 +241,11 @@ fn combined_publication_rejects_expected_origin_mismatch_without_mutation() {
         ModuleRootRole::Normal,
     );
 
+    let mut materialisations = ProviderMaterialisationRegistry::default();
     let error = publish_module_and_generated(
         &mut modules,
         &mut generated,
+        &mut materialisations,
         ModuleId::from_index(0),
         &wrong_origin,
         artifact,
@@ -270,9 +269,11 @@ fn combined_publication_rejects_generated_delta_without_committing_valid_module(
     let artifact = artifact_without_context();
     let expected_origin = artifact.interface.module_origin.clone();
 
+    let mut materialisations = ProviderMaterialisationRegistry::default();
     let error = publish_module_and_generated(
         &mut modules,
         &mut generated,
+        &mut materialisations,
         ModuleId::from_index(0),
         &expected_origin,
         artifact,
@@ -297,9 +298,11 @@ fn combined_publication_rejects_module_after_valid_generated_preflight_without_m
     let artifact = invalid_artifact();
     let expected_origin = artifact.interface.module_origin.clone();
 
+    let mut materialisations = ProviderMaterialisationRegistry::default();
     let error = publish_module_and_generated(
         &mut modules,
         &mut generated,
+        &mut materialisations,
         ModuleId::from_index(0),
         &expected_origin,
         artifact,

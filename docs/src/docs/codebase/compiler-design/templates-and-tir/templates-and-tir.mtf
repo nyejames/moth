@@ -85,6 +85,8 @@ Moth template `.mtf` and Markdown `.md` files do not invent forever-parallel com
 
 Later ordering and folding treat both as ordinary compile-time constants. Return to the greeting project after that side path: `@page.moth` remains the star, and document kinds prove the "one semantic pipeline" bet.
 
+Tooling that wants only a rendered `.mtf` file asks the compiler's **direct Moth template service** for a folded `content` result. That service is a shorter compiler path over the same owners, stopping before HIR. It is not a second parser, and project tooling does not prepare, bind, order or fold the template itself.
+
 **Diagram placeholder:** moth, mtf and md reach one ordinary semantic path
 
 *Caption: simplified source-kind map.*

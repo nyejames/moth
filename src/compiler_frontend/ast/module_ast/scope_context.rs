@@ -62,6 +62,7 @@ use crate::compiler_frontend::headers::module_symbols::{
 use crate::compiler_frontend::instrumentation::{
     AstCounter, increment_ast_counter, record_ast_counter_max,
 };
+use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::paths::rendered_path_usage::RenderedPathUsage;
@@ -72,7 +73,6 @@ use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 use crate::compiler_frontend::traits::ids::TraitId;
-use crate::projects::settings::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::return_compiler_error;
 
 use rustc_hash::{FxHashMap, FxHashSet};

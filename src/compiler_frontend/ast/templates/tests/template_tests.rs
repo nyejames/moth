@@ -18,6 +18,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::headers::parse_file_headers::TopLevelConstFragment;
+use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::test_source_location;
@@ -26,7 +27,7 @@ use crate::compiler_frontend::tests::parse_support::{
 };
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
-use crate::projects::settings::{DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS, IMPLICIT_START_FUNC_NAME};
+use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 use rustc_hash::FxHashMap;
 use std::cell::RefCell;
 use std::rc::Rc;

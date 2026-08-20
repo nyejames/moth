@@ -19,8 +19,9 @@ use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallSummary,
 };
 use crate::compiler_frontend::semantic_identity::{
-    GeneratedDeclarationIdentity, ModulePrivateExecutableCategory, ModulePrivateExecutableIdentity,
-    ModuleRootRole, OriginFunctionId, StableModuleOriginIdentity, StablePackageIdentity,
+    GeneratedDeclarationIdentity, GeneratedFunctionIdentity, ModulePrivateExecutableCategory,
+    ModulePrivateExecutableIdentity, ModuleRootRole, OriginFunctionId, StableModuleOriginIdentity,
+    StablePackageIdentity,
 };
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use std::collections::VecDeque;
@@ -451,11 +452,10 @@ fn convergence_direct_summaries_read_exact_active_base_report_facts() {
     let node = model
         .node_id(&ConvergenceNode::Generated(Box::new(generated)))
         .expect("generated node should exist");
-    let generated_store =
-        super::super::generated_worklist::BoundaryGeneratedFunctionStore::default();
-    let worklist = generated_store.session();
+    let generated_store = crate::build_system::create_project_modules::generated_store::BoundaryGeneratedFunctionStore::default();
+    let transaction = GeneratedFunctionTransaction::new(generated_store.known_generated());
 
-    let direct = direct_convergence_summaries(&model, node, &worklist, &base_hir, &base_report)
+    let direct = direct_convergence_summaries(&model, node, &transaction, &base_hir, &base_report)
         .expect("active-base summaries should resolve from the base report");
 
     assert_eq!(direct.generated, Vec::new());
@@ -518,17 +518,18 @@ fn convergence_callers_queue_reaches_generated_cycle_without_duplicate_entries()
 }
 
 #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
-fn counter_test_module() -> crate::build_system::build::Module {
-    use crate::build_system::build::{
-        ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts, ModuleRootActivity,
-    };
+fn counter_test_module() -> crate::compiler_frontend::module_compilation::Module {
     use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
     use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
     use crate::compiler_frontend::hir::reachability::HirModuleLinkFacts;
+    use crate::compiler_frontend::module_compilation::ModuleRootActivity;
+    use crate::compiler_frontend::module_compilation::artefact::{
+        ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts,
+    };
     use std::path::PathBuf;
     use std::sync::Arc;
 
-    crate::build_system::build::Module {
+    crate::compiler_frontend::module_compilation::Module {
         executable: ModuleExecutable {
             hir: HirModule::new(),
             type_environment: TypeEnvironment::new(),
@@ -554,12 +555,12 @@ fn counter_test_module() -> crate::build_system::build::Module {
 #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
 #[test]
 fn unchanged_generated_summary_counts_comparison_without_change() {
-    use crate::build_system::build::GeneratedFunctionSidecar;
-    use crate::build_system::create_project_modules::generated_worklist::{
-        BoundaryGeneratedFunctionStore, CompletedGeneratedFunction,
-    };
+    use crate::build_system::create_project_modules::generated_store::BoundaryGeneratedFunctionStore;
     use crate::compiler_frontend::instrumentation::{
         capture_frontend_counters_for_test, log_frontend_counters, reset_frontend_counters,
+    };
+    use crate::compiler_frontend::module_compilation::{
+        CompletedGeneratedFunction, GeneratedFunctionSidecar,
     };
     use crate::timing::start_benchmark_collection;
 
@@ -576,10 +577,10 @@ fn unchanged_generated_summary_counts_comparison_without_change() {
         summary: stable.clone(),
         sidecar: GeneratedFunctionSidecar::new(identity.clone(), counter_test_module()),
     });
-    let mut worklist = generated_store.session();
+    let mut transaction = GeneratedFunctionTransaction::new(generated_store.known_generated());
 
     assert!(
-        !super::update_generated_summary(&mut worklist, &identity, stable)
+        !super::update_generated_summary(&mut transaction, &identity, stable)
             .expect("an unchanged summary comparison should succeed")
     );
 

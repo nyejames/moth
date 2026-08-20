@@ -3,16 +3,15 @@
 use super::*;
 use crate::backends::js::test_symbol_helpers::expected_dev_function_name;
 use crate::build_system::BuildProfile;
-use crate::build_system::build::ModuleExternalImport;
-use crate::build_system::build::ResolvedConstFragment;
-use crate::build_system::build::{
-    FileKind, Module, ModuleRootActivity, Project, ProjectCompilation,
-};
+use crate::build_system::build::{FileKind, Project, ProjectCompilation};
 use crate::builder_surface::external_import_providers::provider::RuntimeAssetIdentity;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, InvalidConfigReason};
 use crate::compiler_frontend::external_packages::ExternalPackageId;
+use crate::compiler_frontend::module_compilation::ModuleExternalImport;
+use crate::compiler_frontend::module_compilation::ResolvedConstFragment;
+use crate::compiler_frontend::module_compilation::{Module, ModuleRootActivity};
 use crate::compiler_frontend::paths::compile_time_paths::{
     CompileTimePathBase, CompileTimePathKind,
 };

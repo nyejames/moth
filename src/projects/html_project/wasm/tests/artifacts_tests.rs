@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 fn entry_reachability(
-    module: &crate::build_system::build::Module,
+    module: &crate::compiler_frontend::module_compilation::Module,
 ) -> crate::compiler_frontend::hir::reachability::HirReachability {
     crate::compiler_frontend::hir::reachability::collect_reachability_from_function_link_facts(
         &module.link_facts.functions,

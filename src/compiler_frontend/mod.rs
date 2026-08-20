@@ -54,6 +54,7 @@ pub(crate) mod hir;
 pub(crate) mod analysis;
 pub(crate) mod arena;
 
+pub(crate) mod module_compilation;
 pub(crate) mod module_metadata;
 pub(crate) mod paths;
 

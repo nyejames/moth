@@ -10,7 +10,7 @@
 //! WHY: the public-interface draft trait-requirement projection needs resolved trait facts
 //! available immediately before HIR lowering without reconstructing trait semantics from HIR
 //! or source. This is transient donor-local AST data consumed before HIR; it never enters
-//! `ModuleSemanticDraft`, `Module`, or a cross-module interface.
+//! `ModuleSemanticResult`, `Module`, or a cross-module interface.
 
 use crate::compiler_frontend::ast::module_ast::environment::resolved_public_type_roots::ResolvedPublicTypeRootTable;
 use crate::compiler_frontend::ast::statements::functions::ReturnChannel;
@@ -121,7 +121,7 @@ pub(crate) struct ResolvedPublicTraitRoot {
 /// trait and evidence environments into one closed input for the sole
 /// `PublicInterfaceDraftBuilder` consumer. It has a closed purpose: feeding the public-interface
 /// draft projection (declarations, trait surfaces and reusable evidence) immediately before HIR
-/// lowering. It is not an open-ended future-facts bag and never enters `ModuleSemanticDraft`,
+/// lowering. It is not an open-ended future-facts bag and never enters `ModuleSemanticResult`,
 /// `Module` or a cross-module artefact.
 /// WHY: keeping the public-surface projection input in one named aggregate prevents later
 /// phases from widening executable `Ast` with transient public facts. It is carried on

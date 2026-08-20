@@ -3,9 +3,6 @@
 //! WHAT: runs full frontend entrypoints and asserts borrow-check failures surface through them.
 //! WHY: the borrow checker is only useful if orchestration preserves and reports its diagnostics.
 
-use crate::build_system::build::{
-    Module, ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts, ModuleRootActivity,
-};
 use crate::compiler_frontend::CompilerFrontend;
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
@@ -13,6 +10,10 @@ use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::compiler_messages::{BorrowDiagnosticKind, DiagnosticKind};
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
+use crate::compiler_frontend::module_compilation::artefact::{
+    ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts,
+};
+use crate::compiler_frontend::module_compilation::{FrontendOptions, Module, ModuleRootActivity};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
@@ -26,7 +27,6 @@ use crate::compiler_frontend::tests::type_id_fixture_support::build_ast_with_reg
 use std::sync::Arc;
 
 use crate::compiler_frontend::value_mode::ValueMode;
-use crate::projects::settings::Config;
 
 #[test]
 fn frontend_check_borrows_propagates_failures() {
@@ -84,9 +84,8 @@ fn frontend_check_borrows_propagates_failures() {
         &mut string_table,
     );
 
-    let config = Config::default();
     let frontend = CompilerFrontend::new(
-        &config,
+        FrontendOptions::default(),
         string_table,
         StyleDirectiveRegistry::built_ins(),
         Arc::new(crate::compiler_frontend::external_packages::ExternalPackageRegistry::new()),

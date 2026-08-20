@@ -5,12 +5,12 @@
 //!      argument list at every call site and keeps the two paths in sync as fields evolve.
 
 use crate::build_system::BuildProfile;
-use crate::build_system::build::{ModuleRootActivity, ResolvedConstFragment};
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::reachability::HirReachability;
+use crate::compiler_frontend::module_compilation::{ModuleRootActivity, ResolvedConstFragment};
 use crate::projects::html_project::document_config::HtmlDocumentConfig;
 use std::sync::Arc;
 

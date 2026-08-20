@@ -14,11 +14,12 @@ mod source;
 pub(crate) use runtime_modules::emit_build_runtime_modules;
 
 use crate::backends::js::external_module_export_glue_function_name;
-use crate::build_system::build::{FileKind, Module, ModuleExternalImport, OutputFile};
+use crate::build_system::build::{FileKind, OutputFile};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::external_packages::{
     ExternalFunctionId, ExternalPackageId, ExternalPackageRegistry,
 };
+use crate::compiler_frontend::module_compilation::{Module, ModuleExternalImport};
 use crate::projects::html_project::external_js::runtime_assets::js_runtime_asset_output_path;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;

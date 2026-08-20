@@ -5,7 +5,7 @@
 //! WHY: provider-created JS assets and emitted runtime modules use bare imports like
 //!      `@moth/runtime`; the import map lets the browser resolve them.
 
-use crate::build_system::build::ModuleExternalImport;
+use crate::compiler_frontend::module_compilation::ModuleExternalImport;
 use crate::projects::html_project::external_js::runtime_glue::paths::{
     relative_url_path, runtime_module_output_path,
 };

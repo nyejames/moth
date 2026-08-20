@@ -7,15 +7,16 @@
 //!       support owns the synthetic origin and empty public interface instead.
 //! MUST NOT: be used outside `#[cfg(test)]` code or claim to be a production construction path.
 
-use crate::build_system::build::{CompiledModuleArtifact, Module, ProjectCompilation};
+use crate::build_system::build::ProjectCompilation;
 use crate::build_system::create_project_modules::compiled_boundary::{
     CompiledGraphBoundary, CompletedSourcePackageRegistry,
 };
-use crate::build_system::create_project_modules::generated_worklist::BoundaryGeneratedFunctionStore;
+use crate::build_system::create_project_modules::generated_store::BoundaryGeneratedFunctionStore;
 use crate::build_system::create_project_modules::module_artifact_store::ModuleArtifactStore;
 use crate::build_system::create_project_modules::module_identity::ModuleId;
 use crate::build_system::create_project_modules::project_module_graph::ProjectModuleGraph;
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::module_compilation::{CompiledModuleArtifact, Module};
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,

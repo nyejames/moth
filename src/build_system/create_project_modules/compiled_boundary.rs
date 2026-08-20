@@ -12,9 +12,9 @@
 //! MUST NOT: concatenate package artefacts into one vector with a count, place build-local
 //! `ModuleId` values inside [`CompiledModuleArtifact`], or mutate package root metadata.
 
-use crate::build_system::build::{CompiledModuleArtifact, Module};
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::module_diagnostics::ModuleDiagnostics;
+use crate::compiler_frontend::module_compilation::{CompiledModuleArtifact, Module};
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, ModuleRootRole, StablePackageIdentity,
@@ -23,7 +23,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use super::generated_worklist::BoundaryGeneratedFunctionStore;
+use super::generated_store::BoundaryGeneratedFunctionStore;
 use super::module_artifact_store::MaterialisationContextLocation;
 use super::module_artifact_store::{ModuleArtifactStore, ProviderSlot};
 use super::module_identity::ModuleId;
@@ -676,14 +676,6 @@ impl CompletedSourcePackageRegistry {
     #[cfg(test)]
     pub(crate) fn get(&self, index: usize) -> Option<&CompiledSourcePackage> {
         self.packages.get(index)
-    }
-
-    /// Resolve one published materialisation template across every completed package boundary.
-    pub(crate) fn materialisation_location_for(
-        &self,
-        identity: &GeneratedDeclarationIdentity,
-    ) -> Option<PackageMaterialisationLocation> {
-        self.declarations_by_identity.get(identity).copied()
     }
 
     /// Iterate every cross-package materialisation location in deterministic package order.

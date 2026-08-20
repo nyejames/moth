@@ -5,12 +5,13 @@ use super::paths::relative_url_path;
 use super::runtime_modules::emit_build_runtime_modules;
 use super::source::{generate_fallible_wrapper, generate_infallible_wrapper};
 use super::*;
-use crate::build_system::build::{FileKind, Module};
+use crate::build_system::build::FileKind;
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalFunctionDef, ExternalFunctionId, ExternalFunctionLowerings,
     ExternalJsLowering, ExternalPackageId, ExternalPackageRegistry, ExternalReturnSlot,
     ExternalSignatureType,
 };
+use crate::compiler_frontend::module_compilation::Module;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::external_js::runtime_emission_plan::HtmlExternalRuntimeEmissionPlan;
 use crate::projects::html_project::tests::test_support::create_test_module;
@@ -81,7 +82,7 @@ fn generate_module_glue_empty_when_export_registered_but_not_referenced() {
     let mut string_table = StringTable::new();
     let mut module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
     module.link_facts.external_import_candidates.push(
-        crate::build_system::build::ModuleExternalImport {
+        crate::compiler_frontend::module_compilation::ModuleExternalImport {
             package_id: ExternalPackageId(0),
             runtime_asset: Some(
                 crate::builder_surface::external_import_providers::provider::RuntimeAssetIdentity {
@@ -119,7 +120,7 @@ fn generate_module_glue_emits_glue_file_for_referenced_export() {
     let mut string_table = StringTable::new();
     let mut module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
     module.link_facts.external_import_candidates.push(
-        crate::build_system::build::ModuleExternalImport {
+        crate::compiler_frontend::module_compilation::ModuleExternalImport {
             package_id: ExternalPackageId(0),
             runtime_asset: Some(
                 crate::builder_surface::external_import_providers::provider::RuntimeAssetIdentity {
@@ -175,7 +176,7 @@ fn generate_module_glue_nested_html_output_path() {
     let mut string_table = StringTable::new();
     let mut module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
     module.link_facts.external_import_candidates.push(
-        crate::build_system::build::ModuleExternalImport {
+        crate::compiler_frontend::module_compilation::ModuleExternalImport {
             package_id: ExternalPackageId(0),
             runtime_asset: Some(
                 crate::builder_surface::external_import_providers::provider::RuntimeAssetIdentity {
@@ -214,7 +215,7 @@ fn generate_module_glue_asset_import_relative_to_glue_module() {
     let mut string_table = StringTable::new();
     let mut module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
     module.link_facts.external_import_candidates.push(
-        crate::build_system::build::ModuleExternalImport {
+        crate::compiler_frontend::module_compilation::ModuleExternalImport {
             package_id: ExternalPackageId(0),
             runtime_asset: Some(
                 crate::builder_surface::external_import_providers::provider::RuntimeAssetIdentity {
@@ -256,7 +257,7 @@ fn generate_module_glue_fallible_wrapper_validates_result_shape() {
     let mut string_table = StringTable::new();
     let mut module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
     module.link_facts.external_import_candidates.push(
-        crate::build_system::build::ModuleExternalImport {
+        crate::compiler_frontend::module_compilation::ModuleExternalImport {
             package_id: ExternalPackageId(0),
             runtime_asset: Some(
                 crate::builder_surface::external_import_providers::provider::RuntimeAssetIdentity {
@@ -395,7 +396,7 @@ fn build_import_map_html_includes_moth_runtime() {
 fn build_import_map_html_deduplicates_by_specifier() {
     let mut module = create_module_with_runtime_requirement();
     module.link_facts.external_import_candidates.push(
-        crate::build_system::build::ModuleExternalImport {
+        crate::compiler_frontend::module_compilation::ModuleExternalImport {
             package_id: ExternalPackageId(1),
             runtime_asset: None,
             required_runtime_imports: vec![
@@ -427,7 +428,7 @@ fn create_module_with_runtime_requirement() -> Module {
     let mut string_table = StringTable::new();
     let mut module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
     module.link_facts.external_import_candidates.push(
-        crate::build_system::build::ModuleExternalImport {
+        crate::compiler_frontend::module_compilation::ModuleExternalImport {
             package_id: ExternalPackageId(0),
             runtime_asset: None,
             required_runtime_imports: vec![

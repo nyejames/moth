@@ -102,7 +102,7 @@ impl FrontendProject {
             .collect::<Vec<_>>();
 
         let mut frontend = CompilerFrontend::new(
-            &Config::new(canonical_project_root),
+            Config::new(canonical_project_root).frontend_options(),
             string_table,
             style_directives,
             Arc::new(crate::compiler_frontend::external_packages::ExternalPackageRegistry::new()),

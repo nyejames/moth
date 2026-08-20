@@ -1,17 +1,11 @@
 //! Focused invariant tests for the compiled `Module` lane container.
 
-use crate::build_system::build::{
-    CompiledModuleArtifact, GeneratedFunctionSidecar, Module, ModuleCompilerMetadata,
-    ModuleExecutable, ModuleExternalImport, ModuleLinkFacts, ModuleRootActivity,
-    ProjectCompilation,
-};
+use crate::build_system::build::ProjectCompilation;
 use crate::build_system::create_project_modules::compiled_boundary::{
     BlockedModule, BlockedProvider, CompiledGraphBoundary, CompiledSourcePackage,
     CompletedSourcePackageRegistry, DiagnosedModule, ProjectFrontendCompilation,
 };
-use crate::build_system::create_project_modules::generated_worklist::{
-    BoundaryGeneratedFunctionStore, CompletedGeneratedFunction,
-};
+use crate::build_system::create_project_modules::generated_store::BoundaryGeneratedFunctionStore;
 use crate::build_system::create_project_modules::module_artifact_store::ModuleArtifactStore;
 use crate::build_system::create_project_modules::module_identity::ModuleId;
 use crate::build_system::create_project_modules::project_module_graph::ProjectModuleGraph;
@@ -48,6 +42,13 @@ use crate::compiler_frontend::hir::reactivity::ReactiveSourceId;
 use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::module_compilation::artefact::{
+    ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts,
+};
+use crate::compiler_frontend::module_compilation::{
+    CompiledModuleArtifact, CompletedGeneratedFunction, GeneratedFunctionSidecar, Module,
+    ModuleExternalImport, ModuleRootActivity,
+};
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallSummary,
 };
@@ -630,9 +631,9 @@ fn duplicate_declaration_inside_one_materialisation_context_fails_publication() 
     )]);
     let mut store = ModuleArtifactStore::new(1);
     let mut module = minimal_lane_module(PathBuf::from("@dup.moth"), true);
-    module.metadata.materialisation_context = Some(
+    module.metadata.materialisation_context = Some(Arc::new(
         ModuleMaterialisationContext::from_identities_for_test(vec![identity.clone(), identity]),
-    );
+    ));
 
     let error = store
         .publish_success(
@@ -667,10 +668,12 @@ fn materialisation_lookup_resolves_the_exact_template_row() {
     )]);
     let mut store = ModuleArtifactStore::new(1);
     let mut module = minimal_lane_module(PathBuf::from("@rows.moth"), true);
-    module.metadata.materialisation_context =
-        Some(ModuleMaterialisationContext::from_identities_for_test(
-            vec![first_identity, second_identity.clone()],
-        ));
+    module.metadata.materialisation_context = Some(Arc::new(
+        ModuleMaterialisationContext::from_identities_for_test(vec![
+            first_identity,
+            second_identity.clone(),
+        ]),
+    ));
     store
         .publish_success(
             ModuleId::from_index(0),
@@ -683,14 +686,12 @@ fn materialisation_lookup_resolves_the_exact_template_row() {
 
     let location = store
         .materialisation_context_for(&second_identity)
-        .expect("valid identity lookup")
         .expect("second identity should be indexed");
     assert_eq!(location.template_index, 1);
     assert!(store.materialisation_context_at(location).is_ok());
     assert!(
         store
             .materialisation_context_for(generated_test_identity("missing").declaration())
-            .expect("valid identity lookup")
             .is_none(),
         "an unindexed identity must miss without scanning"
     );
@@ -701,15 +702,15 @@ fn materialisation_lookup_resolves_the_exact_template_row() {
 fn same_generated_declaration_across_project_and_package_boundaries_fails() {
     let identity = generated_test_identity("shared").declaration().clone();
     let mut project_module = minimal_lane_module(PathBuf::from("@page.moth"), true);
-    project_module.metadata.materialisation_context = Some(
+    project_module.metadata.materialisation_context = Some(Arc::new(
         ModuleMaterialisationContext::from_identities_for_test(vec![identity.clone()]),
-    );
+    ));
     let project = test_graph_boundary(vec![project_module], "test", "page");
 
     let mut package_module = minimal_lane_module(PathBuf::from("@mod.moth"), true);
-    package_module.metadata.materialisation_context = Some(
+    package_module.metadata.materialisation_context = Some(Arc::new(
         ModuleMaterialisationContext::from_identities_for_test(vec![identity]),
-    );
+    ));
     let package = test_graph_boundary(vec![package_module], "html", "");
 
     let registry = test_package_registry(vec![CompiledSourcePackage {
@@ -1949,10 +1950,11 @@ fn materialisation_rows_iterate_in_deterministic_publication_order() {
     let mut store = ModuleArtifactStore::new(2);
 
     let mut second_module = minimal_lane_module(PathBuf::from("second/@mod.moth"), false);
-    second_module.metadata.materialisation_context =
-        Some(ModuleMaterialisationContext::from_identities_for_test(
-            vec![second_identity.declaration().clone()],
-        ));
+    second_module.metadata.materialisation_context = Some(Arc::new(
+        ModuleMaterialisationContext::from_identities_for_test(vec![
+            second_identity.declaration().clone(),
+        ]),
+    ));
     store
         .publish_success(
             ModuleId::from_index(1),
@@ -1964,10 +1966,11 @@ fn materialisation_rows_iterate_in_deterministic_publication_order() {
         .expect("higher module id publishes first");
 
     let mut first_module = minimal_lane_module(PathBuf::from("first/@mod.moth"), false);
-    first_module.metadata.materialisation_context =
-        Some(ModuleMaterialisationContext::from_identities_for_test(
-            vec![first_identity.declaration().clone()],
-        ));
+    first_module.metadata.materialisation_context = Some(Arc::new(
+        ModuleMaterialisationContext::from_identities_for_test(vec![
+            first_identity.declaration().clone(),
+        ]),
+    ));
     store
         .publish_success(
             ModuleId::from_index(0),
@@ -1999,10 +2002,11 @@ fn package_registry_materialisation_rows_iterate_in_publication_order() {
     let mut registry = CompletedSourcePackageRegistry::new();
 
     let mut beta_module = minimal_lane_module(PathBuf::from("packages/beta/@mod.moth"), false);
-    beta_module.metadata.materialisation_context =
-        Some(ModuleMaterialisationContext::from_identities_for_test(
-            vec![beta_identity.declaration().clone()],
-        ));
+    beta_module.metadata.materialisation_context = Some(Arc::new(
+        ModuleMaterialisationContext::from_identities_for_test(vec![
+            beta_identity.declaration().clone(),
+        ]),
+    ));
     registry
         .publish(
             CompiledSourcePackage {
@@ -2018,10 +2022,11 @@ fn package_registry_materialisation_rows_iterate_in_publication_order() {
         .expect("beta package publishes first");
 
     let mut alpha_module = minimal_lane_module(PathBuf::from("packages/alpha/@mod.moth"), false);
-    alpha_module.metadata.materialisation_context =
-        Some(ModuleMaterialisationContext::from_identities_for_test(
-            vec![alpha_identity.declaration().clone()],
-        ));
+    alpha_module.metadata.materialisation_context = Some(Arc::new(
+        ModuleMaterialisationContext::from_identities_for_test(vec![
+            alpha_identity.declaration().clone(),
+        ]),
+    ));
     registry
         .publish(
             CompiledSourcePackage {
@@ -2056,10 +2061,11 @@ fn late_package_duplicate_leaves_registry_unchanged() {
     let mut registry = CompletedSourcePackageRegistry::new();
 
     let mut first_module = minimal_lane_module(PathBuf::from("packages/first/@mod.moth"), false);
-    first_module.metadata.materialisation_context =
-        Some(ModuleMaterialisationContext::from_identities_for_test(
-            vec![shared_identity.declaration().clone()],
-        ));
+    first_module.metadata.materialisation_context = Some(Arc::new(
+        ModuleMaterialisationContext::from_identities_for_test(vec![
+            shared_identity.declaration().clone(),
+        ]),
+    ));
     registry
         .publish(
             CompiledSourcePackage {
@@ -2075,10 +2081,11 @@ fn late_package_duplicate_leaves_registry_unchanged() {
         .expect("first package publishes");
 
     let mut late_module = minimal_lane_module(PathBuf::from("packages/late/@mod.moth"), false);
-    late_module.metadata.materialisation_context =
-        Some(ModuleMaterialisationContext::from_identities_for_test(
-            vec![shared_identity.declaration().clone()],
-        ));
+    late_module.metadata.materialisation_context = Some(Arc::new(
+        ModuleMaterialisationContext::from_identities_for_test(vec![
+            shared_identity.declaration().clone(),
+        ]),
+    ));
     let error = registry
         .publish(
             CompiledSourcePackage {
