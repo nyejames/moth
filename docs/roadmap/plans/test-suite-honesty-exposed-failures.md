@@ -64,7 +64,7 @@ weakening the assertion to `rendered_output_contains`. Both hide the defect the 
 | Command | `cargo test -p moth --features benchmark_counters const_required_construction_preparation_is_reused_by_folding -- --test-threads=1` |
 | Environment | macOS 23.6.0 arm64, `benchmark_counters`, reproduced identically at one thread and at default parallelism |
 | Exposed by | Phase 8, giving the `counters` and `timers-counters` lanes an executing command |
-| Classification | pending review: compiler defect or an expectation that names more than it can require |
+| Classification | Phase 9 confirmed compiler defect: duplicate preparation of one composed TIR view |
 | Correction owner | `src/compiler_frontend/ast/templates/create_template_node.rs` and `src/compiler_frontend/ast/templates/template_control_flow/validation.rs` |
 | Status | open |
 | Validating commit | — |
@@ -89,12 +89,11 @@ the same root, phase and context again in `TemplatePreparationMode::ConstRequire
 consumes the returned preparation and never calls `prepare_tir_view`, which is the part the test's
 name is about and the part that is working.
 
-**The decision this entry carries.** Two preparation modes walking one view is either work that
-should be done once — the const-required facts derived from the single `Value` preparation — or two
-genuinely different walks, in which case the counter contract is 2 and the test asserts a number it
-was never entitled to. Phase 9 reviews which, and only then may the assertion change.
+**The decision this entry carries.** Phase 9 confirmed that the stronger count is entitled to one
+preparation: both modes walk the same composed view, and the const-required construction can carry
+the single prepared result into folding. The second preparation is duplicate compiler work, not a
+required semantic walk. Phase 10 removes the duplicate and keeps the exact `== 1` assertion.
 
 **Do not** satisfy this entry by relaxing the assertion to `>= 1`, by deleting the counter, or by
 dropping the `counters` and `timers-counters` lanes from the matrix. The first two remove the only
 observation of the duplicate walk; the third puts the failure back where nothing runs it.
-

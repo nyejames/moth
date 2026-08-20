@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "run": {
-    "id": "470d-0-18cd71e4df53bc60",
+    "id": "a896-0-18cd75e5a80e7010",
     "command": "honesty-audit",
     "os": "macos",
     "arch": "aarch64",
@@ -11,7 +11,7 @@
     "thread_count": null,
     "completed": true
   },
-  "generated_at": "2026-08-20T07:11:03Z",
+  "generated_at": "2026-08-20T08:24:24Z",
   "work_id": "test-suite-honesty",
   "base_revision": "f41f93a7a",
   "scanned_roots": [
@@ -2091,7 +2091,7 @@
     },
     {
       "name": "open_exposed_failures",
-      "command": "docs/roadmap/evidence/exposed-failure-ledger.md",
+      "command": "docs/roadmap/plans/test-suite-honesty-exposed-failures.md",
       "result": "2 — EF-0001 (borrow_checker_string_memory, integration) and EF-0002 (const_required_construction_preparation_is_reused_by_folding, counter lanes); see docs/roadmap/plans/test-suite-honesty-exposed-failures.md",
       "recorded_by_phase": "Phase 8"
     },
@@ -2184,7 +2184,7 @@
       "state": "present",
       "path": "target/test-reports/integration_suite_inventory.json",
       "schema_version": 8,
-      "run_id": "46f2-18cd71e4b2ef7678",
+      "run_id": "a889-18cd75e57b758598",
       "run_command": "tests --audit",
       "run_completed": true,
       "hard_policy_violation_count": 0,

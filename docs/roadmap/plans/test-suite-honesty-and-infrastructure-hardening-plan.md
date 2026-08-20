@@ -6,10 +6,9 @@
 WORK_ID: test-suite-honesty
 WORK_SOURCE: docs/roadmap/plans/test-suite-honesty-and-infrastructure-hardening-plan.md
 BASE_REVISION: f41f93a7a (post-TIR, post-benchmark-counters-timers)
-STATUS: active — Phase 8 complete including its pre-Phase-9 closeout, ready for Phase 9; two
-  exposed failures are open in the ledger
-CURRENT_SCOPE: Phase 8 feature, platform and CI visibility plus the audit/reporting closeout
-  (paused before Phase 9)
+STATUS: active — Phase 9 complete; Phase 10 exposed-defect corrections are next; paused before
+  Phase 11 final review
+CURRENT_SCOPE: Phase 10 corrections for the two reviewed, reproducible exposed failures
 COMPLETED:
   Phase 0: baseline established (4314 unit tests, 0 ignored, 1699 integration cases correct,
     1851 backend executions); durable inventory at docs/roadmap/evidence/test_honesty_inventory.json;
@@ -282,17 +281,38 @@ COMPLETED:
     helpers became shared owners: rust_scanner (the code/comment/literal classifier, now with a
     three-way TextClass) and source_tree (the fail-closed walk and workspace-relative display path,
     previously copied verbatim in feature_matrix and source_audit). moth::ENABLED_FEATURES became
-    public so xtask reports name the build configuration of the compiler they link rather than
-    xtask's own empty feature set. validation.mtf now states what each report guarantees instead of
-    claiming completed-run evidence for all of them, and gained the honesty-audit section.
-NEXT_ACTION: run Phase 9 (Patch A honesty checkpoint), then clear ledger entries EF-0001 and
-  EF-0002 in Phase 10
-VALIDATION: Phase 8 closeout (macOS 23.6.0 arm64) — cargo fmt --all --check clean; clippy
+  public so xtask reports name the build configuration of the compiler they link rather than
+  xtask's own empty feature set. validation.mtf now states what each report guarantees instead of
+  claiming completed-run evidence for all of them, and gained the honesty-audit section.
+  Phase 9: Patch A honesty checkpoint completed. The full available macOS validation, feature,
+  platform-owner, thread and repeat matrix preserved the stronger `rendered_output_exact` and
+  `TirPreparationAttempts == 1` assertions, exposed and reproduced EF-0001 and EF-0002, and
+  separated the sandbox-only socket denial from repository failures. The corrected exposed-failure
+  ledger and durable evidence passed interim auditor pass 2 with `audit_clean`; Phase 10 owns the
+  fixes and the two entries remain open.
+NEXT_ACTION: reproduce and fix EF-0001 and EF-0002 in Phase 10, then re-run the focused and full
+  code-bearing validation gates before its checkpoint
+VALIDATION: Phase 9 baseline (macOS 23.6.0 arm64) — cargo fmt --all -- --check clean;
+  just feature-lane-check (0 findings); cargo run --quiet -- tests --audit (1699 cases, 1851
+  backend executions); just source-audit (1172 files, 0 findings); just test-honesty-audit
+  (0 hard findings, 2196 dispositioned review occurrences, 0 composed findings, 34 ledger
+  findings with 0 open hard findings); just test-honesty-evidence (same counts and corrected
+  durable ledger path); just test-feature-matrix outside the sandbox (6 of 8
+  lanes pass, counters and timers-counters fail only EF-0002); cargo run --quiet -- tests
+  --terse (1850/1851, only EF-0001); MOTH_TEST_THREADS=1 and MOTH_TEST_THREADS=8 repeat the
+  same EF-0001 result; cargo test --workspace --quiet -- --test-threads=1 and --format terse
+  pass 4396 workspace tests, 17 CLI tests and 760 xtask tests; just stress 1 passes all three
+  unit lanes and reproduces only EF-0001 in all three integration lanes; just validate passes
+  Clippy, feature coverage, source audit and workspace tests, then stops at EF-0001 in its
+  integration step. The sandbox-only socket denial in the feature matrix was reproduced as
+  passing by the narrow owner test outside the sandbox. Linux and Windows platform legs remain
+  CI-owned and were not run on this macOS host.
+  Phase 8 closeout (macOS 23.6.0 arm64) — clippy
   --workspace --all-targets --all-features -D warnings clean; cargo test --workspace 4396+17+760,
   0 failed, 0 ignored (xtask 699 to 760: 61 new tests for the honesty audit, the shared scanner
   and tree, the finished report identity and the split matrix reports); docs check clean;
   honesty-audit 1173 files scanned, 564 test-owning, 0 hard findings, 11 review categories with
-  2195 dispositioned occurrences, 34 ledger findings with 0 open hard and 0 integrity findings, 0
+  2196 dispositioned occurrences, 34 ledger findings with 0 open hard and 0 integrity findings, 0
   composed findings; source-audit 1172 files, 0 findings; feature-lane-check 0 findings; the
   honesty audit was proved to fail closed by injecting an unowned ignore and a discarded
   set_current_dir, which it reported by file and line and exited 1 on. Feature matrix re-run to
@@ -349,7 +369,11 @@ VALIDATION: Phase 8 closeout (macOS 23.6.0 arm64) — cargo fmt --all --check cl
   pre-existing benchmark_counters failure unchanged; Linux lane passed via GitHub Actions
   validate-linux (4324 unit tests incl. Linux-only non-UTF-8 filesystem identity tests,
   1851/1851 integration cases)
-AUDITS: Phase 8 required repository search pass rerun across src and xtask (is_err/is_ok/
+AUDITS: Phase 9 interim auditor pass 2 is audit_clean after resolving two low-severity findings:
+  the EF-0002 pending-review wording now records the confirmed compiler defect, and the durable
+  open-exposed-failures command path now names the real ledger. `just test-honesty-evidence`
+  regenerated the durable inventory from the corrected path. Phase 8 required repository
+  search pass rerun across src and xtask (is_err/is_ok/
   expect_err/catch_unwind/should_panic; >=, non-empty and is_empty; exists/is_file/is_dir; lossy
   conversions and path unwrap_or_default; temp_dir/SystemTime::now/process::id; discarded results;
   env and current-dir mutation; sleeps, yields, clocks and mtimes; #[ignore]; feature and platform
@@ -375,13 +399,17 @@ AUDITS: Phase 8 required repository search pass rerun across src and xtask (is_e
   remaining report-rendering uses dispositioned; AUD-0001 (Redundancy over tests.support) —
   F01, F02 and F03 corrected on this branch, F04 routed to Phase 11, and F05 decided in Phase 7
   (both helpers retired, deletion left to Phase 11)
-BLOCKERS: none for Phase 9. Two exposed failures are open in
+BLOCKERS: none for Phase 10 implementation. Two exposed failures are open in
   docs/roadmap/plans/test-suite-honesty-exposed-failures.md — EF-0001 (assigned top-level templates
   are counted as page fragments) and EF-0002 (const-required construction prepares the same
-  composed view twice). Phase 9 reviews whether each stronger assertion is valid and Phase 10 owns
-  the corrections; the integration suite and the two counter lanes stay red until they land, which
-  is Patch A's intended state.
-NOTES: Phase 8 turned the pre-existing counter-lane failure into a reported one and ledgered it as
+  composed view twice). Phase 9 confirmed both stronger assertions are valid and Phase 10 owns the
+  corrections; the integration suite and the two counter lanes stay red until they land, which is
+  Patch A's intended state.
+NOTES: Phase 9 confirmed both stronger contracts are valid. Interim auditor pass 2 is clean after
+  correcting stale ledger/evidence metadata; both entries remain open and reproducible. EF-0001 is
+  user-visible page fragment behavior and reproduced at all integration thread counts. EF-0002 is
+  a real duplicate TIR preparation, reproduced in both counter lanes and isolated from the fold itself. Phase 8
+  turned the pre-existing counter-lane failure into a reported one and ledgered it as
   EF-0002. Root cause: Template::new_const_required prepares the same composed view twice — once at
   new_nested_template's Stage 6 in TemplatePreparationMode::Value and again in
   validate_const_required_template_control_flow in TemplatePreparationMode::ConstRequired — so

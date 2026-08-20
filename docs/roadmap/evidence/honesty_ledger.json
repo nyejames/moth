@@ -23,7 +23,7 @@
     },
     {
       "name": "open_exposed_failures",
-      "command": "docs/roadmap/evidence/exposed-failure-ledger.md",
+      "command": "docs/roadmap/plans/test-suite-honesty-exposed-failures.md",
       "result": "2 \u2014 EF-0001 (borrow_checker_string_memory, integration) and EF-0002 (const_required_construction_preparation_is_reused_by_folding, counter lanes); see docs/roadmap/plans/test-suite-honesty-exposed-failures.md",
       "recorded_by_phase": "Phase 8"
     },
