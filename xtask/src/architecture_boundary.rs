@@ -3,10 +3,15 @@
 //! WHAT: two source-shaped bans that Rust visibility cannot express — production code outside
 //!       `src/compiler_frontend` naming a frontend semantic stage owner, and production
 //!       `compiler_frontend` code naming the build system or the project tool's config container.
-//! WHY:  `style-guide.mtf > Production layering and stage ownership` is a dependency rule, and
-//!       every stage owner it names is `pub(crate)`, so the compiler cannot reject a build-side
-//!       caller. Visibility already carries as much of the rule as the module tree can express;
-//!       what remains is a direction, and a direction is only checkable across files.
+//! WHY:  `style-guide.mtf > Production layering and stage ownership` is a dependency rule. Every
+//!       owner named below is now `pub(in crate::compiler_frontend)` or narrower, so `rustc`
+//!       already rejects a build-side caller. What `rustc` cannot reject is the edit that widens
+//!       one of them back to `pub(crate)` in order to make such a caller compile — that edit is
+//!       legal Rust and silent. This file makes it fail in the same commit that performs it.
+//!
+//! The second rule is different in kind: nothing in the module tree stops `compiler_frontend` from
+//! importing `crate::build_system`, because both are crate-internal. That direction is only
+//! checkable across files, so text is the only tool available for it.
 //!
 //! These are reintroduction tripwires, not behaviour tests. The behaviour each protects — that one
 //! module compilation, one config compilation and one template fold each run behind a named
@@ -14,6 +19,10 @@
 //! rename or an equivalent reimplementation would pass. Saying so is why the rules live here.
 
 /// The frontend semantic stage owners production code outside the compiler must not name.
+///
+/// Each entry mirrors a declaration that is currently frontend-private. The list is the record of
+/// which names that privacy is load-bearing for, so widening one is visible as a rule violation
+/// rather than as an ordinary visibility tweak.
 ///
 /// Stage 0 source preparation is deliberately absent. `tokenize`, `prepare_file_frontend_local` and
 /// `prepare_header_syntax` are the documented build-system exception: deciding which source belongs
@@ -125,8 +134,8 @@ pub fn audit_architecture_boundary_fragment(
 ///
 /// `src/compiler_tests/` is deliberately not exempt as a directory: it also holds
 /// `integration_test_runner`, which ships without `#[cfg(test)]` and is production code backing
-/// `moth tests`. The harness test that drives stages directly is `frontend_pipeline_tests.rs`,
-/// which the filename rule already covers.
+/// `moth tests`. Its remaining `#[cfg(test)]` helpers name no stage owner, so treating them as
+/// production costs nothing and keeps the directory rule from hiding the runner.
 fn is_test_source(relative: &str) -> bool {
     relative.contains("/tests/") || relative.ends_with("_tests.rs")
 }

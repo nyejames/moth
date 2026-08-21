@@ -13,7 +13,7 @@ use crate::compiler_frontend::hir::functions::HirFunctionOriginLookup;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::module_metadata::HirLoweringResult;
 
-pub(crate) fn lower_hir(
+pub(in crate::compiler_frontend::module_compilation) fn lower_hir(
     compiler: &mut CompilerFrontend,
     module_ast: Ast,
     warnings: &[CompilerDiagnostic],
@@ -24,7 +24,7 @@ pub(crate) fn lower_hir(
         .map_err(|messages| merge_stage_messages(messages, warnings, &compiler.string_table))
 }
 
-pub(crate) fn check_borrows(
+pub(in crate::compiler_frontend::module_compilation) fn check_borrows(
     compiler: &CompilerFrontend,
     hir_module: &HirModule,
     warnings: &[CompilerDiagnostic],

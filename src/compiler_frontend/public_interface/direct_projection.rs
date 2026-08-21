@@ -79,7 +79,7 @@ pub(crate) struct PublicInterfaceDraftBuildResult {
 /// does not take a long positional parameter list.
 /// WHY: keeping the inputs named makes the construction boundary easier to audit than seven
 /// positional arguments.
-pub(crate) struct PublicInterfaceDraftBuilderInput<'a> {
+pub(in crate::compiler_frontend) struct PublicInterfaceDraftBuilderInput<'a> {
     pub export_seed: DirectExportSeed,
     pub public_interface_projection_input: AstPublicInterfaceProjectionInput,
     pub public_source_nominal_type_origins: &'a FxHashMap<InternedPath, OriginTypeId>,
@@ -113,7 +113,7 @@ pub(crate) struct PublicInterfaceDraftBuilderInput<'a> {
 /// source-nominal and source-trait origin indexes, while both the `TypeEnvironment` and
 /// `ExternalPackageRegistry` are still available. The output is retained only on overall
 /// semantic success.
-pub(crate) struct PublicInterfaceDraftBuilder<'a> {
+pub(in crate::compiler_frontend) struct PublicInterfaceDraftBuilder<'a> {
     input: PublicInterfaceDraftBuilderInput<'a>,
 }
 

@@ -36,8 +36,8 @@ pub(crate) enum FrontendCounter {
     TokenRescanCount,
     TopLevelDeclarationCount,
     ModuleCompilationSerialCount,
-    // Retained for benchmark-history schema stability while boundary worklist publication keeps
-    // module jobs serial. File preparation still uses Rayon independently.
+    // Retained for benchmark-history schema stability while boundary generated-function
+    // publication keeps module jobs serial. File preparation still uses Rayon independently.
     #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
     ModuleCompilationParallelTaskCount,
     FilePreparationSerialModuleCount,

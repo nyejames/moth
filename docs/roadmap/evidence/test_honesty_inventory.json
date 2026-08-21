@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "run": {
-    "id": "c915-0-18cd7d6506758180",
+    "id": "11cf0-0-18cdc449f155aec0",
     "command": "honesty-audit",
     "os": "macos",
     "arch": "aarch64",
@@ -11,15 +11,15 @@
     "thread_count": null,
     "completed": true
   },
-  "generated_at": "2026-08-20T10:41:48Z",
+  "generated_at": "2026-08-21T08:20:58Z",
   "work_id": "test-suite-honesty",
   "base_revision": "f41f93a7a",
   "scanned_roots": [
     "src",
     "xtask/src"
   ],
-  "scanned_file_count": 1173,
-  "test_owning_file_count": 564,
+  "scanned_file_count": 1199,
+  "test_owning_file_count": 576,
   "hard_findings": [],
   "review_findings": [
     {
@@ -42,10 +42,6 @@
         {
           "file": "src/backends/wasm/tests/lowering/lowering_tests.rs",
           "occurrences": 1
-        },
-        {
-          "file": "src/build_system/create_project_modules/generated_summary_convergence.rs",
-          "occurrences": 2
         },
         {
           "file": "src/build_system/create_project_modules/source_tree_index.rs",
@@ -74,10 +70,6 @@
         {
           "file": "src/build_system/tests/create_project_modules_tests.rs",
           "occurrences": 4
-        },
-        {
-          "file": "src/build_system/tests/generated_worklist_tests.rs",
-          "occurrences": 1
         },
         {
           "file": "src/build_system/tests/module_lane_tests.rs",
@@ -138,6 +130,14 @@
         {
           "file": "src/compiler_frontend/hir/tests/hir_function_provenance_tests.rs",
           "occurrences": 3
+        },
+        {
+          "file": "src/compiler_frontend/module_compilation/generated/convergence.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_frontend/module_compilation/generated/tests/transaction_tests.rs",
+          "occurrences": 1
         },
         {
           "file": "src/compiler_frontend/paths/tests/path_resolution_tests.rs",
@@ -442,7 +442,7 @@
           "occurrences": 3
         },
         {
-          "file": "src/build_system/tests/frontend_orchestration_tests.rs",
+          "file": "src/build_system/tests/module_preparation_tests.rs",
           "occurrences": 3
         },
         {
@@ -993,14 +993,10 @@
       "rationale": "Phase 4 gave artifact lookup a typed inventory that rejects a duplicate path instead of returning whichever entry came first.",
       "scope": "test_owning_files",
       "view": "code",
-      "occurrences": 70,
+      "occurrences": 69,
       "files": [
         {
-          "file": "src/build_system/create_project_modules/frontend_orchestration.rs",
-          "occurrences": 1
-        },
-        {
-          "file": "src/build_system/tests/frontend_orchestration_tests.rs",
+          "file": "src/build_system/tests/module_preparation_tests.rs",
           "occurrences": 2
         },
         {
@@ -1092,12 +1088,12 @@
           "occurrences": 1
         },
         {
-          "file": "src/compiler_frontend/tokenizer/tests/lexer_tests.rs",
-          "occurrences": 14
+          "file": "src/compiler_frontend/tests/frontend_pipeline_tests.rs",
+          "occurrences": 1
         },
         {
-          "file": "src/compiler_tests/frontend_pipeline_tests.rs",
-          "occurrences": 1
+          "file": "src/compiler_frontend/tokenizer/tests/lexer_tests.rs",
+          "occurrences": 14
         },
         {
           "file": "src/timing/tests/summary_tests.rs",
@@ -1167,11 +1163,7 @@
           "occurrences": 30
         },
         {
-          "file": "src/build_system/tests/generated_summary_convergence_tests.rs",
-          "occurrences": 2
-        },
-        {
-          "file": "src/build_system/tests/generated_worklist_tests.rs",
+          "file": "src/build_system/tests/generated_store_tests.rs",
           "occurrences": 2
         },
         {
@@ -1308,6 +1300,10 @@
         },
         {
           "file": "src/compiler_frontend/instrumentation/tests.rs",
+          "occurrences": 2
+        },
+        {
+          "file": "src/compiler_frontend/module_compilation/generated/tests/convergence_tests.rs",
           "occurrences": 2
         },
         {
@@ -2184,7 +2180,7 @@
       "state": "present",
       "path": "target/test-reports/integration_suite_inventory.json",
       "schema_version": 8,
-      "run_id": "c8fd-18cd7d64998d8bf8",
+      "run_id": "11cbc-18cdc449684fe898",
       "run_command": "tests --audit",
       "run_completed": true,
       "hard_policy_violation_count": 0,
@@ -2239,7 +2235,7 @@
     "open_hard_ledger_finding_count": 0,
     "composed_finding_count": 0,
     "review_finding_count": 11,
-    "review_occurrence_count": 2196,
+    "review_occurrence_count": 2195,
     "passed": true
   }
 }

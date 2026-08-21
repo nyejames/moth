@@ -187,7 +187,7 @@ impl DirectExportSeed {
 ///      reconstructed by a later stage. Resolving the origin from the table validates that every
 ///      directly-defined public declaration belongs to one unique active module origin, instead
 ///      of trusting a single loose argument.
-pub(crate) fn build_direct_export_seed(
+pub(in crate::compiler_frontend) fn build_direct_export_seed(
     source_module_origins: &SourceModuleOriginTable,
     active_root_file_id: FileId,
     sorted_headers: &[Header],
@@ -488,7 +488,7 @@ fn index_public_nominal_type_origins(
 /// Rejects a missing `FileId`, an out-of-range table lookup, a duplicate canonical nominal path,
 /// a category inconsistency or a conflicting origin explicitly. It never silently overwrites an
 /// existing entry.
-pub(crate) fn build_public_source_nominal_origin_index(
+pub(in crate::compiler_frontend) fn build_public_source_nominal_origin_index(
     source_module_origins: &SourceModuleOriginTable,
     sorted_headers: &[Header],
     module_symbols: &ModuleSymbols,
@@ -566,7 +566,7 @@ pub(crate) fn build_public_source_nominal_origin_index(
 ///
 /// Rejects a missing `FileId`, an out-of-range table lookup, a duplicate canonical trait path
 /// or a conflicting origin explicitly. It never silently overwrites an existing entry.
-pub(crate) fn build_public_source_trait_origin_index(
+pub(in crate::compiler_frontend) fn build_public_source_trait_origin_index(
     source_module_origins: &SourceModuleOriginTable,
     sorted_headers: &[Header],
     module_symbols: &ModuleSymbols,

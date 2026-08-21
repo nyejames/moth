@@ -7,9 +7,12 @@
 //!       list threaded through each one.
 //!
 //! This is not a production entry point. The services in `module_compilation` and
-//! `single_source_compilation` decide which stages run and in what order; every method here is
-//! crate-visible so those services and the frontend's own tests can drive one stage, not so build
-//! or project code can assemble a sequence of its own.
+//! `single_source_compilation` decide which stages run and in what order.
+//!
+//! Visibility follows that split. Tokenization and per-file preparation are crate-visible because
+//! Stage 0 legitimately prepares source before any module is ready. Every semantic stage —
+//! ordering, AST, HIR and borrow validation — is visible only inside `compiler_frontend`, so build
+//! or project code cannot assemble a semantic sequence of its own.
 
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::FrontendBuildProfile;
@@ -102,7 +105,7 @@ pub(crate) fn file_frontend_prepare_count_for_path_for_test(path: &Path) -> usiz
         .unwrap_or(0)
 }
 
-pub struct CompilerFrontend {
+pub(crate) struct CompilerFrontend {
     pub(crate) external_package_registry: Arc<ExternalPackageRegistry>,
     pub(crate) style_directives: StyleDirectiveRegistry,
     pub(crate) string_table: StringTable,
@@ -362,7 +365,7 @@ impl CompilerFrontend {
     // ---------------------------
     //  DEPENDENCY SORTING
     // ---------------------------
-    pub(crate) fn sort_headers(
+    pub(in crate::compiler_frontend) fn sort_headers(
         &mut self,
         headers: BoundModuleHeaders,
     ) -> Result<SortedHeaders, DiagnosticBag> {
@@ -372,7 +375,7 @@ impl CompilerFrontend {
     // -----------------------------
     //  AST CREATION
     // -----------------------------
-    pub(crate) fn headers_to_ast(
+    pub(in crate::compiler_frontend) fn headers_to_ast(
         &mut self,
         sorted: SortedHeaders,
         entry_file_path: &Path,
@@ -433,7 +436,7 @@ impl CompilerFrontend {
     // -----------------------------
     //  HIR GENERATION
     // -----------------------------
-    pub(crate) fn generate_hir(
+    pub(in crate::compiler_frontend) fn generate_hir(
         &mut self,
         ast: Ast,
         function_origin_lookup: HirFunctionOriginLookup,
@@ -449,7 +452,7 @@ impl CompilerFrontend {
     // ------------------------------
     //  BORROW CHECKING AND ANALYSIS
     // ------------------------------
-    pub(crate) fn check_borrows(
+    pub(in crate::compiler_frontend) fn check_borrows(
         &self,
         hir_module: &HirModule,
     ) -> Result<BorrowCheckReport, CompilerMessages> {

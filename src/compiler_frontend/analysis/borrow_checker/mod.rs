@@ -31,7 +31,7 @@ use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
-pub(crate) fn check_borrows(
+pub(in crate::compiler_frontend) fn check_borrows(
     module: &HirModule,
     external_package_registry: &ExternalPackageRegistry,
     string_table: &StringTable,

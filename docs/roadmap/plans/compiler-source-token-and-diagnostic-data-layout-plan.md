@@ -112,9 +112,10 @@ RELEVANT_CODE:
 - `src/build_system/create_project_modules/prepared_source.rs`: current state-safe source-kind handoff into module preparation
 - `src/build_system/create_project_modules/source_loading.rs`: current source IO and byte-loading owner
 - `src/build_system/create_project_modules/compilation.rs`: canonical module ordering, local identity forks and module-result merging
-- `src/build_system/create_project_modules/frontend_orchestration.rs`: current source attachment, deterministic file-preparation merge and frontend stage ownership
+- `src/build_system/create_project_modules/module_preparation.rs`: current source attachment and deterministic file-preparation merge. Stage 0 stops at prepared syntax; it owns no frontend stage.
 - `src/build_system/build.rs::InputFile`: current duplicate source-text/path carrier and mutable backend string-table handoff
-- `src/compiler_frontend/pipeline.rs::CompilerFrontend`: current mutable frontend owner and per-module `SourceFileTable`
+- `src/compiler_frontend/module_compilation/service.rs::compile_module`: the one production owner of the local semantic sequence, and the consumer of whatever source identity representation this plan lands on
+- `src/compiler_frontend/pipeline.rs::CompilerFrontend`: current mutable stage-facade state and per-module `SourceFileTable`
 - `src/compiler_frontend/symbols/identity.rs`: current `FileId` and `SourceFileTable`
 - `src/compiler_frontend/symbols/interned_path.rs`: current `Vec<StringId>` complete-path owner
 - `src/compiler_frontend/symbols/string_interning.rs`: existing immutable-base fork and deterministic delta merge to reuse
@@ -283,7 +284,7 @@ This table is normative. Do not create a new subsystem when the listed current o
 | `SourceFileTable` | absorb into the build-lifetime `SourceDatabase`; assign IDs once in Stage 0 | per-module file tables, fallback path reconstruction and `attach_source_files` |
 | `InputFile`, `PreparedSourceInput` and source-loading slots | replace with pre-registered source slots whose text allocation is populated once and then addressed by `SourceId`; module inputs become ordered `SourceId` sets | duplicate source strings, per-module input copies and another source cache |
 | `CompilerFrontend` | remain the explicit mutable module compiler owner; borrow build-owned source registration, style directives, path resolver and external registries while owning only module-local mutable string/path/diagnostic state | a parallel all-purpose `CompilationContextBuilder` and per-module clones of immutable build services |
-| `FrontendModuleBuildContext` | continue to own one module compilation's orchestration inputs and consume already-prepared source IDs | a generic worker/task framework |
+| `ModuleCompilationContext` | continue to own one module compilation's immutable inputs and consume already-prepared source IDs | a generic worker/task framework |
 | `TokenStats`, `HeaderStats`, `FrontendArenaCapacityEstimate` | extend only with the layout metrics explicitly required by Phases 0, 3 and 7 | another token-statistics or capacity subsystem |
 | `FrontendCounter` and `xtask` benchmarks | add layout counters and reports here | ad hoc timers, counters or standalone benchmark runners in data modules |
 | `FileFrontendPrepareOutput` | evolve into one cached `PreparedSource` result per `SourceId`, consumed first by structural reachability and later by module aggregation | retokenization for dependency scanning and token stores copied into every header or declaration |

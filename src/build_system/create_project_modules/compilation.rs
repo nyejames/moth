@@ -833,9 +833,9 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
         #[cfg(feature = "timers")]
         let module_context = Some(crate::timing::TimingContext::for_module(timing_module_key));
 
-        // Semantic compilation is provider-dependent: it binds retained `PreparedHeaderSyntax`
-        // against provider interfaces, then resolves dependencies, builds AST, lowers HIR and
-        // runs borrow validation.
+        // Semantic compilation is provider-dependent, so every required provider interface must
+        // already be published before this call. The stage sequence behind it belongs to
+        // `compile_module`; Stage 0 only guarantees the inputs.
         let source_provider_dependencies =
             match self.build_source_provider_dependencies(module_id, &prepared) {
                 Ok(dependencies) => dependencies,

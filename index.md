@@ -45,7 +45,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 
 ## Frontend stage map
 
-- [frontend module map](src/compiler_frontend/mod.rs); [CompilerFrontend driver](src/compiler_frontend/pipeline.rs)
+- [frontend module map](src/compiler_frontend/mod.rs); [CompilerFrontend stage facade](src/compiler_frontend/pipeline.rs) — held by the services below, not an entry point of its own; its semantic stage methods are frontend-private
 - [module_compilation](src/compiler_frontend/module_compilation/): compiler-owned module compilation boundary — [service.rs](src/compiler_frontend/module_compilation/service.rs) `compile_module`, the canonical local semantic sequence, [context.rs](src/compiler_frontend/module_compilation/context.rs) the provider interfaces and options one job reads, [options.rs](src/compiler_frontend/module_compilation/options.rs) frontend options, [prepared.rs](src/compiler_frontend/module_compilation/prepared.rs) provider-independent prepared input, [artefact.rs](src/compiler_frontend/module_compilation/artefact.rs) `Module` executable/link-fact/compiler-metadata lanes and `CompiledModuleArtifact`, [generated/](src/compiler_frontend/module_compilation/generated/) request canonicalisation, materialisation, convergence, sidecars and the per-transaction generated delta, [outcome.rs](src/compiler_frontend/module_compilation/outcome.rs) success/diagnosed classification, [external_imports.rs](src/compiler_frontend/module_compilation/external_imports.rs) provider and builder runtime import candidates, [stages.rs](src/compiler_frontend/module_compilation/stages.rs) warning-preserving HIR and borrow wrappers. kw: FrontendOptions, PreparedModuleInput, ModuleSemanticResult.
 - [single_source_compilation](src/compiler_frontend/single_source_compilation/): the two named short compiler paths that stop at folded AST — [config.rs](src/compiler_frontend/single_source_compilation/config.rs) the `config.moth` stage sequence, its dialect surface and authored key spans, [moth_template.rs](src/compiler_frontend/single_source_compilation/moth_template.rs) the direct `.mtf` fold to a `content` string. kw: compile_config_source, compile_moth_template_source, InvalidConfigReason.
 - [tokenizer](src/compiler_frontend/tokenizer/): lex source/templates into tokens. kw: TokenizeMode, SourceLocation.
@@ -170,7 +170,9 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 
 ## Tests/tooling
 
-- [integration test runner](src/compiler_tests/integration_test_runner/): manifest fixtures, expectations, execution, and assertion-family owners under [assertions](src/compiler_tests/integration_test_runner/assertions/).
+- [integration test runner](src/compiler_tests/integration_test_runner/): manifest fixtures, expectations, execution, and assertion-family owners under [assertions](src/compiler_tests/integration_test_runner/assertions/). Production code, not `#[cfg(test)]`.
+- [frontend stage-boundary tests](src/compiler_frontend/tests/frontend_pipeline_tests.rs): one stage at a time, for handoffs a stage-local test cannot see. Not the canonical sequence — that is `compile_module`.
+- [architecture boundary rules](xtask/src/architecture_boundary.rs): the compiler/build dependency direction the source audit enforces.
 - [integration fixtures](tests/cases/): expect.toml backend matrices.
 - [subsystem unit tests](src/): `*/tests` and module tests throughout src/.
 - [in-process compiler benchmark API](src/benchmarking/): for xtask/dev tooling.

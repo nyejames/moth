@@ -49,7 +49,7 @@ A generic template lives in the declaring module as an immutable validated templ
 2. resolves required visible trait evidence
 3. emits a **module-local request** keyed by stable generic identity, canonical concrete types and evidence identities
 
-The build system aggregates, deduplicates and schedules requests. The compiler materialises each accepted request as a **generated sidecar** beside the base module. Base artefacts stay immutable. Generated functions carry their own HIR, borrow facts and link facts. New concrete code grows beside the original template. The template itself does not mutate.
+The build system aggregates requests across a compilation boundary and lends the published set as an immutable view; the compiler deduplicates each request against that set. The compiler materialises each accepted request as a **generated sidecar** beside the base module. Base artefacts stay immutable. Generated functions carry their own HIR, borrow facts and link facts. New concrete code grows beside the original template. The template itself does not mutate.
 
 HIR and backends never infer generic arguments or consume unresolved template state. Concrete code appears before they look.
 

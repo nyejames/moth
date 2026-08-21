@@ -140,7 +140,7 @@ pub(crate) fn validate_public_call_summary(
 /// WHY: convergence must make progress through one explicit finite order. Silently accepting a
 ///      narrowing or incomparable transition would make scheduling order observable and hide an
 ///      error in the summary producer.
-pub(crate) fn validate_public_call_summary_transition(
+pub(in crate::compiler_frontend) fn validate_public_call_summary_transition(
     previous: &PublicCallSummary,
     next: &PublicCallSummary,
 ) -> Result<PublicCallSummaryTransition, CompilerError> {

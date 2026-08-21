@@ -82,8 +82,8 @@ pub(in crate::compiler_frontend::ast) struct AstEmission {
         FxHashMap<InternedPath, FoldedConstTemplateResult>,
     /// Concrete generic function instances emitted while lowering visible calls.
     pub(in crate::compiler_frontend::ast) generic_instance_count: usize,
-    /// Imported generic calls are inferred here but materialised by the build-owned sidecar
-    /// worklist from the declaring module's retained context.
+    /// Imported generic calls are inferred here but materialised by the generated-function
+    /// transaction from the declaring module's retained context.
     pub(in crate::compiler_frontend::ast) deferred_generic_requests:
         Vec<GenericFunctionInstantiationRequest>,
 }
@@ -451,7 +451,8 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
     //  Emit function bodies
     // --------------------------
 
-    /// Move inferred generic calls into the build-owned worklist without parsing their bodies.
+    /// Move inferred generic calls into the generated-function transaction without parsing their
+    /// bodies.
     ///
     /// The dedicated generated-function materialiser invokes `emit_generic_function_instance`
     /// for one selected request. Ordinary module emission only records stable requests, including
@@ -740,8 +741,8 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             ));
         }
 
-        // Nested calls remain stable requests. The build-owned worklist materialises their
-        // bodies, records dependency edges and detects indirect request cycles.
+        // Nested calls remain stable requests. The generated-function transaction materialises
+        // their bodies, records dependency edges and detects indirect request cycles.
         self.defer_requested_generic_function_instances();
 
         // --------------------------

@@ -29,7 +29,7 @@ const _: () = {
 /// The context remains the sole durable owner. This compatibility-free validation wrapper uses
 /// the existing total join rules while the former body-only store is removed from module
 /// metadata.
-pub(crate) fn validate_materialisation_context_templates(
+pub(in crate::compiler_frontend) fn validate_materialisation_context_templates(
     draft: &PublicInterfaceDraft,
     callable_seeds: &[CallableSeed],
     templates: &mut FxHashMap<InternedPath, GenericFunctionTemplate>,

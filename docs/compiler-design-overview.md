@@ -36,7 +36,7 @@ or thorough reviews.
 | Cross-module declaration, type, builtin or binding identity | `Stable semantic identities` | `Public semantic interfaces` |
 | Public surfaces, exported effects, aliases, conformances or project provenance | `Public semantic interfaces` | `Stable semantic identities` and the relevant language reference |
 | Fingerprints, invalidation inputs or compiler-owned reuse facts | `Fingerprints and reuse facts` | `docs/build-system-design.md` > `Incremental and persistent artefacts` |
-| Concrete generic materialisation or generated sidecars | `Generated concrete functions`; `Frontend stages > Stage 4: AST semantics > Generics` | `docs/build-system-design.md` > `Generated-function worklist` |
+| Concrete generic materialisation or generated sidecars | `Generated concrete functions`; `Frontend stages > Stage 4: AST semantics > Generics` | `docs/build-system-design.md` > `Generated-function boundary` |
 | Tokenization, header syntax, interface binding, source-kind preparation or local declaration ordering | The relevant section under `Frontend stages > Stage 1: tokenization`, `Stage 2: header syntax and interface binding` or `Stage 3: local declaration ordering` | `docs/build-system-design.md` > `Prepared-source orchestration` when Stage 0 consumes or schedules the result |
 | AST typing, constants, traits, casts, templates, reactivity or another language feature | `Frontend stages > Stage 4: AST semantics` and the exact relevant subsection | The feature's canonical unsuffixed language references and routed memory material when value flow is affected |
 | HIR shape, lowering, validation, numeric ownership or call targets | `Frontend stages > Stage 5: HIR and validation` and the exact relevant subsection | The affected Stage 4 producer, Stage 6 consumer or backend handoff |
@@ -109,6 +109,8 @@ Rules:
 - Normal modules, support modules, project package facades and synthetic single-file compilation use this one service after provider-independent preparation.
 - Specialised shorter paths are separate named compiler services, not permission for build or project code to assemble raw stages.
 
+These rules are enforced, not only stated. Every stage owner named above is `pub(in crate::compiler_frontend)` or narrower, so a build-side caller does not compile. `xtask/src/architecture_boundary.rs` guards the edit that would widen one of them back, and guards the reverse direction — `compiler_frontend` importing the build system or the project tool's config container — which the module tree cannot express.
+
 Stage 0 keeps one narrow exception. It asks the compiler to prepare provider-independent source before any provider interface exists, because it needs the retained structural provider references to finish the graph. That exception ends at prepared syntax: Stage 0 decides which source candidate to prepare and when, and reads structural provider references from the result. It does not bind source symbols, order declarations or enter AST, HIR or borrow stages.
 
 ### Module compilation input
@@ -158,10 +160,14 @@ pub type CompileModuleResult =
     Result<ModuleCompilationOutcome, CompilerError>;
 
 pub enum ModuleCompilationOutcome {
-    Success(CompiledModuleArtifact),
+    Success(ModuleSemanticResult),
     Diagnosed(ModuleDiagnostics),
 }
 ```
+
+`ModuleSemanticResult` is the complete unmerged result of one module compilation: the validated module lanes, the generated delta completed in the same transaction, the closed public interface, and the module-local string table carrying every diagnostic render identity. The build system merges that table into its own, remaps the result and stores the merged pair as a `CompiledModuleArtifact`.
+
+The two types are deliberately different. The success payload is what the compiler produced; the artefact is what the boundary published. Publication is atomic, so a result that fails validation at the boundary is discarded whole rather than leaving a merged half.
 
 Contracts:
 
@@ -177,17 +183,24 @@ The build system may collect successful independent branches for `check` or futu
 
 ### Compiled module artefact
 
-A successful module result has four explicit data lanes plus fingerprints.
+A successful module result separates the consumer-visible interface from the three module-local lanes.
 
 ```rust
-pub struct CompiledModuleArtifact {
-    pub interface: PublicSemanticInterface,
+pub struct Module {
     pub executable: ModuleExecutable,
     pub link_facts: ModuleLinkFacts,
     pub metadata: ModuleCompilerMetadata,
-    pub fingerprints: ModuleFingerprints,
+}
+
+pub struct CompiledModuleArtifact {
+    pub module: Module,
+    pub interface: PublicSemanticInterface,
 }
 ```
+
+The three module-local lanes are grouped because they share one lifetime and one remap: string-ID remapping after a table merge covers HIR, type identity, link facts and metadata in a single pass over `Module`. The interface is separate because it is the only lane another module reads.
+
+The reuse fingerprints described under `Fingerprints and reuse facts` are planned design, not a current artefact lane.
 
 `PublicSemanticInterface` contains consumer-visible semantic facts.
 
@@ -523,7 +536,7 @@ Covers backend-neutral link facts derived from callable functions and dormant ro
 - runtime glue requirements
 - rendered runtime path and asset facts
 
-Generated-function requests are worklist dependencies carried with module link data, but they are not runtime-dependency fingerprint contents. A change to the emitted request set is covered by implementation and worklist invalidation, updates generated sidecars and relinks affected assemblies.
+Generated-function requests are materialisation dependencies carried with module link data, but they are not runtime-dependency fingerprint contents. A change to the emitted request set is covered by implementation invalidation, updates generated sidecars and relinks affected assemblies.
 
 ### Documentation fingerprint
 
@@ -551,7 +564,7 @@ A generated request is keyed by:
 
 The declaring module owns and validates the immutable generic template. AST in a consumer emits requests
 from the active specialised executable AST. Calls in inactive static branches may be frontend-validated
-but do not enter the generated-function worklist.
+but emit no generated request.
 
 Generated boundary scheduling and generated semantic completion are different owners.
 
@@ -591,9 +604,11 @@ Each generated function artefact owns:
 
 Generated HIR does not borrow the mutable local type environment of the requesting module and does not extend the declaring dependency artefact. Cross-module calls use stable targets.
 
-A generated function may request further instances. Requests raised while one module compiles converge inside that
-module's compiler transaction. Requests that cross module boundaries converge through the build-system worklist,
-which reaches a fixed point by scheduling further compiler module jobs rather than by driving semantic stages itself.
+A generated function may request further instances. Every request converges inside the requesting module's own compiler
+transaction, including a request against a generic declared in another module: the declaring module's retained
+materialisation context is published with its artefact, so the requester materialises from it without a second module
+job. The build system contributes the published set the request is deduplicated against and the wave order the module
+was scheduled in; it schedules no additional compilation to reach the generated fixed point.
 
 A diagnosed generated request exposes no partial generated artefact. It blocks only entries or package surfaces that require it. An internal generated-function `CompilerError` aborts the owning project or package compilation.
 
@@ -1270,7 +1285,16 @@ Concrete HTML assembly, JavaScript and Wasm partitioning, external JavaScript gl
 
 Current locations are navigation aids rather than permanent architecture.
 
-- Frontend orchestration: `src/compiler_frontend/pipeline.rs`
+### Production entry points
+
+- Canonical module compilation: `src/compiler_frontend/module_compilation/service.rs`
+- Its inputs, options, outcome and artefact lanes: `src/compiler_frontend/module_compilation/`
+- Generated request canonicalisation, materialisation, convergence and delta: `src/compiler_frontend/module_compilation/generated/`
+- Project config compilation and direct Moth-template compilation: `src/compiler_frontend/single_source_compilation/`
+- The stage facade those services drive, which is not an entry point of its own: `src/compiler_frontend/pipeline.rs`
+
+### Stage owners
+
 - Tokenization and numeric text: `src/compiler_frontend/tokenizer/`, `src/compiler_frontend/numeric_text/`
 - Header syntax, binding and declaration shells: `src/compiler_frontend/headers/`, `src/compiler_frontend/declaration_syntax/`
 - Path syntax tables and general path resolution: `src/compiler_frontend/paths/`
@@ -1279,7 +1303,9 @@ Current locations are navigation aids rather than permanent architecture.
 - Type identity, access, coercion, traits and builtins: `src/compiler_frontend/datatypes/`, `src/compiler_frontend/value_mode.rs`, `src/compiler_frontend/type_coercion/`, `src/compiler_frontend/traits/`, `src/compiler_frontend/builtins/`
 - Binding-backed interfaces: `src/compiler_frontend/external_packages/`
 - AST, constants, generics, templates and TIR: `src/compiler_frontend/ast/`
+- Public-interface projection and validation: `src/compiler_frontend/public_interface/`
 - HIR, validation and reachability: `src/compiler_frontend/hir/`
 - Borrow validation: `src/compiler_frontend/analysis/borrow_checker/`
 - Target-contract validation: backend feature and external package validation owners under `src/backends/`
+- Boundary rules over these owners: `xtask/src/architecture_boundary.rs`
 - Integration cases and validation: `tests/cases/`, `src/compiler_tests/`, `justfile`

@@ -52,7 +52,7 @@ struct MaterialisingRequest {
 }
 
 /// Materialise every request this module emitted from its own AST.
-pub(crate) fn materialise_generated_request_roots(
+pub(in crate::compiler_frontend::module_compilation) fn materialise_generated_request_roots(
     context: &ModuleCompilationContext<'_>,
     request_ids: &[GeneratedRequestId],
     transaction: &mut GeneratedFunctionTransaction<'_>,

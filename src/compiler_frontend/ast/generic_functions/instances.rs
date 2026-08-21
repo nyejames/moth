@@ -31,7 +31,8 @@ pub(crate) struct GenericFunctionInstance {
 #[derive(Debug, Clone)]
 pub(crate) struct GenericFunctionInstantiationRequest {
     /// Imported public contracts already carry their origin. Local requests receive either a
-    /// public origin or an artefact-scoped private identity before worklist canonicalisation.
+    /// public origin or an artefact-scoped private identity before stable-request
+    /// canonicalisation.
     pub(crate) declaration_identity: Option<GeneratedDeclarationIdentity>,
     /// Ordered local evidence selections, canonicalized when the stable request is installed.
     pub(crate) evidence: Box<[crate::compiler_frontend::traits::ids::TraitEvidenceId]>,

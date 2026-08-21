@@ -34,6 +34,7 @@ use crate::compiler_frontend::module_compilation::artefact::{
 };
 use crate::compiler_frontend::module_compilation::context::ModuleCompilationContext;
 use crate::compiler_frontend::module_compilation::external_imports::collect_external_import_candidates_for_source_files;
+use crate::compiler_frontend::module_compilation::generated::artefacts::GeneratedFunctionDelta;
 use crate::compiler_frontend::module_compilation::generated::convergence::{
     install_exact_concrete_call_summaries, run_generated_summary_convergence,
 };
@@ -55,8 +56,9 @@ use crate::compiler_frontend::public_interface::{
     SourceProviderDependencySet, build_direct_export_seed,
     build_public_source_nominal_origin_index, build_public_source_trait_origin_index,
 };
-use crate::compiler_frontend::semantic_identity::ModuleRootRole;
-use crate::compiler_frontend::symbols::identity::SourceFileTable;
+use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StableModuleOriginIdentity};
+use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
+use crate::compiler_frontend::symbols::identity::{FileId, SourceFileTable};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::validated_generic_template_metadata::validate_materialisation_context_templates;
 use crate::{borrow_log, timed_stage_attributed};
@@ -83,8 +85,6 @@ pub(crate) fn compile_module(
     known_generated: KnownGeneratedFunctions<'_>,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
 ) -> Result<ModuleCompilationOutcome, CompilerError> {
-    let mut generated_transaction = GeneratedFunctionTransaction::new(known_generated);
-
     // The entry file is a retained preparation identity, so it is resolved from the payload
     // rather than repeated as an argument the caller must keep in sync.
     let entry_file_path = prepared.entry_file_path()?.to_path_buf();
@@ -96,11 +96,16 @@ pub(crate) fn compile_module(
         prepared_header_syntax,
         string_table,
         source_files,
-        mut warnings,
+        warnings,
         source_file_count,
         source_byte_count,
     } = prepared;
 
+    // The active module origin is resolved from the per-file source-origin table using the
+    // retained active root FileId, not from a loose origin argument. Preparation already
+    // validated the active root's table origin against the expected active origin, so the
+    // semantic projection re-derives the same origin from the table and validates every
+    // directly-defined public header against it.
     let active_module_origin = source_module_origins
         .origin_for(active_root_file_id)?
         .ok_or_else(|| {
@@ -110,15 +115,6 @@ pub(crate) fn compile_module(
             ))
         })?
         .clone();
-    let active_root_role = active_module_origin.role();
-
-    // The active module origin is resolved from the per-file source-origin table using the
-    // retained active root FileId, not from a loose origin argument. Preparation already
-    // validated the active root's table origin against the expected active origin, so the
-    // semantic projection re-derives the same origin from the table and validates every
-    // directly-defined public header against it.
-
-    let external_dependency_resolution_table = context.external_dependency_resolution_table;
 
     let mut compiler = CompilerFrontend::new(
         context.options.clone(),
@@ -129,402 +125,23 @@ pub(crate) fn compile_module(
     );
     compiler.set_source_files(source_files);
 
-    let compile_result = (|| {
-        // 1. Bind retained header syntax against provider interfaces.
-        let module_headers = timed_stage_attributed!(
-            crate::timing::TimingMetric::FrontendBindHeaders,
-            timing_context,
-            {
-                bind_retained_headers(
-                    &mut compiler,
-                    prepared_header_syntax,
-                    external_dependency_resolution_table,
-                    context.source_provider_dependencies,
-                    &warnings,
-                )
-            }
-        )?;
-
-        let capacity_estimate = record_frontend_capacity_estimate(
+    let compile_result = run_semantic_stages(
+        &mut compiler,
+        context,
+        known_generated,
+        warnings,
+        SemanticStageInputs {
+            prepared_header_syntax,
+            source_module_origins,
+            active_root_file_id,
+            active_module_origin,
+            entry_file_path,
             source_file_count,
             source_byte_count,
-            &module_headers,
-        );
-
-        // 2. Resolve dependencies and sort headers for linear processing.
-        let sorted = timed_stage_attributed!(
-            crate::timing::TimingMetric::FrontendOrderDeclarations,
-            timing_context,
-            sort_headers(&mut compiler, module_headers, &warnings)
-        )?;
-
-        let root_activity = ModuleRootActivity {
-            has_non_trivial_root_body: sorted.has_non_trivial_root_body,
-            const_fragment_count: sorted.const_fragment_count,
-            runtime_fragment_count: sorted.entry_runtime_fragment_count,
-        };
-
-        // Project the pre-AST `DirectExportSeed` from the bound, sorted declaration shells
-        // and header-built public export metadata. This is the immediate consumer of the
-        // per-file source-origin side table: the bindings and the public nominal-type origin
-        // index depend only on header shells, so they are projected here before `sorted`
-        // moves into AST construction. `DirectExportSeed` is the pre-AST export-identity
-        // authority: it carries only header-shell facts and resolves no callable identities.
-        // The post-AST `CallableSeed` table, built inside the public-interface draft builder,
-        // joins this seed with the resolved receiver-method catalog to own receiver and
-        // callable identity, so best-effort header receiver names never mask valid generic
-        // receiver methods or preempt AST receiver diagnostics. The draft is retained only
-        // on overall semantic success, so a diagnosed module exposes no component.
-        let export_seed = build_direct_export_seed(
-            &source_module_origins,
-            active_root_file_id,
-            &sorted.headers,
-            &sorted.module_symbols,
-            context.source_provider_dependencies,
-            compiler.external_package_registry.as_ref(),
-            &compiler.string_table,
-        )
-        .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
-
-        // Build the transient expanded public source-nominal origin index before `sorted`
-        // moves into AST construction. Each origin is derived from the header's retained
-        // FileId through the per-file SourceModuleOriginTable, so imported project-graph
-        // nominals resolve to their defining provider origin. The type-surface projection
-        // consumes this index to resolve imported nominal references in this module's public
-        // signatures and fields.
-        // The index mirrors the AST `source_path_is_public_from_root_file` nameability owner:
-        // a nominal is included when a retained module-root or source-package public export
-        // entry targets its canonical source path, so a privately-authored nominal exposed
-        // through a public alias resolves to its graph-derived module origin. The retained
-        // `module_symbols` is borrowed before `sorted` moves into AST construction.
-        let public_source_nominal_type_origins = build_public_source_nominal_origin_index(
-            &source_module_origins,
-            &sorted.headers,
-            &sorted.module_symbols,
-            &compiler.string_table,
-        )
-        .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
-
-        // Build the transient expanded public source-trait origin index before `sorted`
-        // moves into AST construction. Analogous to the nominal origin index, this maps
-        // each trait header whose canonical declaration path is targeted by a retained
-        // public export entry to its stable OriginTraitId. Directly-defined, imported
-        // project-graph and public-alias-target traits are included; private and unowned
-        // source-package traits are excluded. The type-surface projection consumes this
-        // index to resolve source-trait generic bounds to stable trait origin identities.
-        let public_source_trait_origins = build_public_source_trait_origin_index(
-            &source_module_origins,
-            &sorted.headers,
-            &sorted.module_symbols,
-            &compiler.string_table,
-        )
-        .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
-
-        // 3. Build the Abstract Syntax Tree (AST).
-        // The build result carries the executable `Ast` plus the two closed side results
-        // consumed before HIR: the public-interface projection input and the validated
-        // donor-local generic-template map. HIR receives the executable `Ast` only. The
-        // projection input carries the resolved receiver-method catalog and public type-root
-        // table that step 4 joins with the pre-AST `DirectExportSeed` to build the post-AST
-        // `CallableSeed` table, the one receiver and callable identity owner.
-        let module_ast_build = build_ast_with_registered_types(
-            context,
-            &mut compiler,
-            sorted,
-            entry_file_path,
-            active_root_role,
-            capacity_estimate,
-            &mut warnings,
-            #[cfg(feature = "timers")]
-            timing_context,
-        )?;
-
-        // Destructure the build result once: the projection input and generic-template map
-        // feed the draft and extraction owners, while only the executable `Ast` reaches HIR.
-        let AstBuildResult {
-            ast: mut module_ast,
-            public_interface_projection_input,
-            materialisation_context: mut materialisation_context_builder,
-            deferred_generic_requests,
-        } = module_ast_build;
-
-        // 4. Build the one aggregate public-interface draft before HIR consumes the AST. The
-        //    draft is the sole pre-HIR public-semantic handoff: the export-origin
-        //    finalization, the canonical type-surface projection and the corrected
-        //    trait-requirement projection are internal builder steps. They run from
-        //    already-resolved facts (the receiver catalog, the resolved public type-root
-        //    table, the resolved public trait-root vector, the `DirectExportSeed` and the
-        //    module TypeEnvironment) without a second source scan or HIR scan, and are
-        //    retained only on overall semantic success. The builder also produces the
-        //    transient post-AST `CallableSeed` table, the one receiver and callable
-        //    identity owner consumed by direct projection, declaration-record projection,
-        //    HIR origin seeding and generic-template extraction. No donor-local TypeId,
-        //    NominalTypeId, GenericParameterId, TraitId, CoreTraitKind or InternedPath
-        //    crosses the module result boundary. It is not the final
-        //    PublicSemanticInterface: reusable evidence is now an internal builder step
-        //    and draft collection, generic template body extraction is already completed in
-        //    step 4b, and concrete call-summary finalization is already completed after
-        //    borrow validation, while provenance, re-export interfaces, cross-module call
-        //    lowering and future generated-generic summaries remain for later phases.
-        //    Folded constant values are now owned by each constant declaration record.
-        let public_interface_build = timed_stage_attributed!(
-            crate::timing::TimingMetric::FrontendPublicInterfaceProject,
-            timing_context,
-            PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {
-                export_seed,
-                public_interface_projection_input,
-                public_source_nominal_type_origins: &public_source_nominal_type_origins,
-                public_source_trait_origins: &public_source_trait_origins,
-                type_environment: &module_ast.type_environment,
-                external_registry: compiler.external_package_registry.as_ref(),
-                string_table: &compiler.string_table,
-                generic_function_templates: materialisation_context_builder
-                    .context()
-                    .generic_function_templates(),
-                module_constants: &module_ast.module_constants,
-            })
-            .build(),
-        )
-        .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
-        let public_interface_draft = public_interface_build.draft;
-
-        let public_origins_by_path = public_interface_build
-            .callable_seeds
-            .iter()
-            .map(|seed| (seed.path.clone(), seed.origin.clone()))
-            .collect::<FxHashMap<_, _>>();
-        let private_function_origin_seeds = materialisation_context_builder
-            .install_concrete_executable_contracts(
-                &active_module_origin,
-                &public_origins_by_path,
-                &public_source_nominal_type_origins,
-            )
-            .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?
-            .into_iter()
-            .map(|(path, origin)| PrivateFunctionOriginSeed { path, origin })
-            .collect::<Vec<_>>();
-
-        let generated_requests = install_generated_request_contracts(
-            &deferred_generic_requests,
-            materialisation_context_builder.context(),
-            materialisation_context_builder
-                .context()
-                .generic_function_templates(),
-            compiler.external_package_registry.as_ref(),
-            &mut module_ast,
-        )
-        .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
-        let generated_request_ids =
-            generated_transaction.register_requests(generated_requests.iter().map(|request| {
-                GeneratedRequestFacts {
-                    identity: request.identity.clone(),
-                    display_name: request
-                        .function_name
-                        .map(|name| compiler.string_table.resolve(name).to_owned())
-                        .unwrap_or_else(|| "<generated>".to_owned()),
-                    diagnostic_location: request.call_location.clone(),
-                }
-            }));
-        // 4b. Extract validated generic-template body artefacts before HIR consumes AST
-        //     state. The transient public callable seed table is the exact path-to-origin
-        //     authority for every directly exported generic free function or receiver method;
-        //     the donor-local template map is the authority for the validated body payload.
-        //     The extraction/join owner moves matching templates out of the donor-local map
-        //     and keys them by the exact `OriginFunctionId` already retained by the draft.
-        //     Private and non-generic templates remain intentional exclusions.
-        //     This runs after generic body validation and before HIR so the templates never
-        //     re-enter donor AST state.
-        validate_materialisation_context_templates(
-            &public_interface_draft,
-            &public_interface_build.callable_seeds,
-            materialisation_context_builder.generic_function_templates_mut(),
-        )
-        .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
-        materialisation_context_builder
-            .finalize_generic_template_identity_index()
-            .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
-
-        let function_origin_lookup = HirFunctionOriginLookup::from_public_and_private_seeds(
-            public_interface_build.function_origin_seeds,
-            private_function_origin_seeds,
-        )
-        .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
-
-        // 5. Resolve const fragment StringIds to strings before AST is consumed by HIR.
-        let const_top_level_fragments = module_ast
-            .const_top_level_fragments
-            .iter()
-            .map(|fragment| ResolvedConstFragment {
-                runtime_insertion_index: fragment.runtime_insertion_index,
-                rendered_text: compiler.string_table.resolve(fragment.value).to_owned(),
-            })
-            .collect::<Vec<_>>();
-
-        // 6. Lower AST to Higher-level Intermediate Representation (HIR).
-        let hir_lowering = timed_stage_attributed!(
-            crate::timing::TimingMetric::FrontendHir,
-            timing_context,
-            lower_hir(&mut compiler, module_ast, &warnings, function_origin_lookup)
-        )?;
-        let HirLoweringResult {
-            mut hir_module,
-            type_environment,
-            metadata: lowering_metadata,
-        } = hir_lowering;
-
-        // 7. Validate extracted non-HIR compiler metadata before a successful module is
-        // returned. Invalid compiler metadata is an internal CompilerError.
-        if let Err(error) = lowering_metadata.validate() {
-            return Err(CompilerMessages::from_error_ref(
-                error,
-                &compiler.string_table,
-            ));
-        }
-
-        // Link facts are the validated-HIR owner for direct call targets. The convergence
-        // observation model consumes these facts after HIR validation rather than scanning
-        // source or introducing a second HIR call graph.
-        let function_link_facts = collect_module_function_link_facts(&hir_module)
-            .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
-
-        // 8. Run static analysis (Borrow Checker).
-        increment_frontend_counter(FrontendCounter::ConvergenceInitialBaseBorrowPasses);
-        let bootstrap_borrow_analysis = timed_stage_attributed!(
-            crate::timing::TimingMetric::FrontendBorrowInitial,
-            timing_context,
-            check_borrows(&compiler, &hir_module, &warnings)
-        )?;
-        install_exact_concrete_call_summaries(
-            &mut materialisation_context_builder,
-            &hir_module,
-            &bootstrap_borrow_analysis,
-        )
-        .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
-        timed_stage_attributed!(
-            crate::timing::TimingMetric::FrontendGeneratedMaterialise,
-            timing_context,
-            materialise_generated_request_roots(
-                context,
-                &generated_request_ids,
-                &mut generated_transaction,
-                materialisation_context_builder.context(),
-                &mut compiler,
-                entry_file_path,
-                #[cfg(feature = "timers")]
-                timing_context,
-            )
-        )?;
-        let borrow_analysis = run_generated_summary_convergence(
-            &compiler,
-            &mut hir_module,
-            &function_link_facts,
-            &mut generated_transaction,
-            bootstrap_borrow_analysis,
-            &warnings,
-            #[cfg(feature = "timers")]
-            timing_context,
-        )?;
-        // Reinstall after convergence: the fixed point may have widened a callee summary the
-        // pre-materialisation pass recorded, and the frozen context must carry the final one.
-        install_exact_concrete_call_summaries(
-            &mut materialisation_context_builder,
-            &hir_module,
-            &borrow_analysis,
-        )
-        .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
-        let generated_delta = generated_transaction
-            .finish()
-            .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
-        record_borrow_counters(&borrow_analysis);
-
-        // Concrete call-summary finalization runs exactly once after HIR and borrow
-        // validation produce the stable local-function relationship and complete call
-        // summaries. The post-AST `CallableSeed` table owns the receiver and callable
-        // identity that this finalization joins; only concrete-local callables receive a
-        // summary record here. Generic templates remain declaration contracts whose
-        // generated summaries belong to the sidecar delta this transaction completes later,
-        // distinct from these direct concrete summaries. Private functions and implicit start retain local
-        // summaries but never enter declaration records.
-        let public_interface = timed_stage_attributed!(
-            crate::timing::TimingMetric::FrontendPublicInterfaceFinalise,
-            timing_context,
-            {
-                let local_public_interface = public_interface_draft
-                    .finalize_after_borrow_validation(&borrow_analysis.analysis, &hir_module)
-                    .map_err(|error| {
-                        CompilerMessages::from_error_ref(error, &compiler.string_table)
-                    })?;
-                PublicSemanticInterface::close_from_local(
-                    local_public_interface,
-                    context.source_provider_dependencies,
-                    compiler.external_package_registry.as_ref(),
-                )
-                .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))
-            }
-        )?;
-        let materialisation_context = materialisation_context_builder
-            .freeze(&public_interface)
-            .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?
-            .map(Arc::new);
-
-        // -------------------------
-        //  Finalize Module Build
-        // -------------------------
-
-        borrow_log!("=== BORROW CHECKER OUTPUT ===");
-        borrow_log!(format!(
-            "Borrow checking completed successfully (states={} functions={} blocks={} conflicts_checked={} stmt_facts={} term_facts={} value_facts={})",
-            borrow_analysis.analysis.total_state_snapshots(),
-            borrow_analysis.stats.functions_analyzed,
-            borrow_analysis.stats.blocks_analyzed,
-            borrow_analysis.stats.conflicts_checked,
-            borrow_analysis.analysis.statement_facts.len(),
-            borrow_analysis.analysis.terminator_facts.len(),
-            borrow_analysis.analysis.value_facts.len()
-        ));
-        borrow_log!("=== END BORROW CHECKER OUTPUT ===");
-
-        // Collect provider-resolved imports used by this module after the frontend has
-        // consumed them. HIR still carries only stable external IDs; this side payload is for
-        // backend asset/glue planning. Source logical paths are derived from the retained
-        // source identity table, not from raw source inputs.
-        let source_logical_paths = collect_source_logical_paths_from_table(
-            &compiler.source_files,
-            &compiler.string_table,
-            context.project_path_resolver.is_some(),
-        );
-
-        let external_import_candidates = collect_external_import_candidates_for_source_files(
-            &source_logical_paths,
-            external_dependency_resolution_table,
-            context.builder_runtime_packages,
-        );
-
-        Ok((
-            Module {
-                executable: ModuleExecutable {
-                    hir: hir_module,
-                    type_environment,
-                    borrow_analysis,
-                },
-                link_facts: ModuleLinkFacts {
-                    external_package_registry: Arc::clone(&compiler.external_package_registry),
-                    external_import_candidates,
-                    functions: function_link_facts,
-                },
-                metadata: ModuleCompilerMetadata::from_hir_lowering(
-                    entry_file_path.to_path_buf(),
-                    warnings,
-                    lowering_metadata,
-                    const_top_level_fragments,
-                    root_activity,
-                    materialisation_context,
-                ),
-            },
-            public_interface,
-            generated_delta,
-        ))
-    })();
+        },
+        #[cfg(feature = "timers")]
+        timing_context,
+    );
 
     // Normalize the deeper stages' mixed `CompilerMessages` once at this semantic boundary.
     // A successful compilation becomes `Success`. A failing stage becomes either
@@ -553,6 +170,443 @@ pub(crate) fn compile_module(
             }
         }
     }
+}
+
+/// Everything one semantic stage run reads from the prepared payload.
+///
+/// WHAT: the retained syntax and module-local identity facts [`run_semantic_stages`] consumes,
+///       after the string table and source-file table have moved into the `CompilerFrontend`.
+/// WHY: seven values from one prepared module travel together through the whole stage sequence.
+///      Naming the bundle keeps `compile_module` readable as setup, one stage run and one
+///      classification, instead of a parameter list that hides which value came from where.
+struct SemanticStageInputs<'a> {
+    prepared_header_syntax: PreparedHeaderSyntax,
+    source_module_origins: SourceModuleOriginTable,
+    active_root_file_id: FileId,
+    active_module_origin: StableModuleOriginIdentity,
+    entry_file_path: &'a Path,
+    source_file_count: usize,
+    source_byte_count: usize,
+}
+
+/// Run the local semantic sequence for one module, from bound headers to a complete result.
+///
+/// WHAT: binding -> ordering -> AST -> public-interface projection -> HIR -> borrow validation ->
+///       generated completion, returning the three values a success is made of.
+/// WHY: every stage in here fails with `CompilerMessages`, which mixes user diagnostics and
+///      infrastructure failures. Collecting those failures at one `?` boundary lets
+///      [`compile_module`] classify them exactly once. Keeping the sequence in its own function
+///      means `compile_module` reads as three steps rather than wrapping four hundred lines.
+fn run_semantic_stages(
+    compiler: &mut CompilerFrontend,
+    context: &ModuleCompilationContext<'_>,
+    known_generated: KnownGeneratedFunctions<'_>,
+    mut warnings: Vec<CompilerDiagnostic>,
+    inputs: SemanticStageInputs<'_>,
+    #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
+) -> Result<(Module, PublicSemanticInterface, GeneratedFunctionDelta), CompilerMessages> {
+    let SemanticStageInputs {
+        prepared_header_syntax,
+        source_module_origins,
+        active_root_file_id,
+        active_module_origin,
+        entry_file_path,
+        source_file_count,
+        source_byte_count,
+    } = inputs;
+    let mut generated_transaction = GeneratedFunctionTransaction::new(known_generated);
+    let active_root_role = active_module_origin.role();
+    let external_dependency_resolution_table = context.external_dependency_resolution_table;
+
+    // 1. Bind retained header syntax against provider interfaces.
+    let module_headers = timed_stage_attributed!(
+        crate::timing::TimingMetric::FrontendBindHeaders,
+        timing_context,
+        {
+            bind_retained_headers(
+                compiler,
+                prepared_header_syntax,
+                external_dependency_resolution_table,
+                context.source_provider_dependencies,
+                &warnings,
+            )
+        }
+    )?;
+
+    let capacity_estimate =
+        record_frontend_capacity_estimate(source_file_count, source_byte_count, &module_headers);
+
+    // 2. Resolve dependencies and sort headers for linear processing.
+    let sorted = timed_stage_attributed!(
+        crate::timing::TimingMetric::FrontendOrderDeclarations,
+        timing_context,
+        sort_headers(compiler, module_headers, &warnings)
+    )?;
+
+    let root_activity = ModuleRootActivity {
+        has_non_trivial_root_body: sorted.has_non_trivial_root_body,
+        const_fragment_count: sorted.const_fragment_count,
+        runtime_fragment_count: sorted.entry_runtime_fragment_count,
+    };
+
+    // Project the pre-AST `DirectExportSeed` from the bound, sorted declaration shells
+    // and header-built public export metadata. This is the immediate consumer of the
+    // per-file source-origin side table: the bindings and the public nominal-type origin
+    // index depend only on header shells, so they are projected here before `sorted`
+    // moves into AST construction. `DirectExportSeed` is the pre-AST export-identity
+    // authority: it carries only header-shell facts and resolves no callable identities.
+    // The post-AST `CallableSeed` table, built inside the public-interface draft builder,
+    // joins this seed with the resolved receiver-method catalog to own receiver and
+    // callable identity, so best-effort header receiver names never mask valid generic
+    // receiver methods or preempt AST receiver diagnostics. The draft is retained only
+    // on overall semantic success, so a diagnosed module exposes no component.
+    let export_seed = build_direct_export_seed(
+        &source_module_origins,
+        active_root_file_id,
+        &sorted.headers,
+        &sorted.module_symbols,
+        context.source_provider_dependencies,
+        compiler.external_package_registry.as_ref(),
+        &compiler.string_table,
+    )
+    .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+
+    // Build the transient expanded public source-nominal origin index before `sorted`
+    // moves into AST construction. Each origin is derived from the header's retained
+    // FileId through the per-file SourceModuleOriginTable, so imported project-graph
+    // nominals resolve to their defining provider origin. The type-surface projection
+    // consumes this index to resolve imported nominal references in this module's public
+    // signatures and fields.
+    // The index mirrors the AST `source_path_is_public_from_root_file` nameability owner:
+    // a nominal is included when a retained module-root or source-package public export
+    // entry targets its canonical source path, so a privately-authored nominal exposed
+    // through a public alias resolves to its graph-derived module origin. The retained
+    // `module_symbols` is borrowed before `sorted` moves into AST construction.
+    let public_source_nominal_type_origins = build_public_source_nominal_origin_index(
+        &source_module_origins,
+        &sorted.headers,
+        &sorted.module_symbols,
+        &compiler.string_table,
+    )
+    .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+
+    // Build the transient expanded public source-trait origin index before `sorted`
+    // moves into AST construction. Analogous to the nominal origin index, this maps
+    // each trait header whose canonical declaration path is targeted by a retained
+    // public export entry to its stable OriginTraitId. Directly-defined, imported
+    // project-graph and public-alias-target traits are included; private and unowned
+    // source-package traits are excluded. The type-surface projection consumes this
+    // index to resolve source-trait generic bounds to stable trait origin identities.
+    let public_source_trait_origins = build_public_source_trait_origin_index(
+        &source_module_origins,
+        &sorted.headers,
+        &sorted.module_symbols,
+        &compiler.string_table,
+    )
+    .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+
+    // 3. Build the Abstract Syntax Tree (AST).
+    // The build result carries the executable `Ast` plus the two closed side results
+    // consumed before HIR: the public-interface projection input and the validated
+    // donor-local generic-template map. HIR receives the executable `Ast` only. The
+    // projection input carries the resolved receiver-method catalog and public type-root
+    // table that step 4 joins with the pre-AST `DirectExportSeed` to build the post-AST
+    // `CallableSeed` table, the one receiver and callable identity owner.
+    let module_ast_build = build_ast_with_registered_types(
+        context,
+        compiler,
+        sorted,
+        entry_file_path,
+        active_root_role,
+        capacity_estimate,
+        &mut warnings,
+        #[cfg(feature = "timers")]
+        timing_context,
+    )?;
+
+    // Destructure the build result once: the projection input and generic-template map
+    // feed the draft and extraction owners, while only the executable `Ast` reaches HIR.
+    let AstBuildResult {
+        ast: mut module_ast,
+        public_interface_projection_input,
+        materialisation_context: mut materialisation_context_builder,
+        deferred_generic_requests,
+    } = module_ast_build;
+
+    // 4. Build the one aggregate public-interface draft before HIR consumes the AST. The
+    //    draft is the sole pre-HIR public-semantic handoff: the export-origin
+    //    finalization, the canonical type-surface projection and the corrected
+    //    trait-requirement projection are internal builder steps. They run from
+    //    already-resolved facts (the receiver catalog, the resolved public type-root
+    //    table, the resolved public trait-root vector, the `DirectExportSeed` and the
+    //    module TypeEnvironment) without a second source scan or HIR scan, and are
+    //    retained only on overall semantic success. The builder also produces the
+    //    transient post-AST `CallableSeed` table, the one receiver and callable
+    //    identity owner consumed by direct projection, declaration-record projection,
+    //    HIR origin seeding and generic-template extraction. No donor-local TypeId,
+    //    NominalTypeId, GenericParameterId, TraitId, CoreTraitKind or InternedPath
+    //    crosses the module result boundary. It is not the final
+    //    PublicSemanticInterface: reusable evidence is now an internal builder step
+    //    and draft collection, generic template body extraction is already completed in
+    //    step 4b, and concrete call-summary finalization is already completed after
+    //    borrow validation, while provenance, re-export interfaces, cross-module call
+    //    lowering and future generated-generic summaries remain for later phases.
+    //    Folded constant values are now owned by each constant declaration record.
+    let public_interface_build = timed_stage_attributed!(
+        crate::timing::TimingMetric::FrontendPublicInterfaceProject,
+        timing_context,
+        PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {
+            export_seed,
+            public_interface_projection_input,
+            public_source_nominal_type_origins: &public_source_nominal_type_origins,
+            public_source_trait_origins: &public_source_trait_origins,
+            type_environment: &module_ast.type_environment,
+            external_registry: compiler.external_package_registry.as_ref(),
+            string_table: &compiler.string_table,
+            generic_function_templates: materialisation_context_builder
+                .context()
+                .generic_function_templates(),
+            module_constants: &module_ast.module_constants,
+        })
+        .build(),
+    )
+    .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+    let public_interface_draft = public_interface_build.draft;
+
+    let public_origins_by_path = public_interface_build
+        .callable_seeds
+        .iter()
+        .map(|seed| (seed.path.clone(), seed.origin.clone()))
+        .collect::<FxHashMap<_, _>>();
+    let private_function_origin_seeds = materialisation_context_builder
+        .install_concrete_executable_contracts(
+            &active_module_origin,
+            &public_origins_by_path,
+            &public_source_nominal_type_origins,
+        )
+        .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?
+        .into_iter()
+        .map(|(path, origin)| PrivateFunctionOriginSeed { path, origin })
+        .collect::<Vec<_>>();
+
+    let generated_requests = install_generated_request_contracts(
+        &deferred_generic_requests,
+        materialisation_context_builder.context(),
+        materialisation_context_builder
+            .context()
+            .generic_function_templates(),
+        compiler.external_package_registry.as_ref(),
+        &mut module_ast,
+    )
+    .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+    let generated_request_ids =
+        generated_transaction.register_requests(generated_requests.iter().map(|request| {
+            GeneratedRequestFacts {
+                identity: request.identity.clone(),
+                display_name: request
+                    .function_name
+                    .map(|name| compiler.string_table.resolve(name).to_owned())
+                    .unwrap_or_else(|| "<generated>".to_owned()),
+                diagnostic_location: request.call_location.clone(),
+            }
+        }));
+    // 4b. Extract validated generic-template body artefacts before HIR consumes AST
+    //     state. The transient public callable seed table is the exact path-to-origin
+    //     authority for every directly exported generic free function or receiver method;
+    //     the donor-local template map is the authority for the validated body payload.
+    //     The extraction/join owner moves matching templates out of the donor-local map
+    //     and keys them by the exact `OriginFunctionId` already retained by the draft.
+    //     Private and non-generic templates remain intentional exclusions.
+    //     This runs after generic body validation and before HIR so the templates never
+    //     re-enter donor AST state.
+    validate_materialisation_context_templates(
+        &public_interface_draft,
+        &public_interface_build.callable_seeds,
+        materialisation_context_builder.generic_function_templates_mut(),
+    )
+    .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+    materialisation_context_builder
+        .finalize_generic_template_identity_index()
+        .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+
+    let function_origin_lookup = HirFunctionOriginLookup::from_public_and_private_seeds(
+        public_interface_build.function_origin_seeds,
+        private_function_origin_seeds,
+    )
+    .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+
+    // 5. Resolve const fragment StringIds to strings before AST is consumed by HIR.
+    let const_top_level_fragments = module_ast
+        .const_top_level_fragments
+        .iter()
+        .map(|fragment| ResolvedConstFragment {
+            runtime_insertion_index: fragment.runtime_insertion_index,
+            rendered_text: compiler.string_table.resolve(fragment.value).to_owned(),
+        })
+        .collect::<Vec<_>>();
+
+    // 6. Lower AST to Higher-level Intermediate Representation (HIR).
+    let hir_lowering = timed_stage_attributed!(
+        crate::timing::TimingMetric::FrontendHir,
+        timing_context,
+        lower_hir(compiler, module_ast, &warnings, function_origin_lookup)
+    )?;
+    let HirLoweringResult {
+        mut hir_module,
+        type_environment,
+        metadata: lowering_metadata,
+    } = hir_lowering;
+
+    // 7. Validate extracted non-HIR compiler metadata before a successful module is
+    // returned. Invalid compiler metadata is an internal CompilerError.
+    if let Err(error) = lowering_metadata.validate() {
+        return Err(CompilerMessages::from_error_ref(
+            error,
+            &compiler.string_table,
+        ));
+    }
+
+    // Link facts are the validated-HIR owner for direct call targets. The convergence
+    // observation model consumes these facts after HIR validation rather than scanning
+    // source or introducing a second HIR call graph.
+    let function_link_facts = collect_module_function_link_facts(&hir_module)
+        .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+
+    // 8. Run static analysis (Borrow Checker).
+    increment_frontend_counter(FrontendCounter::ConvergenceInitialBaseBorrowPasses);
+    let bootstrap_borrow_analysis = timed_stage_attributed!(
+        crate::timing::TimingMetric::FrontendBorrowInitial,
+        timing_context,
+        check_borrows(compiler, &hir_module, &warnings)
+    )?;
+    install_exact_concrete_call_summaries(
+        &mut materialisation_context_builder,
+        &hir_module,
+        &bootstrap_borrow_analysis,
+    )
+    .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+    timed_stage_attributed!(
+        crate::timing::TimingMetric::FrontendGeneratedMaterialise,
+        timing_context,
+        materialise_generated_request_roots(
+            context,
+            &generated_request_ids,
+            &mut generated_transaction,
+            materialisation_context_builder.context(),
+            compiler,
+            entry_file_path,
+            #[cfg(feature = "timers")]
+            timing_context,
+        )
+    )?;
+    let borrow_analysis = run_generated_summary_convergence(
+        compiler,
+        &mut hir_module,
+        &function_link_facts,
+        &mut generated_transaction,
+        bootstrap_borrow_analysis,
+        &warnings,
+        #[cfg(feature = "timers")]
+        timing_context,
+    )?;
+    // Reinstall after convergence: the fixed point may have widened a callee summary the
+    // pre-materialisation pass recorded, and the frozen context must carry the final one.
+    install_exact_concrete_call_summaries(
+        &mut materialisation_context_builder,
+        &hir_module,
+        &borrow_analysis,
+    )
+    .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+    let generated_delta = generated_transaction
+        .finish()
+        .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+    record_borrow_counters(&borrow_analysis);
+
+    // Concrete call-summary finalization runs exactly once after HIR and borrow
+    // validation produce the stable local-function relationship and complete call
+    // summaries. The post-AST `CallableSeed` table owns the receiver and callable
+    // identity that this finalization joins; only concrete-local callables receive a
+    // summary record here. Generic templates remain declaration contracts whose
+    // generated summaries belong to the sidecar delta this transaction completes later,
+    // distinct from these direct concrete summaries. Private functions and implicit start retain local
+    // summaries but never enter declaration records.
+    let public_interface = timed_stage_attributed!(
+        crate::timing::TimingMetric::FrontendPublicInterfaceFinalise,
+        timing_context,
+        {
+            let local_public_interface = public_interface_draft
+                .finalize_after_borrow_validation(&borrow_analysis.analysis, &hir_module)
+                .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+            PublicSemanticInterface::close_from_local(
+                local_public_interface,
+                context.source_provider_dependencies,
+                compiler.external_package_registry.as_ref(),
+            )
+            .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))
+        }
+    )?;
+    let materialisation_context = materialisation_context_builder
+        .freeze(&public_interface)
+        .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?
+        .map(Arc::new);
+
+    // -------------------------
+    //  Finalize Module Build
+    // -------------------------
+
+    borrow_log!("=== BORROW CHECKER OUTPUT ===");
+    borrow_log!(format!(
+        "Borrow checking completed successfully (states={} functions={} blocks={} conflicts_checked={} stmt_facts={} term_facts={} value_facts={})",
+        borrow_analysis.analysis.total_state_snapshots(),
+        borrow_analysis.stats.functions_analyzed,
+        borrow_analysis.stats.blocks_analyzed,
+        borrow_analysis.stats.conflicts_checked,
+        borrow_analysis.analysis.statement_facts.len(),
+        borrow_analysis.analysis.terminator_facts.len(),
+        borrow_analysis.analysis.value_facts.len()
+    ));
+    borrow_log!("=== END BORROW CHECKER OUTPUT ===");
+
+    // Collect provider-resolved imports used by this module after the frontend has
+    // consumed them. HIR still carries only stable external IDs; this side payload is for
+    // backend asset/glue planning. Source logical paths are derived from the retained
+    // source identity table, not from raw source inputs.
+    let source_logical_paths = collect_source_logical_paths_from_table(
+        &compiler.source_files,
+        &compiler.string_table,
+        context.project_path_resolver.is_some(),
+    );
+
+    let external_import_candidates = collect_external_import_candidates_for_source_files(
+        &source_logical_paths,
+        external_dependency_resolution_table,
+        context.builder_runtime_packages,
+    );
+
+    Ok((
+        Module {
+            executable: ModuleExecutable {
+                hir: hir_module,
+                type_environment,
+                borrow_analysis,
+            },
+            link_facts: ModuleLinkFacts {
+                external_package_registry: Arc::clone(&compiler.external_package_registry),
+                external_import_candidates,
+                functions: function_link_facts,
+            },
+            metadata: ModuleCompilerMetadata::from_hir_lowering(
+                entry_file_path.to_path_buf(),
+                warnings,
+                lowering_metadata,
+                const_top_level_fragments,
+                root_activity,
+                materialisation_context,
+            ),
+        },
+        public_interface,
+        generated_delta,
+    ))
 }
 
 /// Bind retained `PreparedHeaderSyntax` against provider interfaces.

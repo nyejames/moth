@@ -2,8 +2,7 @@
 //!
 //! WHAT: every semantic stage between source text and validated HIR — tokenization, declaration
 //!       shells, interface binding, local ordering, AST semantics, public-interface projection,
-//!       HIR lowering and borrow validation — plus the three production entry points that
-//!       sequence them.
+//!       HIR lowering and borrow validation — plus the named services that sequence them.
 //! WHY:  local semantic compilation has one owner. Build and project code chooses one of the
 //!       named services below and handles the result; it never composes the stages itself. The
 //!       dependency direction is stated in `style-guide.mtf > Production layering and stage
@@ -14,8 +13,10 @@
 //!   retained syntax through borrow validation and generated semantic completion
 //! - [`single_source_compilation`]: the two named shorter paths — project config compilation and
 //!   direct Moth template compilation — which stop at folded AST values
-//! - [`pipeline::CompilerFrontend`]: the stage facade those services drive, not an entry point of
-//!   its own
+//!
+//! `pipeline::CompilerFrontend` is the stage facade those services drive, not a fourth entry
+//! point. It holds the module-local mutable state a service threads through the stages, and its
+//! semantic stage methods are visible only inside this module.
 //!
 //! # Stage owners
 //! - [`tokenizer`], [`numeric_text`]: source text to tokens
@@ -90,7 +91,7 @@ pub(crate) mod single_source_compilation;
 
 mod pipeline;
 
-pub use pipeline::CompilerFrontend;
+pub(crate) use pipeline::CompilerFrontend;
 pub(crate) use pipeline::{
     FrontendFilePrepareContext, FrontendFilePrepareInput, FrontendFilePrepareSource,
 };
@@ -118,6 +119,7 @@ pub(crate) mod tests {
     pub(crate) mod borrow_fixture_support;
     mod canonical_type_identity_tests;
     pub(crate) mod external_package_support;
+    mod frontend_pipeline_tests;
     pub(crate) mod hir_fixture_support;
     mod keyword_tests;
     pub(crate) mod parse_support;

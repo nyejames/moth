@@ -120,7 +120,7 @@ pub(crate) mod templates;
 //
 // WHY: the AST module should expose one obvious entry surface. Internal helpers,
 // pass implementations, and parser submodules stay private to `ast/`.
-pub use module_ast::build_context::AstBuildContext;
+pub(in crate::compiler_frontend) use module_ast::build_context::AstBuildContext;
 pub(crate) use module_ast::environment::AstPublicInterfaceProjectionInput;
 pub(crate) use module_ast::environment::ResolvedPublicTypeRootTable;
 pub(crate) use module_ast::environment::TopLevelDeclarationTable;
@@ -278,7 +278,7 @@ pub struct AstBuildResult {
     pub(crate) materialisation_context: ModuleMaterialisationPreparationBuilder,
 
     /// Imported generic requests inferred against provider contracts. The requester carries only
-    /// stable declaration/type evidence into the build-owned sidecar worklist.
+    /// stable declaration/type evidence into the compiler-owned generated-function transaction.
     pub(crate) deferred_generic_requests: Vec<GenericFunctionInstantiationRequest>,
 }
 
@@ -286,7 +286,7 @@ pub struct AstBuildResult {
 ///
 /// WHAT: bundles everything produced by header parsing and dependency sorting that AST needs.
 /// WHY: `Ast::new` should receive one named contract, not a loose list of parameters.
-pub struct AstBuildInput {
+pub(in crate::compiler_frontend) struct AstBuildInput {
     pub headers: Vec<Header>,
     pub module_symbols: ModuleSymbols,
     pub binding_environment: HeaderBindingEnvironment,
@@ -307,7 +307,7 @@ impl Ast {
     // bundles executable `Ast` with its projection side results; renaming would lose the canonical
     // AST construction entry point expected by callers.
     #[allow(clippy::new_ret_no_self)]
-    pub(crate) fn new(
+    pub(in crate::compiler_frontend) fn new(
         input: AstBuildInput,
         context: AstBuildContext<'_>,
     ) -> Result<AstBuildResult, CompilerMessages> {

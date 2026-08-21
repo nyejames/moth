@@ -252,7 +252,7 @@ fn fallible_generic_calls_remain_request_only() {
         !build_result.ast.nodes.iter().any(
             |node| matches!(&node.kind, NodeKind::Function(path, ..) if path == &request.instance_path)
         ),
-        "fallible generic bodies must be materialised by the build-owned worklist"
+        "fallible generic bodies must be materialised by the generated-function transaction"
     );
 }
 

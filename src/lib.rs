@@ -46,8 +46,6 @@ pub const ENABLED_FEATURES: &[&str] = &[
 ];
 
 mod compiler_tests {
-    #[cfg(test)]
-    mod frontend_pipeline_tests;
     pub(crate) mod integration_test_runner; // For running all integration tests and report back the results
 
     #[cfg(test)]

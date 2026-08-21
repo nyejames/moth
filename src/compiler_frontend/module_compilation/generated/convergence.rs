@@ -11,9 +11,7 @@
 use crate::compiler_frontend::CompilerFrontend;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationPreparationBuilder;
-use crate::compiler_frontend::compiler_errors::{
-    CompilerError, CompilerMessages, merge_stage_messages,
-};
+use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget;
@@ -34,6 +32,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::VecDeque;
 
 use crate::compiler_frontend::module_compilation::generated::transaction::GeneratedFunctionTransaction;
+use crate::compiler_frontend::module_compilation::stages::check_borrows;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum ConvergenceNode {
@@ -305,7 +304,7 @@ fn add_model_edges(
 }
 
 /// Run monotone summary convergence for one base HIR and its completed local sidecars.
-pub(crate) fn run_generated_summary_convergence(
+pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_convergence(
     compiler: &CompilerFrontend,
     hir_module: &mut HirModule,
     function_link_facts: &HirModuleLinkFacts,
@@ -378,7 +377,7 @@ pub(crate) fn run_generated_summary_convergence(
                 let report = timed_stage_attributed!(
                     crate::timing::TimingMetric::FrontendBorrowConverge,
                     timing_context,
-                    check_borrows_with_warnings(compiler, hir_module, warnings)
+                    check_borrows(compiler, hir_module, warnings)
                 )?;
                 let summary_changes =
                     base_summary_changes(hir_module, current_borrow_analysis, &report).map_err(
@@ -418,7 +417,7 @@ pub(crate) fn run_generated_summary_convergence(
                     let report = timed_stage_attributed!(
                         crate::timing::TimingMetric::FrontendGeneratedBorrowRecheck,
                         timing_context,
-                        check_borrows_with_warnings(
+                        check_borrows(
                             compiler,
                             &sidecar.module.executable.hir,
                             &sidecar.module.metadata.warnings,
@@ -452,16 +451,6 @@ pub(crate) fn run_generated_summary_convergence(
             &compiler.string_table,
         )
     })
-}
-
-fn check_borrows_with_warnings(
-    compiler: &CompilerFrontend,
-    hir_module: &HirModule,
-    warnings: &[CompilerDiagnostic],
-) -> Result<BorrowCheckReport, CompilerMessages> {
-    compiler
-        .check_borrows(hir_module)
-        .map_err(|messages| merge_stage_messages(messages, warnings, &compiler.string_table))
 }
 
 /// Stable base identities whose exact summaries widened during one borrow pass.
@@ -792,7 +781,7 @@ pub(crate) fn exact_generated_sidecar_summary(
         })
 }
 
-pub(crate) fn install_exact_concrete_call_summaries(
+pub(in crate::compiler_frontend) fn install_exact_concrete_call_summaries(
     context: &mut ModuleMaterialisationPreparationBuilder,
     hir: &HirModule,
     borrow_analysis: &BorrowCheckReport,

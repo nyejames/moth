@@ -341,7 +341,7 @@ type VisitResult = Result<(), Box<CompilerDiagnostic>>;
 /// WHY: `StartFunction` is excluded from the dependency graph — it is build-system-only and
 /// cannot be imported by other headers. All other headers are sorted by edges resolved from their
 /// retained type-surface and constant-initializer hints so AST sees dependencies first.
-pub fn resolve_module_dependencies(
+pub(in crate::compiler_frontend) fn resolve_module_dependencies(
     parsed: BoundModuleHeaders,
     string_table: &mut StringTable,
 ) -> Result<SortedHeaders, DiagnosticBag> {

@@ -34,7 +34,7 @@ refactors or thorough reviews.
 | Module roots, dependency topology, support packages, project facades, namespaces or package classification | `Project and package topology` and the exact relevant subsection | The canonical unsuffixed project-structure and package language references |
 | Dependency, Core or Builder source package graphs | `Project and package topology > Dependency package graphs` or `Core and Builder source package graphs` | Compiler public-interface, provenance, fingerprint and generated-function sections |
 | Compile waves, diagnosed or blocked modules, deterministic merging or `ProjectCompilation` | `Deterministic scheduling and graph outcomes` | `docs/compiler-design-overview.md` > `Compiler input and result boundary` and `Diagnostics and deterministic identity` |
-| Generated request aggregation, scheduling or sidecar reuse | `Generated-function worklist` | `docs/compiler-design-overview.md` > `Generated concrete functions` |
+| Generated request aggregation, scheduling or sidecar reuse | `Generated-function boundary` | `docs/compiler-design-overview.md` > `Generated concrete functions` |
 | Entry selection, package assembly, reachability or validation roots | `Entry and package link planning` | Compiler `Per-function link facts`, `Target-contract validation` and routed lifetime material |
 | HTML fragment assembly, target partitioning, physical variants, runtime memory, lowering, external JavaScript or assets | `HTML project builder` and the exact relevant subsection | Compiler `Backend-facing compiler handoff` plus routed memory material for lifecycle, ABI or runtime representation changes |
 | Output roots, manifests, stale cleanup or output pipelines | `Output ownership` | The selected builder section that produces the output records |
@@ -480,7 +480,7 @@ select command, artefact builder, build profile and tooling overlays
    -> lower and validate HIR
    -> borrow-validate
    -> produce local lifetime constraints, lifetime facts and exported summaries
--> complete the generated-function worklist
+-> publish the module's completed generated delta
 -> assemble a success-only ProjectCompilation
 -> plan entry/package roots and exact reachable unions
 -> instantiate and validate complete lifetime topology
@@ -996,7 +996,7 @@ For `check`, the command may retain successful independent artefacts internally 
 - direct and transitive source providers
 - required Core and Builder source package graphs
 - dependency package facades and artefacts
-- generated requests discovered by the fixed-point worklist
+- generated functions completed while compiling those modules
 
 It performs target validation, backend lowering and output writing when compilation succeeds.
 
@@ -1037,7 +1037,7 @@ It does not duplicate target packages, source kinds, directives, binding metadat
 
 Tooling-only entry config never creates an artefact entry.
 
-## Generated-function worklist
+## Generated-function boundary
 
 The compiler owns generic template validation, call-site inference, request identity, generated HIR, generated borrow facts, and generated lifetime facts and summaries.
 
@@ -1045,7 +1045,7 @@ The build system owns:
 
 - project-wide or package-wide request aggregation
 - the published set every request is deduplicated against, lent as an immutable view
-- worklist scheduling and request availability
+- boundary request availability: which providers have published, and therefore which module compiles next
 - completed sidecar storage and transactional publication
 - sidecar placement
 - reuse across entries
@@ -1054,14 +1054,15 @@ Build-owned generated scheduling means boundary request availability, publicatio
 
 Requests are keyed by stable generic declaration identity, canonical concrete type identities and required evidence identities.
 
-The worklist continues until no generated function requests another instance. It reaches that fixed point by scheduling
-further compiler work, not by driving semantic stages itself. Requests raised while one module compiles converge inside
-that module's compiler transaction and reach the boundary as one completed generated delta.
+The fixed point is reached inside one module's compiler transaction, not by build-side rescheduling. A request raised
+while materialising another generated body is canonicalised and completed in the same transaction, so the boundary sees
+one finished generated delta per module and never schedules a second pass to converge generated work. Module waves come
+from the module dependency graph; generated requests do not add or reorder them.
 
 Each successful generated sidecar entry carries its own generated-local type context, HIR, borrow facts, lifetime facts and summaries, link facts and fingerprints. It does not mutate a base module artefact.
 
-Only requests committed from the Stage 4 specialised active AST enter the project or package
-worklist. Generic calls in an inactive static branch are frontend-validated but do not cause
+Only requests committed from the Stage 4 specialised active AST reach the project or package
+boundary. Generic calls in an inactive static branch are frontend-validated but do not cause
 materialisation or generated sidecar work.
 
 Cross-package instances belong to the consuming compilation. Dependency base artefacts remain immutable.
@@ -1458,8 +1459,9 @@ Normal builds do not attempt best-effort deserialisation, partial migration or c
 
 Current paths are navigation aids rather than permanent architecture.
 
-- Project bootstrap and config: `src/build_system/project_config/`, `src/projects/settings.rs`
+- Project bootstrap, config schema and validation: `src/build_system/project_config.rs`, `src/build_system/project_config/validation.rs`, `src/projects/settings.rs`. Compiling `config.moth` to folded values is a compiler service under `src/compiler_frontend/single_source_compilation/`; this owner supplies the source and applies the result.
 - Source indexing, graph construction and scheduling: `src/build_system/create_project_modules/`, `src/build_system/build.rs`. Stage 0 graph edges keep module identity, retained shell identity and diagnostic location rather than cloning file-owned paths.
+- Module preparation and publication: `src/build_system/create_project_modules/module_preparation.rs` prepares source, `compilation.rs` schedules one `compile_module` call per ready module, and `module_artifact_store.rs` plus `generated_store.rs` publish what it returns.
 - Builder capability surface: `src/builder_surface/`
 - Commands and tooling overlays: `src/projects/cli.rs`, `src/projects/check.rs`, `src/projects/dev_server/`
 - HTML project builder and entry assembly: `src/projects/html_project/`
@@ -1467,4 +1469,4 @@ Current paths are navigation aids rather than permanent architecture.
 - Output writing and manifests: build-system output and cleanup owners
 - Tests, validation and roadmap: `tests/cases/`, `src/build_system/tests/`, `justfile`, `docs/roadmap/`
 
-Compiler frontend, AST, HIR, borrow and target-validation locations are mapped in `docs/compiler-design-overview.md`.
+Compiler frontend, AST, HIR, borrow and target-validation locations are mapped in `docs/compiler-design-overview.md`. Nothing in this map sequences a semantic stage; `xtask/src/architecture_boundary.rs` enforces that.

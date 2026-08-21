@@ -60,6 +60,7 @@ are written and reviewed.
 
 - Moth Templates and raw Markdown preparation:
   - `src/compiler_frontend/pipeline.rs`
+  - `src/compiler_frontend/single_source_compilation/moth_template.rs` (the direct `.mtf` fold service)
   - `src/compiler_frontend/headers/moth_template_prepare.rs`
   - `src/compiler_frontend/plain_markdown.rs`
   - `src/compiler_frontend/headers/plain_markdown_prepare.rs`

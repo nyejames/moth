@@ -7,8 +7,9 @@
 > `agent/constant-evaluation-static-if-type-system-plan`
 >
 > **Status:**
-> Ready for implementation after the command timing correction plan is accepted and this branch is
-> rebased onto it.
+> Ready for implementation. The command timing accounting and reporting correction plan this entry
+> once waited on was deleted from the roadmap on 2026-08-18, so the sequencing gate is satisfied by
+> absence. The timing requirement it carried survives as this plan's own prerequisite below.
 >
 > **Planning snapshot:**
 > `main` at `7a3649d2e35668d11b55746835ac1cb2a7c1bb07`.
@@ -61,9 +62,10 @@ LAST_GOOD_COMMIT:
 - `7a3649d2e35668d11b55746835ac1cb2a7c1bb07`
 
 PREREQUISITE:
-- `docs/roadmap/plans/command-timing-accounting-and-reporting-correction-plan.md`
-- implementation must provide module-attributed timings for constant resolution, const-template
-  parse/fold and module-constant finalisation before Phase 0 records its baseline
+- module-attributed timings for constant resolution, const-template parse/fold and module-constant
+  finalisation must exist before Phase 0 records its baseline. This was previously delegated to
+  `command-timing-accounting-and-reporting-correction-plan.md`, which was deleted from the roadmap
+  on 2026-08-18; establishing the attribution is now part of this plan's Phase 0.
 
 RELEVANT_DOCS:
 - `AGENTS.md`

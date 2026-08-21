@@ -21,13 +21,16 @@
 //!   under `build_system/create_project_modules`
 //! - Generic template validation and AST substitution, which stay in `ast::generic_functions`
 
-pub(crate) mod artefacts;
-pub(crate) mod convergence;
-pub(crate) mod known;
-pub(crate) mod materialisation;
-pub(crate) mod provider_materialisations;
-pub(crate) mod requests;
-pub(crate) mod transaction;
+// Every submodule is reached through this module's re-exports or from `module_compilation`
+// itself, so none of them is a crate-wide path. Only the test fixtures below are, because the
+// build-system boundary store tests build the same completed records.
+pub(in crate::compiler_frontend::module_compilation) mod artefacts;
+pub(in crate::compiler_frontend::module_compilation) mod convergence;
+pub(in crate::compiler_frontend::module_compilation) mod known;
+pub(in crate::compiler_frontend::module_compilation) mod materialisation;
+pub(in crate::compiler_frontend::module_compilation) mod provider_materialisations;
+pub(in crate::compiler_frontend::module_compilation) mod requests;
+pub(in crate::compiler_frontend::module_compilation) mod transaction;
 
 pub(crate) use artefacts::{
     CompletedGeneratedFunction, GeneratedFunctionDelta, GeneratedFunctionId,

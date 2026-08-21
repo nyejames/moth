@@ -43,8 +43,11 @@ This plan is deliberately staged. Each phase must produce benchmark/profile evid
 Current frontend module compilation is coordinated in:
 
 ```text
-src/build_system/create_project_modules/frontend_orchestration.rs
+src/compiler_frontend/module_compilation/service.rs
 ```
+
+Stage 0 prepares source in `src/build_system/create_project_modules/module_preparation.rs` and calls
+that service once per ready module. It sequences no stage itself.
 
 The current module pipeline is:
 
@@ -389,7 +392,8 @@ Arena and optimisation support code must not bloat core pipeline files.
 Files such as:
 
 ```text
-src/build_system/create_project_modules/frontend_orchestration.rs
+src/compiler_frontend/module_compilation/service.rs
+src/build_system/create_project_modules/module_preparation.rs
 src/compiler_frontend/pipeline.rs
 src/compiler_frontend/ast/mod.rs
 ```

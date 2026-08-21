@@ -6,14 +6,14 @@
 WORK_ID: frontend-module-compilation-ownership-cleanup
 WORK_SOURCE: docs/roadmap/plans/frontend-module-compilation-ownership-cleanup-plan.md
 BASE_REVISION: f3b4178118069e857034dc2ba0e9f71864980721
-STATUS: active
-CURRENT_SCOPE: Phases 0-5 complete; the compiler owns canonical module compilation, all generated semantic completion and both specialised short paths, and the dependency direction is guarded
-COMPLETED: Phase 0 re-anchor and documentation hardening, Phase 1 data-ownership move, Phases 2-3 implemented as one slice, Phase 4 preparation-owner reduction and rename, Phase 5 specialised compiler services and the architecture-boundary guard
-NEXT_ACTION: Phase 6, prune migration residue and reconcile every documentation and reference owner
-VALIDATION: `just validate` passes at the Phase 0, Phase 1, Phase 2/3, Phase 4 and Phase 5 gates
+STATUS: complete
+CURRENT_SCOPE: all phases complete; `compiler_frontend` is the single production owner of local semantic compilation, and every stage owner is frontend-private rather than crate-visible
+COMPLETED: Phase 0 re-anchor and documentation hardening, Phase 1 data-ownership move, Phases 2-3 implemented as one slice, Phase 4 preparation-owner reduction and rename, Phase 5 specialised compiler services and the architecture-boundary guard, two independent fresh-context reviews of Phases 0-5, Phase 6 residue pruning and visibility narrowing, Phase 7 cross-boundary audit and performance comparison
+NEXT_ACTION: none; the constant evaluation and static control-flow specialisation plan is the head of the queued chain
+VALIDATION: `just validate` exits 0 at every phase gate including Phase 7. Final state: 4403 / 17 / 779 Rust tests, 1851 integration cases, `xtask source-audit` 1198 files 0 findings, `just test-honesty-evidence` 0 hard and 0 integrity findings, `just bench-frontend-check` unchanged against a worktree at the base revision (~97ms frontend average on both)
 AUDITS: compiler/build ownership, generated-function ownership, module artefact ownership, config and direct Moth-template compiler clients, canonical docs and style-guide boundary rules
 BLOCKERS: none
-NOTES: the previously named command timing accounting plan was deleted from the roadmap on 2026-08-18, so its references in this plan are historical only; the next queued plan is runtime assertion messages and call-argument parser consolidation
+NOTES: not yet committed. The command timing accounting plan was deleted from the roadmap on 2026-08-18, so its references here are historical; the constant-folding plan's dangling prerequisite on it was corrected in Phase 6. Per the convention this plan records for its own predecessors, this file is removed from `docs/roadmap/plans/` once the work is committed.
 ```
 
 ## Purpose
@@ -868,10 +868,14 @@ project style vocabulary and output packaging. `CompilerFrontend::set_source_fil
 `Ast::new`, `hir_builder::lower_module` and the `module_compilation` re-exports during the Phase 5
 review. This is a declaration correction, not a reachability change: `mod compiler_frontend;` is
 private at the crate root, so `pub` inside it was already capped at crate visibility and build code
-could always reach these methods. Tighter than `pub(crate)` is not expressible while the frontend's
-own tests drive single stages, so the dependency direction is carried by the source guard alone. `xtask/src/architecture_boundary.rs` adds
-two source-audit rules covering the direction Rust cannot encode, verified to fire on both
-pre-Phase-5 escape hatches and reporting nothing on the current tree.
+could always reach these methods. `xtask/src/architecture_boundary.rs` adds two source-audit rules
+covering the direction Rust cannot encode, verified to fire on both pre-Phase-5 escape hatches and
+reporting nothing on the current tree.
+
+Phase 5 recorded that "tighter than `pub(crate)` is not expressible while the frontend's own tests
+drive single stages". Phase 6 disproved that: the one test outside `compiler_frontend` that drove
+semantic stages was a compiler-frontend test living in the wrong tree, and moving it made every
+stage owner `pub(in crate::compiler_frontend)` or narrower.
 
 
 ## Independent review of Phases 0-5
@@ -941,27 +945,101 @@ Do not use this phase to redesign Module AST public-state projection or split th
 
 ### Checklist
 
-- [ ] Search the repository for `frontend_orchestration`, `generated_summary_convergence`, old semantic context names and old build-owned artefact type paths.
-- [ ] Delete stale forwarding functions, aliases, compatibility modules and migration-only adapters.
-- [ ] Delete old comments that describe Stage 0 as the owner of AST/HIR/borrow sequencing.
-- [ ] Review `compiler_frontend/pipeline.rs` and `compiler_frontend/mod.rs` as the public structural map and remove stage methods that no longer need crate-wide visibility.
-- [ ] Review `build_system/create_project_modules/mod.rs` as the Stage 0 structural map and make its exclusions explicit.
-- [ ] Update the implementation maps in `docs/compiler-design-overview.md` and `docs/build-system-design.md` to the final source paths.
-- [ ] Re-read the Phase 0 canonical boundary wording against the final code and tighten any sentence that still permits external stage assembly.
-- [ ] Reconcile all affected `docs/src/docs/codebase/compiler-design/**` pages with the final generated and module compilation ownership.
-- [ ] Update `docs/roadmap/plans/command-timing-accounting-and-reporting-correction-plan.md` relevant-code paths and assumptions to the new owners before that plan becomes active.
-- [ ] Update every other active or queued roadmap plan found by the repository reference audit.
-- [ ] Update source file WHAT/WHY comments after moves rather than retaining historical location explanations.
-- [ ] Compare the relevant production LOC and dependency surface against the Phase 0 baseline. Record regressions that came from new wrappers, duplicate state or unnecessary abstraction and remove them before accepting the phase.
-- [ ] Do not impose an arbitrary LOC reduction target. The target is simpler ownership and less duplicated orchestration.
+- [x] Search the repository for `frontend_orchestration`, `generated_summary_convergence`, old semantic context names and old build-owned artefact type paths.
+- [x] Delete stale forwarding functions, aliases, compatibility modules and migration-only adapters.
+- [x] Delete old comments that describe Stage 0 as the owner of AST/HIR/borrow sequencing.
+- [x] Review `compiler_frontend/pipeline.rs` and `compiler_frontend/mod.rs` as the public structural map and remove stage methods that no longer need crate-wide visibility.
+- [x] Review `build_system/create_project_modules/mod.rs` as the Stage 0 structural map and make its exclusions explicit.
+- [x] Update the implementation maps in `docs/compiler-design-overview.md` and `docs/build-system-design.md` to the final source paths.
+- [x] Re-read the Phase 0 canonical boundary wording against the final code and tighten any sentence that still permits external stage assembly.
+- [x] Reconcile all affected `docs/src/docs/codebase/compiler-design/**` pages with the final generated and module compilation ownership.
+- [x] Update `docs/roadmap/plans/command-timing-accounting-and-reporting-correction-plan.md` relevant-code paths and assumptions to the new owners before that plan becomes active.
+- [x] Update every other active or queued roadmap plan found by the repository reference audit.
+- [x] Update source file WHAT/WHY comments after moves rather than retaining historical location explanations.
+- [x] Compare the relevant production LOC and dependency surface against the Phase 0 baseline. Record regressions that came from new wrappers, duplicate state or unnecessary abstraction and remove them before accepting the phase.
+- [x] Do not impose an arbitrary LOC reduction target. The target is simpler ownership and less duplicated orchestration.
 
 ### Phase 6 gate
 
-- [ ] Ownership audit confirms only one current API shape remains and repository searches find no stale semantic owner.
-- [ ] Style-guide review focuses on moved-file responsibility, file size, comment accuracy, clone/copy regressions and redundant wrappers.
-- [ ] Documentation checks, architecture-boundary checks and full validation pass.
+- [x] Ownership audit confirms only one current API shape remains and repository searches find no stale semantic owner.
+- [x] Style-guide review focuses on moved-file responsibility, file size, comment accuracy, clone/copy regressions and redundant wrappers.
+- [x] Documentation checks, architecture-boundary checks and full validation pass.
 
 Exit state: the repository teaches and implements the same compiler/build boundary with no migration layer left behind.
+
+Phase 6 result: the boundary is now carried by Rust visibility, not by prose plus a text guard.
+
+**Residue.** No `src/` file names `frontend_orchestration` or a build-owned
+`generated_summary_convergence`; the remaining hits are this plan's own history. Seven comments
+still called the generated transaction "the build-owned worklist" — three in the AST emitter, one in
+`AstBuildResult`, one in `GenericFunctionInstantiationRequest`, one benchmark-counter note and one
+test assertion message. All now name `GeneratedFunctionTransaction`. `compilation.rs` no longer
+re-teaches the compiler's stage list from Stage 0; it states the fact Stage 0 owns (provider
+readiness) and points at `compile_module`. `check_borrows_with_warnings` in `convergence.rs` was a
+byte-for-byte duplicate of `stages::check_borrows` and is deleted.
+
+**Visibility.** Every one of the sixteen stage owners the guard names is now
+`pub(in crate::compiler_frontend)` or narrower — `bind_module_headers`,
+`resolve_module_dependencies`, `sort_headers`, `AstBuildInput`, `AstBuildContext`, `Ast::new`,
+`headers_to_ast`, `hir_builder`, `lower_module`, `generate_hir`, `PublicInterfaceDraftBuilder`, the
+three export-projection index builders, `check_borrows`, `install_exact_concrete_call_summaries`,
+`materialise_generated_request_roots` and `run_generated_summary_convergence`. `module_compilation`
+exposes only `artefact` and `generated` by path (build and project tests construct artefact lanes
+and generated fixtures); `context`, `options`, `outcome`, `prepared`, `service`, `stages` and
+`external_imports` are private behind the module map, as are every `generated` submodule and both
+`single_source_compilation` services. This is a real reachability change, unlike Phase 5's.
+
+Two things made it possible. `src/compiler_tests/frontend_pipeline_tests.rs` was a compiler-frontend
+stage test in the wrong tree; it moved to `src/compiler_frontend/tests/`, and its header now says it
+is not the canonical sequence and names `compile_module` as the owner of the stages it skips. And
+one Stage 0 merge test called `bind_module_headers` to observe string identities that
+`prepare_header_syntax` already produced — a provider-dependent stage run for facts that exist one
+stage earlier. It now asserts on the prepared syntax.
+
+The guard's own WHY was rewritten to match: it is no longer a substitute for visibility but a
+tripwire on the edit that would widen one of these declarations back, which is legal Rust and
+otherwise silent. The reverse rule keeps its original justification — nothing in the module tree
+stops `compiler_frontend` from importing `crate::build_system`.
+
+**Shape.** `compile_module` was 476 lines wrapping a 395-line IIFE. The closure body moved verbatim
+into `run_semantic_stages`, taking one named `SemanticStageInputs` bundle. `compile_module` is now
+92 lines reading as setup, one stage run, one classification; the 411-line stage sequence is a
+linear numbered sequence that must be read in order and is not split further. Test counts are
+unchanged at 4403 / 17 / 779 and 1851 integration cases.
+
+**Documentation.** The compiler implementation map led with "Frontend orchestration:
+`pipeline.rs`", which has been false since Phase 3; it now separates production entry points from
+stage owners and names the boundary guard. Two shapes had drifted from the code and were corrected:
+`ModuleCompilationOutcome::Success` carries `ModuleSemanticResult`, not the stored artefact — the
+distinction is the atomic-publication design — and `CompiledModuleArtifact` pairs `Module` with the
+interface rather than holding four flat lanes. `ModuleFingerprints` is marked planned, because no
+such lane exists. `## Generated-function worklist` became `## Generated-function boundary` in
+`build-system-design.md`, with both cross-reference tables updated, and the claim that cross-module
+requests "converge through the build-system worklist ... by scheduling further compiler module jobs"
+was replaced: `compile_module_waves` iterates dependency waves once, and every request converges
+inside the requesting module's own transaction. `compile-time-semantics.mtf` still assigned request
+deduplication to the build system, the same error the Phase 5 review fixed in the canonical docs.
+
+**References.** `compiler-source-token-and-diagnostic-data-layout-plan.md`,
+`frontend-arena-semantic-invariant-optimization-plan.md` and
+`post-tir-template-parser-optimization-plan.md` were repointed at the current owners.
+`constant-folding-and-type-system-hot-path-optimization-plan.md` gated itself on a plan file deleted
+on 2026-08-18; the timing requirement it carried is now stated as that plan's own Phase 0
+prerequisite, so the gate is satisfiable rather than dangling. The command-timing plan checklist
+item above is satisfied by that file's absence. `docs/roadmap/evidence/test_honesty_inventory.json`
+was not hand-edited: it is generated, so `just test-honesty-evidence` regenerated it, and it now
+records the current tree with no deleted owners and the moved test at its new path.
+
+**Size.** Production LOC excluding all test files: 268,490 at `f3b41781` to 269,437, up 947 lines
+(+0.35%). 205 of those are `xtask/src/architecture_boundary.rs`, a Phase 5 deliverable that replaced
+nothing. The rest is the documentation cost of splitting one 2,726-line file into named owners: the
+four replaced owners carried 10.4% comment lines, `module_compilation` carries 16.5% and
+`single_source_compilation` 20.6%, which is roughly 215 lines, plus about twenty new file headers
+and two module maps. No wrapper, duplicate payload or parallel state survived the audit, and clones
+fell from 94 to 87 across the moved owners, including the eleven per-source `string_table.clone()`
+calls the old direct template path made. `stages.rs` was kept after review: two eight-line
+warning-merging wrappers over four call sites, which is what lets the stage sequence read as named
+steps.
 
 ## Phase 7: Final cross-boundary audit, performance sanity check and roadmap release
 
@@ -971,31 +1049,98 @@ The final phase verifies the whole boundary rather than another local slice. It 
 
 ### Checklist
 
-- [ ] Re-run the Phase 0 production raw-stage caller inventory and require zero unapproved external orchestration callers.
-- [ ] Re-run the compiler-to-build/project dependency inventory and require no local semantic compiler dependency on build/project containers.
-- [ ] Confirm canonical module compilation has one production entry and one success/diagnosed/error contract.
-- [ ] Confirm Stage 0 still prepares source exactly once and consumes structural provider references before provider binding.
-- [ ] Confirm a diagnosed provider publishes no partial interface and blocks only semantic consumers that require it.
-- [ ] Confirm generated sidecars remain immutable boundary records and equal identities in unrelated boundaries remain independent.
-- [ ] Confirm build-owned generated code performs aggregation, deduplication, storage and publication only.
-- [ ] Confirm compiler-owned generated code performs materialisation, validation, borrow analysis and semantic convergence only.
-- [ ] Confirm project config and direct Moth-template compilation use named compiler services.
-- [ ] Confirm `frontend_orchestration.rs` and build-owned `generated_summary_convergence.rs` are absent.
-- [ ] Confirm compiler artefact lane types live under the compiler owner while `ProjectCompilation`, entries and output policy remain build-owned.
-- [ ] Run the current canonical frontend benchmark/timing comparison recorded in Phase 0 and investigate any material regression caused by extra cloning, remapping or repeated walks introduced by the refactor.
-- [ ] Do not turn this checkpoint into a general frontend optimisation phase. Correct only regressions caused by the ownership move.
-- [ ] Run the repository's complete post-test-honesty validation matrix.
-- [ ] Update this plan's capsule to complete with the final validating commit and audit result.
-- [ ] Mark this roadmap item complete.
-- [ ] Update the roadmap so command timing accounting and reporting corrections becomes the next eligible queued plan.
+- [x] Re-run the Phase 0 production raw-stage caller inventory and require zero unapproved external orchestration callers.
+- [x] Re-run the compiler-to-build/project dependency inventory and require no local semantic compiler dependency on build/project containers.
+- [x] Confirm canonical module compilation has one production entry and one success/diagnosed/error contract.
+- [x] Confirm Stage 0 still prepares source exactly once and consumes structural provider references before provider binding.
+- [x] Confirm a diagnosed provider publishes no partial interface and blocks only semantic consumers that require it.
+- [x] Confirm generated sidecars remain immutable boundary records and equal identities in unrelated boundaries remain independent.
+- [x] Confirm build-owned generated code performs aggregation, deduplication, storage and publication only.
+- [x] Confirm compiler-owned generated code performs materialisation, validation, borrow analysis and semantic convergence only.
+- [x] Confirm project config and direct Moth-template compilation use named compiler services.
+- [x] Confirm `frontend_orchestration.rs` and build-owned `generated_summary_convergence.rs` are absent.
+- [x] Confirm compiler artefact lane types live under the compiler owner while `ProjectCompilation`, entries and output policy remain build-owned.
+- [x] Run the current canonical frontend benchmark/timing comparison recorded in Phase 0 and investigate any material regression caused by extra cloning, remapping or repeated walks introduced by the refactor.
+- [x] Do not turn this checkpoint into a general frontend optimisation phase. Correct only regressions caused by the ownership move.
+- [x] Run the repository's complete post-test-honesty validation matrix.
+- [x] Update this plan's capsule to complete with the final validating commit and audit result.
+- [x] Mark this roadmap item complete.
+- [x] Update the roadmap so command timing accounting and reporting corrections becomes the next eligible queued plan.
 
 ### Phase 7 gate
 
-- [ ] Broad ownership audit reports no unresolved compiler/build boundary finding.
-- [ ] Broad style-guide audit reports no stale owner, compatibility shim, unjustified large moved file or comment-policy regression.
-- [ ] Full validation, docs validation, architecture-boundary tests and the recorded frontend performance sanity comparison pass.
+- [x] Broad ownership audit reports no unresolved compiler/build boundary finding.
+- [x] Broad style-guide audit reports no stale owner, compatibility shim, unjustified large moved file or comment-policy regression.
+- [x] Full validation, docs validation, architecture-boundary tests and the recorded frontend performance sanity comparison pass.
 
 Exit state: the next roadmap plan starts from a frontend whose ownership boundary is explicit in code, documentation and tests.
+
+Phase 7 result: every inventory the plan opened with now returns zero.
+
+**Raw-stage callers outside `compiler_frontend`.** Two hits across all production source, both
+approved. `prepare_header_syntax` in `module_preparation.rs` is the documented Stage 0 exception,
+which ends at prepared syntax. `lower_module` in `backends/js/emitter.rs` is `JsEmitter::lower_module`,
+an unrelated method the guard's own comment already accounts for. The Phase 0 table listed four
+owners assembling twelve stage entry points between them; none remains.
+
+**Compiler dependency on build or project containers.** Zero production hits for
+`crate::build_system` or `settings::Config` under `src/compiler_frontend/`.
+
+**One entry, one contract.** `compile_module` has one definition and two logical call sites, both in
+`compilation.rs` — the single-file synthetic path and the directory wave path — each a
+`#[cfg(feature = "timers")]` pair. It returns `Result<ModuleCompilationOutcome, CompilerError>` and
+nothing else classifies a module result.
+
+**Stage 0 invariants.** Exactly-once preparation is pinned by
+`serial_chunk_local_preparation_counts_each_selected_source_once` and by the
+`file_frontend_prepare_count_for_path_for_test` assertions in `create_project_modules_tests.rs`,
+which check the counter end to end for entry and helper files. Structural provider references are
+read from the preparation result in `source_discovery.rs` before any provider interface exists.
+
+**Diagnosed providers.** `diagnosed_provider_retains_independent_successful_module`,
+`project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_errors` and
+`directory_graph_retains_independent_diagnostics_without_blocked_consumer_cascades` cover the
+no-partial-interface and blocks-only-required-consumers contracts.
+
+**Generated boundaries.** `equal_generated_identities_publish_across_independent_boundaries` and
+`independent_packages_publish_equal_generated_identities_in_any_order` pin identity independence
+across unrelated boundaries. `generated_store.rs` exposes exactly `known_generated`, `preflight`,
+`commit`, `reserve_commit`, `publish`, `sidecars` and `sidecar_at`: lending the published set,
+storing and publishing. It has no deduplication entry point, which matches the corrected docs — the
+compiler deduplicates against the lent set inside `transaction.rs`. The compiler's `generated/`
+owns request canonicalisation, materialisation, validation, borrow analysis and convergence, and
+nothing else.
+
+**Files absent.** `frontend_orchestration.rs`, `generated_summary_convergence.rs`,
+`generated_worklist.rs` and `project_config/parsing.rs` are all gone.
+
+**Artefact lanes.** All eight lane types — `Module`, `CompiledModuleArtifact`, `ModuleExecutable`,
+`ModuleLinkFacts`, `ModuleCompilerMetadata`, `ModuleRootActivity`, `ResolvedConstFragment`,
+`ModuleExternalImport` — live in `compiler_frontend/module_compilation/artefact.rs`.
+`ProjectCompilation`, `EntryAssembly`, `ProjectEntry` and `OutputFile` stay in `build_system/build.rs`.
+
+**Performance.** Phase 0 recorded the command but no measurement, and recorded benchmark history is
+local-data-ignored, so there was no stored figure to diff. `just bench-frontend-check` was therefore
+run on a git worktree at `f3b41781` and on the current tree, same machine, same session:
+
+| | baseline `f3b41781` | current |
+|---|---|---|
+| frontend avg, 31 cases | ~97ms | ~97ms |
+| AST const-template parse | ~336ms | ~336ms |
+| directory compile | ~119ms | ~117ms |
+| frontend stage | ~89ms | ~88ms |
+
+No regression from extra cloning, remapping or repeated walks. This is consistent with the
+structural evidence: stage order is unchanged, clone sites fell from 94 to 87 across the moved
+owners, and the remaining `string_table.clone()` calls are all on error paths building
+`CompilerMessages`.
+
+**Validation.** `just validate` exits 0: clippy all-features, feature-lane check, `xtask
+source-audit` (1198 files, 0 findings, both boundary rules active), `cargo test --workspace`
+(4403 / 17 / 779, 0 failed), `cargo run -- tests --terse` (1851 cases), the docs build, `xtask
+bench-ci` and the timers-erasure check. `just test-honesty-evidence` regenerated the durable
+inventory: 0 hard findings, 0 ledger-integrity findings, 0 source-audit findings, 0 feature-lane
+findings.
 
 ---
 

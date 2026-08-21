@@ -24,15 +24,20 @@
 //! - The stage implementations themselves, which stay with `headers`, `ast`, `hir`, `analysis` and
 //!   `public_interface`
 
+// Only `artefact` and `generated` are reachable by path: build-system and project tests construct
+// artefact lanes and generated fixtures directly. Every other submodule is reached through the
+// re-exports below, so this module map stays the one way in and `stages` cannot become a second
+// raw-stage entry point.
 pub(crate) mod artefact;
-pub(crate) mod context;
-pub(crate) mod external_imports;
 pub(crate) mod generated;
-pub(crate) mod options;
-pub(crate) mod outcome;
-pub(crate) mod prepared;
-pub(crate) mod service;
-pub(crate) mod stages;
+
+mod context;
+mod external_imports;
+mod options;
+mod outcome;
+mod prepared;
+mod service;
+mod stages;
 
 pub(crate) use artefact::{CompiledModuleArtifact, ModuleExternalImport, ModuleRootActivity};
 pub(crate) use artefact::{Module, ResolvedConstFragment};

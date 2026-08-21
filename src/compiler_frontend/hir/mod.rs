@@ -40,7 +40,7 @@ pub(crate) mod statements;
 pub(crate) mod structs;
 pub(crate) mod terminators;
 
-pub(crate) mod hir_builder;
+pub(in crate::compiler_frontend) mod hir_builder;
 pub(crate) mod hir_datatypes;
 pub(crate) mod hir_side_table;
 

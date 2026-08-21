@@ -134,7 +134,7 @@ impl AstTimingMetricFamily {
 ///       that remain constant for the lifetime of a single module compilation.
 /// WHY: centralises service ownership so the environment builder, emitter, and finalizer
 ///      do not need to track these individually.
-pub struct AstBuildContext<'a> {
+pub(in crate::compiler_frontend) struct AstBuildContext<'a> {
     /// Backend-provided virtual package metadata and external symbol registry.
     pub external_package_registry: Arc<ExternalPackageRegistry>,
 
@@ -214,7 +214,9 @@ impl<'a> AstPhaseContext<'a> {
     ///       the table as a separate mutable reference.
     /// WHY: lets the caller pass the phase context and string table independently,
     ///      resolving Rust's borrow checker constraints across phase boundaries.
-    pub(crate) fn from_build_context(context: AstBuildContext<'a>) -> (Self, &'a mut StringTable) {
+    pub(in crate::compiler_frontend) fn from_build_context(
+        context: AstBuildContext<'a>,
+    ) -> (Self, &'a mut StringTable) {
         let AstBuildContext {
             external_package_registry,
             style_directives,

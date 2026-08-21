@@ -211,7 +211,7 @@ pub fn prepare_header_syntax(
 /// WHY: these facts depend on provider interfaces and the project path resolver, so they cannot
 /// be known during syntax preparation. Keeping binding separate lets the build system schedule
 /// it after required providers have compiled.
-pub fn bind_module_headers(
+pub(in crate::compiler_frontend) fn bind_module_headers(
     prepared: PreparedHeaderSyntax,
     external_package_registry: &ExternalPackageRegistry,
     external_dependency_resolution_table: &ExternalImportResolutionTable,

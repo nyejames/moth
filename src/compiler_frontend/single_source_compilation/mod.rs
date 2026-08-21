@@ -19,8 +19,10 @@
 //! - Moth template source collection and output packaging, which stay under
 //!   `projects/html_project/moth_template`
 
-pub(crate) mod config;
-pub(crate) mod moth_template;
+// Both services are reached through the re-exports below, so neither submodule is a crate-wide
+// path and neither can be entered part-way through its stage sequence.
+mod config;
+mod moth_template;
 
 pub(crate) use config::{CompiledConfigSource, ConfigCompilationRequest, compile_config_source};
 pub(crate) use moth_template::{MothTemplateCompilationRequest, compile_moth_template_source};

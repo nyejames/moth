@@ -18,8 +18,7 @@ use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, Diagnostic
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileFrontendPrepareError, FileFrontendPrepareOutput, HeaderKind, HeaderParseOptions,
-    PreparedHeaderSyntax, bind_module_headers, parse_file_headers_with_table,
-    prepare_header_syntax,
+    PreparedHeaderSyntax, parse_file_headers_with_table, prepare_header_syntax,
 };
 use crate::compiler_frontend::module_compilation::{
     ModuleCompilationContext, ModuleCompilationOutcome, ProviderMaterialisationRegistry,
@@ -329,19 +328,11 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
         "module table should contain source strings plus header-generated strings"
     );
 
-    // Aggregate the remapped outputs.
-    let prepared_syntax =
-        prepare_header_syntax(vec![output_a, output_b], &mut frontend.string_table)
-            .expect("header syntax preparation should succeed");
-    let headers = bind_module_headers(
-        prepared_syntax,
-        &frontend.external_package_registry,
-        &ExternalImportResolutionTable::default(),
-        &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
-        options.project_path_resolver.as_ref(),
-        &mut frontend.string_table,
-    )
-    .expect("header binding should succeed");
+    // Aggregate the remapped outputs. Preparation is where Stage 0's merge finishes, so every
+    // assertion below reads the prepared syntax directly: binding against provider interfaces
+    // would add a provider-dependent stage that cannot change a string identity.
+    let headers = prepare_header_syntax(vec![output_a, output_b], &mut frontend.string_table)
+        .expect("header syntax preparation should succeed");
 
     // Verify source text string "beta" resolves through the module table in file B headers.
     let beta_header = headers

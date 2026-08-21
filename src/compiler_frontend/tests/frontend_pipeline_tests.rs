@@ -1,9 +1,18 @@
-//! Frontend stage-by-stage pipeline regression tests.
+//! Stage-boundary regression tests for the frontend stage facade.
 //!
-//! WHAT: exercises tokenizer, header parsing, dependency sorting, AST construction, HIR lowering,
-//! and borrow checking through the public frontend entrypoints.
-//! WHY: Phase 4 needs coverage across stage boundaries so refactors cannot silently break the
-//! compiler pipeline while unit tests still pass in isolation.
+//! WHAT: drives tokenization, header preparation, binding, declaration ordering, AST construction,
+//!       HIR lowering and borrow validation one stage at a time, so a test can assert the
+//!       intermediate value a stage produced rather than only the final outcome.
+//! WHY:  stage-local unit tests can all pass while the handoff between two stages breaks. These
+//!       tests own the handoffs: source identity surviving into diagnostics, declaration ordering
+//!       surviving into lowering, and project-owned style directives reaching header parsing.
+//!
+//! This harness is NOT the canonical module compilation sequence and must not be read as a model
+//! of it. [`module_compilation::compile_module`](crate::compiler_frontend::module_compilation)
+//! is the one production owner: it also projects the public interface, completes generated
+//! functions and converges their summaries, none of which happen here. Coverage for those belongs
+//! to `public_interface/tests/`, `module_compilation/generated/tests/` and the build-system suites
+//! that run the real `HirFunctionOriginLookup`.
 
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
