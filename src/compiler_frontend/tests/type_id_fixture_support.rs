@@ -237,6 +237,7 @@ pub(crate) fn runtime_handled_function_call_item(
             args: vec![],
             result_type_ids,
             handling: expression_handling,
+            propagation_location: None,
         },
         location,
         expression_type_id,

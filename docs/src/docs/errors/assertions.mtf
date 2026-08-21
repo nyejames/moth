@@ -47,8 +47,10 @@ The rules below describe the accepted end state and the explicit target gap.
 - Parentheses are required.
 - The shared call-argument grammar owns trailing-comma behaviour.
 
-The message is type checked even when the condition is compile-time `true`,
-but it is evaluated only on the failure edge. A template-backed message is
+The message is type checked, generic-inferred and evidence-checked even when
+the condition is compile-time `true`, but it is evaluated only on the failure
+edge. A compile-time-true message publishes no generated-function request or
+downstream executable fact. A template-backed message is
 read as one snapshot at failure and does not create an assertion sink or live
 subscription. Message construction cannot use `!`, `?` or another enclosing
 function exit. Handle fallible work before the assertion and pass its infallible

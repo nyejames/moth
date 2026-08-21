@@ -5,8 +5,15 @@
 //! WHY: message evaluation happens on the terminal failure edge, so each expression owner must
 //!      preserve the same no-escape rule without token rescanning.
 
-use crate::compiler_frontend::ast::ast_nodes::NodeKind;
+use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::ast::expressions::assertion_message_effects::{
+    EnclosingExitEffect, assert_message_escape_diagnostic, classify_assertion_message_effect,
+};
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
+use crate::compiler_frontend::ast::statements::value_production::types::{
+    ValueBlock, ValueIfBlock,
+};
 use crate::compiler_frontend::ast::templates::runtime_handoff::{
     OwnedRuntimeTemplateBody, OwnedRuntimeTemplateBranch, OwnedRuntimeTemplateHandoff,
     OwnedRuntimeTemplateNode,
@@ -23,7 +30,9 @@ use crate::compiler_frontend::ast::templates::tir::{
 };
 use crate::compiler_frontend::compiler_messages::InvalidFallibleHandlingReason;
 use crate::compiler_frontend::datatypes::{DataType, builtin_type_ids};
-use crate::compiler_frontend::tests::ast_fixture_support::function_body_by_name;
+use crate::compiler_frontend::tests::ast_fixture_support::{
+    function_body_by_name, function_node, node, test_source_location,
+};
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -59,7 +68,7 @@ fn handoff_expression(handoff: OwnedRuntimeTemplateHandoff) -> Expression {
 }
 
 fn assert_escape_location(message: Expression) -> SourceLocation {
-    let diagnostic = super::assert_message_escape_diagnostic(&message, &TemplateIrStore::new())
+    let diagnostic = assert_message_escape_diagnostic(&message, &TemplateIrStore::new())
         .expect("assertion-message traversal should not fail")
         .expect("message should reject escaping control flow");
     assert!(matches!(
@@ -173,8 +182,117 @@ fn raw_tir_dynamic_expression_is_checked_before_hir_handoff() {
         ValueMode::ImmutableOwned,
     );
 
-    let diagnostic = super::assert_message_escape_diagnostic(&message, &store)
+    let diagnostic = assert_message_escape_diagnostic(&message, &store)
         .expect("raw TIR traversal should not fail")
         .expect("raw TIR dynamic expressions must reject propagation");
     assert_eq!(diagnostic.primary_location, location);
+}
+
+#[test]
+fn fallible_call_keeps_call_mapping_location_separate_from_postfix_effect_location() {
+    let source = r#"
+may_fail || -> String, Error!:
+    return! Error("boom")
+;
+
+check || -> String, Error!:
+    value = may_fail()!
+    return value
+;
+"#;
+    let (ast, string_table) = parse_single_file_ast(source);
+    let body = function_body_by_name(&ast, &string_table, "check");
+    let declaration = body
+        .iter()
+        .find_map(|node| match &node.kind {
+            NodeKind::VariableDeclaration(declaration) => Some(declaration),
+            _ => None,
+        })
+        .expect("expected the fallible value declaration");
+
+    let propagation_location = declaration
+        .value
+        .propagation_location()
+        .expect("parsed postfix propagation must retain its authored location");
+    assert_eq!(
+        propagation_location.start_pos.line_number,
+        declaration.value.location.start_pos.line_number
+    );
+    assert!(
+        propagation_location.start_pos.char_column
+            > declaration.value.location.start_pos.char_column,
+        "the postfix marker must be after the ordinary call location"
+    );
+
+    assert_eq!(
+        classify_assertion_message_effect(&declaration.value, &TemplateIrStore::new())
+            .expect("effect classification should succeed"),
+        Some(EnclosingExitEffect::ErrorPropagation(
+            propagation_location.clone(),
+        ))
+    );
+}
+
+#[test]
+fn effect_classifier_respects_function_and_loop_control_boundaries() {
+    let location = test_source_location(30);
+    let nested_function = function_node(
+        Default::default(),
+        FunctionSignature::default(),
+        vec![node(NodeKind::Return(vec![]), location.clone())],
+        location.clone(),
+    );
+    let loop_with_local_break = node(
+        NodeKind::WhileLoop(
+            Expression::bool(true, location.clone(), ValueMode::ImmutableOwned),
+            vec![node(NodeKind::Break, location.clone())],
+        ),
+        location.clone(),
+    );
+    let message = Expression::new(
+        ExpressionKind::ValueBlock {
+            block: Box::new(ValueBlock::If(ValueIfBlock {
+                condition: Expression::bool(true, location.clone(), ValueMode::ImmutableOwned),
+                then_body: vec![nested_function, loop_with_local_break],
+                else_body: vec![],
+                location: location.clone(),
+                result_type_ids: vec![],
+            })),
+        },
+        location.clone(),
+        crate::compiler_frontend::datatypes::builtin_type_ids::STRING,
+        DataType::StringSlice,
+        ValueMode::ImmutableOwned,
+    );
+
+    assert_eq!(
+        classify_assertion_message_effect(&message, &TemplateIrStore::new())
+            .expect("nested local control-flow classification should succeed"),
+        None
+    );
+
+    let enclosing_return = Expression::new(
+        ExpressionKind::ValueBlock {
+            block: Box::new(ValueBlock::If(ValueIfBlock {
+                condition: Expression::bool(true, location.clone(), ValueMode::ImmutableOwned),
+                then_body: vec![AstNode {
+                    kind: NodeKind::Return(vec![]),
+                    location: location.clone(),
+                    scope: Default::default(),
+                }],
+                else_body: vec![],
+                location: location.clone(),
+                result_type_ids: vec![],
+            })),
+        },
+        location.clone(),
+        crate::compiler_frontend::datatypes::builtin_type_ids::STRING,
+        DataType::StringSlice,
+        ValueMode::ImmutableOwned,
+    );
+    assert_eq!(
+        classify_assertion_message_effect(&enclosing_return, &TemplateIrStore::new())
+            .expect("enclosing return classification should succeed"),
+        Some(EnclosingExitEffect::FunctionReturn(location))
+    );
 }

@@ -7,6 +7,8 @@ Use `assert` for a condition that must already be true.
 
 The message is optional. When you add one it is an ordinary `String?` value,
 including a local string, runtime template snapshot or infallible string-producing call.
+It is still checked when the condition is the literal `true`, but inactive
+message work does not become a generated function or runtime fact.
 JavaScript and HTML evaluate it only on the failure edge; HTML-Wasm currently
 rejects reachable runtime message construction.
 

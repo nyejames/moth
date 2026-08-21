@@ -296,6 +296,7 @@ impl<'a> HirBuilder<'a> {
                 args,
                 result_type_ids,
                 handling,
+                ..
             } => {
                 let target = self.resolve_call_target_or_error(name, &expr.location)?;
                 self.lower_handled_fallible_call_expression(
@@ -303,8 +304,8 @@ impl<'a> HirBuilder<'a> {
                     args,
                     result_type_ids,
                     handling,
-                    true,
                     &expr.location,
+                    expr.propagation_location().unwrap_or(&expr.location),
                 )
             }
 
@@ -314,6 +315,7 @@ impl<'a> HirBuilder<'a> {
                 result_type_ids,
                 error_type_id,
                 handling,
+                ..
             } => self.lower_handled_external_fallible_call_expression(
                 ExternalFallibleCallLoweringInput {
                     id: *id,
@@ -321,7 +323,8 @@ impl<'a> HirBuilder<'a> {
                     result_type_ids,
                     error_type_id: *error_type_id,
                     handling,
-                    location: &expr.location,
+                    call_location: &expr.location,
+                    propagation_location: expr.propagation_location().unwrap_or(&expr.location),
                 },
             ),
 
@@ -356,8 +359,15 @@ impl<'a> HirBuilder<'a> {
                 })
             }
 
-            ExpressionKind::HandledFallibleExpression { value, handling } => self
-                .lower_handled_fallible_expression(value, handling, &expr.location, expr.type_id),
+            ExpressionKind::HandledFallibleExpression {
+                value, handling, ..
+            } => self.lower_handled_fallible_expression(
+                value,
+                handling,
+                &expr.location,
+                expr.propagation_location().unwrap_or(&expr.location),
+                expr.type_id,
+            ),
 
             ExpressionKind::OptionPropagation { value } => {
                 self.lower_option_expression_to_present_value(value, &expr.location)
@@ -685,7 +695,9 @@ impl<'a> HirBuilder<'a> {
                         .iter()
                         .any(|arg| self.expression_needs_current_block_lowering(&arg.value))
             }
-            ExpressionKind::HandledFallibleExpression { value, handling } => {
+            ExpressionKind::HandledFallibleExpression {
+                value, handling, ..
+            } => {
                 matches!(handling, FallibleExpressionHandling::Propagate)
                     || self.expression_needs_current_block_lowering(value)
             }

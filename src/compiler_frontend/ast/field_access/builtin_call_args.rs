@@ -6,7 +6,7 @@
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
 use crate::compiler_frontend::ast::expressions::call_arguments::{
-    NamedArgumentSyntax, parse_call_arguments_typed_with_expectations,
+    CallArgumentSyntax, parse_call_arguments_typed_with_expectations,
 };
 use crate::compiler_frontend::ast::expressions::call_validation::{
     CallArgumentResolutionContext, CallDiagnosticContext, ExpectedAccessMode,
@@ -45,7 +45,7 @@ pub(super) fn parse_builtin_method_args_typed(
         type_interner,
         string_table,
         &expectations,
-        NamedArgumentSyntax::UnsupportedBuiltinMember {
+        CallArgumentSyntax::UnsupportedBuiltinMember {
             member_name: Some(callee_name),
             takes_no_arguments: expected_type_ids.is_empty(),
         },

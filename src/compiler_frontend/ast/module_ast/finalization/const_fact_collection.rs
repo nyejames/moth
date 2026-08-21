@@ -14,6 +14,7 @@ use crate::compiler_frontend::ast::const_values::facts::AstConstFacts;
 use crate::compiler_frontend::ast::const_values::resolver::{
     ConstResolutionError, ConstValueEnvironment, ConstValueResolver,
 };
+use crate::compiler_frontend::ast::expressions::assertion_message_effects::assertion_condition_is_statically_true;
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_rpn::{
@@ -247,7 +248,9 @@ impl<'a> ConstFactCollector<'a> {
 
             NodeKind::Assert { condition, message } => {
                 self.walk_expression_for_body_local(condition, env)?;
-                self.walk_expression_for_body_local(message, env)?;
+                if !assertion_condition_is_statically_true(condition) {
+                    self.walk_expression_for_body_local(message, env)?;
+                }
             }
 
             NodeKind::Match {

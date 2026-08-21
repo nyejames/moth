@@ -364,12 +364,14 @@ pub(crate) fn parse_symbol_statement(
             .into());
         }
 
+        let call_location = token_stream.current_location();
         token_stream.advance();
         let external_call_expression =
             parse_external_function_call_expression(ExternalFunctionCallParseInput {
                 token_stream,
                 external_function_id,
                 external_function: external_function_def,
+                call_location,
                 context,
                 value_required: false,
                 allow_boundary_catch: true,

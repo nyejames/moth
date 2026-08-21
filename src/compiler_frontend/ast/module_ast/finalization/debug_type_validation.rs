@@ -406,7 +406,9 @@ fn debug_validate_expression_type_id_with_context(
             debug_validate_expression_type_id(value, context);
         }
 
-        ExpressionKind::HandledFallibleExpression { value, handling } => {
+        ExpressionKind::HandledFallibleExpression {
+            value, handling, ..
+        } => {
             debug_validate_recover_marker_context(
                 *handling,
                 expression_context,

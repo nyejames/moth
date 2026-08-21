@@ -159,6 +159,13 @@ pub enum ExpressionKind {
         args: Vec<CallArgument>,
         result_type_ids: Vec<TypeId>,
         handling: FallibleExpressionHandling,
+        /// Authored postfix `!` location, kept separate from the call expression location.
+        ///
+        /// WHAT: preserves the source site of propagation while `Expression::location`
+        ///       remains the call location used by ordinary call lowering and side tables.
+        /// WHY: one source location cannot faithfully identify both the call and its
+        ///      control-flow effect.
+        propagation_location: Option<SourceLocation>,
     },
 
     /// External fallible function call with explicit handling.
@@ -171,6 +178,8 @@ pub enum ExpressionKind {
         result_type_ids: Vec<TypeId>,
         error_type_id: TypeId,
         handling: FallibleExpressionHandling,
+        /// Authored postfix `!` location, kept separate from the host-call location.
+        propagation_location: Option<SourceLocation>,
     },
 
     /// Explicit `cast` / `cast!` expression resolved at an explicit typed boundary.
@@ -192,6 +201,8 @@ pub enum ExpressionKind {
     HandledFallibleExpression {
         value: Box<Expression>,
         handling: FallibleExpressionHandling,
+        /// Authored postfix `!` location, kept separate from the wrapped value location.
+        propagation_location: Option<SourceLocation>,
     },
 
     /// Postfix option propagation (`expr?`).

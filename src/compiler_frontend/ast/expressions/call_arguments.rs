@@ -38,14 +38,14 @@ use crate::compiler_frontend::type_coercion::parse_context::{
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::FxHashMap;
 
-/// Whether a call-shaped surface accepts named arguments.
+/// Syntax policy for one call-shaped surface.
 ///
-/// WHAT: carries the surface-specific diagnostic lane for named targets while the shared parser
-///       owns all syntax and slot-selection policy.
-/// WHY: source calls and constructors support named arguments, while builtin members and host
-///      calls retain their existing positional-only diagnostics.
+/// WHAT: carries the surface-specific diagnostic lane for named targets and no-argument builtin
+///       members while the shared parser owns all syntax and slot-selection policy.
+/// WHY: every call-shaped consumer must share one retained-slot parser even when its named or
+///      argument-count policy differs.
 #[derive(Clone, Copy)]
-pub(crate) enum NamedArgumentSyntax {
+pub(crate) enum CallArgumentSyntax {
     Supported {
         callee_name: Option<StringId>,
     },
@@ -71,7 +71,7 @@ pub(crate) fn parse_call_arguments_typed_with_expectations(
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
     expectations: &[ParameterExpectation],
-    named_arguments: NamedArgumentSyntax,
+    argument_syntax: CallArgumentSyntax,
 ) -> Result<Vec<CallArgument>, ExpressionParseError> {
     parse_call_arguments_inner(
         token_stream,
@@ -79,7 +79,7 @@ pub(crate) fn parse_call_arguments_typed_with_expectations(
         type_interner,
         string_table,
         CallArgumentSyntaxContext::Ordinary,
-        named_arguments,
+        argument_syntax,
         Some(expectations),
     )
 }
@@ -100,7 +100,7 @@ pub(crate) fn parse_generic_call_arguments_typed(
         CallArgumentSyntaxContext::GenericFunction {
             function_name: generic_function_name,
         },
-        NamedArgumentSyntax::Supported {
+        CallArgumentSyntax::Supported {
             callee_name: generic_function_name,
         },
         Some(expectations),
@@ -160,15 +160,15 @@ fn parse_call_arguments_inner(
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
     syntax_context: CallArgumentSyntaxContext,
-    named_arguments: NamedArgumentSyntax,
+    argument_syntax: CallArgumentSyntax,
     expectations: Option<&[ParameterExpectation]>,
 ) -> Result<Vec<CallArgument>, ExpressionParseError> {
     ast_log!("Creating function call arguments");
 
-    if let NamedArgumentSyntax::UnsupportedBuiltinMember {
+    if let CallArgumentSyntax::UnsupportedBuiltinMember {
         member_name: Some(member_name),
         takes_no_arguments: true,
-    } = named_arguments
+    } = argument_syntax
     {
         if token_stream.current_token_kind() != &TokenKind::OpenParenthesis {
             return Err(CompilerDiagnostic::invalid_builtin_call(
@@ -216,7 +216,7 @@ fn parse_call_arguments_inner(
     }
 
     let mut arguments = Vec::new();
-    let mut slot_router = ParameterSlotRouter::new(expectations, named_arguments);
+    let mut slot_router = ParameterSlotRouter::new(expectations, argument_syntax);
 
     // ------------------------
     //  Parse each argument
@@ -425,7 +425,7 @@ fn argument_is_bare_none(token_stream: &FileTokens) -> bool {
 ///      the authored call shape later.
 struct ParameterSlotRouter<'a> {
     expectations: Option<&'a [ParameterExpectation]>,
-    named_arguments: NamedArgumentSyntax,
+    argument_syntax: CallArgumentSyntax,
     parameter_name_to_slot: FxHashMap<StringId, usize>,
     positional_cursor: usize,
     saw_named_argument: bool,
@@ -435,7 +435,7 @@ struct ParameterSlotRouter<'a> {
 impl<'a> ParameterSlotRouter<'a> {
     fn new(
         expectations: Option<&'a [ParameterExpectation]>,
-        named_arguments: NamedArgumentSyntax,
+        argument_syntax: CallArgumentSyntax,
     ) -> Self {
         let parameter_name_to_slot = expectations
             .map(|items| {
@@ -449,7 +449,7 @@ impl<'a> ParameterSlotRouter<'a> {
 
         Self {
             expectations,
-            named_arguments,
+            argument_syntax,
             parameter_name_to_slot,
             positional_cursor: 0,
             saw_named_argument: false,
@@ -475,8 +475,8 @@ impl<'a> ParameterSlotRouter<'a> {
         if let Some((target_name, target_location)) = named_target {
             self.saw_named_argument = true;
 
-            match self.named_arguments {
-                NamedArgumentSyntax::UnsupportedCall { callee_name } => {
+            match self.argument_syntax {
+                CallArgumentSyntax::UnsupportedCall { callee_name } => {
                     return Err(CompilerDiagnostic::invalid_call_shape(
                         InvalidCallShapeReason::NamedArgumentsNotSupported,
                         callee_name,
@@ -485,7 +485,7 @@ impl<'a> ParameterSlotRouter<'a> {
                     .into());
                 }
 
-                NamedArgumentSyntax::UnsupportedBuiltinMember { member_name, .. } => {
+                CallArgumentSyntax::UnsupportedBuiltinMember { member_name, .. } => {
                     return Err(CompilerDiagnostic::invalid_builtin_call(
                         InvalidBuiltinCallReason::NamedArgumentsNotSupported,
                         member_name,
@@ -494,7 +494,7 @@ impl<'a> ParameterSlotRouter<'a> {
                     .into());
                 }
 
-                NamedArgumentSyntax::Supported { callee_name } => {
+                CallArgumentSyntax::Supported { callee_name } => {
                     let Some(slot) = self.parameter_name_to_slot.get(target_name).copied() else {
                         return Err(CompilerDiagnostic::invalid_call_shape(
                             InvalidCallShapeReason::NamedArgumentNotFound {
@@ -583,10 +583,10 @@ impl<'a> ParameterSlotRouter<'a> {
     }
 
     fn callee_name(&self) -> Option<StringId> {
-        match self.named_arguments {
-            NamedArgumentSyntax::Supported { callee_name }
-            | NamedArgumentSyntax::UnsupportedCall { callee_name } => callee_name,
-            NamedArgumentSyntax::UnsupportedBuiltinMember { .. } => None,
+        match self.argument_syntax {
+            CallArgumentSyntax::Supported { callee_name }
+            | CallArgumentSyntax::UnsupportedCall { callee_name } => callee_name,
+            CallArgumentSyntax::UnsupportedBuiltinMember { .. } => None,
         }
     }
 }

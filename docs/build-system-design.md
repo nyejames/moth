@@ -1075,7 +1075,10 @@ Each successful generated sidecar entry carries its own generated-local type con
 
 Only requests committed from the Stage 4 specialised active AST reach the project or package
 boundary. Generic calls in an inactive static branch are frontend-validated but do not cause
-materialisation or generated sidecar work.
+materialisation or generated sidecar work. The same compiler-owned provisional request boundary
+applies to a compile-time-true assertion message: the message is validated, then its inactive
+request delta is discarded before generated-function publication. Build orchestration does not
+filter assertion requests after the AST stage.
 
 Cross-package instances belong to the consuming compilation. Dependency base artefacts remain immutable.
 

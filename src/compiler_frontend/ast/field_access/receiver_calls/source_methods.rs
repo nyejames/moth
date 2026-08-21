@@ -14,7 +14,7 @@ use crate::compiler_frontend::ast::expressions::call_argument::{
     CallAccessMode, CallArgument, ParameterSlot, normalize_call_arguments,
 };
 use crate::compiler_frontend::ast::expressions::call_arguments::{
-    NamedArgumentSyntax, parse_call_arguments_typed_with_expectations,
+    CallArgumentSyntax, parse_call_arguments_typed_with_expectations,
 };
 use crate::compiler_frontend::ast::expressions::call_validation::{
     CallArgumentResolutionContext, CallDiagnosticContext,
@@ -243,7 +243,7 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
         type_interner,
         string_table,
         &initial_expectations,
-        NamedArgumentSyntax::Supported {
+        CallArgumentSyntax::Supported {
             callee_name: Some(member_name),
         },
     )?;

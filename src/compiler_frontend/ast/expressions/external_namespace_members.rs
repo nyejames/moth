@@ -96,6 +96,7 @@ pub(super) fn parse_external_namespace_function_member(
             token_stream,
             external_function_id: function_id,
             external_function,
+            call_location: member_location.clone(),
             context,
             value_required: true,
             allow_boundary_catch: allow_boundary_catch

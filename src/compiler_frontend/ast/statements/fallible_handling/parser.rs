@@ -94,10 +94,6 @@ impl HandledFallibleHostCall {
             FallibleHandling::Propagate => FallibleExpressionHandling::Propagate,
             FallibleHandling::Handler { .. } => FallibleExpressionHandling::Recover,
         };
-        let expression_location = match (&handling, propagation_location) {
-            (FallibleHandling::Propagate, Some(location)) => location,
-            _ => self.call_location.clone(),
-        };
         let result_type_ids = self.result_type_ids.clone();
         let function_call_expression =
             Expression::handled_fallible_host_function_call_with_typed_arguments(
@@ -107,10 +103,14 @@ impl HandledFallibleHostCall {
                     result_type_ids: self.result_type_ids,
                     error_type_id: self.error_type_id,
                     handling: expression_handling,
-                    location: expression_location,
+                    location: self.call_location.clone(),
                 },
                 type_environment,
             );
+        let function_call_expression = match propagation_location {
+            Some(location) => function_call_expression.with_propagation_location(location),
+            None => function_call_expression,
+        };
 
         match handling {
             FallibleHandling::Propagate => function_call_expression,
@@ -148,10 +148,6 @@ impl HandledFallibleCall {
             FallibleHandling::Propagate => FallibleExpressionHandling::Propagate,
             FallibleHandling::Handler { .. } => FallibleExpressionHandling::Recover,
         };
-        let expression_location = match (&handling, propagation_location) {
-            (FallibleHandling::Propagate, Some(location)) => location,
-            _ => self.call_location.clone(),
-        };
         let result_type_ids = self.result_type_ids.clone();
         let function_call_expression =
             Expression::handled_fallible_function_call_with_typed_arguments(
@@ -160,8 +156,12 @@ impl HandledFallibleCall {
                 self.result_type_ids,
                 expression_handling,
                 type_environment,
-                expression_location,
+                self.call_location.clone(),
             );
+        let function_call_expression = match propagation_location {
+            Some(location) => function_call_expression.with_propagation_location(location),
+            None => function_call_expression,
+        };
 
         match handling {
             FallibleHandling::Propagate => function_call_expression,
@@ -234,10 +234,7 @@ pub(crate) fn parse_fallible_handling_suffix_for_expression(
         None,
         string_table,
     )? {
-        let expression_location = match (&handling, &propagation_location) {
-            (FallibleHandling::Propagate, Some(location)) => location.clone(),
-            _ => token_stream.current_location(),
-        };
+        let expression_location = expression.location.clone();
 
         return Ok(match handling {
             FallibleHandling::Propagate => Expression::handled_result_with_type_id(
@@ -246,6 +243,9 @@ pub(crate) fn parse_fallible_handling_suffix_for_expression(
                 handled_type_id,
                 success_type_diagnostic_spelling,
                 expression_location,
+            )
+            .with_propagation_location(
+                propagation_location.expect("propagation handling must have a postfix location"),
             ),
 
             FallibleHandling::Handler { .. } => {

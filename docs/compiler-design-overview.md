@@ -864,10 +864,18 @@ Those expectations are compiler metadata. They do not create an importable, shad
 first-class function. Shared call validation owns named-argument, default, type, access and
 argument-shape rules. AST owns only assertion-specific placement, completed-statement suffix
 rejection and the semantic effect rule that prevents message construction from escaping through
-`!`, `?` or another enclosing-function exit.
+`!`, `?` or another enclosing-function exit. A handled fallible expression retains its ordinary
+call/value location separately from the authored postfix propagation location, so call side-table
+mapping remains call-owned while escape diagnostics point at `!` (and the equivalent explicit
+propagation operator).
 
 The completed AST carries both the typed condition and the typed optional message expression. An
 omitted message is the normal typed `none` expression, not a second literal-only payload.
+The compile-time `true` assertion message is still parsed, type checked, generic-inferred and
+evidence-checked. Its compiler-owned provisional generic requests are then discarded before AST
+finalization, so no inactive message request, generated sidecar, HIR, link or target fact reaches
+the build boundary. A compile-time `false` or dynamic assertion retains its message work on the
+failure edge.
 
 #### Value-producing blocks and terminality
 

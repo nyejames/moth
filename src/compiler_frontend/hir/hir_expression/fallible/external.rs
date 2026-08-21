@@ -17,9 +17,11 @@ use super::carrier::EmittedFallibleCarrier;
 /// Input struct for lowering a handled external fallible call.
 ///
 /// WHAT: packages the external function ID, arguments, result types, error type, handling policy,
-/// and source location into one struct so the lowering helper has a short signature.
+/// call location, and propagation location into one struct so the lowering helper has a short
+/// signature.
 /// WHY: external fallible calls have more metadata than source calls; a context struct keeps the
-/// call site readable.
+/// call site readable while preserving the boundary between ordinary call mapping and propagation
+/// control flow.
 pub(crate) struct ExternalFallibleCallLoweringInput<'a> {
     pub(crate) id: crate::compiler_frontend::external_packages::ExternalFunctionId,
     pub(crate) args: &'a [CallArgument],
@@ -27,7 +29,8 @@ pub(crate) struct ExternalFallibleCallLoweringInput<'a> {
     pub(crate) error_type_id: FrontendTypeId,
     pub(crate) handling:
         &'a crate::compiler_frontend::ast::expressions::expression::FallibleExpressionHandling,
-    pub(crate) location: &'a SourceLocation,
+    pub(crate) call_location: &'a SourceLocation,
+    pub(crate) propagation_location: &'a SourceLocation,
 }
 
 impl<'a> HirBuilder<'a> {

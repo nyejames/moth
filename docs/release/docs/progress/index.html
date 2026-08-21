@@ -530,7 +530,7 @@ td {
  <td style="padding: 0.1em 0.5em; "> Partial</td>
  <td style="padding: 0.1em 0.5em; "> Broad parser, diagnostics, HIR lowering, backend artifact, and integration coverage.</td>
  <td style="padding: 0.1em 0.5em; "> Frontend / HIR / JS / HTML</td>
- <td style="padding: 0.1em 0.5em; "> <code>assert</code> is a statement-only language intrinsic. It is always checked, unrecoverable, and accepts named/default typed messages. JavaScript and HTML evaluate reachable runtime messages lazily on the failure edge; HTML-Wasm accepts default and fully folded messages but rejects reachable runtime construction. <code>assert(false)</code> is statically terminal.</td>
+ <td style="padding: 0.1em 0.5em; "> <code>assert</code> is a statement-only language intrinsic. It is always checked, unrecoverable, and accepts named/default typed messages. JavaScript and HTML evaluate reachable runtime messages lazily on the failure edge; HTML-Wasm accepts default and fully folded messages but rejects reachable runtime construction. Literal-true messages are still type/generic/evidence checked but publish no generated request or executable fact. Authored propagation locations remain distinct from ordinary call mapping. <code>assert(false)</code> is statically terminal.</td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">

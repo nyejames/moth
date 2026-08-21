@@ -43,6 +43,9 @@ use super::template_helpers::{
 };
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, LoopBindings, NodeKind};
+use crate::compiler_frontend::ast::expressions::assertion_message_effects::{
+    assert_message_escape_diagnostic, assertion_condition_is_statically_true,
+};
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
 use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ExpressionKind, FallibleHandling, ReactiveTemplateMetadata,
@@ -54,7 +57,6 @@ use crate::compiler_frontend::ast::module_ast::environment::ResolvedPublicTypeRo
 use crate::compiler_frontend::ast::module_ast::scope_context::{
     ReceiverMethodCatalog, ReceiverMethodEntry,
 };
-use crate::compiler_frontend::ast::statements::asserts::assert_message_escape_diagnostic;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
@@ -688,6 +690,12 @@ fn normalize_ast_node_templates(
                 if let Some(diagnostic) = assert_message_escape_diagnostic(message, &store)? {
                     return Err(diagnostic.into());
                 }
+            }
+            if assertion_condition_is_statically_true(condition) {
+                // The parser already validated this message. Static-true assertions do not
+                // execute or publish message templates, so normalization must not materialize
+                // inactive runtime handoffs or helper facts.
+                return Ok(());
             }
             normalize_expression_templates(message, context)?;
             let store = context.template_ir_store.borrow();

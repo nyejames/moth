@@ -11,7 +11,7 @@ use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
 use crate::compiler_frontend::ast::expressions::call_arguments::{
-    NamedArgumentSyntax, parse_call_arguments_typed_with_expectations,
+    CallArgumentSyntax, parse_call_arguments_typed_with_expectations,
 };
 use crate::compiler_frontend::ast::expressions::call_validation::{
     CallArgumentResolutionContext, CallDiagnosticContext, expectations_from_constructor_fields,
@@ -101,7 +101,7 @@ pub(super) fn parse_struct_constructor_expression(
         type_interner,
         string_table,
         &field_expectations,
-        NamedArgumentSyntax::Supported {
+        CallArgumentSyntax::Supported {
             callee_name: Some(struct_name),
         },
     )?;

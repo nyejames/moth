@@ -118,7 +118,7 @@ fn parse_args_with_parameter_names(source: &str, parameter_names: &[&str]) -> Ve
         &mut type_interner,
         &mut string_table,
         &expectations,
-        super::NamedArgumentSyntax::Supported { callee_name: None },
+        super::CallArgumentSyntax::Supported { callee_name: None },
     )
     .expect("call arguments should parse")
 }
@@ -141,7 +141,7 @@ fn parse_raw_call_args_for_test(
         type_interner,
         string_table,
         super::CallArgumentSyntaxContext::Ordinary,
-        super::NamedArgumentSyntax::Supported { callee_name: None },
+        super::CallArgumentSyntax::Supported { callee_name: None },
         None,
     )
 }
@@ -335,7 +335,7 @@ fn final_validation_consumes_retained_slots_for_defaults_and_access_policy() {
         &mut type_interner,
         &mut string_table,
         &expectations,
-        super::NamedArgumentSyntax::Supported { callee_name: None },
+        super::CallArgumentSyntax::Supported { callee_name: None },
     )
     .expect("call arguments should parse");
 
