@@ -5,5 +5,12 @@ make_message || -> String:
     return "message"
 ;
 
-assert(true, make_message())
+make_condition || -> Bool:
+    return true
+;
+
+assert(
+    make_condition(),
+    make_message()
+)
 io.line("assert_message_lazy_success")
