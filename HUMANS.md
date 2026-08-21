@@ -40,10 +40,11 @@ There is plenty of pre-alpha "good enough" scaffold code in this codebase that I
 When the time comes for hardening and optimising, I suspect the gains from using agents will decline further.
 
 A lot of the time I would be writing the code myself is now spent staring at diffs and writing plans and documentation.
-All the architecture, code organisation and design decisions around this language and compiler are all me and always will be. 
+All the architecture, code organisation and design decisions around this language and compiler are driven by me and always will be. 
 
 <div align="center">
     <img src="./docs/assets/iceland-nostalgia.webp" width="500px" border="3" alt="A road in Iceland streching into the distance"/>
+</div>
 </br>
 
 
@@ -154,6 +155,7 @@ Its important to remember you need to be able to let go of ideas. Recognising yo
 
 <div align="center">
     <img src="./docs/assets/Here.jpg" width="500px" border="3" alt="A tree in a field in Gloucestershire"/>
+</div>
 </br>
 
 In this compiler I've made many design calls based on my own experience and intuition that LLMs are consistently confused by. But by sticking to those decisions knowing they are ambitious has got this project a lot further than if GPT was making design calls. One major example is constant folding happening at the AST stage (and in some narrow cases before that), so expressions are flattened before they even get to the HIR. I had to write the detailed compiler documentation because large language models struggle with unusual compiler design choices like this, particularly when it comes to architecture. 
