@@ -38,7 +38,7 @@ use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::structs::{HirField, HirStruct};
-use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::test_source_location;
@@ -223,6 +223,44 @@ fn valid_module_passes_explicit_validation() {
         lower_ast(ast, &mut string_table).expect("lowering should succeed");
     validate_module_for_tests(&module, &string_table, &type_environment)
         .expect("validator should accept a valid lowered module");
+}
+
+#[test]
+fn validator_rejects_assertion_message_evaluation_fact_mismatch() {
+    let (string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
+    let entry_block_index = start_entry_block_index(&module);
+    let entry_block = &mut module.blocks[entry_block_index];
+    let message_location = test_source_location(10);
+    let option_string = type_environment.intern_option(builtin_type_ids::STRING);
+    let message_id = HirValueId(9000);
+    let message = HirExpression {
+        id: message_id,
+        kind: HirExpressionKind::VariantConstruct {
+            carrier: HirVariantCarrier::Option,
+            variant_index: 0,
+            fields: vec![],
+        },
+        ty: option_string,
+        value_kind: ValueKind::RValue,
+        region: entry_block.region,
+    };
+
+    module
+        .side_table
+        .map_value(&message_location, message_id, &message_location);
+    entry_block.terminator = HirTerminator::AssertFailure {
+        message,
+        message_evaluation: HirAssertionMessageEvaluation::Folded,
+    };
+
+    let error = validate_module_for_tests(&module, &string_table, &type_environment)
+        .expect_err("validator should reject a stale assertion message evaluation fact");
+    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert!(
+        error.msg.contains("evaluation fact"),
+        "expected evaluation-fact mismatch, got: {}",
+        error.msg
+    );
 }
 
 #[test]

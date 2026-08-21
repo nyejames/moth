@@ -523,10 +523,13 @@ impl<'a> HirDisplayContext<'a> {
             HirTerminator::RuntimeFailure { message } => {
                 format!("runtime_failure \"{}\"", message.escape_debug())
             }
-            HirTerminator::AssertFailure { message } => match message {
-                Some(msg) => format!("assert_failure \"{}\"", msg.escape_debug()),
-                None => "assert_failure".to_owned(),
-            },
+            HirTerminator::AssertFailure {
+                message,
+                message_evaluation,
+            } => format!(
+                "assert_failure {} [{message_evaluation:?}]",
+                self.render_expression(message)
+            ),
         }
     }
 

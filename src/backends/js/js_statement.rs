@@ -17,7 +17,7 @@ use crate::compiler_frontend::hir::numeric::{
 use crate::compiler_frontend::hir::patterns::{HirMatchArm, HirPattern, HirRelationalPatternOp};
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
-use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
 
 impl<'hir> JsEmitter<'hir> {
     pub(crate) fn emit_block_statements(
@@ -539,13 +539,20 @@ impl<'hir> JsEmitter<'hir> {
 
     pub(crate) fn emit_assert_failure_terminator(
         &mut self,
-        message: &Option<String>,
+        message: &HirExpression,
+        message_evaluation: HirAssertionMessageEvaluation,
     ) -> Result<(), CompilerError> {
-        let js_message = match message {
-            Some(text) => format!("throw new Error({});", escape_js_string(text)),
-            None => "throw new Error(\"assertion failed\");".to_string(),
-        };
-        self.emit_line(&js_message);
+        if matches!(message_evaluation, HirAssertionMessageEvaluation::Default) {
+            self.emit_line("throw new Error(\"assertion failed\");");
+            return Ok(());
+        }
+
+        let message_identifier = self.next_temp_identifier("__assert_message");
+        let message_value = self.lower_expr(message)?;
+        self.emit_line(&format!("let {message_identifier} = {message_value};"));
+        self.emit_line(&format!(
+            "throw new Error(({message_identifier}.tag === \"some\" ? {message_identifier}.value : \"assertion failed\"));"
+        ));
 
         Ok(())
     }
@@ -753,8 +760,11 @@ impl<'hir> JsEmitter<'hir> {
                 self.emit_runtime_failure_terminator(message)?;
             }
 
-            HirTerminator::AssertFailure { message } => {
-                self.emit_assert_failure_terminator(message)?;
+            HirTerminator::AssertFailure {
+                message,
+                message_evaluation,
+            } => {
+                self.emit_assert_failure_terminator(message, *message_evaluation)?;
             }
         }
 

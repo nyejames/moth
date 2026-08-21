@@ -600,8 +600,9 @@ fn annotate_node(
             annotate_nodes(body, flows, &mut body_environment, store)?;
         }
 
-        NodeKind::Assert { condition, .. } => {
+        NodeKind::Assert { condition, message } => {
             annotate_expression(condition, flows, value_environment, store)?;
+            annotate_expression(message, flows, value_environment, store)?;
         }
 
         NodeKind::StructDefinition(_, fields) => {

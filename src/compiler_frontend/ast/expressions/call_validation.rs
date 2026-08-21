@@ -57,6 +57,7 @@ pub(crate) enum CallSurfaceKind {
     ReceiverMethod,
     BuiltinMember,
     HostFunction,
+    Assertion,
 }
 
 #[derive(Clone, Copy)]
@@ -108,6 +109,13 @@ impl<'a> CallDiagnosticContext<'a> {
         }
     }
 
+    pub(crate) fn assertion(callee_name: &'a str) -> Self {
+        Self {
+            kind: CallSurfaceKind::Assertion,
+            callee_name,
+        }
+    }
+
     fn callable_title(self) -> &'static str {
         match self.kind {
             CallSurfaceKind::Function => "Function",
@@ -116,6 +124,7 @@ impl<'a> CallDiagnosticContext<'a> {
             CallSurfaceKind::ReceiverMethod => "Receiver method",
             CallSurfaceKind::BuiltinMember => "Builtin member",
             CallSurfaceKind::HostFunction => "Host function",
+            CallSurfaceKind::Assertion => "Assertion",
         }
     }
 }
@@ -424,6 +433,7 @@ fn resolve_call_arguments_with_type_policy(
                 CallSurfaceKind::ReceiverMethod | CallSurfaceKind::BuiltinMember => {
                     TypeMismatchContext::ReceiverArgument
                 }
+                CallSurfaceKind::Assertion => TypeMismatchContext::AssertionArgument,
                 _ => TypeMismatchContext::FunctionArgument,
             };
             return Err(CompilerDiagnostic::type_mismatch(

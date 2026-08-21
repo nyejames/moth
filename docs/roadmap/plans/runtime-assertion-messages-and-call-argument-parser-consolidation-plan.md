@@ -7,14 +7,14 @@ WORK_ID: runtime-assertion-messages-call-arguments
 WORK_SOURCE: docs/roadmap/plans/runtime-assertion-messages-and-call-argument-parser-consolidation-plan.md
 BASE_REVISION: cb533ced7345dc7a66cf971e7590d88c8cd84f32
 IMPLEMENTATION_START_REVISION: f1c0e0cf56cf8e65af1e5eed7859f967d516663a
-STATUS: active (Phase 1 complete; Phase 2 pending)
-CURRENT_SCOPE: Phase 1 shared call-argument parser and retained parameter-slot routing on branch codex/runtime-assertion-messages-call-arguments
-COMPLETED: current parser, AST, HIR, analysis, backend, diagnostic, documentation and integration-case audit; all five design decisions; Phase 0 tree re-anchor, baseline, regression reproduction and contract documentation; Phase 1 call-argument owner extraction, retained slot routing, consumer migration, metadata invariant check and focused slot-retention coverage
-NEXT_ACTION: checkpoint the accepted Phase 1 slice, then begin assert AST/HIR ownership and typed message-expression migration
-VALIDATION: focused parser 13 passed; focused collection builtin 53 passed; focused HIR validation 42 passed; focused reachability 14 passed; full library 4291 passed; generic receiver retained-slot case 1/1 correct; representative function/generic/constructor/receiver/builtin/cast cases passed; final-tree just validate passed (clippy, feature lanes, source audit, workspace 4403 + xtask 17 + feature-lane 765 tests, 1851 integration cases, docs check, benchmark sanity and timer erasure)
-AUDITS: Phase 0 ownership inventory covers call_argument.rs metadata, function_calls.rs parsing and provisional routing, call_validation.rs final routing/default/type/access validation, all call-shaped consumers, every NodeKind::Assert and HirTerminator::AssertFailure consumer, assertion diagnostics, 19 tagged assertion cases plus the separate Wasm boundary, and the constant/Wasm plan handoffs; Phase 1 pass 1 found and corrected the zero-argument builtin delimiter bypass and stale checklist state; pass 2 found and corrected retained-slot/generic-receiver coverage gaps; pass 2 verification required and received final-tree validation after the new test and fixture edits; final verification found and corrected stale ownership comments in the focused tests, generic nominal inference and call validation; the clean verification audit accepted Phase 1 with no findings
+STATUS: active (Phase 3 accepted; POST_PHASE3_EXTRA_AUDIT_1 pending)
+CURRENT_SCOPE: checkpoint the accepted JavaScript/HTML slice, then run the first requested extra audit-and-correction cycle over the completed Phase 3 progress
+COMPLETED: current parser, AST, HIR, analysis, backend, diagnostic, documentation and integration-case audit; all five design decisions; Phase 0 tree re-anchor, baseline, regression reproduction and contract documentation; Phase 1 call-argument owner extraction, retained slot routing, consumer migration, metadata invariant check and focused slot-retention coverage; Phase 2 frontend/HIR assertion-message ownership, lazy failure CFG, target fact, analysis coverage, diagnostics, fixtures and status reconciliation; Phase 3 JavaScript lowering, target split, runtime local/function/optional/template/cast cases, named-argument success, lazy-success chronology and emitter coverage; normal audit pass 1 correction traverses AssertFailure messages for JS cast-helper, map and reactivity metadata and reconciles assertion/reactivity/cast documentation and fixture contracts; normal audit pass 2 corrections update the Basic assertion/reactivity pages, strengthen the subscription-backed template fixture, and add map/reactive JS emitter regressions
+NEXT_ACTION: create the Phase 3 checkpoint, then launch POST_PHASE3_EXTRA_AUDIT_1 as a fresh audit-plus-correction cycle
+VALIDATION: focused assertion-message tests 6 passed; static-false CFG assertion test 1 passed; borrow fact tests 14 passed; borrow loaded-metadata test 1 passed; backend feature validation tests 8 passed; JS assertion emitter tests 5 passed; HIR validation 43 passed; reachability 14 passed; assertion HTML lane 25/25; template HTML/HTML-Wasm case 2/2 with exact assertion-to-snapshot assignment and live-carrier absence checks; runtime-cast case 1/1; docs check no errors or warnings; docs release rebuilt 70 files; `just validate` passed clippy, feature coverage 0 findings, source audit 1195 files/0 findings, 4419 workspace tests, 17 xtask tests, 765 feature-lane tests, 1856 integration cases, docs check, benchmark preflight/quick measurements and timers-erasure (no-timer binary clean, 8166960 bytes); cargo fmt and git diff checks passed; mutation evidence: removing assertion-boundary snapshot lowering made the strengthened template case fail, then the implementation was restored
+AUDITS: Phase 0 ownership inventory covers call_argument.rs metadata, function_calls.rs parsing and provisional routing, call_validation.rs final routing/default/type/access validation, all call-shaped consumers, every NodeKind::Assert and HirTerminator::AssertFailure consumer, assertion diagnostics, 19 tagged assertion cases plus the separate Wasm boundary, and the constant/Wasm plan handoffs; Phase 1 pass 1 found and corrected the zero-argument builtin delimiter bypass and stale checklist state; pass 2 found and corrected retained-slot/generic-receiver coverage gaps; pass 2 verification required and received final-tree validation after the new test and fixture edits; final verification found and corrected stale ownership comments in the focused tests, generic nominal inference and call validation; the clean verification audit accepted Phase 1 with no findings; Phase 2 verification audit found required source-location, fixture, invariant-coverage and status-documentation corrections, with no new high-severity issue; coordinator corrections now preserve authored postfix locations, add CFG/target/borrow/TIR-handoff/recovery coverage, refresh the rejection fixture and reconcile current-support documentation; Phase 3 focused checks and full validation passed; normal auditor pass 1 found a required JS cast-helper discovery omission plus stale assertion/reactivity/cast documentation and fixture contract prose; normal pass-2 retry found stale Basic documentation and missing map/reactive metadata coverage; focused verification found one medium integration-contract gap: the subscription-backed fixture did not bind the assertion temporary to the snapshot call; correction now requires the exact snapshot assignment, forbids the direct live-carrier assignment, and was causally mutation-checked; full validation is green; the focused-verification retry audit is clean with no new required findings; after this checkpoint run POST_PHASE3_EXTRA_AUDIT_1 and POST_PHASE3_EXTRA_AUDIT_2 as fresh audit-plus-correction cycles
 BLOCKERS: none. If later work rebases the active frontend ownership cleanup, re-check the module-compilation handoff and preserve one parser and one retained slot route without compatibility re-exports.
-NOTES: the nine pre-existing dirty files are accepted Phase 0 plan, architecture, canonical-reference and generated-release outputs; preserve them in the first coordinator checkpoint. The progress matrix must retain an explicit Wasm gap until dynamic assertion-message evaluation is implemented there
+NOTES: the nine pre-existing dirty files are accepted Phase 0 plan, architecture, canonical-reference and generated-release outputs; preserve them in the first coordinator checkpoint. The progress matrix must retain an explicit Wasm gap until dynamic assertion-message evaluation is implemented there. After Phase 3 completion, run and record two additional fresh audit-plus-correction cycles as POST_PHASE3_EXTRA_AUDIT_1 and POST_PHASE3_EXTRA_AUDIT_2 before the final audit.
 ```
 
 ## Phase 0 re-anchor record
@@ -972,34 +972,34 @@ Until JavaScript lowering lands in Phase 3, target validation may conservatively
 
 ### Checklist
 
-- [ ] Add the compiler-owned `condition Bool, message String? = none` expectation builder.
-- [ ] Intern the stable names `condition` and `message` through the active string table.
-- [ ] Construct the default through `Expression::option_none_with_type_id` or its then-current canonical equivalent.
-- [ ] Add a truthful assert/language-intrinsic diagnostic context to shared call validation when needed.
-- [ ] Replace manual delimiter, comma, arity, named-target and mutable-marker parsing in `asserts.rs` with the shared parser and resolver.
-- [ ] Keep reserved-token dispatch, statement placement and completed-statement suffix rejection under the assert statement owner.
-- [ ] Add the assertion message effect gate that rejects `!`, `?` or another escaping control-flow form without rescanning tokens.
-- [ ] Preserve ordinary infallible message calls and precomputed handled values.
-- [ ] Change `NodeKind::Assert` to carry typed condition and message expressions.
-- [ ] Delete `AssertMessage`.
-- [ ] Update every AST walker found in Phase 0, including template normalisation, reactive metadata flow, type validation, debug validation, const-fact collection, remapping and value-production completeness where applicable.
-- [ ] Keep terminality dependent only on a compile-time false condition.
-- [ ] Change `AssertFailure` to carry the typed optional message value and the authoritative static/runtime evaluation fact.
-- [ ] Lower message preludes only after entering the failure block.
-- [ ] Preserve compile-time true elision and compile-time false terminality.
-- [ ] Update HIR remapping, validation, display and side-table mappings.
-- [ ] Update borrow transfer so the message is an ordinary shared terminal use.
-- [ ] Update reachability so runtime assertion-message requirements and failure-edge calls are retained.
-- [ ] Add a temporary structured target gate for runtime assertion messages until each target implements them.
-- [ ] Delete `RuntimeMessageExpressionDeferred` and all literal-only implementation comments.
-- [ ] Update exact diagnostic tests for shared missing, extra, named, type and access errors plus assertion-specific propagation errors.
-- [ ] Add focused AST, HIR, borrow and reachability tests.
+- [x] Add the compiler-owned `condition Bool, message String? = none` expectation builder.
+- [x] Intern the stable names `condition` and `message` through the active string table.
+- [x] Construct the default through `Expression::option_none_with_type_id` or its then-current canonical equivalent.
+- [x] Add a truthful assert/language-intrinsic diagnostic context to shared call validation when needed.
+- [x] Replace manual delimiter, comma, arity, named-target and mutable-marker parsing in `asserts.rs` with the shared parser and resolver.
+- [x] Keep reserved-token dispatch, statement placement and completed-statement suffix rejection under the assert statement owner.
+- [x] Add the assertion message effect gate that rejects `!`, `?` or another escaping control-flow form without rescanning tokens.
+- [x] Preserve ordinary infallible message calls and precomputed handled values.
+- [x] Change `NodeKind::Assert` to carry typed condition and message expressions.
+- [x] Delete `AssertMessage`.
+- [x] Update every AST walker found in Phase 0, including template normalisation, reactive metadata flow, type validation, debug validation, const-fact collection, remapping and value-production completeness where applicable.
+- [x] Keep terminality dependent only on a compile-time false condition.
+- [x] Change `AssertFailure` to carry the typed optional message value and the authoritative static/runtime evaluation fact.
+- [x] Lower message preludes only after entering the failure block.
+- [x] Preserve compile-time true elision and compile-time false terminality.
+- [x] Update HIR remapping, validation, display and side-table mappings.
+- [x] Update borrow transfer so the message is an ordinary shared terminal use.
+- [x] Update reachability so runtime assertion-message requirements and failure-edge calls are retained.
+- [x] Add a temporary structured target gate for runtime assertion messages until each target implements them.
+- [x] Delete `RuntimeMessageExpressionDeferred` and all literal-only implementation comments.
+- [x] Update exact diagnostic tests for shared missing, extra, named, type and access errors plus assertion-specific propagation errors.
+- [x] Add focused AST, HIR, borrow and reachability tests, including static-false message CFGs, target classes, loaded metadata, raw/owned template handoffs and recovered fallible values.
 
 ### Phase 2 gate
 
-- [ ] Ownership audit finds no literal assertion payload and no assert-only argument parser or slot resolver.
-- [ ] Style-guide review confirms the message effect gate reads resolved semantic facts rather than token syntax.
-- [ ] Focused assertion/parser/AST/HIR/borrow/reachability tests and `just validate` pass.
+- [x] Ownership audit finds no literal assertion payload and no assert-only argument parser or slot resolver.
+- [x] Style-guide review confirms the message effect gate reads resolved semantic facts rather than token syntax.
+- [x] Focused assertion/parser/AST/HIR/borrow/reachability tests and `just validate` pass.
 
 Exit state: runtime assertion messages exist as correct lazy frontend and HIR semantics, with unsupported target execution rejected before lowering.
 
@@ -1011,24 +1011,24 @@ JavaScript already owns full `String`, option, template snapshot and `Error` beh
 
 ### Checklist
 
-- [ ] Lower the optional message exactly once at `AssertFailure`.
-- [ ] Use ordinary plain-value lowering so reactive or template-backed strings become one failure-time snapshot.
-- [ ] Reuse the established option carrier to select present text or `"assertion failed"`.
-- [ ] Preserve literal escaping through the normal JavaScript string/value path.
-- [ ] Preserve both structured CFG and dispatcher CFG assertion lowering.
-- [ ] Avoid a new global runtime helper unless another real consumer justifies it.
-- [ ] Remove JavaScript from the temporary runtime-assertion-message target rejection.
-- [ ] Add runtime cases for local strings, templates, function calls, optional present/absent values and named arguments.
-- [ ] Add chronology tests proving success does not evaluate the message and failure evaluates it once before throwing.
-- [ ] Replace the reactive rejection case with snapshot and non-sink coverage.
-- [ ] Preserve existing default-message, explicit-message and escaping cases.
-- [ ] Add JavaScript emitter tests for exact single evaluation and optional selection.
+- [x] Lower the optional message exactly once at `AssertFailure`.
+- [x] Use ordinary plain-value lowering so reactive or template-backed strings become one failure-time snapshot.
+- [x] Reuse the established option carrier to select present text or `"assertion failed"`.
+- [x] Preserve literal escaping through the normal JavaScript string/value path.
+- [x] Preserve both structured CFG and dispatcher CFG assertion lowering.
+- [x] Avoid a new global runtime helper unless another real consumer justifies it.
+- [x] Remove JavaScript from the temporary runtime-assertion-message target rejection.
+- [x] Add runtime cases for local strings, templates, function calls, optional present/absent values and named arguments.
+- [x] Add chronology tests proving success does not evaluate the message and failure evaluates it once before throwing.
+- [x] Replace the reactive rejection case with snapshot and non-sink coverage.
+- [x] Preserve existing default-message, explicit-message and escaping cases.
+- [x] Add JavaScript emitter tests for exact single evaluation and optional selection.
 
 ### Phase 3 gate
 
-- [ ] Ownership audit confirms JavaScript consumes HIR and existing option/template contracts without source or AST reconstruction.
-- [ ] Style-guide review confirms optional unwrapping and one-time evaluation are readable and local.
-- [ ] Focused JavaScript/HTML runtime tests and `just validate` pass.
+- [x] Ownership audit confirms JavaScript consumes HIR and existing option/template contracts without source or AST reconstruction.
+- [x] Style-guide review confirms optional unwrapping and one-time evaluation are readable and local.
+- [x] Focused JavaScript/HTML runtime tests and `just validate` pass.
 
 Exit state: JavaScript and HTML support the complete accepted runtime assertion-message surface.
 

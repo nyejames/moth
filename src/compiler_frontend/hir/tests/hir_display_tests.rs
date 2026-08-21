@@ -10,7 +10,7 @@ use crate::compiler_frontend::hir::hir_display::{HirDisplayContext, HirDisplayOp
 use crate::compiler_frontend::hir::ids::{HirNodeId, HirValueId, LocalId, RegionId};
 use crate::compiler_frontend::hir::numeric::NumericFailureMode;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
-use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
@@ -20,10 +20,20 @@ fn assertion_failure_message_display_escapes_debug_text() {
     let display = HirDisplayContext::new(&string_table);
 
     let rendered = display.render_terminator(&HirTerminator::AssertFailure {
-        message: Some("quoted \"message\"\nnext".to_owned()),
+        message: HirExpression {
+            id: HirValueId(0),
+            kind: HirExpressionKind::StringLiteral("quoted \"message\"\nnext".to_owned()),
+            ty: TypeId(0),
+            value_kind: ValueKind::Const,
+            region: RegionId(0),
+        },
+        message_evaluation: HirAssertionMessageEvaluation::Folded,
     });
 
-    assert_eq!(rendered, "assert_failure \"quoted \\\"message\\\"\\nnext\"");
+    assert_eq!(
+        rendered,
+        "assert_failure [v0] \"quoted \\\"message\\\"\\nnext\" : t0 [Folded]"
+    );
 }
 
 #[test]

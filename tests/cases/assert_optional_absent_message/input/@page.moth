@@ -1,0 +1,4 @@
+-- an already optional absent value selects the default assertion text
+
+absent_message String? = none
+assert(false, absent_message)

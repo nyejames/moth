@@ -23,7 +23,7 @@ pub(crate) fn parse_option_propagation_suffix_for_expression(
     type_interner: &mut AstTypeInterner<'_>,
     expression: Expression,
 ) -> Result<Expression, ExpressionParseError> {
-    let propagation_location = token_stream.current_location();
+    let propagation_location = token_stream.current_postfix_operator_location();
     token_stream.advance();
 
     let type_environment = type_interner.environment();

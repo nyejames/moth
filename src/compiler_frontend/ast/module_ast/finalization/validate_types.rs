@@ -196,7 +196,10 @@ fn validate_node(node: &AstNode, context: &TypeValidationContext) -> Result<(), 
             validate_nodes(body, context)
         }
 
-        NodeKind::Assert { condition, .. } => validate_expression(condition, context),
+        NodeKind::Assert { condition, message } => {
+            validate_expression(condition, context)?;
+            validate_expression(message, context)
+        }
 
         // Terminal nodes that contain no type-carrying positions.
         NodeKind::Break | NodeKind::Continue => Ok(()),

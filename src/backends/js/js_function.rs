@@ -518,9 +518,10 @@ impl<'hir> JsEmitter<'hir> {
             HirTerminator::RuntimeFailure { message } => {
                 self.emit_runtime_failure_terminator(message)
             }
-            HirTerminator::AssertFailure { message } => {
-                self.emit_assert_failure_terminator(message)
-            }
+            HirTerminator::AssertFailure {
+                message,
+                message_evaluation,
+            } => self.emit_assert_failure_terminator(message, *message_evaluation),
 
             HirTerminator::Break { .. } | HirTerminator::Continue { .. } => {
                 Err(CompilerError::compiler_error(
@@ -684,8 +685,11 @@ impl<'hir> JsEmitter<'hir> {
                 Ok(BranchTermination::Terminated)
             }
 
-            HirTerminator::AssertFailure { message } => {
-                self.emit_assert_failure_terminator(message)?;
+            HirTerminator::AssertFailure {
+                message,
+                message_evaluation,
+            } => {
+                self.emit_assert_failure_terminator(message, *message_evaluation)?;
                 Ok(BranchTermination::Terminated)
             }
 

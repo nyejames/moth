@@ -30,6 +30,7 @@ pub enum TypeMismatchContext {
     Declaration,
     ReturnValue,
     FunctionArgument,
+    AssertionArgument,
     ConstructorArgument,
     ReceiverArgument,
     Operator,
@@ -106,6 +107,7 @@ pub enum UnsupportedBackendFeatureReason {
     GenericRuntimeValues,
     ReactiveExternalCallSink,
     CrossModuleCalls,
+    RuntimeAssertionMessages,
 }
 
 impl UnsupportedBackendFeatureReason {
@@ -121,6 +123,7 @@ impl UnsupportedBackendFeatureReason {
             Self::GenericRuntimeValues => "generic runtime values",
             Self::ReactiveExternalCallSink => "reactive external-call sink",
             Self::CrossModuleCalls => "cross-module calls",
+            Self::RuntimeAssertionMessages => "runtime assertion messages",
         }
     }
 }
@@ -1033,7 +1036,6 @@ pub enum InvalidBuiltinCallReason {
     CastMissingClosingParenthesis,
     MissingArgument,
     TooManyArguments,
-    RuntimeMessageExpressionDeferred,
     ExpressionPositionNotAllowed,
     MapLengthIsProperty,
     ScalarConstructorRemoved,
@@ -1186,6 +1188,7 @@ pub enum InvalidFallibleHandlingReason {
     CatchHandlerConflicts,
     CatchHandlerCanFallThrough,
     InlineCatchMultiline,
+    AssertionMessageCannotEscape,
     ThenWithNoActiveValueTarget,
     ThenCrossesBlockedConstruct,
     ThenRequiresValues,
@@ -1279,6 +1282,10 @@ impl InvalidFallibleHandlingReason {
 
             InvalidFallibleHandlingReason::InlineCatchMultiline => {
                 "Inline `catch then` recovery must fit on a single logical line."
+            }
+
+            InvalidFallibleHandlingReason::AssertionMessageCannotEscape => {
+                "Assertion messages must be ordinary values and cannot propagate errors, propagate options, or return through the enclosing function."
             }
 
             InvalidFallibleHandlingReason::ThenWithNoActiveValueTarget => {

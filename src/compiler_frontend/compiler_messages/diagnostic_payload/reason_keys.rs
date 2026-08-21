@@ -116,6 +116,7 @@ define_stable_reason_keys! {
     &UnsupportedBackendFeatureReason::GenericRuntimeValues => "unsupported_backend_feature.generic_runtime_values",
     &UnsupportedBackendFeatureReason::ReactiveExternalCallSink => "unsupported_backend_feature.reactive_external_call_sink",
     &UnsupportedBackendFeatureReason::CrossModuleCalls => "unsupported_backend_feature.cross_module_calls",
+    &UnsupportedBackendFeatureReason::RuntimeAssertionMessages => "unsupported_backend_feature.runtime_assertion_messages",
     },
 
     NumberLiteralErrorReason => {
@@ -492,7 +493,6 @@ define_stable_reason_keys! {
     &InvalidBuiltinCallReason::CastMissingClosingParenthesis => "invalid_builtin_call.cast_missing_closing_parenthesis",
     &InvalidBuiltinCallReason::MissingArgument => "invalid_builtin_call.missing_argument",
     &InvalidBuiltinCallReason::TooManyArguments => "invalid_builtin_call.too_many_arguments",
-    &InvalidBuiltinCallReason::RuntimeMessageExpressionDeferred => "invalid_builtin_call.runtime_message_expression_deferred",
     &InvalidBuiltinCallReason::ExpressionPositionNotAllowed => "invalid_builtin_call.expression_position_not_allowed",
     &InvalidBuiltinCallReason::MapLengthIsProperty => "invalid_builtin_call.map_length_is_property",
     &InvalidBuiltinCallReason::ScalarConstructorRemoved => "invalid_builtin_call.scalar_constructor_removed",
@@ -611,6 +611,7 @@ define_stable_reason_keys! {
     &InvalidFallibleHandlingReason::CatchHandlerConflicts => "invalid_fallible_handling.catch_handler_conflicts",
     &InvalidFallibleHandlingReason::CatchHandlerCanFallThrough => "invalid_fallible_handling.catch_handler_can_fall_through",
     &InvalidFallibleHandlingReason::InlineCatchMultiline => "invalid_fallible_handling.inline_catch_multiline",
+    &InvalidFallibleHandlingReason::AssertionMessageCannotEscape => "invalid_fallible_handling.assertion_message_cannot_escape",
     &InvalidFallibleHandlingReason::ThenWithNoActiveValueTarget => "invalid_fallible_handling.then_with_no_active_value_target",
     &InvalidFallibleHandlingReason::ThenCrossesBlockedConstruct => "invalid_fallible_handling.then_crosses_blocked_construct",
     &InvalidFallibleHandlingReason::ThenRequiresValues => "invalid_fallible_handling.then_requires_values",

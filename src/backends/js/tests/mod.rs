@@ -6,6 +6,7 @@
 
 mod support;
 
+mod assertions;
 mod bindings;
 mod choices;
 mod control_flow;

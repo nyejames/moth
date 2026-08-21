@@ -8,10 +8,11 @@ message:
 ]
 
 This is compiler-owned metadata, not an importable or shadowable Moth
-function. Runtime messages are accepted deferred in the current Alpha
-compiler. Until that implementation lands, the compiler accepts only the
-current positional string-literal message form. The rules below describe the
-accepted end state.
+function. The current Alpha compiler carries the message as a typed optional
+value through AST and HIR. JavaScript and HTML evaluate reachable runtime
+message construction lazily on the failure edge; HTML-Wasm currently rejects
+reachable runtime construction while accepting default and fully folded forms.
+The rules below describe the accepted end state and the explicit target gap.
 
 [codeblock, $code("moth"):
     assert(index < items.length())

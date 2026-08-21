@@ -6947,7 +6947,7 @@ role = "boundary"
 id = "cast_assert_target_rejected"
 path = "cast_assert_target_rejected"
 tags = ["integration","diagnostics","cast"]
-contract = "language.casts.missing_builtin_target_rejected"
+contract = "language.casts.same_type_rejected"
 role = "boundary"
 
 [[case]]
@@ -7532,6 +7532,41 @@ contract = "language.assert.false_message_runtime_stop_acceptance"
 role = "primary"
 
 [[case]]
+id = "assert_message_lazy_success"
+path = "assert_message_lazy_success"
+tags = ["integration", "language", "assert", "control-flow"]
+contract = "language.assert.message_lazy_success"
+role = "primary"
+
+[[case]]
+id = "assert_function_message_runtime_stop"
+path = "assert_function_message_runtime_stop"
+tags = ["integration", "language", "assert", "backend"]
+contract = "language.assert.function_message_runtime_stop"
+role = "backend"
+
+[[case]]
+id = "assert_cast_message_runtime_stop"
+path = "assert_cast_message_runtime_stop"
+tags = ["integration", "language", "assert", "backend", "cast"]
+contract = "language.assert.cast_message_runtime_stop"
+role = "backend"
+
+[[case]]
+id = "assert_optional_present_message"
+path = "assert_optional_present_message"
+tags = ["integration", "language", "assert", "backend"]
+contract = "language.assert.optional_present_message"
+role = "backend"
+
+[[case]]
+id = "assert_optional_absent_message"
+path = "assert_optional_absent_message"
+tags = ["integration", "language", "assert", "backend"]
+contract = "language.assert.optional_absent_message"
+role = "backend"
+
+[[case]]
 id = "assert_message_escaping_runtime_stop"
 path = "assert_message_escaping_runtime_stop"
 tags = ["integration", "language", "assert"]
@@ -7616,10 +7651,10 @@ contract = "language.assert.non_string_message_rejected"
 role = "primary"
 
 [[case]]
-id = "assert_named_argument_rejected"
-path = "assert_named_argument_rejected"
+id = "assert_named_argument_success"
+path = "assert_named_argument_success"
 tags = ["integration", "language", "assert", "diagnostics"]
-contract = "language.assert.named_argument_rejected"
+contract = "language.assert.named_argument_success"
 role = "primary"
 
 [[case]]
@@ -11249,11 +11284,11 @@ contract = "language.reactivity.subscription_const_context_rejected"
 role = "primary"
 
 [[case]]
-id = "reactive_assert_message_rejected"
-path = "reactive_assert_message_rejected"
-tags = ["integration", "language", "reactivity", "templates", "diagnostics"]
-contract = "language.reactivity.assert_message_must_be_string_literal_rejected"
-role = "primary"
+id = "assert_template_message_snapshot"
+path = "assert_template_message_snapshot"
+tags = ["integration", "language", "assert", "backend"]
+contract = "language.assert.template_message_snapshot"
+role = "backend"
 
 [[case]]
 id = "reactive_external_call_sink_rejected"

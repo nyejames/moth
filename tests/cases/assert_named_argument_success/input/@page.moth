@@ -1,0 +1,4 @@
+-- named assertion arguments use the shared call contract
+
+assert(true, message = "x")
+io.line("assert_named_argument_success")

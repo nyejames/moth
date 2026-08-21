@@ -2026,9 +2026,8 @@ fn collect_terminator_loaded_locals(terminator: &HirTerminator, visitor: &mut im
         | HirTerminator::ReturnError(value) => {
             collect_expression_loaded_locals(value, visitor);
         }
-        HirTerminator::AssertFailure { .. } => {
-            // Assertion messages are compile-time text, not expressions, so no
-            // expression loaded locals to collect.
+        HirTerminator::AssertFailure { message, .. } => {
+            collect_expression_loaded_locals(message, visitor);
         }
 
         HirTerminator::RuntimeFailure { .. } => {
@@ -2109,3 +2108,7 @@ fn collect_place_loaded_locals(place: &HirPlace, visitor: &mut impl FnMut(LocalI
         }
     }
 }
+
+#[cfg(test)]
+#[path = "tests/borrow_checker_metadata_tests.rs"]
+mod borrow_checker_metadata_tests;

@@ -1,0 +1,4 @@
+-- an already optional present value is presented without changing its carrier
+
+present_message String? = "optional message"
+assert(false, present_message)

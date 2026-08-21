@@ -13,7 +13,9 @@ use crate::compiler_frontend::hir::hir_side_table::HirLocation;
 use crate::compiler_frontend::hir::ids::{BlockId, LocalId};
 use crate::compiler_frontend::hir::numeric::{HirNumericOperands, NumericFailureMode};
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
-use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::hir::terminators::{
+    HirTerminator, classify_assertion_message_evaluation,
+};
 
 #[derive(Clone, Copy)]
 enum FallibleReturnSlot {
@@ -443,10 +445,31 @@ impl<'a> HirValidator<'a> {
                 // They carry backend-facing text only, not HIR expressions.
             }
 
-            HirTerminator::AssertFailure { .. } => {
+            HirTerminator::AssertFailure {
+                message,
+                message_evaluation,
+            } => {
                 // Assertion failure is a valid terminal terminator.
-                // Messages are compile-time text, not expressions, so no expression validation
-                // is required here.
+                // The message is an ordinary typed optional value evaluated on the failure edge.
+                self.validate_expression(message, anchor)?;
+                let expected_message_type = self.type_environment.builtins().string;
+                if self.type_environment.option_inner_type(message.ty)
+                    != Some(expected_message_type)
+                {
+                    return Err(
+                        self.error_with_hir("AssertFailure message must have type String?", anchor)
+                    );
+                }
+                let actual_evaluation = classify_assertion_message_evaluation(message);
+                if *message_evaluation != actual_evaluation {
+                    return Err(self.error_with_hir(
+                        format!(
+                            "AssertFailure message evaluation fact {:?} does not match lowered shape {:?}",
+                            message_evaluation, actual_evaluation
+                        ),
+                        anchor,
+                    ));
+                }
             }
         }
 

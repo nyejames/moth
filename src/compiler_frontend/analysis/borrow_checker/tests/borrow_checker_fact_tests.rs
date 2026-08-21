@@ -19,12 +19,14 @@ use crate::compiler_frontend::external_packages::{
     CallTarget, ExternalAbiType, ExternalFunctionDef, ExternalFunctionLowerings, ExternalParameter,
     ExternalReturnSlot, ExternalSignatureType,
 };
-use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, HirMapOp};
+use crate::compiler_frontend::hir::expressions::{
+    HirExpression, HirExpressionKind, HirMapOp, ValueKind,
+};
 use crate::compiler_frontend::hir::hir_side_table::HirLocation;
-use crate::compiler_frontend::hir::ids::{BlockId, HirNodeId, HirValueId, LocalId};
+use crate::compiler_frontend::hir::ids::{BlockId, HirNodeId, HirValueId, LocalId, RegionId};
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
-use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
 use crate::compiler_frontend::public_call_summary::FunctionReturnAliasSummary;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
@@ -168,6 +170,29 @@ fn statement_terminator_and_value_facts_are_populated() {
             "value {value_id:?} should have side-table source mapping"
         );
     }
+}
+
+#[test]
+fn assertion_failure_message_is_collected_as_a_borrow_value_root() {
+    let message = HirExpression {
+        id: HirValueId(41),
+        kind: HirExpressionKind::Load(HirPlace::Local(LocalId(7))),
+        ty: builtin_type_ids::STRING,
+        value_kind: ValueKind::RValue,
+        region: RegionId(0),
+    };
+    let terminator = HirTerminator::AssertFailure {
+        message: message.clone(),
+        message_evaluation: HirAssertionMessageEvaluation::Runtime,
+    };
+    let mut value_ids = FxHashSet::default();
+
+    collect_terminator_values(&terminator, &mut value_ids);
+
+    assert!(
+        value_ids.contains(&message.id),
+        "assertion message values must remain visible to borrow fact collection"
+    );
 }
 
 #[test]
@@ -1428,9 +1453,7 @@ fn collect_terminator_values(terminator: &HirTerminator, out: &mut FxHashSet<Hir
         HirTerminator::Return(value)
         | HirTerminator::ReturnSuccess(value)
         | HirTerminator::ReturnError(value) => collect_expression_values(value, out),
-        HirTerminator::AssertFailure { .. } => {
-            // Assertion messages are compile-time text, not expressions.
-        }
+        HirTerminator::AssertFailure { message, .. } => collect_expression_values(message, out),
 
         HirTerminator::RuntimeFailure { .. } => {
             // Runtime-failure messages are backend-facing text, not expressions.

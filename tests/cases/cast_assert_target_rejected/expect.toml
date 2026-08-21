@@ -2,4 +2,4 @@
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0083"]
-message_contains = ["requires an explicit builtin target type"]
+message_contains = ["This value already has type 'Bool'. Remove `cast`."]

@@ -1,0 +1,7 @@
+-- an infallible function call should be evaluated once on the failure edge
+
+make_message || -> String:
+    return "function message"
+;
+
+assert(false, make_message())

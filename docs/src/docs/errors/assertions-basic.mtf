@@ -5,7 +5,10 @@ Use `assert` for a condition that must already be true.
     assert(index < items.length(), "index must be in bounds")
 ]
 
-The message is optional. When you add one it must be a quoted string literal.
+The message is optional. When you add one it is an ordinary `String?` value,
+including a local string, runtime template snapshot or infallible string-producing call.
+JavaScript and HTML evaluate it only on the failure edge; HTML-Wasm currently
+rejects reachable runtime message construction.
 
 A failed assertion stops the current program path.
 

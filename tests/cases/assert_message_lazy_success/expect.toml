@@ -1,0 +1,5 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = ["assert_message_lazy_success"]
+rendered_output_not_contains = ["message evaluated"]

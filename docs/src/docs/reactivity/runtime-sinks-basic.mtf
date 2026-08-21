@@ -21,4 +21,7 @@ In an HTML-JS project, a top-level runtime template with a subscription can rere
 
 ### Not every sink is live
 
-`io.line` and `assert` do not accept reactive templates. HTML-Wasm rejects reactive runtime features for now.
+`io.line` does not accept subscription-bearing reactive templates. An `assert`
+message may carry a reactive template, but reads it as one failure-edge snapshot
+and does not establish a live sink. HTML-Wasm rejects reachable reactive runtime
+features for now.

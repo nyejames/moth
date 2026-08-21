@@ -17,9 +17,10 @@ use crate::compiler_frontend::hir::ids::BlockId;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::numeric::HirNumericOperands;
 use crate::compiler_frontend::hir::reachability::{
-    HirReachability, ReachableFloatStatementKind, ReachableFloatStatementUse, ReachableMapUse,
-    ReachableMapUseKind, ReachableNumericOpUse, ReachableReactiveSinkKind,
-    ReachableReactiveSinkUse, ReachableReactiveTemplateUse, ReachableRuntimeCastUse,
+    HirReachability, ReachableAssertionMessageUse, ReachableFloatStatementKind,
+    ReachableFloatStatementUse, ReachableMapUse, ReachableMapUseKind, ReachableNumericOpUse,
+    ReachableReactiveSinkKind, ReachableReactiveSinkUse, ReachableReactiveTemplateUse,
+    ReachableRuntimeCastUse,
 };
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
@@ -65,6 +66,13 @@ pub fn validate_hir_backend_feature_support(
 
     match input.target {
         BackendTarget::Wasm => {
+            // Wasm has no failure-edge message presentation yet. Default and fully folded
+            // optional values remain target-neutral and are accepted.
+            validate_runtime_assertion_messages(
+                &reachability.reachable_assertion_messages,
+                input.target,
+                string_table,
+            )?;
             validate_wasm_cross_module_calls(input.hir, reachability, input.target, string_table)?;
             // Wasm does not yet lower hashmaps, reactive runtime features, runtime casts, checked
             // numeric operations, or generic runtime values.
@@ -110,6 +118,29 @@ pub fn validate_hir_backend_feature_support(
     }
 
     Ok(())
+}
+
+fn validate_runtime_assertion_messages(
+    messages: &[ReachableAssertionMessageUse],
+    target: BackendTarget,
+    string_table: &mut StringTable,
+) -> Result<(), BackendFeatureValidationError> {
+    let Some(message) = messages.iter().find(|message| {
+        matches!(
+            message.evaluation,
+            crate::compiler_frontend::hir::terminators::HirAssertionMessageEvaluation::Runtime
+        )
+    }) else {
+        return Ok(());
+    };
+
+    Err(BackendFeatureValidationError::Diagnostic(Box::new(
+        CompilerDiagnostic::unsupported_backend_feature(
+            string_table.intern(target.as_str()),
+            UnsupportedBackendFeatureReason::RuntimeAssertionMessages,
+            message.location.clone(),
+        ),
+    )))
 }
 
 fn validate_wasm_cross_module_calls(

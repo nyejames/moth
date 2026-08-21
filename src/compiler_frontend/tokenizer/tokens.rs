@@ -480,6 +480,22 @@ impl FileTokens {
         self.tokens[self.index].location.clone()
     }
 
+    /// Return the authored span for a one-character postfix operator at the cursor.
+    ///
+    /// WHAT: converts the cursor-based token location used for standalone `!` and `?` tokens
+    ///       into the authored character span consumed by semantic suffix parsing.
+    /// WHY: suffix diagnostics must retain the operator the user wrote even after parsing has
+    ///       advanced to the following delimiter. This keeps source context in the resolved
+    ///       handling fact without rescanning source text.
+    pub fn current_postfix_operator_location(&self) -> SourceLocation {
+        let mut location = self.current_location();
+        if location.start_pos == location.end_pos {
+            location.start_pos.char_column = location.start_pos.char_column.saturating_sub(1);
+            location.end_pos.char_column = location.end_pos.char_column.saturating_sub(1);
+        }
+        location
+    }
+
     pub fn advance(&mut self) {
         if self.index >= self.tokens.len() {
             token_log!(Red "Compiler tried to advance past token stream bounds");

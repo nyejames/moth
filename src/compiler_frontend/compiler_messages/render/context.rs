@@ -63,6 +63,9 @@ pub(crate) fn type_mismatch_context_name(
         crate::compiler_frontend::compiler_messages::TypeMismatchContext::FunctionArgument => {
             "function argument"
         }
+        crate::compiler_frontend::compiler_messages::TypeMismatchContext::AssertionArgument => {
+            "assertion argument"
+        }
         crate::compiler_frontend::compiler_messages::TypeMismatchContext::ConstructorArgument => {
             "constructor argument"
         }

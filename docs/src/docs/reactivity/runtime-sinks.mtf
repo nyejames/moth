@@ -27,7 +27,7 @@ Plain string fragments keep ordinary insertion behaviour.
 ### Rejected sinks
 
 - `io.line(...)` with direct subscription-bearing reactive templates is rejected until the IO and side-effect model is designed.
-- `assert(...)` messages are string literals only, so reactive or runtime template messages are rejected.
+- `assert(...)` messages accept ordinary `String?` expressions, including runtime template values. The message is read as one snapshot on the failure edge; it is not a live sink and does not establish a subscription.
 
 ### Keep backend helpers out of the language contract
 

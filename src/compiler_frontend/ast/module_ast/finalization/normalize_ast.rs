@@ -54,6 +54,7 @@ use crate::compiler_frontend::ast::module_ast::environment::ResolvedPublicTypeRo
 use crate::compiler_frontend::ast::module_ast::scope_context::{
     ReceiverMethodCatalog, ReceiverMethodEntry,
 };
+use crate::compiler_frontend::ast::statements::asserts::assert_message_escape_diagnostic;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
@@ -680,7 +681,21 @@ fn normalize_ast_node_templates(
             normalize_expression_templates(expression, context)
         }
 
-        NodeKind::Assert { condition, .. } => normalize_expression_templates(condition, context),
+        NodeKind::Assert { condition, message } => {
+            normalize_expression_templates(condition, context)?;
+            {
+                let store = context.template_ir_store.borrow();
+                if let Some(diagnostic) = assert_message_escape_diagnostic(message, &store)? {
+                    return Err(diagnostic.into());
+                }
+            }
+            normalize_expression_templates(message, context)?;
+            let store = context.template_ir_store.borrow();
+            if let Some(diagnostic) = assert_message_escape_diagnostic(message, &store)? {
+                return Err(diagnostic.into());
+            }
+            Ok(())
+        }
 
         // Terminal nodes (no templates to normalize)
         NodeKind::Break | NodeKind::Continue => Ok(()),

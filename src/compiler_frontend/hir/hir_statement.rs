@@ -22,7 +22,9 @@ use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId};
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
-use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::hir::terminators::{
+    HirTerminator, classify_assertion_message_evaluation,
+};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::return_hir_transformation_error;
 
@@ -256,7 +258,7 @@ impl<'a> HirBuilder<'a> {
             }
 
             NodeKind::Assert { condition, message } => {
-                self.lower_assert_statement(condition, message.as_ref(), &node.location)
+                self.lower_assert_statement(condition, message, &node.location)
             }
 
             NodeKind::PushStartRuntimeFragment(expr) => {
@@ -495,18 +497,18 @@ impl<'a> HirBuilder<'a> {
     fn lower_assert_statement(
         &mut self,
         condition: &Expression,
-        message: Option<&crate::compiler_frontend::ast::ast_nodes::AssertMessage>,
+        message: &Expression,
         location: &SourceLocation,
     ) -> Result<(), CompilerError> {
-        let message_text = message.map(|msg| self.string_table.resolve(msg.text).to_owned());
-
         // Statically known false → immediate assertion failure, no pass block needed.
         if matches!(condition.kind, ExpressionKind::Bool(false)) {
-            let current_block = self.current_block_id_or_error(location)?;
+            let message_value = self.lower_expression_value_to_current_block(message)?;
+            let failure_block = self.current_block_id_or_error(location)?;
             return self.emit_terminator(
-                current_block,
+                failure_block,
                 HirTerminator::AssertFailure {
-                    message: message_text,
+                    message_evaluation: classify_assertion_message_evaluation(&message_value),
+                    message: message_value,
                 },
                 location,
             );
@@ -540,10 +542,13 @@ impl<'a> HirBuilder<'a> {
         self.log_control_flow_edge(condition_block, failure_block, "assert.false");
 
         self.set_current_block(failure_block, location)?;
+        let message_value = self.lower_expression_value_to_current_block(message)?;
+        let failure_tail_block = self.current_block_id_or_error(location)?;
         self.emit_terminator(
-            failure_block,
+            failure_tail_block,
             HirTerminator::AssertFailure {
-                message: message_text,
+                message_evaluation: classify_assertion_message_evaluation(&message_value),
+                message: message_value,
             },
             location,
         )?;

@@ -512,7 +512,7 @@ name = load_name(id) catch |err|:
 assert(index &lt; items.length(), "index must be in bounds")
 assert(false, "unimplemented path")
 </code></pre>
-<p><code>assert</code> is statement-only and always checked. Its optional message is one quoted literal. Failure is unrecoverable. <code>assert(false)</code> is statically terminal.</p>
+<p><code>assert</code> is statement-only and always checked. Its optional message is a <code>String?</code> expression that defaults to <code>none</code>; named and positional arguments use ordinary call rules. Failure is unrecoverable. <code>assert(false)</code> is statically terminal. JavaScript and HTML evaluate reachable runtime messages lazily on the failure edge; HTML-Wasm currently rejects reachable runtime construction while accepting default and fully folded messages.</p>
 <h2><code>if</code>, matching and value-producing blocks</h2>
 <p>Statement <code>if</code>:</p>
 <pre><code class="language-moth">if ready:
