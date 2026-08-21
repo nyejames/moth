@@ -530,7 +530,7 @@ no findings and no changed files.
 
 ### AUD-0002-F04: Stage 0 directory read + tokenize is unmeasured, and the counters that would expose it read zero on every directory build
 
-- State: `candidate`
+- State: `closed`
 - Kind: `Performance`
 - Scope: `build.stage0.discovery` (boundary escalation — see below)
 - Priority: `unassigned`
@@ -643,6 +643,24 @@ remainder. Confirm a no-timer release build's byte scan still finds no timer-onl
 #### Dependencies and related findings
 
 Blocks cheap verification of F01, F02 and F03. Linked to F05.
+
+#### Triage record
+
+2026-08-21 — **Accepted and resolved.** This boundary escalation was accepted because timer and
+counter ownership is centralized. Directory `prepare_owned_source_input` now runs under the
+existing `FrontendPrepare` evidence metric, with no new pipeline metric or accounting change.
+`StringTableBase::from_table` now increments the distinct stable
+`string_table_fork_source_base_copies` counter alongside `string_table_full_clones`, and the
+directory path records `module_count`, `source_file_count` and `source_byte_count` at the
+successful prepared-module boundary. The counter summary exposes the new fork-base metric in the
+existing string/remap group; synthetic-only scheduling/cache counters remain unchanged and are
+not falsely attributed to directory discovery. Coordinator evidence reports warmed medians of
+`stage0.directory.inventory=36.396375 ms`, `boundary.inventory=26.457666 ms` and
+`frontend.prepare=18.038467 ms`; directory counters report 72 modules, 344 files,
+`1,019,284` bytes, 344 prepared files, 2 fork bases, zero token rescans and zero non-identity
+remaps. `just bench-check` and `just validate` passed, including feature-lane/source-audit
+findings at zero and timer erasure with a clean `8,150,400`-byte no-timer binary. The required
+coordinator auditor pass returned `audit_clean` with no findings and no changed files.
 
 ### AUD-0002-F05: Three doc comments describe parallel and cached Stage 0 behaviour that the directory path cannot reach
 

@@ -104,6 +104,8 @@ struct StringTableBase {
 
 impl StringTableBase {
     fn from_table(table: &StringTable) -> Self {
+        increment_frontend_counter(FrontendCounter::StringTableForkSourceBaseCopies);
+
         let strings = table
             .iter()
             .map(|(_, string)| Box::<str>::from(string))

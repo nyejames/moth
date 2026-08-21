@@ -133,6 +133,7 @@ pub(crate) enum FrontendCounter {
     TypeCompatibilityCacheHits,
     TypeCompatibilityCacheMisses,
     StringTableFullClones,
+    StringTableForkSourceBaseCopies,
     StringTableMergeFromSourceEntriesScanned,
     StringTableDeltaMergeCalls,
     StringTableDeltaEntriesScanned,
@@ -198,6 +199,7 @@ mod detailed {
     static TYPE_COMPATIBILITY_CACHE_HITS: AtomicUsize = AtomicUsize::new(0);
     static TYPE_COMPATIBILITY_CACHE_MISSES: AtomicUsize = AtomicUsize::new(0);
     static STRING_TABLE_FULL_CLONES: AtomicUsize = AtomicUsize::new(0);
+    static STRING_TABLE_FORK_SOURCE_BASE_COPIES: AtomicUsize = AtomicUsize::new(0);
     static STRING_TABLE_MERGE_FROM_SOURCE_ENTRIES_SCANNED: AtomicUsize = AtomicUsize::new(0);
     static MODULE_REMAP_STRING_IDS_CALLS: AtomicUsize = AtomicUsize::new(0);
     static ESTIMATED_SCOPE_FRAMES: AtomicUsize = AtomicUsize::new(0);
@@ -480,6 +482,7 @@ mod detailed {
             FrontendCounter::TypeCompatibilityCacheHits,
             FrontendCounter::TypeCompatibilityCacheMisses,
             FrontendCounter::StringTableFullClones,
+            FrontendCounter::StringTableForkSourceBaseCopies,
             FrontendCounter::StringTableMergeFromSourceEntriesScanned,
             FrontendCounter::StringTableDeltaMergeCalls,
             FrontendCounter::StringTableDeltaEntriesScanned,
@@ -760,6 +763,10 @@ mod detailed {
             FrontendCounter::TypeCompatibilityCacheMisses => &TYPE_COMPATIBILITY_CACHE_MISSES,
 
             FrontendCounter::StringTableFullClones => &STRING_TABLE_FULL_CLONES,
+
+            FrontendCounter::StringTableForkSourceBaseCopies => {
+                &STRING_TABLE_FORK_SOURCE_BASE_COPIES
+            }
 
             FrontendCounter::StringTableMergeFromSourceEntriesScanned => {
                 &STRING_TABLE_MERGE_FROM_SOURCE_ENTRIES_SCANNED
@@ -1084,6 +1091,10 @@ mod detailed {
             FrontendCounter::TypeCompatibilityCacheMisses => "type_compatibility_cache_misses",
 
             FrontendCounter::StringTableFullClones => "string_table_full_clones",
+
+            FrontendCounter::StringTableForkSourceBaseCopies => {
+                "string_table_fork_source_base_copies"
+            }
 
             FrontendCounter::StringTableMergeFromSourceEntriesScanned => {
                 "string_table_merge_source_entries_scanned"

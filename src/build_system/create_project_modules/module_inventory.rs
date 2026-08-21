@@ -584,11 +584,15 @@ fn discover_modules_serial_provider_capable(
                 .source(source_id)
                 .canonical_path()
                 .to_path_buf();
-            let input = match prepare_owned_source_input(
-                source_id,
-                source_tree_index,
-                style_directives,
-                syntax.string_table_mut(),
+            let input = match crate::timed_stage_attributed!(
+                crate::timing::TimingMetric::FrontendPrepare,
+                timing_context,
+                prepare_owned_source_input(
+                    source_id,
+                    source_tree_index,
+                    style_directives,
+                    syntax.string_table_mut(),
+                ),
             ) {
                 Ok(input) => input,
                 Err(error) => return Err(error.into_messages(syntax.string_table_mut())),
@@ -668,6 +672,15 @@ fn discover_modules_serial_provider_capable(
             syntax.retain_prepared_output(order, prepared_output);
         }
         let prepared = syntax.finish()?;
+        add_frontend_counter(FrontendCounter::ModuleCount, 1);
+        add_frontend_counter(
+            FrontendCounter::SourceFileCount,
+            prepared.semantic.source_file_count,
+        );
+        add_frontend_counter(
+            FrontendCounter::SourceByteCount,
+            prepared.semantic.source_byte_count,
+        );
         #[cfg(feature = "timers")]
         crate::timing::finalize_timing_module_source_facts(
             timing_module_key,

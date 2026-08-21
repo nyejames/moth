@@ -115,6 +115,7 @@ const COUNTER_SUMMARY_GROUPS: &[CounterSummaryGroup] = &[
         label: "string/remap",
         metrics: &[
             ("string_table_full_clones", "full clones"),
+            ("string_table_fork_source_base_copies", "fork bases"),
             ("string_table_merge_source_entries_scanned", "merge scanned"),
             ("string_table_delta_merge_calls", "delta merges"),
             ("string_table_delta_entries_scanned", "delta scanned"),
