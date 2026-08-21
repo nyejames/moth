@@ -28,8 +28,9 @@ static SOURCE_READ_COUNTS_BY_PATH_FOR_TEST: std::sync::LazyLock<
 /// Reads raw UTF-8 source text without constructing compiler diagnostics.
 ///
 /// WHAT: exposes the filesystem operation separately from diagnostic construction.
-/// WHY: Stage 0 can load cache-miss source files in Rayon workers, then convert any
-///      `std::io::Error` on the serial boundary where the shared `StringTable` is available.
+/// WHY: the single-file synthetic Stage 0 path can load cache-miss source files in Rayon workers,
+///      then convert any `std::io::Error` on the serial boundary where the shared `StringTable`
+///      is available.
 pub(crate) fn read_source_code(file_path: &Path) -> Result<String, std::io::Error> {
     #[cfg(test)]
     if should_count_source_read_for_test(file_path) {

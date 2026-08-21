@@ -7,7 +7,7 @@
 - Coverage: `partial`
 - Reviewed: `2026-08`
 - Baseline: `just bench-check` green at 29 cases, avg ~26ms, "baseline" fingerprint (macOS Apple Silicon 6D851D, 2026-08-21). No pre-existing failures observed.
-- Revision: `bc6fa561d` (clean worktree)
+- Revision: `9945d2b52` (pre-F05/F06 correction checkpoint)
 
 ## Scope, context and exclusions
 
@@ -694,7 +694,7 @@ coordinator auditor pass returned `audit_clean` with no findings and no changed 
 
 ### AUD-0002-F05: Three doc comments describe parallel and cached Stage 0 behaviour that the directory path cannot reach
 
-- State: `candidate`
+- State: `closed`
 - Kind: `Comments`
 - Scope: `build.stage0.preparation` (root owner), `build.stage0.discovery`
 - Priority: `unassigned`
@@ -772,9 +772,24 @@ Comments finding.
 
 Secondary lane of F01. Sequence after F01 if F01 is accepted, so the comments are written once.
 
+#### Triage record
+
+2026-08-21 — **Accepted and resolved.** The three comments now name the paths and source kinds that
+actually reach their described behaviour. The synthetic `FilePreparationStrategy` policy is scoped to
+larger synthetic fanout workloads rather than the directory documentation build; directory inventory
+describes serial module scheduling, reachability and provider resolution while distinguishing ordinary
+`.moth` tokenization from raw `.mtf`/Markdown inputs prepared later in the BFS; and the Rayon cache-miss
+loader is explicitly scoped to synthetic single-file Stage 0.
+
+No executable, API, metric, diagnostic or test behaviour changed. `cargo fmt --all -- --check`,
+`git diff --check` and `just validate` passed, including 4,405 workspace tests, 1,851 integration
+cases, feature/source-audit findings at zero, docs validation, benchmark sanity and timer erasure
+with a clean `8,150,432`-byte no-timer binary. The required coordinator auditor pass 3 returned
+`audit_clean` with no findings and no changed files.
+
 ### AUD-0002-F06: The audit scope registry has no entry covering Stage 0, so this audit can record no freshness
 
-- State: `candidate`
+- State: `closed`
 - Kind: `Documentation`
 - Scope: `docs/roadmap/audit-log.md`
 - Priority: `unassigned`
@@ -956,8 +971,9 @@ other scope's freshness.
 
 ## Limitations
 
-- **Coverage is `partial`, and no freshness cell was updated.** The scope is unregistered (F06), so
-  there is no cell to promote; the audit guide forbids inventing one.
+- **Coverage is `partial`, and neither freshness cell is promoted to complete.** F06 registered the
+  Stage 0 scopes and recorded `P 2026-08 AUD-0002` for the two covered Performance cells. The audit
+  guide still forbids promoting either cell to `C` because the coverage gaps below remain.
 - **Single machine, single platform.** All measurements are macOS Apple Silicon, 10 cores, warm
   filesystem cache. F01's parallelism headroom is a property of this machine's core count; a
   2-core CI runner would see a smaller win. No Windows or Linux comparison was run, and Windows

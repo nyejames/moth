@@ -41,15 +41,17 @@ use std::path::{Path, PathBuf};
 /// Parallel file-preparation scheduling policy.
 ///
 /// WHAT: keeps the production strategy thresholds near the code that applies them.
-/// WHY: these values are benchmark policy, not language semantics. `RAYON_NUM_THREADS` remains
-/// the external concurrency override; this pass deliberately does not add a custom Rayon pool,
-/// unsafe scheduling, or hidden per-build thread control.
+/// WHY: these values are benchmark policy for the single-file synthetic preparation scheduler, not
+/// language semantics. `RAYON_NUM_THREADS` remains the external concurrency override; this pass
+/// deliberately does not add a custom Rayon pool, unsafe scheduling, or hidden per-build thread
+/// control.
 ///
 /// File count at or below which Rayon scheduling is consistently more expensive than useful.
 ///
-/// WHY: benchmark checks showed tiny modules regressing under Rayon, while fanout-style modules
-/// and the documentation build still benefit from parallel file preparation. Medium modules stay
-/// serial unless their total source size crosses `FILE_PREPARATION_MEDIUM_PARALLEL_MIN_BYTES`.
+/// WHY: benchmark checks for this scheduler showed tiny synthetic modules regressing under Rayon,
+/// while larger fanout-style synthetic workloads benefit from parallel file preparation. Medium
+/// modules stay serial unless their total source size crosses
+/// `FILE_PREPARATION_MEDIUM_PARALLEL_MIN_BYTES`.
 const FILE_PREPARATION_ALWAYS_SERIAL_FILE_COUNT: usize = 2;
 
 /// File count at which chunked Rayon scheduling is consistently worth the overhead.

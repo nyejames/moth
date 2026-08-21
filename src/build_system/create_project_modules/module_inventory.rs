@@ -462,10 +462,13 @@ fn order_discovered_modules_by_compile_waves(
 
 /// Prepare every graph module through the canonical header-owned Stage 0 path.
 ///
-/// Each owned source ID is read and tokenized directly into the module's input lane, then its
-/// retained header dependency shells drive indexed reachability and provider resolution. The loop
-/// stays serial because provider discovery mutates build-scoped registries; semantic module
-/// compilation remains serial while each module may parallelize file preparation.
+/// Each owned compiler-semantic source ID enters the module's input lane: ordinary `.moth` sources
+/// are tokenized during provider-independent preparation, while templates and Markdown retain raw
+/// source until reachable frontend preparation. The retained header dependency shells then drive
+/// indexed reachability and provider resolution. The loop keeps module scheduling, reachability and
+/// provider resolution serial because provider discovery mutates build-scoped registries;
+/// sufficiently large owned-source sets may overlap only candidate reads and ordinary `.moth`
+/// tokenization before that serial BFS, while semantic module compilation remains serial.
 fn discover_modules_serial_provider_capable(
     seeds: &[ModuleEntrySeed],
     context: ModuleDiscoveryContext<'_>,

@@ -12,8 +12,7 @@ None.
 
 ## Candidate findings
 
-- [AUD-0002-F05: Three doc comments describe parallel and cached Stage 0 behaviour that the directory path cannot reach](./audits/AUD-0002-stage0-discovery-preparation-performance.md#aud-0002-f05-three-doc-comments-describe-parallel-and-cached-stage-0-behaviour-that-the-directory-path-cannot-reach)
-  - `Comments` | `build.stage0.preparation` (root owner), `build.stage0.discovery`
+None.
 
 ## Accepted and queued findings
 
@@ -40,12 +39,17 @@ None.
   order, exact-once reads and threshold behaviour. Full validation, benchmark checks and the
   required coordinator auditor pass returned clean. See the [triage record](./audits/AUD-0002-stage0-discovery-preparation-performance.md#aud-0002-f01-directory-stage-0-discovery-and-preparation-is-fully-serial-while-every-parallel-and-caching-mechanism-is-reachable-only-from-the-single-file-synthetic-path).
 
+- AUD-0002-F05 was accepted and resolved by scoping the synthetic scheduler and cache-loader
+  comments to their reachable single-file paths and describing the directory batch with precise
+  source-kind and serial-boundary terminology. The required full validation and coordinator auditor
+  pass returned clean. See the [triage record](./audits/AUD-0002-stage0-discovery-preparation-performance.md#aud-0002-f05-three-doc-comments-describe-parallel-and-cached-stage-0-behaviour-that-the-directory-path-cannot-reach).
+
 - AUD-0002-F06 was accepted and implemented. `docs/roadmap/audit-log.md` now registers
   `build.stage0.discovery`, `build.stage0.preparation`, `build.stage0.graph`,
   `build.stage0.scheduling` and the `build.stage0` composite, and AUD-0002's Performance coverage is
   recorded as `P 2026-08 AUD-0002` against the first two. The compiler frontend and the proposed
   `contract.module_compilation_handoff` scope remain unregistered. See the
-  [triage record](./audits/AUD-0002-stage0-discovery-preparation-performance.md#triage-record).
+  [triage record](./audits/AUD-0002-stage0-discovery-preparation-performance.md#aud-0002-f06-the-audit-scope-registry-has-no-entry-covering-stage-0-so-this-audit-can-record-no-freshness).
 
 - AUD-0002-F02 was accepted and resolved by hoisting one immutable `StringTableForkSource` above
   the directory module loop. The coordinator validation and benchmark evidence passed, and the
