@@ -7546,6 +7546,13 @@ contract = "language.assert.static_true_message_elision"
 role = "primary"
 
 [[case]]
+id = "assert_static_message_wasm_acceptance"
+path = "assert_static_message_wasm_acceptance"
+tags = ["integration", "language", "assert", "backend", "html-wasm"]
+contract = "language.assert.static_message_wasm_acceptance"
+role = "backend"
+
+[[case]]
 id = "assert_function_message_runtime_stop"
 path = "assert_function_message_runtime_stop"
 tags = ["integration", "language", "assert", "backend"]

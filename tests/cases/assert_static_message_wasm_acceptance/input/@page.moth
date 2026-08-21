@@ -1,0 +1,17 @@
+-- Reachable default and fully folded assertion messages must remain valid in HTML-Wasm.
+
+always_true || -> Bool:
+    return true
+;
+
+assert_default ||:
+    assert(always_true())
+;
+
+assert_folded ||:
+    assert(always_true(), "folded message")
+;
+
+assert_default()
+assert_folded()
+[:assert_static_message_wasm_acceptance]

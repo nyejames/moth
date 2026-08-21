@@ -15,17 +15,165 @@ use crate::backends::wasm::tests::lowering::test_support::{
 use crate::compiler_frontend::analysis::borrow_checker::BorrowDropSiteKind;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::blocks::HirBlock;
-use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
+use crate::compiler_frontend::hir::expressions::{
+    HirExpressionKind, HirVariantCarrier, HirVariantField, ValueKind,
+};
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
 
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId, RegionId};
 use crate::compiler_frontend::hir::operators::HirBinOp;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
-use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::FxHashMap;
+
+fn assertion_failure_module(
+    string_table: &mut StringTable,
+    type_environment: &mut crate::compiler_frontend::datatypes::environment::TypeEnvironment,
+    message_evaluation: HirAssertionMessageEvaluation,
+) -> crate::compiler_frontend::hir::module::HirModule {
+    let unit_type = type_environment.builtins().none;
+    let string_type = type_environment.builtins().string;
+    let option_string = type_environment.intern_option(string_type);
+    let path = InternedPath::from_single_str("assertion_failure", string_table);
+    let region = RegionId(0);
+    let (message, locals, statements) = match message_evaluation {
+        HirAssertionMessageEvaluation::Default => (
+            expression(
+                1,
+                HirExpressionKind::VariantConstruct {
+                    carrier: HirVariantCarrier::Option,
+                    variant_index: 0,
+                    fields: vec![],
+                },
+                option_string,
+                region,
+                ValueKind::Const,
+            ),
+            vec![],
+            vec![],
+        ),
+        HirAssertionMessageEvaluation::Folded => (
+            expression(
+                1,
+                HirExpressionKind::VariantConstruct {
+                    carrier: HirVariantCarrier::Option,
+                    variant_index: 1,
+                    fields: vec![HirVariantField {
+                        name: None,
+                        value: string_expression(2, "folded message", string_type, region),
+                    }],
+                },
+                option_string,
+                region,
+                ValueKind::RValue,
+            ),
+            vec![],
+            vec![],
+        ),
+        HirAssertionMessageEvaluation::Runtime => (
+            expression(
+                1,
+                HirExpressionKind::VariantConstruct {
+                    carrier: HirVariantCarrier::Option,
+                    variant_index: 1,
+                    fields: vec![HirVariantField {
+                        name: None,
+                        value: load_local(2, LocalId(0), string_type, region),
+                    }],
+                },
+                option_string,
+                region,
+                ValueKind::RValue,
+            ),
+            vec![local(0, string_type, region)],
+            vec![statement(
+                3,
+                HirStatementKind::Assign {
+                    target: HirPlace::Local(LocalId(0)),
+                    value: string_expression(4, "runtime message", string_type, region),
+                },
+                1,
+            )],
+        ),
+    };
+    let function = HirFunction {
+        id: FunctionId(0),
+        entry: BlockId(0),
+        params: vec![],
+        return_type: unit_type,
+    };
+    let block = HirBlock {
+        id: BlockId(0),
+        region,
+        locals,
+        statements,
+        terminator: HirTerminator::AssertFailure {
+            message,
+            message_evaluation,
+        },
+    };
+
+    build_module(
+        string_table,
+        vec![(function, path, HirFunctionOrigin::EntryStart)],
+        vec![block],
+        FunctionId(0),
+    )
+}
+
+#[test]
+fn wasm_assertion_lowering_traps_static_messages_and_rejects_runtime_messages() {
+    for message_evaluation in [
+        HirAssertionMessageEvaluation::Default,
+        HirAssertionMessageEvaluation::Folded,
+    ] {
+        let mut string_table = StringTable::new();
+        let (mut type_environment, _types) = build_type_environment();
+        let module =
+            assertion_failure_module(&mut string_table, &mut type_environment, message_evaluation);
+        let result = lower_hir_to_wasm_lir(
+            &module,
+            &default_borrow_facts(),
+            &WasmBackendRequest::default(),
+            &string_table,
+            &type_environment,
+        )
+        .expect("static assertion messages should lower to Wasm traps");
+        let function = result
+            .lir_module
+            .functions
+            .iter()
+            .find(|function| function.id == WasmLirFunctionId(0))
+            .expect("assertion function should be present");
+        assert!(matches!(
+            function.blocks[0].terminator,
+            WasmLirTerminator::Trap
+        ));
+    }
+
+    let mut string_table = StringTable::new();
+    let (mut type_environment, _types) = build_type_environment();
+    let module = assertion_failure_module(
+        &mut string_table,
+        &mut type_environment,
+        HirAssertionMessageEvaluation::Runtime,
+    );
+    let error = lower_hir_to_wasm_lir(
+        &module,
+        &default_borrow_facts(),
+        &WasmBackendRequest::default(),
+        &string_table,
+        &type_environment,
+    )
+    .expect_err("runtime assertion messages must be rejected before Wasm lowering");
+    assert!(
+        format!("{error:?}").contains("runtime assertion message after target validation"),
+        "the lowerer must report the backend invariant violation instead of discarding the message"
+    );
+}
 
 #[test]
 fn lowers_calls_and_cfg_with_resolvable_branch_targets() {

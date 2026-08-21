@@ -302,6 +302,58 @@ fn js_gate_accepts_reachable_runtime_assertion_messages() {
     );
 }
 
+#[test]
+fn wasm_feature_validation_ignores_unreachable_runtime_assertion_messages() {
+    let mut string_table = StringTable::new();
+    let mut type_environment = TypeEnvironment::new();
+    let option_string = type_environment.intern_option(builtin_type_ids::STRING);
+    let module = hir_module(
+        FunctionId(0),
+        vec![
+            function(FunctionId(0), BlockId(0)),
+            function(FunctionId(1), BlockId(1)),
+        ],
+        vec![
+            block(
+                BlockId(0),
+                vec![],
+                HirTerminator::Return(unit_expression(0)),
+            ),
+            block(
+                BlockId(1),
+                vec![],
+                HirTerminator::AssertFailure {
+                    message: assertion_message_expression(
+                        option_string,
+                        HirAssertionMessageEvaluation::Runtime,
+                    ),
+                    message_evaluation: HirAssertionMessageEvaluation::Runtime,
+                },
+            ),
+        ],
+    );
+
+    let reachability = test_reachability(&module);
+    assert!(
+        reachability.reachable_assertion_messages.is_empty(),
+        "the helper assertion must not enter the start-function reachability facts"
+    );
+    let result = validate_hir_backend_feature_support(
+        BackendFeatureValidationInput {
+            hir: &module,
+            reachability: &reachability,
+            target: BackendTarget::Wasm,
+            type_environment: Some(&type_environment),
+        },
+        &mut string_table,
+    );
+
+    assert!(
+        result.is_ok(),
+        "Wasm validation should ignore runtime assertion messages in unreachable helpers"
+    );
+}
+
 fn wasm_feature_validation_diagnostic(
     module: &HirModule,
     type_environment: &TypeEnvironment,
@@ -382,7 +434,25 @@ fn assertion_message_module(
     option_string: crate::compiler_frontend::datatypes::ids::TypeId,
     evaluation: HirAssertionMessageEvaluation,
 ) -> HirModule {
-    let message = match evaluation {
+    hir_module(
+        FunctionId(0),
+        vec![function(FunctionId(0), BlockId(0))],
+        vec![block(
+            BlockId(0),
+            vec![],
+            HirTerminator::AssertFailure {
+                message: assertion_message_expression(option_string, evaluation),
+                message_evaluation: evaluation,
+            },
+        )],
+    )
+}
+
+fn assertion_message_expression(
+    option_string: crate::compiler_frontend::datatypes::ids::TypeId,
+    evaluation: HirAssertionMessageEvaluation,
+) -> HirExpression {
+    match evaluation {
         HirAssertionMessageEvaluation::Default => HirExpression {
             id: HirValueId(10),
             kind: HirExpressionKind::VariantConstruct {
@@ -418,20 +488,7 @@ fn assertion_message_module(
                 region: RegionId(0),
             }
         }
-    };
-
-    hir_module(
-        FunctionId(0),
-        vec![function(FunctionId(0), BlockId(0))],
-        vec![block(
-            BlockId(0),
-            vec![],
-            HirTerminator::AssertFailure {
-                message,
-                message_evaluation: evaluation,
-            },
-        )],
-    )
+    }
 }
 
 fn hir_module(
