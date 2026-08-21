@@ -275,7 +275,7 @@ the baseline this finding is measured against. F05 records the misleading commen
 
 ### AUD-0002-F02: `fork_for_module` is called per module inside the discovery loop, copying the whole string table once per module against its own API guidance
 
-- State: `candidate`
+- State: `closed`
 - Kind: `Performance`
 - Scope: `build.stage0.discovery`
 - Priority: `unassigned`
@@ -392,6 +392,22 @@ to quantify the re-interning trade. Re-run the profile to confirm the `fork_sour
 
 Independent of F03; both should land before F01 is measured. F04 covers the missing counter that hid
 this cost.
+
+#### Triage record
+
+2026-08-21 — **Accepted and resolved.** `discover_modules_serial_provider_capable` now creates one
+immutable `StringTableForkSource` before the directory module loop and reuses it for every
+module-local fork. The mutable module tables remain independent, and the existing
+`merge_delta_from` base-prefix assertions, remapping, diagnostics, graph locations and output
+publication are unchanged. Coordinator measurements over seven runs improved the `docs`
+`stage0.directory.inventory` median from `49.746209 ms` to `37.729667 ms`; `module-graph` remained
+effectively flat (`1.170750 ms` to `1.167292 ms`) and `import-fanout` remained effectively flat
+(`1.556167 ms` to `1.541417 ms`). The intended trade-off is visible in
+`string_table_delta_entries_scanned` (`22049` to `27978`), while non-identity remaps and token
+rescans stayed at zero. `just validate` and post-change `just bench-check` passed. The targeted
+`just profile-case docs_check terse` build completed, but Samply failed with macOS `Unknown(1100)`;
+profile-stack confirmation is recorded as an environment limitation. The required coordinator
+auditor pass 2 returned `audit_clean` with no findings and no changed files.
 
 ### AUD-0002-F03: `ProjectPathResolver` is deep-cloned once per module inside the discovery loop
 

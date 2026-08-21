@@ -481,6 +481,7 @@ fn discover_modules_serial_provider_capable(
     let mut drafts = Vec::with_capacity(seeds.len());
     let mut resolved_edges = Vec::new();
     let mut source_package_dependencies = Vec::new();
+    let fork_source = string_table.fork_source();
 
     for seed in seeds {
         let module_edge_start = resolved_edges.len();
@@ -527,7 +528,7 @@ fn discover_modules_serial_provider_capable(
             &timing_logical_module_path,
         );
 
-        let fork = string_table.fork_for_module();
+        let fork = fork_source.fork_for_module();
         let (local_string_table, string_table_base_len) = fork.into_parts();
         let preparation_context = ModulePreparationContext {
             style_directives,
