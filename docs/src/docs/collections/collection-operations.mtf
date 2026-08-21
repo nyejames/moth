@@ -29,17 +29,38 @@ Collections use five compiler-owned member operations, with `clear` accepted as 
 
 ### `push`
 
+One source spelling resolves statically to two contracts, chosen by the receiver's collection shape.
+
+#### Growable `push`
+
+[codeblock, $code("moth"):
+    ~items.push(value)
+]
+
+- receiver: `{T}`
+- receiver access: mutable
+- argument: one element value
+- success: no value
+- infallible in Moth source semantics
+- appends after the current last element
+- allocation exhaustion traps rather than entering `Error!`
+- takes no postfix `!` and no `catch`
+
+#### Fixed `push`
+
 [codeblock, $code("moth"):
     ~items.push(value) catch:
     ;
 ]
 
+- receiver: `{N T}`
+- receiver access: mutable
 - argument: one element value
 - success: no value
 - failure: builtin `Error!`
-- receiver access: mutable
+- fallible only because a fixed collection can be full
 - appends after the current last element
-- fails when a fixed collection is full
+- requires postfix `!` or `catch`
 
 ### `remove`
 
@@ -85,25 +106,29 @@ Accepted design with implementation deferred. Maps already expose `clear()`; fix
 
 ## Compiler-known retention effects
 
-Builtin fixed and growable collections are Moth's trusted dynamic-storage substrate. The compiler knows the retained-edge summary contributed by each stored value. An `Int` can contribute zero obligations, a direct heap-backed value can contribute one, an inline aggregate can contribute several and a nested aggregate can contribute transitive obligations. Memory analysis uses those value summaries rather than assuming that one element means one edge.
+Builtin fixed and growable collections are Moth's trusted dynamic-storage substrate. The compiler knows the retained-edge summary contributed by each stored value. An `Int` can contribute zero obligations, a direct heap-backed value can contribute one, and an inline aggregate that physically stores several handles can contribute several direct obligations.
+
+A summary may also describe nested retention, so the compiler knows what a stored value structurally contains. That is a description, not a count: obligations are the **direct** edges between final allocation families. A separately allocated child owns its own outgoing edges, and an allocation reachable only through such a child is never counted again by the container. If layout refinement instead places a child inline in the collection's storage, its handles become direct collection edges and do count.
+
+Memory analysis uses those value summaries rather than assuming that one element means one edge.
 
 The table describes each operation's successful path.
 
 | Operation | Retained-edge effect |
 |---|---|
 | `get` | creates a statically bounded temporary alias. It adds no persistent obligation |
-| `push` | adds the inserted element's retained-edge obligations |
+| `push` | on a committed insertion, adds the inserted value's direct retained-edge summary |
 | `set` | removes the replaced element's obligations and adds the new element's obligations |
 | `remove` | removes the stored element's obligations and returns the existing value as a detached stored result |
 | `clear` | removes the obligations contributed by every stored element |
 | collection destruction | removes all element obligations and destroys the backing-storage domain |
 | growth or reallocation | replaces backing storage while preserving logical element summaries |
 
-For the initial direct-handle implementation, an element commonly contributes zero or one direct obligation. The general summary supports aggregate and transitive retention without changing the collection contract.
+For the initial direct-handle implementation, an element commonly contributes zero or one direct obligation. The general summary supports aggregate and nested retention without changing the collection contract.
 
 ### Successful commits and failed operations
 
-A builtin collection mutation commits its retained-edge effects atomically on the successful path. A failed operation preserves the original storage topology and all cleanup obligations. Invalid-index `remove` destroys no obligation, a failed fixed-capacity `push` adds none and a failed `set` leaves the previous entry intact. Count changes happen after the operation reaches its semantic commit point.
+A builtin collection mutation commits its retained-edge effects atomically on the successful path. A failed operation preserves the original storage topology and all cleanup obligations. Invalid-index `remove` destroys no obligation, a failed fixed-capacity `push` adds none and a failed `set` leaves the previous entry intact. Growable `push` has no recoverable error path, so it has no failed-operation retention case. Count changes happen after the operation reaches its semantic commit point.
 
 Public summaries must preserve exit-specific effects:
 
@@ -128,9 +153,9 @@ For the accessible explanation, see @../memory/automatic-cleanup-and-retained-ed
 
 ### Shared rules
 
-- `get`, `set`, `push` and `remove` must use postfix `!` or `catch`.
+- `get`, `set`, `remove` and fixed-collection `push` must use postfix `!` or `catch`.
 - `set`, `push`, `remove` and `clear` require `~receiver`.
-- `length` and `clear` are infallible and take no error handling.
+- `length`, `clear` and growable `push` are infallible and take no error handling.
 - Builtin member arguments are positional-only.
 - Assignment through `get` is removed.
 - Square-bracket indexing is not supported.

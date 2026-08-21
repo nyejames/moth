@@ -74,6 +74,8 @@ A multi-success recovery uses `then` with the matching arity:
 A fallible operation with no success values does not need `then`.
 
 [codeblock, $code("moth"):
+    items ~{4 Int} = {}
+
     ~items.push(value) catch:
         io.line("push failed")
     ;

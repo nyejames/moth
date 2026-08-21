@@ -610,7 +610,7 @@ td {
  <td style="padding: 0.1em 0.5em; "> Supported</td>
  <td style="padding: 0.1em 0.5em; "> Broad literal, mutation, builtin method, indexing, loop, result, fixed-capacity, AST/HIR, JS helper, and diagnostics coverage.</td>
  <td style="padding: 0.1em 0.5em; "> JS / HTML</td>
- <td style="padding: 0.1em 0.5em; "> Growable <code>{T}</code> and fixed <code>{N T}</code> collections are distinct semantic types. Fixed capacities accept positive literals or bare visible <code>#Int</code> constants. Collection <code>get</code>, <code>set</code>, <code>push</code>, and <code>remove</code> are fallible, and <code>length</code> is infallible.</td>
+ <td style="padding: 0.1em 0.5em; "> Growable <code>{T}</code> and fixed <code>{N T}</code> collections are distinct semantic types. Fixed capacities accept positive literals or bare visible <code>#Int</code> constants. Collection <code>get</code>, <code>set</code>, <code>push</code>, and <code>remove</code> are fallible today, and <code>length</code> is infallible. The accepted contract makes growable <code>push</code> infallible and leaves only fixed <code>push</code> fallible; that split remains deferred until the collection-push plan lands.</td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">
@@ -1012,7 +1012,7 @@ td {
  <td style="padding: 0.1em 0.5em; "> Supported</td>
  <td style="padding: 0.1em 0.5em; "> Broad JS helper, fallible get/set/push/remove, infallible length, removed indexed-write, bounds, and mutable-receiver coverage.</td>
  <td style="padding: 0.1em 0.5em; "> JS / HTML</td>
- <td style="padding: 0.1em 0.5em; "> Collection get, set, push, remove, and length are compiler-owned members. Mutating calls require explicit mutable receiver access, and fallible members require <code>!</code> or <code>catch</code> handling.</td>
+ <td style="padding: 0.1em 0.5em; "> Collection get, set, push, remove, and length are compiler-owned members. Mutating calls require explicit mutable receiver access, and fallible members require <code>!</code> or <code>catch</code> handling. One unified fallible push helper still serves both growable and fixed receivers; the accepted infallible growable push remains deferred.</td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">

@@ -18,11 +18,53 @@ Last-use analysis tracks that access, and REC never counts it.
 A value stored in a collection, map, struct field or other aggregate can outlive
 the operation that inserted it. That stored reference forms a retained edge.
 The stored value contributes a retained-edge summary. A scalar can contribute
-zero obligations, a direct heap-backed value can contribute one and an inline or
-nested aggregate can contribute several or transitive obligations.
+zero obligations, a direct heap-backed value can contribute one, and an inline
+aggregate that physically stores several references can contribute several.
 
-Storage operations add or remove the complete summary contributed by the stored
-value. They don't assume that one element means one edge.
+Nested values can describe several stored references, but the compiler does not
+count every transitively reachable allocation. It resolves the final stored
+references against the actual allocation families. A separately allocated child
+owns its own outgoing references.
+
+Take a collection of `Holder` values, where each `Holder` refers to a `Blob`:
+
+[codeblock, $code("text"):
+    collection -> Holder -> Blob
+]
+
+If `Holder` is its own allocation, the collection holds one stored reference to
+`Holder`, and `Holder` holds its own stored reference to `Blob`. Storing a
+`Holder` does not also create a second obligation from the collection to the
+`Blob`. When `Holder` goes away, it releases its own reference to `Blob`.
+
+If the compiler instead packs `Holder` directly into the collection's storage,
+the `Blob` reference now sits in the collection's own storage, so it does count
+as a stored reference from the collection.
+
+Storage operations add or remove the complete set of stored references
+contributed by the stored value. They don't assume that one element means one
+reference, and they never count the same allocation twice just because it is
+reachable through a chain.
+
+### Last use and stored obligations work together
+
+An ordinary value starts with one cleanup obligation: something has to release
+it. Storing it can hand that obligation over rather than creating a new one.
+
+- An ordinary value starts with one cleanup obligation.
+- If storing it is that value's final use, the compiler can turn that existing
+  obligation into the stored one. Nothing extra needs tracking.
+- If one operation stores two direct references to the same allocation, only one
+  of them can reuse the original obligation.
+- Any additional direct reference is a genuinely new obligation.
+
+So storing a value twice in one operation, such as using it as both a map key
+and a map value, does add work even at a final use. Storing it once at a final
+use does not.
+
+This is why last-use analysis still matters when a count is involved. The count
+is not tracking your aliases; it is tracking obligations that last-use analysis
+could not already resolve statically.
 
 ### When a region is enough
 
@@ -89,9 +131,9 @@ Moth's only source mechanism for direct reference cycles.
 ### Fallible operations commit effects on success
 
 Builtin collection and map mutations publish retained-edge effects atomically on
-the successful path. A failed `push`, `set`, `remove` or map insertion preserves
-the original storage topology and cleanup obligations. Public summaries describe
-the two exits separately:
+the successful path. A failed fixed-capacity `push`, or a failed `set`, `remove`
+or map insertion, preserves the original storage topology and cleanup
+obligations. Public summaries describe the two exits separately:
 
 ```text
 success:
@@ -100,6 +142,13 @@ success:
 error:
     no retention change
 ```
+
+A fallible operation only takes over responsibility for cleaning up a value when
+that hand-over is safe on **every** outcome, success and failure alike. If the
+failure path still uses the value, the operation just borrows it instead. There
+is no special protocol for giving a value back after a failure: a failed
+operation stored nothing, so there is nothing to give back, and the caller's
+original arrangement is untouched.
 
 ### Source visibility
 

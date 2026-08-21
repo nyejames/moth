@@ -13,13 +13,30 @@ Change a stored item with `set`:
     ;
 ]
 
-Add and remove items with `push` and `remove`:
+Add and remove items with `push` and `remove`.
+
+Whether `push` can fail depends on the collection. A growable collection always
+has room, so its `push` cannot fail:
 
 [codeblock, $code("moth"):
-    ~items.push(40) catch:
-    ;
+    growable ~{Int} = {10, 20}
 
-    removed = ~items.remove(1) catch:
+    ~growable.push(30)
+]
+
+A fixed-size collection can be full, so its `push` can fail and must be handled:
+
+[codeblock, $code("moth"):
+    fixed ~{3 Int} = {10, 20}
+
+    ~fixed.push(30) catch:
+    ;
+]
+
+`remove` can fail on either one, because the index may not exist:
+
+[codeblock, $code("moth"):
+    removed = ~growable.remove(1) catch:
         then 0
     ;
 ]

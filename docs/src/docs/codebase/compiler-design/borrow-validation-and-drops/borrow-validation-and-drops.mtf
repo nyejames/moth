@@ -104,11 +104,16 @@ The final lowering path consumes explicit validated artefacts:
 [codeblock, $code("text"):
     borrow facts
         -> validated lifetime topology
+        -> backend-neutral memory requirements
+        -> target partition and validation
+        -> target/profile memory planning
         -> ValidatedMemoryPlan
         -> backend lowering
 ]
 
-The `ValidatedMemoryPlan` carries allocation-family layout, selected representations, affine cleanup decisions, region and group placement, cleanup plans and destruction plans. Backends consume that plan instead of consuming advisory drop sites directly.
+The `ValidatedMemoryPlan` carries allocation-family layout, selected representations, affine cleanup decisions, region and group placement, cleanup plans and destruction plans. It is produced once per target/profile physical variant, after build-owned target partition and target validation. Backends consume that plan instead of consuming advisory drop sites directly.
+
+Last-use facts influence the planner: they are what let it choose affine cleanup at a proven final use, or reclassify an affine root into a stored obligation. They are never interpreted directly by the final lowerer as drop authority. If a drop appears in the emitted code, it is because the plan put it there.
 
 Debug and GC-native representations may erase individual cleanup operations when their runtime owns storage. A capable full-control release backend must still lower without a tracing or reachability collector. It may retain storage under the proven region when optional transfer or a more precise physical optimisation does not apply.
 

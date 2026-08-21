@@ -63,6 +63,35 @@ Contrast these distinct concepts:
 
 Semantic lifetime ownership stays static even when cleanup responsibility moves at runtime. The bit does not imply individual releasability when the value belongs to a region-owned or group-owned allocation family.
 
+## Discharging responsibility is not necessarily destruction
+
+Use these four words for four different things:
+
+- **transfer:** move affine cleanup responsibility to another path
+- **discharge:** satisfy the current affine cleanup obligation
+- **destroy:** physically destroy one allocation family
+- **bulk reclaim:** reclaim a region or group
+
+Discharging responsibility means the obligation is gone from this path. Whether that also destroys the allocation family depends on the family's selected strategy:
+
+[codeblock, $code("text"):
+    uncounted individually releasable family:
+        discharge may destroy immediately
+
+    REC family:
+        discharge removes one affine-root obligation
+        destroy only when REC count reaches zero
+
+    region-owned family:
+        individual handle does not own region destruction
+
+    group-owned family:
+        no individual early destruction
+        group exit bulk-reclaims storage
+]
+
+`drop owned` and `destroy allocation` are therefore never synonyms.
+
 ## Inferred transfer
 
 Assignments and calls can be optional transfer points. Analysis proves eligibility. Lowering realises validated transfer facts. There is no move keyword.
@@ -127,15 +156,15 @@ Deterministic release is legal only when:
 
 ## Conditional destruction
 
-`drop_if_owned` is inserted at possible destruction points. It checks ownership metadata and releases only when responsibility is owned.
+`drop_if_owned` is inserted at possible destruction points. It checks ownership metadata and, when responsibility is owned, discharges that owned responsibility according to the validated memory plan. Discharge destroys the allocation family only when the plan says this family is individually releasable and nothing else keeps it alive; for an REC family it removes one affine-root obligation and destroys only if the count reaches zero.
 
 - It is a conditional responsibility check only.
 - It is not an alias count.
 - It is not a topology validator.
 - It is a no-op for borrowed state.
 - Under pure GC it can lower to no-op or be erased where allowed.
-- Region-owned values may use grouped release rather than individual drop.
-- It doesn't belong in source syntax.
+- Region-owned and group-owned values are bulk reclaimed at region or group exit rather than individually destroyed.
+- It is a conceptual backend operation, not source syntax.
 - Different backends may represent it differently while preserving behaviour.
 
 ## Control-flow exits

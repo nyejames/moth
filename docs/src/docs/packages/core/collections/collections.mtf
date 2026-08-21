@@ -52,17 +52,16 @@ Authors interact with collections through language-level syntax and receiver met
 
 - `get(index)` returns the element at `index` or fails with `Error!`
 - `set(index, value)` replaces the element at `index` or fails with `Error!`
-- `push(value)` appends `value` after the last element or fails with `Error!`
+- `push(value)` appends `value` after the last element. On a growable `{T}` it is infallible; on a fixed `{N T}` it fails with `Error!` when the collection is full
 - `remove(index)` removes and returns the element at `index` or fails with `Error!`
 - `length()` returns the logical length as `Int`
 
-`get`, `set`, `push` and `remove` take the fallible path. `length` stays infallible. `set`, `push` and `remove` require mutable receiver access through `~`.
+`get`, `set`, `remove` and fixed-collection `push` take the fallible path. `length` and growable `push` stay infallible. `set`, `push` and `remove` require mutable receiver access through `~`.
 
 [codeblock, $code("moth"):
     values ~= {1, 2, 3}
 
-    ~values.push(4) catch:
-    ;
+    ~values.push(4)
 
     first = values.get(0) catch:
         then 0
@@ -73,6 +72,12 @@ Authors interact with collections through language-level syntax and receiver met
 
     count = values.length()
 ]
+
+### Current implementation debt
+
+The registered host functions above describe the **current** implementation, which still uses one unified fallible `__moth_collection_push` for both growable and fixed receivers. That does not yet match the accepted source contract, under which growable `push` is infallible and only fixed `push` is fallible.
+
+Splitting the unified helper is owned by `docs/roadmap/plans/collection-push-fallibility-split-plan.md`. Until that plan executes, the compiler and runtime still treat every `push` as fallible. See @../../../progress (progress matrix) for the current-state row.
 
 ### No direct dependency
 

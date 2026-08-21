@@ -43,7 +43,11 @@ page_head #= theme_head
             -> Stage 5: HIR generation
             -> Stage 6: borrow validation
             -> lifetime-region and escape validation
-            -> build-owned link planning and backend lowering
+            -> backend-neutral memory requirements
+            -> build-owned link planning, target partition and target validation
+            -> target/profile-aware compiler-owned memory planning
+            -> ValidatedMemoryPlan
+            -> backend lowering
             -> output files
     ]
 ]

@@ -483,10 +483,22 @@ select command, artefact builder, build profile and tooling overlays
 -> publish the module's completed generated delta
 -> assemble a success-only ProjectCompilation
 -> plan entry/package roots and exact reachable unions
--> instantiate and validate complete lifetime topology
--> plan target assignments and validate them
--> lower backend artefacts
+-> instantiate lifetime summaries with builder lifecycle roots
+-> validate complete lifetime topology
+-> complete intervals, frontiers and epochs
+-> produce backend-neutral memory requirements
+-> target-affinity analysis and partition
+-> target validation
+-> create candidate physical-variant scopes
+-> target/profile-specific family/layout refinement
+-> revalidate affected refined family-edge facts
+-> memory-strategy planning
+-> ValidatedMemoryPlan
+-> backend lowering
+-> collector-free artefact verification when required
 ```
+
+`check` performs every step through `ValidatedMemoryPlan` and stops before lowering.
 
 Config compilation tokenizes and parses one self-contained `config.moth`, orders config declarations,
 resolves direct project `#Config` sources while AST folds config, and validates the completed project
@@ -1177,20 +1189,26 @@ surfaces expose stable semantics rather than physical target names.
 The fixed sequence is:
 
 ```text
-entry or package roots
--> exact reachable function and effect union
--> instantiate local lifetime summaries with builder lifecycle roots
+entry/package roots
+-> exact reachable function/effect union
+-> instantiate lifetime summaries with builder lifecycle roots
 -> validate complete lifetime topology
 -> complete intervals, frontiers and epochs
--> field-sensitive family splitting where implemented
--> memory-strategy planning
+-> produce backend-neutral memory requirements
 -> target-affinity analysis and partition
--> target validation for assigned functions and permitted cross-target edges
--> lower selected functions
+-> target validation
+-> create candidate physical-variant scopes
+-> target/profile-specific family/layout refinement
+-> revalidate affected refined family-edge facts
+-> memory-strategy planning
+-> ValidatedMemoryPlan
+-> backend lowering
 -> collector-free artefact verification when required
 ```
 
-`check` runs the same sequence and stops before lowering.
+Everything up to and including backend-neutral memory requirements is target-independent and shared. Everything from candidate physical-variant scope onwards is per target/profile variant.
+
+`check` performs every step through `ValidatedMemoryPlan` and stops before lowering.
 
 Partition rules:
 
@@ -1211,15 +1229,45 @@ Validation is a compiler service over the completed build-owned partition. A tar
 
 ### Physical variants
 
-Partitioning is entry-specific. Physical variants are deduplicated by a conceptual key containing:
+Partitioning is entry-specific. A physical variant is not complete, and cannot be deduplicated, until its memory plan exists. The required order is:
+
+```text
+partition
+-> candidate physical variant
+-> target validation
+-> target/profile memory planning
+-> memory-plan fingerprint
+-> final physical-variant key
+-> deduplication/reuse
+```
+
+Target partition first creates a candidate physical-variant scope. Memory planning then creates the final physical plan for that scope. Only after that may physical variants be deduplicated. Variants whose pre-plan layout identity matches are not reusable before their memory plans exist.
+
+The final conceptual physical-variant key contains:
 
 - module identity
 - selected concrete function set
 - target assignment
+- build profile
 - ABI identity
 - layout identity
 - runtime capability requirements
 - relevant backend config fingerprint
+- memory-plan fingerprint
+
+The memory-plan fingerprint covers a stable normalised representation of:
+
+- the post-refinement allocation-family graph
+- the selected strategy per family
+- region and group placement
+- affine cleanup decisions
+- hidden-destination physical requirements
+- REC representation decisions
+- cleanup plans
+- destruction plans
+- physical coalescing decisions
+
+Donor-local or process-local indexes are never fingerprinted directly.
 
 Entries with the same key reuse one variant. Different keys produce separate JavaScript companion or Wasm variants.
 
@@ -1231,7 +1279,9 @@ Each selected module variant has a generated JavaScript companion facade. Wasm i
 
 Project and package link planning instantiates local lifetime summaries with builder lifecycle roots and validates the complete lifetime topology before target assignment. Linking does not reopen source or mutate HIR.
 
-`ProjectCompilation` or the link plan conceptually carries project-level validated lifetime topology. Exact Rust shape remains open.
+`ProjectCompilation` or the link plan conceptually carries project-level validated lifetime topology. That topology is shared and target-independent, and it does not carry one project-global physical memory plan. Exact Rust shape remains open.
+
+Its handoff to physical planning is a set of backend-neutral memory requirements: allocation-family identity, validated lifetime owner, intervals, frontiers and epochs, retained-edge and retention-domain facts, retention cardinality, REC candidacy facts, group membership, affine transfer and cleanup candidates, hidden-destination constraints, lifecycle constraints and external-boundary constraints. They must not contain any selected physical strategy, host-GC representation, allocator choice, counter layout, arena layout or target-specific handle representation.
 
 Builder-supplied page, mount, request, frame and arena roots are lifecycle inputs, not builder-specific source-law exceptions. Builder lifecycles cannot change language validity. Lifecycle-root instantiation is what lets reactive and mounted storage that outlives a lexical function still satisfy one lifetime owner and the retained-edge outlives rule.
 
@@ -1241,9 +1291,11 @@ External boundary profile and capability metadata belong on the builder surface 
 
 ### Memory-strategy plans
 
-After link-level topology validation succeeds, memory-strategy planning selects one physical strategy per allocation family: stack or inline placement, static affine cleanup, inferred region allocation, explicit-group bulk reclamation, Retained Edge Counting or a host garbage-collected representation. The planner produces a `ValidatedMemoryPlan` containing allocation-family layouts, selected representations, affine cleanup decisions, region and group placement, cleanup and destruction plans, REC decisions and physical coalescing decisions.
+After link-level topology validation succeeds, and after build-owned target partition and target validation have established a candidate physical variant, the compiler-owned memory planner selects one physical strategy per allocation family: stack or inline placement, static affine cleanup, inferred region allocation, explicit-group bulk reclamation, Retained Edge Counting or a host garbage-collected representation. The planner produces a `ValidatedMemoryPlan` containing allocation-family layouts, selected representations, affine cleanup decisions, region and group placement, cleanup and destruction plans, REC decisions and physical coalescing decisions.
 
-The link plan conceptually carries this `ValidatedMemoryPlan` alongside validated topology. Backends consume it and never select their own strategy or reconsider source legality. Imprecise planning retains conservatively; a missing physical strategy after successful topology validation is `CompilerError`.
+Validated topology and backend-neutral memory requirements remain shared link facts. Each target/profile physical variant receives its own `ValidatedMemoryPlan` after partition and validation.
+
+The build system owns target partition, physical-variant orchestration, the build profile and target/backend capability metadata, and invokes the planner once per candidate physical variant. The planner stays compiler-owned. Backends consume the finished plan and never select their own strategy or reconsider source legality. Imprecise planning retains conservatively; a missing physical strategy after successful topology validation is `CompilerError`.
 
 ### Backend capability metadata and collector-free verification
 
@@ -1429,6 +1481,14 @@ identity. Dependency artefacts include their own configuration namespace and pro
 
 Documentation-only changes regenerate documentation or editor indexes without invalidating semantic consumers or executable instances.
 
+### Physical variant invalidation
+
+Semantic public-interface invalidation and physical variant invalidation are separate concerns.
+
+- A change to memory-plan inputs invalidates the affected physical variants without necessarily recompiling semantic consumers. Shared validated topology and backend-neutral memory requirements can survive a replanned variant.
+- Two variants with different memory-plan fingerprints can never reuse one emitted physical variant, even when every pre-plan key component matches.
+- A change to a provider's public-interface fingerprint still invalidates semantic dependants under the ordinary rules; that is independent of whether any memory plan changed.
+
 Private dependency implementation may use the dependency's own `@project` only when no external package export reaches it. Its config dependence contributes to implementation and compatibility keys. Any exported declaration with direct or transitive dependence is rejected before package assembly.
 
 ### Persistent compatibility
@@ -1448,6 +1508,8 @@ A serialised module, package or generated artefact is reusable only when compati
 - target-independent frontend feature configuration
 - embedded ABI or layout policy
 - generated request identity where applicable
+
+When physical variants themselves become persisted artefacts, their compatibility data must additionally include the memory-plan fingerprint or an equivalent normalised plan identity. A persisted variant is reusable only when that identity matches.
 
 Process-local string IDs and absolute filesystem paths are not compatibility identities. Persistent artefacts store canonical logical identities and self-contained or remappable string data.
 

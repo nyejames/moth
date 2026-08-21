@@ -12,6 +12,8 @@ Accepted deferred `group` / `into` semantics, count-free bulk lifetimes and grou
 - Must not decide: current implementation support, borrow-checker algorithm, physical arena representation, backend allocation or implementation order
 - Invariant: a declared group is a hard, count-free semantic lifetime boundary that cannot be silently widened, and its storage is never released individually
 
+Count-free describes the group's own allocation families. A retained edge stored inside a group whose target is an externally owned REC family is still a counted persistent edge into that external family, released at group exit before bulk reclamation.
+
 ## Read next
 
 - `docs/src/docs/codebase/memory-management/declared-memory-groups/declared-memory-groups.mtf`

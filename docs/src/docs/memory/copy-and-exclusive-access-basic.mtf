@@ -8,9 +8,7 @@ Use `copy` when you need a separate version of a value:
     original ~= {1, 2, 3}
     independent ~= copy original
 
-    ~independent.push(4) catch:
-        assert(false, "unexpected push failure")
-    ;
+    ~independent.push(4)
     -- original still has 3 items
 ]
 
@@ -22,9 +20,7 @@ To change an existing value, use `~` before the value name:
 
 [codeblock, $code("moth"):
     items ~= {1, 2, 3}
-    ~items.push(4) catch:
-        assert(false, "unexpected push failure")
-    ;
+    ~items.push(4)
 ]
 
 The `~` tells the compiler you want exclusive access to mutate the value.

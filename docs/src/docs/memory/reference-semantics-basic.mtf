@@ -19,7 +19,5 @@ Once the alias is no longer needed, mutation becomes valid again.
     view = items
     -- ~items.push(4)  -- would fail: view is still live
     inspect(view)       -- last use of view
-    ~items.push(4) catch:      -- valid now
-        assert(false, "unexpected push failure")
-    ;
+    ~items.push(4)      -- valid now
 ]

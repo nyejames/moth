@@ -11,11 +11,11 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 
 ## Active implementation work
 
+- [Constant evaluation, static control-flow specialisation and type-system architecture](./plans/constant-folding-and-type-system-hot-path-optimization-plan.md) - next eligible; its prerequisite no longer points at the deleted command timing plan
 - [Runtime assertion messages and call-argument parser consolidation](./plans/runtime-assertion-messages-and-call-argument-parser-consolidation-plan.md) - active in separate worktree
 
 ## Queued implementation chain
 
-- [Constant evaluation, static control-flow specialisation and type-system architecture](./plans/constant-folding-and-type-system-hot-path-optimization-plan.md) - next eligible; its prerequisite no longer points at the deleted command timing plan
 - [Path values and resource linking](./plans/path-values-and-resource-linking-plan.md)
 - [Growable collections infallability](./plans/collection-push-fallibility-split-plan.md)
 - [Anonymous const records](./plans/anonymous-const-records-plan.md)
@@ -55,7 +55,11 @@ Two plans own this work:
 - [Final memory-management redesign](./plans/final-memory-management-redesign-and-implementation-plan.md) is the parent authority for source semantics, analysis boundaries, inferred regions, cleanup frontiers, explicit groups, physical memory planning and backend parity.
 - [Retained Edge Counting](./plans/retained-edge-counting-design-and-implementation-plan.md) is the sole detailed owner of REC analysis, the two-bit handle ABI, counters and lowering.
 
-Milestone A of the parent plan (documentation authority migration) is complete. Every implementation phase from Phase 2 onward remains deferred and is not automatically active or queued merely because the design is accepted. Declared groups, lifetime topology, cleanup frontiers, REC and collector-free verification each advance as separate progress-matrix rows.
+One subordinate closure plan is complete:
+
+- [Final memory model consistency closure](./plans/final-memory-model-closure-plan.md) was a documentation-only prerequisite before parent Phase 2 could activate. It encoded the multi-edge REC obligation algebra, direct-edge resolution, discharge-versus-destruction wording, group-to-external REC cleanup and the target-aware physical-planning order across the canonical memory pages, the compiler and build authorities, the teaching pages, the public collection contracts and the owning plans. It changed no source, tests or implementation status and is now complete. It does not enter the queued implementation chain.
+
+Milestone A of the parent plan (documentation authority migration) is complete, including that consistency closure. Every implementation phase from Phase 2 onward remains deferred and is not automatically active or queued merely because the design is accepted. Declared groups, lifetime topology, cleanup frontiers, REC and collector-free verification each advance as separate progress-matrix rows.
 
 Build profiles may vary optional optimisation-analysis effort and physical allocation strategy. They must run semantically equivalent mandatory borrow and lifetime-topology validation and must not change source legality.
 

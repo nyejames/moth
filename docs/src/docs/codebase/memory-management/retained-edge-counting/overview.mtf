@@ -24,6 +24,10 @@ REC lowering
     -> tags, counter layout, transitions and destruction plan
 ```
 
+Retained-edge and cardinality summaries are backend-neutral and precede target partition. Selected REC representation does not: REC selection happens inside target/profile-aware memory planning, after build-owned target partition and target-contract validation, and is therefore scoped to one physical variant.
+
+Final count transitions operate on direct post-refinement persistent edges, evaluated per target allocation family. One affine root can replace at most one persistent-edge obligation, so a storage operation that creates several direct edges into one family still changes the count. The normative per-family transition equation lives in `docs/src/docs/codebase/memory-management/retained-edge-counting/retained-edge-counting.mtf`.
+
 Every REC family keeps its statically proven fallback lifetime region. REC can only reclaim that family earlier than the fallback region frontier. If counting did not exist or failed to improve precision, the static region would still make the program collector-free and correct. The planner fixes the representation before lowering: an uncounted strategy never upgrades to REC at runtime, and an REC-selected strategy never abandons counting or downgrades to an uncounted representation at runtime.
 
 REC is selected only after affine cleanup, inferred regions, cleanup frontiers, explicit groups, field-sensitive splitting and cheap bounded retention have all failed to give a precise enough answer. It is a precision mechanism inside a statically safe collector-free system, not the correctness fallback.

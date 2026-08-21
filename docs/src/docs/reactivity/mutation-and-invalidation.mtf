@@ -26,9 +26,7 @@ Field, item and path-level invalidation are deferred.
 [codeblock, $code("moth"):
     names ${String} = {"Priya"}
 
-    ~names.push("Rob") catch:
-        io.line("push failed")
-    ;
+    ~names.push("Rob")
 ]
 
 Mutation still requires explicit `~` for mutable or exclusive receiver access. Reactive syntax does not bypass ordinary borrowing. Fallible mutations must be handled with `catch` or propagated inside a compatible `Error!` function. Top-level `!` propagation is rejected when no error channel exists.

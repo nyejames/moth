@@ -38,7 +38,11 @@ For build-system or project orchestration questions, read `docs/build-system-des
         -> HIR and validation
         -> borrow validation
         -> lifetime-region and escape validation
-        -> build-owned link planning and backend lowering
+        -> backend-neutral memory requirements
+        -> build-owned link planning, target partition and target validation
+        -> target/profile-aware compiler-owned memory planning
+        -> ValidatedMemoryPlan
+        -> backend lowering
 ]
 
 Keep detailed contracts in `docs/compiler-design-overview.md` and `docs/build-system-design.md`.
@@ -55,7 +59,7 @@ Keep detailed contracts in `docs/compiler-design-overview.md` and `docs/build-sy
 - HIR is the first backend-facing semantic IR. It makes control flow and cross-module call targets explicit.
 - Borrow validation reads HIR and writes side-table facts. It doesn't mutate HIR, assign lifetime owners or choose a physical memory strategy.
 - Lifetime-region and escape validation is mandatory after borrow validation. It also owns retained-edge liveness and cleanup frontiers. GC cannot bypass topology legality.
-- A separate memory-strategy planner selects the physical representation per allocation family after topology is proven.
+- Mandatory lifetime topology and backend-neutral memory requirements are target-independent. Build-owned target partition and target validation happen before target/profile-aware physical memory planning. The compiler-owned memory planner produces one `ValidatedMemoryPlan` per physical variant. Backend lowerers only realise that plan.
 - Static proof is the semantic baseline. GC is one permitted physical representation of already-legal topology; a capable full-control release backend lowers without a tracing collector.
 - **Moth is reference-semantic by default, copy-explicit and move-inferred. It omits explicit reference types and lifetime syntax, not references themselves.**
 - Existing values use shared, read-only access by default. Copies are explicit, `~` requests exclusive access and ownership transfer remains compiler-inferred and optional.

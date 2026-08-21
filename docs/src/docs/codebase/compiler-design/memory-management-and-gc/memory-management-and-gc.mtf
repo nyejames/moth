@@ -34,11 +34,27 @@ The accepted memory pipeline reads from one owner at each stage:
         -> borrow and last-use facts
         -> lifetime topology and retained-edge summaries
         -> complete intervals, frontiers and epochs
-        -> memory-strategy planning
+        -> backend-neutral memory requirements
+        -> target-affinity analysis and partition
+        -> target-contract validation
+        -> per-physical-variant family/layout refinement
+        -> target/profile-aware compiler-owned memory planning
+        -> ValidatedMemoryPlan
         -> backend lowering
 ]
 
-The planner selects stack or inline placement, affine cleanup, an inferred region, an explicit-group arena, REC or a garbage-collected representation. The selection changes memory quality, not source legality or observable behaviour.
+The pipeline has one seam worth memorising: everything above `backend-neutral memory requirements` is **shared**, and everything below it is **per physical variant**.
+
+- **Shared topology** is target-independent and profile-independent. It decides what the program means and whether it is legal.
+- **Backend-neutral memory requirements** are the last shared artefact: family identity, owners, intervals, frontiers, retention facts, REC candidacy, group membership. They deliberately contain no selected strategy.
+- **Target partition** is build-owned. It assigns functions to targets and, with target-contract validation, creates a candidate physical variant.
+- **Variant-specific physical planning** is compiler-owned. Only here does the planner know the target, the build profile and the backend's memory capabilities, so only here can it choose stack or inline placement, affine cleanup, an inferred region, an explicit-group arena, REC or a garbage-collected representation.
+- **`ValidatedMemoryPlan`** is that decision, one per physical variant.
+- **Lowering** realises the plan. It never picks a strategy of its own.
+
+The selection changes memory quality, not source legality or observable behaviour. Two variants of one source function may end up with different physical representations and identical semantics.
+
+`check` runs through creation and validation of the `ValidatedMemoryPlan` and stops before lowering.
 
 ## When transfer proof is missing
 

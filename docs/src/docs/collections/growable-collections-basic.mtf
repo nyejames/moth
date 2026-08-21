@@ -3,12 +3,13 @@ A growable collection can gain and lose items.
 [codeblock, $code("moth"):
     names ~{String} = {}
 
-    ~names.push("Priya") catch:
-        assert(false, "push failed")
-    ;
+    ~names.push("Priya")
 ]
 
 The binding is mutable because the collection changes.
+
+`push` on a growable collection cannot fail, so it needs no `!` or `catch`. A
+fixed-size collection is the one that can be full.
 
 An immutable collection can still be read:
 

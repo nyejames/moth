@@ -94,7 +94,8 @@ target identity. `#Config` is for typed project/build configuration, not platfor
 
 Builders cannot expose target identity as pseudo-config values. A selected builder may expose stable
 capability APIs, and compiler target validation rejects unsupported reachable capability use. Project
-builders and backends choose the physical implementation and output form. This boundary is intentional
+builders own target partition and output form, the compiler-owned memory planner owns physical memory
+strategy per target/profile variant, and backends realise those decisions. This boundary is intentional
 outside-scope policy, not merely deferred syntax.
 
 ### Design review questions

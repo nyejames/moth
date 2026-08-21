@@ -231,7 +231,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Supported]
             [: Broad literal, mutation, builtin method, indexing, loop, result, fixed-capacity, AST/HIR, JS helper, and diagnostics coverage.]
             [: JS / HTML]
-            [: Growable [$html:<code>{T}</code>] and fixed [$html:<code>{N T}</code>] collections are distinct semantic types. Fixed capacities accept positive literals or bare visible [$html:<code>#Int</code>] constants. Collection [$html:<code>get</code>], [$html:<code>set</code>], [$html:<code>push</code>], and [$html:<code>remove</code>] are fallible, and [$html:<code>length</code>] is infallible.]
+            [: Growable [$html:<code>{T}</code>] and fixed [$html:<code>{N T}</code>] collections are distinct semantic types. Fixed capacities accept positive literals or bare visible [$html:<code>#Int</code>] constants. Collection [$html:<code>get</code>], [$html:<code>set</code>], [$html:<code>push</code>], and [$html:<code>remove</code>] are fallible today, and [$html:<code>length</code>] is infallible. The accepted contract makes growable [$html:<code>push</code>] infallible and leaves only fixed [$html:<code>push</code>] fallible; that split remains deferred until the collection-push plan lands.]
         ]
 
         [data:
@@ -623,7 +623,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Supported]
             [: Broad JS helper, fallible get/set/push/remove, infallible length, removed indexed-write, bounds, and mutable-receiver coverage.]
             [: JS / HTML]
-            [: Collection get, set, push, remove, and length are compiler-owned members. Mutating calls require explicit mutable receiver access, and fallible members require [$html:<code>!</code>] or [$html:<code>catch</code>] handling.]
+            [: Collection get, set, push, remove, and length are compiler-owned members. Mutating calls require explicit mutable receiver access, and fallible members require [$html:<code>!</code>] or [$html:<code>catch</code>] handling. One unified fallible push helper still serves both growable and fixed receivers; the accepted infallible growable push remains deferred.]
         ]
 
         [data:

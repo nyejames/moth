@@ -431,7 +431,11 @@ td {
     -&gt; Stage 5: HIR generation
     -&gt; Stage 6: borrow validation
     -&gt; lifetime-region and escape validation
-    -&gt; build-owned link planning and backend lowering
+    -&gt; backend-neutral memory requirements
+    -&gt; build-owned link planning, target partition and target validation
+    -&gt; target/profile-aware compiler-owned memory planning
+    -&gt; ValidatedMemoryPlan
+    -&gt; backend lowering
     -&gt; output files</code></pre></section>
 <section class="container"><h2>Design docs vs current support</h2><p>Codebase pages describe accepted end-state architecture. Some pages define design that the compiler and backends are still converging on.</p><p>Use the <a href="../progress">progress matrix</a> to see what is implemented, partial, experimental or still missing. Use the <a href="https://github.com/nyejames/moth/blob/main/docs/roadmap/roadmap.md">roadmap</a> for sequencing and proposals not yet accepted as design.</p></section>
 <script>

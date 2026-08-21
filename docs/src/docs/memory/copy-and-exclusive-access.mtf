@@ -6,9 +6,7 @@
     original ~= {1, 2, 3}
     independent ~= copy original
 
-    ~independent.push(4) catch:
-        assert(false, "unexpected push failure")
-    ;
+    ~independent.push(4)
     -- original is unchanged
 ]
 
@@ -32,9 +30,7 @@
 
 [codeblock, $code("moth"):
     values ~= {1, 2, 3}
-    ~values.push(4) catch:
-        assert(false, "unexpected push failure")
-    ;
+    ~values.push(4)
 ]
 
 `~` isn't a move marker or a type constructor. It applies to an existing mutable place and requests exclusive access for one operation.
@@ -60,9 +56,7 @@ Mutable receiver calls require explicit mutable or exclusive receiver syntax:
 
 [codeblock, $code("moth"):
     items ~= {1, 2, 3}
-    ~items.push(4) catch:     -- valid: explicit mutable access
-        assert(false, "unexpected push failure")
-    ;
+    ~items.push(4)     -- valid: explicit mutable access
 
     -- items.push(4)   -- invalid: missing ~
 ]

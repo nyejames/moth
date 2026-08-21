@@ -1,6 +1,6 @@
 # Retained Edge Counting design and implementation plan
 
-Status: accepted final design, REC/public retained-edge consistency pass complete, implementation deferred
+Status: accepted final design; the multi-edge obligation algebra, direct-edge resolution and target/profile physical-planning consistency closure are complete. REC implementation remains deferred.
 
 Repository baseline: `nyejames/moth` `main` at `356d0666fa16507a5690aa8451f8c5616d01d00c`
 
@@ -110,7 +110,7 @@ REC counts only runtime-dependent persistent retained edges that survive the sta
 
 ### Physical memory planning
 
-The backend chooses stack placement, static drops, individual heap allocations, inferred arenas, explicit-group arenas and REC layouts for a topology already proven legal.
+The compiler-owned memory planner chooses stack placement, static drops, individual heap allocations, inferred arenas, explicit-group arenas and REC layouts for a topology already proven legal. It runs after build-owned target partition and target-contract validation, once per candidate physical variant, and the backend only realises the resulting `ValidatedMemoryPlan`. The backend never chooses a memory strategy.
 
 REC is therefore a precision mechanism inside a statically safe collector-free system. It is not the correctness fallback.
 
@@ -320,13 +320,34 @@ exported lifetime and retention summaries
 project and package summary instantiation
     |
     v
-complete lifetime-topology validation
+complete backend-neutral lifetime-topology validation
     |
     v
-field-sensitive family splitting where implemented
+non-lexical interval, frontier and epoch completion
     |
     v
-memory-strategy planning
+backend-neutral memory requirements
+    |
+    +-- REC candidacy and cardinality facts
+    +-- no selected REC representation
+    |
+    v
+target-affinity analysis and partition        (build-owned)
+    |
+    v
+target-contract validation                    (build-owned roots)
+    |
+    v
+candidate physical variant scope
+    |
+    v
+per-variant field-sensitive family/layout refinement
+    |
+    v
+revalidate affected refined family-edge facts
+    |
+    v
+target/profile-aware memory planning          (compiler-owned)
     |
     +-- affine static cleanup
     +-- inferred region
@@ -334,8 +355,15 @@ memory-strategy planning
     +-- REC
     |
     v
+ValidatedMemoryPlan (one per physical variant)
+    |
+    v
 backend lowering and collector-free verification
 ```
+
+REC candidacy, cardinality and edge-effect summaries are backend-neutral and precede target partition. **Selected** REC representation does not: it is chosen inside target/profile-aware memory planning, after target partition and target-contract validation, and is therefore scoped to one physical variant. The same source function may be REC-capable in one variant and GC-native in another without any change to its public semantic interface.
+
+The memory planner is compiler-owned. The build system owns target partition, physical-variant orchestration, the build profile and target/backend capability metadata. The backend lowerer realises the finished plan and never chooses a memory strategy.
 
 REC facts must not be inserted into HIR as source semantics. They belong in immutable side tables, exported summaries and the final memory plan.
 
@@ -404,13 +432,19 @@ They must not express:
 - selected physical strategy
 - backend helper names
 
-A package consumer instantiates these summaries into its project topology. Strategy selection occurs after linking against concrete lifecycles and call roots.
+A package consumer instantiates these summaries into its project topology. Strategy selection occurs after linking against concrete lifecycles and call roots, and after build-owned target partition and target-contract validation. REC strategy is selected independently per physical variant, so public semantic interfaces stay REC-free and identical across variants.
 
 ## Builtin collection retention vocabulary
 
 Builtin fixed and growable collections are the trusted dynamic-storage substrate.
 
-Their memory effects are compiler-known. Each stored value contributes a complete retained-edge summary. A scalar such as `Int` may contribute zero obligations, a direct heap-backed value may contribute one, an inline aggregate may contribute several and a nested aggregate may contribute transitive obligations. A storage operation adds or removes the summary contributed by the stored value.
+Their memory effects are compiler-known. Each stored value contributes a complete retained-edge summary. A scalar such as `Int` may contribute zero obligations, a direct heap-backed value may contribute one, and an inline aggregate that physically stores several handles may contribute several direct obligations. A summary may also describe nested retention so the compiler knows what a value structurally contains.
+
+**Nested or transitive retention summaries are analysis descriptions. REC obligations count actual direct persistent edges between the final allocation families and retention domains. Reachability through a separately allocated child is never counted again.**
+
+Given `collection -> Holder family -> Blob family`: if `Holder` is separately allocated, the direct graph is `collection -> Holder` and `Holder -> Blob`, and inserting a `Holder` adds no `collection -> Blob` obligation. If layout refinement places `Holder` inline in collection storage and that representation holds a `Blob` handle, the direct graph contains `collection storage -> Blob`, which does contribute an obligation.
+
+Final counted obligations are therefore resolved after applicable field splitting and physical layout refinement, per physical variant. A storage operation adds or removes the complete set of direct obligations contributed by the stored value.
 
 The table describes the successful semantic path. Fallible operations publish their effects only at their semantic commit point.
 
@@ -426,7 +460,7 @@ The table describes the successful semantic path. Fallible operations publish th
 
 The compiler does not recognize user methods by name.
 
-For the initial direct-handle implementation, an element commonly contributes zero or one direct obligation. The semantic vocabulary remains general so aggregate and transitive retention do not require a later redesign.
+For the initial direct-handle implementation, an element commonly contributes zero or one direct obligation. The semantic vocabulary remains general so aggregate and nested retention do not require a later redesign.
 
 ### Outcome-sensitive builtin commits
 
@@ -442,6 +476,8 @@ error:
 ```
 
 Invalid-index `remove` destroys no obligation. A failed fixed-capacity `push` adds none. A failed `set` leaves the old element intact. A failed map insertion retains neither the incoming key nor the incoming value. Count changes happen after the operation reaches its semantic commit point.
+
+A fallible operation receives inferred affine responsibility only when last-use analysis proves transfer safe across every relevant outcome. If a failure path still uses the incoming value, the operation receives a borrow. A failed operation commits no retained edge, so no ownership-return protocol exists or is required. This is ordinary all-path transfer proof.
 
 ### Map retention vocabulary
 
@@ -462,11 +498,31 @@ Consider a map whose key and value point to the same allocation family:
 text = [: large value]
 values ~{String = String} = {}
 
-~values.set(text, text)!
-removed = ~values.remove(text)!
+~values.set(text, text)! -- final use of text
+removed = ~values.remove("large value")!
 ```
 
-The new-key insertion creates two persistent obligations to the same family, one from the stored key and one from the stored value. Removal removes the key obligation and detaches the value obligation into the result when the caller receives affine responsibility. The lookup `text` used to find the entry does not add another obligation. If the mutation fails, neither stored obligation changes.
+```text
+fresh text root:
+    affine root = 1
+    persistent edges = 0
+    count = 1
+
+after final-use new-key set:
+    affine root = 0
+    stored key edge = 1
+    stored value edge = 1
+    count = 2
+
+after remove:
+    stored key edge disappears
+    stored value edge becomes returned affine root
+    count = 1
+```
+
+The new-key insertion creates two direct persistent obligations to the same family, one from the stored key and one from the stored value. Because this was the final use of `text`, its affine root reclassifies into exactly one of the two edges; the second edge is a new obligation, so the count rises to `2`.
+
+Removal drops the stored key obligation and reclassifies the stored value obligation into the returned result's affine root when the caller receives affine responsibility. The lookup string passed to `remove` is a temporary borrowed alias and does not add another obligation. If the mutation fails, neither stored obligation changes.
 
 A user method gets a strong summary by composing builtin effects.
 
@@ -695,6 +751,64 @@ REC count =
     + one optional affine-root obligation
 ```
 
+There can never be more than one affine-root obligation for one allocation family.
+
+### Per-family transition algebra
+
+Every retention-sensitive semantic commit is evaluated independently for each target allocation family `F`. This equation is normative:
+
+```text
+delta_count(F) =
+    created_persistent_edges(F)
+    - removed_persistent_edges(F)
+    + affine_root_after(F)
+    - affine_root_before(F)
+```
+
+```text
+affine_root_before(F) in {0, 1}
+affine_root_after(F)  in {0, 1}
+```
+
+- `created_persistent_edges(F)`: direct persistent edges into `F` stored by this commit
+- `removed_persistent_edges(F)`: direct persistent edges into `F` removed by this commit
+- `affine_root_before(F)`: `1` when an owned affine root for `F` exists on the incoming path
+- `affine_root_after(F)`: `1` when an owned affine root for `F` exists on the outgoing path
+
+A single affine root can reclassify into at most one new edge, and at most one removed edge can reclassify into a returned affine root.
+
+```text
+one-edge final-use insertion:
+    before: 0 edges, 1 root
+    after:  1 edge,  0 roots
+    delta = +1 - 1 = 0
+
+two-edge final-use insertion:
+    before: 0 edges, 1 root
+    after:  2 edges, 0 roots
+    delta = +2 - 1 = +1
+
+two-edge removal returning one affine root:
+    before: 2 edges, 0 roots
+    after:  0 edges, 1 root
+    delta = -2 + 1 = -1
+```
+
+### Atomic per-family commits
+
+A semantic storage mutation commits its complete obligation delta atomically for each target family. Do not model an overwrite as decrement, possible destroy, increment when the operation replaces one obligation with another obligation to the same family:
+
+```text
+same target family F:
+
+old edge removed  -1
+new edge created  +1
+---------------------
+net transition     0
+```
+
+Destruction is tested only after the complete semantic commit delta for `F` is known. There is no independent transient-zero ownership problem.
+
 The counter does not equal the number of all source aliases.
 
 It excludes:
@@ -725,23 +839,52 @@ stored handle tag = 10
 
 The initial count reflects the initial liveness obligation. A temporary root need not be created and removed when hidden destination allocation constructs directly into storage.
 
-## Count transition table
+## Common direct-handle count transition table
+
+This table is a shorthand for the per-family equation above, for the common direct-handle case. `N` is the number of direct persistent edges into the target family that the operation creates or removes; in the common case `N` is `1`.
 
 | Operation | Counter effect | Handle effect |
 |---|---:|---|
 | ordinary local alias | `0` | borrowed alias, no new obligation |
 | borrowed function call | `0` | callee receives owned bit clear |
 | affine root transfer | `0` | `11` moves to new path |
-| persistent insertion while affine root remains | `+1` per inserted retained-edge obligation | stored edge obligations use `10` |
-| final-use insertion | `0` | reclassify root obligation as persistent edge, store `10` |
+| persistent insertion while affine root remains | `+N` created edges | stored edge obligations use `10`, root stays `11` |
+| final-use insertion | `+(N - 1)`, because one root reclassifies into at most one edge | one root becomes a stored `10` edge, further edges are new obligations |
 | `get()` | `0` | returns temporary `10` borrow |
-| persistent edge removal with no returned root | `-1` per removed retained-edge obligation | obligations disappear |
-| container detachment that creates affine root | `0` | reclassify returned obligations as an `11` result |
-| container detachment while another affine root remains | `-1` per detached obligation | result is borrowed `10` |
-| affine root final release | `-1` | owned path discharged |
-| persistent overwrite | old `-1` per removed obligation, new `+1` per added obligation or reclassification | old summary disappears, new summary appears |
+| persistent removal with no returned root | `-N` | obligations disappear |
+| detachment producing an affine root | `1 - N`, because at most one removed edge reclassifies into the returned root | one removed obligation becomes an `11` result, further removed obligations disappear |
+| detachment while an affine root already remains | `-N` | result is borrowed `10` |
+| affine root discharge | `-1` | owned path discharged; family destroyed only if the count reaches zero |
+| overwrite | compute one atomic per-family before/after delta | old summary disappears, new summary appears |
 | whole-domain clear | one release per surviving external counted-edge obligation unless region elision applies | domain obligations disappear |
 | count reaches zero | destroy exactly once | no usable handles remain |
+
+The one-edge fast path stays cheap and remains the common case:
+
+```text
+N = 1 final-use insertion -> 0
+N = 1 extraction to root  -> 0
+```
+
+These `0` results are scoped to `N = 1`. There is no unconditional general rule that final-use insertion or extraction to an affine root leaves the count unchanged.
+
+### Discharge is not destruction
+
+Keep four terms distinct: **transfer** moves affine cleanup responsibility, **discharge** satisfies the current obligation, **destroy** physically destroys one allocation family and **bulk reclaim** reclaims a region or group.
+
+```text
+discharge owned REC root
+    -> remove one affine-root obligation
+    -> decrement count by one
+
+if count > 0:
+    family remains alive
+
+if count == 0:
+    destroy family
+```
+
+Dropping an owned REC root therefore does not necessarily destroy or free the family.
 
 ## Why temporary aliases do not race count zero
 
@@ -772,7 +915,7 @@ Their final implementation should be specialized by static representation state.
 
 - uncounted target: no REC operation
 - REC borrowed insertion: increment
-- REC final-use insertion: reclassify affine root to edge without changing count
+- REC final-use insertion: reclassify the affine root into one edge, then apply `+(N - 1)` for any further direct edges the same commit creates into that family
 
 ### `release_persistent`
 
@@ -826,6 +969,8 @@ A function needs REC representation knowledge only where it:
 - discharges affine cleanup responsibility
 
 The REC bit travels with the allocation-family handle and is inspected locally at those operations.
+
+REC representation is physical-variant state. One source function may be lowered GC-native in one target/profile variant and with the two-bit REC-capable ABI in another, with no difference in source semantics or in its public semantic interface. Local tag tests stay limited to retention-sensitive operations inside a full-control variant.
 
 ### Avoid whole-function specialization
 
@@ -983,7 +1128,27 @@ Explicit groups have hard semantics.
 - group exit performs bulk cleanup
 - cycles are allowed only inside one group
 
-Aliases from a group into an externally owned REC allocation may still require REC because the external allocation does not belong to the group.
+Group ownership affects the **target** allocation, not every edge whose source happens to be inside a group.
+
+```text
+group-owned target
+    -> no REC counter
+
+edge inside group -> group-owned target
+    -> count-free
+
+edge inside group -> external REC target
+    -> ordinary persistent REC obligation on external target
+```
+
+At `clear()` or group exit the ordering is:
+
+```text
+process outgoing obligations to external REC families
+-> bulk reclaim group-owned storage
+```
+
+The external target is destroyed only if its own count reaches zero. Group count-free semantics never mean that every external allocation referenced from a group is count-free.
 
 The initial implementation does not attempt to coalesce every group-to-external alias into one group-domain count.
 
@@ -1408,7 +1573,7 @@ Builtin collections are the first practical REC boundary and the trusted effect 
 ### Tasks
 
 - [ ] Implement counted `push` insertion.
-- [ ] Implement final-use insertion reclassification with no count change.
+- [ ] Implement final-use insertion reclassification: one root becomes one edge, and the commit applies `+(N - 1)` for any further direct edges into the same family.
 - [ ] Implement counted `set` replacement.
 - [ ] Implement counted `remove` edge destruction.
 - [ ] Implement detached-stored-result reclassification into an affine root.
@@ -1642,17 +1807,17 @@ one-direct-handle shortcut.
 | duplicate runtime keys with individual long-lived eviction | REC |
 | `get` followed by use | no count change |
 | mutation while `get` alias is live | borrow diagnostic |
-| final-use insertion into REC collection | root-to-edge reclassification, no count change |
+| one-direct-edge final-use insertion into REC collection | root-to-edge reclassification, no count change |
 | scalar collection element | zero retained-edge obligations |
 | direct heap collection element | one direct retained-edge obligation |
-| aggregate collection element | several or transitive retained-edge obligations |
+| aggregate collection element | several direct retained-edge obligations when its representation stores several handles |
 | new-key map insertion | stored key and stored value obligations both appear |
 | existing-key map replacement | stored key remains, old value obligations disappear and new value obligations appear |
 | equal-content replacement lookup key | lookup key remains borrowed and is not retained |
 | map key and value alias one family | two obligations point to one allocation family |
 | map removal with aliased key and value | key obligation decrements and value obligation detaches into the result |
 | failed collection or map mutation | original storage topology and obligations remain unchanged |
-| remove returning affine result | detached stored obligations reclassify into the result, with no count change |
+| one-direct-edge remove returning affine result | one detached obligation reclassifies into the result, with no count change; a multi-edge detachment is `1 - N` |
 | remove while another affine root exists | edge decrement, borrowed result |
 | overwrite REC child | old decrement and new retain/reclassification |
 | explicit group with arbitrary aliases | no REC, bulk cleanup |
@@ -1662,6 +1827,18 @@ one-direct-handle shortcut.
 | user collection wrapper around builtin map | same inferred summaries as builtin composition |
 | mixed REC and region call sites | one body, local tag test only at memory operation |
 | package boundary | semantic summary propagation, no source REC type |
+| one-edge final-use insertion | count unchanged |
+| two-edge final-use insertion into same family | count `+1` |
+| two-edge detachment to one affine root | count `-1` |
+| same-family overwrite with net-zero obligation delta | count unchanged |
+| no transient destruction during same-family overwrite | family never destroyed mid-commit |
+| separately allocated `Holder -> Blob` | no duplicated collection-to-`Blob` obligation |
+| inline `Holder` with embedded `Blob` handle | direct collection-domain `Blob` obligation |
+| group-owned target | no REC |
+| group-to-external REC target | decrement on `clear` or group exit, before bulk reclamation |
+| failed fallible mutation with later source use | borrow, no transfer |
+| failed fallible mutation after all-path final use | no committed edge, affine obligation discharged safely |
+| same source function in two physical variants | GC-native in one and REC-capable in the other, with no semantic interface change |
 | foreign boundary | no retained Moth reference permitted |
 | long acyclic REC chain | iterative destruction with bounded stack |
 | diamond DAG | shared child freed at final obligation |

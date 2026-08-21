@@ -1,6 +1,6 @@
 # Final Memory Management Redesign and Implementation Plan
 
-**Status:** documentation migration and REC/public retained-edge consistency passes complete, compiler implementation deferred
+**Status:** documentation migration complete through the final memory model consistency closure, compiler implementation deferred
 **Repository:** `nyejames/moth`  
 **Baseline reviewed:** `main` at `34afc996b746bfe93281dad115c40083a9106ac8`  
 **Activation branch:** `main`  
@@ -10,7 +10,9 @@
 **Required final code gate:** `just validate`  
 **Required documentation-only gate:** `moth build docs --release` or `cargo run --quiet -- build docs --release`  
 
-This plan is the parent roadmap for Moth's final memory-management model. It replaces the old GC-fallback direction with mandatory static lifetime topology and a hard collector-free release guarantee for capable backends. The initial Phase 1 migration reopened for one focused consistency pass after review, and a second audit then corrected REC effects, public retained-edge teaching, summary ownership and implementation-debt wording. Both closure passes complete Milestone A.
+This plan is the parent roadmap for Moth's final memory-management model. It replaces the old GC-fallback direction with mandatory static lifetime topology and a hard collector-free release guarantee for capable backends. The initial Phase 1 migration reopened for one focused consistency pass after review; a second audit corrected REC effects, public retained-edge teaching, summary ownership and implementation-debt wording; and a final closure, owned by `docs/roadmap/plans/final-memory-model-closure-plan.md`, encoded the multi-edge REC obligation algebra, direct-edge resolution and target-aware physical planning order.
+
+Milestone A is closed after the final multi-edge REC and target-aware physical-planning consistency closure.
 
 The Retained Edge Counting plan owns the detailed REC analysis, ABI, counter and lowering contract. This plan owns the complete source semantics, analysis boundaries, inferred regions, cleanup frontiers, explicit groups, field-sensitive allocation splitting, physical memory planning, backend/profile parity, channel prerequisites and repository-wide documentation migration.
 
@@ -19,15 +21,17 @@ The former `docs/roadmap/plans/grouped-memory-design.md` plan is superseded as t
 ## Current state
 
 ```text
-STATUS: documentation slice complete after the Phase 1 consistency closure passes — Milestone A
-  landed. The canonical memory documentation, REC authority, public retained-edge pages,
-  compiler and build authorities, roadmap and progress matrix now describe the accepted
-  collector-free model. Compiler implementation remains deferred and no phase is active.
+STATUS: documentation slice complete. Milestone A is closed after the final multi-edge REC and
+  target-aware physical-planning consistency closure. The canonical memory documentation, REC
+  authority, public retained-edge pages, compiler and build authorities, teaching pages, roadmap
+  and progress matrix now describe the accepted collector-free model, the per-family REC
+  obligation algebra and the target-aware physical planning order. Compiler implementation
+  remains deferred and no phase is active.
 CURRENT_SCOPE: none active. Milestone A (Phases 0 and 1) is closed; Phases 2 through 18 are
   deferred implementation work awaiting explicit activation.
-NEXT_ACTION: Phase 0 and both reopened Phase 1 consistency passes are complete. Milestone A is
-  closed. Do not begin Phase 2 until
-  the borrow and last-use implementation slice is explicitly activated on the roadmap.
+NEXT_ACTION: Phase 0, the reopened Phase 1 consistency passes and the final memory model
+  consistency closure are complete. Do not begin Phase 2 until the borrow and last-use
+  implementation slice is explicitly activated on the roadmap.
 BLOCKERS: none for the documentation slice; implementation phases remain gated on its completion.
 ```
 
@@ -145,6 +149,8 @@ A final successful public or generated summary must not leave topology-relevant 
 
 1. Cleanup responsibility is affine.
 2. Cleanup responsibility may move or be discharged. It never duplicates.
+2a. **Transfer**, **discharge**, **destroy** and **bulk reclaim** are four different things and are never used as synonyms. Transfer moves the obligation to another path. Discharge satisfies it. Destroy physically destroys one allocation family. Bulk reclaim reclaims a region or group.
+2b. Discharging an affine root destroys the family only when the plan makes that family individually destructible and nothing else keeps it alive. For an REC family, discharge removes one affine-root obligation and decrements the count; destruction happens only if the count reaches zero. For a region- or group-owned family, discharge never destroys anything individually.
 3. Semantic lifetime ownership remains static even when cleanup responsibility moves at runtime.
 4. Runtime owned or borrowed state answers who may perform individual cleanup on the current path.
 5. Static result provenance answers where storage came from and which lifetime constraints apply.
@@ -186,6 +192,8 @@ The tags belong to an allocation-family handle. A projection must retain or reco
 9. An overly broad declared group is a visible programmer choice.
 10. Field-sensitive splitting may improve layout inside a group but must not shorten group-owned lifetime.
 11. Group-owned values do not cross channel boundaries as individually transferable values.
+12. Group ownership is a property of the **target** allocation, not of every edge whose source lives inside a group. A group-owned target carries no counter; an edge from group storage to an externally owned REC family is an ordinary counted persistent edge into that external family.
+13. At `clear()` or group exit, outgoing REC boundary obligations are released **before** group storage is bulk reclaimed. The external target is destroyed only if its own count reaches zero.
 
 ### 2.10 Retained Edge Counting
 
@@ -212,6 +220,22 @@ REC does not count:
 - affine transfers
 - explicit-group-owned edges
 
+REC obligations are per target allocation family. For a family `F`, the count is the number of live counted persistent-edge obligations into `F` plus at most one affine-root obligation for `F`. Every retention-sensitive commit is evaluated independently per family as:
+
+```text
+delta_count(F) =
+    created_persistent_edges(F)
+    - removed_persistent_edges(F)
+    + affine_root_after(F)
+    - affine_root_before(F)
+```
+
+One affine root can reclassify into at most one new persistent edge, and at most one removed edge can reclassify into a returned affine root. One storage operation may therefore create several direct edges into one family and still change the count. A same-family overwrite commits one net delta atomically; there is no transient-zero destruction step.
+
+Counts follow the **direct** post-refinement family-edge graph, never transitive reachability. An allocation reachable only through a separately allocated child is never counted again by the container.
+
+The exact transition table, tag encoding and lowering contract live in the REC companion plan.
+
 REC never establishes legality and never permits cycles.
 
 ### 2.11 Builtin collections as the trusted dynamic-storage substrate
@@ -232,7 +256,7 @@ Their compiler-known effects are:
 
 Fixed and growable collections must gain a compiler-owned `clear()` operation in the accepted final surface.
 
-The table describes the successful path. A failed builtin mutation preserves the original storage topology and cleanup obligations, and public summaries preserve separate success and error effects. A stored scalar may contribute zero obligations, a direct heap value one, an inline aggregate several and a nested aggregate transitive obligations.
+The table describes the successful path. A failed builtin mutation preserves the original storage topology and cleanup obligations, and public summaries preserve separate success and error effects. A stored scalar may contribute zero obligations, a direct heap value one, and an inline aggregate that physically stores several handles several direct obligations. A summary may also describe nested retention, but obligations count direct edges between final allocation families: an allocation reachable only through a separately allocated child is never counted again by the container.
 
 User-defined collections and storage abstractions compose these builtin effects. Their semantic summaries are inferred. The compiler does not grant effects based on method names and source annotations are not added.
 
@@ -242,17 +266,23 @@ Keeping builtin destructive operations narrow is an intentional language-design 
 
 1. Field-sensitive allocation-family splitting is required final architecture.
 2. It may land after the first collector-free release implementation.
-3. It runs before final memory-strategy selection.
-4. It may separate a small long-lived field from a large short-lived parent family.
-5. It must preserve source alias, mutation and copy semantics.
-6. It does not add partial-move syntax or observable allocation identity.
-7. Strategy selection reruns for every resulting family.
-8. REC cannot substitute for splitting an unacceptably broad family.
+3. Mandatory source legality never depends on splitting. The unsplit topology must already be valid.
+4. Splitting is a physical refinement, so it runs after build-owned target partition and target-contract validation, once a candidate physical variant exists, and before final memory-strategy selection for that variant.
+5. A split rebuilds the affected direct family-edge graph and revalidates the affected outlives, SCC and family-base invariants.
+6. A refinement that cannot be proven falls back to the unsplit legal family and conservative retention. It never produces a source diagnostic.
+7. It may separate a small long-lived field from a large short-lived parent family.
+8. It must preserve source alias, mutation and copy semantics.
+9. It does not add partial-move syntax or observable allocation identity.
+10. Strategy selection reruns for every resulting family, per physical variant.
+11. REC cannot substitute for splitting an unacceptably broad family.
 
 ### 2.13 Physical memory planning and coalescing
 
 1. Semantic lifetime inference remains maximally precise.
-2. Physical memory planning may deliberately retain values slightly longer to reduce allocation and cleanup overhead.
+2. Physical memory planning is target-aware and profile-aware. It runs per physical variant, after target partition and target validation, and produces one `ValidatedMemoryPlan` per variant.
+3. The memory planner remains compiler-owned. The build system owns target partition, physical-variant orchestration, the build profile and target/backend capability metadata, and invokes the planner per candidate variant.
+4. The backend only realises the plan. It never selects a physical memory strategy.
+5. Physical memory planning may deliberately retain values slightly longer to reduce allocation and cleanup overhead.
 3. Physical coalescing is not semantic region widening.
 4. The first coalescing heuristic is deliberately narrow:
    - straight-line control flow
@@ -328,32 +358,27 @@ The proof guarantees collector-free correctness. Memory quality depends on inter
 The final pipeline is:
 
 ```text
-source access, copy and group syntax
-    ->
-typed AST and validated HIR
-    ->
-borrow and last-use analysis
-    ->
-local allocation-family and retained-edge constraints
-    ->
-exported lifetime and retention summaries
-    ->
-project and package summary instantiation
-    ->
-complete lifetime-topology validation
-    ->
-non-lexical interval, frontier and epoch completion
-    ->
-field-sensitive family splitting where implemented
-    ->
-memory-strategy planning
-    ->
-target partition and target validation
-    ->
-backend memory lowering
-    ->
-collector-free release verification where required
+validated HIR
+-> borrow and last-use analysis
+-> local allocation-family and retained-edge constraints
+-> exported lifetime and retention summaries
+-> project/package summary instantiation
+-> complete backend-neutral lifetime-topology validation
+-> non-lexical interval, frontier and epoch completion
+-> backend-neutral memory requirements
+-> target-affinity analysis and partition
+-> target-contract validation
+-> per-physical-variant family/layout refinement
+-> revalidate affected refined family-edge facts
+-> target/profile-aware compiler-owned memory planning
+-> ValidatedMemoryPlan
+-> backend lowering
+-> collector-free artefact verification where required
 ```
+
+Everything through `backend-neutral memory requirements` is target-independent and shared. Everything after it is scoped to one target/profile physical variant.
+
+`check` runs through creation and validation of the `ValidatedMemoryPlan` and stops before backend lowering and output emission.
 
 ### AST
 
@@ -423,7 +448,7 @@ Build and link planning owns:
 
 ### Memory-strategy planning
 
-A backend-neutral memory planner owns:
+The compiler-owned memory planner is invoked once per candidate physical variant, after build-owned target partition and target-contract validation. It consumes validated topology, the backend-neutral memory requirements, the selected target, the build profile and backend memory capability metadata, and owns:
 
 - `Affine`
 - `InferredRegion`
@@ -435,7 +460,7 @@ A backend-neutral memory planner owns:
 - physical coalescing candidates
 - developer decision records
 
-Strategy planning runs only after topology is valid.
+Strategy planning runs only after topology is valid **and** after target partition and target validation have established the physical variant. It produces one `ValidatedMemoryPlan` per variant, and never affects source legality.
 
 ### Backends
 
@@ -449,7 +474,7 @@ Backends own:
 - stack or arena placement
 - collector-free artifact verification
 
-Backends do not reconsider legality.
+Backends do not reconsider legality and do not select a memory strategy. They realise the `ValidatedMemoryPlan` for the variant they are lowering.
 
 ---
 
@@ -993,11 +1018,24 @@ The group implementation must realize the hard count-free contract without reusi
 
 The backend must receive one complete plan instead of translating borrow-checker advisory sites directly.
 
+Explicit prerequisites, in order, before this phase's planner may run:
+
+```text
+complete shared topology
+target partition
+target validation
+physical variant scope
+```
+
+Only then does target/profile memory planning run, producing one `ValidatedMemoryPlan` per physical variant.
+
 ### Tasks
 
-- [ ] Define a backend-neutral final memory plan keyed by allocation family and reachable function.
+- [ ] Define backend-neutral memory requirements as the last target-independent handoff, carrying no selected physical strategy.
+- [ ] Define a final memory plan keyed by allocation family and reachable function, scoped to one target/profile physical variant.
 - [ ] Add `Affine`, `InferredRegion`, `ExplicitGroup` and `Rec` strategy categories.
-- [ ] Run planning only after complete topology validation.
+- [ ] Run planning only after complete topology validation, target partition and target-contract validation.
+- [ ] Consume the selected target, build profile and backend memory capability metadata.
 - [ ] Carry hidden destination plans.
 - [ ] Carry cleanup and destruction plans.
 - [ ] Carry allocation-family layout requirements.
@@ -1125,9 +1163,12 @@ Collector-free correctness does not require splitting, but the final performance
 - [ ] Preserve alias and mutation behavior.
 - [ ] Preserve explicit-copy graph behavior.
 - [ ] Reject splitting when a projection or invariant requires one family.
-- [ ] Split family identities before memory-strategy selection.
-- [ ] Rerun topology constraints affected by the split.
-- [ ] Rerun affine, region and REC strategy selection.
+- [ ] Require that the unsplit topology is already legal. Splitting must never be what makes source legal.
+- [ ] Execute splitting per physical variant, after target partition and target validation.
+- [ ] Rebuild the affected direct family-edge graph after each accepted split.
+- [ ] Revalidate the affected outlives, SCC and family-base invariants after each accepted split.
+- [ ] Fall back to the unsplit family and conservative retention when the optimisation cannot be proven, without emitting a source diagnostic.
+- [ ] Rerun physical strategy and REC selection after a successful split.
 - [ ] Keep all fields inside an explicit group until group exit even when physically split.
 - [ ] Add developer reporting for accepted and rejected splits.
 
@@ -1203,6 +1244,8 @@ Channel semantics must be constrained before any async implementation starts.
 ### Summary and reasoning
 
 The final guarantee is real only when a backend proves that every reachable family has a complete non-tracing strategy.
+
+Verification operates on each complete target/profile `ValidatedMemoryPlan` and the artefact emitted from it, not on a single project-global plan.
 
 ### Tasks
 

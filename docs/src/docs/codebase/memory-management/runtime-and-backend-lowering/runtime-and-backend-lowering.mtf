@@ -31,6 +31,38 @@ GC is a permitted runtime representation for a statically legal lifetime topolog
 - Missing topology proof is not a backend fallback.
 - A missing physical strategy after successful topology validation is `CompilerError`.
 
+## Planning order
+
+Physical memory strategy is chosen after target assignment, not before it.
+
+[codeblock, $code("text"):
+    validated HIR
+        -> borrow and last-use analysis
+        -> local allocation-family and retained-edge constraints
+        -> exported lifetime and retention summaries
+        -> project/package summary instantiation
+        -> complete backend-neutral lifetime-topology validation
+        -> non-lexical interval, frontier and epoch completion
+        -> backend-neutral memory requirements
+        -> target-affinity analysis and partition
+        -> target-contract validation
+        -> per-physical-variant family/layout refinement
+        -> revalidate affected refined family-edge facts
+        -> target/profile-aware compiler-owned memory planning
+        -> ValidatedMemoryPlan
+        -> backend lowering
+        -> collector-free artefact verification where required
+]
+
+`check` runs through creation and validation of the `ValidatedMemoryPlan`. It stops before backend lowering and output emission.
+
+- A `ValidatedMemoryPlan` is scoped to one target/profile physical variant, never to the whole project.
+- Host GC versus affine, region, group or REC representation is chosen by the compiler-owned planner, and only after target and build-profile information exists.
+- Lowerers receive the already selected plan for their variant.
+- Lowerers do not choose REC, GC, region or group representation, and do not reconsider the plan.
+- A missing physical strategy after successful planning is `CompilerError`.
+- GC-native and collector-free variants share the same mandatory topology result. They differ only in the physical plan built on top of it.
+
 ## Physical memory strategies
 
 The memory planner selects one strategy per validated allocation family. Backends realise the plan; they do not choose semantics.
@@ -192,7 +224,7 @@ A future resource-capable profile requires a separate complete design for identi
 - Missing topology proof is not a backend fallback.
 - Ownership-aware heap values use allocation-family handles carrying the two tag bits.
 - A projection must retain or recover the family base rather than masking an arbitrary interior pointer.
-- Conditional drops release owned handles where individual release is legal.
+- Conditional drops discharge owned handles; they destroy a family only where the plan says individual destruction is legal and nothing else retains it.
 - Runtime helpers own allocation, release, string, collection and handle contracts.
 - The unified ownership ABI applies across ownership-aware calls.
 - Source semantics remain backend independent.

@@ -15,17 +15,18 @@
 - `length()` returns the current logical number of items.
 - The element type is not widened by later mutation.
 
-`push` remains fallible and must be handled even for a growable collection.
-Runtime allocation and backend failures must not become unchecked language
-behaviour.
+Growable `push` is infallible in the accepted source contract and returns no
+value. Allocation exhaustion is unrecoverable and traps rather than entering
+`Error!`, so growable `push` takes neither postfix `!` nor `catch`.
 
 [codeblock, $code("moth"):
     names ~{String} = {}
 
-    ~names.push("Priya") catch:
-        assert(false, "growable push failed")
-    ;
+    ~names.push("Priya")
 ]
+
+Fixed `{N T}` push is the fallible one, because a fixed collection can be full.
+See @./collection-operations (Collection operations) for both contracts.
 
 Use @../bindings/#mutable-bindings (Mutable bindings) for the distinction
 between mutable storage and one exclusive operation.

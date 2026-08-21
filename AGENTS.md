@@ -60,6 +60,7 @@ Core contracts:
 - Borrow validation and lifetime-topology validation are mandatory and backend-independent. GC may represent an already legal topology but cannot legalise invalid or unproven topology.
 - Missing optional transfer proof falls back conservatively without rejecting legal source. Missing mandatory topology proof is a source diagnostic, not a GC fallback.
 - A backend that advertises full memory control must lower release builds without a tracing or reachability collector. A missing physical strategy after successful topology validation is `CompilerError`. There is no source-visible or project-visible no-GC mode.
+- Mandatory lifetime topology and backend-neutral memory requirements are target-independent. Build-owned target partition and target validation happen before target/profile-aware physical memory planning. The compiler-owned memory planner produces one `ValidatedMemoryPlan` per physical variant. Backend lowerers only realise that plan.
 - Retained Edge Counting is a compiler-selected physical representation, never source semantics. Its canonical page is `docs/src/docs/codebase/memory-management/retained-edge-counting/`.
 - Backends do not reparse source, reconstruct imports, infer source semantics or reconsider borrow and lifetime legality.
 

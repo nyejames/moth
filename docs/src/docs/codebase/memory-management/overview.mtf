@@ -40,7 +40,7 @@ User-authored topology that is invalid or cannot be proven legal produces a stru
 
 **Physical strategy selection**
 
-After topology is proven, the compiler selects a physical strategy per allocation family:
+After shared topology and backend-neutral memory requirements are complete, target assignment and target-contract validation establish the physical variant. The compiler-owned memory planner then selects target/profile-specific strategies for that variant, one per allocation family:
 
 - stack or inline placement
 - static affine cleanup at a proven final use
@@ -155,17 +155,22 @@ A full-control backend can therefore reclaim every remaining allocation in `R` w
 [codeblock, $code("text"):
     source access, copy and group syntax
         -> AST access-mode, placement and freshness validation
-        -> validated HIR with explicit places and control flow
+        -> validated HIR
         -> borrow and last-use analysis
         -> local allocation-family and retained-edge constraints
         -> exported lifetime and retention summaries
-        -> project and package summary instantiation
-        -> complete lifetime-topology validation
+        -> project/package summary instantiation
+        -> complete backend-neutral lifetime-topology validation
         -> non-lexical interval, frontier and epoch completion
-        -> field-sensitive family splitting where implemented
-        -> memory-strategy planning
-        -> target partition and target validation
-        -> backend memory lowering
+        -> backend-neutral memory requirements
+        -> target-affinity analysis and partition
+        -> target-contract validation
+        -> per-physical-variant family/layout refinement
+        -> revalidate affected refined family-edge facts
+        -> target/profile-aware compiler-owned memory planning
+        -> ValidatedMemoryPlan
+        -> backend lowering
+        -> collector-free artefact verification where required
 ]
 
 Local module compilation produces local lifetime constraints and exported summaries. Project/link analysis instantiates those summaries over the reachable call graph and builder-supplied lifecycle roots. Backends receive a validated topology and a memory plan, and may not reconsider source legality.
@@ -174,8 +179,12 @@ Local module compilation produces local lifetime constraints and exported summar
 - HIR represents places and control flow explicitly and materialises fresh mutable call arguments where necessary.
 - Borrow validation enforces exclusivity, alias safety and optional affine transfer safety.
 - Lifetime-topology validation enforces one owner, retained-edge legality, escapes, frontiers and cycles.
-- Memory-strategy planning selects the physical representation for each validated allocation family.
-- Backend lowering realises that plan without changing semantics.
+- Backend-neutral memory requirements are the last target-independent handoff. They carry family identity, owners, intervals, frontiers, retention facts, REC candidacy and group membership, but never a selected physical strategy.
+- Target partition and target-contract validation are build-owned and run before physical memory planning.
+- The compiler-owned memory planner selects the physical representation for each validated allocation family, once per target/profile physical variant, and produces one `ValidatedMemoryPlan` per variant.
+- Backend lowering realises that plan without changing semantics or selecting strategy.
+
+`check` runs through creation and validation of the `ValidatedMemoryPlan`. It stops before backend lowering and output emission.
 
 ## Task-reading guide
 
@@ -286,6 +295,6 @@ Local module compilation produces local lifetime constraints and exported summar
 - A missing physical strategy after successful topology validation is `CompilerError`.
 - Affine cleanup responsibility may move or be discharged, but it never duplicates.
 - REC counts persistent retained edges only. It never counts ordinary aliases and never establishes legality.
-- Group-owned storage is count-free, is never released individually and is the only source mechanism for cycles.
+- Group-owned storage is count-free, is never released individually and is the only source mechanism for cycles. Count-free describes the group's own targets: an edge from group storage into an externally owned REC family is still a counted edge into that external family, released at group exit before bulk reclamation.
 - Backends receive validated topology and a memory plan, and may not reconsider source legality.
 - No compiler or backend path may rely on unchecked aliasing or undefined behaviour to make the memory model work.

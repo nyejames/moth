@@ -22,9 +22,7 @@ Alias activity is non-lexical and control-flow-sensitive. A shared alias blocks 
     items ~= load_items()
     view = items       -- shared alias
     inspect(view)      -- last use of view
-    ~items.push(42) catch:    -- valid: view is no longer live
-        assert(false, "unexpected push failure")
-    ;
+    ~items.push(42)    -- valid: view is no longer live
 ]
 
 ### Branches, joins and loops

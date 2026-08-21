@@ -124,8 +124,16 @@ that shared access is no longer used.
 Builtin maps are part of Moth's trusted dynamic-storage substrate. The compiler
 knows the retained-edge summary contributed by every stored key and value. A
 scalar can contribute zero obligations, a direct heap-backed value can
-contribute one, an inline aggregate can contribute several and a nested
-aggregate can contribute transitive obligations.
+contribute one, and an inline aggregate that physically stores several handles
+can contribute several direct obligations.
+
+A summary may also describe nested retention, so the compiler knows what a
+stored value structurally contains. That is a description, not a count.
+Obligations are the **direct** edges between final allocation families: a
+separately allocated child owns its own outgoing edges, and an allocation
+reachable only through such a child is never counted again by the map. If layout
+refinement instead packs a child inline into the map's storage, its handles
+become direct map edges and do count.
 
 The table describes each operation's successful path. Maps retain both stored
 keys and stored values. Replacing an existing key keeps the stored key and
@@ -143,8 +151,8 @@ alias unless the operation inserts it as a new stored key.
 
 For the initial direct-handle implementation, a stored scalar commonly
 contributes zero obligations and a direct heap-backed value commonly contributes
-one. The general summary supports aggregates and transitive retention without a
-new map vocabulary.
+one. The general summary supports aggregates and nested retention without a new
+map vocabulary.
 
 ### Successful commits and failed operations
 
@@ -172,15 +180,24 @@ Consider a map whose key and value point to the same allocation family:
     text = [: large value]
     values ~{String = String} = {}
 
-    ~values.set(text, text)!
-    removed = ~values.remove(text)!
+    ~values.set(text, text)! -- final use of text
+    removed = ~values.remove("large value")!
 ]
 
-The new-key insertion creates two persistent obligations to the same family.
+The new-key insertion creates two direct persistent obligations to the same
+allocation family, one from the stored key and one from the stored value.
+Because this was the final use of `text`, its existing cleanup obligation can be
+reused for exactly one of those two stored references. The second is a genuinely
+new obligation.
+
 Existing-key replacement keeps the stored key, so an equal-content lookup key
-does not add another obligation. Removal drops the stored key obligation and
-detaches the stored value obligation into the result when affine responsibility
-can move there.
+does not add another obligation. The lookup string passed to `remove` is a
+temporary borrowed alias, not an obligation to the stored family.
+
+Removal drops the stored key obligation and reclassifies the stored value
+obligation into the result when affine responsibility can move there. One
+removed reference can become the result's obligation; the other simply
+disappears.
 
 `clear` kills the map's complete retention domain. If no other live alias or
 retention domain can retain a target allocation family, the call becomes that

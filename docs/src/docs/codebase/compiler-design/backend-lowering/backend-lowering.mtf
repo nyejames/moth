@@ -13,6 +13,7 @@ A lowerer receives explicit records:
 - stable call targets
 - borrow facts
 - validated lifetime facts and summaries
+- the `ValidatedMemoryPlan` for this target/profile physical variant
 - external boundary classifications
 - builder lifecycle/runtime plan
 - per-function link facts
@@ -30,6 +31,10 @@ A lowerer does **not**:
 - write final project files directly
 
 If a lowerer needs a fact, an earlier owner should have recorded it.
+
+The `ValidatedMemoryPlan` is the memory half of that rule. It arrives already decided and carries the selected memory layout per allocation family, region and group placement, the cleanup and destruction plans, and the REC representation decisions. The lowerer reads it the way it reads a call target: as a settled fact.
+
+Because the plan is built after target partition and target validation, it is scoped to **one physical variant**. The same source function can be lowered GC-native in a variant targeting a host collector and collector-free with REC-capable handles in a variant targeting full memory control. Those variants share the same validated topology and the same source semantics; only the physical plan differs.
 
 For the walkthrough, target-labelled `start`, `greet` and template work arrive ready. The JavaScript path might own page orchestration. Neutral string work may sit in either partition depending on assignment.
 
@@ -81,7 +86,7 @@ JavaScript companion facades and wrappers call Wasm exports through explicit han
 
 Binding-backed calls lower through demand-driven glue. The binder's semantic interface already existed upstream. The lowerer maps stable external ids to imports, helpers or native operations.
 
-Borrow facts may guide **optional ownership-aware Wasm lowering**: earlier drops and specialised paths. A garbage-collected representation may erase ownership cleanup operations after upstream validation. Every backend still requires the same validation. Optimisation must preserve observable behaviour and the same accepted program set.
+Borrow and last-use facts feed **upstream** topology validation and memory planning. The lowerer does not read them and invent ownership operations of its own: it follows the final plan. Where the plan selected a GC-native representation, ownership cleanup operations may be erased; where it selected affine, region, group or REC handling, the lowerer emits exactly what the plan says. Every backend still requires the same validation, and optimisation must preserve observable behaviour and the same accepted program set.
 
 ## What can fail here
 

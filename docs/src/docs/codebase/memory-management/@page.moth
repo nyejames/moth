@@ -86,9 +86,14 @@ page_head #= theme_head
             -> borrow and last-use analysis
             -> local allocation-family and retained-edge constraints
             -> project and package summary instantiation
-            -> complete lifetime-topology validation
+            -> complete backend-neutral lifetime-topology validation
             -> non-lexical interval, frontier and epoch completion
-            -> memory-strategy planning
+            -> backend-neutral memory requirements
+            -> target-affinity analysis and partition
+            -> target-contract validation
+            -> per-physical-variant family/layout refinement
+            -> target/profile-aware compiler-owned memory planning
+            -> ValidatedMemoryPlan
             -> backend memory lowering
     ]
 ]

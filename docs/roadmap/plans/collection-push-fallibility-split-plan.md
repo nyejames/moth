@@ -132,7 +132,7 @@ VALIDATION_STATE:
 
 DOCS_IMPACT:
 - progress matrix needed: yes, update the existing Collections row rather than adding a new row
-- other docs stale: canonical collection references, binding examples, error examples, memory examples and Core collections package docs contain unified fallible-push wording or examples
+- other docs stale: the accepted collection reference pages, memory examples, reactivity examples, error examples and the Core collections Basic page were corrected by the final memory model consistency closure (`docs/roadmap/plans/final-memory-model-closure-plan.md`). Binding examples were already correct. The only remaining stale output is any generated page under `docs/release/**` not yet rebuilt
 - authorized docs updates: yes, explicitly requested by the user
 
 NEXT_ACTION:
@@ -156,16 +156,18 @@ Current implementation facts:
 - fixed overflow already uses `CollectionFixedCapacityExceeded`
 - collection Wasm lowering remains absent
 
-Current documentation is internally inconsistent:
+Documentation state after the memory model consistency closure:
 
-- `docs/src/docs/bindings/mutable-bindings-basic.mtf` already shows growable push without `catch`
-- `docs/src/docs/bindings/mutable-bindings.mtf` still handles the same growable push
-- `docs/src/docs/collections/growable-collections.mtf` explicitly says growable push remains fallible
-- `docs/src/docs/collections/collection-operations.mtf` and its Basic pair state that every push is fallible
-- Core collections docs describe five host functions and one fallible push helper
-- the progress matrix states that all collection pushes are fallible
+- `docs/src/docs/collections/growable-collections.mtf`, `growable-collections-basic.mtf`, `collection-operations.mtf`, `collection-operations-basic.mtf` and `docs/src/docs/packages/core/collections/collections-basic.mtf` now teach the accepted growable/fixed split. They are no longer stale
+- `docs/src/docs/memory/automatic-cleanup-and-retained-edges.mtf` and the canonical REC page now say *fixed-capacity* push where they mean the fallible one
+- `docs/src/docs/packages/core/collections/collections.mtf` still describes five host functions and one unified fallible push helper, correctly, and now carries an explicit implementation-debt paragraph pointing at this plan. Removing that paragraph is this plan's job, not the closure's
+- `docs/src/docs/bindings/*`, `docs/src/docs/errors/*`, `docs/src/docs/memory/*`, `docs/src/docs/reactivity/*` and the canonical access, aliasing and declared-group pages now use growable `push` without `catch`, and use fixed receivers where a fallible push example is the teaching point
+- the progress matrix still reports that the current compiler treats every push as fallible, which remains true, and now names the accepted split as deferred
+- generated pages under `docs/release/**` reflect whichever build last ran
 
-Treat accepted design as authoritative. Existing compiler behaviour and stale docs do not override it.
+Current compiler and runtime behaviour is unchanged by that closure: one unified fallible `__moth_collection_push` still serves both shapes. This plan still owns the actual AST/HIR/helper split, the accepted source-contract enforcement and the final removal of the transitional debt note from the Core advanced page.
+
+Treat accepted design as authoritative. Existing compiler behaviour and any remaining stale docs do not override it.
 
 ## Accepted source semantics
 

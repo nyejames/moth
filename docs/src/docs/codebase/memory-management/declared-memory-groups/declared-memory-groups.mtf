@@ -85,6 +85,24 @@ A group-owned allocation is never released before its group exits, even when las
 
 This is what makes groups count-free. Because no group child can be released individually, there is no independent obligation to track, so no counter is ever required. See @../retained-edge-counting (Retained Edge Counting) for the counted strategy that groups deliberately avoid.
 
+### Group ownership is a property of the target, not the edge source
+
+Count-free means the group *owns* the target allocation family. It does not mean every reference stored inside group storage is free of obligations.
+
+- A group-owned allocation family carries no REC counter.
+- A retained edge whose target is owned by the same group needs no counted lifetime obligation, because the group's bulk exit already covers it.
+- A retained edge from group storage to an externally owned REC family is an ordinary counted persistent edge into that external family.
+- Group exit processes those outgoing REC obligations before bulk reclamation:
+
+[codeblock, $code("text"):
+    release outgoing REC boundary obligations
+    -> bulk reclaim group storage
+]
+
+- The external target is destroyed only if its own count reaches zero. Group teardown never destroys an external family directly.
+
+Group count-free semantics therefore do not imply that every external target referenced from a group is count-free.
+
 ### Cycles
 
 A group is the only place a Moth program may construct a direct reference cycle. Every member of the cycle must be placed into the same group.
@@ -133,18 +151,14 @@ V1 has no expression-site placement. Prefer:
 
 [codeblock, $code("moth"):
     row Row into scratch = parse_row(raw)
-    ~rows.push(row) catch:
-        assert(false, "unexpected push failure")
-    ;
+    ~rows.push(row)
 ]
 
 Do not initially add:
 
 [codeblock, $code("moth"):
     -- INVALID: expression-site placement is not supported in V1
-    ~rows.push(parse_row(raw) into scratch) catch:
-        assert(false, "unexpected push failure")
-    ;
+    ~rows.push(parse_row(raw) into scratch)
 ]
 
 Placement stays attached to closed receiving boundaries.

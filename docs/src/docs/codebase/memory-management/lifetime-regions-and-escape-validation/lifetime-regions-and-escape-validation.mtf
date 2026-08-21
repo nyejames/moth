@@ -221,6 +221,29 @@ A projection does not silently become an independent allocation or independent c
 
 Field-sensitive allocation splitting may prove that a projected field is an independent allocation family with its own lifetime owner, after which strategy selection reruns for the new families. It applies only when the compiler establishes separate child ownership before the alias escapes. It is not retroactive interior projection detachment.
 
+### Splitting refines an already legal topology
+
+Mandatory source topology must already be valid without field-sensitive splitting. Splitting is a physical refinement of an accepted topology, never a way to make invalid source legal.
+
+Because splitting depends on physical layout, target/layout-aware splitting happens after build-owned target partition and target-contract validation, once a candidate physical variant exists. For each candidate variant:
+
+[codeblock, $code("text"):
+    validated unsplit topology
+    -> target/layout-aware split candidate
+    -> rebuild affected direct family-edge graph
+    -> revalidate affected outlives, SCC and family-base invariants
+]
+
+If refinement succeeds, memory planning uses the refined families. If it cannot be proven:
+
+[codeblock, $code("text"):
+    reject the optimisation
+    -> keep the original unsplit family
+    -> retain conservatively
+]
+
+Failure to prove a split keeps the unsplit family and causes conservative retention. It never produces a source diagnostic, and it never changes source legality in one physical variant relative to another.
+
 ## Returns and multi-return aliasing
 
 Function lifetime summaries cover:
@@ -374,6 +397,14 @@ It reads validated HIR and read-only borrow/effect facts. It writes immutable si
 Build/link analysis instantiates those summaries over the reachable call graph and builder-supplied lifecycle roots. Local module compilation cannot validate every cross-module or builder-lifecycle relationship by itself.
 
 Backends receive a validated topology and may not reconsider source legality.
+
+### Backend-neutral memory requirements
+
+After topology, interval, frontier and epoch completion, this analysis publishes one final shared handoff: backend-neutral memory requirements. They are target-independent and profile-independent, and they are the last artefact shared by every physical variant.
+
+They may contain allocation-family identity, the validated lifetime owner, intervals, frontiers and epochs, retained-edge and retention-domain facts, retention cardinality, REC candidacy facts, group membership, affine transfer and cleanup candidates, hidden-destination constraints, lifecycle constraints and external-boundary constraints.
+
+They must not contain any selected physical strategy: no selected REC representation, no selected host-GC representation, no target allocator choice, no concrete counter layout, no target-specific arena layout and no target-specific handle representation. Those belong to target/profile-aware memory planning, which runs after target partition and target-contract validation.
 
 ## Diagnostics are part of the model
 

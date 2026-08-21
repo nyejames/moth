@@ -1171,17 +1171,73 @@ Retained-edge liveness belongs to this analysis, not to a separate runtime owner
 
 A final cleanup frontier lets an inferred region end before the aggregate that once held its values. Individual `remove` or `set` does not establish a frontier. Uniqueness scans and alias registries are rejected.
 
+### Backend-neutral memory requirements
+
+After topology, interval, frontier and epoch completion, this analysis publishes backend-neutral memory requirements. They are the final target-independent handoff and are shared by every physical variant.
+
+They may contain:
+
+- allocation-family identity
+- validated lifetime owner
+- intervals, frontiers and epochs
+- retained-edge and retention-domain facts
+- retention cardinality
+- REC candidacy facts
+- group membership
+- affine transfer and cleanup candidates
+- hidden-destination constraints
+- lifecycle constraints
+- external-boundary constraints
+
+They must not contain:
+
+- selected REC representation
+- selected host-GC representation
+- target allocator choice
+- concrete counter layout
+- target-specific arena layout
+- target-specific handle representation
+
+Mandatory lifetime topology and these requirements are target-independent. Anything that depends on the target, the build profile or physical layout belongs to memory-strategy planning below.
+
 ### Memory-strategy planning
 
-After topology validation succeeds, a distinct memory-strategy planner selects one physical strategy per allocation family: stack or inline placement, static affine cleanup, inferred region allocation, explicit-group bulk reclamation, Retained Edge Counting or a host garbage-collected representation.
+The memory-strategy planner is compiler-owned and selects one physical strategy per allocation family: stack or inline placement, static affine cleanup, inferred region allocation, explicit-group bulk reclamation, Retained Edge Counting or a host garbage-collected representation.
 
-The planner is the sole owner of strategy selection. Borrow validation and lifetime validation supply facts and never choose a representation. Selection is deterministic for one compile and backend configuration, and never changes source legality.
+It is invoked only after build-owned target partition and target-contract validation have established a candidate physical variant. It consumes validated topology, the backend-neutral memory requirements, the selected target, the build profile and backend memory capability metadata, performs target-specific family and layout refinement, and returns one `ValidatedMemoryPlan` per physical variant.
+
+The planner is the sole owner of strategy selection. Borrow validation and lifetime validation supply facts and never choose a representation. Backend lowerers realise the plan and never choose a strategy. Selection is deterministic for one target, profile and backend configuration, and never affects source legality.
+
+Field-sensitive family and layout refinement runs per candidate variant, rebuilds the affected direct family-edge graph and revalidates the affected outlives, SCC and family-base facts. A refinement that cannot be proven falls back to the unsplit family and conservative retention; it never produces a source diagnostic.
+
+The full planning order is:
+
+```text
+validated HIR
+-> borrow and last-use analysis
+-> local allocation-family and retained-edge constraints
+-> exported lifetime and retention summaries
+-> project/package summary instantiation
+-> complete backend-neutral lifetime-topology validation
+-> non-lexical interval, frontier and epoch completion
+-> backend-neutral memory requirements
+-> target-affinity analysis and partition
+-> target-contract validation
+-> per-physical-variant family/layout refinement
+-> revalidate affected refined family-edge facts
+-> target/profile-aware compiler-owned memory planning
+-> ValidatedMemoryPlan
+-> backend lowering
+-> collector-free artefact verification where required
+```
+
+`check` runs through creation and validation of the `ValidatedMemoryPlan` and stops before backend lowering and output emission.
 
 Canonical REC design lives under `docs/src/docs/codebase/memory-management/retained-edge-counting/`, with detailed sequencing in `docs/roadmap/plans/retained-edge-counting-design-and-implementation-plan.md`.
 
 ### Backend handoff
 
-Backends receive validated HIR, borrow facts, validated affine cleanup decisions, validated lifetime topology and a complete `ValidatedMemoryPlan`. That plan carries allocation-family layout, selected physical strategies, region and group placement, cleanup and destruction plans, REC decisions and physical coalescing decisions. Backends realise the plan and never reconsider source legality, recompute topology or select their own strategy. A backend that advertises full memory control must lower every accepted topology in a release build without a tracing collector; a missing strategy at that point is `CompilerError`.
+Backends receive validated HIR, borrow facts, validated affine cleanup decisions, validated lifetime topology and the complete `ValidatedMemoryPlan` for their target/profile physical variant. That plan carries allocation-family layout, selected physical strategies, region and group placement, cleanup and destruction plans, REC decisions and physical coalescing decisions. Backends realise the plan and never reconsider source legality, recompute topology or select their own strategy. A backend that advertises full memory control must lower every accepted topology in a release build without a tracing collector; a missing strategy at that point is `CompilerError`.
 
 Canonical design lives under `docs/src/docs/codebase/memory-management/lifetime-regions-and-escape-validation/`. Declared `group` / `into` is accepted end-state syntax with implementation deferred; see `docs/src/docs/codebase/memory-management/declared-memory-groups/` for the canonical semantic contract and `docs/roadmap/plans/final-memory-management-redesign-and-implementation-plan.md` for implementation sequencing.
 
@@ -1238,6 +1294,8 @@ earlier. Target assignment remains build-owned and source-neutral.
 
 For mixed-target artefacts, validation receives the completed deterministic partition. It validates each function against its assigned target and verifies every permitted cross-target edge.
 
+Target validation precedes physical memory planning. A candidate physical variant is validated against its target contract before the memory planner is invoked for it, so no physical planning outcome can retroactively change target or source validity. Failure of a physical optimisation, including a field-sensitive split that cannot be proven, falls back to conservative retention and never reopens target or source legality.
+
 Root selection, command policy and partition strategy belong to the build system.
 
 ## Backend-facing compiler handoff
@@ -1250,12 +1308,14 @@ Backend lowerers receive only explicit validated inputs:
 - borrow facts
 - validated lifetime-region facts and exported lifetime summaries
 - validated affine cleanup decisions
-- `ValidatedMemoryPlan` with allocation-family layouts, selected strategies, cleanup plans, destruction plans, REC decisions and physical coalescing decisions
+- the target/profile-specific `ValidatedMemoryPlan` for this physical variant, with allocation-family layouts, selected strategies, cleanup plans, destruction plans, REC decisions and physical coalescing decisions
 - external boundary classifications
 - per-function link facts
 - selected-function, import and capability plans
 - semantic layout identities required by the target
 - builder lifecycle and runtime plans where relevant
+
+Borrow facts and validated lifetime-region facts are present as validated context where a lowerer needs them. They are not the authority from which a lowerer invents ownership or drop operations: every ownership, cleanup, region, group and REC decision comes from the `ValidatedMemoryPlan` for the variant being lowered.
 
 Generated function sidecars carry the same conceptual lifetime summaries and facts as ordinary functions.
 
