@@ -1,13 +1,15 @@
 //! Shared call-argument normalization and validation.
 //!
-//! WHAT: resolves raw parsed arguments into slot-ordered call arguments and enforces the shared
-//! rules for named targets, defaults, type compatibility, and explicit access mode.
-//! WHY: function calls, struct constructors, receiver methods, and builtin members all need the
-//! same argument policy even though they build different AST nodes afterward.
+//! WHAT: consumes parser-retained argument slots, fills defaults and enforces the shared rules for
+//! type compatibility, reactive-source requirements and explicit access mode.
+//! WHY: function calls, struct constructors, receiver methods and builtin members all need the
+//! same final argument policy even though they build different AST nodes afterward. Named and
+//! positional syntax is owned by `call_arguments` and is not reconstructed here.
 
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::expressions::call_argument::{
-    CallAccessMode, CallArgument, CallPassingMode,
+    CallAccessMode, CallArgument, CallPassingMode, ParameterSlot,
+    order_call_arguments_by_retained_slot,
 };
 use crate::compiler_frontend::ast::expressions::constructor_views::{
     ConstructorField, ConstructorFieldAccessMode,
@@ -29,7 +31,6 @@ use crate::compiler_frontend::type_coercion::compatibility::{
     TypeCompatibilityCache, TypeCompatibilityMode,
 };
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_declared_type;
-use rustc_hash::FxHashMap;
 
 pub(crate) enum CallValidationError {
     Diagnostic(Box<CompilerDiagnostic>),
@@ -248,10 +249,12 @@ pub(crate) fn expectations_from_receiver_method_signature(
     expectations_from_user_parameters(parameters_excluding_receiver)
 }
 
-/// Resolves raw parsed call arguments into declaration-order slots.
+/// Resolves parser-owned call arguments through shared final validation.
 ///
-/// WHAT: this is the shared normalization boundary for all call-shaped syntax.
-/// WHY: once one caller changes argument policy, every other caller should inherit it from here.
+/// WHAT: this is the normalization boundary for defaults, type compatibility and access policy
+///      after `call_arguments` has selected each argument's declaration-order slot.
+/// WHY: once one caller changes final argument policy, every other call-shaped consumer inherits
+///      it from here without a second syntax-routing implementation.
 pub(crate) fn resolve_call_arguments(
     diagnostics: CallDiagnosticContext<'_>,
     args: &[CallArgument],
@@ -279,9 +282,9 @@ pub(crate) fn resolve_call_arguments(
 /// caller generic `TypeId`s, then substitutes the call signature. At that point
 /// exact `TypeId` equality is intentionally too strict for the pre-substitution
 /// template parameters.
-/// WHY: this keeps named arguments, arity, defaults, and mutable-access rules in
-/// one shared owner while allowing generic-aware validation to supply its own
-/// type evidence.
+/// WHY: the parser owns named/positional routing; this owner consumes those retained slots for
+/// arity, defaults and mutable-access rules while allowing generic-aware validation to supply its
+/// own type evidence.
 pub(crate) fn resolve_call_arguments_shape_and_access(
     diagnostics: CallDiagnosticContext<'_>,
     args: &[CallArgument],
@@ -317,21 +320,12 @@ fn resolve_call_arguments_with_type_policy(
     } = context;
 
     // Validation flow order is intentionally fixed:
-    // 1) build parameter expectation table,
-    // 2) resolve named targets,
-    // 3) enforce positional-before-named ordering,
-    // 4) detect duplicate targets,
-    // 5) fill defaults,
-    // 6) detect missing required parameters,
-    // 7) validate types,
-    // 8) validate access mode.
-    let mut resolved = resolve_call_argument_slots_typed(
-        diagnostics,
-        args,
-        expectations,
-        location.clone(),
-        string_table,
-    )?;
+    // 1) consume parser-retained parameter slots,
+    // 2) fill defaults,
+    // 3) detect missing required parameters,
+    // 4) validate types,
+    // 5) validate access mode.
+    let mut resolved = order_call_arguments_by_retained_slot(args, expectations.len())?;
 
     // ------------------------
     //  Fill default values
@@ -345,11 +339,10 @@ fn resolve_call_arguments_with_type_policy(
                     "default argument expression carried orphan TypeId({}) not registered in the active TypeEnvironment",
                     defaulted.type_id.0,
                 );
-                resolved[slot] = Some(CallArgument::positional(
-                    defaulted,
-                    CallAccessMode::Shared,
-                    location.clone(),
-                ));
+                resolved[slot] = Some(
+                    CallArgument::positional(defaulted, CallAccessMode::Shared, location.clone())
+                        .with_parameter_slot(ParameterSlot::new(slot)),
+                );
             } else {
                 return Err(CompilerDiagnostic::invalid_call_shape(
                     InvalidCallShapeReason::MissingArgument {
@@ -452,106 +445,6 @@ fn resolve_call_arguments_with_type_policy(
     }
 
     Ok(ordered)
-}
-
-/// Resolves raw call arguments into declaration-order slots without filling defaults or
-/// validating types.
-///
-/// WHAT: generic constructor inference needs the same named/positional routing as full call
-/// validation, but omitted defaulted fields must not infer type parameters.
-pub(crate) fn resolve_call_argument_slots_typed(
-    diagnostics: CallDiagnosticContext<'_>,
-    args: &[CallArgument],
-    expectations: &[ParameterExpectation],
-    location: SourceLocation,
-    string_table: &mut StringTable,
-) -> Result<Vec<Option<CallArgument>>, CallValidationError> {
-    let mut resolved: Vec<Option<CallArgument>> = vec![None; expectations.len()];
-    let mut positional_cursor = 0usize;
-    let mut saw_named_argument = false;
-    let mut parameter_name_to_slot: FxHashMap<StringId, usize> = FxHashMap::default();
-
-    // ------------------------
-    //  Build parameter name index
-    // ------------------------
-    for (slot_index, expectation) in expectations.iter().enumerate() {
-        if let Some(name) = expectation.name {
-            parameter_name_to_slot.insert(name, slot_index);
-        }
-    }
-
-    // ------------------------
-    //  Route each argument to its slot
-    // ------------------------
-    for argument in args {
-        let slot = if let Some(target_name) = argument.target_param {
-            saw_named_argument = true;
-            let Some(slot) = parameter_name_to_slot.get(&target_name).copied() else {
-                let known_parameters: Vec<StringId> = expectations
-                    .iter()
-                    .filter_map(|expectation| expectation.name)
-                    .collect();
-                return Err(CompilerDiagnostic::invalid_call_shape(
-                    InvalidCallShapeReason::NamedArgumentNotFound {
-                        name: target_name,
-                        known_parameters,
-                    },
-                    Some(string_table.intern(diagnostics.callee_name)),
-                    argument
-                        .target_location
-                        .clone()
-                        .unwrap_or_else(|| argument.location.clone()),
-                )
-                .into());
-            };
-            slot
-        } else {
-            if saw_named_argument {
-                return Err(CompilerDiagnostic::invalid_call_shape(
-                    InvalidCallShapeReason::PositionalAfterNamed,
-                    Some(string_table.intern(diagnostics.callee_name)),
-                    argument.location.clone(),
-                )
-                .into());
-            }
-
-            while positional_cursor < expectations.len() && resolved[positional_cursor].is_some() {
-                positional_cursor += 1;
-            }
-            if positional_cursor >= expectations.len() {
-                return Err(CompilerDiagnostic::invalid_call_shape(
-                    InvalidCallShapeReason::ExtraPositionalArgument {
-                        expected_count: expectations.len(),
-                    },
-                    Some(string_table.intern(diagnostics.callee_name)),
-                    location.clone(),
-                )
-                .into());
-            }
-            let slot = positional_cursor;
-            positional_cursor += 1;
-            slot
-        };
-
-        if resolved[slot].is_some() {
-            return Err(CompilerDiagnostic::invalid_call_shape(
-                InvalidCallShapeReason::DuplicateArgument {
-                    parameter_name: expectations[slot].name,
-                    parameter_index: slot,
-                },
-                Some(string_table.intern(diagnostics.callee_name)),
-                argument
-                    .target_location
-                    .clone()
-                    .unwrap_or_else(|| argument.location.clone()),
-            )
-            .into());
-        }
-
-        resolved[slot] = Some(argument.clone());
-    }
-
-    Ok(resolved)
 }
 
 fn classify_call_passing_mode(

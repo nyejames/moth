@@ -11,7 +11,10 @@ use super::shared::{TraitSurfaceReceiverMethod, receiver_result_type_ids_for_cal
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::expressions::call_argument::{
-    CallAccessMode, CallArgument, normalize_call_arguments,
+    CallAccessMode, CallArgument, ParameterSlot, normalize_call_arguments,
+};
+use crate::compiler_frontend::ast::expressions::call_arguments::{
+    NamedArgumentSyntax, parse_call_arguments_typed_with_expectations,
 };
 use crate::compiler_frontend::ast::expressions::call_validation::{
     CallArgumentResolutionContext, CallDiagnosticContext,
@@ -19,9 +22,6 @@ use crate::compiler_frontend::ast::expressions::call_validation::{
 };
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
-use crate::compiler_frontend::ast::expressions::function_calls::{
-    NamedArgumentSyntax, parse_call_arguments_typed_with_expectations,
-};
 use crate::compiler_frontend::ast::field_access::parse_chain::expression_from_postfix_node;
 use crate::compiler_frontend::ast::field_access::receiver_access::{
     ReceiverAccessDiagnostic, ReceiverAccessRequirement, validate_receiver_access,
@@ -34,6 +34,7 @@ use crate::compiler_frontend::ast::generic_functions::{
 use crate::compiler_frontend::ast::receiver_methods::ReceiverMethodEntry;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidReceiverCallReason};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -111,11 +112,24 @@ fn infer_generic_receiver_method_target<'a, 'interner>(
         CallAccessMode::Shared
     };
     let receiver_arg =
-        CallArgument::positional(receiver_expr, receiver_access, member_location.clone());
+        CallArgument::positional(receiver_expr, receiver_access, member_location.clone())
+            .with_parameter_slot(ParameterSlot::new(0));
 
     let mut inference_args = Vec::with_capacity(raw_args.len() + 1);
     inference_args.push(receiver_arg);
-    inference_args.extend(raw_args.iter().cloned());
+    for argument in raw_args {
+        let Some(parameter_slot) = argument.parameter_slot else {
+            return Err(CompilerError::compiler_error(
+                "Receiver call argument is missing its retained parameter slot",
+            )
+            .into());
+        };
+        inference_args.push(
+            argument
+                .clone()
+                .with_parameter_slot(ParameterSlot::new(parameter_slot.index() + 1)),
+        );
+    }
 
     let inference = infer_generic_function_call(GenericFunctionInferenceInput {
         template,

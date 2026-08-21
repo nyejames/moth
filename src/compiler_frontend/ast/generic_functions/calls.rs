@@ -7,15 +7,17 @@
 //! function calls.
 
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
-use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
+use crate::compiler_frontend::ast::expressions::call_argument::{
+    CallArgument, order_call_arguments_by_retained_slot,
+};
+use crate::compiler_frontend::ast::expressions::call_arguments::parse_generic_call_arguments_typed;
 use crate::compiler_frontend::ast::expressions::call_validation::{
     CallArgumentResolutionContext, CallDiagnosticContext, ExpectedParameterType,
-    ParameterExpectation, expectations_from_user_parameters, resolve_call_argument_slots_typed,
-    resolve_call_arguments, resolve_call_arguments_shape_and_access,
+    ParameterExpectation, expectations_from_user_parameters, resolve_call_arguments,
+    resolve_call_arguments_shape_and_access,
 };
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
-use crate::compiler_frontend::ast::expressions::function_calls::parse_generic_call_arguments_typed;
 use crate::compiler_frontend::ast::generic_bounds::{
     evidence_for_type, evidence_target_is_visible, generated_evidence_pair_is_selected,
     generic_parameter_declares_bound,
@@ -409,19 +411,9 @@ pub(crate) fn infer_generic_function_call(
         string_table,
     } = input;
 
-    let callee_name = template
-        .function_path
-        .name_str(string_table)
-        .map(|name| name.to_owned())
-        .unwrap_or_else(|| String::from("<generic function>"));
     let expectations = expectations_from_user_parameters(&template.signature.parameters);
-    let routed_arguments = resolve_call_argument_slots_typed(
-        CallDiagnosticContext::function(&callee_name),
-        raw_arguments,
-        &expectations,
-        call_location.clone(),
-        string_table,
-    )?;
+    let routed_arguments =
+        order_call_arguments_by_retained_slot(raw_arguments, expectations.len())?;
 
     let mut bindings = GenericTypeBindings::new();
     let mut evidence_locations = GenericBindingEvidenceLocations::new();

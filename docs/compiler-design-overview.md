@@ -52,6 +52,9 @@ or thorough reviews.
 - A physical module is compiled once per project or package compilation boundary and owns local type, HIR, borrow and lifetime-analysis identity/facts.
 - Every normal module included in a command's semantic graph has its dormant root work parsed, type-checked, lowered, borrow-validated and lifetime-analysed before any entry can activate it.
 - Tokenization and declaration-shell parsing happen once. Later phases bind and consume retained syntax rather than reparsing source.
+- Call-shaped argument syntax has one parser and one parameter-slot routing owner. Functions,
+  constructors, receiver methods, builtin members and statement intrinsics consume that shared
+  syntax path rather than copying delimiter or named-argument handling.
 - Local semantic compilation is one compiler-owned service. The build system schedules it and consumes its outcome; it never sequences binding, ordering, AST, HIR or borrow stages itself.
 - Each semantic fact has one source owner. A later stage does not reconstruct the same fact from source or an earlier IR.
 - Module interfaces use stable semantic identities rather than donor-local indexes.
@@ -842,6 +845,30 @@ Boundary owners include:
 
 AST carries semantic `TypeId` values through fields, receiver lookup, calls, operators and compatibility checks.
 
+#### Call-shaped syntax and assertion intrinsics
+
+Call-shaped argument syntax has one focused AST owner. It consumes parentheses, commas, newline
+whitespace, positional and named targets, mutable-access markers, argument expression boundaries,
+expected-type and cast-target routing. The same owner retains each parsed argument's parameter slot
+for final validation, so call validation fills defaults and checks types and access without routing
+the source arguments a second time.
+
+`assert` remains a reserved, statement-only language intrinsic. It uses the shared call-shaped
+syntax with compiler-owned synthetic expectations equivalent to:
+
+[codeblock, $code("moth"):
+    assert |condition Bool, message String? = none|
+]
+
+Those expectations are compiler metadata. They do not create an importable, shadowable or
+first-class function. Shared call validation owns named-argument, default, type, access and
+argument-shape rules. AST owns only assertion-specific placement, completed-statement suffix
+rejection and the semantic effect rule that prevents message construction from escaping through
+`!`, `?` or another enclosing-function exit.
+
+The completed AST carries both the typed condition and the typed optional message expression. An
+omitted message is the normal typed `none` expression, not a second literal-only payload.
+
 #### Value-producing blocks and terminality
 
 Value-producing `if`, match and block-form `catch` are closed receiving constructs rather than general expressions.
@@ -1058,6 +1085,19 @@ Every `if` remaining in HIR has a runtime condition. Static Bool branch selectio
 HIR and is never redone by HIR or a backend.
 
 Plain binary operations remain valid for booleans and comparisons. Runtime template string construction lowers through explicit string append operations. Runtime scalar arithmetic and unary negation lower through explicit checked numeric statements. HIR validation rejects arithmetic that survives in the wrong representation.
+
+#### Lazy assertion failure messages
+
+An assertion message is a backend-neutral HIR value used only on the failure edge. HIR lowering
+keeps message preludes in the failure block, evaluates the optional value once and terminates with
+`AssertFailure` after the value is ready. A compile-time `true` assertion retains no message
+runtime work. A compile-time `false` assertion remains terminal after lowering its failure-edge
+message. The message is an ordinary value use for validation, remapping, display, borrow facts and
+reachability. It does not create an assertion-specific ownership or reactivity category.
+
+The HIR message also carries the compiler-owned fact that distinguishes a default or fully folded
+message from a message whose construction needs runtime evaluation. Backends consume that fact
+through target validation and do not infer it from source or AST.
 
 #### HIR validation
 
@@ -1281,12 +1321,19 @@ Target validation:
 - traverses functions reachable from supplied roots
 - includes reachable generated functions
 - checks target-gated HIR features
+- checks reachable assertion-message evaluation against target capabilities
 - checks reachable binding-backed calls against target metadata
 - may inspect semantic types where reachability facts are insufficient
 - returns structured `CompilerDiagnostic` values for user-visible target failures
 - returns `CompilerError` only for inconsistent compiler or builder metadata
 
 Unsupported features in unreachable private functions do not fail validation.
+
+A target that cannot faithfully execute dynamic assertion-message construction reports a structured
+unsupported-backend diagnostic at the authored message location. Default and fully folded message
+values may use static trap lowering when their source-visible runtime work is already complete.
+Validation owns this capability boundary so lowerers do not silently discard reachable message
+evaluation.
 
 Unsupported target features in an inactive static branch do not fail target validation because that
 branch is absent from HIR and link facts. Frontend source errors in that branch were still diagnosed
@@ -1364,6 +1411,8 @@ Current locations are navigation aids rather than permanent architecture.
 - Binding-backed interfaces: `src/compiler_frontend/external_packages/`
 - AST, constants, generics, templates and TIR: `src/compiler_frontend/ast/`
 - Public-interface projection and validation: `src/compiler_frontend/public_interface/`
+- Call-shaped argument parsing and slot routing: the focused owner under
+  `src/compiler_frontend/ast/expressions/`
 - HIR, validation and reachability: `src/compiler_frontend/hir/`
 - Borrow validation: `src/compiler_frontend/analysis/borrow_checker/`
 - Target-contract validation: backend feature and external package validation owners under `src/backends/`

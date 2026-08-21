@@ -2,10 +2,11 @@ Box type A = |
     value A,
 |
 
-get type A |this Box of A| -> A:
-    return this.value
+combine type A |this Box of A
+, first Int, second Int| -> Int:
+    return first + second
 ;
 
 boxed = Box(42)
 
-[: generic receiver [boxed.get()]]
+[: generic receiver [boxed.combine(second = 7, first = 6)]]

@@ -6,14 +6,56 @@
 WORK_ID: runtime-assertion-messages-call-arguments
 WORK_SOURCE: docs/roadmap/plans/runtime-assertion-messages-and-call-argument-parser-consolidation-plan.md
 BASE_REVISION: cb533ced7345dc7a66cf971e7590d88c8cd84f32
-STATUS: queued
-CURRENT_SCOPE: accepted design and implementation plan anchored to the current main branch after the design interview
-COMPLETED: current parser, AST, HIR, analysis, backend, diagnostic, documentation and integration-case audit plus all five design decisions
-NEXT_ACTION: after frontend module compilation ownership cleanup completes, re-anchor Phase 0 against the then-current main branch before changing production code
-VALIDATION: connector-only plan authoring, no repository validation command was run
-AUDITS: bespoke assert parsing, shared call-argument parsing and routing, default arguments, option coercion, AST visitors, HIR lowering, borrow facts, reachability, JavaScript lowering, Wasm target validation, diagnostics, documentation and test ownership
-BLOCKERS: frontend module compilation ownership cleanup is the active roadmap plan and may move compiler entry points or result owners that this plan references
-NOTES: the progress matrix must retain an explicit Wasm gap until dynamic assertion-message evaluation is implemented there
+IMPLEMENTATION_START_REVISION: f1c0e0cf56cf8e65af1e5eed7859f967d516663a
+STATUS: active (Phase 1 complete; Phase 2 pending)
+CURRENT_SCOPE: Phase 1 shared call-argument parser and retained parameter-slot routing on branch codex/runtime-assertion-messages-call-arguments
+COMPLETED: current parser, AST, HIR, analysis, backend, diagnostic, documentation and integration-case audit; all five design decisions; Phase 0 tree re-anchor, baseline, regression reproduction and contract documentation; Phase 1 call-argument owner extraction, retained slot routing, consumer migration, metadata invariant check and focused slot-retention coverage
+NEXT_ACTION: checkpoint the accepted Phase 1 slice, then begin assert AST/HIR ownership and typed message-expression migration
+VALIDATION: focused parser 13 passed; focused collection builtin 53 passed; focused HIR validation 42 passed; focused reachability 14 passed; full library 4291 passed; generic receiver retained-slot case 1/1 correct; representative function/generic/constructor/receiver/builtin/cast cases passed; final-tree just validate passed (clippy, feature lanes, source audit, workspace 4403 + xtask 17 + feature-lane 765 tests, 1851 integration cases, docs check, benchmark sanity and timer erasure)
+AUDITS: Phase 0 ownership inventory covers call_argument.rs metadata, function_calls.rs parsing and provisional routing, call_validation.rs final routing/default/type/access validation, all call-shaped consumers, every NodeKind::Assert and HirTerminator::AssertFailure consumer, assertion diagnostics, 19 tagged assertion cases plus the separate Wasm boundary, and the constant/Wasm plan handoffs; Phase 1 pass 1 found and corrected the zero-argument builtin delimiter bypass and stale checklist state; pass 2 found and corrected retained-slot/generic-receiver coverage gaps; pass 2 verification required and received final-tree validation after the new test and fixture edits; final verification found and corrected stale ownership comments in the focused tests, generic nominal inference and call validation; the clean verification audit accepted Phase 1 with no findings
+BLOCKERS: none. If later work rebases the active frontend ownership cleanup, re-check the module-compilation handoff and preserve one parser and one retained slot route without compatibility re-exports.
+NOTES: the nine pre-existing dirty files are accepted Phase 0 plan, architecture, canonical-reference and generated-release outputs; preserve them in the first coordinator checkpoint. The progress matrix must retain an explicit Wasm gap until dynamic assertion-message evaluation is implemented there
+```
+
+## Phase 0 re-anchor record
+
+```text
+REVISION: main at f1c0e0cf56cf8e65af1e5eed7859f967d516663a
+BRANCH: codex/runtime-assertion-messages-call-arguments
+WORKTREE: /Users/aneirinjames/projects/beanstalk/moth-runtime-assertion-messages
+
+CALL_ARGUMENT_METADATA_OWNER: src/compiler_frontend/ast/expressions/call_argument.rs
+CALL_ARGUMENT_PARSER_OWNER: src/compiler_frontend/ast/expressions/function_calls.rs::parse_call_arguments_inner
+PARSE_TIME_SLOT_ROUTER: src/compiler_frontend/ast/expressions/function_calls.rs::route_argument_slot_before_value_parse
+FINAL_SLOT_ROUTER: src/compiler_frontend/ast/expressions/call_validation.rs::resolve_call_argument_slots_typed
+FINAL_VALIDATION_OWNER: src/compiler_frontend/ast/expressions/call_validation.rs::resolve_call_arguments
+CALL_SHAPED_CONSUMERS: source and host functions, generic functions, struct constructors, choice constructors, source receiver methods, compiler-owned builtin members and generic nominal inference
+
+ASSERT_AST_OWNER: src/compiler_frontend/ast/statements/asserts.rs parses the reserved statement and owns suffix/placement rejection; src/compiler_frontend/ast/ast_nodes.rs owns AssertMessage plus NodeKind::Assert
+ASSERT_HIR_OWNER: src/compiler_frontend/hir/hir_statement.rs lowers the condition and owned Rust message text; src/compiler_frontend/hir/terminators.rs owns AssertFailure { message: Option<String> }
+ASSERT_ANALYSIS_CONSUMERS: HIR validation, display, remapping, reachability, borrow transfer/metadata, utility traversal, backend feature validation, JavaScript structured/dispatcher lowering and Wasm trap lowering
+ASSERT_AST_WALKERS: const_fact_collection.rs, debug_type_validation.rs, normalize_ast.rs, reactive_templates/annotation.rs, reactive_templates/flow.rs, validate_types.rs, terminality.rs and value_production/completeness.rs
+ASSERT_TEST_CONSUMERS: AST terminality/value-production/fallible-handling tests, HIR display/reachability tests and borrow fact tests
+
+ASSERT_DIAGNOSTIC_OWNER: InvalidBuiltinCallReason in compiler_messages/diagnostic_payload/types.rs; reason key in reason_keys.rs; renderer branch in compiler_messages/render/calls.rs
+OBSOLETE_DIAGNOSTIC: RuntimeMessageExpressionDeferred -> invalid_builtin_call.runtime_message_expression_deferred
+
+ASSERTION_CASES: 19 cases selected by --tag assert, including the two value-catch terminality cases, the statement/runtime/terminality cases and the current named/mutable/type/arity/suffix diagnostics; separate keyword-shadow cases are assert_keyword_shadow_header_error and assert_keyword_shadow_body_error; separate Wasm boundary is reactive_assert_message_rejected
+MULTILINE_REGRESSION: cargo run --quiet -- check tmp/phase0_assert_multiline/input --terse -> E|MOTH-RULE-0046|@page.moth|5:45|Assertion messages must be string literals; runtime message expressions are deferred.
+
+FOCUSED_BASELINE:
+  cargo test --lib function_call_tests -- --format terse -> 11 passed
+  cargo test --lib hir_validation_tests -- --format terse -> 42 passed
+  cargo test --lib reachability_tests -- --format terse -> 14 passed
+  cargo test --lib borrow_checker_fact_tests -- --format terse -> 13 passed
+  cargo test --lib backend_feature_validation_tests -- --format terse -> 5 passed
+  cargo run --quiet -- tests --terse --tag assert --backend html -> 19/19 correct
+  cargo run --quiet -- tests --terse --case reactive_assert_message_rejected --backend html_wasm -> 1/1 correct
+FULL_BASELINE: just validate -> passed; 4399 workspace tests, 17 xtask tests, 765 feature-lane tests, 1851 integration cases, docs check, benchmark preflight/quick measurements, source audit and timer-erasure check all passed
+DOCS_RELEASE_GATE: cargo run --quiet -- build docs --release -> passed, 70 output files; the first run emitted the existing recoverable missing-manifest stale-cleanup warning and preserved stale artefacts, and the final post-edit rerun passed with the generated manifest available
+DOCS_AFTER_EDIT: canonical assertion reference and compiler architecture updated; progress matrix and cheatsheet remain current-support truthful until runtime implementation lands; release docs were regenerated through the compiler
+HANDOFF_NOTES: constant-folding Phase 4C must validate assertion message expressions in both authored branches before static selection and elide inactive assertion message work; the Wasm plan must retain target validation for reachable dynamic messages and static trap lowering for default/fully folded messages
+NEXT_EXACT_SLICE: create the focused call-argument syntax owner, move parser policy directly, retain each argument's resolved slot and delete duplicate routing from function_calls.rs and call_validation.rs
 ```
 
 ## Purpose
@@ -864,25 +906,25 @@ This phase does not broaden runtime support yet.
 
 ### Checklist
 
-- [ ] Resolve and record the then-current `main` revision as the implementation start revision.
-- [ ] Re-read `AGENTS.md`, the compiler architecture, the canonical assertion page, the cheatsheet, the progress matrix, the complete style guide, testing guidance and validation guidance.
-- [ ] Re-inventory the current owners of call-argument parsing, parse-time slot routing, final call validation and every call-shaped consumer.
-- [ ] Re-inventory every `NodeKind::Assert` match and every `HirTerminator::AssertFailure` match.
-- [ ] Re-inventory assertion-specific diagnostic variants, reason keys, renderers and exact integration expectations.
-- [ ] Re-inventory the assertion integration cases listed above and record any cases added or removed since the planning snapshot.
-- [ ] Reproduce the exact multiline assertion failure and record its current code, reason and source location in this plan.
-- [ ] Record focused baseline commands for call parsing, assertions, HIR, borrow facts, backend feature validation and JavaScript/Wasm integration.
-- [ ] Run the current full validation gate before production changes and record the result.
-- [ ] Update the canonical assertion reference with the accepted end-state contract and an explicit accepted-deferred note where current support still differs.
-- [ ] Update the compiler architecture with the one-parser, synthetic-signature, lazy-HIR and target-validation ownership contract.
-- [ ] Audit the constant-evaluation plan and Wasm plan for assumptions that this work changes, then record required later edits here.
-- [ ] Update this plan's current-state capsule with confirmed paths, blockers, baseline results and the next exact slice.
+- [x] Resolve and record the then-current `main` revision as the implementation start revision.
+- [x] Re-read `AGENTS.md`, the compiler architecture, the canonical assertion page, the cheatsheet, the progress matrix, the complete style guide, testing guidance and validation guidance.
+- [x] Re-inventory the current owners of call-argument parsing, parse-time slot routing, final call validation and every call-shaped consumer.
+- [x] Re-inventory every `NodeKind::Assert` match and every `HirTerminator::AssertFailure` match.
+- [x] Re-inventory assertion-specific diagnostic variants, reason keys, renderers and exact integration expectations.
+- [x] Re-inventory the assertion integration cases listed above and record any cases added or removed since the planning snapshot.
+- [x] Reproduce the exact multiline assertion failure and record its current code, reason and source location in this plan.
+- [x] Record focused baseline commands for call parsing, assertions, HIR, borrow facts, backend feature validation and JavaScript/Wasm integration.
+- [x] Run the current full validation gate before production changes and record the result.
+- [x] Update the canonical assertion reference with the accepted end-state contract and an explicit accepted-deferred note where current support still differs.
+- [x] Update the compiler architecture with the one-parser, synthetic-signature, lazy-HIR and target-validation ownership contract.
+- [x] Audit the constant-evaluation plan and Wasm plan for assumptions that this work changes, then record required later edits here.
+- [x] Update this plan's current-state capsule with confirmed paths, blockers, baseline results and the next exact slice.
 
 ### Phase 0 gate
 
-- [ ] Ownership audit confirms every parser, AST, HIR, analysis, backend and diagnostic consumer is accounted for.
-- [ ] Style-guide review confirms the target is one concrete shared parser rather than a generic callable framework.
-- [ ] Documentation release build and the current full validation gate pass without production behavior changes.
+- [x] Ownership audit confirms every parser, AST, HIR, analysis, backend and diagnostic consumer is accounted for.
+- [x] Style-guide review confirms the target is one concrete shared parser rather than a generic callable framework.
+- [x] Documentation release build and the current full validation gate pass without production behavior changes.
 
 Exit state: the current tree is re-anchored, the bug is frozen as a known regression and the accepted design is authoritative.
 
@@ -896,27 +938,27 @@ It also removes the current double implementation of parameter-slot routing.
 
 ### Checklist
 
-- [ ] Create the final focused call-argument parsing owner under `ast/expressions/` or adopt an equivalent owner found during Phase 0.
-- [ ] Move parenthesis, comma, newline, named-target, access-marker, expected-type and argument-expression parsing out of `function_calls.rs`.
-- [ ] Move generic call-argument syntax policy with the parser while keeping generic semantic inference in its existing owner.
-- [ ] Define one data-oriented parameter-slot router.
-- [ ] Make parse-time expected-type and cast-target selection consume that router.
-- [ ] Retain each argument's resolved slot through final validation.
-- [ ] Make default filling, type validation and access validation consume retained routes instead of rerunning named/positional routing.
-- [ ] Preserve exact argument locations, named-target locations and mutable-marker locations.
-- [ ] Migrate source calls, host calls, struct constructors, choice constructors, receiver methods and builtin members to the final parser API.
-- [ ] Keep each consumer's existing named-argument policy and diagnostic context.
-- [ ] Delete moved parsing and routing implementations from `function_calls.rs` and `call_validation.rs`.
-- [ ] Do not leave forwarding re-exports or duplicate helper names for compatibility.
-- [ ] Update module documentation and `index.md` for the new owner.
-- [ ] Add focused parser and route-retention tests for every rule listed in Required new coverage.
-- [ ] Run existing function, constructor, receiver, builtin, generic and cast-target integration cases to prove no source behavior changed.
+- [x] Create the final focused call-argument parsing owner under `ast/expressions/` or adopt an equivalent owner found during Phase 0.
+- [x] Move parenthesis, comma, newline, named-target, access-marker, expected-type and argument-expression parsing out of `function_calls.rs`.
+- [x] Move generic call-argument syntax policy with the parser while keeping generic semantic inference in its existing owner.
+- [x] Define one data-oriented parameter-slot router.
+- [x] Make parse-time expected-type and cast-target selection consume that router.
+- [x] Retain each argument's resolved slot through final validation.
+- [x] Make default filling, type validation and access validation consume retained routes instead of rerunning named/positional routing.
+- [x] Preserve exact argument locations, named-target locations and mutable-marker locations.
+- [x] Migrate source calls, host calls, struct constructors, choice constructors, receiver methods and builtin members to the final parser API.
+- [x] Keep each consumer's existing named-argument policy and diagnostic context.
+- [x] Delete moved parsing and routing implementations from `function_calls.rs` and `call_validation.rs`.
+- [x] Do not leave forwarding re-exports or duplicate helper names for compatibility.
+- [x] Update module documentation and `index.md` for the new owner.
+- [x] Add focused parser and route-retention tests for every rule listed in Required new coverage.
+- [x] Run existing function, constructor, receiver, builtin, generic and cast-target integration cases to prove no source behavior changed.
 
 ### Phase 1 gate
 
-- [ ] Ownership audit finds one delimiter parser and one slot router across every call-shaped consumer.
-- [ ] Style-guide review confirms the shared owner is focused and does not absorb function-call completion, constructor semantics or result handling.
-- [ ] Focused call/generic/constructor/receiver/builtin tests and `just validate` pass.
+- [x] Ownership audit finds one delimiter parser and one slot router across every call-shaped consumer.
+- [x] Style-guide review confirms the shared owner is focused and does not absorb function-call completion, constructor semantics or result handling.
+- [x] Focused call/generic/constructor/receiver/builtin tests and `just validate` pass.
 
 Exit state: every existing call-shaped surface uses one robust argument parser and one routing result.
 

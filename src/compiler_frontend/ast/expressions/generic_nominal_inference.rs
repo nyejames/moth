@@ -1,16 +1,17 @@
 //! Shared inference for generic struct and choice constructors.
 //!
 //! WHAT: maps expected types plus constructor arguments onto generic declaration parameters.
-//! WHY: structs and choices use the same nominal generic rules, and both must route named
-//! arguments through the shared call-slot resolver before binding type parameters.
-//! Conflicting repeated-parameter bindings are propagated through the typed invalid generic
-//! instantiation diagnostic, keeping structural non-matches distinct from binding conflicts.
+//! WHY: structs and choices use the same nominal generic rules. The call-argument parser selects
+//! and retains declaration-order slots; this module consumes that retained ordering before binding
+//! type parameters. Conflicting repeated-parameter bindings are propagated through the typed
+//! invalid generic instantiation diagnostic, keeping structural non-matches distinct from binding
+//! conflicts.
 
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
+use crate::compiler_frontend::ast::expressions::call_argument::order_call_arguments_by_retained_slot;
 use crate::compiler_frontend::ast::expressions::call_validation::{
-    CallDiagnosticContext, CallValidationError, expectations_from_constructor_fields,
-    resolve_call_argument_slots_typed,
+    CallValidationError, expectations_from_constructor_fields,
 };
 use crate::compiler_frontend::ast::expressions::constructor_views::ConstructorField;
 use crate::compiler_frontend::ast::generic_bounds::{
@@ -49,7 +50,6 @@ pub(crate) struct GenericNominalConstructorInput<'a> {
     pub template: GenericNominalTemplate<'a>,
     pub constructor_fields: Option<&'a [ConstructorField]>,
     pub raw_args: Option<&'a [CallArgument]>,
-    pub diagnostics: CallDiagnosticContext<'a>,
     pub location: SourceLocation,
 }
 
@@ -379,13 +379,7 @@ fn collect_constructor_argument_bindings(
     };
 
     let expectations = expectations_from_constructor_fields(fields);
-    let resolved_slots = resolve_call_argument_slots_typed(
-        input.diagnostics,
-        raw_args,
-        &expectations,
-        input.location.clone(),
-        string_table,
-    )?;
+    let resolved_slots = order_call_arguments_by_retained_slot(raw_args, expectations.len())?;
 
     let mut evidence_context = NominalBindingEvidenceContext {
         nominal_path: input.nominal_path,
