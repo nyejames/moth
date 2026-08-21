@@ -109,7 +109,7 @@ Its not beautiful.
 
 I am now much more fond of "obviously human" writing. This is an era where its increasingly apparent *shortcuts* are being taken in producing things with a verisimilitude of art.
 
-Having your own distinct "writing voice" is more valuable than ever. The internet is becoming increasingly saturated with tight, em-dashed sentences loaded with qualifiers, outdated pop culture references and corporate language. Your writing style (bad grammar and all) will stand out more than it ever has against the tidal wave of slop. 
+Having your own distinct "writing voice" is more valuable than ever. The internet is becoming increasingly saturated with tight, em-dashed sentences loaded with qualifiers and corporate language. Your writing style (bad grammar and all) will stand out more than it ever has against the tidal wave of slop. 
 
 At least I can say I hated semicolons and oxford commas *before* it was cool.
 
@@ -123,15 +123,15 @@ Often, the things we connect with the most challenge our perspective or give us 
 
 Anyone who works on complex projects and uses LLMs should be acutely aware of how limited they are when it comes to understanding "big picture" design and architecture.
 
-Even when they seem to make good suggestions about these things, they lack genuine creativity. 
+Even when they seem to make good suggestions about these things, they lack deep insight on design. 
 
 **When Agents are confidently wrong**
 
-I've often gone away to think about a design problem (5 minutes to a few days) after asking an LLM about something and not feeling good about the overly authoritative and confident answer. I'll usually come back with a better solution that fixes or simplifies things in broader or more novel ways. These decisions always become the better long term fit. 
+I've often gone away to think about a design problem (5 minutes to a few days) after asking a SOTA model about it and not feeling good about the overly authoritative answer. I'll usually come back with a better solution that fixes or simplifies things in broader or more novel ways. These decisions always become the better long term fit. 
 
 This is when we hear the classic `you're absolutely right` or `that's an improvement`. 
 
-I once wrote a weekend project Rust library called [saying](https://crates.io/crates/saying) (basically a print macro for Rust that adds colour and styiling based keywords in the most concise way possible). I now use this all over the Moth compiler.
+I once wrote a weekend project Rust library called [saying](https://crates.io/crates/saying) (a print macro for Rust that adds colour and styiling based keywords in the most concise way possible). I now use this all over the Moth compiler.
 
 I asked an LLM how to write declaritive macros for this, only for it to say something along the lines of: `the formatting you want to do is impossible with declarative macros lol get rekt idiot, that requires a full parser` (*paraphrasing*).
 
@@ -146,6 +146,8 @@ I'm sure I got an understated `You're abolutely right, it was an error to say th
 ### Agent Bias
 
 AI also reflects your own biases back at you. While there are biases baked into the powerful models, your own prompts create another issue.
+
+This isn't about political or philosophical biases, but about design preferences.
 
 Its very easy to unintentionally steer an LLM towards the solution you prefer rather than the *best* solution. It then proceeds to *proactively* sloppify your codebase with your brilliantly undercooked design choice.
 
@@ -162,7 +164,7 @@ In this compiler I've made many design calls based on my own experience and intu
 
 Moth's memory management strategy has been a pain to try and document clearly enough to avoid agents pulling it back towards all the regular boring stuff every other language does. This is what consumes most of my time, spamming all my ideas into an LLM and getting them to organise it into documents that are slightly readable and don't get the technical details wrong.
 
-And even though the tests in this codebase are pretty much all written by AI, I have to constantly stamp by foot down on LLMs adding redundant tests or putting them in the same files as production code (which is a hard no-no in this codebase). But there's no way I'm going back to writing all the tests by hand again.
+And even though the tests in this codebase are pretty much all written by AI, I have to periodically stamp by foot down on LLMs adding redundant tests or putting them in the same files as production code (which is a hard no-no in this codebase). But there's no way I'm going back to writing all the tests by hand again.
 
 Adding skills, detailed documentation and a carefully written AGENTS.md doesn't fix everything. Reviewing is essential, and realising they will drift towards a boring mean is important.
 
@@ -178,9 +180,13 @@ Detailed well scoped tasks make better results.
 
 Moth is designed to give detailed, fast feedback for producing reliable code. Good languages for the future should be easy to review and strict about how the code is structured. See [the design principles doc](./docs/src/docs/design-scope/design-principles.mtf) for more info about how this directly related to using LLMs.
 
+Ultilmately, this project wouldn't be alive without LLMs. There is absolutely no way I could sustain this project for this long on my own without getting them to do the dirty work. Even when I have to clean up its mess periodically. Building a compiler and build system is an insane task to do solo. This still consumes most of my time outside of my day job despite all these tools.
+
 If this is an industrial revolution for automated thinking, then its still valuable to remember that the "hand-made" things had to designed by someone in the first place.
 
 The printer didn't replace layering paint onto a canvas by hand and computers didn't replace the need for mathematicians.
+
+Compilers didn't replace programmers and LLMs won't either.
 
 The things we got to do and problems we got to solve just became more interesting. Not less important.
 
