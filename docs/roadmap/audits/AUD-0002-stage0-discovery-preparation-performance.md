@@ -411,7 +411,7 @@ auditor pass 2 returned `audit_clean` with no findings and no changed files.
 
 ### AUD-0002-F03: `ProjectPathResolver` is deep-cloned once per module inside the discovery loop
 
-- State: `candidate`
+- State: `closed`
 - Kind: `Performance`
 - Scope: `build.stage0.discovery`
 - Priority: `unassigned`
@@ -510,6 +510,23 @@ claiming a fixed percentage.
 #### Dependencies and related findings
 
 Independent of F02; both are prerequisites for a clean F01 baseline.
+
+#### Triage record
+
+2026-08-21 — **Accepted and resolved.** The directory-discovery boundary now constructs one
+`ModulePreparationContext` before the serial module loop, so its owned `ProjectPathResolver` is
+cloned once per boundary rather than once per module. Each `ModuleSyntaxDiscovery` still borrows
+that context only for its current iteration and retains independent mutable string, source-file,
+origin and prepared-output state. Provider resolution continues to use the original borrowed
+resolver and remains serial. Coordinator measurements over seven runs improved the `docs`
+`stage0.directory.inventory` median from the F02 baseline `37.729667 ms` to `36.129209 ms`;
+`module-graph` moved from `1.167292 ms` to `1.062042 ms`, and `import-fanout` from `1.541417 ms` to
+`1.421000 ms`. Preparation and identity counters were unchanged, including 344 prepared files,
+27,978 delta entries, zero non-identity remaps and zero token rescans. `just validate` and
+post-change `just bench-check` passed. The targeted `just profile-case docs_check terse` build
+completed, but Samply failed with macOS `Unknown(1100)`; profile-stack confirmation is recorded
+as an environment limitation. The required coordinator auditor pass returned `audit_clean` with
+no findings and no changed files.
 
 ### AUD-0002-F04: Stage 0 directory read + tokenize is unmeasured, and the counters that would expose it read zero on every directory build
 

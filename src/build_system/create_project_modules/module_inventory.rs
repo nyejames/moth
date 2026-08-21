@@ -482,6 +482,10 @@ fn discover_modules_serial_provider_capable(
     let mut resolved_edges = Vec::new();
     let mut source_package_dependencies = Vec::new();
     let fork_source = string_table.fork_source();
+    let preparation_context = ModulePreparationContext {
+        style_directives,
+        project_path_resolver: Some(project_path_resolver.clone()),
+    };
 
     for seed in seeds {
         let module_edge_start = resolved_edges.len();
@@ -530,10 +534,6 @@ fn discover_modules_serial_provider_capable(
 
         let fork = fork_source.fork_for_module();
         let (local_string_table, string_table_base_len) = fork.into_parts();
-        let preparation_context = ModulePreparationContext {
-            style_directives,
-            project_path_resolver: Some(project_path_resolver.clone()),
-        };
         #[cfg(not(feature = "timers"))]
         let stable_origin = project_module_graph
             .node(seed.module_id)
