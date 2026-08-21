@@ -330,10 +330,10 @@ fn resolve_call_arguments_with_type_policy(
 
     // Validation flow order is intentionally fixed:
     // 1) consume parser-retained parameter slots,
-    // 2) fill defaults,
-    // 3) detect missing required parameters,
-    // 4) validate types,
-    // 5) validate access mode.
+    // 2) fill defaults and detect missing required parameters,
+    // 3) classify access/passing mode, which feeds compatibility checks,
+    // 4) enforce reactive-source requirements,
+    // 5) validate and coerce known types while retaining opaque external values.
     let mut resolved = order_call_arguments_by_retained_slot(args, expectations.len())?;
 
     // ------------------------

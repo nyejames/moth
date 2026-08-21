@@ -23,7 +23,6 @@ use crate::compiler_frontend::ast::expressions::expression_rpn::{
     ExpressionRpnItem, PlaceExpression, PlaceExpressionKind,
 };
 use crate::compiler_frontend::ast::expressions::expression_types::CastHandling;
-use crate::compiler_frontend::ast::statements::condition_validation::ensure_boolean_condition;
 use crate::compiler_frontend::ast::statements::match_patterns::{MatchArm, MatchPattern};
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::ast::templates::runtime_handoff::{
@@ -131,8 +130,6 @@ pub(crate) fn parse_assert_statement(
         .value
         .clone();
 
-    ensure_boolean_condition(&condition, &condition.location, type_interner.environment())
-        .map_err(ExpressionParseError::Diagnostic)?;
     reject_assert_message_effect(&message, &context.template_ir_store.borrow())?;
 
     // Reject `assert(...)!` — assert is not a fallible expression.
