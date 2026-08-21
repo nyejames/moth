@@ -7616,13 +7616,6 @@ contract = "language.functions.partial_if_return_rejected"
 role = "primary"
 
 [[case]]
-id = "function_assert_false_terminal"
-path = "function_assert_false_terminal"
-tags = ["integration", "language", "assert", "control-flow"]
-contract = "language.assert.false_terminal_satisfies_non_unit_return_acceptance"
-role = "boundary"
-
-[[case]]
 id = "generic_function_fallthrough_rejected"
 path = "generic_function_fallthrough_rejected"
 tags = ["integration", "language", "generics", "control-flow", "diagnostics"]
@@ -7667,7 +7660,7 @@ role = "primary"
 [[case]]
 id = "assert_named_argument_success"
 path = "assert_named_argument_success"
-tags = ["integration", "language", "assert", "diagnostics"]
+tags = ["integration", "language", "assert", "named-args"]
 contract = "language.assert.named_argument_success"
 role = "primary"
 

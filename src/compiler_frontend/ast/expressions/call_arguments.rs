@@ -33,7 +33,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::type_coercion::parse_context::{
-    CastTargetContext, ExpectedType, cast_target_context_for_type_id,
+    CastTargetContext, ExpectedType, cast_target_context_for_type_id, parse_expectation_for_type_id,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::FxHashMap;
@@ -111,6 +111,28 @@ pub(crate) fn parse_generic_call_arguments_typed(
 enum CallArgumentSyntaxContext {
     Ordinary,
     GenericFunction { function_name: Option<StringId> },
+}
+
+/// Preserves parse-time context for literals whose type cannot be inferred from their token.
+///
+/// WHAT: passes an optional parameter type into expression parsing so a call argument such as
+///      `message = none` can resolve its inner type before ordinary call validation runs.
+/// WHY: call arguments otherwise parse with natural-type inference, which is correct for most
+///      values but rejects context-sensitive `none` literals before the receiving slot is known.
+///      Collection and map targets remain inferred here so their type diagnostics stay owned by
+///      call validation rather than moving into the generic expression parser.
+fn expected_type_for_parameter_expectation(
+    expectation: &ParameterExpectation,
+    type_environment: &TypeEnvironment,
+) -> ExpectedType {
+    match expectation.expected_type {
+        ExpectedParameterType::Known(type_id) if type_environment.is_option(type_id) => {
+            parse_expectation_for_type_id(type_id, type_environment)
+        }
+        ExpectedParameterType::Known(_) | ExpectedParameterType::UnknownExternal => {
+            ExpectedType::Infer
+        }
+    }
 }
 
 /// Builds a `CastTargetContext` from a single parameter expectation.
@@ -286,8 +308,23 @@ fn parse_call_arguments_inner(
             .into());
         }
 
-        let cast_target_context = parameter_slot
-            .and_then(|slot| expectations.and_then(|items| items.get(slot.index())))
+        let parameter_expectation =
+            parameter_slot.and_then(|slot| expectations.and_then(|items| items.get(slot.index())));
+        // Only a bare `none` needs the receiving option slot during parsing. Ordinary values
+        // retain natural inference so call validation owns their type diagnostics.
+        let mut inferred = if argument_is_bare_none(token_stream) {
+            parameter_expectation
+                .map(|expectation| {
+                    expected_type_for_parameter_expectation(
+                        expectation,
+                        type_interner.environment(),
+                    )
+                })
+                .unwrap_or(ExpectedType::Infer)
+        } else {
+            ExpectedType::Infer
+        };
+        let cast_target_context = parameter_expectation
             .map(|expectation| {
                 cast_target_context_for_parameter_expectation(
                     expectation,
@@ -297,7 +334,6 @@ fn parse_call_arguments_inner(
             })
             .unwrap_or(CastTargetContext::None);
         let mut cast_target_context = cast_target_context;
-        let mut inferred = ExpectedType::Infer;
         let input = ExpressionParseInput::without_boundary_catch(
             ExpressionParseResources {
                 token_stream,
@@ -353,6 +389,32 @@ fn parse_call_arguments_inner(
     }
 
     Ok(arguments)
+}
+
+/// Returns whether the current argument is exactly `none` before its call delimiter.
+///
+/// WHAT: distinguishes the context-sensitive literal from larger expressions such as
+///      `none is optional_value`.
+/// WHY: only the bare literal needs the receiving option type during parsing. Larger expressions
+///      must keep natural inference so their result type and diagnostics stay call-owned.
+fn argument_is_bare_none(token_stream: &FileTokens) -> bool {
+    if token_stream.current_token_kind() != &TokenKind::NoneLiteral {
+        return false;
+    }
+
+    let mut next_index = token_stream.index + 1;
+    while token_stream
+        .tokens
+        .get(next_index)
+        .is_some_and(|token| matches!(&token.kind, TokenKind::Newline))
+    {
+        next_index += 1;
+    }
+
+    token_stream
+        .tokens
+        .get(next_index)
+        .is_some_and(|token| matches!(&token.kind, TokenKind::Comma | TokenKind::CloseParenthesis))
 }
 
 /// Maintains one parser-time declaration-order routing state for a call argument list.

@@ -21,13 +21,15 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarationTable};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, InvalidCallShapeReason,
-    SyntaxDiagnosticKind,
+    SyntaxDiagnosticKind, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tests::parse_support::parse_single_file_ast_diagnostic;
+use crate::compiler_frontend::tests::parse_support::{
+    parse_single_file_ast, parse_single_file_ast_diagnostic,
+};
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind, TokenizerEntryMode};
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
@@ -356,6 +358,25 @@ fn final_validation_consumes_retained_slots_for_defaults_and_access_policy() {
     assert!(matches!(resolved[1].value.kind, ExpressionKind::Int(2)));
     assert!(matches!(resolved[2].value.kind, ExpressionKind::Int(3)));
     assert_eq!(resolved[0].passing_mode, CallPassingMode::FreshMutableValue);
+}
+
+#[test]
+fn optional_call_context_is_limited_to_bare_none_arguments() {
+    let _ = parse_single_file_ast(
+        "consume |first String?, second String?|:\n    io.line(\"ok\")\n;\n\nconsume(\n    none\n    ,\n    none\n)\n",
+    );
+
+    let diagnostic = parse_single_file_ast_diagnostic(
+        "consume |message String?|:\n    io.line(\"ok\")\n;\n\nmaybe Bool? = none\nconsume(none is maybe)\n",
+    );
+
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::TypeMismatch {
+            context: TypeMismatchContext::FunctionArgument,
+            ..
+        }
+    ));
 }
 
 #[test]

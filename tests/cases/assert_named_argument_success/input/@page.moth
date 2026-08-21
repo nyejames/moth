@@ -1,4 +1,10 @@
 -- named assertion arguments use the shared call contract
 
-assert(true, message = "x")
+ready Bool = true
+
+assert(condition = ready)
+assert(ready, message = "positional condition")
+assert(message = "reversed names", condition = ready)
+assert(condition = ready, message = none)
+
 io.line("assert_named_argument_success")
