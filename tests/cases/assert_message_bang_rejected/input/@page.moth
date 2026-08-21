@@ -1,0 +1,12 @@
+-- assertion messages cannot propagate a fallible result
+
+make_message || -> String, Error!:
+    return "message"
+;
+
+check || -> String, Error!:
+    assert(true, make_message()!)
+    return "done"
+;
+
+check() catch then "caught"

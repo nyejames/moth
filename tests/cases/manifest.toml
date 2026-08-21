@@ -7539,6 +7539,13 @@ contract = "language.assert.message_lazy_success"
 role = "primary"
 
 [[case]]
+id = "assert_static_true_message_elision"
+path = "assert_static_true_message_elision"
+tags = ["integration", "language", "assert", "control-flow", "backend"]
+contract = "language.assert.static_true_message_elision"
+role = "primary"
+
+[[case]]
 id = "assert_function_message_runtime_stop"
 path = "assert_function_message_runtime_stop"
 tags = ["integration", "language", "assert", "backend"]
@@ -7676,6 +7683,20 @@ id = "assert_bang_rejected"
 path = "assert_bang_rejected"
 tags = ["integration", "language", "assert", "diagnostics"]
 contract = "language.assert.bang_rejected"
+role = "primary"
+
+[[case]]
+id = "assert_message_bang_rejected"
+path = "assert_message_bang_rejected"
+tags = ["integration", "language", "assert", "diagnostics"]
+contract = "language.assert.message_bang_rejected"
+role = "primary"
+
+[[case]]
+id = "assert_message_option_rejected"
+path = "assert_message_option_rejected"
+tags = ["integration", "language", "assert", "diagnostics"]
+contract = "language.assert.message_option_rejected"
 role = "primary"
 
 [[case]]

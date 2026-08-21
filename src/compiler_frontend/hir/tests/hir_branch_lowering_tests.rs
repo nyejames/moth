@@ -740,6 +740,86 @@ fn assertion_failure_uses_message_value_block_tail() {
 }
 
 #[test]
+fn statically_true_assertion_elides_runtime_message_call_and_failure_edge() {
+    let mut string_table = StringTable::new();
+    let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
+    let message_name = super::symbol("runtime_message", &mut string_table);
+    let location = test_source_location(86);
+
+    let message_fn = function_node(
+        message_name.clone(),
+        FunctionSignature {
+            parameters: vec![],
+            returns: fresh_success_returns(vec![builtin_type_ids::STRING]),
+        },
+        vec![node(
+            NodeKind::Return(vec![Expression::string_slice(
+                string_table.intern("message"),
+                location.clone(),
+                ValueMode::ImmutableOwned,
+            )]),
+            location.clone(),
+        )],
+        location.clone(),
+    );
+    let message = runtime_expr(
+        vec![runtime_function_call_item(
+            message_name,
+            vec![builtin_type_ids::STRING],
+            location.clone(),
+        )],
+        builtin_type_ids::STRING,
+        location.clone(),
+        ValueMode::MutableOwned,
+    );
+    let mut option_type_environment =
+        crate::compiler_frontend::datatypes::environment::TypeEnvironment::new();
+    let option_string = option_type_environment.intern_option(builtin_type_ids::STRING);
+
+    let start_fn = function_node(
+        start_name,
+        FunctionSignature {
+            parameters: vec![],
+            returns: vec![],
+        },
+        vec![node(
+            NodeKind::Assert {
+                condition: Expression::bool(true, location.clone(), ValueMode::ImmutableOwned),
+                message: Expression::coerced(message, option_string),
+            },
+            location.clone(),
+        )],
+        location.clone(),
+    );
+
+    let (module, _type_environment) = lower_ast(
+        build_ast_with_registered_types(vec![message_fn, start_fn], entry_path),
+        &mut string_table,
+    )
+    .expect("statically true assertion should elide its runtime message");
+    let message_function_id = module
+        .functions
+        .iter()
+        .find(|function| Some(function.id) != module.start_function)
+        .expect("message helper should remain a separate function")
+        .id;
+
+    assert!(
+        blocks_with_user_function_call(&module, message_function_id).is_empty(),
+        "a statically true assertion must not lower its message call"
+    );
+    assert!(
+        module.blocks.iter().all(|block| {
+            !matches!(
+                block.terminator,
+                HirTerminator::If { .. } | HirTerminator::AssertFailure { .. }
+            )
+        }),
+        "a statically true assertion must not retain a failure CFG or assertion message"
+    );
+}
+
+#[test]
 fn statically_false_assertion_keeps_cfg_producing_message_before_terminal_failure() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
