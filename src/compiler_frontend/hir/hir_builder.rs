@@ -49,7 +49,7 @@ mod reactivity;
 // -----------
 // Entry Point
 // -----------
-pub fn lower_module(
+pub(crate) fn lower_module(
     ast: Ast,
     string_table: &mut StringTable,
     path_format_config: PathStringFormatConfig,

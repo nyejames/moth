@@ -35,12 +35,18 @@ pub(crate) struct ProviderMaterialisationRegistry {
 impl ProviderMaterialisationRegistry {
     /// Record one published declaring context for a generic declaration it owns.
     ///
-    /// WHY: one identity resolves to exactly one declaring context. `GeneratedDeclarationIdentity`
-    ///      carries its owning package and module origin, and every producer proves uniqueness
-    ///      before publishing here: the module store rejects an identity published by two
-    ///      materialisation contexts, the package registry rejects one published by two packages,
-    ///      and `ProjectFrontendCompilation::new` rejects one published by both lanes. An insert
-    ///      that replaced an existing entry would mean one of those proofs had already failed.
+    /// WHY: within one lane an identity resolves to exactly one declaring context, and each lane
+    ///      proves that before publishing here: the module store rejects an identity published by
+    ///      two materialisation contexts, and the package registry rejects one published by two
+    ///      packages. Neither proof sees the other lane, so a cross-lane collision does reach this
+    ///      insert and replaces the package seed with the project module. That is the resolution
+    ///      the pre-registry lookup produced for the same collision, and
+    ///      `ProjectFrontendCompilation::new` rejects the pair at the boundary handoff — but it
+    ///      runs after the boundary has compiled, so it is not a preflight for this call.
+    ///
+    /// Seeding completed packages before any module publishes is therefore load-bearing: reversing
+    /// that order would change which context a colliding identity resolves to for the rest of the
+    /// boundary.
     pub(crate) fn publish(
         &mut self,
         identity: GeneratedDeclarationIdentity,
@@ -63,6 +69,10 @@ impl ProviderMaterialisationRegistry {
         self.published.get(identity)
     }
 }
+
+#[cfg(test)]
+#[path = "tests/provider_materialisations_tests.rs"]
+mod tests;
 
 /// Where one generated request finds the template it must materialise.
 ///

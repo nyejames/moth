@@ -7,10 +7,10 @@ WORK_ID: frontend-module-compilation-ownership-cleanup
 WORK_SOURCE: docs/roadmap/plans/frontend-module-compilation-ownership-cleanup-plan.md
 BASE_REVISION: f3b4178118069e857034dc2ba0e9f71864980721
 STATUS: active
-CURRENT_SCOPE: Phases 0-4 complete; the compiler owns the canonical module compilation service and all generated semantic completion, and the build system's remaining preparation owner is named for what it does
-COMPLETED: Phase 0 re-anchor and documentation hardening, Phase 1 data-ownership move, Phases 2-3 implemented as one slice, Phase 4 preparation-owner reduction and rename
-NEXT_ACTION: Phase 5, move project config and direct Moth-template compilation behind compiler services and add the architecture-boundary guard
-VALIDATION: `just validate` passes at the Phase 0, Phase 1, Phase 2/3 and Phase 4 gates
+CURRENT_SCOPE: Phases 0-5 complete; the compiler owns canonical module compilation, all generated semantic completion and both specialised short paths, and the dependency direction is guarded
+COMPLETED: Phase 0 re-anchor and documentation hardening, Phase 1 data-ownership move, Phases 2-3 implemented as one slice, Phase 4 preparation-owner reduction and rename, Phase 5 specialised compiler services and the architecture-boundary guard
+NEXT_ACTION: Phase 6, prune migration residue and reconcile every documentation and reference owner
+VALIDATION: `just validate` passes at the Phase 0, Phase 1, Phase 2/3, Phase 4 and Phase 5 gates
 AUDITS: compiler/build ownership, generated-function ownership, module artefact ownership, config and direct Moth-template compiler clients, canonical docs and style-guide boundary rules
 BLOCKERS: none
 NOTES: the previously named command timing accounting plan was deleted from the roadmap on 2026-08-18, so its references in this plan are historical only; the next queued plan is runtime assertion messages and call-argument parser consolidation
@@ -629,6 +629,9 @@ It deliberately does not perform the separate cleanup of `ast/generic_functions/
 - [x] Preserve boundary-local identity rules so equal generated identities in unrelated project/package boundaries do not collide.
 - [x] Preserve recursive generic diagnostics and exact call-summary transition validation.
 - [x] Add focused tests for known-generated reuse, duplicate suppression, recursive requests, cross-package materialisation, generated borrow convergence and transactional publication.
+  - Cross-package materialisation had no focused test until the Phase 5 review added
+    `generated/tests/provider_materialisations_tests.rs`. Until then it was covered only end to end
+    by `tests/cases/generic_receiver_source_package_facade_success/`.
 
 ### Phase 2 gate
 
@@ -719,7 +722,7 @@ preflight, commit, sidecar storage and the `known_generated()` view, and nothing
 
 ### Deferred to later phases
 
-- `service.rs` is 786 lines and `generated/convergence.rs` is 844. Both are under the style guide's
+- `service.rs` is 766 lines and `generated/convergence.rs` is 844. Both are under the style guide's
   ~2,000-line guidance, but Phase 6 should review whether `compile_module` reads as named steps.
 - Focused tests proving directory and single-file clients receive the same outcome classes are
   Phase 6/7 work; existing suites already cover both paths end to end.
@@ -796,9 +799,10 @@ Exit state: the old build-owned frontend orchestration owner no longer exists.
 
 Result: `frontend_orchestration.rs` became `module_preparation.rs` (1173 lines, preparation only) and
 `frontend_orchestration_tests.rs` became `module_preparation_tests.rs`. The rename is the whole
-change: Phase 3 had already emptied the file of semantic orchestration, and the ownership grep
-confirms the only remaining mention of a semantic stage is a doc comment naming
-`bind_module_headers` as the downstream consumer of retained syntax. `create_project_modules/mod.rs`
+change: Phase 3 had already emptied the file of semantic orchestration. The only remaining call-site
+mention of a semantic stage is a doc comment naming `bind_module_headers` as the downstream consumer
+of retained syntax. Three prose references to the deleted `FrontendModuleBuildContext` and
+`compile_module_semantic` owners survived this phase and were corrected during the Phase 5 review. `create_project_modules/mod.rs`
 now groups its map under discovery/structure, source preparation, scheduling/publication and
 diagnostics, and states that local semantic compilation is not owned there.
 
@@ -807,8 +811,11 @@ diagnostics, and states that local semantic compilation is not owned there.
 already used the term "final module preparation" for the consumer, so the two names now match the
 vocabulary the code was already using.
 
-`xtask/src/timers_erasure_check.rs` hard-codes the preparation file path and was updated with the
-rename; `just validate` would otherwise have failed on a missing path rather than a real regression.
+`xtask/src/timers_erasure_check.rs` names the preparation file in one test fixture string and was
+refreshed with the rename. An earlier note here claimed `just validate` would otherwise have failed;
+that was wrong. The fixture path is only matched against literal allowlists and is never resolved
+against the filesystem, so the stale string would have kept passing while naming a file that no
+longer exists.
 
 Two tests in `module_preparation_tests.rs` deliberately call `compile_module`. They own the
 preparation/semantic seam itself — that retained syntax reaches semantic compilation without a
@@ -828,28 +835,101 @@ This phase closes those sanctioned escape hatches and then makes the dependency 
 
 ### Checklist
 
-- [ ] Create or expose one compiler-owned project-config compilation service for the current single-file compile-time path.
-- [ ] Keep project config schema/application policy build-owned while moving tokenizer -> retained headers -> binding -> ordering -> AST orchestration behind the compiler service.
-- [ ] Preserve config-specific diagnostics, authored key locations and the folded AST/value boundary without constructing HIR or borrow facts.
-- [ ] Create or expose one compiler-owned direct Moth-template service that performs the current prepare -> bind -> order -> AST-fold path and returns the folded `content` result plus warnings.
-- [ ] Keep HTML project source collection and project-specific output packaging outside the compiler service.
-- [ ] Remove direct raw-stage assembly from `src/build_system/project_config/parsing.rs` and `src/projects/html_project/moth_template/compile.rs`.
-- [ ] Inventory any other production raw-stage client outside `compiler_frontend` and either route it through an existing named compiler service or document a canonical architectural exception before keeping it.
-- [ ] Narrow visibility of raw stage orchestration entry points to `compiler_frontend` where Rust module visibility permits it.
-- [ ] Keep completed artefact data types visible to later link/backend consumers only where their final data is part of the documented handoff.
-- [ ] Add an architecture-boundary regression test or equivalent repository check for dependency directions Rust visibility cannot encode.
-- [ ] The guard must reject production Stage 0/project code reintroducing calls to raw AST construction, HIR lowering, public-interface draft construction or borrow execution.
-- [ ] The guard must reject new `compiler_frontend` dependencies on `build_system` or project config container types for local semantic compilation.
-- [ ] Do not make source-text layering tests the only protection. Use narrowed Rust visibility and public API shape wherever possible, with the source-level check covering dependency-direction rules that Rust cannot express.
-- [ ] Add focused config-service and direct-template-service tests before removing the old clients.
+- [x] Create or expose one compiler-owned project-config compilation service for the current single-file compile-time path.
+- [x] Keep project config schema/application policy build-owned while moving tokenizer -> retained headers -> binding -> ordering -> AST orchestration behind the compiler service.
+- [x] Preserve config-specific diagnostics, authored key locations and the folded AST/value boundary without constructing HIR or borrow facts.
+- [x] Create or expose one compiler-owned direct Moth-template service that performs the current prepare -> bind -> order -> AST-fold path and returns the folded `content` result plus warnings.
+- [x] Keep HTML project source collection and project-specific output packaging outside the compiler service.
+- [x] Remove direct raw-stage assembly from `src/build_system/project_config/parsing.rs` and `src/projects/html_project/moth_template/compile.rs`.
+- [x] Inventory any other production raw-stage client outside `compiler_frontend` and either route it through an existing named compiler service or document a canonical architectural exception before keeping it.
+- [x] Narrow visibility of raw stage orchestration entry points to `compiler_frontend` where Rust module visibility permits it.
+- [x] Keep completed artefact data types visible to later link/backend consumers only where their final data is part of the documented handoff.
+- [x] Add an architecture-boundary regression test or equivalent repository check for dependency directions Rust visibility cannot encode.
+- [x] The guard must reject production Stage 0/project code reintroducing calls to raw AST construction, HIR lowering, public-interface draft construction or borrow execution.
+- [x] The guard must reject new `compiler_frontend` dependencies on `build_system` or project config container types for local semantic compilation.
+- [x] Do not make source-text layering tests the only protection. Use narrowed Rust visibility and public API shape wherever possible, with the source-level check covering dependency-direction rules that Rust cannot express.
+- [x] Add focused config-service and direct-template-service tests before removing the old clients.
 
 ### Phase 5 gate
 
-- [ ] Ownership audit finds no production client outside `compiler_frontend` assembling a frontend stage pipeline from raw pieces unless an explicit canonical exception exists.
-- [ ] Style-guide review confirms the specialised services are narrow and do not become a generic configurable pipeline framework.
-- [ ] Config, direct Moth-template, architecture-boundary and full validation suites pass.
+- [x] Ownership audit finds no production client outside `compiler_frontend` assembling a frontend stage pipeline from raw pieces unless an explicit canonical exception exists.
+- [x] Style-guide review confirms the specialised services are narrow and do not become a generic configurable pipeline framework.
+- [x] Config, direct Moth-template, architecture-boundary and full validation suites pass.
 
 Exit state: production compiler clients choose a named compiler service, not a custom stage sequence.
+
+Phase 5 result: `single_source_compilation` is the compiler owner of both short paths.
+`config.rs` owns the `config.moth` stage sequence, its dialect surface rules, duplicate-key
+reclassification and authored key-name spans; `build_system/project_config.rs` keeps locating,
+reading, validating and applying, and `parsing.rs` is deleted. `moth_template.rs` owns the direct
+`.mtf` fold; `projects/html_project/moth_template/compile.rs` keeps request normalization, the
+project style vocabulary and output packaging. `CompilerFrontend::set_source_files`, `sort_headers`,
+`headers_to_ast`, `generate_hir` and `check_borrows` narrowed from `pub` to `pub(crate)`, joined by
+`Ast::new`, `hir_builder::lower_module` and the `module_compilation` re-exports during the Phase 5
+review. This is a declaration correction, not a reachability change: `mod compiler_frontend;` is
+private at the crate root, so `pub` inside it was already capped at crate visibility and build code
+could always reach these methods. Tighter than `pub(crate)` is not expressible while the frontend's
+own tests drive single stages, so the dependency direction is carried by the source guard alone. `xtask/src/architecture_boundary.rs` adds
+two source-audit rules covering the direction Rust cannot encode, verified to fire on both
+pre-Phase-5 escape hatches and reporting nothing on the current tree.
+
+
+## Independent review of Phases 0-5
+
+Two fresh-context reviews audited the whole diff against `f3b41781` using the `AGENTS.md` Final
+audit steps. Both independently confirmed the move is behaviour-preserving: every relocated function
+was diffed against its pre-change body with no silent change to stage order, diagnostic sets or
+ordering, error-versus-warning routing, string-table merge and remap order, or sort and dedup order.
+Their findings were about the guard, comment accuracy and residue. Applied:
+
+- **The guard was bypassable.** `CompilerFrontend::sort_headers` is a one-line wrapper over the
+  banned `resolve_module_dependencies`, and was itself one of the pre-Phase-5 escape-hatch entry
+  points. Added, along with the pre-AST public-interface projection owners and the generated
+  completion owners `style-guide.mtf` names directly ("no build-owned function installs call
+  summaries"). A braced `use ...settings::{Config, ...}` also evaded the container rule; it is now
+  matched, and the remaining multi-line limit is stated in the guard's own documentation.
+- **The guard exempted a production subtree.** `is_test_source` skipped all of
+  `src/compiler_tests/`, which also holds `integration_test_runner` — production code shipped
+  without `#[cfg(test)]`. The directory clause was removed; the one harness test that drives stages
+  directly was already covered by the filename rule, so the exemption protected nothing.
+- **`ProviderMaterialisationRegistry::publish` documented a proof that does not run.**
+  `ProjectFrontendCompilation::new` is the final boundary handoff, not a publication preflight, so a
+  cross-lane collision does reach the replacing insert. The comment now says so, records that the
+  result matches the pre-registry lookup order, and states that seeding packages before modules
+  publish is load-bearing.
+- **Cross-package materialisation had no focused test**, despite a ticked Phase 2 box.
+  `generated/tests/provider_materialisations_tests.rs` now pins row resolution and the collision
+  order. `PublishedBoundary` moved into the shared generated fixture owner, which also removed the
+  compiler convergence tests' two reverse dependencies on the build-owned generated store.
+- **Three plan claims were false or overstated** and were corrected in place: the
+  `timers_erasure_check.rs` edit could not have failed `just validate`, the Phase 4 ownership grep
+  missed three prose references to deleted owners, and the Phase 5 visibility narrowing changed no
+  reachability because `mod compiler_frontend;` is private at the crate root.
+- **Canonical docs assigned generated request deduplication to the build system** while
+  `transaction.rs` does it. Reworded in `compiler-design-overview.md`, `build-system-design.md` and
+  `module-artefacts-and-reuse.mtf`: the build system owns the published set, the compiler
+  deduplicates against it.
+- Residue and shape: stale references to `FrontendModuleBuildContext`, `compile_module_semantic`
+  and the removed worklist vocabulary; `FrontendOptions::from_origin`, a single-caller helper whose
+  doc contradicted the real projection in `Config::frontend_options`; the dead `#[cfg(test)]`
+  accessor `ModuleArtifactStore::materialisation_context_for`, whose one test now asserts the same
+  invariant through the production accessor; `Ast::new`, `hir_builder::lower_module` and the
+  `module_compilation` re-exports narrowed to `pub(crate)` for consistency with Phase 5; and
+  `compiler_frontend/mod.rs`, which had no module map at all, given one that names the three
+  production entry points.
+
+Deferred with reasons rather than fixed here:
+
+- `compile_module` is 476 lines around a 395-line closure whose named steps have large unnumbered
+  gaps. It is a byte-for-byte structural carry-over, and Phase 6 already owns the review.
+- `src/compiler_tests/frontend_pipeline_tests.rs` still hand-assembles the canonical sequence and
+  has drifted from it (no public-interface projection, no generated completion). Routing it through
+  `compile_module` is a test change Phase 6 should own with the rest of the residue pruning.
+- `docs/roadmap/audit-log.md` was not touched. The `tests.support` Redundancy cell is already `P`,
+  and moving one helper into an existing shared fixture owner consolidates toward fewer duplicate
+  owners rather than invalidating recorded coverage.
+
+`just validate` passes after the applied fixes.
 
 ## Phase 6: Prune migration residue and reconcile every documentation/reference owner
 

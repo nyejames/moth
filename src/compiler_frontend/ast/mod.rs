@@ -307,7 +307,7 @@ impl Ast {
     // bundles executable `Ast` with its projection side results; renaming would lose the canonical
     // AST construction entry point expected by callers.
     #[allow(clippy::new_ret_no_self)]
-    pub fn new(
+    pub(crate) fn new(
         input: AstBuildInput,
         context: AstBuildContext<'_>,
     ) -> Result<AstBuildResult, CompilerMessages> {

@@ -80,6 +80,10 @@ pub(super) fn publish_module_and_generated(
     artifact: CompiledModuleArtifact,
     generated_delta: GeneratedFunctionDelta,
 ) -> Result<(), CompilerError> {
+    // Both fallible checks run before anything mutates. The reservations and the materialisation
+    // publication that follow cannot fail, so a rejected publication leaves all three lanes clean.
+    // Materialisation publication sits inside that infallible tail rather than after the commits
+    // because it borrows the artefact `commit_success` consumes.
     let generated_publication = generated.preflight(&generated_delta)?;
     let module_publication = modules.preflight_success(module_id, &artifact, expected_origin)?;
     modules.reserve_success_commit(&module_publication);
@@ -361,8 +365,8 @@ pub(crate) fn compile_single_file_frontend(
     };
 
     // Preparation is provider-independent: it owns no external package registry, dependency
-    // resolution table or builder runtime packages. Construct it before the semantic context so
-    // Phase 5 can schedule provider binding between `prepare_module` and `compile_module_semantic`.
+    // resolution table or builder runtime packages. Constructing it before the compilation context
+    // keeps that separation visible at the one place both are built.
     let preparation_context = ModulePreparationContext {
         style_directives,
         project_path_resolver: Some(project_path_resolver.clone()),
@@ -1006,11 +1010,11 @@ fn compile_module_waves(
 
         ready.sort_by_key(|job| job.module_id.index());
         for job in ready {
-            // The boundary worklist publishes each successful module transaction before the
-            // next ModuleId so duplicate requests in one ready wave materialise exactly once.
-            // File preparation remains parallel inside each module. Semantic module-wave
-            // parallelism remains a separate future phase because worklist sessions currently
-            // commit deterministic deltas through this serial publication owner.
+            // This owner publishes each successful module transaction before starting the next
+            // ModuleId, so duplicate requests in one ready wave materialise exactly once. File
+            // preparation remains parallel inside each module. Semantic module-wave parallelism
+            // remains a separate future phase because generated deltas currently commit
+            // deterministically through this serial publication owner.
             let outcome = {
                 let compile_context = DirectoryModuleCompileContext {
                     boundary: &context,

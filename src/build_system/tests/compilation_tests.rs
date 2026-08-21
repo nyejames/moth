@@ -196,7 +196,7 @@ fn generated_delta_with_identity_mismatch() -> GeneratedFunctionDelta {
 }
 
 #[test]
-fn combined_publication_preflights_both_lanes_before_mutation() {
+fn combined_publication_preflights_both_fallible_lanes_before_mutation() {
     let mut modules = ModuleArtifactStore::new(1);
     let mut generated = BoundaryGeneratedFunctionStore::default();
     let generated_delta = GeneratedFunctionDelta::from_records(Vec::new());

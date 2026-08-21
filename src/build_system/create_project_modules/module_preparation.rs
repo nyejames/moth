@@ -252,10 +252,9 @@ impl ModulePreparationContext<'_> {
     ///      the provider graph is compiled. This context owns no provider-interface values, so
     ///      preparation cannot reach provider state. Retaining the syntax, string-table context,
     ///      source identities and the active root `FileId` lets semantic compilation begin with
-    ///      `bind_module_headers` without retokenizing or reparsing source and without
-    ///      reconstructing module identity from paths, and leaves a clean boundary where the
-    ///      orchestrator can schedule provider binding between this call and
-    ///      `FrontendModuleBuildContext::compile_module_semantic`.
+    ///      interface binding without retokenizing or reparsing source and without
+    ///      reconstructing module identity from paths. Provider binding is scheduled after this
+    ///      call, inside the compiler's module compilation service.
     pub(super) fn prepare_module(
         &self,
         stable_origin: StableModuleOriginIdentity,

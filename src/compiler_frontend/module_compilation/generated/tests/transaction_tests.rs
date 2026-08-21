@@ -6,52 +6,12 @@
 //!      belongs to the build-owned boundary store and is tested there.
 
 use super::*;
-use crate::compiler_frontend::module_compilation::generated::GeneratedFunctionId;
-use crate::compiler_frontend::module_compilation::generated::artefacts::CompletedGeneratedFunction;
-use crate::compiler_frontend::module_compilation::generated::known::KnownGeneratedFunctions;
 use crate::compiler_frontend::module_compilation::generated::test_fixtures::{
-    facts, generated_identity, summary, test_sidecar,
+    PublishedBoundary, facts, generated_identity, summary,
 };
-use crate::compiler_frontend::public_call_summary::PublicCallSummary;
-use crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity;
-
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{CharPosition, SourceLocation};
-
-use rustc_hash::FxHashMap;
-
-/// One already published boundary, as the transaction sees it.
-struct PublishedBoundary {
-    records: Vec<CompletedGeneratedFunction>,
-    by_identity: FxHashMap<GeneratedFunctionIdentity, GeneratedFunctionId>,
-}
-
-impl PublishedBoundary {
-    fn empty() -> Self {
-        Self {
-            records: Vec::new(),
-            by_identity: FxHashMap::default(),
-        }
-    }
-
-    fn with(identity: GeneratedFunctionIdentity, summary: PublicCallSummary) -> Self {
-        let mut boundary = Self::empty();
-        boundary
-            .by_identity
-            .insert(identity.clone(), GeneratedFunctionId::new(0));
-        boundary.records.push(CompletedGeneratedFunction {
-            identity: identity.clone(),
-            summary: summary.clone(),
-            sidecar: test_sidecar(identity, summary),
-        });
-        boundary
-    }
-
-    fn view(&self) -> KnownGeneratedFunctions<'_> {
-        KnownGeneratedFunctions::new(&self.records, &self.by_identity)
-    }
-}
 
 #[test]
 fn registration_sorts_and_deduplicates_stable_identities_before_assigning_dense_ids() {
@@ -119,7 +79,7 @@ fn a_transaction_allocates_only_new_records() {
     assert_eq!(
         transaction.records.len(),
         0,
-        "known summaries seed the transaction"
+        "an already published identity registers no request"
     );
 
     let new_ids = transaction.register_requests([facts("new")]);
@@ -127,7 +87,7 @@ fn a_transaction_allocates_only_new_records() {
     assert_eq!(
         transaction.records.len(),
         1,
-        "a session owns only its new delta"
+        "a transaction owns only its new delta"
     );
 }
 

@@ -33,7 +33,7 @@ use std::sync::Arc;
 ///       root activity, docs and rendered paths).
 /// WHY: backends consume one stable module payload shape regardless of project type, with
 ///      explicit ownership keeping HIR/type/borrow pairing obvious at call sites.
-pub struct Module {
+pub(crate) struct Module {
     pub(crate) executable: ModuleExecutable,
     pub(crate) link_facts: ModuleLinkFacts,
     pub(crate) metadata: ModuleCompilerMetadata,
@@ -206,7 +206,7 @@ impl ModuleRootActivity {
 /// runtime fragments that precede it in source order.
 /// WHY: builders merge const strings with the runtime fragment list returned by entry start()
 /// using the insertion index to reconstruct source-order interleaving.
-pub struct ResolvedConstFragment {
+pub(crate) struct ResolvedConstFragment {
     /// Number of runtime fragments preceding this const fragment in source order.
     pub runtime_insertion_index: usize,
     /// The rendered text content of this const fragment.

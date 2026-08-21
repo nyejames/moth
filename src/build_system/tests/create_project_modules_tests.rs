@@ -15,7 +15,7 @@ use crate::build_system::create_project_modules::module_namespace::{
 use crate::build_system::create_project_modules::resolve_project_entry_root;
 use crate::build_system::create_project_modules::source_package_discovery::build_source_package_boundary_indexes;
 use crate::build_system::project_config::{
-    ProjectConfigParseServices, load_project_config, parse_project_config_file,
+    ProjectConfigParseServices, compile_project_config_file, load_project_config,
 };
 use crate::builder_surface::PackageOrigin;
 use crate::builder_surface::external_import_providers::provider::{
@@ -182,7 +182,7 @@ fn parse_project_config_for_test(
         style_directives,
         frontend_surface: &frontend_surface,
     };
-    parse_project_config_file(config, config_path, &services, &mut string_table).map(|_| ())
+    compile_project_config_file(config, config_path, &services, &mut string_table).map(|_| ())
 }
 
 fn parse_project_config_for_test_with_html_keys(
@@ -198,7 +198,7 @@ fn parse_project_config_for_test_with_html_keys(
         style_directives,
         frontend_surface: &frontend_surface,
     };
-    parse_project_config_file(config, config_path, &services, &mut string_table).map(|_| ())
+    compile_project_config_file(config, config_path, &services, &mut string_table).map(|_| ())
 }
 
 fn parse_project_config_for_test_with_packages(
@@ -212,7 +212,7 @@ fn parse_project_config_for_test_with_packages(
         style_directives,
         frontend_surface,
     };
-    parse_project_config_file(config, config_path, &services, &mut string_table).map(|_| ())
+    compile_project_config_file(config, config_path, &services, &mut string_table).map(|_| ())
 }
 
 fn discover_modules_for_test(

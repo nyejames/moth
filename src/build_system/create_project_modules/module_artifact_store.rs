@@ -256,15 +256,6 @@ impl ModuleArtifactStore {
         })
     }
 
-    /// Resolve one published materialisation context by its generic declaration identity.
-    #[cfg(test)]
-    pub(crate) fn materialisation_context_for(
-        &self,
-        identity: &GeneratedDeclarationIdentity,
-    ) -> Option<MaterialisationContextLocation> {
-        self.contexts_by_declaration.get(identity).copied()
-    }
-
     /// Resolve the exact published context for one indexed location.
     ///
     /// WHY: the boundary registry seeds itself from completed package boundaries through this

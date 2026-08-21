@@ -684,17 +684,15 @@ fn materialisation_lookup_resolves_the_exact_template_row() {
         )
         .expect("row context should publish");
 
-    let location = store
-        .materialisation_context_for(&second_identity)
-        .expect("second identity should be indexed");
-    assert_eq!(location.template_index, 1);
-    assert!(store.materialisation_context_at(location).is_ok());
-    assert!(
-        store
-            .materialisation_context_for(generated_test_identity("missing").declaration())
-            .is_none(),
-        "an unindexed identity must miss without scanning"
+    let (_, location) = store
+        .materialisation_locations()
+        .find(|(identity, _)| **identity == second_identity)
+        .expect("the second identity should be published with its own row");
+    assert_eq!(
+        location.template_index, 1,
+        "the row index must be the declaring context's own position, not the publication order"
     );
+    assert!(store.materialisation_context_at(location).is_ok());
     let _ = graph;
 }
 

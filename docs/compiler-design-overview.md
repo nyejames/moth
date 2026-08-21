@@ -558,13 +558,15 @@ Generated boundary scheduling and generated semantic completion are different ow
 The build system owns the compilation boundary around generated functions:
 
 - boundary-wide generated identity aggregation
-- deterministic deduplication against already published sidecars
+- the published set every request is deduplicated against, lent as an immutable view
 - completed sidecar storage and transactional publication
 - boundary placement and reuse across entries
 
 The compiler owns every generated semantic fact:
 
 - canonicalising a concrete request from AST facts
+- deterministic deduplication of requests against that published set and against work already
+  completed in the same transaction
 - generated AST and HIR materialisation
 - generated HIR validation
 - generated borrow analysis

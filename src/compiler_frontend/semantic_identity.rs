@@ -46,9 +46,9 @@ impl GeneratedDeclarationIdentity {
 
 /// Stable identity for one concrete generated generic function.
 ///
-/// The build-owned worklist deduplicates this exact declaration/type/evidence tuple across
-/// requesters. Call locations and requester modules remain diagnostic context and never affect
-/// identity.
+/// One module's generated transaction deduplicates this exact declaration/type/evidence tuple
+/// across requesters, against the published set the build system supplies. Call locations and
+/// requester modules remain diagnostic context and never affect identity.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct GeneratedFunctionIdentity {
     declaration: GeneratedDeclarationIdentity,

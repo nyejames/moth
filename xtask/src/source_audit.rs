@@ -15,9 +15,12 @@
 //!
 //! # What this module does NOT own
 //! - Timer rule definitions, which stay with the timer subsystem in `timers_erasure_check`
+//! - Compiler/build dependency-direction rule definitions, which stay with
+//!   `architecture_boundary`
 //! - The compiled-artifact half of timer erasure, which needs a built binary
 //! - Feature-lane coverage (see `feature_matrix`)
 
+use crate::architecture_boundary::{BoundaryRule, audit_architecture_boundary_fragment};
 use crate::report_file::{ReportRunIdentity, write_report_atomically};
 use crate::source_tree::{relative_display_path, walk_rust_files, workspace_root};
 use crate::timers_erasure_check::audit_timer_source_fragment;
@@ -55,6 +58,10 @@ pub enum SourceRule {
     RemovedLegacyConversionName,
     /// The removed legacy diagnostic payload variant was reintroduced by name.
     RemovedLegacyPayloadVariant,
+    /// Production code outside `compiler_frontend` named a frontend semantic stage owner.
+    ExternalStageOrchestration,
+    /// Production `compiler_frontend` code named build-system or project config state.
+    CompilerDependencyOnBuild,
     /// A source file could not be read, so no rule could be applied to it.
     UnreadableSource,
 }
@@ -65,6 +72,8 @@ impl SourceRule {
             Self::TimerErasure => "timer-erasure",
             Self::RemovedLegacyConversionName => "legacy-error-conversion-name",
             Self::RemovedLegacyPayloadVariant => "legacy-error-payload-variant",
+            Self::ExternalStageOrchestration => "external-stage-orchestration",
+            Self::CompilerDependencyOnBuild => "compiler-dependency-on-build",
             Self::UnreadableSource => "unreadable-source",
         }
     }
@@ -221,6 +230,22 @@ fn audit_source_fragment(relative: &str, content: &str) -> Vec<SourceFinding> {
 
     findings.extend(audit_legacy_error_conversion(relative, content));
     findings.extend(audit_legacy_error_payload(relative, content));
+    findings.extend(
+        audit_architecture_boundary_fragment(relative, content)
+            .into_iter()
+            .map(|(rule, message)| SourceFinding {
+                file: relative.to_owned(),
+                rule: match rule {
+                    BoundaryRule::ExternalStageOrchestration => {
+                        SourceRule::ExternalStageOrchestration
+                    }
+                    BoundaryRule::CompilerDependencyOnBuild => {
+                        SourceRule::CompilerDependencyOnBuild
+                    }
+                },
+                message,
+            }),
+    );
     findings
 }
 

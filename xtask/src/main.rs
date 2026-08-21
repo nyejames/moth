@@ -25,6 +25,7 @@
 //! - `source-audit`         - Apply the broad-source architecture bans and write their report
 //! - `honesty-audit`        - Classify the test-honesty findings and write the canonical inventory
 
+mod architecture_boundary;
 mod bench;
 mod bench_ci;
 mod bench_history;

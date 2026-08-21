@@ -55,6 +55,7 @@ impl DiagnosticBag {
             .filter(|diagnostic| diagnostic.severity == DiagnosticSeverity::Warning)
     }
 
+    #[cfg(test)]
     pub(crate) fn diagnostics(&self) -> &[CompilerDiagnostic] {
         &self.diagnostics
     }

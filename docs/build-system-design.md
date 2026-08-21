@@ -1044,13 +1044,13 @@ The compiler owns generic template validation, call-site inference, request iden
 The build system owns:
 
 - project-wide or package-wide request aggregation
-- deterministic deduplication against already published sidecars
+- the published set every request is deduplicated against, lent as an immutable view
 - worklist scheduling and request availability
 - completed sidecar storage and transactional publication
 - sidecar placement
 - reuse across entries
 
-Build-owned generated scheduling means boundary request availability, deduplication, publication and reuse. It does not include generated HIR materialisation, HIR mutation, borrow rechecks or call-summary convergence. Those are compiler semantics completed inside one module compilation transaction, from an immutable view of already published generated identities and summaries that the build system supplies.
+Build-owned generated scheduling means boundary request availability, publication and reuse. It does not include request deduplication, generated HIR materialisation, HIR mutation, borrow rechecks or call-summary convergence. Those are compiler semantics completed inside one module compilation transaction, from an immutable view of already published generated identities and summaries that the build system supplies. The build system owns the set a request is measured against; the compiler decides that an already published identity needs no new materialisation.
 
 Requests are keyed by stable generic declaration identity, canonical concrete type identities and required evidence identities.
 

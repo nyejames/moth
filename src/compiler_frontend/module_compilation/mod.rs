@@ -35,14 +35,14 @@ pub(crate) mod service;
 pub(crate) mod stages;
 
 pub(crate) use artefact::{CompiledModuleArtifact, ModuleExternalImport, ModuleRootActivity};
-pub use artefact::{Module, ResolvedConstFragment};
+pub(crate) use artefact::{Module, ResolvedConstFragment};
 pub(crate) use context::ModuleCompilationContext;
 pub(crate) use generated::{
     CompletedGeneratedFunction, GeneratedFunctionDelta, GeneratedFunctionId,
     GeneratedFunctionSidecar, KnownGeneratedFunctions, ProviderMaterialisationRegistry,
     validate_completed_generated_record,
 };
-pub use options::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
+pub(crate) use options::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 pub(crate) use options::FrontendOptions;
 pub(crate) use outcome::{ModuleCompilationOutcome, ModuleSemanticResult};
 pub(crate) use prepared::PreparedModuleInput;

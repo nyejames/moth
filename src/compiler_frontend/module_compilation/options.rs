@@ -13,7 +13,7 @@ use crate::compiler_frontend::paths::path_format::{OutputPathStyle, PathStringFo
 /// WHY: the limit is a compiler semantic guard against non-terminating const template folding, so
 ///      the compiler owns its default. Project configuration may lower it through
 ///      [`FrontendOptions`], and the build system owns the config key and its accepted maximum.
-pub const DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS: usize = 10_000;
+pub(crate) const DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS: usize = 10_000;
 
 /// Settings one frontend instance consumes.
 #[derive(Clone, Debug)]
@@ -24,24 +24,19 @@ pub(crate) struct FrontendOptions {
     pub(crate) template_const_loop_iteration_limit: usize,
 }
 
-impl FrontendOptions {
-    /// Build options for a caller that only needs to override the rendered path origin.
+impl Default for FrontendOptions {
+    /// The settings a caller with no project configuration compiles under.
     ///
-    /// WHY: every current caller derives portable output paths from one origin string and keeps
-    ///      the compiler's own loop ceiling, so this is the whole boundary surface today.
-    pub(crate) fn from_origin(origin: String) -> Self {
+    /// WHY: the direct Moth template service and every fixture compile one standalone source, so
+    ///      there is no configured origin to render against and no reason to lower the compiler's
+    ///      own loop ceiling. `Config::frontend_options` is the projection that overrides both.
+    fn default() -> Self {
         Self {
             path_format_config: PathStringFormatConfig {
-                origin,
+                origin: String::from("/"),
                 output_style: OutputPathStyle::Portable,
             },
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         }
-    }
-}
-
-impl Default for FrontendOptions {
-    fn default() -> Self {
-        Self::from_origin(String::from("/"))
     }
 }

@@ -69,7 +69,7 @@ Base module artefacts remain immutable. Concrete generic functions live in **gen
 
 Each sidecar carries its request identity, generated-local type context, concrete HIR, borrow facts, lifetime facts and summaries, link facts and fingerprints. A generated function may request further instances.
 
-Two owners meet here, and the split matters. The **compiler** materialises each request, validates its HIR, borrow-checks it, converges call summaries and returns a completed generated delta for one module compilation. The **build system** aggregates requests across the boundary, deduplicates them against already published sidecars, stores completed sidecars and publishes them transactionally. Its worklist reaches a fixed point by scheduling more compiler work, not by driving semantic stages itself.
+Two owners meet here, and the split matters. The **compiler** deduplicates each request against the published set, materialises what is left, validates its HIR, borrow-checks it, converges call summaries and returns a completed generated delta for one module compilation. The **build system** aggregates requests across the boundary, lends the published set as an immutable view, stores completed sidecars and publishes them transactionally. Its worklist reaches a fixed point by scheduling more compiler work, not by driving semantic stages itself.
 
 This avoids mutating the declaring module every time a consumer monomorphises a call. New concrete code grows beside the base. The base stays put.
 

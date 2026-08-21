@@ -1,21 +1,28 @@
-//! Tokenization, header parsing, dependency sorting, and AST construction for Stage 0 project
-//! config files.
+//! Project config compilation service.
 //!
-//! WHAT: loads one self-contained `config.moth` through the normal frontend pipeline up to AST,
-//! then hands the folded AST off to config validation.
-//! WHY: config uses normal Moth syntax, but bootstrap must finish before source-package discovery.
-//! Reusing tokenizer → headers → dependency sort → AST preserves constant folding and type
-//! checking without constructing a second dependency graph or package resolver.
-use crate::build_system::create_project_modules::extract_source_code;
-use crate::build_system::project_config::ProjectConfigParseServices;
-use std::sync::Arc;
+//! WHAT: the compiler-owned stage sequence for one authored `config.moth` — tokenization,
+//!       declaration-shell preparation, interface binding for the single authored source, local
+//!       declaration ordering and AST semantics — stopping at folded AST values.
+//! WHY:  config is written in normal Moth syntax but must bootstrap before source-package discovery
+//!       exists, so it needs a shorter path than canonical module compilation. That path is a named
+//!       compiler service rather than a build-owned stage sequence: the build system supplies the
+//!       source and consumes folded values, and never composes preparation, binding, ordering or
+//!       AST itself.
+//!
+//! The service produces no HIR, borrow facts, link facts or public interface. It owns the config
+//! dialect surface — which declaration shapes and dependency clauses `config.moth` accepts — and
+//! the authored key-name spans config diagnostics underline. Config key schema and the application
+//! of folded values to project settings stay build-owned.
 
+use crate::builder_surface::SourceFileKindRegistry;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
+use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::{Ast, AstBuildContext, AstBuildInput};
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, SourceLocation};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticBag, DiagnosticKind, InvalidConfigReason, RuleDiagnosticKind,
 };
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileFrontendPrepareFailure, FileFrontendPrepareOutput, Header, HeaderKind, HeaderParseOptions,
     bind_module_headers, prepare_file_from_tokens, prepare_header_syntax,
@@ -24,7 +31,11 @@ use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_IT
 use crate::compiler_frontend::module_dependencies::resolve_module_dependencies;
 use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
+use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
+use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
+use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
+use crate::compiler_frontend::symbols::identity::FileId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
@@ -33,57 +44,47 @@ use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
 use std::collections::HashMap;
 use std::path::Path;
 
-pub(super) struct ParsedConfigFile {
-    pub(super) ast: Ast,
-    pub(super) errors: Vec<CompilerDiagnostic>,
+/// One authored config source and the capability surface it compiles against.
+pub(crate) struct ConfigCompilationRequest<'a> {
+    /// The config path exactly as the project spelled it.
+    ///
+    /// WHY: this is the authored identity every config diagnostic reports and every authored-scope
+    ///      comparison uses, so it must not be replaced by the canonical form.
+    pub(crate) authored_path: &'a Path,
+    /// The canonical filesystem path the authored config resolved to.
+    pub(crate) canonical_path: &'a Path,
+    pub(crate) source_code: &'a str,
+    pub(crate) style_directives: &'a StyleDirectiveRegistry,
+    pub(crate) binding_packages: &'a ExternalPackageRegistry,
+    pub(crate) source_file_kinds: &'a SourceFileKindRegistry,
+}
+
+/// The folded config source a caller validates and applies.
+pub(crate) struct CompiledConfigSource {
+    pub(crate) ast: Ast,
     /// The interned source identity of the authored `config.moth` file.
     ///
     /// WHY: validation uses the same identity as tokenization and AST entry construction, so
-    /// authored-scope comparisons never re-canonicalize or convert back to `PathBuf`.
-    pub(super) authored_scope: InternedPath,
+    ///      authored-scope comparisons never re-canonicalize or convert back to `PathBuf`.
+    pub(crate) authored_scope: InternedPath,
     /// Header-owned key-name spans keyed by the full declaration path.
     ///
     /// Preserved before AST consumes the headers so key diagnostics can underline the authored
     /// name while downstream setting diagnostics keep using the declaration value location.
-    pub(super) authored_key_name_locations: HashMap<InternedPath, SourceLocation>,
+    pub(crate) authored_key_name_locations: HashMap<InternedPath, SourceLocation>,
 }
 
-// -------------------------
-//  Config Parsing Entry
-// -------------------------
-
-/// Parse `config.moth` through tokenizer → headers → dependency sort → AST.
+/// Compile one authored `config.moth` to folded AST values.
 ///
-/// WHY: value validation happens later, but the pipeline must surface all structural errors before
-/// Stage 0 tries to apply any settings.
-pub(super) fn parse_config_file(
-    config_path: &Path,
-    services: &ProjectConfigParseServices<'_>,
+/// Every stage failure is returned as diagnostics; nothing partial is handed back.
+pub(crate) fn compile_config_source(
+    request: ConfigCompilationRequest<'_>,
     string_table: &mut StringTable,
-) -> Result<ParsedConfigFile, CompilerMessages> {
-    let mut errors = Vec::new();
-
-    let canonical_config = match std::fs::canonicalize(config_path) {
-        Ok(canonical_config) => canonical_config,
-        Err(error) => {
-            return Err(CompilerMessages::from_error(
-                CompilerError::file_error(
-                    config_path,
-                    format!("Failed to canonicalize config path: {error}"),
-                    string_table,
-                ),
-                string_table.clone(),
-            ));
-        }
-    };
-
-    // -------------------------
-    //  Authored Config Identity
-    // -------------------------
+) -> Result<CompiledConfigSource, CompilerMessages> {
     // Construct the one exact authored `InternedPath` before file preparation and reuse it for
-    // tokenization, AST entry identity and validation ownership.
-    let authored_scope =
-        InternedPath::try_from_filesystem_path(config_path, string_table).map_err(|non_utf8| {
+    // tokenization, AST entry identity and diagnostic ownership.
+    let authored_scope = InternedPath::try_from_filesystem_path(request.authored_path, string_table)
+        .map_err(|non_utf8| {
             CompilerMessages::from_error(
                 CompilerError::file_error(
                     &non_utf8.path,
@@ -97,98 +98,55 @@ pub(super) fn parse_config_file(
             )
         })?;
 
-    // -------------------------
-    //  Tokenize and Prepare Config
-    // -------------------------
-    let prepared_output = prepare_config_file(
-        &canonical_config,
-        authored_scope.clone(),
-        config_path,
-        services,
-        &mut errors,
-        string_table,
-    )?;
-    let prepared_outputs = prepared_output.into_iter().collect::<Vec<_>>();
-
-    if !errors.is_empty() {
+    // 1. Tokenize and prepare the single authored file, then apply the config dialect surface.
+    let mut surface_errors = Vec::new();
+    let prepared_file =
+        prepare_config_file(&request, &authored_scope, &mut surface_errors, string_table)?;
+    if !surface_errors.is_empty() {
         return Err(CompilerMessages::from_diagnostics(
-            errors,
+            surface_errors,
             string_table.clone(),
         ));
     }
+    let prepared_file = prepared_file.into_iter().collect::<Vec<_>>();
 
-    // -------------------------
-    //  Header Syntax Preparation + Interface Binding
-    // -------------------------
-    // WHY: syntax preparation is provider-independent and binding resolves retained shells
-    // against provider interfaces. Both phases share the same config-specific duplicate-key
-    // diagnostic routing, so the error path is extracted once.
-    let collect_header_diagnostics =
-        |bag: DiagnosticBag,
-         errors: &mut Vec<CompilerDiagnostic>,
-         authored_scope: &InternedPath| {
-            for diagnostic in bag.diagnostics() {
-                if is_authored_config_duplicate(diagnostic, authored_scope) {
-                    errors.push(config_diagnostic(
-                        None,
-                        InvalidConfigReason::DuplicateKey,
-                        diagnostic.primary_location.clone(),
-                    ));
-                } else {
-                    errors.push(diagnostic.clone());
-                }
+    // 2. Aggregate retained syntax and bind it against the builder's provider interfaces.
+    //
+    // WHY: syntax preparation is provider-independent and binding resolves retained shells against
+    //      provider interfaces. Both phases share the same duplicate-key diagnostic routing, so the
+    //      error path is classified once.
+    let bound_headers =
+        match prepare_header_syntax(prepared_file, string_table).and_then(|prepared| {
+            bind_module_headers(
+                prepared,
+                request.binding_packages,
+                &ExternalImportResolutionTable::default(),
+                &SourceProviderDependencySet::default(),
+                None,
+                string_table,
+            )
+        }) {
+            Ok(headers) => headers,
+            Err(bag) => {
+                return Err(CompilerMessages::from_diagnostics(
+                    classify_header_diagnostics(bag, &authored_scope),
+                    string_table.clone(),
+                ));
             }
         };
 
-    let header_result = match prepare_header_syntax(prepared_outputs, string_table) {
-        Ok(prepared) => bind_module_headers(
-            prepared,
-            &services.frontend_surface.binding_packages,
-            &ExternalImportResolutionTable::default(),
-            &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
-            None,
-            string_table,
-        ),
-        Err(bag) => Err(bag),
-    };
-    let bound_headers = match header_result {
-        Ok(headers) => headers,
-        Err(bag) => {
-            collect_header_diagnostics(bag, &mut errors, &authored_scope);
-            return Err(CompilerMessages::from_diagnostics(
-                errors,
-                string_table.clone(),
-            ));
-        }
-    };
+    // 3. Order local declarations.
+    let sorted = resolve_module_dependencies(bound_headers, string_table).map_err(|bag| {
+        CompilerMessages::from_diagnostics(bag.into_diagnostics(), string_table.clone())
+    })?;
 
-    // -------------------------
-    //  Dependency Sorting
-    // -------------------------
-    let sorted = match resolve_module_dependencies(bound_headers, string_table) {
-        Ok(sorted) => sorted,
-        Err(bag) => {
-            errors.extend(bag.into_diagnostics());
-            return Err(CompilerMessages::from_diagnostics(
-                errors,
-                string_table.clone(),
-            ));
-        }
-    };
-
-    // -------------------------
-    //  Authored Key-Name Spans
-    // -------------------------
-    // Preserve key-name spans before AST consumes the headers. The full header path becomes the
-    // declaration ID, so validation can recover the exact span without rebuilding an identity.
+    // 4. Preserve key-name spans before AST consumes the headers. The full header path becomes the
+    //    declaration ID, so validation can recover the exact span without rebuilding an identity.
     let authored_key_name_locations =
         collect_authored_config_key_name_locations(&sorted.headers, &authored_scope);
 
-    // -------------------------
-    //  AST Construction
-    // -------------------------
-    let external_package_registry = Arc::new(services.frontend_surface.binding_packages.clone());
-    let config_root = canonical_config.parent().ok_or_else(|| {
+    // 5. Fold the ordered declarations. Config stops here: no HIR, borrow facts or interface.
+    let config_root = request.canonical_path.parent().ok_or_else(|| {
         CompilerMessages::from_error_ref(
             CompilerError::compiler_error("Canonical config path has no project root"),
             string_table,
@@ -198,11 +156,11 @@ pub(super) fn parse_config_file(
         config_root.to_path_buf(),
         config_root.to_path_buf(),
         PreparedSourcePackageRoots::empty(),
-        &services.frontend_surface.source_file_kinds,
+        request.source_file_kinds,
     )
     .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
-    let ast_result = Ast::new(
+    let ast = Ast::new(
         AstBuildInput {
             headers: sorted.headers,
             module_symbols: sorted.module_symbols,
@@ -210,12 +168,12 @@ pub(super) fn parse_config_file(
             top_level_const_fragments: sorted.top_level_const_fragments,
         },
         AstBuildContext {
-            root_role: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
-            external_package_registry,
-            style_directives: services.style_directives,
+            root_role: ModuleRootRole::Normal,
+            external_package_registry: std::sync::Arc::new(request.binding_packages.clone()),
+            style_directives: request.style_directives,
             string_table,
             entry_dir: authored_scope.clone(),
-            build_profile: crate::compiler_frontend::FrontendBuildProfile::Dev,
+            build_profile: FrontendBuildProfile::Dev,
             project_path_resolver: Some(path_resolver),
             path_format_config: PathStringFormatConfig::default(),
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
@@ -225,18 +183,11 @@ pub(super) fn parse_config_file(
             #[cfg(feature = "timers")]
             timing_metric_family: crate::compiler_frontend::ast::AstTimingMetricFamily::Config,
         },
-    );
+    )?
+    .ast;
 
-    let ast = match ast_result {
-        Ok(build_result) => build_result.ast,
-        Err(messages) => {
-            return Err(messages);
-        }
-    };
-
-    Ok(ParsedConfigFile {
+    Ok(CompiledConfigSource {
         ast,
-        errors,
         authored_scope,
         authored_key_name_locations,
     })
@@ -246,34 +197,29 @@ pub(super) fn parse_config_file(
 //  Per-File Preparation
 // -------------------------
 
-/// Tokenize and header-parse the single authored config file.
+/// Tokenize and header-parse the single authored config file, then apply the config dialect surface.
 ///
-/// A dependency clause is rejected from the retained structural shell before interface binding can resolve
-/// a package or filesystem target.
+/// Dependency clauses are rejected from the retained structural shell before interface binding can
+/// resolve a package or filesystem target.
 fn prepare_config_file(
-    file_path: &Path,
-    scope: InternedPath,
-    entry_file_path: &Path,
-    services: &ProjectConfigParseServices<'_>,
+    request: &ConfigCompilationRequest<'_>,
+    authored_scope: &InternedPath,
     errors: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
 ) -> Result<Option<FileFrontendPrepareOutput>, CompilerMessages> {
-    let source = extract_source_code(file_path, string_table)
-        .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
-
-    // The caller already interned the file's scope identity, so tokenization reuses it directly
-    // without a second `InternedPath::try_from_filesystem_path` round-trip.
+    // The authored scope identity is already interned, so tokenization reuses it directly without a
+    // second `InternedPath::try_from_filesystem_path` round-trip.
     // Config is one self-contained file and never participates in provider binding, so the
-    // placeholder file identity only stamps shells that are rejected as
-    // `ConfigImportUnsupported` immediately after preparation. It is intentionally isolated
-    // from every module/package identity space.
+    // placeholder file identity only stamps shells that are rejected as `ConfigImportUnsupported`
+    // immediately after preparation. It is intentionally isolated from every module/package
+    // identity space.
     let mut token_stream = match tokenize(
-        &source,
-        &scope,
+        request.source_code,
+        authored_scope,
         TokenizerEntryMode::SourceFile,
-        services.style_directives,
+        request.style_directives,
         string_table,
-        Some(crate::compiler_frontend::symbols::identity::FileId(0)),
+        Some(FileId(0)),
     ) {
         Ok(tokens) => tokens,
         Err(error) => {
@@ -281,11 +227,11 @@ fn prepare_config_file(
             return Ok(None);
         }
     };
-    token_stream.canonical_os_path = Some(file_path.to_path_buf());
+    token_stream.canonical_os_path = Some(request.canonical_path.to_path_buf());
 
     let output = match prepare_file_from_tokens(
         token_stream,
-        entry_file_path,
+        request.authored_path,
         &HeaderParseOptions::default(),
         string_table,
         0,
@@ -350,19 +296,20 @@ fn collect_authored_config_key_name_locations(
 }
 
 // -------------------------
-//  Structural Validation
+//  Config Dialect Surface
 // -------------------------
 
 /// Reject unsupported surfaces in the authored `config.moth` file after header parsing has
 /// normalized declaration shapes.
 ///
-/// WHY: Stage 0 config uses frontend parsing for expression semantics, but config is not a normal
-/// module. It is compile-time-only, so runtime declarations such as functions and standalone
-/// templates are rejected before AST. Type aliases, structs, and choices are allowed as support
-/// declarations because they can be referenced by compile-time constant expressions. Trait
-/// surfaces are source-module metadata and are deliberately kept out of config.
-/// Dependency clauses are rejected from `FileFrontendPrepareOutput.file_dependency_clauses` before this declaration
-/// validation. Start-body validation happens later through `validation.rs` and AST const facts.
+/// WHY: config uses frontend parsing for expression semantics, but config is not a normal module.
+/// It is compile-time-only, so runtime declarations such as functions and standalone templates are
+/// rejected before AST. Type aliases, structs, and choices are allowed as support declarations
+/// because they can be referenced by compile-time constant expressions. Trait surfaces are
+/// source-module metadata and are deliberately kept out of config.
+/// Dependency clauses are rejected from `FileFrontendPrepareOutput.file_dependency_clauses` before
+/// this declaration validation. Start-body validation happens later through the caller's config
+/// validation and AST const facts.
 fn validate_authored_config_surface(headers: &[Header]) -> Vec<CompilerDiagnostic> {
     let mut errors = Vec::new();
 
@@ -402,6 +349,27 @@ fn validate_authored_config_surface(headers: &[Header]) -> Vec<CompilerDiagnosti
 //  Duplicate Classification
 // -------------------------
 
+/// Re-route an authored duplicate declaration to the config key vocabulary.
+fn classify_header_diagnostics(
+    bag: DiagnosticBag,
+    authored_scope: &InternedPath,
+) -> Vec<CompilerDiagnostic> {
+    bag.into_diagnostics()
+        .into_iter()
+        .map(|diagnostic| {
+            if is_authored_config_duplicate(&diagnostic, authored_scope) {
+                config_diagnostic(
+                    None,
+                    InvalidConfigReason::DuplicateKey,
+                    diagnostic.primary_location.clone(),
+                )
+            } else {
+                diagnostic
+            }
+        })
+        .collect()
+}
+
 fn is_duplicate_config_header_error(diagnostic: &CompilerDiagnostic) -> bool {
     matches!(
         diagnostic.kind,
@@ -429,3 +397,7 @@ fn config_diagnostic(
 ) -> CompilerDiagnostic {
     CompilerDiagnostic::invalid_config_reason(key, reason, location)
 }
+
+#[cfg(test)]
+#[path = "tests/config_tests.rs"]
+mod tests;

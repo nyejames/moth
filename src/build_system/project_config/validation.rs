@@ -9,7 +9,7 @@ use crate::build_system::output::{
     ValidatedDirectoryOutputSettings, ValidatedOutputFolder, canonical_output_root_for_identity,
     classify_output_folder, output_path_identity, validate_output_folder_containment,
 };
-use crate::build_system::project_config::parsing::ParsedConfigFile;
+use crate::compiler_frontend::single_source_compilation::CompiledConfigSource;
 
 use crate::builder_surface::config_key_registry::{
     ConfigKeyEntry, ConfigKeyOwner, ConfigValueShape, ProjectConfigKeyRegistry,
@@ -42,7 +42,7 @@ use std::path::{Path, PathBuf};
 /// has produced folded expressions.
 pub(super) fn validate_and_apply_config_ast(
     config: &mut Config,
-    parsed_config: &ParsedConfigFile,
+    compiled_config: &CompiledConfigSource,
     config_keys: &ProjectConfigKeyRegistry,
     string_table: &mut StringTable,
 ) -> Result<(), Vec<CompilerDiagnostic>> {
@@ -54,10 +54,10 @@ pub(super) fn validate_and_apply_config_ast(
     // authored scope is the exact interned identity the parser used for tokenization, so
     // membership is checked by direct interned equality rather than by converting paths back to
     // `PathBuf`.
-    let authored_scope = &parsed_config.authored_scope;
+    let authored_scope = &compiled_config.authored_scope;
 
     // 1. Extract authored top-level compile-time constants.
-    for declaration in &parsed_config.ast.module_constants {
+    for declaration in &compiled_config.ast.module_constants {
         // A module constant's source file is the parent of its symbol path.
         // WHY: the value expression's location scope may be normalized to an imported
         // file when the initializer references an imported constant, so the declaration id
@@ -75,7 +75,7 @@ pub(super) fn validate_and_apply_config_ast(
             errors.push(config_diagnostic(
                 Some(string_table.intern(&key)),
                 InvalidConfigReason::DuplicateKey,
-                key_identity_location(declaration, &parsed_config.authored_key_name_locations)
+                key_identity_location(declaration, &compiled_config.authored_key_name_locations)
                     .clone(),
             ));
             continue;
@@ -85,8 +85,8 @@ pub(super) fn validate_and_apply_config_ast(
             config,
             declaration,
             config_keys,
-            &parsed_config.ast.const_facts,
-            &parsed_config.authored_key_name_locations,
+            &compiled_config.ast.const_facts,
+            &compiled_config.authored_key_name_locations,
             string_table,
         ) {
             errors.append(&mut decl_errors);
@@ -96,7 +96,7 @@ pub(super) fn validate_and_apply_config_ast(
     // 2. Reject authored start-body statements in `config.moth`.
     // Only top-level compile-time constants are config entries. Plain bindings and runtime
     // statements are not.
-    for node in &parsed_config.ast.nodes {
+    for node in &compiled_config.ast.nodes {
         let NodeKind::Function(path, _, body) = &node.kind else {
             continue;
         };

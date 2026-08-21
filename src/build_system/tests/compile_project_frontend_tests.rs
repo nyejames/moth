@@ -2476,7 +2476,7 @@ fn directory_project_rejects_missing_entry_root() {
         style_directives: &style_directives,
         frontend_surface: &frontend_surface,
     };
-    let parse_result = crate::build_system::project_config::parse_project_config_file(
+    let parse_result = crate::build_system::project_config::compile_project_config_file(
         &mut config,
         &config_path,
         &services,

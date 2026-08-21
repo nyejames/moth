@@ -1,16 +1,22 @@
-//! Stage 0 config loading, parsing, and validation for Moth projects.
+//! Stage 0 config loading and settings application for Moth projects.
 //!
-//! WHAT: owns the public entry points for loading `config.moth` before compilation starts.
-//! WHY: callers only need one stable surface while parsing and validation details stay split by
-//! concern in dedicated helpers.
-mod parsing;
+//! WHAT: owns the public entry points for loading `config.moth` before compilation starts: locating
+//! the file, reading it, calling the compiler's config compilation service and applying the folded
+//! values it returns.
+//! WHY: which file is the project's config, what its keys mean and how accepted values reach
+//! [`Config`] is build policy. The stage sequence that turns config source into folded values is
+//! compiler-owned, so this module composes no frontend stage itself.
 mod validation;
 
 pub(crate) use validation::validate_directory_output_settings;
 
+use crate::build_system::create_project_modules::extract_source_code;
 use crate::build_system::output::ValidatedDirectoryOutputSettings;
 use crate::builder_surface::BuilderSurface;
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::single_source_compilation::{
+    ConfigCompilationRequest, compile_config_source,
+};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::settings::Config;
@@ -40,8 +46,8 @@ pub(crate) struct ProjectConfigParseServices<'a> {
 
 /// Load and validate the project config from `config.moth` before compilation begins (Stage 0).
 ///
-/// Config files are optional. When present this delegates to the parser/validator pipeline and
-/// applies all accepted settings directly to `config`.
+/// Config files are optional. When present this compiles the source through the compiler's config
+/// service, then validates and applies all accepted settings directly to `config`.
 pub fn load_project_config(
     config: &mut Config,
     services: &ProjectConfigParseServices<'_>,
@@ -53,31 +59,53 @@ pub fn load_project_config(
         return validate_directory_output_settings_if_needed(config, string_table);
     }
 
-    parse_project_config_file(config, &config_path, services, string_table)
+    compile_project_config_file(config, &config_path, services, string_table)
 }
 
 // -------------------------
 //  Internal Orchestration
 // -------------------------
 
-/// Parse `config.moth` and extract top-level constant declarations into the `Config` struct.
+/// Compile `config.moth` and extract top-level constant declarations into the `Config` struct.
 ///
-/// WHY: config uses normal Moth syntax, so Stage 0 keeps the tokenizer/header parser in the
-/// loop and then applies a dedicated config-only validation pass.
-pub(crate) fn parse_project_config_file(
+/// WHY: config uses normal Moth syntax, so Stage 0 hands the source to the compiler's config
+/// compilation service and then applies a dedicated config-only validation pass to folded values.
+pub(crate) fn compile_project_config_file(
     config: &mut Config,
     config_path: &Path,
     services: &ProjectConfigParseServices<'_>,
     string_table: &mut StringTable,
 ) -> Result<Option<ValidatedDirectoryOutputSettings>, CompilerMessages> {
-    // 1. Run the specialized config parser.
-    let mut parsed_config = parsing::parse_config_file(config_path, services, string_table)?;
-    let mut errors = std::mem::take(&mut parsed_config.errors);
+    // 1. Compile the config source to folded values.
+    let canonical_config_path = std::fs::canonicalize(config_path).map_err(|error| {
+        CompilerMessages::from_error(
+            CompilerError::file_error(
+                config_path,
+                format!("Failed to canonicalize config path: {error}"),
+                string_table,
+            ),
+            string_table.clone(),
+        )
+    })?;
+    let source_code = extract_source_code(&canonical_config_path, string_table)
+        .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
+    let compiled_config = compile_config_source(
+        ConfigCompilationRequest {
+            authored_path: config_path,
+            canonical_path: &canonical_config_path,
+            source_code: &source_code,
+            style_directives: services.style_directives,
+            binding_packages: &services.frontend_surface.binding_packages,
+            source_file_kinds: &services.frontend_surface.source_file_kinds,
+        },
+        string_table,
+    )?;
 
     // 2. Validate and apply the folded AST to the live Config object.
+    let mut errors = Vec::new();
     if let Err(mut validation_errors) = validation::validate_and_apply_config_ast(
         config,
-        &parsed_config,
+        &compiled_config,
         &services.frontend_surface.config_keys,
         string_table,
     ) {

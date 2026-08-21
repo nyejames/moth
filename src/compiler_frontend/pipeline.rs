@@ -1,7 +1,15 @@
-//! Compiler frontend pipeline orchestration.
+//! The frontend stage facade.
 //!
-//! WHAT: wires tokenization, header parsing, dependency sorting, AST/HIR construction, and borrow
-//! validation into the stage flow described in the compiler design overview.
+//! WHAT: one value carrying the registries, options, string table and file identities every stage
+//!       needs, plus the thin per-stage calls that read them.
+//! WHY:  the stage owners each need a different slice of the same immutable context. Holding it
+//!       once keeps a service's flow readable as named stage calls instead of a growing argument
+//!       list threaded through each one.
+//!
+//! This is not a production entry point. The services in `module_compilation` and
+//! `single_source_compilation` decide which stages run and in what order; every method here is
+//! crate-visible so those services and the frontend's own tests can drive one stage, not so build
+//! or project code can assemble a sequence of its own.
 
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::FrontendBuildProfile;
@@ -221,7 +229,7 @@ impl CompilerFrontend {
     }
 
     /// Attach per-module file identities built during Stage 0.
-    pub fn set_source_files(&mut self, source_files: SourceFileTable) {
+    pub(crate) fn set_source_files(&mut self, source_files: SourceFileTable) {
         self.source_files = source_files;
     }
 
@@ -354,7 +362,7 @@ impl CompilerFrontend {
     // ---------------------------
     //  DEPENDENCY SORTING
     // ---------------------------
-    pub fn sort_headers(
+    pub(crate) fn sort_headers(
         &mut self,
         headers: BoundModuleHeaders,
     ) -> Result<SortedHeaders, DiagnosticBag> {
@@ -364,7 +372,7 @@ impl CompilerFrontend {
     // -----------------------------
     //  AST CREATION
     // -----------------------------
-    pub fn headers_to_ast(
+    pub(crate) fn headers_to_ast(
         &mut self,
         sorted: SortedHeaders,
         entry_file_path: &Path,
@@ -425,7 +433,7 @@ impl CompilerFrontend {
     // -----------------------------
     //  HIR GENERATION
     // -----------------------------
-    pub fn generate_hir(
+    pub(crate) fn generate_hir(
         &mut self,
         ast: Ast,
         function_origin_lookup: HirFunctionOriginLookup,
@@ -441,7 +449,7 @@ impl CompilerFrontend {
     // ------------------------------
     //  BORROW CHECKING AND ANALYSIS
     // ------------------------------
-    pub fn check_borrows(
+    pub(crate) fn check_borrows(
         &self,
         hir_module: &HirModule,
     ) -> Result<BorrowCheckReport, CompilerMessages> {

@@ -15,6 +15,7 @@ use crate::compiler_frontend::hir::reachability::{
 };
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::module_compilation::generated::test_fixtures::PublishedBoundary;
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallSummary,
 };
@@ -452,8 +453,8 @@ fn convergence_direct_summaries_read_exact_active_base_report_facts() {
     let node = model
         .node_id(&ConvergenceNode::Generated(Box::new(generated)))
         .expect("generated node should exist");
-    let generated_store = crate::build_system::create_project_modules::generated_store::BoundaryGeneratedFunctionStore::default();
-    let transaction = GeneratedFunctionTransaction::new(generated_store.known_generated());
+    let published = PublishedBoundary::empty();
+    let transaction = GeneratedFunctionTransaction::new(published.view());
 
     let direct = direct_convergence_summaries(&model, node, &transaction, &base_hir, &base_report)
         .expect("active-base summaries should resolve from the base report");
@@ -555,13 +556,10 @@ fn counter_test_module() -> crate::compiler_frontend::module_compilation::Module
 #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
 #[test]
 fn unchanged_generated_summary_counts_comparison_without_change() {
-    use crate::build_system::create_project_modules::generated_store::BoundaryGeneratedFunctionStore;
     use crate::compiler_frontend::instrumentation::{
         capture_frontend_counters_for_test, log_frontend_counters, reset_frontend_counters,
     };
-    use crate::compiler_frontend::module_compilation::{
-        CompletedGeneratedFunction, GeneratedFunctionSidecar,
-    };
+    use crate::compiler_frontend::module_compilation::GeneratedFunctionSidecar;
     use crate::timing::start_benchmark_collection;
 
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
@@ -571,13 +569,12 @@ fn unchanged_generated_summary_counts_comparison_without_change() {
 
     let identity = generated_identity("stable");
     let stable = summary(FunctionReturnAliasSummary::Fresh);
-    let mut generated_store = BoundaryGeneratedFunctionStore::default();
-    generated_store.push_completed_for_test(CompletedGeneratedFunction {
-        identity: identity.clone(),
-        summary: stable.clone(),
-        sidecar: GeneratedFunctionSidecar::new(identity.clone(), counter_test_module()),
-    });
-    let mut transaction = GeneratedFunctionTransaction::new(generated_store.known_generated());
+    let published = PublishedBoundary::with_sidecar(
+        identity.clone(),
+        stable.clone(),
+        GeneratedFunctionSidecar::new(identity.clone(), counter_test_module()),
+    );
+    let mut transaction = GeneratedFunctionTransaction::new(published.view());
 
     assert!(
         !super::update_generated_summary(&mut transaction, &identity, stable)

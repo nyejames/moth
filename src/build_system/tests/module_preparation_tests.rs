@@ -418,12 +418,11 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
 /// WHAT: `prepare_module` runs on a `ModulePreparationContext` that carries no provider-interface
 ///       values — only style directives and the project path resolver — and retains a
 ///       `PreparedModule` carrying `PreparedHeaderSyntax`, the module string table and source
-///       identities. `compile_module_semantic` runs on a separately constructed
-///       `FrontendModuleBuildContext` that owns the provider interfaces, and consumes only the
+///       identities. `compile_module` runs on a separately constructed
+///       `ModuleCompilationContext` that owns the provider interfaces, and consumes only the
 ///       retained payload through HIR and borrow validation. The `PreparedModule` type carries no
 ///       source text or tokens, so the type system prevents semantic compilation from rerunning
-///       file preparation, and the boundary lets Phase 5 schedule provider binding between the
-///       two calls.
+///       file preparation, and the boundary is where provider binding is scheduled.
 #[test]
 fn prepare_module_retains_header_syntax_for_semantic_compilation() {
     let temp_dir = tempfile::tempdir().expect("should create temp dir");

@@ -1,7 +1,36 @@
-//! Compiler frontend pipeline.
+//! The compiler frontend.
 //!
-//! WHAT: tokenization, header parsing, dependency sorting, AST/HIR construction, and borrow
-//! validation, wired into the stage flow described in the compiler design overview.
+//! WHAT: every semantic stage between source text and validated HIR — tokenization, declaration
+//!       shells, interface binding, local ordering, AST semantics, public-interface projection,
+//!       HIR lowering and borrow validation — plus the three production entry points that
+//!       sequence them.
+//! WHY:  local semantic compilation has one owner. Build and project code chooses one of the
+//!       named services below and handles the result; it never composes the stages itself. The
+//!       dependency direction is stated in `style-guide.mtf > Production layering and stage
+//!       ownership` and checked by `xtask/src/architecture_boundary.rs`.
+//!
+//! # Production entry points
+//! - [`module_compilation::compile_module`]: the canonical service for one ready module, from
+//!   retained syntax through borrow validation and generated semantic completion
+//! - [`single_source_compilation`]: the two named shorter paths — project config compilation and
+//!   direct Moth template compilation — which stop at folded AST values
+//! - [`pipeline::CompilerFrontend`]: the stage facade those services drive, not an entry point of
+//!   its own
+//!
+//! # Stage owners
+//! - [`tokenizer`], [`numeric_text`]: source text to tokens
+//! - [`headers`], [`declaration_syntax`], [`paths`]: retained declaration and dependency shells,
+//!   file-owned path syntax, and interface binding against provider interfaces
+//! - [`module_dependencies`]: local declaration ordering
+//! - [`ast`]: AST semantics, constants, generics, templates and TIR
+//! - [`public_interface`]: the projected interface a provider publishes
+//! - [`hir`]: HIR lowering, validation and reachability
+//! - [`analysis`]: borrow validation over validated HIR
+//!
+//! # What this module does NOT own
+//! - Which source belongs to a module, when it is prepared and what happens to a compiled result,
+//!   which stay under `build_system`
+//! - Project aggregation, entry assembly, output policy and builder capability surfaces
 
 pub(crate) mod ast;
 pub(crate) mod declaration_syntax;
@@ -57,6 +86,7 @@ pub(crate) mod arena;
 pub(crate) mod module_compilation;
 pub(crate) mod module_metadata;
 pub(crate) mod paths;
+pub(crate) mod single_source_compilation;
 
 mod pipeline;
 
