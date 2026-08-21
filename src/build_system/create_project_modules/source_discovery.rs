@@ -32,7 +32,9 @@ use crate::compiler_frontend::paths::path_resolution::ResolvedDependencyFile;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::SourceFileTable;
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{
+    StringIdRemap, StringTable, StringTableForkSource,
+};
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
 use crate::counter_observation;
@@ -57,6 +59,16 @@ use super::source_tree_index::{SourceClassification, SourceId, SourceTreeIndex};
 /// The threshold keeps tiny projects and mostly-cached modules on the cheaper serial path while
 /// still letting markdown-heavy modules overlap independent filesystem reads.
 pub(super) const STAGE0_PARALLEL_SOURCE_LOAD_MIN_FILES: usize = 8;
+
+/// Minimum owned-source batch size before Stage 0 overlaps independent reads and tokenization.
+///
+/// Tiny directory modules stay on the cheaper iterator path; the directory boundary still keeps
+/// provider resolution serial while larger owned-source batches use Rayon for provider-free work.
+const STAGE0_PARALLEL_SOURCE_PREPARE_MIN_FILES: usize = 16;
+
+pub(super) fn should_parallelize_owned_source_preparation(source_count: usize) -> bool {
+    source_count >= STAGE0_PARALLEL_SOURCE_PREPARE_MIN_FILES
+}
 
 /// Mutable external-import state shared across Stage 0 reachable-file discovery.
 ///
@@ -355,6 +367,124 @@ pub(super) fn prepare_owned_source_input(
             source_path: record.canonical_path().to_path_buf(),
         },
     })
+}
+
+/// One provider-independent source input prepared against a batch-local string-table fork.
+///
+/// WHAT: retains either a tokenized source input or its source-local failure until the serial
+///       reachability walk decides whether the source is semantically reachable.
+/// WHY: batching all owned candidates can speculatively read/tokenize unreachable files, but it
+///      must not surface their diagnostics or merge their strings into the module unless the
+///      existing header-owned BFS reaches that source.
+pub(super) struct PreparedOwnedSource {
+    string_table: StringTable,
+    base_len: usize,
+    input: Result<PreparedSourceInput, SourceDiscoveryError>,
+}
+
+/// Prepare a module's provider-independent owned-source candidates as one deterministic batch.
+///
+/// Reads and tokenization touch no provider registry, resolution table or external cache, so a
+/// sufficiently large candidate batch can use Rayon. The returned map is consumed by the serial
+/// BFS in deterministic reachability order; selected inputs merge their local string delta and
+/// remap retained tokens immediately before header preparation. Retained outputs are later sorted
+/// by canonical source order before the module handoff. Unreachable candidates are dropped
+/// without merging, preserving the existing semantic source set and diagnostic behaviour.
+pub(super) fn prepare_owned_source_inputs(
+    source_ids: &[SourceId],
+    source_tree_index: &SourceTreeIndex,
+    style_directives: &StyleDirectiveRegistry,
+    fork_source: &StringTableForkSource,
+    #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
+) -> FxHashMap<SourceId, PreparedOwnedSource> {
+    let prepare_source = |&source_id: &SourceId| {
+        let fork = fork_source.fork_for_module();
+        let (mut string_table, base_len) = fork.into_parts();
+        let input = crate::timed_stage_attributed!(
+            crate::timing::TimingMetric::FrontendPrepare,
+            timing_context,
+            prepare_owned_source_input(
+                source_id,
+                source_tree_index,
+                style_directives,
+                &mut string_table,
+            ),
+        );
+
+        (
+            source_id,
+            PreparedOwnedSource {
+                string_table,
+                base_len,
+                input,
+            },
+        )
+    };
+
+    let prepared_sources = source_ids
+        .par_iter()
+        .map(prepare_source)
+        .collect::<Vec<_>>();
+
+    prepared_sources.into_iter().collect()
+}
+
+/// Merge one selected batched input into the module string table before header preparation.
+pub(super) fn merge_prepared_owned_source(
+    source_id: SourceId,
+    prepared_sources: &mut FxHashMap<SourceId, PreparedOwnedSource>,
+    string_table: &mut StringTable,
+) -> Result<PreparedSourceInput, SourceDiscoveryError> {
+    let Some(prepared) = prepared_sources.remove(&source_id) else {
+        return Err(SourceDiscoveryError::from(CompilerError::compiler_error(
+            format!(
+                "Prepared source ID {} is absent from the owned-source batch",
+                source_id.index(),
+            ),
+        )));
+    };
+    let remap = string_table.merge_delta_from(&prepared.string_table, prepared.base_len);
+
+    match prepared.input {
+        Ok(mut input) => {
+            remap_prepared_source_input(&mut input, &remap)?;
+            Ok(input)
+        }
+        Err(error) => Err(remap_source_discovery_error(error, &remap, string_table)),
+    }
+}
+
+fn remap_prepared_source_input(
+    input: &mut PreparedSourceInput,
+    remap: &StringIdRemap,
+) -> Result<(), CompilerError> {
+    if let PreparedSourceInput::Moth { tokens, .. } = input {
+        tokens.remap_preparing_string_ids(remap)?;
+    }
+
+    Ok(())
+}
+
+fn remap_source_discovery_error(
+    error: SourceDiscoveryError,
+    remap: &StringIdRemap,
+    string_table: &StringTable,
+) -> SourceDiscoveryError {
+    match error {
+        SourceDiscoveryError::Diagnostic(mut diagnostic) => {
+            diagnostic.remap_string_ids(remap);
+            SourceDiscoveryError::Diagnostic(diagnostic)
+        }
+        SourceDiscoveryError::Messages(mut messages) => {
+            messages.remap_string_ids(remap);
+            messages.string_table = string_table.clone();
+            SourceDiscoveryError::Messages(messages)
+        }
+        SourceDiscoveryError::Infrastructure(mut error) => {
+            error.remap_string_ids(remap);
+            SourceDiscoveryError::Infrastructure(error)
+        }
+    }
 }
 
 /// Assemble `PreparedSourceInput` values without a semantic set (single-file synthetic path).

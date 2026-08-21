@@ -518,14 +518,33 @@ impl FileTokens {
     // This is wired when file-level frontend outputs are merged before module-wide header
     // aggregation. Keeping it beside token remapping makes the traversal owner explicit.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
+        self.remap_token_payload_string_ids(remap);
+
+        // Path tokens carry dense handles. The prepared-file output owns the single path-table
+        // remap, so substreams remap only their local token and semantic-path payloads here.
+    }
+
+    fn remap_token_payload_string_ids(&mut self, remap: &StringIdRemap) {
         self.src_path.remap_string_ids(remap);
 
         for token in &mut self.tokens {
             token.remap_string_ids(remap);
         }
+    }
 
-        // Path tokens carry dense handles. The prepared-file output owns the single path-table
-        // remap, so substreams remap only their local token and semantic-path payloads here.
+    /// Remap a token stream while it still owns its mutable path table.
+    pub(crate) fn remap_preparing_string_ids(
+        &mut self,
+        remap: &StringIdRemap,
+    ) -> Result<(), CompilerError> {
+        // Validate the mutable lifecycle before changing any token payload. The second access is
+        // safe because the first borrow ends before the payload traversal begins.
+        self.path_syntax.preparing_table_mut()?;
+        self.remap_token_payload_string_ids(remap);
+        self.path_syntax
+            .preparing_table_mut()?
+            .remap_string_ids(remap);
+        Ok(())
     }
 
     /// Rebind this token stream to a new module source identity.

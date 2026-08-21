@@ -250,6 +250,41 @@ fn file_tokens_with_path_tokens_leave_table_remapping_to_the_prepared_file_owner
 }
 
 #[test]
+fn file_tokens_preparing_remap_updates_owned_path_table() {
+    let mut local_table = StringTable::new();
+    let mut global_table = StringTable::new();
+
+    let source_path = InternedPath::from_single_str("module.moth", &mut local_table);
+    let mut path_syntax = PathSyntaxTable::new();
+    let button = path_syntax.push(
+        InternedPath::from_components(vec![local_table.intern("ui"), local_table.intern("Button")]),
+        make_location(source_path.clone()),
+    );
+    let tokens = vec![make_token(TokenKind::Path(button), source_path.clone())];
+    let mut file_tokens =
+        FileTokens::new_with_identity(source_path, None, None, tokens, path_syntax);
+
+    global_table.intern("preexisting");
+    let remap = global_table.merge_from(&local_table);
+
+    file_tokens
+        .remap_preparing_string_ids(&remap)
+        .expect("the preparing token stream should own a mutable path table");
+
+    let path = file_tokens
+        .path_syntax
+        .try_path(button)
+        .expect("valid path handle");
+    let path_strings: Vec<&str> = path
+        .root
+        .as_components()
+        .iter()
+        .map(|id| global_table.resolve(*id))
+        .collect();
+    assert_eq!(path_strings, vec!["ui", "Button"]);
+}
+
+#[test]
 fn rebind_source_identity_updates_scopes_without_changing_spans_or_paths() {
     let mut table = StringTable::new();
 

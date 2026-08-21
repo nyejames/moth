@@ -12,8 +12,6 @@ None.
 
 ## Candidate findings
 
-- [AUD-0002-F01: Directory Stage 0 discovery and preparation is fully serial while every parallel and caching mechanism is reachable only from the single-file synthetic path](./audits/AUD-0002-stage0-discovery-preparation-performance.md#aud-0002-f01-directory-stage-0-discovery-and-preparation-is-fully-serial-while-every-parallel-and-caching-mechanism-is-reachable-only-from-the-single-file-synthetic-path)
-  - `Performance` | `build.stage0.discovery` (root owner), `build.stage0.preparation`
 - [AUD-0002-F05: Three doc comments describe parallel and cached Stage 0 behaviour that the directory path cannot reach](./audits/AUD-0002-stage0-discovery-preparation-performance.md#aud-0002-f05-three-doc-comments-describe-parallel-and-cached-stage-0-behaviour-that-the-directory-path-cannot-reach)
   - `Comments` | `build.stage0.preparation` (root owner), `build.stage0.discovery`
 
@@ -34,6 +32,13 @@ None.
 None.
 
 ## Resolved in this branch
+
+- AUD-0002-F01 was accepted and resolved by batching provider-independent directory source
+  read/tokenize work for sufficiently large owned-source sets while preserving serial reachability
+  and provider resolution. The correction also remaps the mutable file-owned path-syntax table
+  before header parsing and adds focused coverage for speculative tokenizer failures, deterministic
+  order, exact-once reads and threshold behaviour. Full validation, benchmark checks and the
+  required coordinator auditor pass returned clean. See the [triage record](./audits/AUD-0002-stage0-discovery-preparation-performance.md#aud-0002-f01-directory-stage-0-discovery-and-preparation-is-fully-serial-while-every-parallel-and-caching-mechanism-is-reachable-only-from-the-single-file-synthetic-path).
 
 - AUD-0002-F06 was accepted and implemented. `docs/roadmap/audit-log.md` now registers
   `build.stage0.discovery`, `build.stage0.preparation`, `build.stage0.graph`,

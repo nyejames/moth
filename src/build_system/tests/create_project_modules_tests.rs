@@ -4330,6 +4330,148 @@ fn stage0_reuses_scanned_moth_source_when_assembling_input_files() {
 }
 
 #[test]
+fn stage0_parallel_owned_batch_is_speculative_and_deterministic() {
+    assert!(!super::source_discovery::should_parallelize_owned_source_preparation(15));
+    assert!(super::source_discovery::should_parallelize_owned_source_preparation(16));
+
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create src dir");
+
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "entry_root #= \"src\"\n",
+    )
+    .expect("should write config");
+    fs::write(src.join("@page.moth"), "@reachable\n@leaf\n#[:entry]\n")
+        .expect("should write entry");
+    fs::write(
+        src.join("reachable.moth"),
+        "@leaf\nreachable_value #= \"reachable_unique\"\n",
+    )
+    .expect("should write reachable source");
+    fs::write(src.join("leaf.moth"), "leaf_value #= \"leaf_unique\"\n")
+        .expect("should write leaf source");
+
+    let unreachable_names = (0..13)
+        .map(|index| format!("unreachable_{index:02}.moth"))
+        .collect::<Vec<_>>();
+    for (index, name) in unreachable_names.iter().enumerate() {
+        fs::write(
+            src.join(name),
+            format!("unreachable_unique_{index:02} = \"unterminated\n"),
+        )
+        .expect("should write unreachable malformed source");
+    }
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+
+    let _counter_guard = lock_source_read_counter_tests();
+    let canonical_root = fs::canonicalize(&root).expect("test root should canonicalize");
+    super::source_loading::reset_source_read_count_for_test(&canonical_root);
+    crate::compiler_frontend::reset_file_frontend_prepare_count_for_test(&canonical_root);
+
+    let modules = discover_modules_for_test(&config, &resolver, &style_directives)
+        .expect("unreachable malformed sources must not enter the module diagnostics");
+    let modules: Vec<_> = modules.waves().iter().flatten().collect();
+    assert_eq!(modules.len(), 1);
+    let module = modules[0];
+
+    assert_eq!(
+        module.prepared.semantic.source_file_count, 3,
+        "only the entry and its two reachable dependencies should be retained"
+    );
+    assert_eq!(
+        module_prepared_source_names(module),
+        vec!["@page.moth", "leaf.moth", "reachable.moth"],
+        "retained source identities must stay in canonical source order"
+    );
+
+    let all_source_paths = std::iter::once(src.join("@page.moth"))
+        .chain(std::iter::once(src.join("reachable.moth")))
+        .chain(std::iter::once(src.join("leaf.moth")))
+        .chain(unreachable_names.iter().map(|name| src.join(name)))
+        .collect::<Vec<_>>();
+    for source_path in &all_source_paths {
+        let canonical_path = fs::canonicalize(source_path).expect("source should canonicalize");
+        assert_eq!(
+            super::source_loading::source_read_count_for_path_for_test(&canonical_path),
+            1,
+            "each owned candidate should be read exactly once, including speculative sources"
+        );
+    }
+
+    let selected_source_paths = [
+        src.join("@page.moth"),
+        src.join("reachable.moth"),
+        src.join("leaf.moth"),
+    ];
+    for source_path in selected_source_paths {
+        let canonical_path = fs::canonicalize(source_path).expect("source should canonicalize");
+        assert_eq!(
+            crate::compiler_frontend::file_frontend_prepare_count_for_path_for_test(
+                &canonical_path
+            ),
+            1,
+            "each reachable source should receive one header preparation"
+        );
+    }
+    for name in &unreachable_names {
+        let canonical_path =
+            fs::canonicalize(src.join(name)).expect("unreachable source should canonicalize");
+        assert_eq!(
+            crate::compiler_frontend::file_frontend_prepare_count_for_path_for_test(
+                &canonical_path
+            ),
+            0,
+            "unreachable speculative tokenizer failures must not enter header preparation"
+        );
+    }
+
+    assert!(
+        module
+            .prepared
+            .semantic
+            .string_table
+            .iter()
+            .all(|(_, text)| !text.starts_with("unreachable_unique_")),
+        "unreachable speculative token strings must not enter the retained module table"
+    );
+
+    let reachable_path =
+        fs::canonicalize(src.join("reachable.moth")).expect("reachable source should canonicalize");
+    let reachable_header = module
+        .prepared
+        .semantic
+        .prepared_header_syntax
+        .headers
+        .iter()
+        .find(|header| header.tokens.canonical_os_path.as_deref() == Some(reachable_path.as_path()))
+        .expect("reachable source should retain one header stream");
+    assert!(
+        reachable_header
+            .tokens
+            .path_syntax
+            .paths()
+            .iter()
+            .any(|path| path
+                .root
+                .to_portable_string(&module.prepared.semantic.string_table)
+                == "leaf"),
+        "reachable dependency path should survive the non-identity string remap"
+    );
+}
+
+#[test]
 fn project_source_ids_are_prepared_into_owned_inputs_without_a_retained_store() {
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();

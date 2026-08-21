@@ -34,7 +34,9 @@ use super::project_module_graph::ProjectModuleGraph;
 use super::project_structure_diagnostics::{config_diagnostic_messages, path_id};
 use super::source_discovery::{
     ExternalImportDiscoveryState, ResolvedDependencyEdge, ResolvedSourcePackageDependency,
-    StructuralProviderAction, prepare_owned_source_input, resolve_structural_provider_reference,
+    StructuralProviderAction, merge_prepared_owned_source, prepare_owned_source_input,
+    prepare_owned_source_inputs, resolve_structural_provider_reference,
+    should_parallelize_owned_source_preparation,
 };
 use super::source_tree_index::{SourceClassification, SourceOwnership};
 
@@ -486,10 +488,10 @@ fn discover_modules_serial_provider_capable(
         style_directives,
         project_path_resolver: Some(project_path_resolver.clone()),
     };
+    let source_tree_index = directory_dependency_resolution.source_tree_index();
 
     for seed in seeds {
         let module_edge_start = resolved_edges.len();
-        let source_tree_index = directory_dependency_resolution.source_tree_index();
         let candidate_source_ids = source_tree_index
             .owned_source_ids(seed.module_id)
             .iter()
@@ -541,6 +543,17 @@ fn discover_modules_serial_provider_capable(
             .clone();
         #[cfg(feature = "timers")]
         let timing_context = Some(crate::timing::TimingContext::for_module(timing_module_key));
+        let mut prepared_owned_sources =
+            should_parallelize_owned_source_preparation(candidate_source_ids.len()).then(|| {
+                prepare_owned_source_inputs(
+                    &candidate_source_ids,
+                    source_tree_index,
+                    style_directives,
+                    &fork_source,
+                    #[cfg(feature = "timers")]
+                    timing_context,
+                )
+            });
         let mut syntax = preparation_context.begin_syntax_discovery(
             stable_origin,
             source_origin_lookup,
@@ -584,16 +597,24 @@ fn discover_modules_serial_provider_capable(
                 .source(source_id)
                 .canonical_path()
                 .to_path_buf();
-            let input = match crate::timed_stage_attributed!(
-                crate::timing::TimingMetric::FrontendPrepare,
-                timing_context,
-                prepare_owned_source_input(
+            let input_result = match prepared_owned_sources.as_mut() {
+                Some(prepared_sources) => merge_prepared_owned_source(
                     source_id,
-                    source_tree_index,
-                    style_directives,
+                    prepared_sources,
                     syntax.string_table_mut(),
                 ),
-            ) {
+                None => crate::timed_stage_attributed!(
+                    crate::timing::TimingMetric::FrontendPrepare,
+                    timing_context,
+                    prepare_owned_source_input(
+                        source_id,
+                        source_tree_index,
+                        style_directives,
+                        syntax.string_table_mut(),
+                    ),
+                ),
+            };
+            let input = match input_result {
                 Ok(input) => input,
                 Err(error) => return Err(error.into_messages(syntax.string_table_mut())),
             };

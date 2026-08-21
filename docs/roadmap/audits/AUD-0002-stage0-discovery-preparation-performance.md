@@ -146,7 +146,7 @@ in-tree counter).
 
 ### AUD-0002-F01: Directory Stage 0 discovery and preparation is fully serial while every parallel and caching mechanism is reachable only from the single-file synthetic path
 
-- State: `candidate`
+- State: `closed`
 - Kind: `Performance`
 - Scope: `build.stage0.discovery` (root owner), `build.stage0.preparation`
 - Priority: `unassigned`
@@ -272,6 +272,36 @@ the intended speculative-preparation delta.
 
 F02 and F03 are independent, cheaper wins on the same call path and should land first — they change
 the baseline this finding is measured against. F05 records the misleading comments.
+
+#### Triage record
+
+2026-08-21 — **Accepted and resolved.** Directory Stage 0 now batches provider-independent source
+read and tokenization only when a module owns at least 16 compiler-semantic candidates. Each worker
+uses an independent string-table fork; the existing deterministic BFS remains serial and merges only
+the source it reaches before header preparation. Structural provider resolution, ownership checks,
+module scheduling and diagnostic ordering remain serial and unchanged. Candidate sets below the
+threshold continue through the established direct preparation path, avoiding a new small-module
+allocation and remapping path.
+
+The selected Moth input is remapped through the complete mutable `FileTokens` lifecycle, including
+its file-owned path-syntax table, before header parsing consumes dense path handles. This required a
+narrow tokenizer-owner extension and a focused regression test; no second path-table owner or
+parallel semantic parser was introduced. The Stage 0 orchestration fixture covers the 15/16 policy
+boundary, a 16-candidate module, deterministic canonical retained order, one read per candidate,
+unreachable tokenizer failures after unique-text interning, zero header preparation for unreachable
+candidates, discarded diagnostics/strings and a reachable path row that survives a non-identity
+remap. Token rescans remain zero.
+
+Coordinator measurements over the required warm seven-run series were `36.385 ms` for
+`stage0.directory.inventory` on `docs` (F03 baseline `36.129 ms`), `1.086 ms` for
+`module-graph` (baseline `1.062 ms`) and `1.419 ms` for `import-fanout` (baseline `1.421 ms`),
+with prepared-file counts unchanged at `344/10/13`. The small-workload changes are within the
+observed run noise while the large directory path now overlaps provider-free preparation. `just
+bench-check` (29 cases) and `just validate` passed, including feature/source-audit findings at zero,
+4,405 workspace tests, 1,851 integration cases, docs validation, benchmark sanity and timer
+erasure. The required coordinator interim auditor pass 3 returned `audit_clean` with no findings and
+no changed files. Targeted Samply profile-stack confirmation remains unavailable because macOS
+reports `Unknown(1100)`; this is an environment limitation, not a validation failure.
 
 ### AUD-0002-F02: `fork_for_module` is called per module inside the discovery loop, copying the whole string table once per module against its own API guidance
 
