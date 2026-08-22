@@ -1,0 +1,17 @@
+-- a successful assertion must not evaluate its failure message
+
+make_message || -> String:
+    io.line("message evaluated")
+    return "message"
+;
+
+make_condition || -> Bool:
+    return true
+;
+
+assert(true, make_message())
+assert(
+    make_condition(),
+    make_message()
+)
+[:assert_message_lazy_success]

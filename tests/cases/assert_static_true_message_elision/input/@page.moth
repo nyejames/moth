@@ -1,0 +1,8 @@
+-- compile-time true assertions must elide runtime message work
+
+make_message || -> String:
+    return "message"
+;
+
+assert(true, make_message())
+[:assert_static_true_message_elision]

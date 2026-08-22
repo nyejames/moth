@@ -1,4 +1,5 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["MOTH-RULE-0046"]
+diagnostic_codes = ["MOTH-TYPE-0001"]
+message_contains = ["Type mismatch in assertion argument"]

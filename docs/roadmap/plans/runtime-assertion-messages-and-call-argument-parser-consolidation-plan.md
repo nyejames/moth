@@ -6,14 +6,65 @@
 WORK_ID: runtime-assertion-messages-call-arguments
 WORK_SOURCE: docs/roadmap/plans/runtime-assertion-messages-and-call-argument-parser-consolidation-plan.md
 BASE_REVISION: cb533ced7345dc7a66cf971e7590d88c8cd84f32
-STATUS: queued
-CURRENT_SCOPE: accepted design and implementation plan anchored to the current main branch after the design interview
-COMPLETED: current parser, AST, HIR, analysis, backend, diagnostic, documentation and integration-case audit plus all five design decisions
-NEXT_ACTION: after frontend module compilation ownership cleanup completes, re-anchor Phase 0 against the then-current main branch before changing production code
-VALIDATION: connector-only plan authoring, no repository validation command was run
-AUDITS: bespoke assert parsing, shared call-argument parsing and routing, default arguments, option coercion, AST visitors, HIR lowering, borrow facts, reachability, JavaScript lowering, Wasm target validation, diagnostics, documentation and test ownership
-BLOCKERS: frontend module compilation ownership cleanup is the active roadmap plan and may move compiler entry points or result owners that this plan references
-NOTES: the progress matrix must retain an explicit Wasm gap until dynamic assertion-message evaluation is implemented there
+IMPLEMENTATION_START_REVISION: f1c0e0cf56cf8e65af1e5eed7859f967d516663a
+STATUS: in_progress
+CURRENT_SCOPE: implementation-ready on the main worktree; external publication is blocked by GitHub authentication, so the branch is not yet externally reviewable
+REBASE_BASE_REVISION: 0e6a4ad16bdcf7c797e64a32483eafe7cdfe1405 (origin/main)
+REBASE_RESULT: based on origin/main at 0e6a4ad16bdcf7c797e64a32483eafe7cdfe1405; the branch is 0 commits behind and retains the feature-only diff
+COMPLETED: current parser, AST, HIR, analysis, backend, diagnostic, documentation and integration-case audit; all five design decisions; Phase 0 tree re-anchor, baseline, regression reproduction and contract documentation; Phase 1 call-argument owner extraction, retained slot routing, consumer migration, metadata invariant check and focused slot-retention coverage; Phase 2 frontend/HIR assertion-message ownership, lazy failure CFG, target fact, analysis coverage, diagnostics, fixtures and status reconciliation; Phase 3 JavaScript lowering, target split, runtime local/function/optional/template/cast cases, named-argument success, lazy-success chronology and emitter coverage; normal audit pass 1 correction traverses AssertFailure messages for JS cast-helper, map and reactivity metadata and reconciles assertion/reactivity/cast documentation and fixture contracts; normal audit pass 2 corrections update the Basic assertion/reactivity pages, strengthen the subscription-backed template fixture, and add map/reactive JS emitter regressions; both explicitly requested post-Phase-3 extra audit-and-correction cycles; Phase 4 Wasm target validation, unreachable-helper reachability coverage, static trap preservation, lowerer invariant enforcement, canonical static-message fixture/integration coverage, mixed-target roadmap handoff and clean interim/focused verification audits; Phase 5 correction removes the redundant static-false terminality boundary, strengthens the primary runtime-output assertion, expands named/default/explicit-none assertion coverage, preserves backend-only target/artifact roles, and adds optional parse context in the shared call parser without changing ordinary type-diagnostic ownership; Phase 5 clean verification retry, full validation and release-documentation gate; Phase 6 focused gates, final-auditor corrections, final validation and clean final audit
+NEXT_ACTION: re-authenticate the configured GitHub account, publish this branch, then hand it to external review; an authorized maintainer may squash merge it later; this task performs no merge or squash
+VALIDATION: focused correction suites are green, including 11 owned-handoff validation tests, 39 AST-normalization tests, 7 assertion-message tests and 46 shared-call parser tests; direct regression cases are green; the schema-8 test audit reports 1708 cases and 1862 backend executions with zero hard-policy or duplicate-primary findings, plus 15 adversarial-only, 72 backend-only and 3 mixed-role advisories; docs check reports no errors or warnings; release docs rebuilds 70 files; just bench-check passes 29 cases with 10 measured at approximately 16ms average; just validate passes native all-feature Clippy, feature lanes with 0 findings, workspace tests 4444/0 + 17/0 + 779/0, integration tests 1862/1862, docs check, all 60 benchmark preflights, source audit 1203 files/0 findings and timer erasure with a clean 8183520-byte no-timer binary; final Correctness audit AUD-0003 is clean with no required findings
+HISTORICAL_VALIDATION: the pre-correction publication recorded 1707 cases/1860 backend executions, a 70-file documentation build, benchmark and full validation results; that evidence belongs to the prior tree and is retained only for audit history
+AUDITS: Phase 0 ownership inventory covers call_argument.rs metadata, function_calls.rs parsing and provisional routing, call_validation.rs final routing/default/type/access validation, all call-shaped consumers, every NodeKind::Assert and HirTerminator::AssertFailure consumer, assertion diagnostics, 19 tagged assertion cases plus the separate Wasm boundary, and the constant/Wasm plan handoffs; Phase 1 pass 1 found and corrected the zero-argument builtin delimiter bypass and stale checklist state; pass 2 found and corrected retained-slot/generic-receiver coverage gaps; pass 2 verification required and received final-tree validation after the new test and fixture edits; final verification found and corrected stale ownership comments in the focused tests, generic nominal inference and call validation; the clean verification audit accepted Phase 1 with no findings; Phase 2 verification audit found required source-location, fixture, invariant-coverage and status-documentation corrections, with no new high-severity issue; coordinator corrections now preserve authored postfix locations, add CFG/target/borrow/TIR-handoff/recovery coverage, refresh the rejection fixture and reconcile current-support documentation; Phase 3 focused checks and full validation passed; normal auditor pass 1 found a required JS cast-helper discovery omission plus stale assertion/reactivity/cast documentation and fixture contract prose; normal pass-2 retry found stale Basic documentation and missing map/reactive metadata coverage; focused verification found one medium integration-contract gap: the subscription-backed fixture did not bind the assertion temporary to the snapshot call; correction now requires the exact snapshot assignment, forbids the direct live-carrier assignment, and was causally mutation-checked; full validation is green; the focused-verification retry audit is clean with no new required findings; POST_PHASE3_EXTRA_AUDIT_1 inspection found two medium coverage gaps: lazy-success used compile-time true and the exact multiline assertion had no end-to-end case; corrections now use a runtime condition and multiline `assert` in the lazy-success fixture and reconcile the current-state capsule; full validation is green; the POST_PHASE3_EXTRA_AUDIT_1 retry audit is clean with no new required findings; POST_PHASE3_EXTRA_AUDIT_2 inspection found two medium coverage gaps and one low stale-plan finding: real-source `!`/`?` assertion-message diagnostics were absent, compile-time-true runtime-message elision and Wasm acceptance were not independently covered, and the re-anchor capsule named stale owners/revision/next slice; corrections add two exact diagnostic fixtures, a static-true HIR/integration target case, and current retained-slot/status facts; full validation is green; the POST_PHASE3_EXTRA_AUDIT_2 retry audit is clean with no new required findings; Phase 4 focused validation and full `just validate` are green; normal Phase 4 audit found one low test-placement error: the unreachable assertion-fact check had landed in the unrelated numeric-operation test; correction removed it there and placed it in the unreachable-runtime-assertion test; focused validation and full `just validate` are green; Phase 4 verification audit found one low test-honesty gap: the Wasm lowerer used unit-typed fake messages and no reachable source static-message case crossed HTML-Wasm validation; correction builds canonical Option<String> default/folded/runtime HIR and adds a runtime-condition integration case covering reachable default and folded messages; focused validation and full `just validate` are green; focused Phase 4 verification audit is clean with no new required findings; Phase 5 interim audit required removal of the redundant terminality boundary, stronger named/default/explicit-none ownership and fresh plan evidence; Phase 5 verification audit found two medium gaps: optional parse context was applied to every expression beginning with `none` and the named primary only asserted output presence; corrections now detect a syntactically bare `none`, add a shared ordinary-call regression, and require exact-once output; final focused/full gates are green; Phase 5 verification retry found two low evidence gaps: bare-none newline delimiters were not covered and the current HTML/call-test counts were stale; the focused test now covers newline-to-comma and newline-to-close delimiters, `assert` HTML is 27/27 and the shared call-argument module is 14 tests; the first clean-retry attempt was blocked by the provider workspace guard, then the corrected clean verification retry completed with no required findings after the 28-total/27-HTML inventory sentence was repaired; latest `just validate` and release-doc rebuild are green; final_auditor found one low evidence gap in the test-audit disposition: the current report also has 3 pre-existing mixed-role advisories (`source_package_facade_runtime_template_rejected`, `source_support_transitive_sibling_reexport_rejected`, `pattern_unreachable_after_else_warning`) alongside 15 adversarial-only and 72 backend-only advisories; the plan now explicitly records all three as deliberate boundary cases outside this assertion ownership slice
+POST_REBASE_AUDIT_STATUS: POST_REBASE_AUDIT_1 corrected stale classifier ownership in the plan; POST_REBASE_AUDIT_2 removed the former-owner compatibility re-export and direct-imported the classifier in tests; final audit found no further required findings
+HISTORICAL_PUBLICATION: origin/runtime-assertion-messages-call-arguments advanced from 755a8b290c735ecd2f2eb64fb886e581d8c321a6 to 4462b72e0 with exact force-with-lease; local main and the backup branch were not pushed, merged or squashed
+PUBLICATION: push of the final corrected checkpoint was attempted and blocked because the configured GitHub HTTPS credential is invalid; origin/runtime-assertion-messages-call-arguments remains at 0d2fca846 while local main carries the unpublished correction and closeout commits; main remains unchanged and no merge or squash has been performed
+EXTERNAL_REVIEW_CORRECTIONS: external review found that normalize_ast.rs returns before normalizing a compile-time-true assertion message, allowing a store-backed ExpressionKind::Template to survive the completed AST boundary; this pass also reopens message-local loop-control classification, exhaustive owned-runtime-node matching, the dynamic generic-request activity matrix and dedicated static-true runtime-template coverage.
+REPRODUCED_FAILURE: added tests/cases/assert_static_true_runtime_template_elision with a direct [: inactive [name]] runtime template under assert(true); cargo run --quiet -- tests --case assert_static_true_runtime_template_elision failed for both HTML and HTML-Wasm with MOTH-INFRA-0001, finalized_tir_view_for_template reporting a Formatted TIR reference at the final AST boundary.
+LOOP_CONTROL_PROOF: the focused parser regression constructs an outer-loop `assert(true, if ... break ... else ...)` shape and receives the existing `ValueBlockOutsideReceiver` diagnostic; assertion call arguments cannot contain value-producing AST blocks, so depth-zero `break`/`continue` is guarded as an internal invariant while loop-local controls remain non-effects.
+BLOCKERS: remote publication is blocked until GitHub authentication is repaired; the implementation, validation, audit and main-worktree handoff are complete.
+CURRENT_VALIDATION: tests --audit reports 1708 cases/1862 backend executions with zero hard-policy and duplicate-primary findings, plus 15 adversarial-only, 72 backend-only and 3 mixed-role advisories; docs check and 70-file release build pass; just bench-check and just validate pass, with 4444 + 17 + 779 workspace tests, 1862/1862 integration tests, 1203 source-audit files with 0 findings and a clean 8183520-byte no-timer binary.
+CURRENT_AUDIT: final-correction audit 1 retry clean; final-correction audit 2 found and corrected the owned-handoff TypeId, redundant const-fact filter and stale plan-state issues; audit-2 retries found no remaining source correction; the first final_auditor attempt exposed a missing registered cross-stage scope, corrected by registering the assertion-message and shared-call handoff contracts plus their feature composite; the registered final-auditor pass found one low roadmap/plan status mismatch, corrected by moving the plan to Active implementation work; the final-auditor retry is clean on the exact origin/main...1d0a68207ce0ac3b9b20ae1d25a9825ae2350424 range, with no required findings, and is recorded as AUD-0003; only remote publication remains open because the configured GitHub credential is invalid.
+NOTES: the nine pre-existing dirty files are accepted Phase 0 plan, architecture, canonical-reference and generated-release outputs; preserve them in the first coordinator checkpoint. The progress matrix must retain an explicit Wasm gap until dynamic assertion-message evaluation is implemented there. After Phase 3 completion, run and record two additional fresh audit-plus-correction cycles as POST_PHASE3_EXTRA_AUDIT_1 and POST_PHASE3_EXTRA_AUDIT_2 before the final audit. After the local-main rebase, repeat two fresh review-and-correction passes as POST_REBASE_AUDIT_1 and POST_REBASE_AUDIT_2 before declaring the branch ready for external review.
+```
+
+The long `VALIDATION` capsule above is pre-correction history from the previously published tree; it is not evidence for this final correction pass. The current tree must replace it with fresh test-audit, documentation, benchmark and `just validate` results before completion. Likewise, the historical Phase 6 closeout checkboxes below are reopened for this correction pass until the current tree's final audit is clean.
+
+## Phase 0 re-anchor record
+
+```text
+REVISION: publication closeout record
+BRANCH: runtime-assertion-messages-call-arguments
+WORKTREE: /Users/aneirinjames/projects/beanstalk/moth-runtime-assertion-messages
+FINAL_AUDIT: final_auditor clean on the corrected tree; post-rebase ownership and compatibility-path audits required and received corrections, invalid inactive generic messages remain diagnosed, all final gates are green, and no required findings remain
+
+CALL_ARGUMENT_METADATA_OWNER: src/compiler_frontend/ast/expressions/call_argument.rs
+CALL_ARGUMENT_PARSER_OWNER: src/compiler_frontend/ast/expressions/call_arguments.rs::parse_call_arguments_inner
+PARSE_TIME_SLOT_ROUTER: src/compiler_frontend/ast/expressions/call_arguments.rs::ParameterSlotRouter
+FINAL_SLOT_ROUTER: src/compiler_frontend/ast/expressions/call_argument.rs::order_call_arguments_by_retained_slot, consumed by call_validation.rs::resolve_call_arguments
+FINAL_VALIDATION_OWNER: src/compiler_frontend/ast/expressions/call_validation.rs::resolve_call_arguments
+CALL_SHAPED_CONSUMERS: source and host functions, generic functions, struct constructors, choice constructors, source receiver methods, compiler-owned builtin members and generic nominal inference
+
+ASSERT_AST_OWNER: src/compiler_frontend/ast/statements/asserts.rs parses the reserved statement and owns suffix/placement rejection; src/compiler_frontend/ast/ast_nodes.rs owns typed NodeKind::Assert { condition, message }
+ASSERT_MESSAGE_EFFECT_OWNER: src/compiler_frontend/ast/expressions/assertion_message_effects.rs classifies typed enclosing exits across AST expressions, canonical TIR views and owned runtime handoffs; it preserves authored propagation locations and treats nested function returns and loop-local control as non-enclosing effects
+ASSERT_HIR_OWNER: src/compiler_frontend/hir/hir_statement.rs lowers the typed condition/message expressions; src/compiler_frontend/hir/terminators.rs owns AssertFailure { message: HirExpression, message_evaluation: HirAssertionMessageEvaluation }
+ASSERT_ANALYSIS_CONSUMERS: HIR validation, display, remapping, reachability, borrow transfer/metadata, utility traversal, backend feature validation, JavaScript structured/dispatcher lowering and Wasm trap lowering
+ASSERT_AST_WALKERS: const_fact_collection.rs, debug_type_validation.rs, normalize_ast.rs, reactive_templates/annotation.rs, reactive_templates/flow.rs, validate_types.rs, terminality.rs and value_production/completeness.rs
+ASSERT_TEST_CONSUMERS: AST terminality/value-production/fallible-handling tests, HIR display/reachability tests and borrow fact tests
+
+ASSERT_DIAGNOSTIC_OWNER: InvalidFallibleHandlingReason::AssertionMessageCannotEscape in compiler_messages/diagnostic_payload/types.rs; reason key in reason_keys.rs; shared call diagnostics in compiler_messages/render/calls.rs
+REMOVED_DIAGNOSTIC: RuntimeMessageExpressionDeferred and invalid_builtin_call.runtime_message_expression_deferred are deleted
+
+ASSERTION_CASES: 28 cases selected by --tag assert overall and 27 selected by --tag assert --backend html, including shared-call diagnostics, real assertion-message propagation diagnostics, runtime local/function/optional/template/cast cases, static/runtime lazy-success chronology and terminality cases; assert_static_message_wasm_acceptance is the Wasm-only assertion boundary; separate keyword-shadow cases are assert_keyword_shadow_header_error and assert_keyword_shadow_body_error; the separate cross-target Wasm boundaries are assert_static_true_message_elision and assert_template_message_snapshot
+MULTILINE_REGRESSION: resolved by the shared parser; tests/cases/assert_message_lazy_success/input/@page.moth now covers newlines after the opening parenthesis and comma with a runtime-computed true condition and side-effecting message; cargo run --quiet -- tests --terse --case assert_message_lazy_success -> 1/1 correct
+
+FOCUSED_BASELINE: assertion-message tests 6 passed; static-false CFG 1; borrow facts 14; loaded borrow metadata 1; backend feature validation 8; JS emitter 5; HIR validation 43; reachability 14; assertion HTML lane 25/25; template HTML/HTML-Wasm 2/2; cast runtime case 1/1
+FULL_BASELINE: just validate -> passed; 4419 workspace tests, 17 xtask tests, 765 feature-lane tests, 1856 integration cases, docs check, benchmark preflight/quick measurements, source audit 1195 files/0 findings and timer-erasure check all passed
+DOCS_RELEASE_GATE: cargo run --quiet -- build docs --release -> passed, 70 output files with no warning on the final rerun after the generated manifest was available
+DOCS_AFTER_EDIT: canonical assertion reference, compiler architecture, progress matrix, cheatsheet, reactivity and cast-target references describe JavaScript/HTML runtime support and the explicit reachable-runtime Wasm gap; release docs were regenerated through the compiler
+HANDOFF_NOTES: constant-folding Phase 4C must validate assertion message expressions in both authored branches before static selection and elide inactive assertion message work; the Wasm plan must retain target validation for reachable dynamic messages and static trap lowering for default/fully folded messages
+POST_REBASE_CORRECTIONS: handled fallible AST payloads now preserve call/value locations separately from authored postfix locations; HIR call statements and side-table mappings consume call locations while propagation branches and assertion diagnostics consume effect locations; assertion-message effect classification moved to ast/expressions/assertion_message_effects.rs with typed enclosing-exit facts and nested-function/loop boundaries; static-true assertion messages retain frontend validation but discard compiler-owned generic requests and downstream annotation/normalization/const facts; the shared call-syntax policy is now named CallArgumentSyntax; assertion extraction consumes resolved arguments without clones
+NEXT_EXACT_SLICE: external review of the published feature branch, then a later authorized squash merge without coordinator-side merging
 ```
 
 ## Purpose
@@ -248,7 +299,7 @@ The message expression is parsed, type checked and fully validated even when the
 
 Message evaluation is lazy. It executes only after the condition is known to be false.
 
-An assertion message must not propagate `!`, `?` or another enclosing-function exit from the failure edge. A broken invariant cannot turn into a recoverable error or optional return because constructing its diagnostic text failed. Fallible work must be handled before the assertion and passed in as an infallible value.
+An assertion message must not escape its evaluation through `!`, `?`, `return`, `break` or `continue` from the failure edge. A broken invariant cannot turn into a recoverable error or optional return because constructing its diagnostic text failed. Fallible work must be handled before the assertion and passed in as an infallible value. Loop control owned by a loop inside the message remains local; depth-zero loop control is rejected by the AST invariant because assertion call arguments cannot contain value-producing blocks.
 
 ### 2. Call-shaped argument parsing is shared
 
@@ -554,7 +605,7 @@ Add a truthful assert or language-intrinsic call diagnostic context if the exist
 
 Assertion-specific diagnostics own only genuinely assertion-specific behavior:
 
-- propagation or another enclosing-function exit inside message construction
+- message construction escaping its evaluation through propagation, return, `break` or `continue`
 - postfix `!` on the completed assert statement
 - `catch` on the completed assert statement
 - statement-only placement where the surrounding parser needs a targeted diagnostic
@@ -864,25 +915,25 @@ This phase does not broaden runtime support yet.
 
 ### Checklist
 
-- [ ] Resolve and record the then-current `main` revision as the implementation start revision.
-- [ ] Re-read `AGENTS.md`, the compiler architecture, the canonical assertion page, the cheatsheet, the progress matrix, the complete style guide, testing guidance and validation guidance.
-- [ ] Re-inventory the current owners of call-argument parsing, parse-time slot routing, final call validation and every call-shaped consumer.
-- [ ] Re-inventory every `NodeKind::Assert` match and every `HirTerminator::AssertFailure` match.
-- [ ] Re-inventory assertion-specific diagnostic variants, reason keys, renderers and exact integration expectations.
-- [ ] Re-inventory the assertion integration cases listed above and record any cases added or removed since the planning snapshot.
-- [ ] Reproduce the exact multiline assertion failure and record its current code, reason and source location in this plan.
-- [ ] Record focused baseline commands for call parsing, assertions, HIR, borrow facts, backend feature validation and JavaScript/Wasm integration.
-- [ ] Run the current full validation gate before production changes and record the result.
-- [ ] Update the canonical assertion reference with the accepted end-state contract and an explicit accepted-deferred note where current support still differs.
-- [ ] Update the compiler architecture with the one-parser, synthetic-signature, lazy-HIR and target-validation ownership contract.
-- [ ] Audit the constant-evaluation plan and Wasm plan for assumptions that this work changes, then record required later edits here.
-- [ ] Update this plan's current-state capsule with confirmed paths, blockers, baseline results and the next exact slice.
+- [x] Resolve and record the then-current `main` revision as the implementation start revision.
+- [x] Re-read `AGENTS.md`, the compiler architecture, the canonical assertion page, the cheatsheet, the progress matrix, the complete style guide, testing guidance and validation guidance.
+- [x] Re-inventory the current owners of call-argument parsing, parse-time slot routing, final call validation and every call-shaped consumer.
+- [x] Re-inventory every `NodeKind::Assert` match and every `HirTerminator::AssertFailure` match.
+- [x] Re-inventory assertion-specific diagnostic variants, reason keys, renderers and exact integration expectations.
+- [x] Re-inventory the assertion integration cases listed above and record any cases added or removed since the planning snapshot.
+- [x] Reproduce the exact multiline assertion failure and record its current code, reason and source location in this plan.
+- [x] Record focused baseline commands for call parsing, assertions, HIR, borrow facts, backend feature validation and JavaScript/Wasm integration.
+- [x] Run the current full validation gate before production changes and record the result.
+- [x] Update the canonical assertion reference with the accepted end-state contract and an explicit accepted-deferred note where current support still differs.
+- [x] Update the compiler architecture with the one-parser, synthetic-signature, lazy-HIR and target-validation ownership contract.
+- [x] Audit the constant-evaluation plan and Wasm plan for assumptions that this work changes, then record required later edits here.
+- [x] Update this plan's current-state capsule with confirmed paths, blockers, baseline results and the next exact slice.
 
 ### Phase 0 gate
 
-- [ ] Ownership audit confirms every parser, AST, HIR, analysis, backend and diagnostic consumer is accounted for.
-- [ ] Style-guide review confirms the target is one concrete shared parser rather than a generic callable framework.
-- [ ] Documentation release build and the current full validation gate pass without production behavior changes.
+- [x] Ownership audit confirms every parser, AST, HIR, analysis, backend and diagnostic consumer is accounted for.
+- [x] Style-guide review confirms the target is one concrete shared parser rather than a generic callable framework.
+- [x] Documentation release build and the current full validation gate pass without production behavior changes.
 
 Exit state: the current tree is re-anchored, the bug is frozen as a known regression and the accepted design is authoritative.
 
@@ -896,27 +947,27 @@ It also removes the current double implementation of parameter-slot routing.
 
 ### Checklist
 
-- [ ] Create the final focused call-argument parsing owner under `ast/expressions/` or adopt an equivalent owner found during Phase 0.
-- [ ] Move parenthesis, comma, newline, named-target, access-marker, expected-type and argument-expression parsing out of `function_calls.rs`.
-- [ ] Move generic call-argument syntax policy with the parser while keeping generic semantic inference in its existing owner.
-- [ ] Define one data-oriented parameter-slot router.
-- [ ] Make parse-time expected-type and cast-target selection consume that router.
-- [ ] Retain each argument's resolved slot through final validation.
-- [ ] Make default filling, type validation and access validation consume retained routes instead of rerunning named/positional routing.
-- [ ] Preserve exact argument locations, named-target locations and mutable-marker locations.
-- [ ] Migrate source calls, host calls, struct constructors, choice constructors, receiver methods and builtin members to the final parser API.
-- [ ] Keep each consumer's existing named-argument policy and diagnostic context.
-- [ ] Delete moved parsing and routing implementations from `function_calls.rs` and `call_validation.rs`.
-- [ ] Do not leave forwarding re-exports or duplicate helper names for compatibility.
-- [ ] Update module documentation and `index.md` for the new owner.
-- [ ] Add focused parser and route-retention tests for every rule listed in Required new coverage.
-- [ ] Run existing function, constructor, receiver, builtin, generic and cast-target integration cases to prove no source behavior changed.
+- [x] Create the final focused call-argument parsing owner under `ast/expressions/` or adopt an equivalent owner found during Phase 0.
+- [x] Move parenthesis, comma, newline, named-target, access-marker, expected-type and argument-expression parsing out of `function_calls.rs`.
+- [x] Move generic call-argument syntax policy with the parser while keeping generic semantic inference in its existing owner.
+- [x] Define one data-oriented parameter-slot router.
+- [x] Make parse-time expected-type and cast-target selection consume that router.
+- [x] Retain each argument's resolved slot through final validation.
+- [x] Make default filling, type validation and access validation consume retained routes instead of rerunning named/positional routing.
+- [x] Preserve exact argument locations, named-target locations and mutable-marker locations.
+- [x] Migrate source calls, host calls, struct constructors, choice constructors, receiver methods and builtin members to the final parser API.
+- [x] Keep each consumer's existing named-argument policy and diagnostic context.
+- [x] Delete moved parsing and routing implementations from `function_calls.rs` and `call_validation.rs`.
+- [x] Do not leave forwarding re-exports or duplicate helper names for compatibility.
+- [x] Update module documentation and `index.md` for the new owner.
+- [x] Add focused parser and route-retention tests for every rule listed in Required new coverage.
+- [x] Run existing function, constructor, receiver, builtin, generic and cast-target integration cases to prove no source behavior changed.
 
 ### Phase 1 gate
 
-- [ ] Ownership audit finds one delimiter parser and one slot router across every call-shaped consumer.
-- [ ] Style-guide review confirms the shared owner is focused and does not absorb function-call completion, constructor semantics or result handling.
-- [ ] Focused call/generic/constructor/receiver/builtin tests and `just validate` pass.
+- [x] Ownership audit finds one delimiter parser and one slot router across every call-shaped consumer.
+- [x] Style-guide review confirms the shared owner is focused and does not absorb function-call completion, constructor semantics or result handling.
+- [x] Focused call/generic/constructor/receiver/builtin tests and `just validate` pass.
 
 Exit state: every existing call-shaped surface uses one robust argument parser and one routing result.
 
@@ -930,34 +981,34 @@ Until JavaScript lowering lands in Phase 3, target validation may conservatively
 
 ### Checklist
 
-- [ ] Add the compiler-owned `condition Bool, message String? = none` expectation builder.
-- [ ] Intern the stable names `condition` and `message` through the active string table.
-- [ ] Construct the default through `Expression::option_none_with_type_id` or its then-current canonical equivalent.
-- [ ] Add a truthful assert/language-intrinsic diagnostic context to shared call validation when needed.
-- [ ] Replace manual delimiter, comma, arity, named-target and mutable-marker parsing in `asserts.rs` with the shared parser and resolver.
-- [ ] Keep reserved-token dispatch, statement placement and completed-statement suffix rejection under the assert statement owner.
-- [ ] Add the assertion message effect gate that rejects `!`, `?` or another escaping control-flow form without rescanning tokens.
-- [ ] Preserve ordinary infallible message calls and precomputed handled values.
-- [ ] Change `NodeKind::Assert` to carry typed condition and message expressions.
-- [ ] Delete `AssertMessage`.
-- [ ] Update every AST walker found in Phase 0, including template normalisation, reactive metadata flow, type validation, debug validation, const-fact collection, remapping and value-production completeness where applicable.
-- [ ] Keep terminality dependent only on a compile-time false condition.
-- [ ] Change `AssertFailure` to carry the typed optional message value and the authoritative static/runtime evaluation fact.
-- [ ] Lower message preludes only after entering the failure block.
-- [ ] Preserve compile-time true elision and compile-time false terminality.
-- [ ] Update HIR remapping, validation, display and side-table mappings.
-- [ ] Update borrow transfer so the message is an ordinary shared terminal use.
-- [ ] Update reachability so runtime assertion-message requirements and failure-edge calls are retained.
-- [ ] Add a temporary structured target gate for runtime assertion messages until each target implements them.
-- [ ] Delete `RuntimeMessageExpressionDeferred` and all literal-only implementation comments.
-- [ ] Update exact diagnostic tests for shared missing, extra, named, type and access errors plus assertion-specific propagation errors.
-- [ ] Add focused AST, HIR, borrow and reachability tests.
+- [x] Add the compiler-owned `condition Bool, message String? = none` expectation builder.
+- [x] Intern the stable names `condition` and `message` through the active string table.
+- [x] Construct the default through `Expression::option_none_with_type_id` or its then-current canonical equivalent.
+- [x] Add a truthful assert/language-intrinsic diagnostic context to shared call validation when needed.
+- [x] Replace manual delimiter, comma, arity, named-target and mutable-marker parsing in `asserts.rs` with the shared parser and resolver.
+- [x] Keep reserved-token dispatch, statement placement and completed-statement suffix rejection under the assert statement owner.
+- [x] Add the assertion message effect gate that rejects `!`, `?` or another escaping control-flow form without rescanning tokens.
+- [x] Preserve ordinary infallible message calls and precomputed handled values.
+- [x] Change `NodeKind::Assert` to carry typed condition and message expressions.
+- [x] Delete `AssertMessage`.
+- [x] Update every AST walker found in Phase 0, including template normalisation, reactive metadata flow, type validation, debug validation, const-fact collection, remapping and value-production completeness where applicable.
+- [x] Keep terminality dependent only on a compile-time false condition.
+- [x] Change `AssertFailure` to carry the typed optional message value and the authoritative static/runtime evaluation fact.
+- [x] Lower message preludes only after entering the failure block.
+- [x] Preserve compile-time true elision and compile-time false terminality.
+- [x] Update HIR remapping, validation, display and side-table mappings.
+- [x] Update borrow transfer so the message is an ordinary shared terminal use.
+- [x] Update reachability so runtime assertion-message requirements and failure-edge calls are retained.
+- [x] Add a temporary structured target gate for runtime assertion messages until each target implements them.
+- [x] Delete `RuntimeMessageExpressionDeferred` and all literal-only implementation comments.
+- [x] Update exact diagnostic tests for shared missing, extra, named, type and access errors plus assertion-specific propagation errors.
+- [x] Add focused AST, HIR, borrow and reachability tests, including static-false message CFGs, target classes, loaded metadata, raw/owned template handoffs and recovered fallible values.
 
 ### Phase 2 gate
 
-- [ ] Ownership audit finds no literal assertion payload and no assert-only argument parser or slot resolver.
-- [ ] Style-guide review confirms the message effect gate reads resolved semantic facts rather than token syntax.
-- [ ] Focused assertion/parser/AST/HIR/borrow/reachability tests and `just validate` pass.
+- [x] Ownership audit finds no literal assertion payload and no assert-only argument parser or slot resolver.
+- [x] Style-guide review confirms the message effect gate reads resolved semantic facts rather than token syntax.
+- [x] Focused assertion/parser/AST/HIR/borrow/reachability tests and `just validate` pass.
 
 Exit state: runtime assertion messages exist as correct lazy frontend and HIR semantics, with unsupported target execution rejected before lowering.
 
@@ -969,24 +1020,24 @@ JavaScript already owns full `String`, option, template snapshot and `Error` beh
 
 ### Checklist
 
-- [ ] Lower the optional message exactly once at `AssertFailure`.
-- [ ] Use ordinary plain-value lowering so reactive or template-backed strings become one failure-time snapshot.
-- [ ] Reuse the established option carrier to select present text or `"assertion failed"`.
-- [ ] Preserve literal escaping through the normal JavaScript string/value path.
-- [ ] Preserve both structured CFG and dispatcher CFG assertion lowering.
-- [ ] Avoid a new global runtime helper unless another real consumer justifies it.
-- [ ] Remove JavaScript from the temporary runtime-assertion-message target rejection.
-- [ ] Add runtime cases for local strings, templates, function calls, optional present/absent values and named arguments.
-- [ ] Add chronology tests proving success does not evaluate the message and failure evaluates it once before throwing.
-- [ ] Replace the reactive rejection case with snapshot and non-sink coverage.
-- [ ] Preserve existing default-message, explicit-message and escaping cases.
-- [ ] Add JavaScript emitter tests for exact single evaluation and optional selection.
+- [x] Lower the optional message exactly once at `AssertFailure`.
+- [x] Use ordinary plain-value lowering so reactive or template-backed strings become one failure-time snapshot.
+- [x] Reuse the established option carrier to select present text or `"assertion failed"`.
+- [x] Preserve literal escaping through the normal JavaScript string/value path.
+- [x] Preserve both structured CFG and dispatcher CFG assertion lowering.
+- [x] Avoid a new global runtime helper unless another real consumer justifies it.
+- [x] Remove JavaScript from the temporary runtime-assertion-message target rejection.
+- [x] Add runtime cases for local strings, templates, function calls, optional present/absent values and named arguments.
+- [x] Add chronology tests proving success does not evaluate the message and failure evaluates it once before throwing.
+- [x] Replace the reactive rejection case with snapshot and non-sink coverage.
+- [x] Preserve existing default-message, explicit-message and escaping cases.
+- [x] Add JavaScript emitter tests for exact single evaluation and optional selection.
 
 ### Phase 3 gate
 
-- [ ] Ownership audit confirms JavaScript consumes HIR and existing option/template contracts without source or AST reconstruction.
-- [ ] Style-guide review confirms optional unwrapping and one-time evaluation are readable and local.
-- [ ] Focused JavaScript/HTML runtime tests and `just validate` pass.
+- [x] Ownership audit confirms JavaScript consumes HIR and existing option/template contracts without source or AST reconstruction.
+- [x] Style-guide review confirms optional unwrapping and one-time evaluation are readable and local.
+- [x] Focused JavaScript/HTML runtime tests and `just validate` pass.
 
 Exit state: JavaScript and HTML support the complete accepted runtime assertion-message surface.
 
@@ -998,24 +1049,24 @@ Wasm may continue trapping for messages that need no runtime source evaluation. 
 
 ### Checklist
 
-- [ ] Add a reachable runtime assertion-message fact with exact source location.
-- [ ] Add `UnsupportedBackendFeatureReason::RuntimeAssertionMessages` or an equally narrow typed reason.
-- [ ] Reject the first reachable dynamic message during Wasm target validation.
-- [ ] Preserve default-message and fully folded present-message trap lowering.
-- [ ] Prove unreachable helper assertions do not fail target validation.
-- [ ] Prove compile-time true assertions retain no runtime message requirement.
-- [ ] Make the Wasm lowerer return `CompilerError` if a dynamic message bypasses validation.
-- [ ] Keep one HIR assertion representation for both targets.
-- [ ] Add focused reachability, target-validation and lowerer-invariant tests.
-- [ ] Add integration cases for static acceptance and dynamic rejection on Wasm.
-- [ ] Update the progress matrix with the explicit dynamic-message Wasm gap.
-- [ ] Update the mixed JavaScript/Wasm roadmap plan with the future evaluation and presentation work.
+- [x] Add a reachable runtime assertion-message fact with exact source location.
+- [x] Add `UnsupportedBackendFeatureReason::RuntimeAssertionMessages` or an equally narrow typed reason.
+- [x] Reject the first reachable dynamic message during Wasm target validation.
+- [x] Preserve default-message and fully folded present-message trap lowering.
+- [x] Prove unreachable helper assertions do not fail target validation.
+- [x] Prove compile-time true assertions retain no runtime message requirement.
+- [x] Make the Wasm lowerer return `CompilerError` if a dynamic message bypasses validation.
+- [x] Keep one HIR assertion representation for both targets.
+- [x] Add focused reachability, target-validation and lowerer-invariant tests.
+- [x] Add integration cases for static acceptance and dynamic rejection on Wasm.
+- [x] Update the progress matrix with the explicit dynamic-message Wasm gap.
+- [x] Update the mixed JavaScript/Wasm roadmap plan with the future evaluation and presentation work.
 
 ### Phase 4 gate
 
-- [ ] Ownership audit confirms capability selection happens in target validation and the lowerer only enforces the validated invariant.
-- [ ] Style-guide review confirms no backend-specific flag leaked into source, AST type identity or general call parsing.
-- [ ] Focused Wasm validation/lowering tests and `just validate` pass.
+- [x] Ownership audit confirms capability selection happens in target validation and the lowerer only enforces the validated invariant.
+- [x] Style-guide review confirms no backend-specific flag leaked into source, AST type identity or general call parsing.
+- [x] Focused Wasm validation/lowering tests and `just validate` pass.
 
 Exit state: Wasm fails early and clearly for dynamic messages while preserving supported static trap behavior and a durable future work record.
 
@@ -1027,34 +1078,62 @@ The implementation changes several previously intentional rejection cases into s
 
 ### Checklist
 
-- [ ] Audit every assert-tagged integration case and its manifest contract.
-- [ ] Replace `assert_named_argument_rejected` with named success and only the missing boundary diagnostics not already owned by general call cases.
-- [ ] Update mutable-marker expectations to the shared access diagnostic.
-- [ ] Update non-string message expectations to the normal type mismatch diagnostic.
-- [ ] Replace `reactive_assert_message_rejected` with snapshot behavior.
-- [ ] Remove every expectation for `RuntimeMessageExpressionDeferred`.
-- [ ] Add the exact multiline regression case.
-- [ ] Add runtime local, template, function, optional and lazy-evaluation cases without duplicating one contract across many fixtures.
-- [ ] Preserve statement-only, suffix-rejection and static-terminality cases.
-- [ ] Run the test-suite audit and correct manifest ownership, roles and duplicate-primary findings.
-- [ ] Finish the canonical assertion and Basic pages.
-- [ ] Update the cheatsheet.
-- [ ] Update compiler architecture and data-layout documentation where implementation names or payloads changed.
-- [ ] Update reactivity wording while preserving non-live-sink semantics.
-- [ ] Verify the progress matrix accurately distinguishes JavaScript support and the Wasm gap.
-- [ ] Update `index.md` for moved parser ownership.
-- [ ] Search source, tests and docs for stale literal-only wording, old payload names and removed diagnostic reasons.
-- [ ] Rebuild generated release documentation through the compiler.
+- [x] Audit every assert-tagged integration case and its manifest contract. The schema-8 inventory now covers 28 assertion-tagged cases, with six assertion-specific backend-only target/artifact boundaries intentionally retained as `backend` roles.
+- [x] Replace `assert_named_argument_rejected` with named success and only the missing boundary diagnostics not already owned by general call cases.
+- [x] Update mutable-marker expectations to the shared access diagnostic.
+- [x] Update non-string message expectations to the normal type mismatch diagnostic.
+- [x] Replace `reactive_assert_message_rejected` with snapshot behavior.
+- [x] Remove every expectation for `RuntimeMessageExpressionDeferred` from current source, tests and documentation surfaces.
+- [x] Add the exact multiline regression case.
+- [x] Add runtime local, template, function, optional and lazy-evaluation cases without duplicating one contract across many fixtures.
+- [x] Preserve statement-only, suffix-rejection and static-terminality cases, with one primary owner for the non-unit terminality contract.
+- [x] Run the test-suite audit and correct manifest ownership, roles and duplicate-primary findings. The corrected inventory has 1707 cases, 1860 backend executions, zero hard findings and zero duplicate-primary findings. The advisory inventory is 15 adversarial-only, 72 backend-only and 3 pre-existing mixed-role boundary advisories (`source_package_facade_runtime_template_rejected`, `source_support_transitive_sibling_reexport_rejected`, `pattern_unreachable_after_else_warning`); these are deliberate policy output outside this assertion ownership slice.
+- [x] Finish the canonical assertion and Basic pages.
+- [x] Update the cheatsheet.
+- [x] Update compiler architecture and data-layout documentation where implementation names or payloads changed.
+- [x] Update reactivity wording while preserving non-live-sink semantics.
+- [x] Verify the progress matrix accurately distinguishes JavaScript support and the Wasm gap.
+- [x] Update `index.md` for moved parser ownership.
+- [x] Search source, tests and docs for stale literal-only wording, old payload names and removed diagnostic reasons. Current implementation, tests, canonical docs, generated docs and index surfaces are clean; historical plan prose retains its audit record.
+- [x] Rebuild generated release documentation through the compiler. The release gate rebuilt 70 output files successfully.
 
 ### Phase 5 gate
 
-- [ ] Ownership audit confirms each observable assertion contract has one primary integration owner and focused unit tests protect only internal invariants.
-- [ ] Style-guide review confirms docs describe the final source contract without implementation chronology.
-- [ ] Test-honesty audit, documentation release build and `just validate` pass.
+- [x] Ownership audit confirms each observable assertion contract has one primary integration owner and focused unit tests protect only internal invariants.
+- [x] Style-guide review confirms docs describe the final source contract without implementation chronology.
+- [x] Test-honesty audit, documentation release build and `just validate` pass.
 
 Exit state: tests, diagnostics, canonical docs, teaching docs, status and indexes all describe one final assertion implementation.
 
-## Phase 6: Final audit, validation and closeout
+## Post-rebase correction record
+
+- **POST_REBASE_AUDIT_1** — Re-read the changed AST, HIR, finalization, parser and plan ownership paths after rebasing onto local `main`. Found one stale ownership statement that still assigned assertion-message effect classification to `ast/statements/asserts.rs`. Correction: record `ast/expressions/assertion_message_effects.rs` as the sole typed classifier owner, including its AST/TIR/runtime handoff boundary and nested-function/loop rules.
+- **POST_REBASE_AUDIT_2** — Re-ran the duplicate-parser, compatibility-path, inactive-fact and downstream `NodeKind::Assert` inventory. Found one compatibility re-export from `asserts.rs` that let tests reach the moved classifier through its former owner. Correction: remove the re-export and import the classifier directly from `assertion_message_effects.rs`; focused assertion and generic-request suites remained green.
+- Both audits were performed after the Phase 3 completion point and each required a source or plan correction before the final validation pass.
+
+## Final correction pass (external review)
+
+- **REANCHOR** — `origin/main` contains the rebase base `0e6a4ad16bdcf7c797e64a32483eafe7cdfe1405`; `origin/main...HEAD` remains `0` behind and `9` ahead before this correction checkpoint. No merge or squash is performed in this task.
+- **REPRODUCED_FAILURE** — The focused integration case `assert_static_true_runtime_template_elision` initially failed for both HTML and HTML-Wasm with `MOTH-INFRA-0001` because the compile-time-true direct runtime-template message remained a non-finalized TIR-backed expression at the completed AST type boundary. The failure is retained as the external-review reproduction record.
+- **PRIMARY_CORRECTION** — `normalize_ast.rs` now fully normalizes and effect-validates the authored message but preserves it through `AstFinalizer::validate_no_unresolved_executable_types`. The AST-owned `discard_inactive_assertion_messages` pass runs immediately after that validation and before const facts, HIR, generated requests, link facts, target facts or backend work; it replaces only compile-time-true messages with the existing typed `OptionNone` shape and removes TIR/runtime/reactive/provenance state.
+- **TYPE_BOUNDARY_REGRESSION** — `validate_types_tests::static_true_assertion_message_reaches_type_validation_before_elision` uses a finalized runtime-template overlay with orphan `TypeId(9999)` inside a static-true assertion message and proves the authoritative type/TIR validator rejects it before any elision can occur.
+- **AUDIT_PASS_1** — The independent coordinator audit found two required corrections: the original elision preceded final AST type/TIR validation, and `assertions-basic.mtf` plus generated release documentation were stale. It found no loop-control, parser-ownership, exhaustive-match, downstream-filtering or compatibility-path issue. The type-boundary ordering correction and source documentation correction are complete; the audit retry remains pending after release regeneration.
+- **AUDIT_PASS_1_RETRY** — The first correction retry is clean. It confirms that authored messages remain through final AST TypeId/finalized-TIR validation, malformed `TypeId(9999)` payloads are rejected before elision, generated assertion documentation is current, and no parser, loop, handoff, downstream or compatibility issue was introduced. Its independent Cargo rerun was blocked by the audit route's read-only build-lock permission; the feature worktree's focused reruns are recorded separately.
+- **AUDIT_PASS_2** — The second independent audit found three required corrections: release-mode owned handoff validation checked only dynamic expressions and omitted branch selectors/loop headers; const-fact collection retained a redundant static-true message filter after AST-owned cleanup; and the plan mixed pre-correction green closeout text with the open correction state and stale counts. The validator now has an exhaustive expression-bearing payload callback, the const-fact filter is removed, and the plan separates current inventory evidence from historical publication evidence.
+- **AUDIT_PASS_2_RETRY** — The expanded regression matrix now covers ordinary and slot-application handoffs, dynamic and both selector forms, every loop-header expression route including range start/end/step, loop bindings and static-true slot-message validation. The current report records 1708 cases/1862 backend executions, zero hard and duplicate-primary findings, and the 15/72/3 advisory disposition. The read-only retry found no source correction but could not clear the repository's write-capable closeout gates.
+- **AUDIT_PASS_2_RETRY_3** — A retry that overlapped the restoration of the range-start regression reported that stale omission and was stopped by the launcher after the worktree changed. The settled source now contains the independent orphan-TypeId range-start case alongside range end and step, and the focused validation test passes.
+- **AUDIT_PASS_2_RETRY_4** — Fresh inspection of the settled tree found no required source, ownership, coverage or documentation correction, including the range-start regression. It remained `task_blocked` only because the auditor route cannot run the pending docs, benchmark and full validation commands that write artifacts; those gates are run by the coordinator below.
+- **LOOP_CONTROL** — The parser regression records the existing `ValueBlockOutsideReceiver` diagnostic for attempted depth-zero outer-loop control in an assertion message. The classifier now treats depth-zero `break`/`continue` as compiler-invariant errors while preserving loop-local controls as non-effects; the diagnostic wording covers all message-evaluation escapes.
+- **EXHAUSTIVE_HANDOFF** — `classify_owned_runtime_node` names every current `OwnedRuntimeTemplateNode` variant explicitly; expression-bearing dynamic nodes, branch selectors and loop headers retain their existing handling and the canonical runtime-handoff walker remains the sole structural recursion owner.
+- **GENERIC_MATRIX** — The focused function-parsing coverage now proves static-true message-only generic requests are discarded, static-false requests are retained and dynamic-condition requests retain exactly one required request.
+- **INTEGRATION_COVERAGE** — `assert_static_true_runtime_template_elision` is registered as a primary HTML/HTML-Wasm case and checks successful output plus absence of assertion/template helper output. Existing static-true, runtime-template snapshot and propagation rejection cases remain retained.
+- **FINAL_GATE_EVIDENCE** — The corrected tree passes focused correction suites, direct integration regressions, the schema-8 test audit (1708 cases/1862 backend executions, zero hard or duplicate-primary findings, 15/72/3 advisory disposition), docs check, the 70-file release documentation build, `just bench-check` and `just validate` (4444 + 17 + 779 workspace tests, 1862/1862 integration tests, feature lanes 0 findings, source audit 1203 files/0 findings, timer-erasure binary clean at 8183520 bytes). The registered final Correctness audit is clean; AUD-0003 records no required findings.
+- **FINAL_AUDIT_SCOPE** — The audit registry contains `contract.assertion_message_runtime_handoff`, `contract.assertion_call_argument_handoff` and the `feature.runtime_assertion_messages_call_arguments` composite. The first final_auditor attempt stopped before inspection because this cross-stage scope was absent; the registered composite retry inspected the exact `origin/main...1d0a68207ce0ac3b9b20ae1d25a9825ae2350424` range and is recorded in `docs/roadmap/audits/AUD-0003-runtime-assertion-messages-call-arguments.md`.
+- **FINAL_AUDIT_1** — The registered Correctness composite audit found no implementation, test, ownership, backend or documentation defect. It found one low publication-state inconsistency: `roadmap.md` listed this in-progress plan under Completed implementation work while the plan retained final-audit and publication blockers.
+- **FINAL_AUDIT_1_CORRECTION** — Moved the plan to Active implementation work and removed the stale Completed entry. After the clean final-auditor retry, moved both roadmap and plan to their completed state together.
+- **FINAL_AUDIT_FINAL** — The final-auditor retry is clean: static-true runtime-template finalization/discard, TIR boundary ownership, inactive publication suppression, loop-control semantics, exhaustive handoff classification, singular call-parser ownership, the explicit HTML-Wasm reachable-runtime limitation, documentation/plan reconciliation and compatibility-path review all have no required finding.
+
+## Phase 6: Final audit, validation and closeout (reopened for final correction pass)
 
 ### Context
 
@@ -1062,34 +1141,45 @@ The final phase verifies the whole change as one architecture and language surfa
 
 ### Checklist
 
-- [ ] Re-read every changed production module from its entry point.
-- [ ] Re-run searches for bespoke call delimiters, duplicate slot routing, `AssertMessage`, `Option<String>` HIR message payloads, `RuntimeMessageExpressionDeferred` and literal-only assertion wording.
-- [ ] Confirm every call-shaped consumer uses the final parser and route representation.
-- [ ] Confirm every AST walker handles the message expression correctly.
-- [ ] Confirm every HIR consumer handles the message value and evaluation class correctly.
-- [ ] Confirm JavaScript lazy evaluation through runtime chronology.
-- [ ] Confirm Wasm dynamic-message rejection and static-message acceptance.
-- [ ] Confirm `assert(true, ...)` retains no message HIR, call reachability, reactive feature or target requirement.
-- [ ] Confirm `assert(false, ...)` remains statically terminal after message lowering.
-- [ ] Confirm no compatibility re-export, duplicate payload or fallback parser remains.
-- [ ] Run focused assertion, call, AST, HIR, borrow, reachability, JavaScript and Wasm suites.
-- [ ] Run `cargo run --quiet -- tests --audit` or its then-current replacement.
-- [ ] Run `just bench-check` as a non-recording parser/frontend regression check.
-- [ ] Run `just validate`.
-- [ ] Run a fresh Final audit using the current audit workflow and resolve every required finding.
-- [ ] Re-run affected focused gates and `just validate` after audit corrections.
-- [ ] Record the accepted final commit, validation and audit result in this plan.
-- [ ] Mark the plan complete and update roadmap sequencing without removing the Wasm progress gap.
+- [x] Re-read every changed production module from its entry point.
+- [x] Re-run searches for bespoke call delimiters, duplicate slot routing, `AssertMessage`, `Option<String>` HIR message payloads, `RuntimeMessageExpressionDeferred` and literal-only assertion wording.
+- [x] Confirm every call-shaped consumer uses the final parser and route representation.
+- [x] Confirm every AST walker handles the message expression correctly.
+- [x] Confirm every HIR consumer handles the message value and evaluation class correctly.
+- [x] Confirm JavaScript lazy evaluation through runtime chronology.
+- [x] Confirm Wasm dynamic-message rejection and static-message acceptance.
+- [x] Confirm `assert(true, ...)` retains no message HIR, call reachability, reactive feature or target requirement.
+- [x] Confirm `assert(false, ...)` remains statically terminal after message lowering.
+- [x] Confirm no compatibility re-export, duplicate payload or fallback parser remains.
+- [x] Run focused assertion, call, AST, HIR, borrow, reachability, JavaScript and Wasm suites.
+- [x] Run `cargo run --quiet -- tests --audit` or its then-current replacement.
+- [x] Run `just bench-check` as a non-recording parser/frontend regression check.
+- [x] Run `just validate`.
+- [x] Run a fresh Final audit using the current audit workflow and resolve every required finding.
+- [x] Re-run affected focused gates and `just validate` after audit corrections.
+- [x] Record the accepted final commit, validation and audit result in this plan.
+- [x] Mark the plan complete and update roadmap sequencing without removing the Wasm progress gap.
 
 ### Phase 6 gate
 
-- [ ] Final ownership audit is clean.
-- [ ] Final style-guide review is clean.
-- [ ] Documentation and progress status are current.
-- [ ] Full validation passes on the final tree.
-- [ ] Final audit reports no unresolved required findings.
+- [x] Final ownership audit is clean.
+- [x] Final style-guide review is clean.
+- [x] Documentation and progress status are current.
+- [x] Full validation passes on the final tree.
+- [x] Final audit reports no unresolved required findings.
 
 Exit state: `assert` has one shared call-shaped parser, runtime optional messages on JavaScript, honest Wasm gating and no literal-only compatibility path.
+
+### Current correction gate
+
+The checked Phase 6 history above describes the pre-correction publication and remains historical evidence only. The current correction tree must pass this reopened gate:
+
+- [x] Re-run focused finalization, owned-handoff validation, assertion-effect, shared-call, HIR, analysis and backend suites after the audit-2 corrections.
+- [x] Re-run the direct new integration case, existing static-true elision, runtime-template snapshot and `!`/`?` rejection cases.
+- [x] Re-run the test audit, docs check, docs release build, `just bench-check` and `just validate`; record fresh counts and advisory disposition.
+- [x] Run the fresh final architecture/correctness audit against `origin/main...HEAD` and resolve every required finding.
+- [x] After the reopened gate was green, mark the plan complete and commit the focused correction checkpoint.
+- [ ] Publish the feature branch after GitHub authentication is repaired, without merging or squashing.
 
 ---
 
@@ -1099,57 +1189,57 @@ The plan is complete only when all of the following are true.
 
 ## Parsing and calls
 
-- [ ] One shared owner parses call-shaped delimiters, newlines, names, access markers and expression boundaries.
-- [ ] One owner routes arguments to parameter slots.
-- [ ] Final validation consumes retained routes instead of recalculating them.
-- [ ] Functions, constructors, receiver methods, builtin members and `assert` use the shared owner.
-- [ ] The exact multiline assertion example compiles.
+- [x] One shared owner parses call-shaped delimiters, newlines, names, access markers and expression boundaries.
+- [x] One owner routes arguments to parameter slots.
+- [x] Final validation consumes retained routes instead of recalculating them.
+- [x] Functions, constructors, receiver methods, builtin members and `assert` use the shared owner.
+- [x] The exact multiline assertion example compiles.
 
 ## Source semantics
 
-- [ ] `condition` and `message` named arguments work through ordinary rules.
-- [ ] `message` behaves as `String? = none`.
-- [ ] Runtime strings, templates, calls and optional values work on JavaScript.
-- [ ] `none` selects the default message.
-- [ ] Message evaluation is lazy and exact-once.
-- [ ] Message propagation cannot escape the failure edge.
-- [ ] `assert` remains statement-only, unrecoverable, always checked and statically terminal for `false`.
+- [x] `condition` and `message` named arguments work through ordinary rules.
+- [x] `message` behaves as `String? = none`.
+- [x] Runtime strings, templates, calls and optional values work on JavaScript.
+- [x] `none` selects the default message.
+- [x] Message evaluation is lazy and exact-once.
+- [x] Message propagation cannot escape the failure edge.
+- [x] `assert` remains statement-only, unrecoverable, always checked and statically terminal for `false`.
 
 ## Compiler representation
 
-- [ ] `AssertMessage` is deleted.
-- [ ] AST carries the typed optional expression.
-- [ ] HIR carries a backend-neutral message value and authoritative runtime-evaluation fact.
-- [ ] Message preludes live only on the failure path.
-- [ ] HIR validation, remapping, display, borrow facts and reachability traverse the value.
-- [ ] No assertion-specific memory or ownership category exists.
+- [x] `AssertMessage` is deleted.
+- [x] AST carries the typed optional expression.
+- [x] HIR carries a backend-neutral message value and authoritative runtime-evaluation fact.
+- [x] Message preludes live only on the failure path.
+- [x] HIR validation, remapping, display, borrow facts and reachability traverse the value.
+- [x] No assertion-specific memory or ownership category exists.
 
 ## Backends
 
-- [ ] JavaScript reports runtime messages and preserves default text.
-- [ ] Template-backed messages snapshot on failure and do not become live sinks.
-- [ ] Wasm accepts static trap forms.
-- [ ] Wasm rejects reachable dynamic message evaluation before lowering.
-- [ ] Wasm lowerer fails internally rather than silently discarding an unvalidated dynamic message.
-- [ ] The progress matrix and Wasm plan retain the future implementation gap.
+- [x] JavaScript reports runtime messages and preserves default text.
+- [x] Template-backed messages snapshot on failure and do not become live sinks.
+- [x] Wasm accepts static trap forms.
+- [x] Wasm rejects reachable dynamic message evaluation before lowering.
+- [x] Wasm lowerer fails internally rather than silently discarding an unvalidated dynamic message.
+- [x] The progress matrix and Wasm plan retain the future implementation gap.
 
 ## Diagnostics, tests and docs
 
-- [ ] Shared call and type diagnostics own shared failures.
-- [ ] Assertion-specific diagnostics own only assertion-specific behavior.
-- [ ] `RuntimeMessageExpressionDeferred` is deleted everywhere.
-- [ ] Obsolete rejection fixtures are replaced or removed.
-- [ ] Lazy evaluation, named/default arguments, optional values, analyses and target gaps have honest coverage.
-- [ ] Canonical docs, Basic docs, cheatsheet, architecture, reactivity wording, progress and indexes are current.
-- [ ] Generated docs were rebuilt rather than edited.
+- [x] Shared call and type diagnostics own shared failures.
+- [x] Assertion-specific diagnostics own only assertion-specific behavior.
+- [x] `RuntimeMessageExpressionDeferred` is deleted everywhere.
+- [x] Obsolete rejection fixtures are replaced or removed.
+- [x] Lazy evaluation, named/default arguments, optional values, analyses and target gaps have honest coverage.
+- [x] Canonical docs, Basic docs, cheatsheet, architecture, reactivity wording, progress and indexes are current.
+- [x] Generated docs were rebuilt rather than edited.
 
 ## Closeout
 
-- [ ] No compatibility path remains.
-- [ ] No duplicate parser or slot router remains.
-- [ ] No stale literal-only wording remains.
-- [ ] Full validation passes.
-- [ ] Final audit is clean.
+- [x] No compatibility path remains.
+- [x] No duplicate parser or slot router remains.
+- [x] No stale literal-only wording remains.
+- [x] Full validation passes.
+- [x] Final audit is clean.
 
 ## Handoff summary
 

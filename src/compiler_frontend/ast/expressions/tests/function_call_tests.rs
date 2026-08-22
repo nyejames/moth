@@ -3,26 +3,37 @@
 //! WHAT: protects raw parsed argument shape, call-access mode classification, and the distinct
 //!       named-target, value-expression and authored-marker source locations produced by the
 //!       call argument parser.
-//! WHY: these are parser-local facts that end-to-end integration output cannot inspect. Whole-
-//!      source call acceptance and rejection behavior is owned by canonical integration cases
-//!      under `tests/cases/function_call_*`; the tests here stop at parser shape and locations.
+//! WHY: parser-local facts and the parser-to-final-validation retained-slot handoff are internal
+//!      invariants that end-to-end integration output cannot inspect. Whole-source call acceptance
+//!      and rejection behavior is owned by canonical integration cases under
+//!      `tests/cases/function_call_*`.
 
-use crate::compiler_frontend::ast::expressions::call_argument::{CallAccessMode, CallArgument};
+use crate::compiler_frontend::ast::expressions::call_argument::{
+    CallAccessMode, CallArgument, CallPassingMode,
+};
+use crate::compiler_frontend::ast::expressions::call_validation::{
+    CallArgumentResolutionContext, CallDiagnosticContext, ExpectedAccessMode,
+    ExpectedParameterType, ParameterExpectation, resolve_call_arguments,
+};
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
+use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarationTable};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, InvalidCallShapeReason,
-    SyntaxDiagnosticKind,
+    SyntaxDiagnosticKind, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tests::parse_support::parse_single_file_ast_diagnostic;
+use crate::compiler_frontend::tests::parse_support::{
+    parse_single_file_ast, parse_single_file_ast_diagnostic,
+};
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind, TokenizerEntryMode};
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
+use crate::compiler_frontend::value_mode::ValueMode;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -61,6 +72,57 @@ fn parse_args(
         .expect("call arguments should parse")
 }
 
+fn parse_args_with_parameter_names(source: &str, parameter_names: &[&str]) -> Vec<CallArgument> {
+    let mut string_table = StringTable::new();
+    let file_path = InternedPath::from_single_str("@page.moth", &mut string_table);
+    let mut tokens = tokenize(
+        source,
+        &file_path,
+        TokenizerEntryMode::SourceFile,
+        &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(),
+        &mut string_table,
+        None,
+    )
+    .expect("tokenization should succeed");
+
+    while tokens.current_token_kind() != &TokenKind::OpenParenthesis {
+        tokens.advance();
+    }
+
+    let context = ScopeContext::new_for_tests(
+        ContextKind::Function,
+        InternedPath::new(),
+        Rc::new(TopLevelDeclarationTable::new(vec![])),
+        Arc::new(ExternalPackageRegistry::new()),
+        vec![],
+        0,
+    );
+
+    let expectations = parameter_names
+        .iter()
+        .map(|name| ParameterExpectation {
+            name: Some(string_table.intern(name)),
+            expected_type: ExpectedParameterType::UnknownExternal,
+            access_mode: ExpectedAccessMode::Shared,
+            requires_reactive_source: false,
+            default_value: None,
+        })
+        .collect::<Vec<_>>();
+
+    let mut type_environment = TypeEnvironment::new();
+    let mut compatibility_cache = TypeCompatibilityCache::new();
+    let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
+    super::parse_call_arguments_typed_with_expectations(
+        &mut tokens,
+        &context,
+        &mut type_interner,
+        &mut string_table,
+        &expectations,
+        super::CallArgumentSyntax::Supported { callee_name: None },
+    )
+    .expect("call arguments should parse")
+}
+
 /// Parses raw call arguments without parameter expectations for syntax-level tests.
 ///
 /// WHAT: calls the production argument parser with no expectations so syntax-only tests are not
@@ -79,7 +141,7 @@ fn parse_raw_call_args_for_test(
         type_interner,
         string_table,
         super::CallArgumentSyntaxContext::Ordinary,
-        super::NamedArgumentSyntax::Supported { callee_name: None },
+        super::CallArgumentSyntax::Supported { callee_name: None },
         None,
     )
 }
@@ -196,6 +258,125 @@ fn parses_mixed_positional_then_named() {
     assert!(args[0].target_param.is_none());
     assert!(args[1].target_param.is_some());
     assert!(args[2].target_param.is_some());
+}
+
+#[test]
+fn retains_parser_selected_parameter_slots_for_named_and_positional_arguments() {
+    let args = parse_args_with_parameter_names("call(1, c = 3, b = 2)", &["a", "b", "c"]);
+
+    assert_eq!(args.len(), 3);
+    assert_eq!(args[0].parameter_slot.map(|slot| slot.index()), Some(0));
+    assert_eq!(args[1].parameter_slot.map(|slot| slot.index()), Some(2));
+    assert_eq!(args[2].parameter_slot.map(|slot| slot.index()), Some(1));
+}
+
+#[test]
+fn final_validation_consumes_retained_slots_for_defaults_and_access_policy() {
+    let mut string_table = StringTable::new();
+    let file_path = InternedPath::from_single_str("@page.moth", &mut string_table);
+    let mut tokens = tokenize(
+        "call(1, third = 3)",
+        &file_path,
+        TokenizerEntryMode::SourceFile,
+        &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(),
+        &mut string_table,
+        None,
+    )
+    .expect("tokenization should succeed");
+
+    while tokens.current_token_kind() != &TokenKind::OpenParenthesis {
+        tokens.advance();
+    }
+
+    let context = ScopeContext::new_for_tests(
+        ContextKind::Function,
+        InternedPath::new(),
+        Rc::new(TopLevelDeclarationTable::new(vec![])),
+        Arc::new(ExternalPackageRegistry::new()),
+        vec![],
+        0,
+    );
+
+    let mut type_environment = TypeEnvironment::new();
+    let int_type_id = type_environment.builtins().int;
+    let expectations = [
+        ParameterExpectation {
+            name: Some(string_table.intern("first")),
+            expected_type: ExpectedParameterType::Known(int_type_id),
+            access_mode: ExpectedAccessMode::Mutable,
+            requires_reactive_source: false,
+            default_value: None,
+        },
+        ParameterExpectation {
+            name: Some(string_table.intern("second")),
+            expected_type: ExpectedParameterType::Known(int_type_id),
+            access_mode: ExpectedAccessMode::Shared,
+            requires_reactive_source: false,
+            default_value: Some(Expression::int(
+                2,
+                Default::default(),
+                ValueMode::ImmutableOwned,
+            )),
+        },
+        ParameterExpectation {
+            name: Some(string_table.intern("third")),
+            expected_type: ExpectedParameterType::Known(int_type_id),
+            access_mode: ExpectedAccessMode::Shared,
+            requires_reactive_source: false,
+            default_value: None,
+        },
+    ];
+
+    let mut compatibility_cache = TypeCompatibilityCache::new();
+    let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
+    let arguments = super::parse_call_arguments_typed_with_expectations(
+        &mut tokens,
+        &context,
+        &mut type_interner,
+        &mut string_table,
+        &expectations,
+        super::CallArgumentSyntax::Supported { callee_name: None },
+    )
+    .expect("call arguments should parse");
+
+    let location = arguments[0].location.clone();
+    let type_check_context = type_interner.type_check_context();
+    let resolved = resolve_call_arguments(
+        CallDiagnosticContext::function("call"),
+        &arguments,
+        &expectations,
+        location,
+        CallArgumentResolutionContext {
+            string_table: &mut string_table,
+            type_environment: type_check_context.type_environment,
+            compatibility_cache: type_check_context.compatibility_cache,
+        },
+    )
+    .unwrap_or_else(|_| panic!("retained slots should resolve without rerouting"));
+
+    assert!(matches!(resolved[0].value.kind, ExpressionKind::Int(1)));
+    assert!(matches!(resolved[1].value.kind, ExpressionKind::Int(2)));
+    assert!(matches!(resolved[2].value.kind, ExpressionKind::Int(3)));
+    assert_eq!(resolved[0].passing_mode, CallPassingMode::FreshMutableValue);
+}
+
+#[test]
+fn optional_call_context_is_limited_to_bare_none_arguments() {
+    let _ = parse_single_file_ast(
+        "consume |first String?, second String?|:\n    io.line(\"ok\")\n;\n\nconsume(\n    none\n    ,\n    none\n)\n",
+    );
+
+    let diagnostic = parse_single_file_ast_diagnostic(
+        "consume |message String?|:\n    io.line(\"ok\")\n;\n\nmaybe Bool? = none\nconsume(none is maybe)\n",
+    );
+
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::TypeMismatch {
+            context: TypeMismatchContext::FunctionArgument,
+            ..
+        }
+    ));
 }
 
 #[test]

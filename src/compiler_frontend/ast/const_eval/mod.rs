@@ -262,7 +262,9 @@ pub fn fold_compile_time_expression(
                 None,
             )
         }
-        ExpressionKind::HandledFallibleExpression { value, handling } => {
+        ExpressionKind::HandledFallibleExpression {
+            value, handling, ..
+        } => {
             let folded_value = fold_compile_time_expression(
                 value,
                 template_ir_store,

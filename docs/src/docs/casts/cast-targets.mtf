@@ -44,6 +44,7 @@ Valid target boundaries include:
 - a struct or choice field
 - a default value
 - a typed collection or map entry
+- a compiler-owned typed assertion argument slot (`condition: Bool` or `message: String?`)
 - a `then` arm whose enclosing value-producing block has an explicit receiver
 
 Generic parameter slots are not cast targets. Generic inference does not look
@@ -53,7 +54,6 @@ These positions do not supply cast targets:
 
 - conditions
 - loop conditions
-- assertions
 - template interpolation
 - operator operands
 - expression statements

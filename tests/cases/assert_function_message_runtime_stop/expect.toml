@@ -1,0 +1,13 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = [
+    "__moth_private_fn_0());",
+    "let __assert_message_0 = { tag: \"some\", \"value\": __moth_read(",
+    "throw new Error((__assert_message_0.tag === \"some\" ? __assert_message_0.value : \"assertion failed\"));",
+]
+must_contain_exactly_once = ["__moth_private_fn_0());"]

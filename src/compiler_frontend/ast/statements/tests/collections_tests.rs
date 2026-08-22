@@ -391,6 +391,26 @@ fn rejects_explicit_receiver_tilde_for_collection_get_and_length() {
 }
 
 #[test]
+fn parses_multiline_zero_argument_collection_and_map_builtins() {
+    let source = "values = {1, 2}\ncount = values.length(\n)\nscores ~{String = Int} = {\"Ada\" = 10}\n~scores.clear(\n)\n";
+
+    parse_single_file_ast(source);
+}
+
+#[test]
+fn preserves_zero_argument_builtin_extra_argument_diagnostic() {
+    let diagnostic = parse_single_file_ast_diagnostic("values = {1, 2}\nvalues.length(1)\n");
+
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::InvalidBuiltinCall {
+            reason: InvalidBuiltinCallReason::TakesNoArguments,
+            ..
+        }
+    ));
+}
+
+#[test]
 fn rejects_pull_method_as_unknown_collection_member() {
     let diagnostic = parse_single_file_ast_diagnostic("values ~= {1, 2, 3}\nvalues.pull(1)\n");
 

@@ -11,7 +11,7 @@ use super::super::build_context::AstPhaseContext;
 use super::super::emission::AstEmission;
 use super::super::environment::AstModuleEnvironment;
 use super::const_fact_collection::ConstFactCollector;
-use super::normalize_ast::TemplateNormalizationError;
+use super::normalize_ast::{TemplateNormalizationError, discard_inactive_assertion_messages};
 use crate::compiler_frontend::ast::generic_functions::{
     ModuleMaterialisationEnvironmentInput, ModuleMaterialisationPreparationBuilder,
 };
@@ -152,6 +152,11 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         // ----------------------------
         self.validate_no_unresolved_executable_types(&emitted.ast, &module_constants, string_table)
             .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
+
+        // The authored assertion message must remain available to the authoritative AST
+        // type/TIR boundary validation above. Only after that validation succeeds may AST
+        // finalization discard compile-time-inactive executable message state.
+        discard_inactive_assertion_messages(&mut emitted.ast);
 
         // ----------------------------
         //  Collect const facts

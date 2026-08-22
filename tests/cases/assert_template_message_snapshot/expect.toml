@@ -1,0 +1,35 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = [
+    "__assert_message_0",
+    "__moth_template_string",
+    "__moth_template_snapshot",
+    "message",
+    "let __assert_message_0 = { tag: \"some\", \"value\": __moth_template_snapshot(__moth_template_string(",
+]
+must_not_contain = [
+    "let __assert_message_0 = { tag: \"some\", \"value\": __moth_template_string(",
+]
+must_contain_exactly_once = [
+    "let __assert_message_0 = { tag: \"some\", \"value\": __moth_template_snapshot(__moth_template_string(",
+]
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0064"]
+message_contains = ["runtime assertion messages"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0064"
+reason = "unsupported_backend_feature.runtime_assertion_messages"
+path = "input/@page.moth"
+line = 10
+column = 31

@@ -18,7 +18,6 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
-use crate::compiler_frontend::symbols::string_interning::StringId;
 
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::return_compiler_error;
@@ -88,16 +87,6 @@ pub enum MatchExhaustiveness {
     ExhaustiveChoice,
 }
 
-/// Text payload for a failed assertion message.
-///
-/// WHAT: carries the literal string data and source location for an assertion message.
-/// WHY: assertion messages are compile-time text, not runtime expressions, so they are
-///      stored as resolved string data rather than as an `Expression` node.
-#[derive(Debug, Clone)]
-pub struct AssertMessage {
-    pub text: StringId,
-}
-
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum NodeKind {
@@ -135,11 +124,11 @@ pub enum NodeKind {
     ///
     /// WHAT: `assert(condition)` and `assert(condition, "message")` are language-owned
     ///       statement surfaces for runtime invariant checking.
-    /// WHY: keeping assert out of the ordinary function-call path prevents shadowing,
-    ///      named arguments, mutable markers, and result handling that do not apply.
+    /// WHY: keeping assert statement-only prevents shadowing and result handling while the
+    ///      shared call parser owns its named/default/access/type argument contract.
     Assert {
         condition: Expression,
-        message: Option<AssertMessage>,
+        message: Expression,
     },
 
     /// Value-production terminator for active value-producing blocks.

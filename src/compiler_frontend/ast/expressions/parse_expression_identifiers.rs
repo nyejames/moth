@@ -360,6 +360,7 @@ pub(super) fn parse_identifier_or_call(
         }
 
         // External calls parse from metadata directly; do not synthesize fake parameter declarations.
+        let call_location = token_stream.current_location();
         token_stream.advance();
 
         let function_call_expression =
@@ -367,6 +368,7 @@ pub(super) fn parse_identifier_or_call(
                 token_stream,
                 external_function_id: function_id,
                 external_function: host_function_definition,
+                call_location,
                 context,
                 value_required: true,
                 allow_boundary_catch: allow_boundary_catch

@@ -22,7 +22,7 @@ use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
-use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
     function_node, make_test_variable, node, test_source_location,
@@ -612,6 +612,313 @@ fn value_if_then_place_materializes_copy_before_hidden_result_assignment() {
     assert!(
         matches!(else_value_kind, HirExpressionKind::Copy(HirPlace::Local(_))),
         "else name should be copied before assigning the hidden result local"
+    );
+}
+
+#[test]
+fn assertion_failure_uses_message_value_block_tail() {
+    let mut string_table = StringTable::new();
+    let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
+    let condition_name = super::symbol("condition", &mut string_table);
+    let location = test_source_location(80);
+
+    let message_value = Expression::new(
+        ExpressionKind::ValueBlock {
+            block: Box::new(ValueBlock::If(ValueIfBlock {
+                condition: inferred_type_reference_expr(
+                    condition_name.clone(),
+                    builtin_type_ids::BOOL,
+                    location.clone(),
+                    ValueMode::ImmutableReference,
+                ),
+                then_body: vec![node(
+                    NodeKind::ThenValue(ProducedValues {
+                        expressions: vec![Expression::string_slice(
+                            string_table.intern("then"),
+                            location.clone(),
+                            ValueMode::ImmutableOwned,
+                        )],
+                        location: location.clone(),
+                    }),
+                    location.clone(),
+                )],
+                else_body: vec![node(
+                    NodeKind::ThenValue(ProducedValues {
+                        expressions: vec![Expression::string_slice(
+                            string_table.intern("else"),
+                            location.clone(),
+                            ValueMode::ImmutableOwned,
+                        )],
+                        location: location.clone(),
+                    }),
+                    location.clone(),
+                )],
+                location: location.clone(),
+                result_type_ids: vec![builtin_type_ids::STRING],
+            })),
+        },
+        location.clone(),
+        builtin_type_ids::STRING,
+        DataType::StringSlice,
+        ValueMode::ImmutableOwned,
+    );
+    let mut option_type_environment =
+        crate::compiler_frontend::datatypes::environment::TypeEnvironment::new();
+    let option_string = option_type_environment.intern_option(builtin_type_ids::STRING);
+    let message = Expression::coerced(message_value, option_string);
+
+    let start_fn = function_node(
+        start_name,
+        FunctionSignature {
+            parameters: vec![
+                crate::compiler_frontend::tests::type_id_fixture_support::param_with_type_id(
+                    condition_name.clone(),
+                    builtin_type_ids::BOOL,
+                    false,
+                    location.clone(),
+                ),
+            ],
+            returns: vec![],
+        },
+        vec![node(
+            NodeKind::Assert {
+                condition: inferred_type_reference_expr(
+                    condition_name,
+                    builtin_type_ids::BOOL,
+                    location.clone(),
+                    ValueMode::ImmutableReference,
+                ),
+                message,
+            },
+            location.clone(),
+        )],
+        location.clone(),
+    );
+
+    let mut ast = build_ast_with_registered_types(vec![start_fn], entry_path);
+    assert_eq!(
+        ast.type_environment.intern_option(builtin_type_ids::STRING),
+        option_string,
+        "the fixture environment must register the same canonical String? type"
+    );
+    let (module, _type_environment) = lower_ast(ast, &mut string_table)
+        .expect("assertion with a value-block message should lower");
+
+    let assertion_block = module
+        .blocks
+        .iter()
+        .find(|block| matches!(block.terminator, HirTerminator::AssertFailure { .. }))
+        .expect("lowering should produce an assertion failure terminator");
+    let message_evaluation = match &assertion_block.terminator {
+        HirTerminator::AssertFailure {
+            message_evaluation, ..
+        } => *message_evaluation,
+        _ => unreachable!(),
+    };
+    assert_eq!(message_evaluation, HirAssertionMessageEvaluation::Runtime);
+    assert!(
+        module.blocks.iter().any(|block| {
+            matches!(
+                block.terminator,
+                HirTerminator::Jump { target, .. } if target == assertion_block.id
+            )
+        }),
+        "the message value-block branches must converge into the assertion failure tail"
+    );
+    let failure_entry = match module.blocks[0].terminator {
+        HirTerminator::If { else_block, .. } => else_block,
+        ref terminator => panic!("expected dynamic assertion branch, got {terminator:?}"),
+    };
+    assert!(
+        failure_entry != assertion_block.id
+            && matches!(
+                module.blocks[failure_entry.0 as usize].terminator,
+                HirTerminator::If { .. }
+            ),
+        "the dynamic assertion failure edge must remain the message value-block entry"
+    );
+}
+
+#[test]
+fn statically_true_assertion_elides_runtime_message_call_and_failure_edge() {
+    let mut string_table = StringTable::new();
+    let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
+    let message_name = super::symbol("runtime_message", &mut string_table);
+    let location = test_source_location(86);
+
+    let message_fn = function_node(
+        message_name.clone(),
+        FunctionSignature {
+            parameters: vec![],
+            returns: fresh_success_returns(vec![builtin_type_ids::STRING]),
+        },
+        vec![node(
+            NodeKind::Return(vec![Expression::string_slice(
+                string_table.intern("message"),
+                location.clone(),
+                ValueMode::ImmutableOwned,
+            )]),
+            location.clone(),
+        )],
+        location.clone(),
+    );
+    let message = runtime_expr(
+        vec![runtime_function_call_item(
+            message_name,
+            vec![builtin_type_ids::STRING],
+            location.clone(),
+        )],
+        builtin_type_ids::STRING,
+        location.clone(),
+        ValueMode::MutableOwned,
+    );
+    let mut option_type_environment =
+        crate::compiler_frontend::datatypes::environment::TypeEnvironment::new();
+    let option_string = option_type_environment.intern_option(builtin_type_ids::STRING);
+
+    let start_fn = function_node(
+        start_name,
+        FunctionSignature {
+            parameters: vec![],
+            returns: vec![],
+        },
+        vec![node(
+            NodeKind::Assert {
+                condition: Expression::bool(true, location.clone(), ValueMode::ImmutableOwned),
+                message: Expression::coerced(message, option_string),
+            },
+            location.clone(),
+        )],
+        location.clone(),
+    );
+
+    let (module, _type_environment) = lower_ast(
+        build_ast_with_registered_types(vec![message_fn, start_fn], entry_path),
+        &mut string_table,
+    )
+    .expect("statically true assertion should elide its runtime message");
+    let message_function_id = module
+        .functions
+        .iter()
+        .find(|function| Some(function.id) != module.start_function)
+        .expect("message helper should remain a separate function")
+        .id;
+
+    assert!(
+        blocks_with_user_function_call(&module, message_function_id).is_empty(),
+        "a statically true assertion must not lower its message call"
+    );
+    assert!(
+        module.blocks.iter().all(|block| {
+            !matches!(
+                block.terminator,
+                HirTerminator::If { .. } | HirTerminator::AssertFailure { .. }
+            )
+        }),
+        "a statically true assertion must not retain a failure CFG or assertion message"
+    );
+}
+
+#[test]
+fn statically_false_assertion_keeps_cfg_producing_message_before_terminal_failure() {
+    let mut string_table = StringTable::new();
+    let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
+    let condition_name = super::symbol("message_condition", &mut string_table);
+    let location = test_source_location(90);
+
+    let message_value = Expression::new(
+        ExpressionKind::ValueBlock {
+            block: Box::new(ValueBlock::If(ValueIfBlock {
+                condition: inferred_type_reference_expr(
+                    condition_name.clone(),
+                    builtin_type_ids::BOOL,
+                    location.clone(),
+                    ValueMode::ImmutableReference,
+                ),
+                then_body: vec![node(
+                    NodeKind::ThenValue(ProducedValues {
+                        expressions: vec![Expression::string_slice(
+                            string_table.intern("then"),
+                            location.clone(),
+                            ValueMode::ImmutableOwned,
+                        )],
+                        location: location.clone(),
+                    }),
+                    location.clone(),
+                )],
+                else_body: vec![node(
+                    NodeKind::ThenValue(ProducedValues {
+                        expressions: vec![Expression::string_slice(
+                            string_table.intern("else"),
+                            location.clone(),
+                            ValueMode::ImmutableOwned,
+                        )],
+                        location: location.clone(),
+                    }),
+                    location.clone(),
+                )],
+                location: location.clone(),
+                result_type_ids: vec![builtin_type_ids::STRING],
+            })),
+        },
+        location.clone(),
+        builtin_type_ids::STRING,
+        DataType::StringSlice,
+        ValueMode::ImmutableOwned,
+    );
+    let mut option_type_environment =
+        crate::compiler_frontend::datatypes::environment::TypeEnvironment::new();
+    let option_string = option_type_environment.intern_option(builtin_type_ids::STRING);
+    let message = Expression::coerced(message_value, option_string);
+
+    let start_fn = function_node(
+        start_name,
+        FunctionSignature {
+            parameters: vec![
+                crate::compiler_frontend::tests::type_id_fixture_support::param_with_type_id(
+                    condition_name,
+                    builtin_type_ids::BOOL,
+                    false,
+                    location.clone(),
+                ),
+            ],
+            returns: vec![],
+        },
+        vec![node(
+            NodeKind::Assert {
+                condition: Expression::bool(false, location.clone(), ValueMode::ImmutableOwned),
+                message,
+            },
+            location.clone(),
+        )],
+        location.clone(),
+    );
+
+    let mut ast = build_ast_with_registered_types(vec![start_fn], entry_path);
+    assert_eq!(
+        ast.type_environment.intern_option(builtin_type_ids::STRING),
+        option_string,
+        "the fixture environment must register the same canonical String? type"
+    );
+    let (module, _type_environment) = lower_ast(ast, &mut string_table)
+        .expect("statically false assertion with a value-block message should lower");
+
+    assert_no_placeholder_terminators(&module);
+    assert_eq!(
+        module
+            .blocks
+            .iter()
+            .filter(|block| matches!(block.terminator, HirTerminator::If { .. }))
+            .count(),
+        1,
+        "the message CFG should remain, but the statically false assertion must not add a pass branch"
+    );
+    assert!(
+        module
+            .blocks
+            .iter()
+            .any(|block| matches!(block.terminator, HirTerminator::AssertFailure { .. })),
+        "the message CFG must converge into a terminal assertion failure"
     );
 }
 

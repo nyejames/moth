@@ -35,6 +35,7 @@ use crate::compiler_frontend::ast::templates::{
 use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ReceiverKey;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -3013,6 +3014,64 @@ fn retained_signature_default_normalizes_template_to_string_slice() {
         "a retained template default must normalize to a TIR-free StringSlice, got {:?}",
         signature.parameters[0].value.kind
     );
+}
+
+#[test]
+fn static_true_assertion_discards_normalized_runtime_template_message_after_validation() {
+    let mut string_table = StringTable::new();
+    let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
+    let template = registered_runtime_template(
+        string_table.intern("inactive: "),
+        "name",
+        TemplateViewContext::default(),
+        &template_ir_store,
+        &mut string_table,
+    );
+    let template_expression = Expression::template(template, ValueMode::ImmutableOwned);
+
+    let mut type_environment = TypeEnvironment::new();
+    let option_string_type_id = type_environment.intern_option(builtin_type_ids::STRING);
+    let message = Expression::new(
+        ExpressionKind::Coerced {
+            value: Box::new(template_expression),
+            to_type: option_string_type_id,
+        },
+        SourceLocation::default(),
+        option_string_type_id,
+        DataType::Option(Box::new(DataType::StringSlice)),
+        ValueMode::ImmutableOwned,
+    );
+    let mut node = AstNode {
+        kind: NodeKind::Assert {
+            condition: Expression::bool(true, SourceLocation::default(), ValueMode::ImmutableOwned),
+            message,
+        },
+        location: SourceLocation::default(),
+        scope: InternedPath::new(),
+    };
+    let mut context = TemplateNormalizationContext {
+        template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        string_table: &mut string_table,
+        template_ir_store,
+    };
+
+    normalize_ast_node_templates(&mut node, &mut context)
+        .expect("static-true assertion messages should normalize before discard");
+    // The production finalizer calls this cleanup immediately after its authoritative type/TIR
+    // validation pass. This unit test exercises the same post-validation boundary directly.
+    discard_inactive_assertion_messages(std::slice::from_mut(&mut node));
+
+    let NodeKind::Assert { message, .. } = node.kind else {
+        panic!("expected the test node to remain an assertion");
+    };
+    assert!(
+        matches!(message.kind, ExpressionKind::OptionNone),
+        "inactive assertion messages must be replaced with typed none, got {:?}",
+        message.kind
+    );
+    assert_eq!(message.type_id, option_string_type_id);
+    assert!(message.reactive_template.is_none());
+    assert!(message.synthetic_interface_provenance.is_empty());
 }
 
 // ---------------------------------------------------------------------------

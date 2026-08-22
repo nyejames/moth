@@ -189,6 +189,10 @@ See `docs/build-system-design.md` "Mixed-target planning and validation" for par
 - Validate every function against its assigned target.
 - Validate permitted cross-target edges.
 - `check` runs the same sequence and stops before lowering.
+- Carry assertion-message capability facts through the selected-function partition: JavaScript-owned
+  functions retain lazy runtime message evaluation, while enabling dynamic messages in Wasm requires an
+  explicit selected-target representation and failure-presentation path (including the HTML handoff) before
+  target validation may be relaxed.
 
 ### Phase 4: Selected JavaScript emission and companions
 

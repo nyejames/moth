@@ -256,6 +256,72 @@ fn fallible_generic_calls_remain_request_only() {
     );
 }
 
+#[test]
+fn static_true_assertion_validates_but_discards_inactive_generic_message_requests() {
+    let (build_result, string_table) = parse_single_file_ast_build_result(
+        "identity type T |value T| -> T:\n    return value\n;\n\nassert(true, identity(\"inactive\"))\n",
+    )
+    .expect("inactive generic assertion message should still be frontend-valid");
+
+    assert!(
+        build_result.deferred_generic_requests.is_empty(),
+        "static-true assertion messages must not publish generic requests"
+    );
+    let start_body = start_function_body(&build_result.ast, &string_table);
+    assert!(
+        start_body
+            .iter()
+            .any(|node| matches!(node.kind, NodeKind::Assert { .. })),
+        "the assertion itself remains in the executable AST contract"
+    );
+}
+
+#[test]
+fn static_true_assertion_still_reports_invalid_generic_message() {
+    let payload = parse_function_diagnostic_payload(
+        "identity type T |value T| -> T:\n    return value\n;\n\nassert(true, identity(1))\n",
+    );
+
+    assert!(
+        matches!(
+            payload,
+            DiagnosticPayload::TypeMismatch {
+                context: TypeMismatchContext::AssertionArgument,
+                ..
+            }
+        ),
+        "inactive assertion messages must still report type errors, got {payload:?}"
+    );
+}
+
+#[test]
+fn static_false_assertion_retains_active_generic_message_requests() {
+    let (build_result, _string_table) = parse_single_file_ast_build_result(
+        "identity type T |value T| -> T:\n    return value\n;\n\nassert(false, identity(\"active\"))\n",
+    )
+    .expect("active generic assertion message should be frontend-valid");
+
+    assert_eq!(
+        build_result.deferred_generic_requests.len(),
+        1,
+        "static-false assertion messages remain executable on the failure edge"
+    );
+}
+
+#[test]
+fn dynamic_assertion_retains_generic_message_requests() {
+    let (build_result, _string_table) = parse_single_file_ast_build_result(
+        "condition || -> Bool:\n    return true\n;\n\nidentity type T |value T| -> T:\n    return value\n;\n\nassert(condition(), identity(\"dynamic\"))\n",
+    )
+    .expect("dynamic assertion message should remain frontend-valid");
+
+    assert_eq!(
+        build_result.deferred_generic_requests.len(),
+        1,
+        "dynamic assertion messages must retain their required generic request"
+    );
+}
+
 // --------------------------
 //  Call dispatch
 // --------------------------

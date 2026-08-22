@@ -1,27 +1,34 @@
 //! Assert statement parsing.
 //!
-//! WHAT: parses `assert(condition)` and `assert(condition, "message")` as a language-owned
-//!       statement intrinsic.
-//! WHY: keeping assert out of the ordinary symbol/expression path prevents shadowing,
-//!      named arguments, mutable markers, fallible suffixes, and expression-position use.
+//! WHAT: parses the reserved `assert` statement through the shared call-argument contract.
+//! WHY: assertion placement, unrecoverable failure, and message control-flow policy are special;
+//!      parentheses, separators, named routing, defaults, access and type validation are not.
+//!
+//! The message-effect classifier lives in `ast::expressions::assertion_message_effects`, where
+//! its AST/TIR/runtime representation boundary and message-evaluation control-flow rules have a
+//! truthful owner. This module remains responsible for the assertion statement contract only.
 
 use crate::compiler_frontend::ast::ScopeContext;
-use crate::compiler_frontend::ast::ast_nodes::{AssertMessage, AstNode, NodeKind};
+use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::ast::expressions::assertion_message_effects::assert_message_escape_diagnostic;
+use crate::compiler_frontend::ast::expressions::assertion_message_effects::assertion_condition_is_statically_true;
+use crate::compiler_frontend::ast::expressions::call_arguments::{
+    CallArgumentSyntax, parse_call_arguments_typed_with_expectations,
+};
+use crate::compiler_frontend::ast::expressions::call_validation::{
+    CallArgumentResolutionContext, CallDiagnosticContext, ExpectedAccessMode,
+    ExpectedParameterType, ParameterExpectation, resolve_call_arguments,
+};
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::parse_expression::create_expression_until;
-use crate::compiler_frontend::ast::expressions::parse_expression_input::{
-    ExpressionParseInput, ExpressionParseResources,
-};
-use crate::compiler_frontend::ast::statements::condition_validation::ensure_boolean_condition;
+use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidBuiltinCallReason, InvalidFallibleHandlingReason,
+    CompilerDiagnostic, InvalidFallibleHandlingReason,
 };
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
-use crate::compiler_frontend::type_coercion::parse_context::CastTargetContext;
-use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
-use crate::compiler_frontend::value_mode::ValueMode;
 
 pub(crate) fn parse_assert_statement(
     token_stream: &mut FileTokens,
@@ -32,106 +39,95 @@ pub(crate) fn parse_assert_statement(
 ) -> Result<(), ExpressionParseError> {
     let assert_location = token_stream.current_location();
     let assert_name = string_table.intern("assert");
+    let condition_name = string_table.intern("condition");
+    let message_name = string_table.intern("message");
+    let generic_request_checkpoint = context.generic_request_checkpoint();
 
     token_stream.advance(); // past `assert`
 
-    // Require `(` immediately.
-    if token_stream.current_token_kind() != &TokenKind::OpenParenthesis {
-        return Err(CompilerDiagnostic::invalid_builtin_call(
-            InvalidBuiltinCallReason::MissingParentheses,
-            Some(assert_name),
-            token_stream.current_location(),
-        )
-        .into());
-    }
-    token_stream.advance(); // past `(`
-
-    // Reject `assert()`.
-    if token_stream.current_token_kind() == &TokenKind::CloseParenthesis {
-        return Err(CompilerDiagnostic::invalid_builtin_call(
-            InvalidBuiltinCallReason::MissingArgument,
-            Some(assert_name),
-            token_stream.current_location(),
-        )
-        .into());
-    }
-    reject_unsupported_assert_argument_prefix(token_stream, assert_name)?;
-
-    // Parse the condition expression, stopping at the top-level comma or close paren.
     let bool_type_id = type_interner.environment().builtins().bool;
-    let mut expected_bool = ExpectedType::Known(bool_type_id);
-    let mut cast_target_context = CastTargetContext::None;
-    let input = ExpressionParseInput::until(ExpressionParseResources {
+    let string_type_id = type_interner.environment().builtins().string;
+    let default_message = Expression::option_none_with_type_id(
+        string_type_id,
+        DataType::StringSlice,
+        type_interner.environment_mut_for_derived_types(),
+        assert_location.clone(),
+    );
+    let message_type_id = default_message.type_id;
+
+    let expectations = [
+        ParameterExpectation {
+            name: Some(condition_name),
+            expected_type: ExpectedParameterType::Known(bool_type_id),
+            access_mode: ExpectedAccessMode::Shared,
+            requires_reactive_source: false,
+            default_value: None,
+        },
+        ParameterExpectation {
+            name: Some(message_name),
+            expected_type: ExpectedParameterType::Known(message_type_id),
+            access_mode: ExpectedAccessMode::Shared,
+            requires_reactive_source: false,
+            default_value: Some(default_message),
+        },
+    ];
+
+    let raw_arguments = parse_call_arguments_typed_with_expectations(
         token_stream,
-        scope_context: context,
+        context,
         type_interner,
-        expected_type: &mut expected_bool,
-        cast_target_context: &mut cast_target_context,
-        value_mode: &ValueMode::ImmutableOwned,
         string_table,
-    });
-    let condition =
-        create_expression_until(input, &[TokenKind::Comma, TokenKind::CloseParenthesis])?;
+        &expectations,
+        CallArgumentSyntax::Supported {
+            callee_name: Some(assert_name),
+        },
+    )?;
 
-    // Validate the condition is Bool using the shared condition diagnostic path.
-    ensure_boolean_condition(&condition, &condition.location, type_interner.environment())
-        .map_err(ExpressionParseError::Diagnostic)?;
-
-    // Optional message argument.
-    let message = if token_stream.current_token_kind() == &TokenKind::Comma {
-        token_stream.advance(); // past `,`
-
-        // Reject trailing comma with no message.
-        if token_stream.current_token_kind() == &TokenKind::CloseParenthesis {
-            return Err(CompilerDiagnostic::invalid_builtin_call(
-                InvalidBuiltinCallReason::MissingArgument,
-                Some(assert_name),
-                token_stream.current_location(),
-            )
-            .into());
-        }
-        reject_unsupported_assert_argument_prefix(token_stream, assert_name)?;
-
-        // For Alpha, only string slice literals are accepted as messages.
-        match token_stream.current_token_kind() {
-            TokenKind::StringSliceLiteral(text) => {
-                let msg = AssertMessage { text: *text };
-                token_stream.advance();
-                Some(msg)
-            }
-            _ => {
-                return Err(CompilerDiagnostic::invalid_builtin_call(
-                    InvalidBuiltinCallReason::RuntimeMessageExpressionDeferred,
-                    Some(assert_name),
-                    token_stream.current_location(),
-                )
-                .into());
-            }
-        }
-    } else {
-        None
+    let resolved_arguments = {
+        let type_check_context = type_interner.type_check_context();
+        resolve_call_arguments(
+            CallDiagnosticContext::assertion("assert"),
+            &raw_arguments,
+            &expectations,
+            assert_location.clone(),
+            CallArgumentResolutionContext {
+                string_table,
+                type_environment: type_check_context.type_environment,
+                compatibility_cache: type_check_context.compatibility_cache,
+            },
+        )?
     };
 
-    // Reject extra arguments such as `assert(true, "a", "b")`.
-    if token_stream.current_token_kind() == &TokenKind::Comma {
-        return Err(CompilerDiagnostic::invalid_builtin_call(
-            InvalidBuiltinCallReason::TooManyArguments,
-            Some(assert_name),
-            token_stream.current_location(),
-        )
-        .into());
+    let mut resolved_arguments = resolved_arguments.into_iter();
+    let condition = resolved_arguments
+        .next()
+        .ok_or_else(|| {
+            CompilerError::compiler_error(
+                "Assertion call resolution did not produce a condition argument",
+            )
+        })?
+        .value;
+    let message = resolved_arguments
+        .next()
+        .ok_or_else(|| {
+            CompilerError::compiler_error(
+                "Assertion call resolution did not produce a message argument",
+            )
+        })?
+        .value;
+
+    if assertion_condition_is_statically_true(&condition) {
+        // The message has been parsed, inferred, and evidence-checked above. It is inactive at
+        // this compiler-owned boundary, so provisional generic requests must not leak into AST
+        // finalization, HIR, linking, or backend request facts.
+        context.discard_generic_requests_since(generic_request_checkpoint);
     }
 
-    // Require closing `)`.
-    if token_stream.current_token_kind() != &TokenKind::CloseParenthesis {
-        return Err(CompilerDiagnostic::expected_token(
-            TokenKind::CloseParenthesis,
-            Some(token_stream.current_token_kind().to_owned()),
-            token_stream.current_location(),
-        )
-        .into());
+    if let Some(diagnostic) =
+        assert_message_escape_diagnostic(&message, &context.template_ir_store.borrow())?
+    {
+        return Err(diagnostic.into());
     }
-    token_stream.advance(); // past `)`
 
     // Reject `assert(...)!` — assert is not a fallible expression.
     if token_stream.current_token_kind() == &TokenKind::Bang {
@@ -160,27 +156,6 @@ pub(crate) fn parse_assert_statement(
     Ok(())
 }
 
-fn reject_unsupported_assert_argument_prefix(
-    token_stream: &FileTokens,
-    assert_name: StringId,
-) -> Result<(), ExpressionParseError> {
-    match token_stream.current_token_kind() {
-        TokenKind::Mutable => Err(CompilerDiagnostic::invalid_builtin_call(
-            InvalidBuiltinCallReason::DoesNotAcceptMutableAccess,
-            Some(assert_name),
-            token_stream.current_location(),
-        )
-        .into()),
-
-        TokenKind::Symbol(_) if token_stream.peek_next_token() == Some(&TokenKind::Assign) => {
-            Err(CompilerDiagnostic::invalid_builtin_call(
-                InvalidBuiltinCallReason::NamedArgumentsNotSupported,
-                Some(assert_name),
-                token_stream.current_location(),
-            )
-            .into())
-        }
-
-        _ => Ok(()),
-    }
-}
+#[cfg(test)]
+#[path = "tests/assertion_message_tests.rs"]
+mod assertion_message_tests;

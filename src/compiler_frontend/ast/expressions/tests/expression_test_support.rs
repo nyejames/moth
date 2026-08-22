@@ -115,6 +115,7 @@ impl Expression {
                 args,
                 result_type_ids: result_type_ids.clone(),
                 handling,
+                propagation_location: None,
             },
             result_type_ids,
             location,

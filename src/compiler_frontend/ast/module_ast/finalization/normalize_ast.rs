@@ -43,6 +43,9 @@ use super::template_helpers::{
 };
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, LoopBindings, NodeKind};
+use crate::compiler_frontend::ast::expressions::assertion_message_effects::{
+    assert_message_escape_diagnostic, assertion_condition_is_statically_true,
+};
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
 use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ExpressionKind, FallibleHandling, ReactiveTemplateMetadata,
@@ -64,6 +67,9 @@ use crate::compiler_frontend::ast::templates::runtime_handoff::{
     OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
 };
 use crate::compiler_frontend::ast::templates::template::Template;
+use crate::compiler_frontend::ast::templates::template_control_flow::{
+    TemplateBranchSelector, TemplateLoopHeader,
+};
 use crate::compiler_frontend::ast::templates::tir::{
     ExpressionSiteId, RuntimeTemplateReason, TemplateHelperKind, TemplateIrStore,
     TemplatePreparation, TemplatePreparationMode, TemplatePreparationOutcome, TemplateTirPhase,
@@ -680,7 +686,27 @@ fn normalize_ast_node_templates(
             normalize_expression_templates(expression, context)
         }
 
-        NodeKind::Assert { condition, .. } => normalize_expression_templates(condition, context),
+        NodeKind::Assert { condition, message } => {
+            normalize_expression_templates(condition, context)?;
+
+            {
+                let store = context.template_ir_store.borrow();
+                if let Some(diagnostic) = assert_message_escape_diagnostic(message, &store)? {
+                    return Err(diagnostic.into());
+                }
+            }
+
+            // The message still needs the ordinary AST normalization path so its nested
+            // templates reach the finalized boundary and retain their frontend diagnostics.
+            normalize_expression_templates(message, context)?;
+
+            let store = context.template_ir_store.borrow();
+            if let Some(diagnostic) = assert_message_escape_diagnostic(message, &store)? {
+                return Err(diagnostic.into());
+            }
+
+            Ok(())
+        }
 
         // Terminal nodes (no templates to normalize)
         NodeKind::Break | NodeKind::Continue => Ok(()),
@@ -895,6 +921,395 @@ fn normalize_call_argument_values(
     }
 
     Ok(())
+}
+
+/// Discards compile-time-inactive assertion messages after final AST type validation.
+///
+/// WHAT: walks the normalized AST and replaces only messages whose assertion condition is the
+///       literal `true` with the canonical typed `none` expression.
+/// WHY: normalized authored messages must remain visible to the authoritative finalized-TIR and
+///       TypeId validation pass. This AST-owned cleanup runs after that pass and before const
+///       facts, HIR, generated requests, link facts, target facts, or backend work can observe
+///       the completed AST.
+pub(super) fn discard_inactive_assertion_messages(ast: &mut [AstNode]) {
+    for node in ast {
+        discard_inactive_assertion_messages_in_node(node);
+    }
+}
+
+fn discard_inactive_assertion_messages_in_node(node: &mut AstNode) {
+    match &mut node.kind {
+        NodeKind::Function(_, signature, body) => {
+            discard_inactive_assertion_messages_in_signature(signature);
+            discard_inactive_assertion_messages(body);
+        }
+
+        NodeKind::VariableDeclaration(declaration) => {
+            discard_inactive_assertion_messages_in_expression(&mut declaration.value);
+        }
+
+        NodeKind::Return(values) => {
+            for value in values {
+                discard_inactive_assertion_messages_in_expression(value);
+            }
+        }
+
+        NodeKind::ReturnError(value)
+        | NodeKind::PushStartRuntimeFragment(value)
+        | NodeKind::ExpressionStatement(value) => {
+            discard_inactive_assertion_messages_in_expression(value);
+        }
+
+        NodeKind::ThenValue(produced_values) => {
+            for expression in &mut produced_values.expressions {
+                discard_inactive_assertion_messages_in_expression(expression);
+            }
+        }
+
+        NodeKind::If(condition, then_body, else_body) => {
+            discard_inactive_assertion_messages_in_expression(condition);
+            discard_inactive_assertion_messages(then_body);
+            if let Some(else_body) = else_body {
+                discard_inactive_assertion_messages(else_body);
+            }
+        }
+
+        NodeKind::Match {
+            scrutinee,
+            arms,
+            default,
+            ..
+        } => {
+            discard_inactive_assertion_messages_in_expression(scrutinee);
+            for arm in arms {
+                discard_inactive_assertion_messages_in_match_pattern(&mut arm.pattern);
+                if let Some(guard) = &mut arm.guard {
+                    discard_inactive_assertion_messages_in_expression(guard);
+                }
+                discard_inactive_assertion_messages(&mut arm.body);
+            }
+            if let Some(default) = default {
+                discard_inactive_assertion_messages(default);
+            }
+        }
+
+        NodeKind::ScopedBlock { body } => discard_inactive_assertion_messages(body),
+
+        NodeKind::RangeLoop {
+            bindings,
+            range,
+            body,
+        } => {
+            discard_inactive_assertion_messages_in_loop_bindings(bindings);
+            discard_inactive_assertion_messages_in_expression(&mut range.start);
+            discard_inactive_assertion_messages_in_expression(&mut range.end);
+            if let Some(step) = &mut range.step {
+                discard_inactive_assertion_messages_in_expression(step);
+            }
+            discard_inactive_assertion_messages(body);
+        }
+
+        NodeKind::CollectionLoop {
+            bindings,
+            iterable,
+            body,
+        } => {
+            discard_inactive_assertion_messages_in_loop_bindings(bindings);
+            discard_inactive_assertion_messages_in_expression(iterable);
+            discard_inactive_assertion_messages(body);
+        }
+
+        NodeKind::WhileLoop(condition, body) => {
+            discard_inactive_assertion_messages_in_expression(condition);
+            discard_inactive_assertion_messages(body);
+        }
+
+        NodeKind::Assert { condition, message } => {
+            discard_inactive_assertion_messages_in_expression(condition);
+            if assertion_condition_is_statically_true(condition) {
+                replace_inactive_assertion_message(message);
+            } else {
+                discard_inactive_assertion_messages_in_expression(message);
+            }
+        }
+
+        NodeKind::StructDefinition(_, fields) => {
+            for field in fields {
+                discard_inactive_assertion_messages_in_expression(&mut field.value);
+            }
+        }
+
+        NodeKind::Assignment { value, .. } | NodeKind::MultiBind { value, .. } => {
+            discard_inactive_assertion_messages_in_expression(value);
+        }
+
+        NodeKind::Break | NodeKind::Continue => {}
+    }
+}
+
+fn discard_inactive_assertion_messages_in_signature(signature: &mut FunctionSignature) {
+    for parameter in &mut signature.parameters {
+        discard_inactive_assertion_messages_in_expression(&mut parameter.value);
+    }
+}
+
+fn discard_inactive_assertion_messages_in_loop_bindings(bindings: &mut LoopBindings) {
+    if let Some(item) = &mut bindings.item {
+        discard_inactive_assertion_messages_in_expression(&mut item.value);
+    }
+    if let Some(index) = &mut bindings.index {
+        discard_inactive_assertion_messages_in_expression(&mut index.value);
+    }
+}
+
+fn discard_inactive_assertion_messages_in_match_pattern(pattern: &mut MatchPattern) {
+    match pattern {
+        MatchPattern::Literal(expression)
+        | MatchPattern::OptionValue {
+            value: expression, ..
+        }
+        | MatchPattern::Relational {
+            value: expression, ..
+        } => discard_inactive_assertion_messages_in_expression(expression),
+
+        MatchPattern::ChoiceVariant { .. }
+        | MatchPattern::OptionNone { .. }
+        | MatchPattern::OptionPresentCapture { .. } => {}
+    }
+}
+
+fn discard_inactive_assertion_messages_in_expression(expression: &mut Expression) {
+    match &mut expression.kind {
+        ExpressionKind::Runtime(rpn) => {
+            for item in &mut rpn.items {
+                if let ExpressionRpnItem::Operand(expression) = item {
+                    discard_inactive_assertion_messages_in_expression(expression);
+                }
+            }
+        }
+
+        ExpressionKind::Copy(_) => {}
+
+        ExpressionKind::FieldAccess { base, .. } => {
+            discard_inactive_assertion_messages_in_expression(base);
+        }
+
+        ExpressionKind::MethodCall { receiver, args, .. }
+        | ExpressionKind::CollectionBuiltinCall { receiver, args, .. }
+        | ExpressionKind::MapBuiltinCall { receiver, args, .. } => {
+            discard_inactive_assertion_messages_in_expression(receiver);
+            discard_inactive_assertion_messages_in_call_arguments(args);
+        }
+
+        ExpressionKind::Function(signature) => {
+            discard_inactive_assertion_messages_in_signature(signature);
+        }
+
+        ExpressionKind::FunctionCall { args, .. }
+        | ExpressionKind::HostFunctionCall { args, .. }
+        | ExpressionKind::HandledFallibleFunctionCall { args, .. }
+        | ExpressionKind::HandledFallibleHostFunctionCall { args, .. } => {
+            discard_inactive_assertion_messages_in_call_arguments(args);
+        }
+
+        ExpressionKind::Collection(items) => {
+            for item in items {
+                discard_inactive_assertion_messages_in_expression(item);
+            }
+        }
+
+        ExpressionKind::StructInstance(fields)
+        | ExpressionKind::StructDefinition(fields)
+        | ExpressionKind::ChoiceConstruct { fields, .. } => {
+            for field in fields {
+                discard_inactive_assertion_messages_in_expression(&mut field.value);
+            }
+        }
+
+        ExpressionKind::Range(start, end) => {
+            discard_inactive_assertion_messages_in_expression(start);
+            discard_inactive_assertion_messages_in_expression(end);
+        }
+
+        ExpressionKind::ValueBlock { block } => match block.as_mut() {
+            ValueBlock::If(value_if) => {
+                discard_inactive_assertion_messages_in_expression(&mut value_if.condition);
+                discard_inactive_assertion_messages(&mut value_if.then_body);
+                discard_inactive_assertion_messages(&mut value_if.else_body);
+            }
+
+            ValueBlock::Match(value_match) => {
+                discard_inactive_assertion_messages_in_expression(&mut value_match.scrutinee);
+                for arm in &mut value_match.arms {
+                    discard_inactive_assertion_messages_in_match_pattern(&mut arm.pattern);
+                    if let Some(guard) = &mut arm.guard {
+                        discard_inactive_assertion_messages_in_expression(guard);
+                    }
+                    discard_inactive_assertion_messages(&mut arm.body);
+                }
+                if let Some(default) = &mut value_match.default {
+                    discard_inactive_assertion_messages(default);
+                }
+            }
+
+            ValueBlock::Catch(value_catch) => {
+                discard_inactive_assertion_messages_in_expression(&mut value_catch.handled_value);
+                discard_inactive_assertion_messages_in_fallible_handling(&mut value_catch.handler);
+            }
+        },
+
+        ExpressionKind::MapLiteral(entries) => {
+            for entry in entries {
+                discard_inactive_assertion_messages_in_expression(&mut entry.key);
+                discard_inactive_assertion_messages_in_expression(&mut entry.value);
+            }
+        }
+
+        ExpressionKind::OptionPropagation { value }
+        | ExpressionKind::Coerced { value, .. }
+        | ExpressionKind::HandledFallibleExpression { value, .. } => {
+            discard_inactive_assertion_messages_in_expression(value);
+        }
+
+        ExpressionKind::Cast(cast) => {
+            discard_inactive_assertion_messages_in_expression(&mut cast.source);
+        }
+
+        #[cfg(test)]
+        ExpressionKind::FallibleCarrierConstruct { value, .. } => {
+            discard_inactive_assertion_messages_in_expression(value);
+        }
+
+        ExpressionKind::RuntimeTemplateHandoff(handoff) => {
+            discard_inactive_assertion_messages_in_runtime_template_handoff(handoff);
+        }
+
+        ExpressionKind::RuntimeSlotApplicationHandoff(handoff) => {
+            discard_inactive_assertion_messages_in_runtime_slot_handoff(handoff);
+        }
+
+        ExpressionKind::Template(_)
+        | ExpressionKind::NoValue
+        | ExpressionKind::OptionNone
+        | ExpressionKind::Int(_)
+        | ExpressionKind::Float(_)
+        | ExpressionKind::StringSlice(_)
+        | ExpressionKind::Bool(_)
+        | ExpressionKind::Char(_)
+        | ExpressionKind::Reference(_) => {}
+
+        #[cfg(test)]
+        ExpressionKind::Path(_) => {}
+    }
+}
+
+fn discard_inactive_assertion_messages_in_call_arguments(arguments: &mut [CallArgument]) {
+    for argument in arguments {
+        discard_inactive_assertion_messages_in_expression(&mut argument.value);
+    }
+}
+
+fn discard_inactive_assertion_messages_in_fallible_handling(handling: &mut FallibleHandling) {
+    if let FallibleHandling::Handler { body, .. } = handling {
+        discard_inactive_assertion_messages(body);
+    }
+}
+
+fn discard_inactive_assertion_messages_in_runtime_template_handoff(
+    handoff: &mut OwnedRuntimeTemplateHandoff,
+) {
+    runtime_handoff::walk_owned_runtime_template_handoff_mut(handoff, &mut |node| {
+        discard_inactive_assertion_messages_in_owned_runtime_node(node);
+        Ok::<(), std::convert::Infallible>(())
+    })
+    .expect("owned runtime template handoff walker cannot fail");
+}
+
+fn discard_inactive_assertion_messages_in_runtime_slot_handoff(
+    handoff: &mut OwnedRuntimeSlotApplicationHandoff,
+) {
+    runtime_handoff::walk_owned_runtime_slot_application_handoff_mut(handoff, &mut |node| {
+        discard_inactive_assertion_messages_in_owned_runtime_node(node);
+        Ok::<(), std::convert::Infallible>(())
+    })
+    .expect("owned runtime slot handoff walker cannot fail");
+}
+
+fn discard_inactive_assertion_messages_in_owned_runtime_node(node: &mut OwnedRuntimeTemplateNode) {
+    match node {
+        OwnedRuntimeTemplateNode::DynamicExpression { expression, .. } => {
+            discard_inactive_assertion_messages_in_expression(expression);
+        }
+
+        OwnedRuntimeTemplateNode::BranchChain { branches, .. } => {
+            for branch in branches {
+                discard_inactive_assertion_messages_in_branch_selector(&mut branch.selector);
+            }
+        }
+
+        OwnedRuntimeTemplateNode::Loop { header, .. } => {
+            discard_inactive_assertion_messages_in_loop_header(header);
+        }
+
+        OwnedRuntimeTemplateNode::Sequence { .. }
+        | OwnedRuntimeTemplateNode::Text { .. }
+        | OwnedRuntimeTemplateNode::ChildTemplate { .. }
+        | OwnedRuntimeTemplateNode::ConditionalWrapper { .. }
+        | OwnedRuntimeTemplateNode::AggregateOutput
+        | OwnedRuntimeTemplateNode::LoopControl { .. }
+        | OwnedRuntimeTemplateNode::RuntimeSlotSite { .. }
+        | OwnedRuntimeTemplateNode::RuntimeSlotContributionSource { .. }
+        | OwnedRuntimeTemplateNode::Slot { .. } => {}
+    }
+}
+
+fn discard_inactive_assertion_messages_in_branch_selector(selector: &mut TemplateBranchSelector) {
+    match selector {
+        TemplateBranchSelector::Bool(condition) => {
+            discard_inactive_assertion_messages_in_expression(condition);
+        }
+        TemplateBranchSelector::OptionPresentCapture { scrutinee, pattern } => {
+            discard_inactive_assertion_messages_in_expression(scrutinee);
+            discard_inactive_assertion_messages_in_match_pattern(pattern);
+        }
+    }
+}
+
+fn discard_inactive_assertion_messages_in_loop_header(header: &mut TemplateLoopHeader) {
+    match header {
+        TemplateLoopHeader::Conditional { condition } => {
+            discard_inactive_assertion_messages_in_expression(condition);
+        }
+        TemplateLoopHeader::Range { bindings, range } => {
+            discard_inactive_assertion_messages_in_loop_bindings(bindings);
+            discard_inactive_assertion_messages_in_expression(&mut range.start);
+            discard_inactive_assertion_messages_in_expression(&mut range.end);
+            if let Some(step) = &mut range.step {
+                discard_inactive_assertion_messages_in_expression(step);
+            }
+        }
+        TemplateLoopHeader::Collection { bindings, iterable } => {
+            discard_inactive_assertion_messages_in_loop_bindings(bindings);
+            discard_inactive_assertion_messages_in_expression(iterable);
+        }
+    }
+}
+
+/// Replaces a fully validated inactive assertion message with the canonical typed `none` shape.
+///
+/// WHAT: removes the normalized executable message, including any owned runtime handoff,
+///       reactive metadata, synthetic provenance, and TIR-backed expression identity.
+/// WHY: a compile-time-true assertion remains frontend-valid but publishes no message value or
+///      downstream executable fact. The existing resolved optional type identity is retained.
+fn replace_inactive_assertion_message(message: &mut Expression) {
+    let inert_message = Expression::new(
+        ExpressionKind::OptionNone,
+        message.location.clone(),
+        message.type_id,
+        message.diagnostic_type.clone(),
+        ValueMode::ImmutableOwned,
+    );
+    *message = inert_message;
 }
 
 #[derive(Debug)]

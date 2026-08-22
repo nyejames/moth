@@ -5,7 +5,19 @@ Use `assert` for a condition that must already be true.
     assert(index < items.length(), "index must be in bounds")
 ]
 
-The message is optional. When you add one it must be a quoted string literal.
+The message is optional. When you add one it is an ordinary `String?` value,
+including a local string, runtime template snapshot or infallible string-producing call.
+It is still fully checked and normalized when the condition is the literal
+`true`. The message is normalized through the ordinary AST template path before
+it is discarded after final AST type/TIR validation, so its temporary AST-local
+TIR is removed with the message and no TIR reference, runtime handoff, reactive
+metadata, generated function or other runtime fact survives. JavaScript and
+HTML evaluate active messages only on the failure
+edge. HTML-Wasm accepts an unreachable literal-true runtime message but
+currently rejects reachable runtime message construction.
+
+Message construction must not escape its evaluation through `!`, `?`, `return`,
+`break` or `continue`.
 
 A failed assertion stops the current program path.
 

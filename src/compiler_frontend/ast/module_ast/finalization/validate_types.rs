@@ -27,6 +27,9 @@ use crate::compiler_frontend::ast::templates::runtime_handoff::{
     OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
 };
 use crate::compiler_frontend::ast::templates::template::Template;
+use crate::compiler_frontend::ast::templates::template_control_flow::{
+    TemplateBranchSelector, TemplateLoopHeader,
+};
 use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrStore, finalized_tir_view_for_template, walk_tir_view_expression_payloads,
 };
@@ -106,21 +109,7 @@ fn validate_node(node: &AstNode, context: &TypeValidationContext) -> Result<(), 
             validate_expression(scrutinee, context)?;
 
             for arm in arms {
-                match &arm.pattern {
-                    MatchPattern::Literal(value)
-                    | MatchPattern::OptionValue { value, .. }
-                    | MatchPattern::Relational { value, .. } => {
-                        validate_expression(value, context)?;
-                    }
-                    MatchPattern::ChoiceVariant { captures, .. } => {
-                        for capture in captures {
-                            validate_type_id(capture.type_id, &capture.location, context)?;
-                        }
-                    }
-                    MatchPattern::OptionNone { .. } | MatchPattern::OptionPresentCapture { .. } => {
-                    }
-                }
-
+                validate_match_pattern(&arm.pattern, context)?;
                 if let Some(guard) = &arm.guard {
                     validate_expression(guard, context)?;
                 }
@@ -196,7 +185,10 @@ fn validate_node(node: &AstNode, context: &TypeValidationContext) -> Result<(), 
             validate_nodes(body, context)
         }
 
-        NodeKind::Assert { condition, .. } => validate_expression(condition, context),
+        NodeKind::Assert { condition, message } => {
+            validate_expression(condition, context)?;
+            validate_expression(message, context)
+        }
 
         // Terminal nodes that contain no type-carrying positions.
         NodeKind::Break | NodeKind::Continue => Ok(()),
@@ -384,11 +376,7 @@ fn validate_owned_runtime_template_handoff(
     context: &TypeValidationContext,
 ) -> Result<(), CompilerError> {
     runtime_handoff::walk_owned_runtime_template_handoff(handoff, &mut |node| {
-        if let OwnedRuntimeTemplateNode::DynamicExpression { expression, .. } = node {
-            validate_expression(expression, context)?;
-        }
-
-        Ok(())
+        validate_owned_runtime_template_node(node, context)
     })
 }
 
@@ -397,12 +385,104 @@ fn validate_owned_runtime_slot_application_handoff(
     context: &TypeValidationContext,
 ) -> Result<(), CompilerError> {
     runtime_handoff::walk_owned_runtime_slot_application_handoff(handoff, &mut |node| {
-        if let OwnedRuntimeTemplateNode::DynamicExpression { expression, .. } = node {
-            validate_expression(expression, context)?;
+        validate_owned_runtime_template_node(node, context)
+    })
+}
+
+/// Validates every expression-bearing payload exposed by an owned runtime handoff.
+///
+/// WHAT: checks dynamic expressions, branch selectors, and loop headers while the canonical
+///       runtime-handoff walker owns recursion through child/body/slot structures.
+/// WHY: these control-flow payloads are not child nodes, so a dynamic-expression-only callback
+///       would let orphan TypeIds cross the AST/HIR boundary unnoticed.
+fn validate_owned_runtime_template_node(
+    node: &OwnedRuntimeTemplateNode,
+    context: &TypeValidationContext,
+) -> Result<(), CompilerError> {
+    match node {
+        OwnedRuntimeTemplateNode::DynamicExpression { expression, .. } => {
+            validate_expression(expression, context)
         }
 
-        Ok(())
-    })
+        OwnedRuntimeTemplateNode::BranchChain { branches, .. } => {
+            for branch in branches {
+                validate_template_branch_selector(&branch.selector, context)?;
+            }
+            Ok(())
+        }
+
+        OwnedRuntimeTemplateNode::Loop { header, .. } => {
+            validate_template_loop_header(header, context)
+        }
+
+        OwnedRuntimeTemplateNode::Sequence { .. }
+        | OwnedRuntimeTemplateNode::Text { .. }
+        | OwnedRuntimeTemplateNode::ChildTemplate { .. }
+        | OwnedRuntimeTemplateNode::ConditionalWrapper { .. }
+        | OwnedRuntimeTemplateNode::AggregateOutput
+        | OwnedRuntimeTemplateNode::LoopControl { .. }
+        | OwnedRuntimeTemplateNode::RuntimeSlotSite { .. }
+        | OwnedRuntimeTemplateNode::RuntimeSlotContributionSource { .. }
+        | OwnedRuntimeTemplateNode::Slot { .. } => Ok(()),
+    }
+}
+
+fn validate_template_branch_selector(
+    selector: &TemplateBranchSelector,
+    context: &TypeValidationContext,
+) -> Result<(), CompilerError> {
+    match selector {
+        TemplateBranchSelector::Bool(condition) => validate_expression(condition, context),
+        TemplateBranchSelector::OptionPresentCapture { scrutinee, pattern } => {
+            validate_expression(scrutinee, context)?;
+            validate_match_pattern(pattern, context)
+        }
+    }
+}
+
+fn validate_template_loop_header(
+    header: &TemplateLoopHeader,
+    context: &TypeValidationContext,
+) -> Result<(), CompilerError> {
+    match header {
+        TemplateLoopHeader::Conditional { condition } => validate_expression(condition, context),
+        TemplateLoopHeader::Range { bindings, range } => {
+            validate_loop_bindings(bindings, context)?;
+            validate_expression(&range.start, context)?;
+            validate_expression(&range.end, context)?;
+            if let Some(step) = &range.step {
+                validate_expression(step, context)?;
+            }
+            Ok(())
+        }
+        TemplateLoopHeader::Collection { bindings, iterable } => {
+            validate_loop_bindings(bindings, context)?;
+            validate_expression(iterable, context)
+        }
+    }
+}
+
+fn validate_match_pattern(
+    pattern: &MatchPattern,
+    context: &TypeValidationContext,
+) -> Result<(), CompilerError> {
+    match pattern {
+        MatchPattern::Literal(value)
+        | MatchPattern::OptionValue { value, .. }
+        | MatchPattern::Relational { value, .. } => validate_expression(value, context),
+        MatchPattern::ChoiceVariant { captures, .. } => {
+            for capture in captures {
+                validate_type_id(capture.type_id, &capture.location, context)?;
+            }
+            Ok(())
+        }
+        MatchPattern::OptionNone { .. } => Ok(()),
+        MatchPattern::OptionPresentCapture {
+            inner_type_id,
+            binding_location,
+            ..
+        } => validate_type_id(*inner_type_id, binding_location, context),
+    }
 }
 
 // --------------------------

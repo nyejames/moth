@@ -7,7 +7,7 @@ use crate::backends::wasm::lir::instructions::{WasmLirStmt, WasmLirTerminator};
 use crate::backends::wasm::lir::types::WasmAbiType;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 use crate::compiler_frontend::hir::ids::BlockId;
-use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
 
 pub(crate) fn lower_terminator(
     context: &mut WasmFunctionLoweringContext<'_, '_>,
@@ -59,6 +59,12 @@ pub(crate) fn lower_terminator(
             "Wasm lowering encountered Uninitialized terminator",
         )),
         HirTerminator::RuntimeFailure { .. } => Ok(WasmLirTerminator::Trap),
+        HirTerminator::AssertFailure {
+            message_evaluation: HirAssertionMessageEvaluation::Runtime,
+            ..
+        } => Err(CompilerError::compiler_error(
+            "Wasm lowering received a runtime assertion message after target validation",
+        )),
         HirTerminator::AssertFailure { .. } => Ok(WasmLirTerminator::Trap),
         HirTerminator::Match { .. } => Err(lir_transformation_error(
             "Wasm lowering does not yet support HirTerminator::Match",

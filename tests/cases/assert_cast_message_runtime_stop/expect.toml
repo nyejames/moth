@@ -1,0 +1,12 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = [
+    "function __moth_cast_int_to_string(",
+    "__moth_cast_int_to_string(__moth_read(",
+    "let __assert_message_0",
+]

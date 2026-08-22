@@ -728,6 +728,7 @@ impl Expression {
                 args,
                 result_type_ids,
                 handling,
+                propagation_location: None,
             },
             resolved_types,
             location,
@@ -779,6 +780,7 @@ impl Expression {
                 result_type_ids,
                 error_type_id,
                 handling,
+                propagation_location: None,
             },
             resolved_types,
             location,
@@ -888,6 +890,7 @@ impl Expression {
             ExpressionKind::HandledFallibleExpression {
                 value: Box::new(value),
                 handling,
+                propagation_location: None,
             },
             location,
             result_type_id,
@@ -896,6 +899,63 @@ impl Expression {
         )
         .with_regular_division_provenance(contains_regular_division)
         .with_synthetic_interface_provenance(synthetic_interface_provenance)
+    }
+
+    /// Attach the authored postfix propagation location to a handled expression.
+    ///
+    /// WHAT: records the `!` token separately from the expression's ordinary source location.
+    /// WHY: call/value source maps and propagation diagnostics have different source owners.
+    ///
+    /// The parser is the only production caller. A propagation location on a recovery or
+    /// unrelated expression is an internal construction error and is rejected in debug builds.
+    pub(crate) fn with_propagation_location(mut self, location: SourceLocation) -> Self {
+        match &mut self.kind {
+            ExpressionKind::HandledFallibleFunctionCall {
+                propagation_location,
+                handling,
+                ..
+            }
+            | ExpressionKind::HandledFallibleHostFunctionCall {
+                propagation_location,
+                handling,
+                ..
+            }
+            | ExpressionKind::HandledFallibleExpression {
+                propagation_location,
+                handling,
+                ..
+            } => {
+                debug_assert!(
+                    matches!(handling, FallibleExpressionHandling::Propagate),
+                    "only propagating fallible expressions carry a postfix location"
+                );
+                *propagation_location = Some(location);
+            }
+            _ => debug_assert!(
+                false,
+                "postfix propagation location attached to a non-fallible expression"
+            ),
+        }
+        self
+    }
+
+    /// Returns the authored postfix propagation location, if this is a handled fallible value.
+    pub(crate) fn propagation_location(&self) -> Option<&SourceLocation> {
+        match &self.kind {
+            ExpressionKind::HandledFallibleFunctionCall {
+                propagation_location,
+                ..
+            }
+            | ExpressionKind::HandledFallibleHostFunctionCall {
+                propagation_location,
+                ..
+            }
+            | ExpressionKind::HandledFallibleExpression {
+                propagation_location,
+                ..
+            } => propagation_location.as_ref(),
+            _ => None,
+        }
     }
 
     /// Wraps an optional expression with postfix `?` propagation.

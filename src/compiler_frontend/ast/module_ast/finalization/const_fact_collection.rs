@@ -245,11 +245,9 @@ impl<'a> ConstFactCollector<'a> {
                 }
             }
 
-            NodeKind::Assert {
-                condition,
-                message: _,
-            } => {
+            NodeKind::Assert { condition, message } => {
                 self.walk_expression_for_body_local(condition, env)?;
+                self.walk_expression_for_body_local(message, env)?;
             }
 
             NodeKind::Match {

@@ -125,9 +125,24 @@ pub(crate) fn transfer_terminator(
             )?;
         }
 
-        HirTerminator::AssertFailure { .. } => {
-            // Assertion messages are compile-time text, not expressions, so no
-            // borrow reads are needed here.
+        HirTerminator::AssertFailure { message, .. } => {
+            let mut read_env = SharedReadEnv {
+                context,
+                layout,
+                state,
+                block_id,
+                tracker: &mut tracker,
+                location: location.clone(),
+                current_order: terminator_order,
+                stats,
+                value_fact_buffer,
+            };
+            record_shared_reads_in_expression(
+                &mut read_env,
+                message,
+                location.clone(),
+                &mut RootSet::empty(layout.local_count()),
+            )?;
         }
 
         HirTerminator::RuntimeFailure { .. } => {

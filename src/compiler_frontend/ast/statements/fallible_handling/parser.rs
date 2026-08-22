@@ -86,6 +86,7 @@ impl HandledFallibleHostCall {
     pub(crate) fn into_expression(
         self,
         handling: FallibleHandling,
+        propagation_location: Option<SourceLocation>,
         type_environment: &mut TypeEnvironment,
     ) -> Expression {
         let normalized_args = normalize_call_arguments(&self.args);
@@ -102,10 +103,14 @@ impl HandledFallibleHostCall {
                     result_type_ids: self.result_type_ids,
                     error_type_id: self.error_type_id,
                     handling: expression_handling,
-                    location: self.call_location,
+                    location: self.call_location.clone(),
                 },
                 type_environment,
             );
+        let function_call_expression = match propagation_location {
+            Some(location) => function_call_expression.with_propagation_location(location),
+            None => function_call_expression,
+        };
 
         match handling {
             FallibleHandling::Propagate => function_call_expression,
@@ -135,6 +140,7 @@ impl HandledFallibleCall {
     pub(crate) fn into_expression(
         self,
         handling: FallibleHandling,
+        propagation_location: Option<SourceLocation>,
         type_environment: &mut TypeEnvironment,
     ) -> Expression {
         let normalized_args = normalize_call_arguments(&self.args);
@@ -150,8 +156,12 @@ impl HandledFallibleCall {
                 self.result_type_ids,
                 expression_handling,
                 type_environment,
-                self.call_location,
+                self.call_location.clone(),
             );
+        let function_call_expression = match propagation_location {
+            Some(location) => function_call_expression.with_propagation_location(location),
+            None => function_call_expression,
+        };
 
         match handling {
             FallibleHandling::Propagate => function_call_expression,
@@ -206,6 +216,9 @@ pub(crate) fn parse_fallible_handling_suffix_for_expression(
     let success_type_diagnostic_spelling =
         diagnostic_type_spelling(handled_type_id, type_interner.environment());
 
+    let propagation_location = (token_stream.current_token_kind() == &TokenKind::Bang)
+        .then(|| token_stream.current_postfix_operator_location());
+
     if let Some(handling) = parse_fallible_handling_suffix(
         token_stream,
         context,
@@ -221,13 +234,18 @@ pub(crate) fn parse_fallible_handling_suffix_for_expression(
         None,
         string_table,
     )? {
+        let expression_location = expression.location.clone();
+
         return Ok(match handling {
             FallibleHandling::Propagate => Expression::handled_result_with_type_id(
                 expression,
                 FallibleExpressionHandling::Propagate,
                 handled_type_id,
                 success_type_diagnostic_spelling,
-                token_stream.current_location(),
+                expression_location,
+            )
+            .with_propagation_location(
+                propagation_location.expect("propagation handling must have a postfix location"),
             ),
 
             FallibleHandling::Handler { .. } => {
@@ -236,7 +254,7 @@ pub(crate) fn parse_fallible_handling_suffix_for_expression(
                     FallibleExpressionHandling::Recover,
                     handled_type_id,
                     success_type_diagnostic_spelling,
-                    token_stream.current_location(),
+                    expression_location,
                 );
 
                 wrap_catch_expression(handled_expression, handling, success_result_type_ids)
@@ -299,12 +317,13 @@ fn parse_postfix_propagation(
     site: FallibleHandlingSite<'_>,
     type_environment: &TypeEnvironment,
 ) -> Result<FallibleHandling, ExpressionParseError> {
+    let propagation_location = token_stream.current_postfix_operator_location();
     token_stream.advance();
 
     let Some(expected_error_type_id) = context.expected_error_type else {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::FunctionHasNoErrorSlot,
-            token_stream.current_location(),
+            propagation_location,
         )
         .into());
     };
@@ -318,7 +337,7 @@ fn parse_postfix_propagation(
             expected_error_type_id,
             site.error_return_type_id,
             TypeMismatchContext::ErrorReturn,
-            token_stream.current_location(),
+            propagation_location,
         )
         .into());
     }
@@ -549,6 +568,9 @@ pub(crate) fn parse_fallible_handling_suffix_for_call_expression(
         allow_boundary_catch,
     } = handler_call;
 
+    let propagation_location = (token_stream.current_token_kind() == &TokenKind::Bang)
+        .then(|| token_stream.current_postfix_operator_location());
+
     let handling = parse_fallible_handling_suffix(
         token_stream,
         context,
@@ -573,7 +595,11 @@ pub(crate) fn parse_fallible_handling_suffix_for_call_expression(
         .into());
     };
 
-    Ok(call.into_expression(handling, type_interner.environment_mut_for_derived_types()))
+    Ok(call.into_expression(
+        handling,
+        propagation_location,
+        type_interner.environment_mut_for_derived_types(),
+    ))
 }
 
 pub(crate) fn parse_fallible_handling_suffix_for_host_call_expression(
@@ -589,6 +615,9 @@ pub(crate) fn parse_fallible_handling_suffix_for_host_call_expression(
         value_required,
         allow_boundary_catch,
     } = handler_call;
+
+    let propagation_location = (token_stream.current_token_kind() == &TokenKind::Bang)
+        .then(|| token_stream.current_postfix_operator_location());
 
     let handling = parse_fallible_handling_suffix(
         token_stream,
@@ -614,7 +643,11 @@ pub(crate) fn parse_fallible_handling_suffix_for_host_call_expression(
         .into());
     };
 
-    Ok(call.into_expression(handling, type_interner.environment_mut_for_derived_types()))
+    Ok(call.into_expression(
+        handling,
+        propagation_location,
+        type_interner.environment_mut_for_derived_types(),
+    ))
 }
 
 /// Input bundle for `parse_cast_catch_handling_suffix`.

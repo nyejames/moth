@@ -1,0 +1,12 @@
+-- assertion messages cannot propagate an optional result
+
+make_message || -> String?:
+    return "message"
+;
+
+check || -> String?:
+    assert(true, make_message()?)
+    return "done"
+;
+
+result = check()

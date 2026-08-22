@@ -1,5 +1,19 @@
 `assert` provides an always-checked statement intrinsic for invariants.
 
+The accepted end-state contract uses one required condition and one optional
+message:
+
+[codeblock, $code("moth"):
+    assert |condition Bool, message String? = none|
+]
+
+This is compiler-owned metadata, not an importable or shadowable Moth
+function. The current Alpha compiler carries the message as a typed optional
+value through AST and HIR. JavaScript and HTML evaluate reachable runtime
+message construction lazily on the failure edge; HTML-Wasm currently rejects
+reachable runtime construction while accepting default and fully folded forms.
+The rules below describe the accepted end state and the explicit target gap.
+
 [codeblock, $code("moth"):
     assert(index < items.length())
     assert(index < items.length(), "index must be in bounds")
@@ -9,19 +23,40 @@
 ### Accepted forms
 
 [codeblock, $code("moth"):
-    assert(condition)
-    assert(condition, "literal message")
+    assert(ready)
+    assert(ready, "must be ready")
+    assert(condition = ready)
+    assert(ready, message = "must be ready")
+    assert(message = "must be ready", condition = ready)
+    assert(condition = ready, message = none)
 ]
 
 - The condition must resolve to `Bool`.
 - The condition is required.
-- The message is optional.
-- When present the message must be one quoted string literal.
-- Exactly one condition and at most one message are accepted.
-- Named arguments are invalid.
-- Mutable access markers are invalid.
+- The message resolves to `String?` and defaults to `none`.
+- A `String` promotes to `String?` through ordinary contextual coercion.
+- `none` selects the default failure text, `"assertion failed"`.
+- A present message may be an ordinary infallible expression, including a
+  local string, runtime template or infallible string-producing call.
+- Moth does not implicitly stringify other value types for an assertion
+  message.
+- Named and positional arguments use the ordinary call rules. Positional
+  arguments must come first, names must be `condition` or `message`, and a
+  parameter cannot be supplied twice.
+- Mutable access markers are invalid for both parameters.
 - Parentheses are required.
-- Trailing comma without a message is invalid.
+- The shared call-argument grammar owns trailing-comma behaviour.
+
+The message is type checked, generic-inferred, evidence-checked and fully
+normalized, including nested templates, even when the condition is compile-time
+`true`. The normalized inactive message is then replaced with typed `none` before
+the AST/HIR boundary, so it publishes no TIR, runtime handoff, reactive metadata,
+generated-function request or downstream executable fact. An active message is
+evaluated only on the failure edge. A template-backed message is read as one
+snapshot at failure and does not create an assertion sink or live subscription.
+Message construction cannot escape its evaluation through `!`, `?`, `return`,
+`break` or `continue`. Handle fallible work before the assertion and pass its
+infallible value instead.
 
 ### Failure behaviour
 
@@ -43,6 +78,8 @@
 - does not produce a value
 
 `assert(false)` and `assert(false, "message")` are statically terminal.
+`assert(false, runtime_message)` is also statically terminal after the
+failure-edge message is lowered.
 
 They may end a function path that otherwise requires a value.
 

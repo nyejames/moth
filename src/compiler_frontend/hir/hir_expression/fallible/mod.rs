@@ -77,7 +77,8 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         value: &Expression,
         handling: &FallibleExpressionHandling,
-        location: &SourceLocation,
+        value_location: &SourceLocation,
+        propagation_location: &SourceLocation,
         expr_type_id: FrontendTypeId,
     ) -> Result<LoweredExpression, CompilerError> {
         let lowered = self.lower_expression(value)?;
@@ -89,25 +90,25 @@ impl<'a> HirBuilder<'a> {
             None => {
                 return_hir_transformation_error!(
                     "Handled fallible expression reached HIR lowering without an internal carrier type",
-                    self.hir_error_location(location)
+                    self.hir_error_location(value_location)
                 );
             }
         };
 
         let result_type_ids = self.handled_expression_result_type_ids(expr_type_id);
-        let expected_ok_type = self.lower_call_result_type(&result_type_ids, location)?;
+        let expected_ok_type = self.lower_call_result_type(&result_type_ids, value_location)?;
         if expected_ok_type != ok_type {
             return_hir_transformation_error!(
                 "Handled fallible expression lowered with mismatched success type",
-                self.hir_error_location(location)
+                self.hir_error_location(value_location)
             );
         }
 
         if matches!(handling, FallibleExpressionHandling::Propagate) {
             let result_carrier =
-                self.emit_lowered_result_expression_to_current_block(lowered, location)?;
+                self.emit_lowered_result_expression_to_current_block(lowered, value_location)?;
             let success_value =
-                self.lower_fallible_carrier_to_success_value(result_carrier, location)?;
+                self.lower_fallible_carrier_to_success_value(result_carrier, propagation_location)?;
 
             return Ok(LoweredExpression {
                 prelude: vec![],
@@ -117,7 +118,7 @@ impl<'a> HirBuilder<'a> {
 
         return_hir_transformation_error!(
             "Recovering fallible expression reached HIR outside a value catch block",
-            self.hir_error_location(location)
+            self.hir_error_location(value_location)
         )
     }
 
@@ -177,16 +178,16 @@ impl<'a> HirBuilder<'a> {
         args: &[CallArgument],
         result_type_ids: &[FrontendTypeId],
         handling: &FallibleExpressionHandling,
-        _value_required: bool,
-        location: &SourceLocation,
+        call_location: &SourceLocation,
+        propagation_location: &SourceLocation,
     ) -> Result<LoweredExpression, CompilerError> {
-        let (_, ok_type, _) = self.result_call_carrier_slots(&target, location)?;
+        let (_, ok_type, _) = self.result_call_carrier_slots(&target, call_location)?;
 
-        let requested_ok_type = self.lower_call_result_type(result_type_ids, location)?;
+        let requested_ok_type = self.lower_call_result_type(result_type_ids, call_location)?;
         if requested_ok_type != ok_type {
             return_hir_transformation_error!(
                 "Handled fallible call lowered with mismatched success type",
-                self.hir_error_location(location)
+                self.hir_error_location(call_location)
             );
         }
 
@@ -195,12 +196,12 @@ impl<'a> HirBuilder<'a> {
                 target,
                 args,
                 result_type_ids,
-                location,
+                call_location,
             )?;
             let success_value =
-                self.lower_fallible_carrier_to_success_value(result_carrier, location)?;
+                self.lower_fallible_carrier_to_success_value(result_carrier, propagation_location)?;
 
-            self.log_call_result_binding(location, None, &success_value);
+            self.log_call_result_binding(call_location, None, &success_value);
 
             return Ok(LoweredExpression {
                 prelude: vec![],
@@ -210,7 +211,7 @@ impl<'a> HirBuilder<'a> {
 
         return_hir_transformation_error!(
             "Recovering fallible call reached HIR outside a value catch block",
-            self.hir_error_location(location)
+            self.hir_error_location(call_location)
         )
     }
 
@@ -224,7 +225,8 @@ impl<'a> HirBuilder<'a> {
             result_type_ids,
             error_type_id,
             handling,
-            location,
+            call_location,
+            propagation_location,
         } = input;
 
         if matches!(handling, FallibleExpressionHandling::Propagate) {
@@ -233,12 +235,12 @@ impl<'a> HirBuilder<'a> {
                 args,
                 result_type_ids,
                 error_type_id,
-                location,
+                call_location,
             )?;
             let success_value =
-                self.lower_fallible_carrier_to_success_value(result_carrier, location)?;
+                self.lower_fallible_carrier_to_success_value(result_carrier, propagation_location)?;
 
-            self.log_call_result_binding(location, None, &success_value);
+            self.log_call_result_binding(call_location, None, &success_value);
 
             return Ok(LoweredExpression {
                 prelude: vec![],
@@ -248,7 +250,7 @@ impl<'a> HirBuilder<'a> {
 
         return_hir_transformation_error!(
             "Recovering external fallible call reached HIR outside a value catch block",
-            self.hir_error_location(location)
+            self.hir_error_location(call_location)
         )
     }
 }

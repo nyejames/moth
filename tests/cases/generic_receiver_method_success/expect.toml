@@ -1,4 +1,4 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_contains = ["generic receiver 42"]
+rendered_output_contains = ["generic receiver 13"]

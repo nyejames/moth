@@ -10,6 +10,7 @@ use super::types::{
     FunctionTemplateFlow, ReactiveTemplateValueEnvironment, reference_path_for_place_expression,
 };
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, LoopBindings, NodeKind};
+use crate::compiler_frontend::ast::expressions::assertion_message_effects::assertion_condition_is_statically_true;
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
 use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ExpressionKind, FallibleHandling, ReactiveTemplateMetadata,
@@ -600,8 +601,11 @@ fn annotate_node(
             annotate_nodes(body, flows, &mut body_environment, store)?;
         }
 
-        NodeKind::Assert { condition, .. } => {
+        NodeKind::Assert { condition, message } => {
             annotate_expression(condition, flows, value_environment, store)?;
+            if !assertion_condition_is_statically_true(condition) {
+                annotate_expression(message, flows, value_environment, store)?;
+            }
         }
 
         NodeKind::StructDefinition(_, fields) => {

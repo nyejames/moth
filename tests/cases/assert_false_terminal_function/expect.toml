@@ -1,8 +1,4 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-
-[[backends.html.artifact_assertions]]
-path = "index.html"
-kind = "html"
-must_contain = ["assert_false_terminal_function"]
+rendered_output_contains_exactly_once = ["assert_false_terminal_function"]

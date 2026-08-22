@@ -5,8 +5,25 @@
 //! mutable access markers, and mutable-place vs fresh-rvalue passing semantics.
 
 use crate::compiler_frontend::ast::expressions::expression::Expression;
-use crate::compiler_frontend::compiler_errors::SourceLocation;
+use crate::compiler_frontend::compiler_errors::{CompilerError, SourceLocation};
 use crate::compiler_frontend::symbols::string_interning::StringId;
+
+/// Stable declaration-order slot retained from call-argument parsing.
+///
+/// WHAT: identifies the parameter selected before the argument expression was parsed.
+/// WHY: later validation must consume this fact rather than rerun named/positional routing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ParameterSlot(usize);
+
+impl ParameterSlot {
+    pub(crate) fn new(index: usize) -> Self {
+        Self(index)
+    }
+
+    pub(crate) fn index(self) -> usize {
+        self.0
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CallAccessMode {
@@ -55,6 +72,12 @@ pub struct CallArgument {
     /// the value expression when the marker is absent, so the primary label stays on the
     /// authored source that the author must change.
     pub marker_location: Option<SourceLocation>,
+
+    /// Parameter slot selected by the shared parser before this value was parsed.
+    ///
+    /// WHAT: retains the parser's named/positional routing decision through AST validation.
+    /// WHY: final validation must not reconstruct call syntax or produce a second routing policy.
+    pub(crate) parameter_slot: Option<ParameterSlot>,
 }
 
 impl CallArgument {
@@ -84,6 +107,7 @@ impl CallArgument {
             location,
             target_location: None,
             marker_location: None,
+            parameter_slot: None,
         }
     }
 
@@ -103,6 +127,7 @@ impl CallArgument {
             location,
             target_location: Some(target_location),
             marker_location: None,
+            parameter_slot: None,
         }
     }
 
@@ -120,6 +145,57 @@ impl CallArgument {
         self.marker_location = Some(marker_location);
         self
     }
+
+    /// Retain the parser-selected declaration-order parameter slot.
+    pub(crate) fn with_parameter_slot(mut self, parameter_slot: ParameterSlot) -> Self {
+        self.parameter_slot = Some(parameter_slot);
+        self
+    }
+}
+
+/// Arrange parsed arguments by their retained declaration-order slots.
+///
+/// WHAT: consumes parser-owned slot metadata without inspecting named targets or positional order.
+/// WHY: a missing, duplicate or out-of-range slot is an internal compiler invariant failure after
+/// the shared parser has accepted the call syntax.
+pub(crate) fn order_call_arguments_by_retained_slot(
+    arguments: &[CallArgument],
+    expected_slot_count: usize,
+) -> Result<Vec<Option<CallArgument>>, CompilerError> {
+    let mut ordered = vec![None; expected_slot_count];
+
+    for argument in arguments {
+        if argument.target_param.is_some() != argument.target_location.is_some() {
+            return Err(CompilerError::compiler_error(
+                "Parsed named call argument has incomplete target metadata",
+            ));
+        }
+
+        let Some(parameter_slot) = argument.parameter_slot else {
+            return Err(CompilerError::compiler_error(
+                "Parsed call argument is missing its retained parameter slot",
+            ));
+        };
+
+        let slot_index = parameter_slot.index();
+        let Some(slot) = ordered.get_mut(slot_index) else {
+            return Err(CompilerError::compiler_error(format!(
+                "Parsed call argument retained out-of-range parameter slot {}",
+                slot_index
+            )));
+        };
+
+        if slot.is_some() {
+            return Err(CompilerError::compiler_error(format!(
+                "Parsed call arguments retained duplicate parameter slot {}",
+                slot_index
+            )));
+        }
+
+        *slot = Some(argument.clone());
+    }
+
+    Ok(ordered)
 }
 
 /// Clone a call-argument slice into an owned vector.

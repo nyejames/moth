@@ -53,7 +53,8 @@ fn assert_statement(condition: Expression, line: i32) -> AstNode {
     node(
         NodeKind::Assert {
             condition,
-            message: None,
+            // Branch-flow tests inspect only the condition's terminality effect.
+            message: Expression::bool(true, test_source_location(line), ValueMode::ImmutableOwned),
         },
         test_source_location(line),
     )

@@ -56,7 +56,9 @@ pub(crate) mod expressions {
     //! `ExpressionRpn` and `PlaceExpression` payloads. Broad `AstNode` fragments
     //! must not be stored inside expression variants that survive AST evaluation.
 
+    pub(crate) mod assertion_message_effects;
     pub(crate) mod call_argument;
+    pub(crate) mod call_arguments;
     pub(crate) mod call_validation;
     pub(crate) mod choice_constructor;
     pub(crate) mod constructor_views;

@@ -32,13 +32,13 @@ impl<'a> HirBuilder<'a> {
         value: &Expression,
         location: &SourceLocation,
     ) -> Result<Option<HirExpression>, CompilerError> {
-        let Some(result_carrier) =
-            self.emit_result_propagation_carrier_to_current_block(value, location)?
+        let Some(result_carrier) = self.emit_result_propagation_carrier_to_current_block(value)?
         else {
             return Ok(None);
         };
 
-        self.lower_fallible_carrier_to_success_value(result_carrier, location)
+        let propagation_location = value.propagation_location().unwrap_or(location);
+        self.lower_fallible_carrier_to_success_value(result_carrier, propagation_location)
             .map(Some)
     }
 
@@ -145,7 +145,6 @@ impl<'a> HirBuilder<'a> {
     pub(super) fn emit_result_propagation_carrier_to_current_block(
         &mut self,
         value: &Expression,
-        location: &SourceLocation,
     ) -> Result<Option<EmittedFallibleCarrier>, CompilerError> {
         match &value.kind {
             ExpressionKind::HandledFallibleFunctionCall {
@@ -153,13 +152,14 @@ impl<'a> HirBuilder<'a> {
                 args,
                 result_type_ids,
                 handling: FallibleExpressionHandling::Propagate,
+                ..
             } => {
-                let target = self.resolve_call_target_or_error(name, location)?;
+                let target = self.resolve_call_target_or_error(name, &value.location)?;
                 let carrier = self.emit_result_call_carrier_to_current_block(
                     target,
                     args,
                     result_type_ids,
-                    location,
+                    &value.location,
                 )?;
 
                 Ok(Some(carrier))
@@ -171,22 +171,24 @@ impl<'a> HirBuilder<'a> {
                 result_type_ids,
                 error_type_id,
                 handling: FallibleExpressionHandling::Propagate,
+                ..
             } => Ok(Some(
                 self.emit_external_result_call_carrier_to_current_block(
                     *id,
                     args,
                     result_type_ids,
                     *error_type_id,
-                    location,
+                    &value.location,
                 )?,
             )),
 
             ExpressionKind::HandledFallibleExpression {
                 value: result_value,
                 handling: FallibleExpressionHandling::Propagate,
+                ..
             } => Ok(Some(self.emit_result_expression_to_current_block(
                 result_value,
-                location,
+                &result_value.location,
             )?)),
 
             _ => Ok(None),

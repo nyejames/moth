@@ -1,0 +1,4 @@
+-- an explicit runtime cast in an assertion message must retain its JS helper
+
+value Int = 42
+assert(false, cast value)

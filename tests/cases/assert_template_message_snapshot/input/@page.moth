@@ -1,0 +1,18 @@
+-- Runtime template assertion messages snapshot on the failure edge for JS.
+
+count $Int = 1
+
+make_flag |value Bool| -> Bool:
+    return value
+;
+
+check_count |value Int, count $Int| -> String, Error!:
+    assert(make_flag(false), [:message [$(count)]])
+    return "unreachable"
+;
+
+result = check_count(count, count) catch:
+    then "caught"
+;
+
+[: [result]]

@@ -1,3 +1,4 @@
--- assert(false, "custom message") should compile and emit a throw with the message in JS
+-- a local String message should be evaluated on the failure edge in JS
 
-assert(false, "custom message")
+message = "custom message"
+assert(false, message)

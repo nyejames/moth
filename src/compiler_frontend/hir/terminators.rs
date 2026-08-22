@@ -3,7 +3,9 @@
 //! WHAT: explicit control-flow exits for each block.
 //! WHY: control flow must be structured enough for borrow validation and backend lowering.
 
-use crate::compiler_frontend::hir::expressions::HirExpression;
+use crate::compiler_frontend::hir::expressions::{
+    HirExpression, HirExpressionKind, HirVariantCarrier, ValueKind,
+};
 use crate::compiler_frontend::hir::ids::{BlockId, LocalId};
 use crate::compiler_frontend::hir::patterns::HirMatchArm;
 use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
@@ -84,10 +86,53 @@ pub enum HirTerminator {
     ///
     /// WHAT: represents a failed `assert` statement.
     /// WHY: this is the only source-level unrecoverable stop in Alpha Moth.
-    /// `message: None` means the default "assertion failed" message.
+    /// The message is an optional String value; its evaluation fact tells target validation
+    /// whether construction is the default, fully folded, or runtime work.
     AssertFailure {
-        message: Option<String>,
+        message: HirExpression,
+        message_evaluation: HirAssertionMessageEvaluation,
     },
+}
+
+/// Evaluation fact retained with an assertion failure message.
+///
+/// WHAT: distinguishes the default option, a fully folded present option, and runtime message
+///       construction after HIR has lowered the expression.
+/// WHY: target validation must consume one authoritative fact rather than reclassifying source or
+///      backend expression shapes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HirAssertionMessageEvaluation {
+    Default,
+    Folded,
+    Runtime,
+}
+
+/// Classifies the lowered assertion message shape used by validation and target gating.
+///
+/// WHAT: derives the evaluation fact from the canonical lowered `Option<String>` shape.
+/// WHY: lowering, HIR validation, reachability and backend feature checks must share one
+///      classifier rather than independently interpreting variant or constant details.
+pub(crate) fn classify_assertion_message_evaluation(
+    message: &HirExpression,
+) -> HirAssertionMessageEvaluation {
+    match &message.kind {
+        HirExpressionKind::VariantConstruct {
+            carrier: HirVariantCarrier::Option,
+            variant_index: 0,
+            fields,
+        } if fields.is_empty() => HirAssertionMessageEvaluation::Default,
+        HirExpressionKind::VariantConstruct {
+            carrier: HirVariantCarrier::Option,
+            variant_index: 1,
+            fields,
+        } if fields
+            .iter()
+            .all(|field| field.value.value_kind == ValueKind::Const) =>
+        {
+            HirAssertionMessageEvaluation::Folded
+        }
+        _ => HirAssertionMessageEvaluation::Runtime,
+    }
 }
 
 impl HirTerminator {
@@ -108,8 +153,8 @@ impl HirTerminator {
             | Self::Break { .. }
             | Self::Continue { .. }
             | Self::Uninitialized
-            | Self::RuntimeFailure { .. }
-            | Self::AssertFailure { .. } => {}
+            | Self::RuntimeFailure { .. } => {}
+            Self::AssertFailure { message, .. } => message.remap_string_ids(remap),
         }
     }
 }

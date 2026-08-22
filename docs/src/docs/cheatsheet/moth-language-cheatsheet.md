@@ -432,7 +432,7 @@ assert(index < items.length(), "index must be in bounds")
 assert(false, "unimplemented path")
 ```
 
-`assert` is statement-only and always checked. Its optional message is one quoted literal. Failure is unrecoverable. `assert(false)` is statically terminal.
+`assert` is statement-only and always checked. Its optional message is a `String?` expression that defaults to `none`; named and positional arguments use ordinary call rules. Failure is unrecoverable. `assert(false)` is statically terminal. A literal-`true` message is fully type/generic/evidence checked and normalized, then discarded before HIR, so it publishes no TIR, runtime handoff, reactive metadata, generated request or executable fact. Message construction cannot escape its evaluation through `!`, `?`, `return`, `break` or `continue`. JavaScript and HTML evaluate reachable runtime messages lazily on the failure edge; HTML-Wasm accepts unreachable literal-true runtime messages but currently rejects reachable runtime construction.
 
 ## `if`, matching and value-producing blocks
 

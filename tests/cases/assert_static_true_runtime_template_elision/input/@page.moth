@@ -1,0 +1,10 @@
+-- A reachable runtime template in a compile-time-true assertion message is
+-- still frontend-valid, but must be discarded before the AST/HIR boundary.
+
+check |name String| -> String:
+    assert(true, [: inactive [name]])
+    return name
+;
+
+result = check("runtime")
+[: [result]]

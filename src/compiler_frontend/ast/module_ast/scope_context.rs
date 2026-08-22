@@ -304,6 +304,38 @@ impl ContextKind {
 }
 
 impl ScopeContext {
+    /// Marks the current end of the compiler-owned generic-instantiation request sink.
+    ///
+    /// WHAT: returns a provisional request boundary that a parser can commit or roll back after
+    ///       it has validated a source construct and determined whether its work is active.
+    /// WHY: inactive static assertion messages still need frontend inference and evidence checks,
+    ///       but must not publish generated-function requests to later stages.
+    pub(crate) fn generic_request_checkpoint(&self) -> usize {
+        self.shared
+            .generic_function_instantiation_requests
+            .borrow()
+            .len()
+    }
+
+    /// Discards requests appended after a compiler-owned provisional boundary.
+    ///
+    /// The sink is shared by child scopes, so the operation is intentionally defined here rather
+    /// than in build orchestration. Callers must only pass a checkpoint obtained from the same
+    /// shared sink and must invoke this after validation has completed.
+    pub(crate) fn discard_generic_requests_since(&self, checkpoint: usize) {
+        let mut requests = self
+            .shared
+            .generic_function_instantiation_requests
+            .borrow_mut();
+        debug_assert!(
+            checkpoint <= requests.len(),
+            "generic request checkpoint must belong to the current sink"
+        );
+        if checkpoint <= requests.len() {
+            requests.truncate(checkpoint);
+        }
+    }
+
     pub(crate) fn record_generic_function_instantiation_request(
         &self,
         request: GenericFunctionInstantiationRequest,

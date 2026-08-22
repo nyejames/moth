@@ -19,7 +19,7 @@ use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::numeric::HirNumericOperands;
 use crate::compiler_frontend::hir::reactivity::ReactiveTemplateId;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
-use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
 use crate::compiler_frontend::semantic_identity::{
     GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, OriginFunctionId,
 };
@@ -45,6 +45,7 @@ pub(crate) struct HirReachability {
     pub(crate) reachable_runtime_casts: Vec<ReachableRuntimeCastUse>,
     pub(crate) reachable_numeric_ops: Vec<ReachableNumericOpUse>,
     pub(crate) reachable_float_statements: Vec<ReachableFloatStatementUse>,
+    pub(crate) reachable_assertion_messages: Vec<ReachableAssertionMessageUse>,
     backend_selection: HirBackendSelection,
 }
 
@@ -102,6 +103,7 @@ struct HirBlockRuntimeFacts {
     reachable_runtime_casts: Vec<ReachableRuntimeCastUse>,
     reachable_numeric_ops: Vec<ReachableNumericOpUse>,
     reachable_float_statements: Vec<ReachableFloatStatementUse>,
+    reachable_assertion_messages: Vec<ReachableAssertionMessageUse>,
 }
 
 impl HirModuleLinkFacts {
@@ -284,6 +286,17 @@ impl HirBackendSelection {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ReachableMapUse {
     pub(crate) kind: ReachableMapUseKind,
+    pub(crate) location: SourceLocation,
+}
+
+/// A reachable assertion failure message and its HIR evaluation fact.
+///
+/// WHAT: retains the source location and static/runtime classification selected by HIR lowering.
+/// WHY: target validation must reject only reachable runtime message construction without
+///      reconstructing assertion semantics from the terminator expression.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ReachableAssertionMessageUse {
+    pub(crate) evaluation: HirAssertionMessageEvaluation,
     pub(crate) location: SourceLocation,
 }
 
@@ -533,6 +546,8 @@ impl HirReachability {
             .extend(direct.reachable_numeric_ops.iter().cloned());
         self.reachable_float_statements
             .extend(direct.reachable_float_statements.iter().cloned());
+        self.reachable_assertion_messages
+            .extend(direct.reachable_assertion_messages.iter().cloned());
     }
 }
 
@@ -558,6 +573,9 @@ impl HirBlockRuntimeFacts {
         }
         for float_statement in &mut self.reachable_float_statements {
             float_statement.location.remap_string_ids(remap);
+        }
+        for assertion_message in &mut self.reachable_assertion_messages {
+            assertion_message.location.remap_string_ids(remap);
         }
     }
 }
@@ -828,8 +846,27 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
             | HirTerminator::Break { .. }
             | HirTerminator::Continue { .. }
             | HirTerminator::RuntimeFailure { .. }
-            | HirTerminator::AssertFailure { .. }
             | HirTerminator::Uninitialized => {}
+
+            HirTerminator::AssertFailure {
+                message,
+                message_evaluation,
+            } => {
+                let location = self
+                    .index
+                    .hir
+                    .side_table
+                    .value_source_location(message.id)
+                    .cloned()
+                    .unwrap_or(fallback_location.clone());
+                self.direct_facts
+                    .reachable_assertion_messages
+                    .push(ReachableAssertionMessageUse {
+                        evaluation: *message_evaluation,
+                        location,
+                    });
+                self.collect_runtime_feature_uses_from_expression(message, &fallback_location);
+            }
         }
     }
 

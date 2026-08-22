@@ -27,13 +27,13 @@ impl<'a> HirBuilder<'a> {
         value: &Expression,
         location: &SourceLocation,
     ) -> Result<bool, CompilerError> {
-        let Some(result_carrier) =
-            self.emit_result_propagation_carrier_to_current_block(value, location)?
+        let Some(result_carrier) = self.emit_result_propagation_carrier_to_current_block(value)?
         else {
             return Ok(false);
         };
 
-        self.emit_result_carrier_direct_return(result_carrier, location)?;
+        let propagation_location = value.propagation_location().unwrap_or(location);
+        self.emit_result_carrier_direct_return(result_carrier, propagation_location)?;
         Ok(true)
     }
 

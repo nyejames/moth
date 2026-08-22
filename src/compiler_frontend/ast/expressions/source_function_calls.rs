@@ -164,6 +164,7 @@ pub(super) fn parse_source_callable_member(
     let function_call_expression = parse_function_call_expression(FunctionCallParseInput {
         token_stream,
         id: function_path,
+        call_location,
         context,
         signature,
         value_required: true,

@@ -37,7 +37,9 @@ fn assert_bool(condition: bool, line: i32) -> AstNode {
                 test_source_location(line),
                 ValueMode::ImmutableOwned,
             ),
-            message: None,
+            // Terminality only inspects the condition; this fixture keeps a typed expression
+            // placeholder because parsed assertions always carry the canonical optional value.
+            message: Expression::bool(true, test_source_location(line), ValueMode::ImmutableOwned),
         },
         test_source_location(line),
     )

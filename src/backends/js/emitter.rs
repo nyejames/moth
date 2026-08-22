@@ -466,12 +466,15 @@ impl<'hir> JsEmitter<'hir> {
                 self.record_expression_reactivity(value)?;
             }
 
+            HirTerminator::AssertFailure { message, .. } => {
+                self.record_expression_reactivity(message)?;
+            }
+
             HirTerminator::Jump { .. }
             | HirTerminator::Break { .. }
             | HirTerminator::Continue { .. }
             | HirTerminator::Uninitialized
-            | HirTerminator::RuntimeFailure { .. }
-            | HirTerminator::AssertFailure { .. } => {}
+            | HirTerminator::RuntimeFailure { .. } => {}
         }
 
         Ok(())
@@ -638,12 +641,13 @@ impl<'hir> JsEmitter<'hir> {
             | HirTerminator::ReturnSuccess(value)
             | HirTerminator::ReturnError(value) => self.expression_uses_maps(value),
 
+            HirTerminator::AssertFailure { message, .. } => self.expression_uses_maps(message),
+
             HirTerminator::Jump { .. }
             | HirTerminator::Break { .. }
             | HirTerminator::Continue { .. }
             | HirTerminator::Uninitialized
-            | HirTerminator::RuntimeFailure { .. }
-            | HirTerminator::AssertFailure { .. } => false,
+            | HirTerminator::RuntimeFailure { .. } => false,
         }
     }
 
@@ -797,12 +801,15 @@ fn collect_terminator_cast_policies(
         | HirTerminator::ReturnSuccess(value)
         | HirTerminator::ReturnError(value) => collect_expression_cast_policies(value, policies),
 
+        HirTerminator::AssertFailure { message, .. } => {
+            collect_expression_cast_policies(message, policies)
+        }
+
         HirTerminator::Jump { .. }
         | HirTerminator::Break { .. }
         | HirTerminator::Continue { .. }
         | HirTerminator::Uninitialized
-        | HirTerminator::RuntimeFailure { .. }
-        | HirTerminator::AssertFailure { .. } => {}
+        | HirTerminator::RuntimeFailure { .. } => {}
     }
 }
 

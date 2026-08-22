@@ -19,7 +19,7 @@ use crate::compiler_frontend::hir::reachability::{
     collect_module_function_link_facts, collect_reachability_from_function_link_facts,
 };
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
-use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
 use crate::compiler_frontend::hir::{
     expressions::HirExpression, expressions::HirExpressionKind, expressions::HirMapEntry,
     expressions::HirMapOp,
@@ -422,7 +422,8 @@ fn cfg_successors_cover_branch_match_break_continue_and_terminal_edges() {
                 BlockId(8),
                 vec![],
                 HirTerminator::AssertFailure {
-                    message: Some("stop".to_owned()),
+                    message: unit_expression(8),
+                    message_evaluation: HirAssertionMessageEvaluation::Default,
                 },
             ),
             block(
@@ -444,6 +445,11 @@ fn cfg_successors_cover_branch_match_break_continue_and_terminal_edges() {
     .expect("reachability should follow CFG edges");
 
     assert_reachability(&reachability, &[0], &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9], &[]);
+    assert_eq!(reachability.reachable_assertion_messages.len(), 1);
+    assert_eq!(
+        reachability.reachable_assertion_messages[0].evaluation,
+        HirAssertionMessageEvaluation::Default
+    );
 }
 
 #[test]
