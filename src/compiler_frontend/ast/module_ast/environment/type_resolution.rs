@@ -254,14 +254,19 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // -------------------
         //  Resolve constants
         // -------------------
-        timing_scope_attributed_opt!(
-            _constant_header_guard,
-            self.context
-                .timing_metric_family
-                .constant_header_resolution(),
-            self.context.timing_context
-        );
-        self.resolve_constant_headers(sorted_headers, trait_environment, string_table)?;
+        // The guard is scoped to the constant pass alone. Left at function scope it would drop at
+        // the end of this function and bill the struct-field and choice-variant loops below to a
+        // metric named for constant resolution.
+        {
+            timing_scope_attributed_opt!(
+                _constant_header_guard,
+                self.context
+                    .timing_metric_family
+                    .constant_header_resolution(),
+                self.context.timing_context
+            );
+            self.resolve_constant_headers(sorted_headers, trait_environment, string_table)?;
+        }
 
         // ----------------------------
         //  Resolve struct field types

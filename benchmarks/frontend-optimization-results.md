@@ -1811,3 +1811,205 @@ module-wide visibility.
    fixtures that will show it.
 4. **`docs` moved for the first time in this plan.** `-6%` with no constant-pass change confirms
    the copy was in shared header-loop machinery, not in constant-specific code.
+
+## Constant Evaluation And Type-System Plan - Phase A Re-Baseline And Attribution - 2026-08-22
+
+Evidence-only phase. The single source change is the `constant_header_resolution` timing-guard
+scope. Everything else here is measurement.
+
+Binaries: `cargo build --release --features detailed_timers,benchmark_counters` for timing and
+counters, and `RUSTFLAGS="-C force-frame-pointers=yes" cargo build --profile profiling` with the
+same features for sampling. All timings are the median of five independent runs at
+`RAYON_NUM_THREADS=1`.
+
+### Why This Phase Existed
+
+The Phase 0 baseline was measured when per-declaration `FileVisibility` copying dominated every AST
+workload. That cost was removed in `917f7e81c`, which moved AST time by between `6%` and `98%`
+depending on the fixture. No share in the old baseline survived that, so no priority in the plan was
+evidence-backed any more.
+
+### Wall Time Baseline
+
+All values in milliseconds. `-` means the metric did not fire for that workload.
+
+| Case | `check.total` | `ast.total` | `ast.environment` | `env.constant_header_resolution` | `ast.emit` | `emit.const_template_parse` | `ast.finalise` | `finalise.module_constant` |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `docs` | 266.634 | 171.868 | 98.064 | 87.137 | 54.314 | 37.539 | 19.261 | 18.948 |
+| `one_module_kitchen_sink` | 8.507 | 2.083 | 0.770 | 0.144 | 0.830 | - | 0.475 | 0.143 |
+| `type_stress` | 12.204 | 6.452 | 4.337 | 0.000 | 1.325 | - | 0.780 | 0.269 |
+| `environment_stress` | 8.702 | 4.958 | 3.795 | 0.000 | 0.688 | - | 0.450 | 0.257 |
+| `nominal_capacity_stress` | 14.915 | 11.244 | 10.710 | 0.124 | 0.201 | - | 0.327 | 0.199 |
+| `fold_stress` | 7.078 | 2.927 | 1.545 | 1.331 | 0.638 | - | 0.712 | 0.320 |
+| `expression_rpn_churn` | 8.710 | 1.290 | 0.247 | 0.000 | 0.845 | - | 0.190 | 0.063 |
+| `template_stress` | 8.252 | 2.962 | 1.096 | 0.887 | 1.046 | - | 0.820 | 0.271 |
+| `constant_dag_churn` | 4.352 | 1.574 | 1.090 | 0.949 | 0.189 | - | 0.288 | 0.226 |
+| `constant_chain_32` | 2.289 | 0.464 | 0.285 | 0.241 | 0.071 | - | 0.101 | 0.077 |
+| `constant_chain_128` | 3.829 | 1.278 | 0.825 | 0.765 | 0.145 | - | 0.283 | 0.258 |
+| `constant_chain_512` | 9.698 | 4.212 | 2.868 | 2.733 | 0.474 | - | 0.811 | 0.779 |
+
+Repeating `docs`, `nominal_capacity_stress`, `type_stress`, `environment_stress` at the default
+thread count reproduced every figure within run-to-run noise. These are single-module or
+module-parallel workloads whose AST cost does not move with the scheduler, so no separate
+fixed-thread identity is needed for later phases.
+
+The constant chains are now close to linear in constant count. `constant_header_resolution` across
+`32 -> 128 -> 512` is `0.241 -> 0.765 -> 2.733`, so a `4x` input costs `3.2x` then `3.6x`. The
+chain superlinearity that opened this plan is gone.
+
+### The Timing Guard Was Mis-Scoped, And It Mattered
+
+The guard was declared before `resolve_constant_headers` and dropped at the end of
+`resolve_nominal_members_and_constants`, so it also billed the struct-field and choice-variant
+loops to a metric named for constant resolution. Measured on both scopes:
+
+| Case | wide guard | narrow guard | `ast.environment` |
+| --- | --- | --- | --- |
+| `docs` | 87.336 | 87.533 | 98.340 |
+| `nominal_capacity_stress` | 6.344 | 0.127 | 10.661 |
+| `type_stress` | 1.940 | 0.000 | 4.458 |
+| `environment_stress` | 1.434 | 0.000 | 3.862 |
+| `one_module_kitchen_sink` | 0.338 | 0.154 | 0.796 |
+| `constant_chain_512` | 2.712 | 2.699 | 2.917 |
+
+For `type_stress` and `environment_stress` the metric was reporting entirely borrowed time: the
+true constant cost is zero and every millisecond it showed belonged to the member-shell loops. For
+`nominal_capacity_stress` `98%` of the metric was borrowed. `docs` and the constant chains were
+unaffected, which is why the mis-scoping survived Phase 0 unnoticed - the fixtures that would have
+exposed it were read as constant-heavy precisely because this metric said so.
+
+### Nominal Member Resolution Is Quadratic
+
+`nominal-capacity-stress.moth` documents itself as a deterministic generated pattern, so the same
+pattern was regenerated at four sizes to get a scaling curve. The generator and fixtures are
+untracked under `tmp/phaseA/`. `cap-40` reproduces the committed fixture's shape and cost.
+
+| Buckets | `check.total` | `ast.total` | `ast.environment` | `env.constant_header_resolution` |
+| --- | --- | --- | --- | --- |
+| 40 | 13.363 | 9.761 | 9.295 | 0.126 |
+| 160 | 136.246 | 126.726 | 124.922 | 0.343 |
+| 640 | 1991.782 | 1955.258 | 1947.223 | 1.415 |
+| 2560 | 44010.615 | 43853.843 | 43816.283 | 6.776 |
+
+A `64x` input costs `4714x` in `ast.environment`, which is `O(n^2.03)`. Constant resolution over the
+same range is `54x`, so it is linear and is not the cause. At 2560 nominal declarations - a large
+but unremarkable module - the environment pass takes **43.8 seconds**.
+
+### Every Counter Is Linear
+
+Across the same four sizes, no counter in the frontend grows faster than input. The closest
+candidates are exactly linear:
+
+| Counter | n=40 | n=160 | n=640 | n=2560 | growth |
+| --- | --- | --- | --- | --- | --- |
+| `ast_type_resolution_calls` | 1744 | 6964 | 27844 | 111364 | `63.9x` |
+| `ast_constant_pass_side_table_entries_cloned` | 102 | 402 | 1602 | 6402 | `62.8x` |
+| `ast_scope_contexts_created` | 149 | 569 | 2249 | 8969 | `60.2x` |
+| `ast_declaration_replacements_by_path` | 65 | 245 | 965 | 3845 | `59.2x` |
+
+Type resolution is called a linear number of times. What grew is the cost of each call.
+
+`ast_constant_pass_side_table_entries_cloned` deserves its own note. It instruments the
+**once-per-module** snapshot Phase 1 hoisted into `resolve_constant_headers`, which is correct and
+linear. It has never seen the **per-header** snapshot in `constant_header_scope_context`, which is
+the quadratic one. A counter reading linear beside a quadratic wall time is not a contradiction
+when the counter is pointed at the wrong copy.
+
+### Function-Level Attribution
+
+Sampled with macOS `sample` at 1ms against the `profiling` binary, aggregated across runs.
+`samply` was tried first, through `just profile-case` and `just profile-case-symbolicated`, and
+reported `failed_raw_addresses` in both modes, matching the AUD-0002 note. `sample` attaches by
+process name and cannot catch a workload shorter than roughly 100ms, which is why the scaled
+fixture was needed rather than the committed one.
+
+**`cap-640`, call graph, one representative run.** Line numbers are post-guard-fix
+`type_resolution.rs`.
+
+| Path | inclusive samples |
+| --- | --- |
+| `resolve_nominal_members_and_constants:308` - struct-field loop | 613 |
+| ... `unresolved_member_syntax_to_declarations:1053` - build scope context | 316 |
+| ... `unresolved_member_syntax_to_declarations:1096` - drop it at function return | 293 |
+| `resolve_nominal_members_and_constants:425` - choice-variant loop | 449 |
+| ... `unresolved_member_syntax_to_declarations:1053` | 231 |
+| ... `unresolved_member_syntax_to_declarations:1096` | 216 |
+
+`609` of `613` samples in the struct-field loop, and `447` of `449` in the choice-variant loop, are
+the construction and destruction of one `ScopeContext`. Actual member parsing is in the noise.
+
+`constant_header_scope_context` deep-clones five whole-module side tables per call:
+
+```rust
+.with_resolved_type_aliases(Rc::new(self.resolved_type_aliases_by_path.clone()))
+.with_generic_declarations(Rc::new(self.module_symbols.generic_declarations_by_path.clone()))
+.with_resolved_struct_fields_by_path(Rc::new(self.resolved_struct_fields_by_path.clone()))
+.with_choice_variant_shells_by_path(Rc::new(self.choice_variant_shells_by_path.clone()))
+.with_nominal_type_ids_by_path(Rc::new(self.nominal_type_ids_by_path.clone()))
+```
+
+`resolved_struct_fields_by_path` is `FxHashMap<InternedPath, Vec<Declaration>>`, and `Declaration`
+owns an `Expression` and a `DataType`, both recursive. So the clone is deep, it is `O(module)`, and
+it happens once per nominal header. Self time confirms it:
+
+| Symbol | samples |
+| --- | --- |
+| malloc / free family, combined | ~6565 |
+| `<DataType as Clone>::clone` | 535 |
+| `_platform_memmove` | 337 |
+| `<Expression as Clone>::clone` | 308 |
+| `_platform_memset` | 137 |
+| `drop_glue<HashMap<InternedPath, Vec<Declaration>, FxBuildHasher>>` | 120 |
+| `<Vec<Declaration> as Clone>::clone` | 111 |
+| `<ExpressionKind as Clone>::clone` | 93 |
+| `drop_glue<DataType>` | 84 |
+| `drop_glue<ExpressionKind>` | 42 |
+
+Roughly `79%` of non-idle self time is the allocator and `memmove`/`memset`. The named Rust
+functions above it are the clone and drop of that snapshot.
+
+**`docs`, 25 aggregated runs.** A different shape entirely:
+
+| Symbol | samples |
+| --- | --- |
+| malloc / free family, combined | ~1988 |
+| `_platform_memmove` | 240 |
+| `core::hash::sip::Hasher::write` | 196 |
+| `_platform_memset` | 143 |
+| `hashbrown::HashMap<&_, TraitId, FxBuildHasher>::get` | 76 |
+| `ast::templates::tir::summary::accumulate_nodes` | 71 |
+| `BuildHasher::hash_one<ExternalTypeId>` (`RandomState`) | 58 |
+
+`87%` of non-idle self time is allocation, deallocation and copying, but none of the callers above
+it are the nominal path. `docs` has 72 modules, 545 constants, 5162 const templates and **2**
+structs, so the quadratic member-shell cost cannot touch it.
+
+### Findings That Change Later Phases
+
+1. **The per-header side-table snapshot in `constant_header_scope_context` is the largest single
+   defect in the frontend, and it is quadratic.** One call site, five map clones, once per nominal
+   header. It is `>99%` of the cost of the pass that contains it and `O(n^2.03)` in module size.
+   This was already written into the plan as Phase B, sized from code shape alone; the measurement
+   promotes it to first place ahead of every other performance phase.
+2. **The fix must be copy-on-write, not hoisting.** `resolve_type_declarations` writes
+   `resolved_struct_fields_by_path` and `choice_variant_shells_by_path` inside the same loop that
+   snapshots them, and headers are dependency-sorted so a later struct's fields can read an earlier
+   struct's resolved fields. A snapshot hoisted out of the loop would go stale silently. Holding
+   the tables behind `Rc` and writing through `Rc::make_mut` gives free reads, and the scope context
+   is dropped before the next write, so the builder is the sole owner at write time and the clone
+   does not happen.
+3. **`docs` and the nominal fixtures need different phases, and neither substitutes for the
+   other.** `docs` spends `87.1ms` of its `98.1ms` environment in constant header resolution with
+   `ast_expression_fold_items = 0` and `constant_fold_attempt_count = 0`. Its constant cost is
+   const-template work, not arithmetic folding. Phase D's move-only folding cannot be validated on
+   `docs`, and Phase B cannot be validated on it either.
+4. **Counters cannot find this class of defect, and this is the second time.** Every counter was
+   linear while wall time was quadratic. The rule already in the plan is now proven twice; the
+   counter that looked closest to the defect was measuring a different copy in a different pass.
+5. **`ExternalPackageRegistry` hashes with SipHash.** All fifteen of its maps use
+   `std::collections::HashMap` with the default `RandomState`, next door to
+   `datatypes/environment.rs:92` which uses `FxHashMap` for the same key type. Only the
+   `hash_one<ExternalTypeId>` samples (58, about `2%` of `docs` moth self time) are confirmed to be
+   the registry; the larger 196-sample `sip::Hasher::write` is shared across all SipHash users and
+   was not attributed. Worth confirming and fixing, but it is a small independent change and not
+   evidence for any phase in this plan.

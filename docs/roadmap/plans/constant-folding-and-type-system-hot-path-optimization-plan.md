@@ -54,26 +54,33 @@ COMPLETED:
 - Phase 0 (baseline, scaling fixtures, semantic freeze) - commit `ccf25d166`
 - Phase 1 (module-owned constant resolution session) - commit `4e421a5a8`
 - Shared file visibility (taken out of sequence after profiling) - commit `917f7e81c`
+- Phase A (re-baseline and attribution) - see **Phase A outcome** below
 
 CURRENT_SLICE:
-- Phase: A (re-baseline and attribution)
-- Goal: replace the Phase 0 baseline, which was measured when file-visibility copying dominated
-  every AST workload, and pick the order of Phases B to F from a profile instead of from that
-  baseline
-- Non-goals: no representation change, no semantic change, no control-flow change
+- Phase: B (shared environment side tables)
+- Goal: remove the per-header deep clone of five whole-module side tables in
+  `constant_header_scope_context`, measured in Phase A as `O(n^2.03)` in module size and `>99%`
+  of the cost of the pass that contains it
+- Non-goals: no semantic change, no control-flow change, no member-shell restructuring (that is
+  Phase E, and it must be re-measured after this phase lands)
 
 NEXT_ACTION:
-- execute Phase A, record the ranked attribution, then confirm or reorder Phases B to F in this
-  file before implementing any of them
+- execute Phase B against the copy-on-write design recorded in that phase, then re-measure the
+  nominal scaling curve before starting Phase E
 
 PHASE_ORDER:
 - A (re-baseline) -> B (shared side tables) -> C (folded-value authority) -> D (move-only folding
   and lazy diagnostics) -> E (nominal member shells) -> F (type environment and generic keys) ->
   G (static Bool `if`, mandatory semantic gate) -> H (declaration lanes and pass cleanup) ->
   I (closeout)
-- B to F are performance phases and Phase A may reorder them. G, H and I keep their positions:
-  G depends on C, H is clarity work that should follow the representation changes it touches, and
-  I is the closeout.
+- Confirmed unchanged by Phase A. B was already first among the performance phases and the
+  measurement promoted it further: it is the only quadratic cost found in the frontend. C and D
+  keep their places because they are deletion phases whose value does not depend on the profile.
+  E moved in scope rather than position - Phase B removes most of what E was going to pay for, so
+  E re-measures first and may shrink to a correctness phase. F is now known to be unmeasurable at
+  current fixture scale and is re-scoped in place. G, H and I keep their positions: G depends on
+  C, H is clarity work that should follow the representation changes it touches, and I is the
+  closeout.
 
 RELEVANT_DOCS:
 - `AGENTS.md`
@@ -467,74 +474,134 @@ Known constraints:
 
 Work items:
 
-- [ ] Record five independent runs per case for `docs`, `one_module_kitchen_sink`, `type_stress`,
+- [x] Record five independent runs per case for `docs`, `one_module_kitchen_sink`, `type_stress`,
       `environment_stress`, `nominal_capacity_stress`, `fold_stress`, `expression_rpn_churn`,
       `template_stress`, `constant_dag_churn` and the three constant chains.
-- [ ] Repeat at the normal thread identity to confirm no scheduling regression.
-- [ ] Capture module-attributed constant, const-template and finalisation timings.
-- [ ] Narrow the `constant_header_resolution` timing guard so its span matches its name.
-- [ ] Sample `--profile profiling` builds of `docs`, `environment_stress`,
-      `nominal_capacity_stress` and `type_stress`, and produce a ranked
-      function-level attribution table.
-- [ ] Record current values for every `AstCounter` and `FrontendCounter` this plan added.
-- [ ] Write the attribution into `benchmarks/frontend-optimization-results.md`.
-- [ ] Confirm or reorder `PHASE_ORDER` in this file, with one sentence of justification per move.
+- [x] Repeat at the normal thread identity to confirm no scheduling regression.
+- [x] Capture module-attributed constant, const-template and finalisation timings.
+- [x] Narrow the `constant_header_resolution` timing guard so its span matches its name.
+- [x] Sample `--profile profiling` builds and produce a ranked function-level attribution table.
+      Done for `docs` and for a scaled regeneration of `nominal_capacity_stress`; see the outcome
+      note on why the committed small fixtures could not be sampled directly.
+- [x] Record current values for every `AstCounter` and `FrontendCounter` this plan added.
+- [x] Write the attribution into `benchmarks/frontend-optimization-results.md`.
+- [x] Confirm or reorder `PHASE_ORDER` in this file, with one sentence of justification per move.
 
 Acceptance:
 
-- [ ] every later performance phase in this file names a cost that appears in the Phase A table
-- [ ] any phase whose target does not appear is explicitly re-scoped as clarity work or dropped
+- [x] every later performance phase in this file names a cost that appears in the Phase A table
+- [x] any phase whose target does not appear is explicitly re-scoped as clarity work or dropped
 
 Checkpoint: evidence only. No source change beyond the timing-guard fix.
+
+### Phase A outcome
+
+Full tables, profiles and counter series are in `benchmarks/frontend-optimization-results.md`
+under **Constant Evaluation And Type-System Plan - Phase A Re-Baseline And Attribution**. What a
+later phase must not rediscover:
+
+1. **`constant_header_scope_context` is quadratic, and it is the largest defect in the frontend.**
+   It deep-clones five whole-module side tables per nominal header. Regenerating
+   `nominal-capacity-stress.moth`'s documented pattern at 40, 160, 640 and 2560 buckets gives
+   `ast.environment` of `9.295ms`, `124.922ms`, `1947.223ms` and `43816.283ms`: a `64x` input costs
+   `4714x`, or `O(n^2.03)`. In the call graph, `609` of `613` samples in the struct-field loop and
+   `447` of `449` in the choice-variant loop are the construction and destruction of that one
+   `ScopeContext`. This is Phase B and it is now the top priority.
+2. **The timing guard really was mis-scoped, and it had misled the plan.** Measured on both
+   scopes, `constant_header_resolution` fell from `6.344ms` to `0.127ms` on
+   `nominal_capacity_stress`, from `1.940ms` to `0.000ms` on `type_stress`, and from `1.434ms` to
+   `0.000ms` on `environment_stress`. `docs` and the constant chains did not move. Those three
+   fixtures had no constant cost at all; the metric was reporting the member-shell loops under a
+   constant-resolution name, which is part of why the plan originally read them as constant-heavy.
+3. **Counters cannot find this class of defect. Second confirmation.** Across the four scaled
+   sizes no frontend counter grows faster than input; the closest are exactly linear
+   (`ast_type_resolution_calls` `63.9x` for a `64x` input). Type resolution is *called* a linear
+   number of times - the cost per call is what grew.
+4. **`ast_constant_pass_side_table_entries_cloned` is pointed at the wrong copy.** It instruments
+   the once-per-module snapshot Phase 1 hoisted into `resolve_constant_headers`, which is correct
+   and linear. It has never seen the per-header snapshot that is actually quadratic.
+5. **`docs` and the nominal fixtures need different phases and neither substitutes for the other.**
+   `docs` is 72 modules, 545 constants, 5162 const templates and **2** structs, so Phase B cannot
+   help it. Its `87.1ms` of constant header resolution sits alongside `ast_expression_fold_items =
+   0` and `constant_fold_attempt_count = 0`, so its constant cost is const-template work, not
+   arithmetic folding - Phase D cannot be validated on it either.
+6. **Allocation dominates both shapes.** `79%` of non-idle self time on the nominal fixture and
+   `87%` on `docs` is the allocator plus `memmove`/`memset`. Every phase in this plan that deletes
+   a duplicate representation is also deleting allocator traffic, which is the main reason C and D
+   keep their positions without a profile of their own.
+7. **Tooling: `samply` cannot symbolicate this binary and `sample` cannot catch a short run.**
+   `just profile-case` and `just profile-case-symbolicated` both report `failed_raw_addresses`,
+   matching the AUD-0002 note. macOS `sample` symbolicates correctly but attaches by process name
+   and misses anything under roughly 100ms, which is why the scaled fixture was necessary. The
+   generator and the harness scripts are preserved untracked under `tmp/phaseA/`.
+8. **Unrelated lead, recorded so it is not lost.** `ExternalPackageRegistry` hashes all fifteen of
+   its maps with `std::collections::HashMap` and the default `RandomState`, next to
+   `datatypes/environment.rs:92` which uses `FxHashMap` for the same key type. Only the
+   `hash_one<ExternalTypeId>` samples (about `2%` of `docs` moth self time) are confirmed to be the
+   registry. It is a small independent change and it is not evidence for any phase here.
 
 ## Phase B - Shared environment side tables
 
 Goal: remove the per-header `Rc::new(map.clone())` snapshots of the environment builder's side
-tables, the last known instance of the copy-per-header shape that dominated the last two slices.
+tables. Phase A measured this as the only quadratic cost in the frontend and the largest single
+defect in it.
 
-Why now: same proven class as the shared file-visibility slice, in the same passes, with the
-fixtures that isolate it already committed. Phase A confirms magnitude before implementation.
+Why now: measured, not inferred. `O(n^2.03)` in module size, `>99%` of the cost of the pass that
+contains it, and `43.8 seconds` of `ast.environment` for a 2560-declaration module. It is one call
+site with five clones.
 
 Targets:
 
-- `type_resolution.rs:1169-1175`, `constant_header_scope_context`, called once per struct and choice
-  header through `unresolved_member_syntax_to_declarations`
-- `function_signatures.rs:155,165`, once per generic function header
-- `traits.rs:539-544`, once per trait requirement
+- `type_resolution.rs`, `constant_header_scope_context` - the confirmed quadratic site. Called once
+  per struct and once per choice header through `unresolved_member_syntax_to_declarations`, and it
+  deep-clones all five of `resolved_type_aliases_by_path`, `generic_declarations_by_path`,
+  `resolved_struct_fields_by_path`, `choice_variant_shells_by_path` and `nominal_type_ids_by_path`.
+  `resolved_struct_fields_by_path` is `FxHashMap<InternedPath, Vec<Declaration>>` and `Declaration`
+  owns a recursive `Expression` and `DataType`, so each clone is deep as well as `O(module)`.
+- `function_signatures.rs:155,165`, once per generic function header. Same shape, not separately
+  measured - no committed fixture has enough generic function headers to show it.
+- `traits.rs:539-544`, once per trait requirement. Same shape, not separately measured.
 - `scope_context/lookup.rs:155`, `is_explicit_compile_time_constant` linear-scans
-  `lookups.module_constants` for every fixed-capacity check during body emission
-
-Each snapshot copies `resolved_type_aliases_by_path`, `generic_declarations_by_path`,
-`resolved_struct_fields_by_path`, `choice_variant_shells_by_path` or `nominal_type_ids_by_path`,
-so the cost is `O(declarations)` per function, struct, choice and trait requirement.
+  `lookups.module_constants` for every fixed-capacity check during body emission.
 
 Known constraints:
 
-- Unlike file visibility, these tables are **still being written while the loops that snapshot them
-  run**. `resolve_type_declarations` writes `resolved_struct_fields_by_path` and
-  `choice_variant_shells_by_path` inside the same loop that snapshots them. A handle taken once
-  before the loop would go stale and silently change resolution.
-- Two viable shapes. Hoist the snapshot where the loop provably does not write the table it reads
-  (the function-signature pass reads four tables it never writes). Or move the table itself behind
-  a copy-on-write handle in the builder, so writes clone once and reads are free. Prefer hoisting
-  where it is provable; reach for copy-on-write only where a write really does interleave.
+- These tables are **still being written while the loops that snapshot them run**.
+  `resolve_type_declarations` writes `resolved_struct_fields_by_path` and
+  `choice_variant_shells_by_path` inside the same loop that snapshots them, and headers are
+  dependency-sorted so a later struct's fields legitimately read an earlier struct's resolved
+  fields. A snapshot hoisted out of the loop would go stale and silently change resolution.
+- **Copy-on-write is therefore the shape for the quadratic site, not hoisting.** Hold the tables
+  behind `Rc` in the builder and write through `Rc::make_mut`. Reads become free. The
+  `ScopeContext` that borrows a handle is dropped before the next write, so the builder is the sole
+  owner at write time and `make_mut` does not clone. Hoisting stays available for the
+  function-signature pass, which reads four tables it never writes.
 - `ConstantResolutionSession` already holds these tables correctly. Do not build a second session
   type for the member-shell or signature passes; either widen the existing one or hoist.
+- Do not let the drop cost hide. Phase A found the snapshot's destruction (`293` and `216` samples)
+  to be almost exactly as expensive as its construction (`316` and `231`). A change that removes
+  the clone but leaves an owned per-header structure behind has only fixed half of it.
 
 Work items:
 
 - [ ] Establish, per pass, which side tables it writes while iterating.
+- [ ] Move the five tables behind copy-on-write builder handles and take handles in
+      `constant_header_scope_context`.
 - [ ] Hoist the snapshots that are provably read-only for their loop.
-- [ ] Move the genuinely interleaved tables behind copy-on-write builder handles.
 - [ ] Replace the `module_constants` linear scan with the existing
       `resolved_module_constant_paths` set or its Phase H successor.
-- [ ] Delete `ConstantPassSideTableEntriesCloned` if the copy it measures no longer exists, or
-      re-point it at the copy that remains.
+- [ ] Re-point `ConstantPassSideTableEntriesCloned` at the per-header copy, which is the one that
+      matters, or delete it if no copy survives. It currently measures the once-per-module
+      snapshot and reads linear while the real copy is quadratic.
+- [ ] Decide whether a scaled nominal fixture joins `benchmarks/manifest.toml`. Phase A needed one
+      to see this at all and had to generate it untracked; without a committed equivalent the
+      recorded suite cannot regression-test the fix. Raise it rather than deciding silently - it
+      changes the tracked benchmark surface.
 
 Acceptance:
 
-- [ ] `environment_stress` and `nominal_capacity_stress` improve, or the phase is recorded as
-      having found the cost already immaterial
+- [ ] the regenerated nominal scaling curve is linear in module size, replacing `O(n^2.03)`
+- [ ] `environment_stress`, `type_stress` and `nominal_capacity_stress` improve
 - [ ] no pass reads a side table snapshot taken before a write it depends on
 - [ ] diagnostics, warning order and emitted artefacts are byte-for-byte equivalent
 
@@ -546,8 +613,10 @@ Goal: give each module constant one folded-value owner, and delete the three rep
 already-folded fact.
 
 Why now: the largest remaining structural duplication, and Phase G depends on it. This is a deletion
-phase whose value does not depend on the Phase A ranking, though its priority relative to B, D, E
-and F does.
+phase whose value does not depend on the Phase A ranking. Phase A confirmed its position: `docs`
+spends `18.9ms` of its `19.3ms` finalisation in `finalise.module_constant`, and `87%` of `docs`
+self time is allocator and copy traffic, so removing a duplicate representation of an
+already-folded fact is removing allocations on the one large real workload.
 
 Targets: `src/compiler_frontend/ast/const_values/`, `src/compiler_frontend/folded_value.rs`,
 `finalization/normalize_constants.rs`, `finalization/public_const_templates.rs`,
@@ -604,10 +673,19 @@ Checkpoint: one folded-value authority with all old conversion paths removed. Co
 Goal: stop building rich intermediate data around a correct algorithm. Keep shunting yard as the one
 precedence owner.
 
-Why now: `ast_expression_operand_clones` equals `ast_expression_fold_items` and
-`ast_diagnostic_data_type_materialisations` equals it too, so today every folded operand is a full
-`Expression` clone and every successful fold builds diagnostic spelling it never uses. Both are
-counted, both are provably `1:1`, and neither depends on the Phase A ranking to be worth removing.
+Why now: `ast_diagnostic_data_type_materialisations` equals `ast_expression_fold_items` exactly, on
+every fixture that folds anything - `960/960` on `fold_stress`, `392/392` on `constant_dag_churn`,
+`45/45` on `expression_rpn_churn`, `9/9` on `generic_trait_churn`. Every successful fold builds
+diagnostic spelling it never uses. `ast_expression_operand_clones` runs at about `0.81` per fold
+item, so most folded operands are also full `Expression` clones. All of this is counted and
+provably wasted, and none of it depends on the Phase A ranking to be worth removing.
+
+**Scope honesty, from Phase A.** No committed fixture makes this cost large in absolute terms:
+every fixture with non-zero fold items has an `ast.total` under `3ms`, and `docs` - the only large
+real workload - folds nothing at all (`ast_expression_fold_items = 0`). So this is a deletion and
+representation phase whose justification is the proven `1:1` waste, not a measured share of a
+profile. Either commit a scaled folding fixture as part of this phase or record the improvement as
+counter-verified only. Do not claim a wall-time scaling result the fixtures cannot support.
 
 Targets: `src/compiler_frontend/ast/expressions/expression_rpn.rs`,
 `src/compiler_frontend/ast/const_eval/`, `src/compiler_frontend/ast/type_resolution/`,
@@ -672,6 +750,13 @@ Why now: `resolve_type_declarations` builds member shells before constants and r
 so the same field and variant structure is reconstructed twice per nominal.
 `nominal_capacity_stress` isolates this from constant count.
 
+**Re-measure before implementing.** Phase A found that `>99%` of the cost of the pass this phase
+targets was the side-table snapshot, which Phase B removes. Whatever remains here after Phase B is
+the true cost of building shells twice, and it has never been measured on its own. Start this phase
+by re-running the scaled nominal curve and recording what is left. If the double construction turns
+out to be cheap, this becomes a correctness and clarity phase - one shell per member is still the
+right shape - and it must be recorded as such rather than carrying a scaling claim.
+
 Targets: `environment/type_resolution.rs` (`unresolved_member_syntax_to_declarations`,
 `resolve_constructor_shells_for_constants`, `resolve_type_declarations`),
 `type_resolution/struct_fields.rs`, `datatypes/definitions.rs`.
@@ -712,6 +797,22 @@ concrete generic binding set once.
 
 Why now: last of the performance phases, and the one most at risk of unjustified complexity. Apply
 one table change per checkpoint with layout/query tests and benchmark evidence.
+
+**Re-scoped by Phase A: this phase currently has no measurable target.** The counters it is written
+against are near zero on every committed fixture. `generic_trait_churn`, the fixture built for it,
+reports `generic_substitution_key_builds = 12`, `type_environment_substitute_type_id_calls = 89` and
+`type_environment_substitution_cache_lookups = 12`. Nothing in the Phase A attribution table points
+here. Two honest options, and the choice belongs to whoever reaches this phase:
+
+- Commit a fixture that actually exercises generic instantiation at scale, re-measure, and proceed
+  only against what that shows.
+- Drop the dense-storage conversions entirely and keep only the substitution-key canonicalisation,
+  on the grounds that repeatedly collecting, sorting and boxing the same mapping is waste
+  regardless of its current share.
+
+Do not perform the dense-storage conversions on the strength of this plan alone. The phase's own
+constraint - that a less readable table which is not hot is a regression - now applies to the whole
+phase, not just to individual conversions within it.
 
 Targets: `src/compiler_frontend/datatypes/environment.rs`,
 `src/compiler_frontend/datatypes/generic_parameters.rs`,
