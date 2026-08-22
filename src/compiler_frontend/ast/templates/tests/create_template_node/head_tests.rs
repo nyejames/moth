@@ -2465,7 +2465,7 @@ fn imported_const_template_context(
     );
 
     constant_template_context(scope, &[declaration])
-        .with_visible_declarations(Rc::new(visible_declarations))
+        .with_visible_declarations(Arc::new(visible_declarations))
         .with_visible_source_bindings(visible_bindings)
 }
 

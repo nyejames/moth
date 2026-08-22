@@ -59,7 +59,8 @@ CURRENT_SLICE:
 - Non-goals: no semantic control-flow change before the explicit Phase 4C gate
 
 LAST_GOOD_COMMIT:
-- Phase 1 commit on `const-folding-and-types-optimisation`
+- Shared file-visibility commit on `const-folding-and-types-optimisation`, taken out of phase order
+  after profiling (see `Shared file visibility - out-of-order slice`)
 
 PREREQUISITE:
 - Satisfied. Timing schema `2` already carries the module-attributed
@@ -108,7 +109,8 @@ RELEVANT_CODE:
 - `benchmarks/manifest.toml`
 
 NEXT_ACTION:
-- execute Phase 2 and preserve current semantics until the mandatory Phase 4C review gate
+- execute Phase 2 as an ownership and clarity change, not as a scaling fix, and preserve current
+  semantics until the mandatory Phase 4C review gate
 
 ---
 
@@ -783,6 +785,59 @@ Findings that constrain later phases:
    replacement, the per-constant module-constant declaration clone and constant normalisation,
    which Phases 2 and 3 own.
 
+   *Superseded.* All three candidates were wrong. Profiling found one full `FileVisibility` copy
+   per header in `validate_nominal_generic_bound_surfaces` and in `AstEmitter::emit`. See
+   `Shared file visibility - out-of-order slice` below.
+
+## Shared file visibility - out-of-order slice
+
+Landed on 2026-08-22, between Phase 1 and Phase 2. Evidence lives in
+`benchmarks/frontend-optimization-results.md` under
+`Constant Evaluation And Type-System Plan - Shared File Visibility - 2026-08-22`.
+
+This slice was not the next phase in sequence. It was taken first because a profile of the
+remaining `constant_chain_512` superlinearity attributed effectively the whole AST pass to one
+cost that Phase 1 had not looked at, and that Phase 2's planned work would not have touched.
+
+`HeaderBindingEnvironment` now owns one `Arc<FileVisibility>` per source file and hands it out by
+handle. `FileVisibility::visible_declaration_paths` is itself a shared handle, so
+`ScopeContext::with_file_visibility` takes one argument and shares the gate with the package.
+Binding construction writes the gate through `FileVisibility::visible_declaration_paths_mut`, which
+holds the sole reference and never copies. Every AST pass that walks headers now pays a refcount
+bump where it used to copy eight module-sized maps.
+
+Checklist items this closes:
+
+- Phase 5, `Centralise visibility lookup by file once per header/declaration pass`. The lookup is
+  now free everywhere, so there is nothing left to centralise.
+- Phase 9, `Replace clone-to-satisfy-borrow patterns`, for file visibility only. The side-table
+  snapshots described in finding 3 below are still open.
+- Phase 2's scaling acceptance, `Setup work for the 32/128/512 constant fixtures grows
+  approximately linearly`. Measured `0.64 / 1.31 / 4.23ms`.
+
+It does not close either open Phase 1 item. The synthetic `AstModuleLookups` is still built per
+constant, and the constant-header `ScopeContext` builder chain still has two callers.
+
+Findings:
+
+1. **Phase 1's candidate list for the residual superlinearity was wrong on all three counts.**
+   `replace_by_path` is one hash lookup plus an indexed store, the module-constant declaration
+   clone is `O(1)`, and module-constant normalisation visits exactly one expression per constant.
+   Phase 2's by-ID replacement work is an ownership and clarity change. Do not record a scaling
+   claim for it without measuring one.
+2. **Counters located nothing here.** Every counter in the constant pass already read linear when
+   this cost was found, because the counters instrument the pass Phase 1 rewrote and the cost was
+   in two passes with no counters at all. Later phases should confirm their target with a profile
+   before choosing a representation change.
+3. **The same shape survives in the side tables.** `resolve_function_signatures` and
+   `unresolved_member_syntax_to_declarations` still build `Rc::new(map.clone())` snapshots of
+   `resolved_type_aliases_by_path`, `generic_declarations_by_path`,
+   `resolved_struct_fields_by_path` and `nominal_type_ids_by_path` once per header, which is
+   `O(declarations)` per function, struct and choice. Unlike visibility these tables are still
+   being written while those loops run, so the fix is either hoisting the snapshot where the loop
+   provably does not write, or moving the table itself to copy-on-write. Phases 8 and 9 own it.
+   `nominal_capacity_stress` and `environment_stress` are the fixtures that will show it.
+
 ## Phase 2 - Dense declaration and resolved-constant state
 
 - [ ] Make Stage 3 final order allocate or carry stable `DeclarationId`s.
@@ -798,7 +853,8 @@ Findings that constrain later phases:
 
 Scaling acceptance:
 
-- [ ] Setup work for the 32/128/512 constant fixtures grows approximately linearly.
+- [x] Setup work for the 32/128/512 constant fixtures grows approximately linearly. Closed by the
+      shared file-visibility slice, not by dense IDs: `0.64 / 1.31 / 4.23ms`.
 - [x] The `previous-constant IDs copied` counter reaches zero for module constants. Phase 1
       deleted both the copy and the counter.
 - [ ] No new full declaration scan appears per constant.
@@ -928,7 +984,9 @@ the Phase 4C semantic gate.
 - [ ] Construct diagnostic spelling only when producing a diagnostic or public display fact.
 - [ ] Borrow resolved aliases, fields, variants and signatures instead of cloning them for read-only
       validation.
-- [ ] Centralise visibility lookup by file once per header/declaration pass.
+- [x] Centralise visibility lookup by file once per header/declaration pass. Closed early by the
+      shared file-visibility slice: `visibility_for` returns a handle, so there is no copy to
+      centralise.
 - [ ] Add a lookup cache only when counters prove repeated identical resolution under the same
       visibility and generic scope. Its key must include every semantic context dimension.
 
@@ -992,7 +1050,8 @@ Checkpoint separately for structs and choices if either surface becomes broad.
       ordering.
 - [ ] Consolidate environment final assembly so each side table moves once into its final owner.
 - [ ] Replace clone-to-satisfy-borrow patterns with field splitting, temporary `mem::take` or narrow
-      query methods where ownership remains clear.
+      query methods where ownership remains clear. File visibility is already done; the per-header
+      side-table snapshots are what remain.
 - [ ] Keep orchestration readable. Do not hide the phase order in a generic pass framework.
 
 Checkpoint: pass/index cleanup after the main constant, static-control-flow and type wins are already

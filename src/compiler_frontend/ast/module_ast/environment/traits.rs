@@ -308,11 +308,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         trait_environment: &TraitEnvironment,
         string_table: &mut StringTable,
     ) -> Result<ResolvedTraitDefinition, CompilerMessages> {
-        let visibility = self
-            .binding_environment
-            .visibility_for(&header.source_file)
-            .map_err(|error| self.error_messages(error, string_table))?
-            .clone();
+        let visibility = Arc::clone(
+            self.binding_environment
+                .visibility_for(&header.source_file)
+                .map_err(|error| self.error_messages(error, string_table))?,
+        );
 
         let this_name = trait_this_name(string_table);
         let this_parameters =
@@ -423,11 +423,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             generic_parameter_scope,
         } = input;
 
-        let visibility = self
-            .binding_environment
-            .visibility_for(&header.source_file)
-            .map_err(|error| self.error_messages(error, string_table))?
-            .clone();
+        let visibility = Arc::clone(
+            self.binding_environment
+                .visibility_for(&header.source_file)
+                .map_err(|error| self.error_messages(error, string_table))?,
+        );
 
         let signature_syntax =
             signature_with_trait_this_as_parameter(&requirement.signature, this_name);
@@ -616,11 +616,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             };
 
             let relation_source_file = header.source_file.clone();
-            let visibility = self
-                .binding_environment
-                .visibility_for(&header.source_file)
-                .map_err(|error| self.error_messages(error, string_table))?
-                .clone();
+            let visibility = Arc::clone(
+                self.binding_environment
+                    .visibility_for(&header.source_file)
+                    .map_err(|error| self.error_messages(error, string_table))?,
+            );
 
             let subject_id = self.resolve_trait_incompatibility_reference(
                 &incompatibility.subject,

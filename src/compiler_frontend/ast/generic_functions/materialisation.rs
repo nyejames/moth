@@ -1162,8 +1162,10 @@ impl GenericTemplateArtefact {
         let mut environment = HeaderBindingEnvironment::default();
         environment.file_visibility_by_source.insert(
             source_file.clone(),
-            self.visibility
-                .materialise(external_package_registry, string_table)?,
+            Arc::new(
+                self.visibility
+                    .materialise(external_package_registry, string_table)?,
+            ),
         );
         for binding in &self.declarations {
             let local_path = materialise_path(&binding.local_path, string_table);
@@ -2560,38 +2562,42 @@ impl StableFileVisibility {
         string_table: &mut StringTable,
     ) -> Result<FileVisibility, CompilerError> {
         let mut visibility = FileVisibility::default();
-        let mut materialise_bindings =
-            |bindings: &[StableVisibleDeclaration],
-             target: &mut FxHashMap<StringId, SourceDeclarationTarget>| {
-                for binding in bindings {
-                    let name = string_table.intern(&binding.visible_name);
-                    let local_path = materialise_path(&binding.local_path, string_table);
-                    visibility
-                        .visible_declaration_paths
-                        .insert(local_path.clone());
-                    let declaration_target = match &binding.origin {
-                        Some(origin) => SourceDeclarationTarget::Imported {
-                            origin: origin.clone(),
-                            local_path,
-                        },
-                        None => SourceDeclarationTarget::Local(local_path),
-                    };
-                    target.insert(name, declaration_target);
-                }
-            };
-        materialise_bindings(&self.source_names, &mut visibility.visible_source_names);
-        materialise_bindings(
-            &self.type_alias_names,
-            &mut visibility.visible_type_alias_names,
-        );
-        materialise_bindings(&self.trait_names, &mut visibility.visible_trait_names);
+
+        // The declaration gate is built alongside the name maps and installed once at the end,
+        // so the binding loop can borrow both without splitting the visibility package.
+        let mut visible_declaration_paths = FxHashSet::default();
+        {
+            let mut materialise_bindings =
+                |bindings: &[StableVisibleDeclaration],
+                 target: &mut FxHashMap<StringId, SourceDeclarationTarget>| {
+                    for binding in bindings {
+                        let name = string_table.intern(&binding.visible_name);
+                        let local_path = materialise_path(&binding.local_path, string_table);
+                        visible_declaration_paths.insert(local_path.clone());
+                        let declaration_target = match &binding.origin {
+                            Some(origin) => SourceDeclarationTarget::Imported {
+                                origin: origin.clone(),
+                                local_path,
+                            },
+                            None => SourceDeclarationTarget::Local(local_path),
+                        };
+                        target.insert(name, declaration_target);
+                    }
+                };
+            materialise_bindings(&self.source_names, &mut visibility.visible_source_names);
+            materialise_bindings(
+                &self.type_alias_names,
+                &mut visibility.visible_type_alias_names,
+            );
+            materialise_bindings(&self.trait_names, &mut visibility.visible_trait_names);
+        }
+
         let error_path =
             crate::compiler_frontend::builtins::error_type::builtin_error_type_path(string_table);
         let error_name =
             string_table.intern(crate::compiler_frontend::builtins::error_type::ERROR_TYPE_NAME);
-        visibility
-            .visible_declaration_paths
-            .insert(error_path.clone());
+        visible_declaration_paths.insert(error_path.clone());
+        visibility.visible_declaration_paths = Arc::new(visible_declaration_paths);
         visibility
             .visible_source_names
             .insert(error_name, SourceDeclarationTarget::Local(error_path));

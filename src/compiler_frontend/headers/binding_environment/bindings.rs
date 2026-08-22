@@ -19,6 +19,7 @@ use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::sync::Arc;
 
 /// Per-file visible-name environment.
 ///
@@ -234,7 +235,11 @@ impl std::ops::Deref for SourceFunctionTarget {
 pub(crate) struct FileVisibility {
     /// Declaration paths that are visible in this file (including builtins).
     /// Used as an access gate for permission checks.
-    pub(crate) visible_declaration_paths: FxHashSet<InternedPath>,
+    ///
+    /// WHY: AST scopes gate every name lookup through this set and a body scope that declares a
+    /// local needs its own copy. Sharing the header-built set by handle means only a scope that
+    /// actually mutates it pays for one, instead of every scope copying the whole module's paths.
+    pub(crate) visible_declaration_paths: Arc<FxHashSet<InternedPath>>,
 
     /// Source-visible names → canonical declaration path.
     /// Includes same-file declarations and imported source symbols (aliased or not).
@@ -286,7 +291,12 @@ pub(crate) struct FileVisibility {
 /// semantics in later stages.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct HeaderBindingEnvironment {
-    pub(crate) file_visibility_by_source: FxHashMap<InternedPath, FileVisibility>,
+    /// One shared visibility package per source file.
+    ///
+    /// WHY: every AST pass that walks headers needs the visibility of the file each header came
+    /// from. Handing out a handle keeps that lookup free, so a module with many declarations in
+    /// one file does not copy its whole visibility package once per declaration.
+    pub(crate) file_visibility_by_source: FxHashMap<InternedPath, Arc<FileVisibility>>,
     /// Consumer-local declaration paths mapped to their stable provider origins.
     ///
     /// WHAT: aliases and namespace members reference the one record stored under
@@ -324,6 +334,16 @@ pub(crate) struct ImportedFunctionContract {
     pub(crate) target: SourceFunctionTarget,
 }
 
+impl FileVisibility {
+    /// Mutable access to the visible-declaration gate while binding construction runs.
+    ///
+    /// WHY: the gate is published as a shared handle, but only binding construction writes to
+    /// it and it holds the sole reference at that point, so this never copies the set.
+    pub(crate) fn visible_declaration_paths_mut(&mut self) -> &mut FxHashSet<InternedPath> {
+        Arc::make_mut(&mut self.visible_declaration_paths)
+    }
+}
+
 impl HeaderBindingEnvironment {
     /// Return the visibility map for a parsed source file.
     ///
@@ -333,7 +353,7 @@ impl HeaderBindingEnvironment {
     pub(crate) fn visibility_for(
         &self,
         source_file: &InternedPath,
-    ) -> Result<&FileVisibility, CompilerError> {
+    ) -> Result<&Arc<FileVisibility>, CompilerError> {
         self.file_visibility_by_source.get(source_file).ok_or_else(|| {
             CompilerError::compiler_error(format!(
                 "Missing visibility entry for source file. This is a compiler bug: header parsing did not produce a visibility map for '{source_file:?}'."

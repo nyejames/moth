@@ -27,6 +27,7 @@ use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::syntax::TraitIncompatibilitySyntax;
 
 use rustc_hash::FxHashSet;
+use std::sync::Arc;
 
 impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     /// Validate all explicit public authored declarations and trait metadata in a module root.
@@ -448,11 +449,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         trait_environment: &TraitEnvironment,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
-        let visibility = self
-            .binding_environment
-            .visibility_for(public_root_file)
-            .map_err(|error| self.error_messages(error, string_table))?
-            .clone();
+        let visibility = Arc::clone(
+            self.binding_environment
+                .visibility_for(public_root_file)
+                .map_err(|error| self.error_messages(error, string_table))?,
+        );
 
         let subject_id = self.resolve_visible_trait_reference(
             &incompatibility.subject,

@@ -1713,3 +1713,101 @@ acceptance item it belonged to is satisfied structurally instead.
    session that keeps one root scope alive for the whole pass, with per-constant child frames, is
    only possible once the table has ID-based replacement that does not require sole `Rc`
    ownership. Phase 2 should decide that shape deliberately rather than discovering it again.
+
+## Constant Evaluation And Type-System Plan - Shared File Visibility - 2026-08-22
+
+The Phase 1 evidence recorded that `constant_chain_512` was still superlinear and named
+declaration-table replacement, the module-constant declaration clone and constant normalisation as
+the likely causes. Profiling found none of those. The remaining quadratic term was one full
+`FileVisibility` copy per header, taken in two unrelated passes.
+
+### How It Was Found
+
+A `--profile profiling` build was sampled with `sample` over a local 4096-constant chain. Every one
+of the 1619 samples in the window landed inside `AstModuleEnvironmentBuilder::build`, 954 of them in
+`validate_nominal_generic_bound_surfaces` and 953 of those in `FileVisibility::clone`. A further 663
+samples were the matching drop at the end of the same loop iteration. The pass was spending
+essentially all of its time copying and freeing a visibility package it read one `TypeId` from.
+
+`AstEmitter::emit` had the same shape: a `Rc::new(visibility_for(..)?.clone())` at the top of the
+header loop, taken for every header including constants, which need no scope at all.
+
+`FileVisibility` holds eight maps keyed off the whole module's declarations, so a module with `C`
+declarations in one file paid `O(C)` per header in each pass, twice.
+
+### Change
+
+`HeaderBindingEnvironment::file_visibility_by_source` now stores `Arc<FileVisibility>` and
+`visibility_for` returns the handle. `FileVisibility::visible_declaration_paths` is itself an
+`Arc<FxHashSet<InternedPath>>`, so `ScopeContext::with_file_visibility` takes one argument and
+shares both the package and its declaration gate. Binding construction writes the gate through
+`FileVisibility::visible_declaration_paths_mut`, which holds the sole reference and never copies.
+
+`Arc` rather than `Rc` because the package is header-stage data that AST, dependency sorting and
+trait-evidence validation all read, and the header stage has no module-local ownership rule to
+lean on.
+
+### Wall Time
+
+`frontend.ast.total`, median of five runs, `RAYON_NUM_THREADS=1`, `--release` with
+`detailed_timers`, both binaries built from the same tree in the same session and measured
+interleaved.
+
+| Workload | Phase 1 | Shared visibility | Change |
+|---|---:|---:|---:|
+| `constant_chain_32` | `0.82ms` | `0.64ms` | `-22%` |
+| `constant_chain_128` | `5.09ms` | `1.31ms` | `-74%` |
+| `constant_chain_512` | `61.73ms` | `4.23ms` | `-93%` |
+| local `constant_chain_2048` | `875.44ms` | `17.06ms` | `-98%` |
+| `fold_stress` | `7.24ms` | `2.89ms` | `-60%` |
+| `type_stress` | `11.90ms` | `6.44ms` | `-46%` |
+| `environment_stress` | `10.66ms` | `4.97ms` | `-53%` |
+| `nominal_capacity_stress` | `15.43ms` | `11.11ms` | `-28%` |
+| `pattern_stress` | `4.63ms` | `3.78ms` | `-18%` |
+| `template_stress` | `3.80ms` | `3.12ms` | `-18%` |
+| `collection_stress` | `3.44ms` | `3.26ms` | `-5%` |
+| `docs` | `180.92ms` | `169.44ms` | `-6%` |
+
+Nothing measured got slower. The 2048-constant chain is a local ad-hoc fixture under `./tmp`, not a
+committed benchmark case; it exists to show the curve past the committed `512` point.
+
+### Stage Split
+
+| Metric | `chain_512` before | after | `chain_2048` before | after |
+|---|---:|---:|---:|---:|
+| `frontend.ast.total` | `68.99ms` | `4.68ms` | `902.96ms` | `17.30ms` |
+| `frontend.ast.environment` | `39.19ms` | `3.28ms` | `455.50ms` | `11.88ms` |
+| `frontend.ast.emit` | `28.79ms` | `0.52ms` | `442.88ms` | `1.69ms` |
+| `frontend.ast.finalise` | `0.96ms` | `0.83ms` | `4.42ms` | `3.57ms` |
+
+Constant setup now scales linearly across the committed chain fixtures: `0.64 / 1.31 / 4.23ms` for
+`32 / 128 / 512`, and `17.06ms` at `2048`.
+
+### Counters
+
+`ast_constant_pass_visibility_entries_cloned` was deleted with the copy it measured, as
+`ast_constant_pass_prior_constant_ids_copied` was in Phase 1. It only ever attributed the constant
+pass's own copy, which no longer exists, and it never saw the two larger copies this change
+removed. No other counter moves: the same scopes are created, they just no longer rebuild
+module-wide visibility.
+
+### Findings That Change Later Phases
+
+1. **The Phase 1 candidate list for the remaining superlinearity was wrong on all three counts.**
+   `TopLevelDeclarationTable::replace_by_path` is already one hash lookup plus an indexed store,
+   the module-constant declaration clone is `O(1)` per constant, and
+   `ast_module_constant_normalization_expressions_visited` is exactly one per constant. Phase 2
+   should treat the by-ID replacement work as a clarity and ownership change, not as a scaling fix,
+   and re-measure before claiming a scaling result from it.
+2. **Profile before choosing the next representation change.** Every counter in the constant pass
+   was already linear when this cost was found. Counters proved the pass they instrument was clean
+   and said nothing about the two passes that dominated the module. The remaining plan phases
+   should confirm their target with a profile, not with the absence of a counter.
+3. **The same clone-to-satisfy-borrow shape survives elsewhere.** The function-signature pass and
+   `unresolved_member_syntax_to_declarations` still rebuild `Rc::new(map.clone())` snapshots of
+   `resolved_type_aliases_by_path`, `generic_declarations_by_path`, `resolved_struct_fields_by_path`
+   and `nominal_type_ids_by_path` per header. That is `O(declarations)` per function, struct and
+   choice. Phases 8 and 9 own it, and `nominal_capacity_stress` and `environment_stress` are the
+   fixtures that will show it.
+4. **`docs` moved for the first time in this plan.** `-6%` with no constant-pass change confirms
+   the copy was in shared header-loop machinery, not in constant-specific code.

@@ -275,11 +275,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 continue;
             };
 
-            let visibility = self
-                .binding_environment
-                .visibility_for(&header.source_file)
-                .map_err(|error| self.error_messages(error, string_table))?
-                .clone();
+            let visibility = Arc::clone(
+                self.binding_environment
+                    .visibility_for(&header.source_file)
+                    .map_err(|error| self.error_messages(error, string_table))?,
+            );
 
             let source_file_scope = header.canonical_source_file(string_table);
             let generic_parameter_scope =
@@ -394,11 +394,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             };
 
             let source_file_scope = header.canonical_source_file(string_table);
-            let visibility = self
-                .binding_environment
-                .visibility_for(&header.source_file)
-                .map_err(|error| self.error_messages(error, string_table))?
-                .clone();
+            let visibility = Arc::clone(
+                self.binding_environment
+                    .visibility_for(&header.source_file)
+                    .map_err(|error| self.error_messages(error, string_table))?,
+            );
 
             let generic_parameter_scope =
                 build_generic_parameter_scope(GenericParameterScopeBuildInput {
@@ -575,11 +575,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 continue;
             }
 
-            let visibility = self
-                .binding_environment
-                .visibility_for(&header.source_file)
-                .map_err(|error| self.error_messages(error, string_table))?
-                .clone();
+            let visibility = Arc::clone(
+                self.binding_environment
+                    .visibility_for(&header.source_file)
+                    .map_err(|error| self.error_messages(error, string_table))?,
+            );
             let resolved_bounds_by_local = self.resolve_generic_parameter_bounds(
                 generic_parameters,
                 &visibility,
@@ -635,11 +635,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
         for header in sorted_headers {
-            let visibility = self
-                .binding_environment
-                .visibility_for(&header.source_file)
-                .map_err(|error| self.error_messages(error, string_table))?
-                .clone();
+            let visibility = Arc::clone(
+                self.binding_environment
+                    .visibility_for(&header.source_file)
+                    .map_err(|error| self.error_messages(error, string_table))?,
+            );
             let validation_context = NominalBoundSurfaceValidationContext {
                 visibility: &visibility,
                 trait_environment,
@@ -799,11 +799,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 HeaderKind::Struct {
                     generic_parameters, ..
                 } => {
-                    let visibility = self
-                        .binding_environment
-                        .visibility_for(&header.source_file)
-                        .map_err(|error| self.error_messages(error, string_table))?
-                        .clone();
+                    let visibility = Arc::clone(
+                        self.binding_environment
+                            .visibility_for(&header.source_file)
+                            .map_err(|error| self.error_messages(error, string_table))?,
+                    );
 
                     let generic_parameter_scope =
                         build_generic_parameter_scope(GenericParameterScopeBuildInput {
@@ -869,11 +869,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 HeaderKind::Choice {
                     generic_parameters, ..
                 } => {
-                    let visibility = self
-                        .binding_environment
-                        .visibility_for(&header.source_file)
-                        .map_err(|error| self.error_messages(error, string_table))?
-                        .clone();
+                    let visibility = Arc::clone(
+                        self.binding_environment
+                            .visibility_for(&header.source_file)
+                            .map_err(|error| self.error_messages(error, string_table))?,
+                    );
 
                     let generic_parameter_scope =
                         build_generic_parameter_scope(GenericParameterScopeBuildInput {
@@ -1039,11 +1039,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         fallback_policy: SignatureTypeFallbackPolicy,
         emit_warnings: bool,
     ) -> Result<Vec<Declaration>, CompilerMessages> {
-        let visibility = self
-            .binding_environment
-            .visibility_for(&header.source_file)
-            .map_err(|error| self.error_messages(error, string_table))?
-            .clone();
+        let visibility = Arc::clone(
+            self.binding_environment
+                .visibility_for(&header.source_file)
+                .map_err(|error| self.error_messages(error, string_table))?,
+        );
 
         let field_context = self.constant_header_scope_context(header, &visibility, string_table);
 
@@ -1144,7 +1144,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     fn constant_header_scope_context(
         &self,
         header: &Header,
-        visibility: &FileVisibility,
+        visibility: &Arc<FileVisibility>,
         string_table: &mut StringTable,
     ) -> ScopeContext {
         let source_file_scope: InternedPath = header.canonical_source_file(string_table);
@@ -1164,10 +1164,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         .with_path_format_config(self.context.path_format_config.clone())
         .with_template_const_loop_iteration_limit(self.context.template_const_loop_iteration_limit)
         .with_rendered_path_usage_sink(Rc::clone(&self.rendered_path_usages))
-        .with_file_visibility(
-            Rc::new(visibility.clone()),
-            Rc::new(visibility.visible_declaration_paths.clone()),
-        )
+        .with_file_visibility(Arc::clone(visibility))
         .with_explicit_compile_time_constants(Rc::clone(&self.resolved_module_constant_paths))
         .with_resolved_type_aliases(Rc::new(self.resolved_type_aliases_by_path.clone()))
         .with_generic_declarations(Rc::new(

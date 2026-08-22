@@ -4,8 +4,8 @@
 //! folds every top-level constant initializer in header dependency order.
 //! WHY: headers are already sorted by the dependency stage, so the whole pass reads one
 //! unchanging view of the module. Building that view once means a module with many constants
-//! prepares its visibility packages, side tables and compatibility cache a fixed number of times
-//! instead of once per constant.
+//! prepares its side tables, canonical file scopes and compatibility cache a fixed number of
+//! times instead of once per constant.
 //! MUST NOT: rebuild dependency visibility, or hold the declaration table across a constant. The
 //! environment builder commits each resolved constant into the table in place, which requires
 //! sole ownership between calls.
@@ -34,8 +34,6 @@ use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationMetadata;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
-#[cfg(feature = "benchmark_counters")]
-use crate::compiler_frontend::instrumentation::add_ast_counter;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
@@ -79,7 +77,7 @@ pub(crate) struct ConstantHeaderInput<'a> {
     pub top_level_declarations: Rc<TopLevelDeclarationTable>,
     /// Paths of the constants resolved so far, shared rather than copied into the scope frame.
     pub resolved_constant_paths: Rc<FxHashSet<InternedPath>>,
-    pub file_visibility: &'a FileVisibility,
+    pub file_visibility: &'a Arc<FileVisibility>,
     pub type_environment: &'a mut TypeEnvironment,
     pub warnings: &'a mut Vec<CompilerDiagnostic>,
 }
@@ -88,11 +86,11 @@ pub(crate) struct ConstantHeaderInput<'a> {
 pub(crate) struct ConstantResolutionSession {
     module_view: ConstantResolutionSessionInput,
 
-    /// One prepared visibility package per source file that declares a constant.
+    /// Canonical scope path of each source file that declares a constant.
     ///
-    /// WHY: `FileVisibility` and its declaration-path gate are the largest per-constant copies in
-    /// the pass, and both are identical for every constant declared in the same file.
-    visibility_by_source_file: FxHashMap<InternedPath, PreparedFileVisibility>,
+    /// WHY: interning the canonical file path needs the string table and is identical for every
+    /// constant declared in the same file.
+    source_file_scopes: FxHashMap<InternedPath, InternedPath>,
 
     /// One compatibility cache for the whole pass.
     ///
@@ -101,18 +99,11 @@ pub(crate) struct ConstantResolutionSession {
     compatibility_cache: TypeCompatibilityCache,
 }
 
-/// Everything a constant scope needs from its source file, prepared once per file.
-struct PreparedFileVisibility {
-    visibility: Rc<FileVisibility>,
-    visible_declaration_paths: Rc<FxHashSet<InternedPath>>,
-    source_file_scope: InternedPath,
-}
-
 impl ConstantResolutionSession {
     pub(crate) fn new(module_view: ConstantResolutionSessionInput) -> Self {
         Self {
             module_view,
-            visibility_by_source_file: FxHashMap::default(),
+            source_file_scopes: FxHashMap::default(),
             compatibility_cache: TypeCompatibilityCache::new(),
         }
     }
@@ -200,26 +191,16 @@ impl ConstantResolutionSession {
         header: &Header,
         top_level_declarations: Rc<TopLevelDeclarationTable>,
         resolved_constant_paths: Rc<FxHashSet<InternedPath>>,
-        file_visibility: &FileVisibility,
+        file_visibility: &Arc<FileVisibility>,
         string_table: &mut StringTable,
     ) -> ScopeContext {
         increment_ast_counter(AstCounter::ConstantResolutionContextsCreated);
 
         let module_view = &self.module_view;
-        let prepared = self
-            .visibility_by_source_file
+        let source_file_scope = self
+            .source_file_scopes
             .entry(header.source_file.to_owned())
-            .or_insert_with(|| {
-                record_constant_pass_visibility_clone(file_visibility);
-
-                PreparedFileVisibility {
-                    visibility: Rc::new(file_visibility.clone()),
-                    visible_declaration_paths: Rc::new(
-                        file_visibility.visible_declaration_paths.clone(),
-                    ),
-                    source_file_scope: header.canonical_source_file(string_table),
-                }
-            });
+            .or_insert_with(|| header.canonical_source_file(string_table));
 
         ScopeContext::new(
             ContextKind::ConstantHeader,
@@ -239,11 +220,8 @@ impl ConstantResolutionSession {
         // Keep full module declarations for path identity, but gate every file-local lookup
         // through the header-built visibility package so namespace bindings and aliases behave
         // exactly like they do in function/start body contexts.
-        .with_file_visibility(
-            Rc::clone(&prepared.visibility),
-            Rc::clone(&prepared.visible_declaration_paths),
-        )
-        .with_source_file_scope(prepared.source_file_scope.to_owned())
+        .with_file_visibility(Arc::clone(file_visibility))
+        .with_source_file_scope(source_file_scope.to_owned())
         .with_resolved_type_aliases(Rc::clone(&module_view.resolved_type_aliases))
         .with_explicit_compile_time_constants(resolved_constant_paths)
         .with_generic_declarations(Rc::clone(&module_view.generic_declarations_by_path))
@@ -253,22 +231,3 @@ impl ConstantResolutionSession {
         .with_trait_environment(Rc::clone(&module_view.trait_environment))
     }
 }
-
-/// Record how many bound visibility entries this source file's constant scope copies.
-///
-/// WHY: the `FileVisibility` copy is the largest in the constant pass. Attributing it per source
-/// file rather than per constant is exactly the change this counter has to show.
-#[cfg(feature = "benchmark_counters")]
-fn record_constant_pass_visibility_clone(file_visibility: &FileVisibility) {
-    let entries = file_visibility.visible_declaration_paths.len()
-        + file_visibility.visible_source_names.len()
-        + file_visibility.visible_type_alias_names.len()
-        + file_visibility.visible_trait_names.len()
-        + file_visibility.visible_external_symbols.len()
-        + file_visibility.visible_namespace_records.len();
-
-    add_ast_counter(AstCounter::ConstantPassVisibilityEntriesCloned, entries);
-}
-
-#[cfg(not(feature = "benchmark_counters"))]
-fn record_constant_pass_visibility_clone(_file_visibility: &FileVisibility) {}

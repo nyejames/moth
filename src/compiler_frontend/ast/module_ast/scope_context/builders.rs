@@ -95,7 +95,7 @@ impl ScopeContext {
     /// prevent same-file references from bypassing the visibility system.
     pub fn with_visible_declarations(
         mut self,
-        visible: Rc<FxHashSet<InternedPath>>,
+        visible: Arc<FxHashSet<InternedPath>>,
     ) -> ScopeContext {
         self.visible_declaration_ids = Some(visible);
         self
@@ -116,7 +116,7 @@ impl ScopeContext {
             .unwrap_or_default();
 
         update(&mut file_visibility);
-        shared.file_visibility = Some(Rc::new(file_visibility));
+        shared.file_visibility = Some(Arc::new(file_visibility));
     }
 
     /// Register source-visible external package symbols.
@@ -166,18 +166,14 @@ impl ScopeContext {
 
     /// Apply a header-built `FileVisibility` to this scope context.
     ///
-    /// WHAT: adopts all visibility maps from the prepared header environment, plus the matching
-    /// declaration-path gate.
+    /// WHAT: adopts all visibility maps from the prepared header environment, including the
+    /// declaration-path gate the package already carries.
     /// WHY: AST emission should consume header-built visibility directly instead of
-    /// reconstructing dependency bindings or manually setting each field. The gate is passed
-    /// separately so a pass that parses many declarations against one file can share both
-    /// handles instead of copying the path set per declaration.
-    pub(crate) fn with_file_visibility(
-        mut self,
-        visibility: Rc<FileVisibility>,
-        visible_declaration_paths: Rc<FxHashSet<InternedPath>>,
-    ) -> ScopeContext {
-        self.visible_declaration_ids = Some(visible_declaration_paths);
+    /// reconstructing dependency bindings or manually setting each field. Both the package and
+    /// its gate are shared handles, so a pass that parses many declarations against one file
+    /// copies neither.
+    pub(crate) fn with_file_visibility(mut self, visibility: Arc<FileVisibility>) -> ScopeContext {
+        self.visible_declaration_ids = Some(Arc::clone(&visibility.visible_declaration_paths));
         Rc::make_mut(&mut self.shared).file_visibility = Some(visibility);
         self
     }

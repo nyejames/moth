@@ -69,7 +69,7 @@ fn add_var_extends_visibility_gate_when_gate_is_set() {
     );
 
     // Install an empty visibility gate.
-    context = context.with_visible_declarations(Rc::new(FxHashSet::default()));
+    context = context.with_visible_declarations(Arc::new(FxHashSet::default()));
 
     let variable_path = InternedPath::from_components(vec![string_table.intern("my_var")]);
     let declaration = Declaration {
@@ -116,7 +116,7 @@ fn add_compile_time_var_extends_visibility_gate_when_gate_is_set() {
         vec![],
         0,
     )
-    .with_visible_declarations(Rc::new(FxHashSet::default()));
+    .with_visible_declarations(Arc::new(FxHashSet::default()));
 
     let constant_name = string_table.intern("local_const");
     let constant_path = InternedPath::from_components(vec![constant_name]);
@@ -268,7 +268,7 @@ fn new_constant_inherits_parent_visibility_gate() {
     let mut visibility_gate = FxHashSet::default();
     let gated_path = InternedPath::from_components(vec![string_table.intern("gated")]);
     visibility_gate.insert(gated_path.to_owned());
-    context = context.with_visible_declarations(Rc::new(visibility_gate));
+    context = context.with_visible_declarations(Arc::new(visibility_gate));
 
     let constant_scope = InternedPath::from_components(vec![string_table.intern("const_scope")]);
     let constant_context = ScopeContext::new_constant(constant_scope, &context);
@@ -556,7 +556,7 @@ fn new_child_control_flow_inherits_visibility_gate() {
     let mut gate = FxHashSet::default();
     let gated_path = InternedPath::from_components(vec![string_table.intern("gated")]);
     gate.insert(gated_path.to_owned());
-    context = context.with_visible_declarations(Rc::new(gate));
+    context = context.with_visible_declarations(Arc::new(gate));
 
     let child = context.new_child_control_flow(ContextKind::Branch, &mut string_table);
     assert!(
@@ -566,6 +566,67 @@ fn new_child_control_flow_inherits_visibility_gate() {
             .unwrap()
             .contains(&gated_path),
         "child control-flow frame must inherit the parent's visibility gate"
+    );
+}
+
+#[test]
+fn child_scope_local_does_not_leak_into_the_shared_visibility_gate() {
+    use crate::compiler_frontend::ast::ast_nodes::Declaration;
+    use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+    use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
+    use crate::compiler_frontend::value_mode::ValueMode;
+
+    let mut string_table = StringTable::new();
+    let scope = empty_scope(&mut string_table);
+    let mut context = ScopeContext::new_for_tests(
+        ContextKind::Function,
+        scope,
+        Rc::new(TopLevelDeclarationTable::new(vec![])),
+        Arc::new(ExternalPackageRegistry::new()),
+        vec![],
+        0,
+    );
+
+    // The gate every scope starts from is the header-built set, shared by handle. A child that
+    // declares a local must copy it before writing, or the local would become visible to every
+    // other scope in the module.
+    let shared_gate = Arc::new(FxHashSet::default());
+    context = context.with_visible_declarations(Arc::clone(&shared_gate));
+
+    let local_path = InternedPath::from_components(vec![string_table.intern("branch_local")]);
+    let declaration = Declaration {
+        id: local_path.to_owned(),
+        value: Expression::new(
+            ExpressionKind::NoValue,
+            SourceLocation::default(),
+            builtin_type_ids::INT,
+            DataType::Int,
+            ValueMode::ImmutableOwned,
+        ),
+    };
+
+    let mut child = context.new_child_control_flow(ContextKind::Branch, &mut string_table);
+    child.add_var(declaration, SourceLocation::default());
+
+    assert!(
+        child
+            .visible_declaration_ids
+            .as_ref()
+            .unwrap()
+            .contains(&local_path),
+        "the declaring child must see its own local"
+    );
+    assert!(
+        !shared_gate.contains(&local_path),
+        "a child local must not be written back into the shared header-built gate"
+    );
+    assert!(
+        !context
+            .visible_declaration_ids
+            .as_ref()
+            .unwrap()
+            .contains(&local_path),
+        "a child local must not become visible to its parent scope"
     );
 }
 

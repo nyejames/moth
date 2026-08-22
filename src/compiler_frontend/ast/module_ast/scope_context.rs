@@ -117,7 +117,7 @@ pub struct ScopeShared {
     pub(crate) build_profile: FrontendBuildProfile,
 
     // File-local visibility and resolved declarations.
-    pub(crate) file_visibility: Option<Rc<FileVisibility>>,
+    pub(crate) file_visibility: Option<Arc<FileVisibility>>,
     pub(crate) resolved_type_aliases: Option<Rc<FxHashMap<InternedPath, ResolvedTypeAnnotation>>>,
     pub(crate) generic_declarations_by_path:
         Option<Rc<FxHashMap<InternedPath, GenericDeclarationMetadata>>>,
@@ -191,7 +191,7 @@ pub struct ScopeContext {
     // Kept directly on `ScopeContext` rather than in `ScopeShared` because `add_var` extends it.
     // The set is shared copy-on-write: child scopes and header-pass scopes clone the handle, and
     // only a scope that actually declares a local pays for a private copy.
-    pub visible_declaration_ids: Option<Rc<FxHashSet<InternedPath>>>,
+    pub visible_declaration_ids: Option<Arc<FxHashSet<InternedPath>>>,
 
     // Type expectations.
     pub expected_result_type_ids: Vec<TypeId>,

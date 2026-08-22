@@ -69,11 +69,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 continue;
             };
 
-            let visibility = self
-                .binding_environment
-                .visibility_for(&header.source_file)
-                .map_err(|error| self.error_messages(error, string_table))?
-                .clone();
+            let visibility = Arc::clone(
+                self.binding_environment
+                    .visibility_for(&header.source_file)
+                    .map_err(|error| self.error_messages(error, string_table))?,
+            );
 
             let resolved_bounds_by_local = self.resolve_generic_parameter_bounds(
                 generic_parameters,
@@ -148,7 +148,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     self.context.template_const_loop_iteration_limit,
                 )
                 .with_rendered_path_usage_sink(Rc::clone(&self.rendered_path_usages))
-                .with_visible_declarations(Rc::new(visibility.visible_declaration_paths.clone()))
+                .with_visible_declarations(Arc::clone(&visibility.visible_declaration_paths))
                 .with_visible_external_symbols(visibility.visible_external_symbols.clone())
                 .with_visible_source_bindings(visibility.visible_source_names.clone())
                 .with_visible_type_aliases(visibility.visible_type_alias_names.clone())
