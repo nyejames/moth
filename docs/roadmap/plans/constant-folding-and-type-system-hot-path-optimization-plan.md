@@ -4,30 +4,26 @@
 > `docs/roadmap/plans/constant-folding-and-type-system-hot-path-optimization-plan.md`
 >
 > **Implementation branch:**
-> `agent/constant-evaluation-static-if-type-system-plan`
+> `const-folding-and-types-optimisation`
 >
 > **Status:**
-> Ready for implementation. The command timing accounting and reporting correction plan this entry
-> once waited on was deleted from the roadmap on 2026-08-18, so the sequencing gate is satisfied by
-> absence. The timing requirement it carried survives as this plan's own prerequisite below.
->
-> **Planning snapshot:**
-> `main` at `7a3649d2e35668d11b55746835ac1cb2a7c1bb07`.
+> In progress. Phase 0, Phase 1 and the shared file-visibility slice are complete. Rewritten on
+> 2026-08-22 after profiling invalidated the prioritisation the original phase order was built on.
 
 ## Purpose
 
-Build one compact, durable constant-evaluation and type-resolution architecture, remove the dominant
-constant and type-system hot-path costs and add Stage 4 static specialisation of ordinary `if`
-statements whose conditions are known compile-time `Bool` values.
+Build one compact, durable constant-evaluation and type-resolution architecture, remove the
+dominant constant and type-system hot-path costs, and add Stage 4 static specialisation of ordinary
+`if` statements whose conditions are known compile-time `Bool` values.
 
-This plan has two coupled outcomes:
+Two coupled outcomes:
 
 1. Replace repeated context construction, copied semantic state, rich intermediate clones and
    redundant value representations with data-oriented module-owned stores and indexed views.
 2. Make compile-time evaluation reduce ordinary Bool control flow before HIR so later compiler
    systems process only the executable branch selected for the configured build.
 
-The final design must improve the common path without replacing Moth's existing semantic owners:
+The design must improve the common path without replacing Moth's existing semantic owners:
 
 - Stage 3 remains the declaration-order authority
 - `TopLevelDeclarationTable` remains the indexed declaration owner
@@ -40,33 +36,44 @@ The final design must improve the common path without replacing Moth's existing 
 - HIR receives final folded values and already-specialised executable control flow, never TIR,
   unresolved type syntax or a statically decided `if`
 
-Most phases are implementation optimisations and must preserve accepted programs, diagnostics,
-public identities and emitted artefacts. Phase 4C is the one deliberate semantic expansion: both
-branches remain frontend-valid source, but a compile-time-known Bool condition selects one branch
-before HIR, borrow validation, lifetime analysis, link facts, target validation and backend lowering.
+Every phase except Phase G is an implementation optimisation and must preserve accepted programs,
+diagnostics, public identities and emitted artefacts. Phase G is the one deliberate semantic
+expansion.
 
 ---
 
-## Active context capsule
+## Current state
 
 ACTIVE_PLAN:
 - `docs/roadmap/plans/constant-folding-and-type-system-hot-path-optimization-plan.md`
 
+BRANCH:
+- `const-folding-and-types-optimisation`
+
+COMPLETED:
+- Phase 0 (baseline, scaling fixtures, semantic freeze) - commit `ccf25d166`
+- Phase 1 (module-owned constant resolution session) - commit `4e421a5a8`
+- Shared file visibility (taken out of sequence after profiling) - commit `917f7e81c`
+
 CURRENT_SLICE:
-- Phase: 2 (dense declaration and resolved-constant state)
-- Goal: carry `DeclarationId` into AST environment work and replace path-based declaration
-  replacement with ID replacement inside ordered semantic passes
-- Non-goals: no semantic control-flow change before the explicit Phase 4C gate
+- Phase: A (re-baseline and attribution)
+- Goal: replace the Phase 0 baseline, which was measured when file-visibility copying dominated
+  every AST workload, and pick the order of Phases B to F from a profile instead of from that
+  baseline
+- Non-goals: no representation change, no semantic change, no control-flow change
 
-LAST_GOOD_COMMIT:
-- Shared file-visibility commit on `const-folding-and-types-optimisation`, taken out of phase order
-  after profiling (see `Shared file visibility - out-of-order slice`)
+NEXT_ACTION:
+- execute Phase A, record the ranked attribution, then confirm or reorder Phases B to F in this
+  file before implementing any of them
 
-PREREQUISITE:
-- Satisfied. Timing schema `2` already carries the module-attributed
-  `frontend.ast.environment.constant_header_resolution`,
-  `frontend.ast.emit.const_template_parse`, `frontend.ast.emit.const_template_fold` and
-  `frontend.ast.finalise.module_constant` metrics, so no rebase was needed.
+PHASE_ORDER:
+- A (re-baseline) -> B (shared side tables) -> C (folded-value authority) -> D (move-only folding
+  and lazy diagnostics) -> E (nominal member shells) -> F (type environment and generic keys) ->
+  G (static Bool `if`, mandatory semantic gate) -> H (declaration lanes and pass cleanup) ->
+  I (closeout)
+- B to F are performance phases and Phase A may reorder them. G, H and I keep their positions:
+  G depends on C, H is clarity work that should follow the representation changes it touches, and
+  I is the closeout.
 
 RELEVANT_DOCS:
 - `AGENTS.md`
@@ -83,127 +90,202 @@ RELEVANT_DOCS:
 - `docs/src/docs/codebase/style-guide/validation.mtf`
 
 RELEVANT_CODE:
-- `src/compiler_frontend/module_dependencies.rs`
-- `src/compiler_frontend/headers/types.rs`
 - `src/compiler_frontend/headers/binding_environment/`
 - `src/compiler_frontend/ast/module_ast/environment/`
 - `src/compiler_frontend/ast/module_ast/finalization/`
 - `src/compiler_frontend/ast/module_ast/scope_context/`
 - `src/compiler_frontend/ast/statements/branching.rs`
 - `src/compiler_frontend/ast/statements/terminality.rs`
-- `src/compiler_frontend/ast/statements/value_production/`
 - `src/compiler_frontend/ast/type_resolution/`
-- `src/compiler_frontend/ast/type_interner.rs`
 - `src/compiler_frontend/ast/const_eval/`
 - `src/compiler_frontend/ast/const_values/`
-- `src/compiler_frontend/ast/expressions/eval_expression/`
 - `src/compiler_frontend/ast/expressions/expression_rpn.rs`
-- `src/compiler_frontend/ast/generic_functions/`
 - `src/compiler_frontend/datatypes/environment.rs`
-- `src/compiler_frontend/datatypes/definitions.rs`
 - `src/compiler_frontend/type_coercion/compatibility.rs`
 - `src/compiler_frontend/folded_value.rs`
 - `src/compiler_frontend/hir/hir_statement/declarations.rs`
-- `src/compiler_frontend/hir/tests/hir_branch_lowering_tests.rs`
 - `src/compiler_frontend/instrumentation/`
 - `benchmarks/manifest.toml`
 
-NEXT_ACTION:
-- execute Phase 2 as an ownership and clarity change, not as a scaling fix, and preserve current
-  semantics until the mandatory Phase 4C review gate
+---
+
+## How this plan is run
+
+Each phase is a checkpoint, a commit and a natural context compaction point. A phase is finished
+when its work items are ticked, its acceptance holds, `just validate` passes, and its **Outcome**
+subsection is written in this file. Write outcomes for the reader who arrives with no memory of the
+session: what changed, what it measured, and what a later phase must not rediscover.
+
+Rules learned from the work so far. These are not style preferences, they cost real time:
+
+1. **Profile before choosing a representation change.** The plan's original ordering was derived
+   from a Phase 0 baseline dominated by a cost nobody had attributed. Three phases of planned work
+   were pointed at candidates that turned out to be `O(1)`.
+2. **A counter proves the pass it instruments is clean. It says nothing about the module.** Every
+   constant-pass counter read linear while two uninstrumented passes owned the whole runtime. Do
+   not accept "the counters are flat" as evidence that a phase is done.
+3. **Do not record a scaling claim for work that was not measured to scale.** State plainly when a
+   phase is an ownership or clarity change.
+4. **Record findings that contradict the plan, including the plan's own earlier findings.** The
+   superseded Phase 1 candidate list is left in this file with its correction, not deleted.
+5. **Deletion is the deliverable.** A faster implementation that leaves the old builder, tree or
+   walker alive as a second path does not satisfy the phase.
 
 ---
 
-## Phase 0 outcome and implementation notes
+## Completed work and durable findings
 
-Phase 0 completed on 2026-08-22. Evidence lives in
-`benchmarks/frontend-optimization-results.md` under
-`Constant Evaluation And Type-System Plan - Phase 0 Baseline - 2026-08-22`. The facts below change
-how later phases must be implemented, so they are recorded here rather than only in the evidence
-file.
+### Phase 0 - baseline, scaling fixtures and semantic freeze
 
-### Measured baseline highlights
+Completed 2026-08-22, commit `ccf25d166`. Evidence:
+`benchmarks/frontend-optimization-results.md`, section
+`Constant Evaluation And Type-System Plan - Phase 0 Baseline - 2026-08-22`.
 
-- Constant-header resolution is about half of `frontend.ast.total` on `docs` (`566ms` of `1144ms`),
-  `fold_stress` (`17.0ms` of `36.6ms`) and `constant_dag_churn` (`9.7ms` of `17.1ms`).
-- `ast_constant_pass_prior_constant_ids_copied` is exactly `C * (C - 1) / 2`: `496` / `8128` /
-  `130816` for the 32 / 128 / 512 constant chains. `ast_constant_pass_visibility_entries_cloned`
-  is `2208` / `33408` / `526848` for the same chains.
-- `moth check` on the chains costs roughly `7ms` / `40ms` / `350ms` above a `~28ms` floor, so
-  constant setup is clearly superlinear today.
-- `ast_expression_operand_clones` equals `ast_expression_fold_items` on the chains: every folded
-  operand is currently a full `Expression` clone.
+Assets it created, all still in use:
 
-### Findings that constrain later phases
+- Benchmark workloads `constant_chain_32`, `constant_chain_128`, `constant_chain_512` and
+  `nominal_capacity_stress`, each with a `_check` and a `_frontend` case, plus the manifest
+  inventory test in `xtask/src/benchmark_manifest/tests.rs` and the counts in `benchmarks/README.md`.
+- `AstCounter` variants `ConstantResolutionContextsCreated`, `ConstantsResolved`,
+  `ConstantPassSideTableEntriesCloned`, `ModuleConstantDeclarationClones`,
+  `ExpressionOrderingInputItems`, `ExpressionTypedStackItems`, `ExpressionFoldItems`,
+  `ExpressionOperandClones`, `DiagnosticDataTypeMaterialisations`, `BranchLocalGenericRequests`.
+- `FrontendCounter` variants `GenericSubstitutionKeyBuilds`, `GenericSubstitutionKeySortedPairs`,
+  `PublicFoldedValueConversions`, `HirConstValueConversions`, `HirStaticBoolIfNodes`,
+  `HirRuntimeIfNodes`.
+- Integration cases `static_if_constant_bool_branch_selection`,
+  `static_if_value_producing_branch_selection`, `static_if_branch_scope_preserved` and
+  `static_if_inactive_branch_generic_call`.
+- Ignored intended-contract tests in `src/compiler_frontend/tests/frontend_pipeline_tests.rs`:
+  `intended_compile_time_true_condition_reaches_hir_without_a_branch`,
+  `intended_compile_time_false_condition_without_else_lowers_no_branch_body` and
+  `intended_terminality_observes_the_selected_branch`, plus the non-ignored freeze
+  `runtime_bool_condition_lowers_one_branch_diamond`. Phase G enables the ignored three.
+
+Findings that still constrain later phases:
 
 1. **A constant-backed Bool condition is not a folded `Bool` at HIR.** `if enabled:` with
    `enabled #= true` reaches HIR as a reference expression; only a literal `if true:` folds to
-   `ExpressionKind::Bool`. The JavaScript backend resolves the module constant later, which is why
-   the emitted code reads `if (true)`. The Phase 4C specialisation owner must read the condition
-   through the folded-value authority (module constant row / `ConstValueStore`), not by matching
-   `ExpressionKind::Bool`. The `hir_static_bool_if_nodes` counter deliberately measures the literal
-   case only, so it is the post-4C invariant counter, not a candidate census.
+   `ExpressionKind::Bool`. Phase G must read the condition through the folded-value authority, not
+   by matching `ExpressionKind::Bool`. `hir_static_bool_if_nodes` measures the literal case only,
+   so it is the post-G invariant counter, not a candidate census.
 2. **Reuse the existing generic-request pruning boundary.** `ScopeContext::generic_request_checkpoint`
    and `ScopeContext::discard_generic_requests_since` already exist and are used by static
-   `assert(true)` message discarding in `src/compiler_frontend/ast/statements/asserts.rs`. Phase 4C
-   must reuse that mechanism for inactive branches rather than adding a second boundary.
+   `assert(true)` message discarding in `src/compiler_frontend/ast/statements/asserts.rs`.
    `src/compiler_frontend/ast/statements/branching.rs` already brackets its branch bodies with a
-   checkpoint under `benchmark_counters` for the `ast_branch_local_generic_requests` counter.
+   checkpoint under `benchmark_counters`. Phase G must reuse that mechanism, not add a second one.
 3. **Inactive generic work is materialised today.** A generic call reachable only through a
-   compile-time-false branch still emits a generated function into the artefact. Phase 4C's
+   compile-time-false branch still emits a generated function into the artefact. Phase G's
    acceptance must assert its absence.
 4. **`HirBuilder::lower_if_with_body_emitters` in
    `src/compiler_frontend/hir/hir_statement/control_flow.rs` is the single HIR `if`-diamond owner**
    for both statement `if` and runtime template `if`. It carries `record_hir_branch_condition_kind`,
    which is where the "no statically decided `if` reaches HIR" assertion belongs.
 5. **Member shells are rebuilt after constants** in
-   `AstModuleEnvironmentBuilder::resolve_type_declarations`
-   (`src/compiler_frontend/ast/module_ast/environment/type_resolution.rs`), which is the Phase 8
-   target. `benchmarks/nominal-capacity-stress.moth` isolates that cost from constant count.
-6. **`resolve_constant_headers` clones five module side tables once per module**, not per constant,
-   so `ast_constant_pass_side_table_entries_cloned` reflects table size. The genuine per-constant
-   cost was the `Rc::new(file_visibility.clone())` in the constant-header parser, measured by
-   `ast_constant_pass_visibility_entries_cloned`. Phase 1 moved that copy to once per source file.
+   `AstModuleEnvironmentBuilder::resolve_type_declarations`. That is Phase E.
+   `benchmarks/nominal-capacity-stress.moth` isolates that cost from constant count.
+6. **The Phase 0 timing baseline is superseded.** It was recorded when a per-header
+   `FileVisibility` copy dominated every AST workload, so its attribution shares are not usable for
+   prioritisation. Phase A replaces it. The counter values it recorded remain valid as counts.
 
-### Assets Phase 0 created
+### Phase 1 - consolidate constant-resolution context
 
-- Benchmark workloads `constant_chain_32`, `constant_chain_128`, `constant_chain_512` and
-  `nominal_capacity_stress`, each with a `_check` and a `_frontend` case. The manifest inventory
-  test in `xtask/src/benchmark_manifest/tests.rs` and the counts in `benchmarks/README.md` were
-  updated in the same change.
-- New `AstCounter` variants: `ConstantResolutionContextsCreated`, `ConstantsResolved`,
-  `ConstantPassPriorConstantIdsCopied` (deleted in Phase 1 with the copy it measured),
-  `ConstantPassVisibilityEntriesCloned`,
-  `ConstantPassSideTableEntriesCloned`, `ModuleConstantDeclarationClones`,
-  `ExpressionOrderingInputItems`, `ExpressionTypedStackItems`, `ExpressionFoldItems`,
-  `ExpressionOperandClones`, `DiagnosticDataTypeMaterialisations`, `BranchLocalGenericRequests`.
-  `DeclarationTableReplacements` was renamed `DeclarationReplacementsByPath`; the by-ID counterpart
-  belongs to Phase 2, which introduces the by-ID replacement path.
-- New `FrontendCounter` variants: `GenericSubstitutionKeyBuilds`,
-  `GenericSubstitutionKeySortedPairs`, `PublicFoldedValueConversions`, `HirConstValueConversions`,
-  `HirStaticBoolIfNodes`, `HirRuntimeIfNodes`.
-- Integration cases `static_if_constant_bool_branch_selection`,
-  `static_if_value_producing_branch_selection`, `static_if_branch_scope_preserved` and
-  `static_if_inactive_branch_generic_call`. `function_partial_if_return_rejected` already froze the
-  current terminality rejection and `dynamic_if_test` already owns runtime-condition execution, so
-  neither was duplicated.
-- Ignored intended-contract tests in `src/compiler_frontend/tests/frontend_pipeline_tests.rs`:
-  `intended_compile_time_true_condition_reaches_hir_without_a_branch`,
-  `intended_compile_time_false_condition_without_else_lowers_no_branch_body` and
-  `intended_terminality_observes_the_selected_branch`, plus the non-ignored freeze
-  `runtime_bool_condition_lowers_one_branch_diamond`. Phase 4C enables the ignored three.
+Completed 2026-08-22, commit `4e421a5a8`. Evidence:
+`benchmarks/frontend-optimization-results.md`, section
+`Constant Evaluation And Type-System Plan - Phase 1 Consolidated Constant Session - 2026-08-22`.
 
-### Measurement protocol note
+`ConstantResolutionSession` in
+`src/compiler_frontend/ast/module_ast/environment/constant_resolution.rs` owns the module view the
+whole constant pass reads: the five side tables, the trait environment, project services, the TIR
+store, the rendered-path sink, one `TypeCompatibilityCache` and one canonical file scope per source
+file. `resolve_constant_headers` drives it and commits each folded constant.
+`ConstantHeaderParseContext` and `parse_constant_header_declaration` are deleted.
 
-Recorded runs (`just bench`, `just bench-frontend`) require a clean committed worktree and rewrite
-the tracked monthly summary, so five consecutive recorded invocations need
-`git checkout -- benchmarks/summaries/` between them. Fixed-thread recorded runs
-(`RAYON_NUM_THREADS=1`) never touch the tracked summary. Per-case medians come from
-`benchmarks/local-data/runs.jsonl`, which read-only `bench-check` modes do not write.
+Supporting ownership changes:
+
+- `ScopeContext::visible_declaration_ids` and
+  `ScopeFrame::explicit_compile_time_constant_declarations` are shared copy-on-write handles. Only a
+  scope that actually declares a local pays for a private copy.
+- `AstModuleEnvironmentBuilder` owns one `resolved_module_constant_paths` set, updated by
+  `push_module_constant` and shared by handle with the constant-header, nominal-member and
+  function-signature scopes.
+
+Findings:
+
+1. **`ast_constant_pass_prior_constant_ids_copied` was deleted, not zeroed.** The cumulative copy it
+   measured no longer exists. Do not reintroduce it to satisfy a checkbox.
+2. **The declaration table's `Rc::get_mut` commit path constrains session shape.**
+   `AstModuleEnvironmentBuilder::replace_declaration` requires sole `Rc` ownership, so no scope may
+   hold the table across a constant commit. That is why the session still builds one `ScopeContext`
+   per constant. Phase H decides deliberately whether the table gains a commit path that tolerates
+   live readers. If it does, the session collapses to one root scope with per-constant child frames
+   and the remaining per-constant `ScopeContext::new` disappears with it.
+3. **`docs` is not a constant-setup workload.** Its constants are one or two per file. The Phase 0
+   reading that constant-header resolution is about half of `frontend.ast.total` on `docs` is fold
+   work owned by Phases C and D, not context construction.
+4. **~~The remaining `chain_512` superlinearity is declaration-table replacement, the
+   module-constant declaration clone, or constant normalisation.~~ Superseded.** All three are
+   `O(1)` per constant. See the shared file-visibility findings below.
+
+Two Phase 1 checkboxes remain open and are carried into Phase H:
+
+- top-level constants still require a synthetic `AstModuleLookups`, built inside `ScopeContext::new`
+- the constant-header `ScopeContext` builder chain still has two callers, the member-shell pass and
+  the function-signature pass, which read side tables that are still being written while they run
+
+### Shared file visibility - out-of-sequence slice
+
+Completed 2026-08-22, commit `917f7e81c`. Evidence:
+`benchmarks/frontend-optimization-results.md`, section
+`Constant Evaluation And Type-System Plan - Shared File Visibility - 2026-08-22`.
+
+Taken before Phase 2 because a profile of the residual `constant_chain_512` superlinearity
+attributed effectively the whole AST pass to a cost no phase was pointed at.
+`AstModuleEnvironmentBuilder::validate_nominal_generic_bound_surfaces` and `AstEmitter::emit` each
+cloned a whole `FileVisibility` per header, including for constants that need no scope. On a local
+4096-constant chain, 1617 of 1619 samples in the environment pass were that copy and its drop.
+
+`HeaderBindingEnvironment::file_visibility_by_source` now stores `Arc<FileVisibility>` and
+`visibility_for` returns the handle. `FileVisibility::visible_declaration_paths` is itself an
+`Arc<FxHashSet<InternedPath>>`, so `ScopeContext::with_file_visibility` takes one argument and
+shares the package and its declaration gate together. Binding construction writes the gate through
+`FileVisibility::visible_declaration_paths_mut`, which holds the sole reference and never copies.
+`Arc` rather than `Rc` because this is header-stage data read by AST, dependency sorting and
+trait-evidence validation.
+
+`frontend.ast.total`, median of five interleaved runs, `RAYON_NUM_THREADS=1`:
+
+| Workload | Before | After |
+|---|---:|---:|
+| `constant_chain_128` | `5.09ms` | `1.31ms` |
+| `constant_chain_512` | `61.73ms` | `4.23ms` |
+| local 2048-constant chain | `875.44ms` | `17.06ms` |
+| `fold_stress` | `7.24ms` | `2.89ms` |
+| `environment_stress` | `10.66ms` | `4.97ms` |
+| `type_stress` | `11.90ms` | `6.44ms` |
+| `nominal_capacity_stress` | `15.43ms` | `11.11ms` |
+| `docs` | `180.92ms` | `169.44ms` |
+
+Findings:
+
+1. **Phase 1's candidate list was wrong on all three counts.** `replace_by_path` is one hash lookup
+   plus an indexed store, the module-constant declaration clone is `O(1)`, and module-constant
+   normalisation visits exactly one expression per constant. The dense-`DeclarationId` work is an
+   ownership and clarity change, not a scaling fix, and is now Phase H.
+2. **Counters located nothing here.** They instrument the pass Phase 1 rewrote; the cost was in two
+   passes with no counters at all.
+3. **The same clone-to-satisfy-borrow shape survives in the side tables.** That is Phase B.
+4. **`docs` moved for the first time in this plan**, which confirms the copy was in shared
+   header-loop machinery rather than constant-specific code.
+5. **`ast_constant_pass_visibility_entries_cloned` was deleted** with the copy it measured, for the
+   same reason as the Phase 1 counter deletion.
 
 ---
 
 ## Accepted static control-flow contract
+
+This section is accepted design. Phase G implements it. Changing it requires a Moth design review,
+not a plan edit.
 
 ### Ordinary `if` is the only source form
 
@@ -219,7 +301,7 @@ if enabled:
 ```
 
 The queued build-configuration-values plan defines `#Config of T`. A configured Bool enters the
-same ordinary folded-constant and static-if path defined here:
+same ordinary folded-constant and static-`if` path defined here:
 
 ```moth
 analytics #Config of Bool = false
@@ -230,8 +312,8 @@ if analytics:
 ```
 
 This plan does not implement `#Config`, CLI build-input parsing or project-global interfaces. It
-establishes the general static-`if` behaviour that the queued build-configuration-values plan will
-consume without a config-specific AST node, branch pass or HIR operation.
+establishes the general static-`if` behaviour that the queued plan will consume without a
+config-specific AST node, branch pass or HIR operation.
 
 ### Both branches remain valid source
 
@@ -259,23 +341,16 @@ After both branches are frontend-valid and the condition has a final folded valu
 - a known `true` condition selects the `then` branch
 - a known `false` condition selects the `else` branch, or an empty scoped result when no `else`
   exists
-- an unknown/runtime condition remains an ordinary `if`
+- an unknown or runtime condition remains an ordinary `if`
 
 The selected branch retains its authored lexical scope. Specialisation must not hoist branch-local
 bindings into the parent scope or flatten control-flow ownership merely because the runtime test is
 removed.
 
-The specialised active AST becomes the authority for:
-
-- function terminality
-- durable generated-function requests
-- executable effect, access and project-context summaries
-- HIR construction
-- borrow validation
-- lifetime-region and escape analysis
-- per-function link facts and reachability
-- target-contract validation
-- backend lowering and emitted runtime code
+The specialised active AST becomes the authority for function terminality, durable generated-function
+requests, executable effect/access/project-context summaries, HIR construction, borrow validation,
+lifetime-region and escape analysis, per-function link facts and reachability, target-contract
+validation, and backend lowering.
 
 The inactive branch contributes none of those downstream products. HIR must never receive an `if`
 whose condition is already a known compile-time Bool.
@@ -283,17 +358,10 @@ whose condition is already a known compile-time Bool.
 ### Stable source structure
 
 Compile-time values may specialise executable behaviour. They do not change source structure.
-
-`#Config` and ordinary compile-time Bool conditions must not control:
-
-- dependency clauses or provider graph edges
-- package resolution
-- source discovery or semantic source sets
-- declaration existence
-- exported declaration existence
-- receiver-method existence
-- trait or conformance existence
-- module or package facade topology
+`#Config` and ordinary compile-time Bool conditions must not control dependency clauses or provider
+graph edges, package resolution, source discovery or semantic source sets, declaration existence,
+exported declaration existence, receiver-method existence, trait or conformance existence, or
+module/package facade topology.
 
 This keeps Stage 0 graph construction, Stage 3 declaration order, declaration identity and module
 interfaces structurally stable across configured builds. Public semantic summaries and executable
@@ -301,8 +369,8 @@ fingerprints may still change when the active body has different effects, calls 
 
 ### Platform-agnostic source boundary
 
-Moth source does not inspect compilation targets, operating systems, architectures, backend choice or
-runtime-platform identity. Platform integration belongs to project builders, builder packages,
+Moth source does not inspect compilation targets, operating systems, architectures, backend choice
+or runtime-platform identity. Platform integration belongs to project builders, builder packages,
 external packages and backend capability surfaces.
 
 The static-`if` system is for typed application and build configuration, not target-dependent source.
@@ -312,51 +380,6 @@ the future `#Config` surface.
 
 A change to this boundary requires an explicit Moth design-philosophy review. It is not a deferred
 extension of this plan.
-
----
-
-## Evidence at the planning snapshot
-
-A representative release documentation build reported:
-
-- AST environment: about `64.32ms`
-- constant-header resolution: about `53.7ms` after excluding the duplicate outer timer
-- const-template parsing: about `21.1ms`
-- const-template folding: about `3.2ms`
-- module-constant normalisation: about `8.0ms`
-
-The legacy detailed channel prints synchronously and duplicates the constant timer, so these numbers
-are directional rather than a valid benchmark baseline. They are enough to prioritise constant setup
-and representation work. Phase 0 must replace them with schema-v2 measurements.
-
-The current implementation also shows the static-control-flow gap that Phase 4C must close:
-
-- AST branching parses both bodies and always creates `NodeKind::If` for an ordinary Bool condition
-- HIR branch tests currently lower even literal `true` and `false` conditions into runtime CFG
-  diamonds
-- function terminality intentionally does not evaluate conditions beyond structurally folded
-  `assert(false)`
-- generic requests and other durable side products need an ownership audit so a pruned branch cannot
-  keep downstream work alive
-
-The current code also exposes concrete structural costs independent of timing noise:
-
-| Current pattern | Cost or complexity |
-|---|---|
-| Fresh `ScopeContext` and synthetic `AstModuleLookups` per top-level constant | Allocates and populates body-oriented machinery for a declaration-order constant pass |
-| Copy all previously resolved constant IDs into each new constant scope | Cumulative `O(C²)` insertion work for `C` constants |
-| Clone aliases, generic metadata, nominal members, nominal IDs and trait environment for the constant pass | Rebuilds immutable views already owned by the environment builder |
-| Clone `FileVisibility` and its visible declaration set for short-lived contexts | Repeats binding-owned state instead of borrowing it |
-| Store each constant as a cloned declaration in both declaration table and `module_constants` | Duplicates a rich expression tree and path metadata |
-| Recursively normalise module constants into new `Expression` trees, then recursively convert them again for HIR | Three value representations for one already-folded fact |
-| Build infix items, shunting-yard RPN, a type stack and a folding stack over full `Expression` operands | Multiple linear passes and full-expression clones around an efficient ordering algorithm |
-| Carry and clone diagnostic `DataType` through hot type stacks | Builds cold display data on successful paths where `TypeId` is sufficient |
-| Rebuild nominal member declaration shells before and after constants | Reparses or reconstructs the same field and variant structure to resolve capacity dependencies |
-| Scan `sorted_headers` repeatedly for each declaration kind | Repeated broad branching and poor locality as the language grows |
-| Clone fields, variants or signatures before read-only generic-bound validation | Copies semantic trees to satisfy local borrow structure |
-| Build and sort boxed generic substitution mappings per cache key | Repeats canonicalisation that can be owned once by the binding set |
-| Lower compile-time-known Bool conditions into ordinary HIR branches | Sends inactive executable work through every later compiler system and backend |
-| Validate terminality before static branch selection | Rejects functions whose specialised active body is provably terminal |
 
 ---
 
@@ -381,7 +404,7 @@ The current code also exposes concrete structural costs independent of timing no
   target requirements or backend code.
 - HIR does not become a second constant folder or type resolver and never receives a statically
   decided `if`.
-- Type and fold errors retain current source locations, diagnostic families and priority. Phase 4C
+- Type and fold errors retain current source locations, diagnostic families and priority. Phase G
   intentionally removes only downstream diagnostics belonging exclusively to inactive executable
   work.
 - TIR stays AST-local and is dropped before the completed AST leaves Stage 4.
@@ -390,250 +413,8 @@ The current code also exposes concrete structural costs independent of timing no
 - Capacity estimates and caches affect performance only. A miss or underestimate cannot change
   correctness.
 - Parallelism, reuse and caching preserve deterministic identities, diagnostics and output order.
-
----
-
-## Locked end-state decisions
-
-### 1. One module constant-resolution session
-
-Replace the per-constant body-oriented context construction with one
-`ConstantResolutionSession` owned by `AstModuleEnvironmentBuilder` for the complete dependency-ordered
-constant pass.
-
-The session borrows:
-
-- the declaration table
-- binding-owned file visibility
-- resolved aliases and generic declaration metadata
-- nominal type IDs and member shells
-- trait metadata
-- external package and project-path services
-- the module TIR store
-- warning and rendered-path sinks
-
-It owns or mutably borrows:
-
-- the module `TypeEnvironment`
-- one `TypeCompatibilityCache`
-- resolved-constant state
-- the module-local folded-value store
-
-The exact name may change. The ownership may not. Do not create one `Rc` graph per constant and do not
-build a synthetic complete `AstModuleLookups` package before the real environment exists.
-
-The shared declaration and expression parsers remain the syntax owners. Split the resources they
-consume into narrow lookup and mutation views rather than creating a second constant parser.
-
-### 2. Dense declaration identity through Stage 3 and AST
-
-Carry `DeclarationId` from final Stage 3 order into AST environment work. Add direct ID-based
-`get`, `get_mut` and `replace` operations to `TopLevelDeclarationTable` and use path/name indexes only
-for source lookup.
-
-Build compact ordered lanes once:
-
-```text
-all declarations in dependency order
-aliases
-nominals
-constants
-traits and conformances
-functions
-```
-
-Each lane stores declaration/header IDs, not cloned headers. Kind-specific passes iterate their lane
-while dependency-sensitive passes retain the complete order.
-
-Builtins and generated construction appends must allocate IDs through the table owner so indexes and
-lanes cannot drift.
-
-### 3. Resolved constants use a bitset, not copied path sets
-
-Add a dense `ResolvedConstantSet` keyed by `DeclarationId`. A constant becomes visible to later
-constants when its value is committed in dependency order.
-
-This set replaces:
-
-- copying every prior constant ID into each new scope frame
-- scanning `module_constants` to decide whether a declaration is an explicit compile-time constant
-- path hashing for resolution-state checks when a declaration ID is already known
-
-Body-local `#` constants remain scope-frame facts. Do not conflate module declaration order with
-body-local lexical scope.
-
-### 4. One module-local folded-value store
-
-Introduce a Vec-backed `ConstValueStore` with compact `ConstValueId` handles for module-local folded
-values. Start with a straightforward maintainable representation and use ranges or side arenas for
-variable-length collections, records and choice payloads. Do not begin with unsafe packing or a
-compiler-wide AST arena.
-
-A stored value retains the facts required by current consumers:
-
-- canonical local `TypeId`
-- folded scalar or aggregate payload
-- synthetic-interface provenance
-- source location or diagnostic anchor where required
-- const-record classification where applicable
-
-Strings use module-local `StringId`. Aggregate children use `ConstValueId`. Public projection copies
-an exported value once into `PublicFoldedValue`, converting local type/value identities to canonical
-owned interface facts.
-
-The completed AST moves the store and module-constant rows into HIR ownership. HIR references the
-same folded values or consumes them move-only into its final constant pool. It must not reconstruct
-an intermediate normalised AST tree first.
-
-### 5. Module constants are indexed rows, not duplicate declarations
-
-Store module constants as compact rows such as:
-
-```rust
-struct ModuleConstant {
-    declaration: DeclarationId,
-    value: ConstValueId,
-}
-```
-
-The declaration table remains the name, type and visibility authority. The constant row/store remain
-the folded-value authority. Do not retain a second `Vec<Declaration>` containing cloned expressions.
-
-A reference to a module constant resolves to its declaration and `ConstValueId`. Runtime lowering can
-load the constant by ID without first materialising a deep `Expression` clone.
-
-### 6. Keep shunting yard, replace the rich work around it
-
-The existing shunting-yard algorithm is correct and remains the precedence owner.
-
-First make the current path move-only:
-
-- consume input vectors
-- reserve output/operator capacity from known item count
-- move operands and operators through folding
-- return a fully folded operand without cloning it
-- keep diagnostic spelling out of the successful type stack
-
-Then combine ordering and operator typing into one typed-postfix builder. Resolve an operator's
-`TypeId` result when it leaves the operator stack and emit compact typed postfix data. Complete type
-validation before evaluating foldable operations so current type-error-before-fold-error priority is
-preserved.
-
-The fold evaluator consumes typed postfix once and returns either:
-
-- `ConstValueId` for a fully folded result
-- a reduced runtime expression/postfix payload for surviving runtime work
-
-A full `ExprId` arena is evidence-gated. Implement it only if Phase 4 counters or profiles show that
-move-only full `Expression` operands remain material. Do not introduce an arena to satisfy an
-architectural preference alone.
-
-### 7. Static Bool control flow is specialised once in Stage 4
-
-Add one AST-finalisation owner for ordinary `if` specialisation after constant values and expression
-types are final, but before terminality and durable executable summaries are committed.
-
-The owner consumes the existing folded-value authority. It must not:
-
-- run a second evaluator
-- inspect source tokens again
-- identify `#Config` declarations specially
-- add a config-specific AST or HIR node
-- rebuild branch scopes or reparse branch bodies
-
-For statement `if`:
-
-- known `true` selects the authored `then` body in its existing lexical scope
-- known `false` selects the authored `else` body in its existing lexical scope
-- known `false` without `else` produces no executable statements while preserving valid source and
-  diagnostic identity
-- runtime/unknown conditions retain the ordinary `NodeKind::If`
-
-For value-producing `if`:
-
-- both branches first satisfy the normal receiving arity and type rules
-- a known condition selects the corresponding already-validated value block
-- the selected value enters normal expression/value lowering without a runtime branch or hidden
-  merge local
-
-Do not generalise this phase into match reduction, loop unrolling, cross-function constant
-propagation or a compile-time virtual machine.
-
-Durable generic requests and executable metadata must be published from, or filtered against, the
-specialised active AST. Type checking may validate a generic call in an inactive branch, but that
-branch must not cause concrete materialisation or generated sidecar work.
-
-Terminality runs after specialisation. A function may therefore become provably terminal when its
-only active configured branch returns, while a runtime condition retains the existing conservative
-all-path rule.
-
-### 8. Type resolution uses explicit views
-
-Split the broad optional `TypeResolutionContextInputs` shape into explicit data views:
-
-- immutable declaration and visibility lookup
-- mutable derived-type interning
-- optional generic scope
-- optional trait/evidence overlay
-- optional constant-value lookup
-
-Provide named constructors for the real context classes, such as module declaration, constant,
-body and generated materialisation. Invalid combinations should be unrepresentable or rejected at
-construction, not represented by many unrelated `Option` fields.
-
-Successful resolution returns or carries `TypeId`. Diagnostic spelling is produced lazily at the
-error/render boundary. Do not cache rendered names as semantic facts.
-
-### 9. Improve `TypeEnvironment` in place
-
-Do not replace `TypeEnvironment`. It already owns dense `TypeId` storage and canonical interning.
-Optimise its hot tables in place:
-
-- seed capacities from existing `FrontendArenaCapacityEstimate` and header statistics
-- replace reverse maps keyed by dense local IDs with vectors where absence can be represented
-  explicitly
-- keep forward structural/path interning maps as hash maps
-- store generic parameter type IDs and bounds in dense ID-indexed vectors
-- store `NominalTypeId -> TypeId` as a dense vector
-- store `TypeId -> canonical identity` as an ID-indexed optional vector if profiling confirms its
-  current reverse hash map is material
-- represent cached generic instance fields/variants as arena ranges or boxed slices with borrowed
-  query views rather than independent growable vectors
-
-Every conversion requires size, lookup and benchmark evidence. Do not make a less readable table
-more compact when it is not hot.
-
-### 10. Canonical generic bindings are built once
-
-Give each immutable concrete generic binding set one canonical ordered pair representation and, if
-useful, a module-local `GenericBindingsId`. Substitution cache keys use that stable representation
-instead of collecting and sorting an `FxHashMap` into a new boxed slice for each recursive lookup.
-
-Reuse the current substitution cache and generic instance interning. Remove only repeated key
-construction and cloned member views.
-
-### 11. Nominal members keep one syntax shell
-
-Keep one immutable parsed member shell per struct field or choice payload. Early nominal registration
-creates identity and generic metadata only.
-
-Constructor readiness writes resolved type slots or explicit pending fixups into a side table. Fixed
-capacity expressions that depend on constants record a targeted fixup keyed by the affected member
-and constant declaration. After constants resolve, complete only pending slots and write canonical
-field/variant definitions once.
-
-Do not rebuild complete `Declaration` and `ChoiceVariant` trees before and after constants. Defaults
-must similarly retain one syntax owner and one final folded value.
-
-### 12. The source/token layout plan owns token ranges
-
-The existing compiler source/token/diagnostic data-layout plan owns compact source identities, token
-stores and retained token ranges. This plan must not introduce competing `SpanId`, token-range or
-source-store designs.
-
-Before that plan lands, optimise ownership and movement around current `FileTokens` and
-`SourceLocation`. After it lands, switch constant/member syntax to its canonical ranges without
-changing this plan's semantic stores.
+- Header-stage binding data is shared by handle, never copied per declaration. Any pass that needs
+  an owned `FileVisibility` must justify it.
 
 ---
 
@@ -655,224 +436,144 @@ changing this plan's semantic stores.
 - no token/source layout work already owned by the data-layout plan
 - no cross-module sharing of donor-local IDs or mutable stores
 - no best-effort fallback that reparses source or rebuilds semantic facts
+- **no representation change without a profile that names the cost it removes**
 
 ---
 
-## Phase 0 - Correct baseline, semantic freeze and scaling fixtures
+## Phase A - Re-baseline and attribution
 
-Prerequisite: rebase onto the accepted timing-schema v2 implementation.
+Goal: replace the superseded Phase 0 baseline and choose the order of Phases B to F from measured
+attribution rather than from the original plan's assumptions.
 
-- [x] Record five independent focused frontend and end-to-end runs using the existing benchmark
-      protocol.
-- [x] Capture module-attributed constant, const-template and finalisation timings.
-- [x] Run `docs`, `constant_dag_churn`, `fold_stress`, `expression_rpn_churn`, `type_stress`,
-      `environment_stress` and `one_module_kitchen_sink`.
-- [x] Add committed clean benchmark workloads with the same tiny initializer repeated across at
-      least 32, 128 and 512 dependency-ordered constants. Generate them deterministically if hand
-      maintenance would be noisy.
-- [x] Add a capacity-dependent nominal fixture that separates constant count from member count.
-- [x] Add or freeze focused static-control-flow cases for:
-  - literal `true` and `false` statement `if`
-  - constant-backed Bool conditions
-  - `if` with and without `else`
-  - value-producing `if`
-  - scope preservation after branch selection
-  - terminality changed by a known condition
-  - a generic call owned only by the future inactive branch
-  - borrow, lifetime, link and target work owned only by the future inactive branch
-  - a runtime Bool condition that must continue to lower as CFG
-- [x] Where the intended Phase 4C behaviour differs from the current compiler, add clearly named
-      ignored intended-contract tests rather than weakening current assertions early.
-- [x] Record counters for:
-  - constants resolved
-  - constant sessions and `ScopeContext`s created
-  - previous-constant IDs copied
-  - visibility/map entries cloned
-  - compatibility-cache lookups/hits
-  - declaration replacements by path and by ID
-  - infix, typed-postfix and fold item counts
-  - full `Expression` and `DataType` clones/materialisations
-  - module-constant normalisation nodes visited
-  - public and HIR folded-value conversions
-  - generic substitution key builds and sorted pairs
-  - static-Bool `if` candidates
-  - runtime `if` nodes reaching HIR
-  - generated requests attributed to branch-local call sites
-- [x] Use `RAYON_NUM_THREADS=1` for local frontend attribution, then repeat the normal thread identity
-      to ensure no scheduling regression.
-- [x] Store concise evidence in `benchmarks/frontend-optimization-results.md`.
+Why now: two consecutive slices moved AST time by between `6%` and `98%` depending on workload. Every
+share in the Phase 0 baseline was measured against a dominant cost that no longer exists, so no
+current priority in this plan is evidence-backed.
 
-Checkpoint: evidence and intended-contract tests only. No semantic representation or control-flow
-change.
+Targets: `benchmarks/manifest.toml` fixtures, `--profile profiling` builds, `MOTH_TIMERS=full`,
+`MOTH_COUNTERS=summary`.
 
-## Phase 1 - Consolidate constant-resolution context
+Known constraints:
 
-- [x] Introduce the one module-owned `ConstantResolutionSession`.
-- [x] Borrow binding visibility and environment side tables instead of cloning them into `Rc`s.
-- [x] Reuse one `TypeCompatibilityCache` for the pass.
-- [x] Reuse the existing TIR store, warning sink and rendered-path sink.
-- [ ] Refactor shared declaration/expression parser resources so top-level constants do not require
-      synthetic `AstModuleLookups`.
-- [ ] Delete the constant-header `ScopeContext` builder chain after the final caller migrates.
-- [x] Keep body-local constant parsing on normal lexical `ScopeContext`.
-- [x] Prove diagnostics, warning order and folded results are byte-for-byte equivalent.
+- Recorded runs (`just bench`, `just bench-frontend`) require a clean committed worktree and rewrite
+  the tracked monthly summary, so consecutive recorded invocations need
+  `git checkout -- benchmarks/summaries/` between them. Fixed-thread runs (`RAYON_NUM_THREADS=1`)
+  never touch the tracked summary. Per-case medians come from `benchmarks/local-data/runs.jsonl`,
+  which read-only `bench-check` modes do not write.
+- `--release` strips symbols. Use `--profile profiling` for any `sample` run.
+- `frontend.ast.environment.constant_header_resolution` over-measures: its timing guard is declared
+  before `resolve_constant_headers` and drops at the end of
+  `resolve_nominal_members_and_constants`, so it also covers the struct-field and choice-variant
+  loops. Treat it as an upper bound until the guard is narrowed.
 
-Expected deletion targets:
+Work items:
 
-- per-constant `ScopeContext::new`
-- per-constant synthetic empty lookup maps and registries
-- module-wide side-table clones created only for constant parsing
-- per-constant `TypeCompatibilityCache`
+- [ ] Record five independent runs per case for `docs`, `one_module_kitchen_sink`, `type_stress`,
+      `environment_stress`, `nominal_capacity_stress`, `fold_stress`, `expression_rpn_churn`,
+      `template_stress`, `constant_dag_churn` and the three constant chains.
+- [ ] Repeat at the normal thread identity to confirm no scheduling regression.
+- [ ] Capture module-attributed constant, const-template and finalisation timings.
+- [ ] Narrow the `constant_header_resolution` timing guard so its span matches its name.
+- [ ] Sample `--profile profiling` builds of `docs`, `environment_stress`,
+      `nominal_capacity_stress` and `type_stress`, and produce a ranked
+      function-level attribution table.
+- [ ] Record current values for every `AstCounter` and `FrontendCounter` this plan added.
+- [ ] Write the attribution into `benchmarks/frontend-optimization-results.md`.
+- [ ] Confirm or reorder `PHASE_ORDER` in this file, with one sentence of justification per move.
 
-Checkpoint: context consolidation with no value representation or control-flow change.
+Acceptance:
 
-### Phase 1 outcome and implementation notes
+- [ ] every later performance phase in this file names a cost that appears in the Phase A table
+- [ ] any phase whose target does not appear is explicitly re-scoped as clarity work or dropped
 
-Phase 1 completed on 2026-08-22. Evidence lives in
-`benchmarks/frontend-optimization-results.md` under
-`Constant Evaluation And Type-System Plan - Phase 1 Consolidated Constant Session - 2026-08-22`.
+Checkpoint: evidence only. No source change beyond the timing-guard fix.
 
-`ConstantResolutionSession` in
-`src/compiler_frontend/ast/module_ast/environment/constant_resolution.rs` now owns the module view
-the whole constant pass reads: the five side tables, the trait environment, project services, the
-TIR store, the rendered-path sink, one `TypeCompatibilityCache`, and one prepared
-`FileVisibility` package per source file. `resolve_constant_headers` drives it and commits each
-folded constant. `ConstantHeaderParseContext` and `parse_constant_header_declaration` are deleted.
+## Phase B - Shared environment side tables
 
-Two supporting ownership changes carry most of the measured win:
+Goal: remove the per-header `Rc::new(map.clone())` snapshots of the environment builder's side
+tables, the last known instance of the copy-per-header shape that dominated the last two slices.
 
-- `ScopeContext::visible_declaration_ids` and
-  `ScopeFrame::explicit_compile_time_constant_declarations` are now shared copy-on-write handles.
-  Every child scope in the compiler shared these sets by clone before; only a scope that actually
-  declares a local now pays for a private copy.
-- `AstModuleEnvironmentBuilder` owns one `resolved_module_constant_paths` set, updated by
-  `push_module_constant`. Constant-header, nominal-member and function-signature scopes all take a
-  handle to it instead of copying every prior constant path.
+Why now: same proven class as the shared file-visibility slice, in the same passes, with the
+fixtures that isolate it already committed. Phase A confirms magnitude before implementation.
 
-Measured result: `-46%` on `constant_chain_512`, `-27%` on `fold_stress`, `-23%` on
-`constant_dag_churn`, flat on `docs` and `nominal_capacity_stress`.
-`ast_constant_pass_visibility_entries_cloned` falls from `526848` to `1029` on the `512` chain.
+Targets:
 
-Two checkboxes stay open, deliberately:
+- `type_resolution.rs:1169-1175`, `constant_header_scope_context`, called once per struct and choice
+  header through `unresolved_member_syntax_to_declarations`
+- `function_signatures.rs:155,165`, once per generic function header
+- `traits.rs:539-544`, once per trait requirement
+- `scope_context/lookup.rs:155`, `is_explicit_compile_time_constant` linear-scans
+  `lookups.module_constants` for every fixed-capacity check during body emission
 
-1. **The synthetic `AstModuleLookups` per constant remains.** `ScopeContext::new` builds it, and it
-   holds the declaration table, so it cannot be prepared once for the pass. See finding 2 below.
-2. **The constant-header `ScopeContext` builder chain still has callers.**
-   `AstModuleEnvironmentBuilder::constant_header_scope_context` (member shells) and the
-   function-signature pass both build `ContextKind::ConstantHeader` scopes from live side tables
-   that are still being mutated when they run, so neither can share the constants session. Phases 8
-   and 9 own those passes.
+Each snapshot copies `resolved_type_aliases_by_path`, `generic_declarations_by_path`,
+`resolved_struct_fields_by_path`, `choice_variant_shells_by_path` or `nominal_type_ids_by_path`,
+so the cost is `O(declarations)` per function, struct, choice and trait requirement.
 
-Findings that constrain later phases:
+Known constraints:
 
-1. **`ast_constant_pass_prior_constant_ids_copied` was deleted, not zeroed.** The cumulative copy
-   it measured no longer exists. The Phase 2 scaling acceptance item naming that counter is
-   satisfied structurally; do not reintroduce the counter to check the box.
-2. **The declaration table's `Rc::get_mut` commit path is the real constraint on session shape.**
-   `AstModuleEnvironmentBuilder::replace_declaration` requires sole `Rc` ownership, so no scope may
-   hold the table across a constant commit. That is why the session prepares everything except the
-   table and still builds one `ScopeContext` per constant. Phase 2's ID-based replacement work
-   should decide deliberately whether the table gains a commit path that tolerates live readers; if
-   it does, the session collapses to one root scope with per-constant child frames and the
-   remaining per-constant `ScopeContext::new` disappears with it.
-3. **`docs` is not a constant-setup workload.** It stayed flat despite a `29%` drop in visibility
-   copying, because its constants are one or two per file and its AST cost is const-template
-   parsing and folding. The Phase 0 reading that constant-header resolution is about half of
-   `frontend.ast.total` on `docs` is real, but that half is fold work owned by Phases 3 and 4, not
-   context construction.
-4. **`constant_chain_512` is still superlinear after the session.** `68.69ms` for `512` trivial
-   constants is well above `4x` the `128` case. The remaining candidates are path-based declaration
-   replacement, the per-constant module-constant declaration clone and constant normalisation,
-   which Phases 2 and 3 own.
+- Unlike file visibility, these tables are **still being written while the loops that snapshot them
+  run**. `resolve_type_declarations` writes `resolved_struct_fields_by_path` and
+  `choice_variant_shells_by_path` inside the same loop that snapshots them. A handle taken once
+  before the loop would go stale and silently change resolution.
+- Two viable shapes. Hoist the snapshot where the loop provably does not write the table it reads
+  (the function-signature pass reads four tables it never writes). Or move the table itself behind
+  a copy-on-write handle in the builder, so writes clone once and reads are free. Prefer hoisting
+  where it is provable; reach for copy-on-write only where a write really does interleave.
+- `ConstantResolutionSession` already holds these tables correctly. Do not build a second session
+  type for the member-shell or signature passes; either widen the existing one or hoist.
 
-   *Superseded.* All three candidates were wrong. Profiling found one full `FileVisibility` copy
-   per header in `validate_nominal_generic_bound_surfaces` and in `AstEmitter::emit`. See
-   `Shared file visibility - out-of-order slice` below.
+Work items:
 
-## Shared file visibility - out-of-order slice
+- [ ] Establish, per pass, which side tables it writes while iterating.
+- [ ] Hoist the snapshots that are provably read-only for their loop.
+- [ ] Move the genuinely interleaved tables behind copy-on-write builder handles.
+- [ ] Replace the `module_constants` linear scan with the existing
+      `resolved_module_constant_paths` set or its Phase H successor.
+- [ ] Delete `ConstantPassSideTableEntriesCloned` if the copy it measures no longer exists, or
+      re-point it at the copy that remains.
 
-Landed on 2026-08-22, between Phase 1 and Phase 2. Evidence lives in
-`benchmarks/frontend-optimization-results.md` under
-`Constant Evaluation And Type-System Plan - Shared File Visibility - 2026-08-22`.
+Acceptance:
 
-This slice was not the next phase in sequence. It was taken first because a profile of the
-remaining `constant_chain_512` superlinearity attributed effectively the whole AST pass to one
-cost that Phase 1 had not looked at, and that Phase 2's planned work would not have touched.
+- [ ] `environment_stress` and `nominal_capacity_stress` improve, or the phase is recorded as
+      having found the cost already immaterial
+- [ ] no pass reads a side table snapshot taken before a write it depends on
+- [ ] diagnostics, warning order and emitted artefacts are byte-for-byte equivalent
 
-`HeaderBindingEnvironment` now owns one `Arc<FileVisibility>` per source file and hands it out by
-handle. `FileVisibility::visible_declaration_paths` is itself a shared handle, so
-`ScopeContext::with_file_visibility` takes one argument and shares the gate with the package.
-Binding construction writes the gate through `FileVisibility::visible_declaration_paths_mut`, which
-holds the sole reference and never copies. Every AST pass that walks headers now pays a refcount
-bump where it used to copy eight module-sized maps.
+Checkpoint: ownership only. No value representation or control-flow change.
 
-Checklist items this closes:
+## Phase C - Module-local folded-value authority
 
-- Phase 5, `Centralise visibility lookup by file once per header/declaration pass`. The lookup is
-  now free everywhere, so there is nothing left to centralise.
-- Phase 9, `Replace clone-to-satisfy-borrow patterns`, for file visibility only. The side-table
-  snapshots described in finding 3 below are still open.
-- Phase 2's scaling acceptance, `Setup work for the 32/128/512 constant fixtures grows
-  approximately linearly`. Measured `0.64 / 1.31 / 4.23ms`.
+Goal: give each module constant one folded-value owner, and delete the three representations of one
+already-folded fact.
 
-It does not close either open Phase 1 item. The synthetic `AstModuleLookups` is still built per
-constant, and the constant-header `ScopeContext` builder chain still has two callers.
+Why now: the largest remaining structural duplication, and Phase G depends on it. This is a deletion
+phase whose value does not depend on the Phase A ranking, though its priority relative to B, D, E
+and F does.
 
-Findings:
+Targets: `src/compiler_frontend/ast/const_values/`, `src/compiler_frontend/folded_value.rs`,
+`finalization/normalize_constants.rs`, `finalization/public_const_templates.rs`,
+`hir/hir_statement/declarations.rs`, `environment/lookups.rs`.
 
-1. **Phase 1's candidate list for the residual superlinearity was wrong on all three counts.**
-   `replace_by_path` is one hash lookup plus an indexed store, the module-constant declaration
-   clone is `O(1)`, and module-constant normalisation visits exactly one expression per constant.
-   Phase 2's by-ID replacement work is an ownership and clarity change. Do not record a scaling
-   claim for it without measuring one.
-2. **Counters located nothing here.** Every counter in the constant pass already read linear when
-   this cost was found, because the counters instrument the pass Phase 1 rewrote and the cost was
-   in two passes with no counters at all. Later phases should confirm their target with a profile
-   before choosing a representation change.
-3. **The same shape survives in the side tables.** `resolve_function_signatures` and
-   `unresolved_member_syntax_to_declarations` still build `Rc::new(map.clone())` snapshots of
-   `resolved_type_aliases_by_path`, `generic_declarations_by_path`,
-   `resolved_struct_fields_by_path` and `nominal_type_ids_by_path` once per header, which is
-   `O(declarations)` per function, struct and choice. Unlike visibility these tables are still
-   being written while those loops run, so the fix is either hoisting the snapshot where the loop
-   provably does not write, or moving the table itself to copy-on-write. Phases 8 and 9 own it.
-   `nominal_capacity_stress` and `environment_stress` are the fixtures that will show it.
+Known constraints:
 
-## Phase 2 - Dense declaration and resolved-constant state
+- `AstModuleLookups::module_constants` is a second `Vec<Declaration>` alongside the declaration
+  table. Both are read: `normalize_constants.rs` and `public_const_templates.rs` iterate the vector,
+  `lookup.rs` scans it for constant identity. Every consumer must move before the vector goes.
+- Template-valued constants classify through `classify_template_from_effective_tir` and carry
+  module-local reference, phase and overlay identity. The store must retain that, not flatten it.
+- `is_helper_only_template_value` filters `$insert(..)` helper constants out of the HIR handoff.
+  That filter is a real semantic rule, not an optimisation, and must survive the migration.
 
-- [ ] Make Stage 3 final order allocate or carry stable `DeclarationId`s.
-- [ ] Add direct ID operations to `TopLevelDeclarationTable`.
-- [ ] Build declaration-kind lanes once from final order.
-- [ ] Add `ResolvedConstantSet` with capacity equal to declaration count.
-- [ ] Resolve explicit module-constant visibility through the bitset.
-- [ ] Replace path-based declaration replacement with ID replacement inside ordered semantic passes.
-- [x] Remove cumulative prior-constant insertion into temporary scope frames. Phase 1 replaced it
-      with one shared `resolved_module_constant_paths` handle.
-- [ ] Remove linear scans of `module_constants` for explicit constant identity.
-- [ ] Keep source name/path maps only at lookup and diagnostic boundaries.
+Store and rows:
 
-Scaling acceptance:
-
-- [x] Setup work for the 32/128/512 constant fixtures grows approximately linearly. Closed by the
-      shared file-visibility slice, not by dense IDs: `0.64 / 1.31 / 4.23ms`.
-- [x] The `previous-constant IDs copied` counter reaches zero for module constants. Phase 1
-      deleted both the copy and the counter.
-- [ ] No new full declaration scan appears per constant.
-
-Checkpoint: dense IDs and state, still using current folded expression payloads and control flow.
-
-## Phase 3 - Module-local folded-value authority
-
-### Store and rows
-
-- [ ] Add `ConstValueId`, `ConstValueStore` and compact module-constant rows.
+- [ ] Add `ConstValueId`, `ConstValueStore` and compact module-constant rows
+      (`{ declaration: DeclarationId, value: ConstValueId }`).
 - [ ] Define scalar, collection, record, choice, range, option/fallible and string/template-folded
       payloads required by current language support.
 - [ ] Preserve type, provenance, const-record and location facts.
 - [ ] Make declaration lookup return constant identity without cloning its value tree.
 - [ ] Change module-constant references and field access to read the store.
 
-### Consumers
+Consumers:
 
 - [ ] Project exported constants directly from the store into `PublicFoldedValue` once.
 - [ ] Move the store and rows through the AST-to-HIR boundary.
@@ -881,74 +582,217 @@ Checkpoint: dense IDs and state, still using current folded expression payloads 
 - [ ] Keep advisory body-local/inferred `AstConstFacts` separate from authored module-constant
       storage, but reuse `ConstValueId` where a value is retained.
 
-### Delete old representations
+Deletions:
 
 - [ ] Replace `module_constants: Vec<Declaration>` in environment/lookups/AST contracts.
-- [ ] Delete `declaration.clone()` solely for table plus module-vector ownership.
-- [ ] Delete recursive `normalize_module_constant_expression` once the store receives final values
-      directly.
-- [ ] Delete the AST-expression-to-HIR-constant recursive conversion after HIR consumes the store.
-- [ ] Consolidate public and HIR conversion walkers around one borrowed store visitor where their
-      output vocabularies differ.
+- [ ] Delete the `declaration.clone()` that exists only to own the constant twice.
+- [ ] Delete recursive `normalize_module_constant_expression`.
+- [ ] Delete the AST-expression-to-HIR-constant recursive conversion.
+- [ ] Consolidate public and HIR conversion walkers around one borrowed store visitor.
 
-Checkpoint: one folded-value authority with all old conversion paths removed. Control-flow behaviour
-remains unchanged until Phase 4C.
+Acceptance:
 
-## Phase 4 - Typed constant evaluation and static control-flow specialisation
+- [ ] each module constant has exactly one folded-value owner
+- [ ] public projection and HIR consume it without reparsing or deep intermediate clones
+- [ ] `ast_module_constant_declaration_clones` reaches zero
+- [ ] helper-only template constants are still excluded from the HIR handoff
 
-### 4A: ownership cleanup
+Checkpoint: one folded-value authority with all old conversion paths removed. Control flow unchanged.
+
+## Phase D - Move-only folding and lazy diagnostics
+
+Goal: stop building rich intermediate data around a correct algorithm. Keep shunting yard as the one
+precedence owner.
+
+Why now: `ast_expression_operand_clones` equals `ast_expression_fold_items` and
+`ast_diagnostic_data_type_materialisations` equals it too, so today every folded operand is a full
+`Expression` clone and every successful fold builds diagnostic spelling it never uses. Both are
+counted, both are provably `1:1`, and neither depends on the Phase A ranking to be worth removing.
+
+Targets: `src/compiler_frontend/ast/expressions/expression_rpn.rs`,
+`src/compiler_frontend/ast/const_eval/`, `src/compiler_frontend/ast/type_resolution/`,
+`src/compiler_frontend/type_coercion/compatibility.rs`.
+
+Known constraints:
+
+- Type validation must complete before fold evaluation so the current type-error-before-fold-error
+  priority is preserved. This is observable in existing diagnostic tests.
+- A full `ExprId` arena is evidence-gated. Implement it only if the Phase A profile or the counters
+  after this phase show that move-only full `Expression` operands remain material. Do not introduce
+  an arena to satisfy an architectural preference.
+
+Ownership cleanup:
 
 - [ ] Make expression ordering reserve from the known input count.
 - [ ] Make `constant_fold` consume its item vector.
-- [ ] Move non-foldable operands/operators back into the runtime result.
+- [ ] Move non-foldable operands and operators back into the runtime result.
 - [ ] Return the sole folded operand by move.
 - [ ] Add focused tests proving no source or synthetic provenance is lost.
 - [ ] Drive full-expression clone counters to zero in ordinary arithmetic fold paths.
 
-Checkpoint: move-only ownership cleanup with byte-for-byte equivalent diagnostics and artefacts.
-
-### 4B: typed-postfix builder
+Typed postfix:
 
 - [ ] Resolve operator input/result `TypeId`s as operators leave the shunting-yard stack.
-- [ ] Emit a compact typed postfix item with only semantic IDs, flags and diagnostic anchors needed
-      by the fold evaluator.
-- [ ] Keep diagnostic `DataType` construction lazy.
-- [ ] Validate the whole typed expression before executing fold operations so diagnostic priority
-      remains unchanged.
+- [ ] Emit a compact typed postfix item carrying only semantic IDs, flags and diagnostic anchors.
+- [ ] Validate the whole typed expression before executing fold operations.
 - [ ] Delete the separate rich RPN result-type scan.
 - [ ] Make the fold evaluator produce `ConstValueId` directly.
 - [ ] Preserve reduced postfix only for runtime-dependent work.
 
-Checkpoint: typed-postfix and folded-value authority with unchanged source semantics.
+Lazy diagnostics and explicit type-resolution views:
 
-### 4C: static Bool `if` specialisation
+- [ ] Split the broad optional `TypeResolutionContextInputs` shape into explicit data views:
+      immutable declaration/visibility lookup, mutable derived-type interning, optional generic
+      scope, optional trait/evidence overlay, optional constant-value lookup.
+- [ ] Add named constructors for module declaration, constant, body and generated contexts, so
+      invalid combinations are unrepresentable or rejected at construction.
+- [ ] Return `TypeId`-first results from successful lookup paths and construct diagnostic spelling
+      only at the error or public-display boundary.
+- [ ] Borrow resolved aliases, fields, variants and signatures instead of cloning them for
+      read-only validation.
+- [ ] Remove the remaining owned `visible_declaration_ids` copy in
+      `type_resolution/struct_fields.rs:316`, which exists only because
+      `TypeResolutionContextInputs` carries a borrow where the scope needs a handle.
 
-This is the mandatory semantic review gate. Do not combine it with operand-arena work or another
-performance refactor.
+Acceptance:
+
+- [ ] `ast_expression_operand_clones` and `ast_diagnostic_data_type_materialisations` fall well
+      below `ast_expression_fold_items`
+- [ ] diagnostic text, ordering and priority are unchanged
+- [ ] shunting yard remains the one precedence algorithm
+
+Checkpoint: typed-postfix and lazy diagnostic data with unchanged source semantics.
+
+## Phase E - Nominal member shells and capacity fixups
+
+Goal: keep one immutable parsed member shell per struct field and choice payload, and build canonical
+member definitions once.
+
+Why now: `resolve_type_declarations` builds member shells before constants and rebuilds them after,
+so the same field and variant structure is reconstructed twice per nominal.
+`nominal_capacity_stress` isolates this from constant count.
+
+Targets: `environment/type_resolution.rs` (`unresolved_member_syntax_to_declarations`,
+`resolve_constructor_shells_for_constants`, `resolve_type_declarations`),
+`type_resolution/struct_fields.rs`, `datatypes/definitions.rs`.
+
+Known constraints:
+
+- The rebuild exists because fixed-capacity expressions in member types depend on constants that are
+  not resolved when shells are first needed. The replacement must record a targeted fixup, not defer
+  the whole shell.
+- Default-value diagnostics and recursive-type validation locations must keep their current source
+  anchors.
+
+Work items:
+
+- [ ] Define the single retained field/variant member shell and its resolution slots.
+- [ ] Register nominal identities and generic metadata without constructing unresolved declaration
+      value trees.
+- [ ] Resolve constructor-required member types into slots before constant evaluation.
+- [ ] Record only constant-dependent capacity and default fixups, keyed by affected member and
+      constant declaration.
+- [ ] Apply fixups in declaration order after their constants commit.
+- [ ] Build canonical `FieldDefinition` and `ChoiceVariantDefinition` arrays once, move them into
+      `TypeEnvironment` and expose borrowed views.
+- [ ] Delete the early and late reconstruction of member declarations and choice variants.
+
+Acceptance:
+
+- [ ] `nominal_capacity_stress` improves
+- [ ] no member shell is constructed twice
+- [ ] default-value and recursive-type diagnostics keep their locations
+
+Checkpoint separately for structs and choices if either surface becomes broad.
+
+## Phase F - Type environment and generic substitution keys
+
+Goal: make `TypeEnvironment`'s hot tables dense where profiling justifies it, and canonicalise each
+concrete generic binding set once.
+
+Why now: last of the performance phases, and the one most at risk of unjustified complexity. Apply
+one table change per checkpoint with layout/query tests and benchmark evidence.
+
+Targets: `src/compiler_frontend/datatypes/environment.rs`,
+`src/compiler_frontend/datatypes/generic_parameters.rs`,
+`src/compiler_frontend/ast/generic_functions/`.
+
+Known constraints:
+
+- Do not replace `TypeEnvironment`. It already owns dense `TypeId` storage and canonical interning.
+- Keep forward structural, path and canonical-identity interning maps hashed.
+- Do not expose physical table layout outside `TypeEnvironment` query methods.
+- Revert any conversion that adds complexity without measurable benefit. A less readable table that
+  is not hot is a regression.
+
+Type environment:
+
+- [ ] Add capacity-aware construction from existing `FrontendArenaCapacityEstimate` and header
+      statistics.
+- [ ] Convert `NominalTypeId -> TypeId` to dense storage.
+- [ ] Convert generic parameter `ID -> TypeId` and `ID -> bounds` to dense storage.
+- [ ] Evaluate `TypeId -> canonical identity` dense optional storage.
+- [ ] Store generic instance field/variant views in compact immutable ranges or slices.
+- [ ] Confirm every query returns borrowed data unless ownership is required at a stage boundary.
+- [ ] Record memory and lookup effects for each conversion.
+
+Generic substitution keys:
+
+- [ ] Canonicalise each concrete generic binding set once, with a module-local `GenericBindingsId`
+      if useful.
+- [ ] Reuse its ordered pair slice in recursive substitution.
+- [ ] Change substitution-cache keys to avoid collecting, sorting and boxing the same mapping for
+      each source `TypeId`.
+- [ ] Keep cache scope module-local and preserve deterministic ordering and conflict diagnostics.
+
+Acceptance:
+
+- [ ] `GenericSubstitutionKeyBuilds` and `GenericSubstitutionKeySortedPairs` fall materially
+- [ ] `type_stress` and generic-trait workloads improve
+- [ ] every dense conversion cites its own evidence, and unjustified ones are reverted
+
+Checkpoint one table or key change at a time.
+
+## Phase G - Static Bool `if` specialisation
+
+**This is the mandatory semantic review gate.** Do not combine it with any performance refactor.
+
+Goal: implement the accepted static control-flow contract above.
+
+Why here: it needs a single folded-value authority to read the condition from, which Phase C
+provides. Everything before it is optimisation; this phase changes what the compiler can do.
+
+Targets: one new Stage 4 specialisation owner in `ast/module_ast/finalization/`,
+`ast/statements/branching.rs`, `ast/statements/terminality.rs`,
+`hir/hir_statement/control_flow.rs`.
+
+Known constraints: Phase 0 findings 1 to 4 above. In particular, read the condition through the
+folded-value authority rather than by matching `ExpressionKind::Bool`, and reuse
+`ScopeContext::generic_request_checkpoint` rather than adding a second pruning boundary.
+
+Work items:
 
 - [ ] Add one named Stage 4 specialisation owner after full branch frontend validation and final
       constant values, before terminality, durable generated work and HIR.
 - [ ] Read a condition's known Bool from the existing typed folded-value authority. Add no second
-      evaluator or config-specific lookup.
-- [ ] Specialise statement `if` according to the accepted contract while preserving the selected
-      branch's lexical scope, source locations and statement order.
+      evaluator and no config-specific lookup.
+- [ ] Specialise statement `if` while preserving the selected branch's lexical scope, source
+      locations and statement order.
 - [ ] Specialise value-producing `if` only after both branches satisfy receiving arity and type
       rules.
 - [ ] Leave runtime and unknown Bool conditions as ordinary `NodeKind::If` values.
 - [ ] Run terminality over the specialised active AST.
-- [ ] Ensure inactive branch calls do not publish generated-function requests or generated sidecar
-      work.
+- [ ] Ensure inactive branch calls publish no generated-function requests or generated sidecar work.
 - [ ] Ensure inactive branch code contributes no HIR, borrow facts, lifetime facts, executable
       effects, link facts, target requirements or backend output.
 - [ ] Preserve syntax, name, visibility, type, generic-evidence, cast, const-evaluation and
       value-production diagnostics from both authored branches.
-- [ ] Preserve stable declaration, type and function identities. Static specialisation changes
-      executable bodies and derived summaries, not source declaration identity.
+- [ ] Preserve stable declaration, type and function identities.
 - [ ] Record branch-selection dependencies in implementation, effect/link and root fingerprints
       through the existing fingerprint owners. Do not add a parallel static-if fingerprint.
 - [ ] Assert that HIR contains no branch terminator for a statically decided `if`.
 - [ ] Assert that a runtime Bool condition still produces the established HIR branch/merge shape.
-- [ ] Enable and complete the Phase 0 intended-contract tests.
+- [ ] Enable and complete the three ignored Phase 0 intended-contract tests.
 
 Review gate acceptance:
 
@@ -960,104 +804,64 @@ Review gate acceptance:
 - [ ] source graph, declarations, exports and package topology are unchanged
 - [ ] no platform/backend conditional mechanism has entered source
 
-Checkpoint: accepted static-control-flow semantics and focused end-to-end validation. Artefact changes
-are expected and must match the selected active branch exactly.
+Checkpoint: accepted static-control-flow semantics and focused end-to-end validation. Artefact
+changes are expected and must match the selected active branch exactly.
 
-### 4D: evidence-gated operand handles
+Closeout for this phase must update the compiler architecture documentation, the progress matrix and
+user-facing constant/control-flow documentation, because it changes current language support.
 
-- [ ] Profile remaining runtime postfix copies after 4A through 4C.
-- [ ] Introduce compact operand handles only if they materially reduce time or retained memory.
-- [ ] If implemented, keep the arena module-local and move it into final AST ownership.
-- [ ] Delete `#[allow(clippy::large_enum_variant)]` only when the representation genuinely no longer
-      needs it.
+## Phase H - Declaration lanes and environment pass cleanup
 
-Checkpoint each subphase independently. Do not combine a measured operand representation change with
-the Phase 4C semantic gate.
+Goal: dense declaration identity and readable pass structure. **This is an ownership and clarity
+phase, not a scaling fix.** Its original scaling justification was measured away by the shared
+file-visibility slice.
 
-## Phase 5 - Type-resolution context and lazy diagnostics
+Why last of the implementation phases: it touches the same passes as B, C and E, and doing it after
+them means it cleans the final shape rather than a shape three phases will change again.
 
-- [ ] Split immutable lookup, mutable type interning and optional semantic overlays into explicit
-      views.
-- [ ] Add named constructors for module declaration, constant, body and generated contexts.
-- [ ] Remove impossible `Option` combinations and repeated wide initialisers.
-- [ ] Return `TypeId`-first results from successful lookup paths.
-- [ ] Construct diagnostic spelling only when producing a diagnostic or public display fact.
-- [ ] Borrow resolved aliases, fields, variants and signatures instead of cloning them for read-only
-      validation.
-- [x] Centralise visibility lookup by file once per header/declaration pass. Closed early by the
-      shared file-visibility slice: `visibility_for` returns a handle, so there is no copy to
-      centralise.
-- [ ] Add a lookup cache only when counters prove repeated identical resolution under the same
-      visibility and generic scope. Its key must include every semantic context dimension.
+Targets: `environment/declaration_table.rs`, `environment/builder.rs`,
+`environment/type_resolution.rs`, `scope_context.rs`.
 
-Deletion targets:
+Known constraints:
 
-- repeated `TypeResolutionContextInputs` boilerplate
-- context setters that exist only to assemble constant-header lookup state
-- successful-path `DataType` clones used only in case of a later error
-- clone-to-iterate generic-bound validation paths
+- `replace_declaration` commits through `Rc::get_mut`, so no scope may hold the declaration table
+  across a constant commit. This phase decides deliberately whether the table gains a commit path
+  that tolerates live readers.
+- `ScopeDeclarationRef::Shared(&'a Declaration)` hands out a borrow tied to the context lifetime, so
+  the table cannot simply move behind a `RefCell`.
+- If the commit path does gain live readers, the constant session collapses to one root scope with
+  per-constant child frames, and the two open Phase 1 items close with it.
 
-Checkpoint: explicit contexts and lazy diagnostic data.
+Work items:
 
-## Phase 6 - `TypeEnvironment` hot-table improvements
-
-Apply one table change per checkpoint with layout/query tests and benchmark evidence.
-
-- [ ] Add capacity-aware construction from existing frontend estimates.
-- [ ] Convert `NominalTypeId -> TypeId` to dense storage.
-- [ ] Convert generic parameter `ID -> TypeId` and `ID -> bounds` to dense storage.
-- [ ] Evaluate `TypeId -> canonical identity` dense optional storage.
-- [ ] Store generic instance field/variant views in compact immutable ranges or slices.
-- [ ] Keep forward structural, path and canonical-identity interning maps hashed.
-- [ ] Confirm every query returns borrowed data unless ownership is required at a stage boundary.
-- [ ] Record memory and lookup effects. Revert conversions that add complexity without measurable
-      benefit.
-
-Do not expose physical table layout outside `TypeEnvironment` query methods.
-
-## Phase 7 - Generic substitution key consolidation
-
-- [ ] Canonicalise each concrete generic binding set once.
-- [ ] Reuse its ordered pair slice or `GenericBindingsId` in recursive substitution.
-- [ ] Change substitution-cache keys to avoid collecting, sorting and boxing the same mapping for
-      each source `TypeId`.
-- [ ] Keep cache scope module-local.
-- [ ] Preserve deterministic ordering and current conflict diagnostics.
-- [ ] Measure generic-trait and type-stress workloads before accepting the new key shape.
-
-Checkpoint: substitution key only. Do not mix with generic semantics or materialisation changes.
-
-## Phase 8 - Nominal member shell and capacity fixups
-
-- [ ] Define the single retained field/variant member shell and its resolution slots.
-- [ ] Register nominal identities and generic metadata without constructing unresolved declaration
-      value trees.
-- [ ] Resolve constructor-required member types into slots before constant evaluation.
-- [ ] Record only constant-dependent capacity/default fixups.
-- [ ] Apply fixups in declaration order after their constants commit.
-- [ ] Build canonical `FieldDefinition` and `ChoiceVariantDefinition` arrays once.
-- [ ] Move those arrays into `TypeEnvironment` and expose borrowed views.
-- [ ] Delete the early and late reconstruction of member declarations/choice variants.
-- [ ] Preserve default-value diagnostics and recursive-type validation locations.
-
-Checkpoint separately for structs and choices if either surface becomes broad.
-
-## Phase 9 - Declaration-lane and environment pass cleanup
-
-- [ ] Migrate aliases, nominals, constants, traits and functions to their prebuilt ID lanes.
-- [ ] Keep complete declaration order for passes whose semantics depend on it.
+- [ ] Make Stage 3 final order allocate or carry stable `DeclarationId`s.
+- [ ] Add direct ID-based `get`, `get_mut` and `replace` to `TopLevelDeclarationTable`, and use
+      path/name indexes only for source lookup.
+- [ ] Build compact ordered declaration-kind lanes once from final order, storing IDs, not headers.
+- [ ] Add `ResolvedConstantSet` keyed by `DeclarationId` and resolve explicit module-constant
+      visibility through it.
+- [ ] Replace path-based declaration replacement with ID replacement inside ordered semantic passes.
+- [ ] Migrate aliases, nominals, constants, traits and functions to their lanes, keeping complete
+      declaration order for passes whose semantics depend on it.
 - [ ] Remove repeated `for header in sorted_headers { match kind ... }` scans that no longer own
       ordering.
+- [ ] Decide the declaration-table commit path, then close or explicitly re-defer the two open
+      Phase 1 items: the synthetic per-constant `AstModuleLookups`, and the constant-header
+      `ScopeContext` builder chain.
 - [ ] Consolidate environment final assembly so each side table moves once into its final owner.
-- [ ] Replace clone-to-satisfy-borrow patterns with field splitting, temporary `mem::take` or narrow
-      query methods where ownership remains clear. File visibility is already done; the per-header
-      side-table snapshots are what remain.
-- [ ] Keep orchestration readable. Do not hide the phase order in a generic pass framework.
+- [ ] Ensure builtins and generated construction appends allocate IDs through the table owner so
+      indexes and lanes cannot drift.
 
-Checkpoint: pass/index cleanup after the main constant, static-control-flow and type wins are already
-measurable.
+Acceptance:
 
-## Phase 10 - Final audit and closeout
+- [ ] no per-constant synthetic complete lookup context remains, or its survival is justified here
+- [ ] `ast_declaration_replacements_by_path` reaches zero for ordered semantic passes
+- [ ] orchestration stays readable; the phase order is not hidden in a generic pass framework
+- [ ] no scaling claim is recorded for this phase unless a measurement supports one
+
+Checkpoint: index and pass cleanup with no behaviour change.
+
+## Phase I - Final audit and closeout
 
 Run focused validation throughout. At final closeout run at minimum:
 
@@ -1082,9 +886,9 @@ At each performance-only checkpoint:
 - [ ] run the relevant scaling fixture
 - [ ] record counter and timing movement in `benchmarks/frontend-optimization-results.md`
 - [ ] treat an unexplained median regression above 5% as a blocker
-- [ ] require semantic/output equivalence before accepting a speed improvement
+- [ ] require semantic and output equivalence before accepting a speed improvement
 
-At the Phase 4C semantic checkpoint:
+At the Phase G semantic checkpoint:
 
 - [ ] compare output to the accepted static-control-flow contract rather than the old artefact bytes
 - [ ] record the intended HIR, generated-work, borrow/lifetime, link and target-validation deltas
@@ -1095,7 +899,7 @@ At the Phase 4C semantic checkpoint:
 Final acceptance:
 
 - [ ] constant setup scales linearly with constant count
-- [ ] no per-constant synthetic complete lookup context remains
+- [ ] no per-declaration copy of header-stage binding data remains
 - [ ] no cumulative previous-constant copying remains
 - [ ] each module constant has one folded-value authority
 - [ ] public projection and HIR consume that authority without reparsing or deep intermediate clones
@@ -1116,13 +920,12 @@ Final acceptance:
 - [ ] no platform/backend conditional source mechanism exists
 - [ ] old redundant APIs and representations are deleted without compatibility wrappers
 - [ ] optimisation-only phases preserve diagnostics, public identities and emitted artefacts
-- [ ] Phase 4C changes executable artefacts and downstream diagnostics only where the inactive branch
+- [ ] Phase G changes executable artefacts and downstream diagnostics only where the inactive branch
       is deliberately absent
+- [ ] every phase in this file carries an Outcome subsection with its measurement
 
-Phase 4C changes current language/compiler support. Its implementation closeout must update the
-compiler architecture, progress matrix and user-facing constant/control-flow documentation. The
-queued build-configuration-values plan must integrate `#Config of Bool` through the same ordinary constant and `if`
-path without adding another specialisation owner.
+The queued build-configuration-values plan must integrate `#Config of Bool` through the same
+ordinary constant and `if` path without adding another specialisation owner.
 
 ---
 
@@ -1135,31 +938,33 @@ path without adding another specialisation owner.
 - `FrontendArenaCapacityEstimate` and header/token statistics
 - `TypeEnvironment` interning and substitution caches
 - `TypeCompatibilityCache`
-- binding-owned `FileVisibility`
+- binding-owned `Arc<FileVisibility>`, shared by handle
+- `ConstantResolutionSession` as the one constant-pass owner
+- `AstModuleEnvironmentBuilder::resolved_module_constant_paths`
 - scope-frame arenas for body-local declarations only
 - existing `NodeKind::If`, branch scopes and value-producing `if` validation
 - existing AST finalisation boundary, extended with one named static-control-flow owner
 - existing terminality validation, moved after specialisation
 - TIR store, exact views, preparation and fold cache
 - `PublicFoldedValue` for owned cross-module projection
-- existing HIR module-constant and const-fact consumers, migrated to IDs/store access
+- existing HIR module-constant and const-fact consumers, migrated to IDs and store access
 - existing HIR branch lowering for runtime conditions only
+- `ScopeContext::generic_request_checkpoint` for inactive-branch pruning
 - current benchmark manifest, profiles, counters and five-run protocol
 
 ### Remove after migration
 
-- constant-header synthetic `AstModuleLookups`
-- constant-header `ScopeContext` setter chains
-- per-constant compatibility caches
-- copied prior-module-constant path sets
+- per-header side-table snapshots in the signature, member-shell and trait passes
+- the `module_constants` linear scan for explicit constant identity
 - duplicate `Vec<Declaration>` module-constant ownership
 - recursive normalised-expression reconstruction for module constants
 - duplicate AST-to-public and AST-to-HIR value-tree interpretation
 - rich RPN item cloning
 - eager diagnostic `DataType` stacks
-- repeated generic substitution map sorting/boxing
+- repeated generic substitution map sorting and boxing
 - duplicate nominal member shell reconstruction
 - repeated broad header scans made obsolete by declaration lanes
+- constant-header synthetic `AstModuleLookups` and its `ScopeContext` setter chains
 - HIR `if` diamonds whose conditions are already known compile-time Bool values
 - inactive-branch generated requests and executable side products
 - pre-specialisation terminality assumptions
@@ -1178,6 +983,7 @@ path without adding another specialisation owner.
 - source-token or span designs parallel to the data-layout plan
 - speculative caches with incomplete semantic keys
 - unsafe packing before ordinary ownership and algorithmic waste is removed
+- a representation change chosen from a counter rather than a profile
 
 ## Completion contract
 
