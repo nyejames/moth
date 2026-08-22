@@ -256,7 +256,10 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         )
         .with_style_directives(self.context.style_directives)
         .with_build_profile(self.context.build_profile)
-        .with_file_visibility(input.visibility)
+        .with_file_visibility(
+            Rc::clone(&input.visibility),
+            Rc::new(input.visibility.visible_declaration_paths.clone()),
+        )
         .with_resolved_type_aliases(Rc::clone(
             &self.environment.lookups.resolved_type_aliases_by_path,
         ))
@@ -682,7 +685,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 source_file_scope: template.source_file.clone(),
                 scope_frame_capacity: 0,
             })
-            .with_visible_declarations(visible_declarations)
+            .with_visible_declarations(Rc::new(visible_declarations))
             .with_active_generic_type_context(generic_type_context)
             .with_generic_function_instantiation_stack(active_instance_stack.clone());
         context.expected_result_type_ids = signature.success_return_type_ids();
@@ -822,7 +825,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 source_file_scope,
                 scope_frame_capacity,
             })
-            .with_visible_declarations(visible_declarations);
+            .with_visible_declarations(Rc::new(visible_declarations));
         let generic_type_context = self.build_active_generic_type_context(
             template.generic_parameter_list_id,
             None,
@@ -894,7 +897,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 source_file_scope,
                 scope_frame_capacity,
             })
-            .with_visible_declarations(visible_declarations);
+            .with_visible_declarations(Rc::new(visible_declarations));
         let expected_result_type_ids = resolved_signature.signature.success_return_type_ids();
         let expected_error_type = resolved_signature.signature.error_return_type_id();
         context.expected_result_type_ids = expected_result_type_ids;

@@ -313,7 +313,7 @@ fn inline_visible_constant_references_impl(
             );
 
             if let Some(visible) = visible_declaration_ids {
-                evaluation_context.visible_declaration_ids = Some(visible.to_owned());
+                evaluation_context.visible_declaration_ids = Some(Rc::new(visible.to_owned()));
             }
 
             let mut compatibility_cache = TypeCompatibilityCache::new();

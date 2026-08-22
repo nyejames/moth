@@ -53,13 +53,13 @@ ACTIVE_PLAN:
 - `docs/roadmap/plans/constant-folding-and-type-system-hot-path-optimization-plan.md`
 
 CURRENT_SLICE:
-- Phase: 1 (consolidate constant-resolution context)
-- Goal: replace the per-constant body-oriented context construction with one module-owned
-  `ConstantResolutionSession`
+- Phase: 2 (dense declaration and resolved-constant state)
+- Goal: carry `DeclarationId` into AST environment work and replace path-based declaration
+  replacement with ID replacement inside ordered semantic passes
 - Non-goals: no semantic control-flow change before the explicit Phase 4C gate
 
 LAST_GOOD_COMMIT:
-- `3ba28c5fb907d2ee44e69a58c59d002aa6a2b384` (Phase 0 baseline commit)
+- Phase 1 commit on `const-folding-and-types-optimisation`
 
 PREREQUISITE:
 - Satisfied. Timing schema `2` already carries the module-attributed
@@ -108,7 +108,7 @@ RELEVANT_CODE:
 - `benchmarks/manifest.toml`
 
 NEXT_ACTION:
-- execute Phase 1 and preserve current semantics until the mandatory Phase 4C review gate
+- execute Phase 2 and preserve current semantics until the mandatory Phase 4C review gate
 
 ---
 
@@ -160,8 +160,8 @@ file.
    target. `benchmarks/nominal-capacity-stress.moth` isolates that cost from constant count.
 6. **`resolve_constant_headers` clones five module side tables once per module**, not per constant,
    so `ast_constant_pass_side_table_entries_cloned` reflects table size. The genuine per-constant
-   cost is the `Rc::new(file_visibility.clone())` inside
-   `parse_constant_header_declaration`, measured by `ast_constant_pass_visibility_entries_cloned`.
+   cost was the `Rc::new(file_visibility.clone())` in the constant-header parser, measured by
+   `ast_constant_pass_visibility_entries_cloned`. Phase 1 moved that copy to once per source file.
 
 ### Assets Phase 0 created
 
@@ -170,7 +170,8 @@ file.
   test in `xtask/src/benchmark_manifest/tests.rs` and the counts in `benchmarks/README.md` were
   updated in the same change.
 - New `AstCounter` variants: `ConstantResolutionContextsCreated`, `ConstantsResolved`,
-  `ConstantPassPriorConstantIdsCopied`, `ConstantPassVisibilityEntriesCloned`,
+  `ConstantPassPriorConstantIdsCopied` (deleted in Phase 1 with the copy it measured),
+  `ConstantPassVisibilityEntriesCloned`,
   `ConstantPassSideTableEntriesCloned`, `ModuleConstantDeclarationClones`,
   `ExpressionOrderingInputItems`, `ExpressionTypedStackItems`, `ExpressionFoldItems`,
   `ExpressionOperandClones`, `DiagnosticDataTypeMaterialisations`, `BranchLocalGenericRequests`.
@@ -704,15 +705,15 @@ change.
 
 ## Phase 1 - Consolidate constant-resolution context
 
-- [ ] Introduce the one module-owned `ConstantResolutionSession`.
-- [ ] Borrow binding visibility and environment side tables instead of cloning them into `Rc`s.
-- [ ] Reuse one `TypeCompatibilityCache` for the pass.
-- [ ] Reuse the existing TIR store, warning sink and rendered-path sink.
+- [x] Introduce the one module-owned `ConstantResolutionSession`.
+- [x] Borrow binding visibility and environment side tables instead of cloning them into `Rc`s.
+- [x] Reuse one `TypeCompatibilityCache` for the pass.
+- [x] Reuse the existing TIR store, warning sink and rendered-path sink.
 - [ ] Refactor shared declaration/expression parser resources so top-level constants do not require
       synthetic `AstModuleLookups`.
 - [ ] Delete the constant-header `ScopeContext` builder chain after the final caller migrates.
-- [ ] Keep body-local constant parsing on normal lexical `ScopeContext`.
-- [ ] Prove diagnostics, warning order and folded results are byte-for-byte equivalent.
+- [x] Keep body-local constant parsing on normal lexical `ScopeContext`.
+- [x] Prove diagnostics, warning order and folded results are byte-for-byte equivalent.
 
 Expected deletion targets:
 
@@ -723,6 +724,65 @@ Expected deletion targets:
 
 Checkpoint: context consolidation with no value representation or control-flow change.
 
+### Phase 1 outcome and implementation notes
+
+Phase 1 completed on 2026-08-22. Evidence lives in
+`benchmarks/frontend-optimization-results.md` under
+`Constant Evaluation And Type-System Plan - Phase 1 Consolidated Constant Session - 2026-08-22`.
+
+`ConstantResolutionSession` in
+`src/compiler_frontend/ast/module_ast/environment/constant_resolution.rs` now owns the module view
+the whole constant pass reads: the five side tables, the trait environment, project services, the
+TIR store, the rendered-path sink, one `TypeCompatibilityCache`, and one prepared
+`FileVisibility` package per source file. `resolve_constant_headers` drives it and commits each
+folded constant. `ConstantHeaderParseContext` and `parse_constant_header_declaration` are deleted.
+
+Two supporting ownership changes carry most of the measured win:
+
+- `ScopeContext::visible_declaration_ids` and
+  `ScopeFrame::explicit_compile_time_constant_declarations` are now shared copy-on-write handles.
+  Every child scope in the compiler shared these sets by clone before; only a scope that actually
+  declares a local now pays for a private copy.
+- `AstModuleEnvironmentBuilder` owns one `resolved_module_constant_paths` set, updated by
+  `push_module_constant`. Constant-header, nominal-member and function-signature scopes all take a
+  handle to it instead of copying every prior constant path.
+
+Measured result: `-46%` on `constant_chain_512`, `-27%` on `fold_stress`, `-23%` on
+`constant_dag_churn`, flat on `docs` and `nominal_capacity_stress`.
+`ast_constant_pass_visibility_entries_cloned` falls from `526848` to `1029` on the `512` chain.
+
+Two checkboxes stay open, deliberately:
+
+1. **The synthetic `AstModuleLookups` per constant remains.** `ScopeContext::new` builds it, and it
+   holds the declaration table, so it cannot be prepared once for the pass. See finding 2 below.
+2. **The constant-header `ScopeContext` builder chain still has callers.**
+   `AstModuleEnvironmentBuilder::constant_header_scope_context` (member shells) and the
+   function-signature pass both build `ContextKind::ConstantHeader` scopes from live side tables
+   that are still being mutated when they run, so neither can share the constants session. Phases 8
+   and 9 own those passes.
+
+Findings that constrain later phases:
+
+1. **`ast_constant_pass_prior_constant_ids_copied` was deleted, not zeroed.** The cumulative copy
+   it measured no longer exists. The Phase 2 scaling acceptance item naming that counter is
+   satisfied structurally; do not reintroduce the counter to check the box.
+2. **The declaration table's `Rc::get_mut` commit path is the real constraint on session shape.**
+   `AstModuleEnvironmentBuilder::replace_declaration` requires sole `Rc` ownership, so no scope may
+   hold the table across a constant commit. That is why the session prepares everything except the
+   table and still builds one `ScopeContext` per constant. Phase 2's ID-based replacement work
+   should decide deliberately whether the table gains a commit path that tolerates live readers; if
+   it does, the session collapses to one root scope with per-constant child frames and the
+   remaining per-constant `ScopeContext::new` disappears with it.
+3. **`docs` is not a constant-setup workload.** It stayed flat despite a `29%` drop in visibility
+   copying, because its constants are one or two per file and its AST cost is const-template
+   parsing and folding. The Phase 0 reading that constant-header resolution is about half of
+   `frontend.ast.total` on `docs` is real, but that half is fold work owned by Phases 3 and 4, not
+   context construction.
+4. **`constant_chain_512` is still superlinear after the session.** `68.69ms` for `512` trivial
+   constants is well above `4x` the `128` case. The remaining candidates are path-based declaration
+   replacement, the per-constant module-constant declaration clone and constant normalisation,
+   which Phases 2 and 3 own.
+
 ## Phase 2 - Dense declaration and resolved-constant state
 
 - [ ] Make Stage 3 final order allocate or carry stable `DeclarationId`s.
@@ -731,14 +791,16 @@ Checkpoint: context consolidation with no value representation or control-flow c
 - [ ] Add `ResolvedConstantSet` with capacity equal to declaration count.
 - [ ] Resolve explicit module-constant visibility through the bitset.
 - [ ] Replace path-based declaration replacement with ID replacement inside ordered semantic passes.
-- [ ] Remove cumulative prior-constant insertion into temporary scope frames.
+- [x] Remove cumulative prior-constant insertion into temporary scope frames. Phase 1 replaced it
+      with one shared `resolved_module_constant_paths` handle.
 - [ ] Remove linear scans of `module_constants` for explicit constant identity.
 - [ ] Keep source name/path maps only at lookup and diagnostic boundaries.
 
 Scaling acceptance:
 
 - [ ] Setup work for the 32/128/512 constant fixtures grows approximately linearly.
-- [ ] The `previous-constant IDs copied` counter reaches zero for module constants.
+- [x] The `previous-constant IDs copied` counter reaches zero for module constants. Phase 1
+      deleted both the copy and the counter.
 - [ ] No new full declaration scan appears per constant.
 
 Checkpoint: dense IDs and state, still using current folded expression payloads and control flow.

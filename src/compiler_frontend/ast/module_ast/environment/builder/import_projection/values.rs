@@ -102,7 +102,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             };
             let declaration =
                 self.project_imported_constant(local_path, &constant, string_table)?;
-            self.module_constants.push(declaration.clone());
+            self.push_module_constant(declaration.clone());
             Rc::make_mut(&mut self.declaration_table)
                 .append_for_construction(declaration)
                 .ok_or_else(|| {

@@ -93,7 +93,10 @@ impl ScopeContext {
     /// resolved.
     /// WHY: file/start contexts set this to enforce dependency-binding semantics and
     /// prevent same-file references from bypassing the visibility system.
-    pub fn with_visible_declarations(mut self, visible: FxHashSet<InternedPath>) -> ScopeContext {
+    pub fn with_visible_declarations(
+        mut self,
+        visible: Rc<FxHashSet<InternedPath>>,
+    ) -> ScopeContext {
         self.visible_declaration_ids = Some(visible);
         self
     }
@@ -163,11 +166,18 @@ impl ScopeContext {
 
     /// Apply a header-built `FileVisibility` to this scope context.
     ///
-    /// WHAT: copies all visibility maps from the prepared header environment.
+    /// WHAT: adopts all visibility maps from the prepared header environment, plus the matching
+    /// declaration-path gate.
     /// WHY: AST emission should consume header-built visibility directly instead of
-    /// reconstructing dependency bindings or manually setting each field.
-    pub(crate) fn with_file_visibility(mut self, visibility: Rc<FileVisibility>) -> ScopeContext {
-        self.visible_declaration_ids = Some(visibility.visible_declaration_paths.clone());
+    /// reconstructing dependency bindings or manually setting each field. The gate is passed
+    /// separately so a pass that parses many declarations against one file can share both
+    /// handles instead of copying the path set per declaration.
+    pub(crate) fn with_file_visibility(
+        mut self,
+        visibility: Rc<FileVisibility>,
+        visible_declaration_paths: Rc<FxHashSet<InternedPath>>,
+    ) -> ScopeContext {
+        self.visible_declaration_ids = Some(visible_declaration_paths);
         Rc::make_mut(&mut self.shared).file_visibility = Some(visibility);
         self
     }
@@ -190,26 +200,22 @@ impl ScopeContext {
         self
     }
 
-    /// Seed explicit compile-time constants known before final module lookups exist.
+    /// Seed the module's already-resolved explicit compile-time constants.
     ///
-    /// WHAT: records top-level compile-time constants already resolved by the environment builder.
-    /// WHY: constant-header and nominal-member contexts run before final `AstModuleLookups`
-    ///      contains `module_constants`, but fixed-capacity type syntax still needs to
-    ///      distinguish explicit constants from merely foldable runtime bindings.
+    /// WHAT: shares the environment builder's resolved-constant path set with this scope's frame.
+    /// WHY: constant-header, nominal-member and signature contexts run before the final
+    ///      `AstModuleLookups` contains `module_constants`, but fixed-capacity type syntax still
+    ///      needs to distinguish explicit constants from merely foldable runtime bindings. The
+    ///      set is shared rather than copied so a module with many constants does not rebuild it
+    ///      for every declaration it parses.
     pub(crate) fn with_explicit_compile_time_constants(
         self,
-        constants: &[Declaration],
+        constants: Rc<FxHashSet<InternedPath>>,
     ) -> ScopeContext {
-        add_ast_counter(
-            AstCounter::ConstantPassPriorConstantIdsCopied,
-            constants.len(),
-        );
-
         self.arena
             .borrow_mut()
             .frame_mut(self.current_frame_id)
-            .explicit_compile_time_constant_declarations
-            .extend(constants.iter().map(|constant| constant.id.clone()));
+            .explicit_compile_time_constant_declarations = Some(constants);
         self
     }
 

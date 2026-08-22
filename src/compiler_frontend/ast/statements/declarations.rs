@@ -441,7 +441,7 @@ pub fn resolve_declaration_syntax(
         let mut type_resolution_context =
             TypeResolutionContext::from_inputs(TypeResolutionContextInputs {
                 declaration_table: &context.top_level_declarations,
-                visible_declaration_ids: context.visible_declaration_ids.as_ref(),
+                visible_declaration_ids: context.visible_declaration_ids.as_deref(),
                 visible_external_symbols: context
                     .file_visibility
                     .as_ref()
@@ -623,7 +623,7 @@ pub fn resolve_declaration_syntax(
     };
 
     // Body-local compile-time constants must fully fold after parsing and coercion.
-    // Top-level constants are validated by `parse_constant_header_declaration`;
+    // Top-level constants are validated by `ConstantResolutionSession`;
     // this check covers the body-local path through `resolve_declaration_syntax`.
     let initializer_is_compile_time_constant = if declaration_syntax.binding_mode.is_compile_time()
     {

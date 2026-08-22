@@ -192,7 +192,7 @@ fn source_const_value_for_path<'a>(
 ) -> Option<&'a Expression> {
     let declaration = context
         .top_level_declarations
-        .get_visible_resolved_by_path(path, context.visible_declaration_ids.as_ref())?;
+        .get_visible_resolved_by_path(path, context.visible_declaration_ids.as_deref())?;
 
     let decidable = source_const_value_is_condition_decidable(&declaration.value, context);
 

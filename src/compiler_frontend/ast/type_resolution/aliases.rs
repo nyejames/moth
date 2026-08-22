@@ -142,7 +142,7 @@ pub(super) fn resolve_alias_annotation(
 
     let mut alias_context = TypeResolutionContext::from_inputs(TypeResolutionContextInputs {
         declaration_table: context.declaration_table,
-        visible_declaration_ids: alias_scope_context.visible_declaration_ids.as_ref(),
+        visible_declaration_ids: alias_scope_context.visible_declaration_ids.as_deref(),
         visible_external_symbols: alias_scope_context
             .file_visibility
             .as_ref()
@@ -231,9 +231,10 @@ fn alias_scope_context(
         .visibility_for(source_file)
         .ok()?
         .clone();
+    let visible_declaration_paths = Rc::new(visibility.visible_declaration_paths.clone());
     let mut alias_scope = scope_context
         .clone()
-        .with_file_visibility(Rc::new(visibility))
+        .with_file_visibility(Rc::new(visibility), visible_declaration_paths)
         .with_source_file_scope(source_file.clone());
 
     // Type aliases are top-level metadata. Re-resolving an alias target must not see

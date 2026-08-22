@@ -26,7 +26,6 @@ pub(crate) enum AstCounter {
     // Module constant-resolution pass pressure.
     ConstantResolutionContextsCreated,
     ConstantsResolved,
-    ConstantPassPriorConstantIdsCopied,
     ConstantPassVisibilityEntriesCloned,
     ConstantPassSideTableEntriesCloned,
     ModuleConstantDeclarationClones,
@@ -230,7 +229,6 @@ mod detailed {
             AstCounter::BoundedExpressionTokenCopiesAvoided,
             AstCounter::ConstantResolutionContextsCreated,
             AstCounter::ConstantsResolved,
-            AstCounter::ConstantPassPriorConstantIdsCopied,
             AstCounter::ConstantPassVisibilityEntriesCloned,
             AstCounter::ConstantPassSideTableEntriesCloned,
             AstCounter::ModuleConstantDeclarationClones,
@@ -319,9 +317,6 @@ mod detailed {
                 "ast_constant_resolution_contexts_created"
             }
             AstCounter::ConstantsResolved => "ast_constants_resolved",
-            AstCounter::ConstantPassPriorConstantIdsCopied => {
-                "ast_constant_pass_prior_constant_ids_copied"
-            }
             AstCounter::ConstantPassVisibilityEntriesCloned => {
                 "ast_constant_pass_visibility_entries_cloned"
             }

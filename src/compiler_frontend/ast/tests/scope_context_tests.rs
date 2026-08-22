@@ -69,7 +69,7 @@ fn add_var_extends_visibility_gate_when_gate_is_set() {
     );
 
     // Install an empty visibility gate.
-    context = context.with_visible_declarations(FxHashSet::default());
+    context = context.with_visible_declarations(Rc::new(FxHashSet::default()));
 
     let variable_path = InternedPath::from_components(vec![string_table.intern("my_var")]);
     let declaration = Declaration {
@@ -116,7 +116,7 @@ fn add_compile_time_var_extends_visibility_gate_when_gate_is_set() {
         vec![],
         0,
     )
-    .with_visible_declarations(FxHashSet::default());
+    .with_visible_declarations(Rc::new(FxHashSet::default()));
 
     let constant_name = string_table.intern("local_const");
     let constant_path = InternedPath::from_components(vec![constant_name]);
@@ -268,7 +268,7 @@ fn new_constant_inherits_parent_visibility_gate() {
     let mut visibility_gate = FxHashSet::default();
     let gated_path = InternedPath::from_components(vec![string_table.intern("gated")]);
     visibility_gate.insert(gated_path.to_owned());
-    context = context.with_visible_declarations(visibility_gate);
+    context = context.with_visible_declarations(Rc::new(visibility_gate));
 
     let constant_scope = InternedPath::from_components(vec![string_table.intern("const_scope")]);
     let constant_context = ScopeContext::new_constant(constant_scope, &context);
@@ -556,7 +556,7 @@ fn new_child_control_flow_inherits_visibility_gate() {
     let mut gate = FxHashSet::default();
     let gated_path = InternedPath::from_components(vec![string_table.intern("gated")]);
     gate.insert(gated_path.to_owned());
-    context = context.with_visible_declarations(gate);
+    context = context.with_visible_declarations(Rc::new(gate));
 
     let child = context.new_child_control_flow(ContextKind::Branch, &mut string_table);
     assert!(

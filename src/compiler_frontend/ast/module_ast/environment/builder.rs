@@ -166,6 +166,13 @@ pub(crate) struct AstModuleEnvironmentBuilder<'context, 'services> {
     pub(crate) warnings: Vec<CompilerDiagnostic>,
     pub(crate) declaration_table: Rc<TopLevelDeclarationTable>,
     pub(crate) module_constants: Vec<Declaration>,
+
+    /// Paths of every module constant resolved so far, shared with environment-time scopes.
+    ///
+    /// WHY: constant-header, nominal-member and function-signature parsing all need to know
+    /// which visible declarations are explicit compile-time constants. Sharing one set means
+    /// none of those passes copies it per declaration.
+    pub(crate) resolved_module_constant_paths: Rc<FxHashSet<InternedPath>>,
     pub(crate) rendered_path_usages: Rc<RefCell<Vec<RenderedPathUsage>>>,
     pub(crate) builtin_struct_ast_nodes: Vec<AstNode>,
     pub(crate) resolved_struct_fields_by_path: FxHashMap<InternedPath, Vec<Declaration>>,
@@ -213,6 +220,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             warnings: Vec::new(),
             declaration_table: Rc::new(TopLevelDeclarationTable::new(Vec::new())),
             module_constants: Vec::new(),
+            resolved_module_constant_paths: Rc::new(FxHashSet::default()),
             rendered_path_usages: Rc::new(RefCell::new(Vec::new())),
             builtin_struct_ast_nodes: Vec::new(),
             resolved_struct_fields_by_path: FxHashMap::default(),
@@ -542,6 +550,16 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         }
 
         Ok(())
+    }
+
+    /// Commit one resolved module constant and publish it to environment-time scopes.
+    ///
+    /// WHAT: appends to `module_constants` and to the shared explicit-constant path set.
+    /// WHY: the two must not drift. Any scope built after this call resolves the constant as an
+    /// explicit compile-time constant.
+    pub(crate) fn push_module_constant(&mut self, declaration: Declaration) {
+        Rc::make_mut(&mut self.resolved_module_constant_paths).insert(declaration.id.to_owned());
+        self.module_constants.push(declaration);
     }
 
     pub(crate) fn declaration_table_mut(

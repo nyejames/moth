@@ -1639,3 +1639,77 @@ right reasons:
 4. **Struct and choice member shells are rebuilt after constants** in
    `AstModuleEnvironmentBuilder::resolve_type_declarations`, which is the cost the nominal
    capacity fixture isolates.
+
+## Constant Evaluation And Type-System Plan - Phase 1 Consolidated Constant Session - 2026-08-22
+
+Phase 1 replaced the per-constant context construction in
+`src/compiler_frontend/ast/module_ast/environment/constant_resolution.rs` with one module-owned
+`ConstantResolutionSession`.
+
+### Measurement Protocol
+
+Wall times are the compiler-reported `Done in` figure from `moth check`, three consecutive runs
+after one warm-up, `--release` without `benchmark_counters`. The baseline column is the same
+measurement taken from a `--release` build of the stashed pre-Phase-1 tree on the same machine in
+the same session, so the two columns differ only by this change. Counters come from a separate
+`--release --features benchmark_counters` build with `MOTH_COUNTERS=summary`. `docs` counter
+totals are summed across its per-module AST counter resets.
+
+These are single-machine attribution measurements, not the recorded five-run benchmark protocol.
+
+### Wall Time
+
+| Workload | Baseline | Phase 1 | Change |
+|---|---:|---:|---:|
+| `constant_chain_32` | `4.73ms` | `3.58ms` | `-24%` |
+| `constant_chain_128` | `12.38ms` | `8.27ms` | `-33%` |
+| `constant_chain_512` | `128.10ms` | `68.69ms` | `-46%` |
+| `constant_dag_churn` | `8.35ms` | `6.43ms` | `-23%` |
+| `fold_stress` | `15.19ms` | `11.16ms` | `-27%` |
+| `nominal_capacity_stress` | `20.27ms` | `21.21ms` | flat |
+| `docs` | `274.57ms` | `274.73ms` | flat |
+
+Growth across the chains is now `3.58 / 8.27 / 68.69` for `32 / 128 / 512` constants, against
+`4.73 / 12.38 / 128.10` before. The `512` case is still superlinear: the remaining quadratic term
+is not in context construction.
+
+### Counter Movement
+
+| Counter | `chain_32` | `chain_128` | `chain_512` | `constant_dag_churn` | `fold_stress` | `docs` |
+|---|---:|---:|---:|---:|---:|---:|
+| `ast_constant_pass_visibility_entries_cloned` before | `2208` | `33408` | `526848` | `16456` | `30840` | `24816` |
+| `ast_constant_pass_visibility_entries_cloned` after | `69` | `261` | `1029` | `187` | `257` | `17548` |
+| `ast_constant_pass_prior_constant_ids_copied` before | `496` | `8128` | `130816` | `4092` | `7860` | `17337` |
+| `ast_constant_pass_prior_constant_ids_copied` after | removed | removed | removed | removed | removed | removed |
+
+`ast_constants_resolved`, `ast_constant_resolution_contexts_created`,
+`ast_module_constant_declaration_clones`, `ast_declaration_replacements_by_path` and
+`ast_scope_contexts_created` are unchanged on every fixture, which is the intended result: the
+same scopes are still created per constant, but they no longer rebuild module-wide state.
+
+`ast_constant_pass_prior_constant_ids_copied` was deleted rather than reported as zero. The
+cumulative copy it measured no longer exists: the environment builder owns one
+`resolved_module_constant_paths` set that constant-header, nominal-member and function-signature
+scopes share by handle. A counter that can only ever read zero is noise, so the Phase 2 scaling
+acceptance item it belonged to is satisfied structurally instead.
+
+### Findings That Change Later Phases
+
+1. **Context construction was not the `docs` cost.** `docs` is flat despite `-29%` visibility
+   copying, because its constants are one or two per file and its AST time is dominated by
+   const-template parsing and folding rather than by constant setup. The `docs` share of
+   `frontend.ast.environment.constant_header_resolution` recorded in the Phase 0 baseline is
+   therefore mostly fold work, and only Phases 3 and 4 can move it.
+2. **The remaining `chain_512` superlinearity is downstream of the session.** With per-constant
+   context construction now `O(1)` in module state, `68.69ms` for `512` trivial constants is still
+   far above `4x` the `128` case. The next candidates are declaration-table replacement by path,
+   the module-constant declaration clone, and constant normalisation, all of which Phases 2 and 3
+   own.
+3. **`nominal_capacity_stress` is unmoved, as designed.** Member-shell reconstruction builds its
+   own contexts in `AstModuleEnvironmentBuilder::unresolved_member_syntax_to_declarations` and
+   still clones all five side tables per struct or choice header. That pass belongs to Phase 8.
+4. **The declaration table blocks a longer-lived scope tree.** `replace_declaration` commits each
+   folded constant through `Rc::get_mut`, so no scope may hold the table across a commit. A
+   session that keeps one root scope alive for the whole pass, with per-constant child frames, is
+   only possible once the table has ID-based replacement that does not require sole `Rc`
+   ownership. Phase 2 should decide that shape deliberately rather than discovering it again.

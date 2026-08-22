@@ -15,7 +15,7 @@ impl ScopeContext {
     ///      stay in the current frame and never leak into the parent.
     pub fn add_var(&mut self, declaration: Declaration, binding_location: SourceLocation) {
         if let Some(visible_declarations) = self.visible_declaration_ids.as_mut() {
-            visible_declarations.insert(declaration.id.clone());
+            Rc::make_mut(visible_declarations).insert(declaration.id.clone());
         }
         self.arena
             .borrow_mut()
@@ -35,7 +35,7 @@ impl ScopeContext {
         binding_location: SourceLocation,
     ) {
         if let Some(visible_declarations) = self.visible_declaration_ids.as_mut() {
-            visible_declarations.insert(declaration.id.clone());
+            Rc::make_mut(visible_declarations).insert(declaration.id.clone());
         }
         self.arena
             .borrow_mut()

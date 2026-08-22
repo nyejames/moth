@@ -12,7 +12,7 @@ use crate::compiler_frontend::ast::generic_bounds::{
     GenericBoundEvidenceContext, validate_nominal_generic_bound_evidence,
 };
 use crate::compiler_frontend::ast::module_ast::environment::constant_resolution::{
-    ConstantHeaderParseContext, parse_constant_header_declaration,
+    ConstantHeaderInput, ConstantResolutionSession, ConstantResolutionSessionInput,
 };
 use crate::compiler_frontend::ast::module_ast::scope_context::{ContextKind, ScopeContext};
 use crate::compiler_frontend::ast::statements::functions::{
@@ -935,23 +935,34 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         Ok(())
     }
 
+    /// Resolve every top-level constant initializer in header dependency order.
+    ///
+    /// WHAT: drives one [`ConstantResolutionSession`] across the whole constant pass and commits
+    /// each folded constant to the declaration table and module constant list.
+    /// WHY: the session owns the module view the pass reads, so const-heavy modules prepare
+    /// their visibility packages, side tables and compatibility cache a fixed number of times
+    /// instead of once per constant.
     fn resolve_constant_headers(
         &mut self,
         sorted_headers: &[Header],
         trait_environment: &TraitEnvironment,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
+        if !sorted_headers
+            .iter()
+            .any(|header| matches!(header.kind, HeaderKind::Constant { .. }))
+        {
+            return Ok(());
+        }
+
+        // Constant parsing reads these side tables but does not mutate them, so the session takes
+        // one shared handle to each for the whole pass.
         let resolved_type_aliases = Rc::new(self.resolved_type_aliases_by_path.clone());
         let generic_declarations =
             Rc::new(self.module_symbols.generic_declarations_by_path.clone());
-
-        // Constant parsing reads these side tables but does not mutate them. Clone the maps once
-        // for the constants pass so const-heavy modules do not rebuild identical Rc payloads for
-        // every header.
         let resolved_struct_fields_by_path = Rc::new(self.resolved_struct_fields_by_path.clone());
         let choice_variant_shells_by_path = Rc::new(self.choice_variant_shells_by_path.clone());
         let nominal_type_ids_by_path = Rc::new(self.nominal_type_ids_by_path.clone());
-        let trait_environment = Rc::new(trait_environment.clone());
 
         add_ast_counter(
             AstCounter::ConstantPassSideTableEntriesCloned,
@@ -961,6 +972,23 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 + choice_variant_shells_by_path.len()
                 + nominal_type_ids_by_path.len(),
         );
+
+        let mut session = ConstantResolutionSession::new(ConstantResolutionSessionInput {
+            resolved_type_aliases,
+            generic_declarations_by_path: generic_declarations,
+            resolved_struct_fields_by_path,
+            choice_variant_shells_by_path,
+            nominal_type_ids_by_path,
+            trait_environment: Rc::new(trait_environment.clone()),
+            external_package_registry: Arc::clone(&self.context.external_package_registry),
+            style_directives: self.context.style_directives.clone(),
+            project_path_resolver: self.context.project_path_resolver.clone(),
+            path_format_config: self.context.path_format_config.clone(),
+            template_const_loop_iteration_limit: self.context.template_const_loop_iteration_limit,
+            template_ir_store: Rc::clone(&self.context.template_ir_store),
+            build_profile: self.context.build_profile,
+            rendered_path_usages: Rc::clone(&self.rendered_path_usages),
+        });
 
         for header in sorted_headers {
             let HeaderKind::Constant { .. } = &header.kind else {
@@ -972,41 +1000,25 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 .visibility_for(&header.source_file)
                 .map_err(|error| self.error_messages(error, string_table))?;
 
-            let declaration = parse_constant_header_declaration(
-                header,
-                ConstantHeaderParseContext {
-                    top_level_declarations: Rc::clone(&self.declaration_table),
-                    module_constants: &self.module_constants,
-                    file_visibility: visibility,
-                    resolved_type_aliases: Rc::clone(&resolved_type_aliases),
-                    generic_declarations_by_path: Rc::clone(&generic_declarations),
-                    resolved_struct_fields_by_path: Rc::clone(&resolved_struct_fields_by_path),
-                    choice_variant_shells_by_path: Rc::clone(&choice_variant_shells_by_path),
-                    type_environment: &mut self.type_environment,
-                    nominal_type_ids_by_path: Rc::clone(&nominal_type_ids_by_path),
-                    external_package_registry: &self.context.external_package_registry,
-                    style_directives: self.context.style_directives,
-                    project_path_resolver: self.context.project_path_resolver.clone(),
-                    path_format_config: self.context.path_format_config.clone(),
-                    template_const_loop_iteration_limit: self
-                        .context
-                        .template_const_loop_iteration_limit,
-                    template_ir_store: self.context.template_ir_store.clone(),
-                    build_profile: self.context.build_profile,
-                    warnings: &mut self.warnings,
-                    rendered_path_usages: self.rendered_path_usages.clone(),
+            let declaration = session
+                .resolve_constant_header(
+                    header,
+                    ConstantHeaderInput {
+                        top_level_declarations: Rc::clone(&self.declaration_table),
+                        resolved_constant_paths: Rc::clone(&self.resolved_module_constant_paths),
+                        file_visibility: visibility,
+                        type_environment: &mut self.type_environment,
+                        warnings: &mut self.warnings,
+                    },
                     string_table,
-                    trait_environment: Some(Rc::clone(&trait_environment)),
-                },
-            )
-            .map_err(|error| self.expression_error_messages(error, string_table))?;
+                )
+                .map_err(|error| self.expression_error_messages(error, string_table))?;
 
-            increment_ast_counter(AstCounter::ConstantsResolved);
             increment_ast_counter(AstCounter::ModuleConstantDeclarationClones);
 
             self.replace_declaration(declaration.clone())
                 .map_err(|error| self.error_messages(error, string_table))?;
-            self.module_constants.push(declaration);
+            self.push_module_constant(declaration);
         }
 
         Ok(())
@@ -1152,8 +1164,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         .with_path_format_config(self.context.path_format_config.clone())
         .with_template_const_loop_iteration_limit(self.context.template_const_loop_iteration_limit)
         .with_rendered_path_usage_sink(Rc::clone(&self.rendered_path_usages))
-        .with_file_visibility(Rc::new(visibility.clone()))
-        .with_explicit_compile_time_constants(&self.module_constants)
+        .with_file_visibility(
+            Rc::new(visibility.clone()),
+            Rc::new(visibility.visible_declaration_paths.clone()),
+        )
+        .with_explicit_compile_time_constants(Rc::clone(&self.resolved_module_constant_paths))
         .with_resolved_type_aliases(Rc::new(self.resolved_type_aliases_by_path.clone()))
         .with_generic_declarations(Rc::new(
             self.module_symbols.generic_declarations_by_path.clone(),

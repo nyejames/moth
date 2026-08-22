@@ -148,12 +148,14 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     self.context.template_const_loop_iteration_limit,
                 )
                 .with_rendered_path_usage_sink(Rc::clone(&self.rendered_path_usages))
-                .with_visible_declarations(visibility.visible_declaration_paths.clone())
+                .with_visible_declarations(Rc::new(visibility.visible_declaration_paths.clone()))
                 .with_visible_external_symbols(visibility.visible_external_symbols.clone())
                 .with_visible_source_bindings(visibility.visible_source_names.clone())
                 .with_visible_type_aliases(visibility.visible_type_alias_names.clone())
                 .with_resolved_type_aliases(Rc::new(self.resolved_type_aliases_by_path.clone()))
-                .with_explicit_compile_time_constants(&self.module_constants)
+                .with_explicit_compile_time_constants(Rc::clone(
+                    &self.resolved_module_constant_paths,
+                ))
                 .with_generic_declarations(Rc::new(
                     self.module_symbols.generic_declarations_by_path.clone(),
                 ))

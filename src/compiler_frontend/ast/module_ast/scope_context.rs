@@ -60,7 +60,7 @@ use crate::compiler_frontend::headers::module_symbols::{
     GenericDeclarationMetadata, ModuleSymbols,
 };
 use crate::compiler_frontend::instrumentation::{
-    AstCounter, add_ast_counter, increment_ast_counter, record_ast_counter_max,
+    AstCounter, increment_ast_counter, record_ast_counter_max,
 };
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
@@ -187,8 +187,11 @@ pub struct ScopeContext {
 
     // Optional file-local visibility gate over declarations.
     // When present, references must be in this set, which enforces dependency boundaries.
-    // Kept directly on ScopeContext (not in ScopeShared) because add_var mutates it.
-    pub visible_declaration_ids: Option<FxHashSet<InternedPath>>,
+    //
+    // Kept directly on `ScopeContext` rather than in `ScopeShared` because `add_var` extends it.
+    // The set is shared copy-on-write: child scopes and header-pass scopes clone the handle, and
+    // only a scope that actually declares a local pays for a private copy.
+    pub visible_declaration_ids: Option<Rc<FxHashSet<InternedPath>>>,
 
     // Type expectations.
     pub expected_result_type_ids: Vec<TypeId>,
@@ -680,6 +683,7 @@ impl ScopeContext {
     ///       resolver + source file scope propagation into constant parsing paths.
     /// WHY: resolver-less constant contexts are invalid for template folding and
     ///      template-head path coercion.
+    ///
     pub fn new_constant(scope: InternedPath, parent: &ScopeContext) -> ScopeContext {
         increment_ast_counter(AstCounter::ScopeContextsCreated);
 

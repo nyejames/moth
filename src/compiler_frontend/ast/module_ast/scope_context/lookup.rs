@@ -120,7 +120,7 @@ impl ScopeContext {
         self.shared
             .lookups
             .declaration_table
-            .get_visible_non_receiver_by_name(*name, self.visible_declaration_ids.as_ref())
+            .get_visible_non_receiver_by_name(*name, self.visible_declaration_ids.as_deref())
             .map(ScopeDeclarationRef::Shared)
     }
 
