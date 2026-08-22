@@ -1,0 +1,881 @@
+-- nominal-scaling-80.moth
+-- Nominal member scaling fixture.
+--
+-- Declares 80 structs of six fixed-capacity fields each and 20 choices of three
+-- payload variants each, driven by four capacity constants. Constant count is fixed at four
+-- at every size, so member-shell construction and capacity fixup cost scale independently of
+-- constant resolution cost.
+--
+-- One point in the `nominal_members` scaling series declared in benchmarks/manifest.toml.
+-- Every point uses this identical generated pattern so the series measures size alone.
+-- Deterministic pattern; regenerate the whole series rather than hand editing members.
+
+-- Capacity constants: the only compile-time constants in this module.
+tiny_capacity #Int = 2
+small_capacity #Int = 4
+medium_capacity #Int = 8
+large_capacity #Int = 16
+
+-- Structs: every field is a fixed-capacity collection keyed by one capacity constant.
+Bucket0000 = |
+    field0_v {tiny_capacity Int},
+    field1_v {small_capacity Float},
+    field2_v {medium_capacity String},
+    field3_v {large_capacity Bool},
+    field4_v {tiny_capacity Int},
+    field5_v {small_capacity Float},
+|
+
+Bucket0001 = |
+    field0_v {small_capacity Bool},
+    field1_v {medium_capacity Int},
+    field2_v {large_capacity Float},
+    field3_v {tiny_capacity String},
+    field4_v {small_capacity Bool},
+    field5_v {medium_capacity Int},
+|
+
+Bucket0002 = |
+    field0_v {medium_capacity String},
+    field1_v {large_capacity Bool},
+    field2_v {tiny_capacity Int},
+    field3_v {small_capacity Float},
+    field4_v {medium_capacity String},
+    field5_v {large_capacity Bool},
+|
+
+Bucket0003 = |
+    field0_v {large_capacity Float},
+    field1_v {tiny_capacity String},
+    field2_v {small_capacity Bool},
+    field3_v {medium_capacity Int},
+    field4_v {large_capacity Float},
+    field5_v {tiny_capacity String},
+|
+
+Bucket0004 = |
+    field0_v {tiny_capacity Int},
+    field1_v {small_capacity Float},
+    field2_v {medium_capacity String},
+    field3_v {large_capacity Bool},
+    field4_v {tiny_capacity Int},
+    field5_v {small_capacity Float},
+|
+
+Bucket0005 = |
+    field0_v {small_capacity Bool},
+    field1_v {medium_capacity Int},
+    field2_v {large_capacity Float},
+    field3_v {tiny_capacity String},
+    field4_v {small_capacity Bool},
+    field5_v {medium_capacity Int},
+|
+
+Bucket0006 = |
+    field0_v {medium_capacity String},
+    field1_v {large_capacity Bool},
+    field2_v {tiny_capacity Int},
+    field3_v {small_capacity Float},
+    field4_v {medium_capacity String},
+    field5_v {large_capacity Bool},
+|
+
+Bucket0007 = |
+    field0_v {large_capacity Float},
+    field1_v {tiny_capacity String},
+    field2_v {small_capacity Bool},
+    field3_v {medium_capacity Int},
+    field4_v {large_capacity Float},
+    field5_v {tiny_capacity String},
+|
+
+Bucket0008 = |
+    field0_v {tiny_capacity Int},
+    field1_v {small_capacity Float},
+    field2_v {medium_capacity String},
+    field3_v {large_capacity Bool},
+    field4_v {tiny_capacity Int},
+    field5_v {small_capacity Float},
+|
+
+Bucket0009 = |
+    field0_v {small_capacity Bool},
+    field1_v {medium_capacity Int},
+    field2_v {large_capacity Float},
+    field3_v {tiny_capacity String},
+    field4_v {small_capacity Bool},
+    field5_v {medium_capacity Int},
+|
+
+Bucket0010 = |
+    field0_v {medium_capacity String},
+    field1_v {large_capacity Bool},
+    field2_v {tiny_capacity Int},
+    field3_v {small_capacity Float},
+    field4_v {medium_capacity String},
+    field5_v {large_capacity Bool},
+|
+
+Bucket0011 = |
+    field0_v {large_capacity Float},
+    field1_v {tiny_capacity String},
+    field2_v {small_capacity Bool},
+    field3_v {medium_capacity Int},
+    field4_v {large_capacity Float},
+    field5_v {tiny_capacity String},
+|
+
+Bucket0012 = |
+    field0_v {tiny_capacity Int},
+    field1_v {small_capacity Float},
+    field2_v {medium_capacity String},
+    field3_v {large_capacity Bool},
+    field4_v {tiny_capacity Int},
+    field5_v {small_capacity Float},
+|
+
+Bucket0013 = |
+    field0_v {small_capacity Bool},
+    field1_v {medium_capacity Int},
+    field2_v {large_capacity Float},
+    field3_v {tiny_capacity String},
+    field4_v {small_capacity Bool},
+    field5_v {medium_capacity Int},
+|
+
+Bucket0014 = |
+    field0_v {medium_capacity String},
+    field1_v {large_capacity Bool},
+    field2_v {tiny_capacity Int},
+    field3_v {small_capacity Float},
+    field4_v {medium_capacity String},
+    field5_v {large_capacity Bool},
+|
+
+Bucket0015 = |
+    field0_v {large_capacity Float},
+    field1_v {tiny_capacity String},
+    field2_v {small_capacity Bool},
+    field3_v {medium_capacity Int},
+    field4_v {large_capacity Float},
+    field5_v {tiny_capacity String},
+|
+
+Bucket0016 = |
+    field0_v {tiny_capacity Int},
+    field1_v {small_capacity Float},
+    field2_v {medium_capacity String},
+    field3_v {large_capacity Bool},
+    field4_v {tiny_capacity Int},
+    field5_v {small_capacity Float},
+|
+
+Bucket0017 = |
+    field0_v {small_capacity Bool},
+    field1_v {medium_capacity Int},
+    field2_v {large_capacity Float},
+    field3_v {tiny_capacity String},
+    field4_v {small_capacity Bool},
+    field5_v {medium_capacity Int},
+|
+
+Bucket0018 = |
+    field0_v {medium_capacity String},
+    field1_v {large_capacity Bool},
+    field2_v {tiny_capacity Int},
+    field3_v {small_capacity Float},
+    field4_v {medium_capacity String},
+    field5_v {large_capacity Bool},
+|
+
+Bucket0019 = |
+    field0_v {large_capacity Float},
+    field1_v {tiny_capacity String},
+    field2_v {small_capacity Bool},
+    field3_v {medium_capacity Int},
+    field4_v {large_capacity Float},
+    field5_v {tiny_capacity String},
+|
+
+Bucket0020 = |
+    field0_v {tiny_capacity Int},
+    field1_v {small_capacity Float},
+    field2_v {medium_capacity String},
+    field3_v {large_capacity Bool},
+    field4_v {tiny_capacity Int},
+    field5_v {small_capacity Float},
+|
+
+Bucket0021 = |
+    field0_v {small_capacity Bool},
+    field1_v {medium_capacity Int},
+    field2_v {large_capacity Float},
+    field3_v {tiny_capacity String},
+    field4_v {small_capacity Bool},
+    field5_v {medium_capacity Int},
+|
+
+Bucket0022 = |
+    field0_v {medium_capacity String},
+    field1_v {large_capacity Bool},
+    field2_v {tiny_capacity Int},
+    field3_v {small_capacity Float},
+    field4_v {medium_capacity String},
+    field5_v {large_capacity Bool},
+|
+
+Bucket0023 = |
+    field0_v {large_capacity Float},
+    field1_v {tiny_capacity String},
+    field2_v {small_capacity Bool},
+    field3_v {medium_capacity Int},
+    field4_v {large_capacity Float},
+    field5_v {tiny_capacity String},
+|
+
+Bucket0024 = |
+    field0_v {tiny_capacity Int},
+    field1_v {small_capacity Float},
+    field2_v {medium_capacity String},
+    field3_v {large_capacity Bool},
+    field4_v {tiny_capacity Int},
+    field5_v {small_capacity Float},
+|
+
+Bucket0025 = |
+    field0_v {small_capacity Bool},
+    field1_v {medium_capacity Int},
+    field2_v {large_capacity Float},
+    field3_v {tiny_capacity String},
+    field4_v {small_capacity Bool},
+    field5_v {medium_capacity Int},
+|
+
+Bucket0026 = |
+    field0_v {medium_capacity String},
+    field1_v {large_capacity Bool},
+    field2_v {tiny_capacity Int},
+    field3_v {small_capacity Float},
+    field4_v {medium_capacity String},
+    field5_v {large_capacity Bool},
+|
+
+Bucket0027 = |
+    field0_v {large_capacity Float},
+    field1_v {tiny_capacity String},
+    field2_v {small_capacity Bool},
+    field3_v {medium_capacity Int},
+    field4_v {large_capacity Float},
+    field5_v {tiny_capacity String},
+|
+
+Bucket0028 = |
+    field0_v {tiny_capacity Int},
+    field1_v {small_capacity Float},
+    field2_v {medium_capacity String},
+    field3_v {large_capacity Bool},
+    field4_v {tiny_capacity Int},
+    field5_v {small_capacity Float},
+|
+
+Bucket0029 = |
+    field0_v {small_capacity Bool},
+    field1_v {medium_capacity Int},
+    field2_v {large_capacity Float},
+    field3_v {tiny_capacity String},
+    field4_v {small_capacity Bool},
+    field5_v {medium_capacity Int},
+|
+
+Bucket0030 = |
+    field0_v {medium_capacity String},
+    field1_v {large_capacity Bool},
+    field2_v {tiny_capacity Int},
+    field3_v {small_capacity Float},
+    field4_v {medium_capacity String},
+    field5_v {large_capacity Bool},
+|
+
+Bucket0031 = |
+    field0_v {large_capacity Float},
+    field1_v {tiny_capacity String},
+    field2_v {small_capacity Bool},
+    field3_v {medium_capacity Int},
+    field4_v {large_capacity Float},
+    field5_v {tiny_capacity String},
+|
+
+Bucket0032 = |
+    field0_v {tiny_capacity Int},
+    field1_v {small_capacity Float},
+    field2_v {medium_capacity String},
+    field3_v {large_capacity Bool},
+    field4_v {tiny_capacity Int},
+    field5_v {small_capacity Float},
+|
+
+Bucket0033 = |
+    field0_v {small_capacity Bool},
+    field1_v {medium_capacity Int},
+    field2_v {large_capacity Float},
+    field3_v {tiny_capacity String},
+    field4_v {small_capacity Bool},
+    field5_v {medium_capacity Int},
+|
+
+Bucket0034 = |
+    field0_v {medium_capacity String},
+    field1_v {large_capacity Bool},
+    field2_v {tiny_capacity Int},
+    field3_v {small_capacity Float},
+    field4_v {medium_capacity String},
+    field5_v {large_capacity Bool},
+|
+
+Bucket0035 = |
+    field0_v {large_capacity Float},
+    field1_v {tiny_capacity String},
+    field2_v {small_capacity Bool},
+    field3_v {medium_capacity Int},
+    field4_v {large_capacity Float},
+    field5_v {tiny_capacity String},
+|
+
+Bucket0036 = |
+    field0_v {tiny_capacity Int},
+    field1_v {small_capacity Float},
+    field2_v {medium_capacity String},
+    field3_v {large_capacity Bool},
+    field4_v {tiny_capacity Int},
+    field5_v {small_capacity Float},
+|
+
+Bucket0037 = |
+    field0_v {small_capacity Bool},
+    field1_v {medium_capacity Int},
+    field2_v {large_capacity Float},
+    field3_v {tiny_capacity String},
+    field4_v {small_capacity Bool},
+    field5_v {medium_capacity Int},
+|
+
+Bucket0038 = |
+    field0_v {medium_capacity String},
+    field1_v {large_capacity Bool},
+    field2_v {tiny_capacity Int},
+    field3_v {small_capacity Float},
+    field4_v {medium_capacity String},
+    field5_v {large_capacity Bool},
+|
+
+Bucket0039 = |
+    field0_v {large_capacity Float},
+    field1_v {tiny_capacity String},
+    field2_v {small_capacity Bool},
+    field3_v {medium_capacity Int},
+    field4_v {large_capacity Float},
+    field5_v {tiny_capacity String},
+|
+
+Bucket0040 = |
+    field0_v {tiny_capacity Int},
+    field1_v {small_capacity Float},
+    field2_v {medium_capacity String},
+    field3_v {large_capacity Bool},
+    field4_v {tiny_capacity Int},
+    field5_v {small_capacity Float},
+|
+
+Bucket0041 = |
+    field0_v {small_capacity Bool},
+    field1_v {medium_capacity Int},
+    field2_v {large_capacity Float},
+    field3_v {tiny_capacity String},
+    field4_v {small_capacity Bool},
+    field5_v {medium_capacity Int},
+|
+
+Bucket0042 = |
+    field0_v {medium_capacity String},
+    field1_v {large_capacity Bool},
+    field2_v {tiny_capacity Int},
+    field3_v {small_capacity Float},
+    field4_v {medium_capacity String},
+    field5_v {large_capacity Bool},
+|
+
+Bucket0043 = |
+    field0_v {large_capacity Float},
+    field1_v {tiny_capacity String},
+    field2_v {small_capacity Bool},
+    field3_v {medium_capacity Int},
+    field4_v {large_capacity Float},
+    field5_v {tiny_capacity String},
+|
+
+Bucket0044 = |
+    field0_v {tiny_capacity Int},
+    field1_v {small_capacity Float},
+    field2_v {medium_capacity String},
+    field3_v {large_capacity Bool},
+    field4_v {tiny_capacity Int},
+    field5_v {small_capacity Float},
+|
+
+Bucket0045 = |
+    field0_v {small_capacity Bool},
+    field1_v {medium_capacity Int},
+    field2_v {large_capacity Float},
+    field3_v {tiny_capacity String},
+    field4_v {small_capacity Bool},
+    field5_v {medium_capacity Int},
+|
+
+Bucket0046 = |
+    field0_v {medium_capacity String},
+    field1_v {large_capacity Bool},
+    field2_v {tiny_capacity Int},
+    field3_v {small_capacity Float},
+    field4_v {medium_capacity String},
+    field5_v {large_capacity Bool},
+|
+
+Bucket0047 = |
+    field0_v {large_capacity Float},
+    field1_v {tiny_capacity String},
+    field2_v {small_capacity Bool},
+    field3_v {medium_capacity Int},
+    field4_v {large_capacity Float},
+    field5_v {tiny_capacity String},
+|
+
+Bucket0048 = |
+    field0_v {tiny_capacity Int},
+    field1_v {small_capacity Float},
+    field2_v {medium_capacity String},
+    field3_v {large_capacity Bool},
+    field4_v {tiny_capacity Int},
+    field5_v {small_capacity Float},
+|
+
+Bucket0049 = |
+    field0_v {small_capacity Bool},
+    field1_v {medium_capacity Int},
+    field2_v {large_capacity Float},
+    field3_v {tiny_capacity String},
+    field4_v {small_capacity Bool},
+    field5_v {medium_capacity Int},
+|
+
+Bucket0050 = |
+    field0_v {medium_capacity String},
+    field1_v {large_capacity Bool},
+    field2_v {tiny_capacity Int},
+    field3_v {small_capacity Float},
+    field4_v {medium_capacity String},
+    field5_v {large_capacity Bool},
+|
+
+Bucket0051 = |
+    field0_v {large_capacity Float},
+    field1_v {tiny_capacity String},
+    field2_v {small_capacity Bool},
+    field3_v {medium_capacity Int},
+    field4_v {large_capacity Float},
+    field5_v {tiny_capacity String},
+|
+
+Bucket0052 = |
+    field0_v {tiny_capacity Int},
+    field1_v {small_capacity Float},
+    field2_v {medium_capacity String},
+    field3_v {large_capacity Bool},
+    field4_v {tiny_capacity Int},
+    field5_v {small_capacity Float},
+|
+
+Bucket0053 = |
+    field0_v {small_capacity Bool},
+    field1_v {medium_capacity Int},
+    field2_v {large_capacity Float},
+    field3_v {tiny_capacity String},
+    field4_v {small_capacity Bool},
+    field5_v {medium_capacity Int},
+|
+
+Bucket0054 = |
+    field0_v {medium_capacity String},
+    field1_v {large_capacity Bool},
+    field2_v {tiny_capacity Int},
+    field3_v {small_capacity Float},
+    field4_v {medium_capacity String},
+    field5_v {large_capacity Bool},
+|
+
+Bucket0055 = |
+    field0_v {large_capacity Float},
+    field1_v {tiny_capacity String},
+    field2_v {small_capacity Bool},
+    field3_v {medium_capacity Int},
+    field4_v {large_capacity Float},
+    field5_v {tiny_capacity String},
+|
+
+Bucket0056 = |
+    field0_v {tiny_capacity Int},
+    field1_v {small_capacity Float},
+    field2_v {medium_capacity String},
+    field3_v {large_capacity Bool},
+    field4_v {tiny_capacity Int},
+    field5_v {small_capacity Float},
+|
+
+Bucket0057 = |
+    field0_v {small_capacity Bool},
+    field1_v {medium_capacity Int},
+    field2_v {large_capacity Float},
+    field3_v {tiny_capacity String},
+    field4_v {small_capacity Bool},
+    field5_v {medium_capacity Int},
+|
+
+Bucket0058 = |
+    field0_v {medium_capacity String},
+    field1_v {large_capacity Bool},
+    field2_v {tiny_capacity Int},
+    field3_v {small_capacity Float},
+    field4_v {medium_capacity String},
+    field5_v {large_capacity Bool},
+|
+
+Bucket0059 = |
+    field0_v {large_capacity Float},
+    field1_v {tiny_capacity String},
+    field2_v {small_capacity Bool},
+    field3_v {medium_capacity Int},
+    field4_v {large_capacity Float},
+    field5_v {tiny_capacity String},
+|
+
+Bucket0060 = |
+    field0_v {tiny_capacity Int},
+    field1_v {small_capacity Float},
+    field2_v {medium_capacity String},
+    field3_v {large_capacity Bool},
+    field4_v {tiny_capacity Int},
+    field5_v {small_capacity Float},
+|
+
+Bucket0061 = |
+    field0_v {small_capacity Bool},
+    field1_v {medium_capacity Int},
+    field2_v {large_capacity Float},
+    field3_v {tiny_capacity String},
+    field4_v {small_capacity Bool},
+    field5_v {medium_capacity Int},
+|
+
+Bucket0062 = |
+    field0_v {medium_capacity String},
+    field1_v {large_capacity Bool},
+    field2_v {tiny_capacity Int},
+    field3_v {small_capacity Float},
+    field4_v {medium_capacity String},
+    field5_v {large_capacity Bool},
+|
+
+Bucket0063 = |
+    field0_v {large_capacity Float},
+    field1_v {tiny_capacity String},
+    field2_v {small_capacity Bool},
+    field3_v {medium_capacity Int},
+    field4_v {large_capacity Float},
+    field5_v {tiny_capacity String},
+|
+
+Bucket0064 = |
+    field0_v {tiny_capacity Int},
+    field1_v {small_capacity Float},
+    field2_v {medium_capacity String},
+    field3_v {large_capacity Bool},
+    field4_v {tiny_capacity Int},
+    field5_v {small_capacity Float},
+|
+
+Bucket0065 = |
+    field0_v {small_capacity Bool},
+    field1_v {medium_capacity Int},
+    field2_v {large_capacity Float},
+    field3_v {tiny_capacity String},
+    field4_v {small_capacity Bool},
+    field5_v {medium_capacity Int},
+|
+
+Bucket0066 = |
+    field0_v {medium_capacity String},
+    field1_v {large_capacity Bool},
+    field2_v {tiny_capacity Int},
+    field3_v {small_capacity Float},
+    field4_v {medium_capacity String},
+    field5_v {large_capacity Bool},
+|
+
+Bucket0067 = |
+    field0_v {large_capacity Float},
+    field1_v {tiny_capacity String},
+    field2_v {small_capacity Bool},
+    field3_v {medium_capacity Int},
+    field4_v {large_capacity Float},
+    field5_v {tiny_capacity String},
+|
+
+Bucket0068 = |
+    field0_v {tiny_capacity Int},
+    field1_v {small_capacity Float},
+    field2_v {medium_capacity String},
+    field3_v {large_capacity Bool},
+    field4_v {tiny_capacity Int},
+    field5_v {small_capacity Float},
+|
+
+Bucket0069 = |
+    field0_v {small_capacity Bool},
+    field1_v {medium_capacity Int},
+    field2_v {large_capacity Float},
+    field3_v {tiny_capacity String},
+    field4_v {small_capacity Bool},
+    field5_v {medium_capacity Int},
+|
+
+Bucket0070 = |
+    field0_v {medium_capacity String},
+    field1_v {large_capacity Bool},
+    field2_v {tiny_capacity Int},
+    field3_v {small_capacity Float},
+    field4_v {medium_capacity String},
+    field5_v {large_capacity Bool},
+|
+
+Bucket0071 = |
+    field0_v {large_capacity Float},
+    field1_v {tiny_capacity String},
+    field2_v {small_capacity Bool},
+    field3_v {medium_capacity Int},
+    field4_v {large_capacity Float},
+    field5_v {tiny_capacity String},
+|
+
+Bucket0072 = |
+    field0_v {tiny_capacity Int},
+    field1_v {small_capacity Float},
+    field2_v {medium_capacity String},
+    field3_v {large_capacity Bool},
+    field4_v {tiny_capacity Int},
+    field5_v {small_capacity Float},
+|
+
+Bucket0073 = |
+    field0_v {small_capacity Bool},
+    field1_v {medium_capacity Int},
+    field2_v {large_capacity Float},
+    field3_v {tiny_capacity String},
+    field4_v {small_capacity Bool},
+    field5_v {medium_capacity Int},
+|
+
+Bucket0074 = |
+    field0_v {medium_capacity String},
+    field1_v {large_capacity Bool},
+    field2_v {tiny_capacity Int},
+    field3_v {small_capacity Float},
+    field4_v {medium_capacity String},
+    field5_v {large_capacity Bool},
+|
+
+Bucket0075 = |
+    field0_v {large_capacity Float},
+    field1_v {tiny_capacity String},
+    field2_v {small_capacity Bool},
+    field3_v {medium_capacity Int},
+    field4_v {large_capacity Float},
+    field5_v {tiny_capacity String},
+|
+
+Bucket0076 = |
+    field0_v {tiny_capacity Int},
+    field1_v {small_capacity Float},
+    field2_v {medium_capacity String},
+    field3_v {large_capacity Bool},
+    field4_v {tiny_capacity Int},
+    field5_v {small_capacity Float},
+|
+
+Bucket0077 = |
+    field0_v {small_capacity Bool},
+    field1_v {medium_capacity Int},
+    field2_v {large_capacity Float},
+    field3_v {tiny_capacity String},
+    field4_v {small_capacity Bool},
+    field5_v {medium_capacity Int},
+|
+
+Bucket0078 = |
+    field0_v {medium_capacity String},
+    field1_v {large_capacity Bool},
+    field2_v {tiny_capacity Int},
+    field3_v {small_capacity Float},
+    field4_v {medium_capacity String},
+    field5_v {large_capacity Bool},
+|
+
+Bucket0079 = |
+    field0_v {large_capacity Float},
+    field1_v {tiny_capacity String},
+    field2_v {small_capacity Bool},
+    field3_v {medium_capacity Int},
+    field4_v {large_capacity Float},
+    field5_v {tiny_capacity String},
+|
+
+-- Choices: every payload field is a fixed-capacity collection.
+Signal0000 ::
+    Idle,
+    Batch0 | items {tiny_capacity Int}, tag String |,
+    Batch1 | items {small_capacity Float}, tag String |,
+    Batch2 | items {medium_capacity String}, tag String |,
+;
+
+Signal0001 ::
+    Idle,
+    Batch0 | items {small_capacity String}, tag String |,
+    Batch1 | items {medium_capacity Bool}, tag String |,
+    Batch2 | items {large_capacity Int}, tag String |,
+;
+
+Signal0002 ::
+    Idle,
+    Batch0 | items {medium_capacity Int}, tag String |,
+    Batch1 | items {large_capacity Float}, tag String |,
+    Batch2 | items {tiny_capacity String}, tag String |,
+;
+
+Signal0003 ::
+    Idle,
+    Batch0 | items {large_capacity String}, tag String |,
+    Batch1 | items {tiny_capacity Bool}, tag String |,
+    Batch2 | items {small_capacity Int}, tag String |,
+;
+
+Signal0004 ::
+    Idle,
+    Batch0 | items {tiny_capacity Int}, tag String |,
+    Batch1 | items {small_capacity Float}, tag String |,
+    Batch2 | items {medium_capacity String}, tag String |,
+;
+
+Signal0005 ::
+    Idle,
+    Batch0 | items {small_capacity String}, tag String |,
+    Batch1 | items {medium_capacity Bool}, tag String |,
+    Batch2 | items {large_capacity Int}, tag String |,
+;
+
+Signal0006 ::
+    Idle,
+    Batch0 | items {medium_capacity Int}, tag String |,
+    Batch1 | items {large_capacity Float}, tag String |,
+    Batch2 | items {tiny_capacity String}, tag String |,
+;
+
+Signal0007 ::
+    Idle,
+    Batch0 | items {large_capacity String}, tag String |,
+    Batch1 | items {tiny_capacity Bool}, tag String |,
+    Batch2 | items {small_capacity Int}, tag String |,
+;
+
+Signal0008 ::
+    Idle,
+    Batch0 | items {tiny_capacity Int}, tag String |,
+    Batch1 | items {small_capacity Float}, tag String |,
+    Batch2 | items {medium_capacity String}, tag String |,
+;
+
+Signal0009 ::
+    Idle,
+    Batch0 | items {small_capacity String}, tag String |,
+    Batch1 | items {medium_capacity Bool}, tag String |,
+    Batch2 | items {large_capacity Int}, tag String |,
+;
+
+Signal0010 ::
+    Idle,
+    Batch0 | items {medium_capacity Int}, tag String |,
+    Batch1 | items {large_capacity Float}, tag String |,
+    Batch2 | items {tiny_capacity String}, tag String |,
+;
+
+Signal0011 ::
+    Idle,
+    Batch0 | items {large_capacity String}, tag String |,
+    Batch1 | items {tiny_capacity Bool}, tag String |,
+    Batch2 | items {small_capacity Int}, tag String |,
+;
+
+Signal0012 ::
+    Idle,
+    Batch0 | items {tiny_capacity Int}, tag String |,
+    Batch1 | items {small_capacity Float}, tag String |,
+    Batch2 | items {medium_capacity String}, tag String |,
+;
+
+Signal0013 ::
+    Idle,
+    Batch0 | items {small_capacity String}, tag String |,
+    Batch1 | items {medium_capacity Bool}, tag String |,
+    Batch2 | items {large_capacity Int}, tag String |,
+;
+
+Signal0014 ::
+    Idle,
+    Batch0 | items {medium_capacity Int}, tag String |,
+    Batch1 | items {large_capacity Float}, tag String |,
+    Batch2 | items {tiny_capacity String}, tag String |,
+;
+
+Signal0015 ::
+    Idle,
+    Batch0 | items {large_capacity String}, tag String |,
+    Batch1 | items {tiny_capacity Bool}, tag String |,
+    Batch2 | items {small_capacity Int}, tag String |,
+;
+
+Signal0016 ::
+    Idle,
+    Batch0 | items {tiny_capacity Int}, tag String |,
+    Batch1 | items {small_capacity Float}, tag String |,
+    Batch2 | items {medium_capacity String}, tag String |,
+;
+
+Signal0017 ::
+    Idle,
+    Batch0 | items {small_capacity String}, tag String |,
+    Batch1 | items {medium_capacity Bool}, tag String |,
+    Batch2 | items {large_capacity Int}, tag String |,
+;
+
+Signal0018 ::
+    Idle,
+    Batch0 | items {medium_capacity Int}, tag String |,
+    Batch1 | items {large_capacity Float}, tag String |,
+    Batch2 | items {tiny_capacity String}, tag String |,
+;
+
+Signal0019 ::
+    Idle,
+    Batch0 | items {large_capacity String}, tag String |,
+    Batch1 | items {tiny_capacity Bool}, tag String |,
+    Batch2 | items {small_capacity Int}, tag String |,
+;
+
+[:nominal-scaling structs=80 choices=20]

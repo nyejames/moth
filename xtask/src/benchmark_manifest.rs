@@ -1,7 +1,8 @@
 //! Typed authority for the repository benchmark inventory.
 //!
-//! WHAT: Loads the schema-3 TOML manifest, validates authored identities and
-//! resolves each case to one immutable workload relationship.
+//! WHAT: Loads the schema-4 TOML manifest, validates authored identities,
+//! resolves each case to one immutable workload relationship and resolves each
+//! scaling series to its ordered member cases.
 //! WHY: Benchmark commands need one strict source of case order, runner
 //! semantics and filesystem ownership instead of path-derived text lists.
 
@@ -14,7 +15,7 @@ use std::io;
 use std::path::{Component, Path, PathBuf};
 
 pub(crate) const BENCHMARK_MANIFEST_PATH: &str = "benchmarks/manifest.toml";
-pub(crate) const BENCHMARK_MANIFEST_SCHEMA_VERSION: u32 = 3;
+pub(crate) const BENCHMARK_MANIFEST_SCHEMA_VERSION: u32 = 4;
 
 /// Authored fingerprint boundary mode for one workload.
 ///
@@ -33,8 +34,36 @@ pub(crate) enum BenchmarkFingerprintMode {
 pub(crate) struct BenchmarkManifest {
     pub(crate) workloads: Vec<BenchmarkWorkload>,
     pub(crate) cases: Vec<BenchmarkCase>,
+    pub(crate) scaling_series: Vec<BenchmarkScalingSeries>,
     pub(crate) manifest_path: PathBuf,
     pub(crate) repository_root: PathBuf,
+}
+
+/// One declared scaling series: the same compiler work at several input sizes.
+///
+/// WHY: the normal suites compare a case against its own recorded history, so a
+/// cost that has been superlinear since it was written never reads as a
+/// regression. A series states the input size explicitly, which lets the growth
+/// exponent be fitted and held to a budget.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct BenchmarkScalingSeries {
+    pub(crate) id: String,
+    /// Stable timing metric name fitted against size. Must be a Basic metric:
+    /// the benchmark compiler is built with `timers`, not `detailed_timers`.
+    pub(crate) metric: String,
+    /// Largest growth exponent this series is allowed to reach.
+    pub(crate) max_exponent: f64,
+    /// Member points in strictly increasing size order.
+    pub(crate) points: Vec<BenchmarkScalingPoint>,
+}
+
+/// One member of a scaling series, resolved to its manifest case.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct BenchmarkScalingPoint {
+    pub(crate) case_id: String,
+    pub(crate) case_index: usize,
+    /// Authored input size this fixture represents.
+    pub(crate) size: u32,
 }
 
 /// Whether a workload entry is a single file or a directory project.
@@ -233,6 +262,24 @@ struct RawBenchmarkManifest {
     workloads: Vec<RawBenchmarkWorkload>,
     #[serde(rename = "case")]
     cases: Vec<RawBenchmarkCase>,
+    #[serde(rename = "scaling", default)]
+    scaling_series: Vec<RawBenchmarkScalingSeries>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawBenchmarkScalingSeries {
+    id: String,
+    metric: String,
+    max_exponent: f64,
+    points: Vec<RawBenchmarkScalingPoint>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawBenchmarkScalingPoint {
+    case: String,
+    size: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -624,12 +671,137 @@ fn validate_manifest(
         ));
     }
 
+    let scaling_series =
+        validate_scaling_series(raw.scaling_series, &cases, &mut all_ids, manifest_path)?;
+
     Ok(BenchmarkManifest {
         workloads,
         cases,
+        scaling_series,
         manifest_path: manifest_path.to_owned(),
         repository_root: repository_root.to_owned(),
     })
+}
+
+/// Minimum member count for a fitted scaling series.
+///
+/// WHY: two points give a single ratio, which one noisy run can dominate. Three
+/// points make the fit a trend rather than a comparison.
+const MINIMUM_SCALING_POINTS: usize = 3;
+
+/// Resolve every declared scaling series against the validated case inventory.
+///
+/// WHAT: checks series identity, member existence, runner agreement, strictly
+/// increasing sizes and a usable exponent budget.
+/// WHY: the fitted exponent is only meaningful when every point runs the same
+/// runner over the same shape and differs only in the declared size. An
+/// unchecked series would report a confident number about nothing.
+fn validate_scaling_series(
+    raw_series: Vec<RawBenchmarkScalingSeries>,
+    cases: &[BenchmarkCase],
+    all_ids: &mut HashSet<String>,
+    manifest_path: &Path,
+) -> Result<Vec<BenchmarkScalingSeries>, BenchmarkManifestError> {
+    let case_indexes: HashMap<&str, usize> = cases
+        .iter()
+        .enumerate()
+        .map(|(index, case)| (case.id.as_str(), index))
+        .collect();
+
+    let mut series_list = Vec::with_capacity(raw_series.len());
+    for raw in raw_series {
+        validate_id(manifest_path, "scaling series", &raw.id)?;
+        if !all_ids.insert(raw.id.clone()) {
+            return Err(invalid(
+                manifest_path,
+                format!("scaling series '{}'", raw.id),
+                "duplicate global ID",
+            ));
+        }
+
+        let subject = format!("scaling series '{}'", raw.id);
+
+        if raw.metric.trim().is_empty() {
+            return Err(invalid(manifest_path, subject, "metric must not be empty"));
+        }
+        if !raw.max_exponent.is_finite() || raw.max_exponent <= 0.0 {
+            return Err(invalid(
+                manifest_path,
+                subject,
+                format!(
+                    "max_exponent must be a finite positive number, got {}",
+                    raw.max_exponent
+                ),
+            ));
+        }
+        if raw.points.len() < MINIMUM_SCALING_POINTS {
+            return Err(invalid(
+                manifest_path,
+                subject,
+                format!(
+                    "must declare at least {MINIMUM_SCALING_POINTS} points, got {}",
+                    raw.points.len()
+                ),
+            ));
+        }
+
+        let mut points = Vec::with_capacity(raw.points.len());
+        let mut previous_size = 0u32;
+        let mut member_runner: Option<&BenchmarkRunner> = None;
+        for raw_point in raw.points {
+            let Some(&case_index) = case_indexes.get(raw_point.case.as_str()) else {
+                return Err(invalid(
+                    manifest_path,
+                    subject,
+                    format!("unknown case '{}'", raw_point.case),
+                ));
+            };
+            if raw_point.size <= previous_size {
+                return Err(invalid(
+                    manifest_path,
+                    subject,
+                    format!(
+                        "point sizes must strictly increase, got {} after {}",
+                        raw_point.size, previous_size
+                    ),
+                ));
+            }
+            previous_size = raw_point.size;
+
+            // Every point must exercise the same runner, or the fit compares
+            // two different measurements and calls the difference growth.
+            let runner = &cases[case_index].runner;
+            match member_runner {
+                None => member_runner = Some(runner),
+                Some(first) if first == runner => {}
+                Some(_) => {
+                    return Err(invalid(
+                        manifest_path,
+                        subject,
+                        format!(
+                            "case '{}' declares a different runner from the first point",
+                            raw_point.case
+                        ),
+                    ));
+                }
+            }
+
+            points.push(BenchmarkScalingPoint {
+                case_id: raw_point.case,
+                case_index,
+                size: raw_point.size,
+            });
+        }
+
+        series_list.push(BenchmarkScalingSeries {
+            id: raw.id,
+            metric: raw.metric,
+            max_exponent: raw.max_exponent,
+            points,
+        });
+    }
+
+    Ok(series_list)
 }
 
 #[derive(Debug, Hash, PartialEq, Eq)]

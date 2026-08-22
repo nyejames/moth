@@ -582,6 +582,7 @@ impl CliFixture {
         BenchmarkManifest {
             workloads,
             cases,
+            scaling_series: Vec::new(),
             manifest_path: self.root().join("manifest.toml"),
             repository_root: self.root().to_path_buf(),
         }

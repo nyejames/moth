@@ -31,6 +31,7 @@ mod bench_ci;
 mod bench_history;
 mod bench_observations;
 mod bench_report;
+mod bench_scaling;
 mod bench_summary;
 mod bench_system;
 mod bench_time;
@@ -129,6 +130,9 @@ fn main() {
         }
         BenchmarkMode::BenchValidate => {
             exit_with_result(validate_all_benchmarks());
+        }
+        BenchmarkMode::BenchScaling => {
+            exit_with_result(bench_scaling::run_scaling_benchmarks());
         }
         BenchmarkMode::Stress { repeats } => {
             exit_with_result(run_stress_matrix(repeats));

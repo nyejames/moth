@@ -52,6 +52,8 @@ pub enum BenchmarkMode {
     BenchFrontendCheck,
     /// Validate all benchmark cases compile without errors (no timing).
     BenchValidate,
+    /// Fit and check the growth exponent of every declared scaling series.
+    BenchScaling,
     /// Run Samply-backed profiling on benchmark cases.
     BenchProfile(ProfileOptions),
     /// Prove that a no-timer release binary contains no timer-only markers.
@@ -109,6 +111,7 @@ impl BenchmarkMode {
             "bench-frontend" => Some(BenchmarkMode::BenchFrontend),
             "bench-frontend-check" => Some(BenchmarkMode::BenchFrontendCheck),
             "bench-validate" => Some(BenchmarkMode::BenchValidate),
+            "bench-scaling" => Some(BenchmarkMode::BenchScaling),
             "timers-erasure-check" => Some(BenchmarkMode::TimersErasureCheck),
             "feature-matrix" => Some(BenchmarkMode::FeatureMatrix),
             "feature-lane-check" => Some(BenchmarkMode::FeatureLaneCheck),

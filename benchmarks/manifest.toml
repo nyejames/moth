@@ -1,4 +1,4 @@
-schema = 3
+schema = 4
 
 [[workload]]
 id = "root_single_file"
@@ -92,10 +92,31 @@ fingerprint_roots = ["benchmarks/constant-scaling/constant-chain-512.moth"]
 fingerprint_excludes = []
 
 [[workload]]
-id = "nominal_capacity_stress"
-entry = "benchmarks/nominal-capacity-stress.moth"
+id = "nominal_scaling_40"
+entry = "benchmarks/nominal-scaling/nominal-scaling-40.moth"
 fingerprint_mode = "full_tree"
-fingerprint_roots = ["benchmarks/nominal-capacity-stress.moth"]
+fingerprint_roots = ["benchmarks/nominal-scaling/nominal-scaling-40.moth"]
+fingerprint_excludes = []
+
+[[workload]]
+id = "nominal_scaling_80"
+entry = "benchmarks/nominal-scaling/nominal-scaling-80.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/nominal-scaling/nominal-scaling-80.moth"]
+fingerprint_excludes = []
+
+[[workload]]
+id = "nominal_scaling_160"
+entry = "benchmarks/nominal-scaling/nominal-scaling-160.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/nominal-scaling/nominal-scaling-160.moth"]
+fingerprint_excludes = []
+
+[[workload]]
+id = "nominal_scaling_320"
+entry = "benchmarks/nominal-scaling/nominal-scaling-320.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/nominal-scaling/nominal-scaling-320.moth"]
 fingerprint_excludes = []
 
 [[workload]]
@@ -419,8 +440,41 @@ command = "check"
 args = []
 
 [[case]]
-id = "nominal_capacity_stress_check"
-workload = "nominal_capacity_stress"
+id = "nominal_scaling_40_check"
+workload = "nominal_scaling_40"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "nominal_scaling_80_check"
+workload = "nominal_scaling_80"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "nominal_scaling_160_check"
+workload = "nominal_scaling_160"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "nominal_scaling_320_check"
+workload = "nominal_scaling_320"
 group = "stress"
 quick = false
 expectation = "clean"
@@ -738,8 +792,38 @@ kind = "frontend"
 profile = "dev"
 
 [[case]]
-id = "nominal_capacity_stress_frontend"
-workload = "nominal_capacity_stress"
+id = "nominal_scaling_40_frontend"
+workload = "nominal_scaling_40"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "nominal_scaling_80_frontend"
+workload = "nominal_scaling_80"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "nominal_scaling_160_frontend"
+workload = "nominal_scaling_160"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "nominal_scaling_320_frontend"
+workload = "nominal_scaling_320"
 group = "stress"
 quick = false
 expectation = "clean"
@@ -976,3 +1060,38 @@ expectation = "clean"
 [case.runner]
 kind = "frontend"
 profile = "dev"
+
+# Scaling series.
+#
+# Each series measures one compiler cost against a declared input size across
+# fixtures that differ only in that size. `just bench-scaling` fits the growth
+# exponent of `metric` against `size` and fails when it exceeds `max_exponent`.
+#
+# This is the lane that catches a cost which has always been superlinear. The
+# normal suites compare against recorded history, so they only ever report a
+# change; a pass that has been quadratic since it was written never looks like
+# a regression to them.
+#
+# `metric` must be a Basic timing metric. The benchmark compiler is built with
+# `--features timers`, so Detailed metrics are not emitted.
+
+[[scaling]]
+id = "nominal_members"
+metric = "frontend.ast.environment"
+max_exponent = 1.25
+points = [
+    { case = "nominal_scaling_40_frontend", size = 40 },
+    { case = "nominal_scaling_80_frontend", size = 80 },
+    { case = "nominal_scaling_160_frontend", size = 160 },
+    { case = "nominal_scaling_320_frontend", size = 320 },
+]
+
+[[scaling]]
+id = "constant_chain"
+metric = "frontend.ast.total"
+max_exponent = 1.25
+points = [
+    { case = "constant_chain_32_frontend", size = 32 },
+    { case = "constant_chain_128_frontend", size = 128 },
+    { case = "constant_chain_512_frontend", size = 512 },
+]

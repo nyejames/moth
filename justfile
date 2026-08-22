@@ -59,6 +59,10 @@ bench-frontend-check:
 bench-validate:
     cargo run --package xtask --bin xtask -- bench-validate
 
+# Fit the growth exponent of every declared scaling series and hold it to budget.
+bench-scaling:
+    cargo run --package xtask --bin xtask -- bench-scaling
+
 # Build a no-timer release binary and prove no timer-only marker survives into its bytes.
 # The timer *source* rules are applied by `just source-audit`, which owns the single walk.
 timers-erasure-check:

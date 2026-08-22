@@ -55,6 +55,8 @@ COMPLETED:
 - Phase 1 (module-owned constant resolution session) - commit `4e421a5a8`
 - Shared file visibility (taken out of sequence after profiling) - commit `917f7e81c`
 - Phase A (re-baseline and attribution) - see **Phase A outcome** below
+- Benchmark scaling lane (hardening slice, taken out of sequence) - see **Benchmark scaling lane**
+  below
 
 CURRENT_SLICE:
 - Phase: B (shared environment side tables)
@@ -65,8 +67,8 @@ CURRENT_SLICE:
   Phase E, and it must be re-measured after this phase lands)
 
 NEXT_ACTION:
-- execute Phase B against the copy-on-write design recorded in that phase, then re-measure the
-  nominal scaling curve before starting Phase E
+- execute Phase B against the copy-on-write design recorded in that phase, until
+  `just bench-scaling` reports `nominal_members` within budget, then re-measure before Phase E
 
 PHASE_ORDER:
 - A (re-baseline) -> B (shared side tables) -> C (folded-value authority) -> D (move-only folding
@@ -153,6 +155,8 @@ Assets it created, all still in use:
 - Benchmark workloads `constant_chain_32`, `constant_chain_128`, `constant_chain_512` and
   `nominal_capacity_stress`, each with a `_check` and a `_frontend` case, plus the manifest
   inventory test in `xtask/src/benchmark_manifest/tests.rs` and the counts in `benchmarks/README.md`.
+  `nominal_capacity_stress` has since been replaced by the four-point `nominal_members` scaling
+  series; measuring that path at a single size is what hid the quadratic cost Phase A found.
 - `AstCounter` variants `ConstantResolutionContextsCreated`, `ConstantsResolved`,
   `ConstantPassSideTableEntriesCloned`, `ModuleConstantDeclarationClones`,
   `ExpressionOrderingInputItems`, `ExpressionTypedStackItems`, `ExpressionFoldItems`,
@@ -189,8 +193,8 @@ Findings that still constrain later phases:
    for both statement `if` and runtime template `if`. It carries `record_hir_branch_condition_kind`,
    which is where the "no statically decided `if` reaches HIR" assertion belongs.
 5. **Member shells are rebuilt after constants** in
-   `AstModuleEnvironmentBuilder::resolve_type_declarations`. That is Phase E.
-   `benchmarks/nominal-capacity-stress.moth` isolates that cost from constant count.
+   `AstModuleEnvironmentBuilder::resolve_type_declarations`. That is Phase E. The
+   `nominal_members` scaling series isolates that cost from constant count.
 6. **The Phase 0 timing baseline is superseded.** It was recorded when a per-header
    `FileVisibility` copy dominated every AST workload, so its attribution shares are not usable for
    prioritisation. Phase A replaces it. The counter values it recorded remain valid as counts.
@@ -540,6 +544,68 @@ later phase must not rediscover:
    `hash_one<ExternalTypeId>` samples (about `2%` of `docs` moth self time) are confirmed to be the
    registry. It is a small independent change and it is not evidence for any phase here.
 
+## Benchmark scaling lane - hardening slice
+
+Taken out of sequence between Phase A and Phase B, because Phase A found a quadratic cost that the
+whole benchmark system was structurally unable to see, and Phase B is about to claim it fixed it.
+
+**The gap.** Every benchmark mode compares a case against its own recorded history, which detects a
+*change*. A cost that has been superlinear since it was written never changes, so every comparison
+reports "no measurable change" forever. The `O(n^2.03)` side-table clone survived the full suite, a
+dedicated stress fixture, a complete counter inventory and a recorded optimisation baseline. It was
+found by hand-regenerating a fixture at four sizes.
+
+**What was built:**
+
+- `[[scaling]]` series in `benchmarks/manifest.toml`, manifest schema 4. A series names a timing
+  metric, a complexity budget and three or more cases with declared input sizes. Validation
+  enforces at least three points, strictly increasing sizes, a positive finite budget and one
+  shared runner across all points.
+- `just bench-scaling` (`xtask/src/bench_scaling.rs`) fits the slope of `ln(metric)` against
+  `ln(size)` by least squares and fails when it exceeds the budget. Nine unit tests cover linear,
+  quadratic and flat fits, the missing-metric path and the noise floor.
+- `benchmarks/nominal-scaling/nominal-scaling-{40,80,160,320}.moth`, one generated pattern at four
+  sizes with a constant count fixed at four. These replace `nominal-capacity-stress.moth`, which
+  measured the same path at a single size and therefore could not see the shape.
+- The constant chains, which already existed at three sizes, are declared as the second series.
+- A profiling run whose symbolication returned raw addresses now fails the command instead of
+  presenting eight hex addresses as hot functions.
+
+**Two failure modes are treated as failures, not passes:** a metric that was never emitted, and a
+largest point too small to fit. A series that cannot answer the question must not look like one
+that answered it favourably.
+
+**What it reports today:**
+
+```text
+Scaling series 'nominal_members' — metric frontend.ast.environment — budget n^1.25
+        size     metric_ms   size step   time step
+          40        23.125           -           -
+          80        79.706       2.00x       3.45x
+         160       293.048       2.00x       3.68x
+         320      1111.980       2.00x       3.79x
+  fitted n^1.86 — EXCEEDS BUDGET n^1.25
+
+Scaling series 'constant_chain' — metric frontend.ast.total — budget n^1.25
+  fitted n^0.82 — within budget
+```
+
+Findings worth keeping:
+
+1. **The lane reproduces the Phase A finding independently.** Phase A measured `n^2.03` through the
+   release CLI with `RAYON_NUM_THREADS=1` and a detailed-timer build; the lane measures `n^1.86`
+   in-process through the frontend suite. Two different measurement paths, same conclusion. The
+   absolute times differ by about `2.3x` between the two paths, so compare exponents across them,
+   never milliseconds.
+2. **The constant chain is confirmed fixed, by budget rather than by eye.** `n^0.82` against a
+   `n^1.25` budget. Phase 0's chain superlinearity is gone and there is now a command that says so.
+3. **`just bench-scaling` is deliberately not in `just validate` yet.** It fails today because the
+   defect is real. The gate must pass on every commit, so the lane joins it as part of Phase B,
+   when `nominal_members` comes within budget.
+4. **A Detailed metric cannot be used by a series.** The benchmark compiler is built with
+   `--features timers`, not `detailed_timers`, so `constant_header_resolution` and its siblings are
+   never emitted to the suite. This is why both series fit Basic metrics.
+
 ## Phase B - Shared environment side tables
 
 Goal: remove the per-header `Rc::new(map.clone())` snapshots of the environment builder's side
@@ -593,15 +659,15 @@ Work items:
 - [ ] Re-point `ConstantPassSideTableEntriesCloned` at the per-header copy, which is the one that
       matters, or delete it if no copy survives. It currently measures the once-per-module
       snapshot and reads linear while the real copy is quadratic.
-- [ ] Decide whether a scaled nominal fixture joins `benchmarks/manifest.toml`. Phase A needed one
-      to see this at all and had to generate it untracked; without a committed equivalent the
-      recorded suite cannot regression-test the fix. Raise it rather than deciding silently - it
-      changes the tracked benchmark surface.
+- [ ] Wire `just bench-scaling` into `just validate` once `nominal_members` is within budget. The
+      lane is deliberately not in the gate while it fails, because the gate must pass for every
+      commit.
 
 Acceptance:
 
-- [ ] the regenerated nominal scaling curve is linear in module size, replacing `O(n^2.03)`
-- [ ] `environment_stress`, `type_stress` and `nominal_capacity_stress` improve
+- [ ] `just bench-scaling` reports `nominal_members` within its `n^1.25` budget, replacing the
+      `n^1.86` it reports today
+- [ ] `environment_stress` and `type_stress` improve
 - [ ] no pass reads a side table snapshot taken before a write it depends on
 - [ ] diagnostics, warning order and emitted artefacts are byte-for-byte equivalent
 
@@ -747,8 +813,8 @@ Goal: keep one immutable parsed member shell per struct field and choice payload
 member definitions once.
 
 Why now: `resolve_type_declarations` builds member shells before constants and rebuilds them after,
-so the same field and variant structure is reconstructed twice per nominal.
-`nominal_capacity_stress` isolates this from constant count.
+so the same field and variant structure is reconstructed twice per nominal. The `nominal_members`
+scaling series isolates this from constant count at four sizes.
 
 **Re-measure before implementing.** Phase A found that `>99%` of the cost of the pass this phase
 targets was the side-table snapshot, which Phase B removes. Whatever remains here after Phase B is
@@ -784,7 +850,8 @@ Work items:
 
 Acceptance:
 
-- [ ] `nominal_capacity_stress` improves
+- [ ] `just bench-scaling` still reports `nominal_members` within budget, and its absolute times
+      improve
 - [ ] no member shell is constructed twice
 - [ ] default-value and recursive-type diagnostics keep their locations
 

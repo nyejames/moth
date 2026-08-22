@@ -160,6 +160,7 @@ fn manifest() -> BenchmarkManifest {
                 },
             },
         ],
+        scaling_series: Vec::new(),
         manifest_path: "manifest.toml".into(),
         repository_root: ".".into(),
     }
@@ -193,6 +194,7 @@ fn observation_and_samply_receive_one_resolved_invocation() {
                 args: vec!["--terse".to_owned()],
             },
         }],
+        scaling_series: Vec::new(),
         manifest_path: directory.path().join("manifest.toml"),
         repository_root: directory.path().to_path_buf(),
     };
@@ -269,6 +271,7 @@ fn profile_fixture(root: &Path) -> (BenchmarkManifest, PreparedBenchmarkRun) {
                 args: Vec::new(),
             },
         }],
+        scaling_series: Vec::new(),
         manifest_path: root.join("manifest.toml"),
         repository_root: root.to_path_buf(),
     };

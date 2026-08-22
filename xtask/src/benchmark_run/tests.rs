@@ -48,7 +48,7 @@ fn commit_all(root: &Path, message: &str) {
 }
 
 fn write_fixture_manifest(repository_root: &Path) {
-    let contents = r#"schema = 3
+    let contents = r#"schema = 4
 
 [[workload]]
 id = "fixture"
@@ -75,7 +75,7 @@ args = []
 
 #[cfg(unix)]
 fn write_invalid_manifest(repository_root: &Path) {
-    let contents = r#"schema = 3
+    let contents = r#"schema = 4
 
 [[workload]]
 id = "fixture"
