@@ -1612,7 +1612,6 @@ left as vague future work.
 
 Implementation of this design requires synchronized changes to:
 
-- `AGENTS.md` — add this document to the reading list for source/token/diagnostic/failure work
 - `docs/compiler-design-overview.md` — source context, token ownership, diagnostics and failure lanes
 - `docs/build-system-design.md` — deterministic source registration, compilation contexts and tooling
   worker boundaries

@@ -20,8 +20,7 @@ Contributions that are AI generated can be accepted on their own merit, but migh
 
 Everything must pass the full validation workflow and follow the compiler documentation strictly. Submissions that show design drift, duplicated implementation paths, weak diagnostics, superficial tests, or overly verbose code will not be accepted.
 
-The [AGENTS](./AGENTS.md) file in this repo is an attempt to keep LLMs on track but is not a complete solution. Human review and clear guidance is still absolutely essential.
-
+Human review and clear guidance is always absolutely essential.
 
 </br>
 </br>

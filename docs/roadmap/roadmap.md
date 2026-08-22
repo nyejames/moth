@@ -11,10 +11,7 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 
 ## Active implementation work
 
-- [Runtime assertion messages and call-argument parser consolidation](./plans/runtime-assertion-messages-and-call-argument-parser-consolidation-plan.md) - implementation and final audit complete; publication is blocked on GitHub authentication before external review
-- [Constant evaluation, static control-flow specialisation and type-system architecture](./plans/constant-folding-and-type-system-hot-path-optimization-plan.md) - next eligible; its prerequisite no longer points at the deleted command timing plan
-
-## Completed implementation work
+- [Constant evaluation, static control-flow specialisation and type-system architecture](./plans/constant-folding-and-type-system-hot-path-optimization-plan.md)
 
 ## Queued implementation chain
 
