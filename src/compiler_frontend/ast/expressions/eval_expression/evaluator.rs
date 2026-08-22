@@ -18,7 +18,9 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
+use crate::compiler_frontend::instrumentation::{
+    AstCounter, FrontendCounter, increment_ast_counter, increment_frontend_counter,
+};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::type_coercion::compatibility::is_declaration_compatible;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
@@ -115,6 +117,7 @@ pub fn evaluate_expression(
             )
             .into());
         };
+        increment_ast_counter(AstCounter::ExpressionOperandClones);
         return Ok(expression.clone());
     }
 

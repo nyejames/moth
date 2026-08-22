@@ -71,6 +71,34 @@ fingerprint_roots = ["benchmarks/environment-stress.moth"]
 fingerprint_excludes = []
 
 [[workload]]
+id = "constant_chain_32"
+entry = "benchmarks/constant-scaling/constant-chain-32.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/constant-scaling/constant-chain-32.moth"]
+fingerprint_excludes = []
+
+[[workload]]
+id = "constant_chain_128"
+entry = "benchmarks/constant-scaling/constant-chain-128.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/constant-scaling/constant-chain-128.moth"]
+fingerprint_excludes = []
+
+[[workload]]
+id = "constant_chain_512"
+entry = "benchmarks/constant-scaling/constant-chain-512.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/constant-scaling/constant-chain-512.moth"]
+fingerprint_excludes = []
+
+[[workload]]
+id = "nominal_capacity_stress"
+entry = "benchmarks/nominal-capacity-stress.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/nominal-capacity-stress.moth"]
+fingerprint_excludes = []
+
+[[workload]]
 id = "one_module_kitchen_sink"
 entry = "benchmarks/adversarial/one-module-kitchen-sink.moth"
 fingerprint_mode = "full_tree"
@@ -358,6 +386,50 @@ command = "check"
 args = []
 
 [[case]]
+id = "constant_chain_32_check"
+workload = "constant_chain_32"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "constant_chain_128_check"
+workload = "constant_chain_128"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "constant_chain_512_check"
+workload = "constant_chain_512"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "nominal_capacity_stress_check"
+workload = "nominal_capacity_stress"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
 id = "one_module_kitchen_sink_check"
 workload = "one_module_kitchen_sink"
 group = "stress"
@@ -628,6 +700,46 @@ profile = "dev"
 [[case]]
 id = "environment_stress_frontend"
 workload = "environment_stress"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "constant_chain_32_frontend"
+workload = "constant_chain_32"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "constant_chain_128_frontend"
+workload = "constant_chain_128"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "constant_chain_512_frontend"
+workload = "constant_chain_512"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "nominal_capacity_stress_frontend"
+workload = "nominal_capacity_stress"
 group = "stress"
 quick = false
 expectation = "clean"

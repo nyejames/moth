@@ -29,6 +29,8 @@ use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidControlFlowStatementReason, InvalidMatchArmReason,
 };
+#[cfg(feature = "benchmark_counters")]
+use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
@@ -173,6 +175,13 @@ pub fn create_branch(
     }
 
     token_stream.advance();
+
+    // Branch bodies own every generic request their calls publish. Static specialisation will
+    // need that boundary, so the parser records how much durable generated work a branch
+    // contributes before any selection exists.
+    #[cfg(feature = "benchmark_counters")]
+    let branch_request_checkpoint = context.generic_request_checkpoint();
+
     let then_context = context.new_child_control_flow(ContextKind::Branch, string_table);
     let then_scope = then_context.scope.clone();
     let then_block = function_body_to_ast(
@@ -197,6 +206,14 @@ pub fn create_branch(
     } else {
         None
     };
+
+    #[cfg(feature = "benchmark_counters")]
+    add_ast_counter(
+        AstCounter::BranchLocalGenericRequests,
+        context
+            .generic_request_checkpoint()
+            .saturating_sub(branch_request_checkpoint),
+    );
 
     Ok(vec![AstNode {
         kind: NodeKind::If(condition, then_block, else_block),

@@ -1,0 +1,41 @@
+-- Compile-time Bool conditions select the authored branch.
+--
+-- Literal and constant-backed conditions, with and without `else`, must produce the
+-- same values a runtime test would. Static specialisation may remove the runtime test
+-- but must never change which branch runs.
+
+enabled #= true
+disabled #= false
+
+with_else ~= 0
+if enabled:
+    with_else = 1
+else
+    with_else = 2
+;
+
+without_else ~= 0
+if disabled:
+    without_else = 3
+;
+
+literal_true ~= 0
+if true:
+    literal_true = 4
+else
+    literal_true = 5
+;
+
+literal_false ~= 0
+if false:
+    literal_false = 6
+else
+    literal_false = 7
+;
+
+negated ~= 0
+if not disabled:
+    negated = 8
+;
+
+[:static_if with_else=[with_else] without_else=[without_else] literal_true=[literal_true] literal_false=[literal_false] negated=[negated]]

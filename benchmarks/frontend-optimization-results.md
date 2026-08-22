@@ -1467,3 +1467,175 @@ F1 deleted `Ast::remap_template_ir_store_string_ids` (dead code; TIR store is al
 before the module-wide StringId remap boundary). `TemplateIrStore::remap_string_ids` remains as a
 store-level capability for tests. The `template_ir_store` field on `Ast` carries
 `#[allow(dead_code)]` until Phases F2-F8 wire production TIR consumers. No behavior change.
+
+## Constant Evaluation And Type-System Plan - Phase 0 Baseline - 2026-08-22
+
+Baseline freeze for
+`docs/roadmap/plans/constant-folding-and-type-system-hot-path-optimization-plan.md` on the
+`const-folding-and-types-optimisation` branch. Evidence only: no semantic representation or
+control-flow change.
+
+### Baseline Environment
+
+- Commit: `3ba28c5fb907d2ee44e69a58c59d002aa6a2b384` (`prep for const optimisation`)
+- Branch: `const-folding-and-types-optimisation` (identical to `main` at the time of measurement)
+- Machine: macOS Apple Silicon benchmark host `6D851D`, Darwin `23.6.0` ARM64
+- Timing schema: `2`. The prerequisite module-attributed constant timers already exist:
+  `frontend.ast.environment.constant_header_resolution`,
+  `frontend.ast.emit.const_template_parse`, `frontend.ast.emit.const_template_fold` and
+  `frontend.ast.finalise.module_constant`. No rebase onto a newer timing schema was required.
+
+### Commands Run
+
+- `just bench-frontend` five recorded invocations, default thread identity
+- `just bench` five recorded invocations, default thread identity
+- `RAYON_NUM_THREADS=1 just bench-frontend` five recorded invocations
+- `just bench-validate` after adding the four new workloads
+- counter capture with a `timers,benchmark_counters` release binary and `MOTH_COUNTERS=summary`
+
+The tracked monthly summary was restored between recorded runs so each invocation started from a
+clean committed worktree. The raw per-case medians below come from
+`benchmarks/local-data/runs.jsonl`.
+
+### Suite Medians Across Five Runs
+
+| Suite | Thread identity | Median suite average |
+|---|---|---:|
+| `frontend_phases` | default | `85.15ms` |
+| `frontend_phases` | fixed 1 | `84.89ms` |
+| `end_to_end_cli` | default | `24.49ms` |
+
+Single-thread and default-thread frontend medians agree within noise on the constant-heavy cases,
+so constant setup cost is not a scheduling artefact.
+
+### Per-Case Medians (median of five run medians)
+
+| Case | frontend wall | CLI wall |
+|---|---:|---:|
+| `docs` | `1540.55ms` | `286.07ms` |
+| `type_stress` | `59.03ms` | `21.03ms` |
+| `fold_stress` | `56.04ms` | `17.99ms` |
+| `environment_stress` | `44.92ms` | `17.20ms` |
+| `one_module_kitchen_sink` | `36.92ms` | `12.47ms` |
+| `expression_rpn_churn` | `34.14ms` | `11.68ms` |
+| `constant_dag_churn` | `29.45ms` | `10.86ms` |
+
+### Module-Attributed Constant Timings (frontend suite, median ms)
+
+| Case | `ast.total` | `constant_header_resolution` | `const_template_parse` | `const_template_fold` | `finalise.module_constant` |
+|---|---:|---:|---:|---:|---:|
+| `docs` | `1143.87` | `566.28` | `317.16` | `44.17` | `104.37` |
+| `fold_stress` | `36.57` | `17.04` | `0.00` | `0.00` | `0.97` |
+| `type_stress` | `33.55` | `8.53` | `0.00` | `0.00` | `0.73` |
+| `environment_stress` | `28.16` | `7.30` | `0.00` | `0.00` | `0.73` |
+| `constant_dag_churn` | `17.07` | `9.70` | `0.00` | `0.00` | `0.64` |
+| `one_module_kitchen_sink` | `10.97` | `1.70` | `0.00` | `0.00` | `0.43` |
+| `expression_rpn_churn` | `5.05` | `0.16` | `0.00` | `0.00` | `0.22` |
+
+Constant-header resolution is about half of `frontend.ast.total` on `docs`, `fold_stress` and
+`constant_dag_churn`. That confirms the plan's priority ordering without relying on the deleted
+legacy detailed channel.
+
+### New Scaling Fixtures
+
+Four workloads and eight cases were added (`37` workloads, `68` cases total):
+
+- `benchmarks/constant-scaling/constant-chain-32.moth`
+- `benchmarks/constant-scaling/constant-chain-128.moth`
+- `benchmarks/constant-scaling/constant-chain-512.moth`
+- `benchmarks/nominal-capacity-stress.moth`
+
+The chains repeat one tiny initializer (`c<i> #= c<i-1> + 1`) so constant count is the only
+variable. The nominal fixture holds constant count at four while driving `240` fixed-capacity
+struct fields and `36` capacity-dependent choice payload variants, separating member-shell cost
+from constant cost.
+
+`moth check` wall time on the chains, single measurement each: `32` -> `~35ms`, `128` -> `~68ms`,
+`512` -> `~378ms`. Against a `~28ms` fixed floor that is roughly `7ms`, `40ms` and `350ms` of
+constant work for a `4x` and `4x` growth in constant count: clearly superlinear.
+
+### Counter Baseline
+
+New counters added in this phase are listed with their baseline values. `ast_declaration_table_replacements`
+was renamed `ast_declaration_replacements_by_path`; a by-ID replacement path does not exist yet and
+arrives with the dense declaration-identity phase.
+
+| Counter | `chain_32` | `chain_128` | `chain_512` | `nominal_capacity` | `constant_dag_churn` | `fold_stress` | `docs` |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `ast_constants_resolved` | `32` | `128` | `512` | `4` | `88` | `120` | `545` |
+| `ast_constant_resolution_contexts_created` | `32` | `128` | `512` | `4` | `88` | `120` | `545` |
+| `ast_constant_pass_prior_constant_ids_copied` | `496` | `8128` | `130816` | `310` | `4092` | `7860` | `17337` |
+| `ast_constant_pass_visibility_entries_cloned` | `2208` | `33408` | `526848` | `468` | `16456` | `30840` | `24816` |
+| `ast_constant_pass_side_table_entries_cloned` | `2` | `2` | `2` | `106` | `6` | `10` | `150` |
+| `ast_module_constant_declaration_clones` | `32` | `128` | `512` | `4` | `88` | `120` | `545` |
+| `ast_scope_contexts_created` | `65` | `257` | `1025` | `161` | `197` | `299` | `1904` |
+| `ast_expression_ordering_input_items` | `95` | `383` | `1535` | `8` | `459` | `1120` | `1322` |
+| `ast_expression_typed_stack_items` | `93` | `381` | `1533` | `0` | `392` | `960` | `0` |
+| `ast_expression_fold_items` | `93` | `381` | `1533` | `0` | `392` | `960` | `0` |
+| `ast_expression_operand_clones` | `93` | `381` | `1533` | `0` | `334` | `780` | `0` |
+| `ast_diagnostic_data_type_materialisations` | `93` | `381` | `1533` | `0` | `392` | `960` | `0` |
+| `ast_declaration_replacements_by_path` | `33` | `129` | `513` | `69` | `91` | `125` | `620` |
+| `ast_module_constant_normalization_expressions_visited` | `32` | `128` | `512` | `4` | `108` | `142` | `2089` |
+| `hir_const_value_conversions` | `32` | `128` | `512` | `4` | `108` | `142` | `2076` |
+| `public_folded_value_conversions` | `0` | `0` | `0` | `0` | `0` | `0` | `6` |
+| `ast_branch_local_generic_requests` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
+| `hir_static_bool_if_nodes` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
+| `hir_runtime_if_nodes` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
+| `generic_substitution_key_builds` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
+
+`ast_constant_pass_prior_constant_ids_copied` is exactly `C * (C - 1) / 2` on the chains. The
+cumulative prior-constant copy and the per-constant `FileVisibility` clone are the two quadratic
+terms the dense-identity and session phases must drive to zero.
+
+`ast_expression_operand_clones` equals `ast_expression_fold_items` on the chains: every folded
+operand is a full `Expression` clone today.
+
+`generic_trait_churn` is the workload that will move the substitution-key counters; the constant
+fixtures build no substitution keys at all.
+
+### Static Control-Flow Freeze
+
+Four integration cases freeze the current accepted behaviour that specialisation must preserve:
+
+- `static_if_constant_bool_branch_selection`
+- `static_if_value_producing_branch_selection`
+- `static_if_branch_scope_preserved`
+- `static_if_inactive_branch_generic_call`
+
+`function_partial_if_return_rejected` already froze the current terminality rejection for
+`if true: return 1 ;`, and `dynamic_if_test` already owns runtime-condition execution, so neither
+was duplicated.
+
+Three ignored intended-contract tests in `src/compiler_frontend/tests/frontend_pipeline_tests.rs`
+record the accepted behaviour the current compiler does not implement. All three fail today for the
+right reasons:
+
+- `intended_compile_time_true_condition_reaches_hir_without_a_branch`: `1` branch terminator, `0`
+  expected
+- `intended_compile_time_false_condition_without_else_lowers_no_branch_body`: `1` branch
+  terminator, `0` expected
+- `intended_terminality_observes_the_selected_branch`:
+  `InvalidReturnShape { reason: FunctionMayFallThrough }`
+
+`runtime_bool_condition_lowers_one_branch_diamond` is the matching non-ignored freeze.
+
+### Findings That Change Later Phases
+
+1. **A constant-backed Bool condition is not a folded `Bool` at HIR.** `if enabled:` with
+   `enabled #= true` reaches HIR as a reference, not `ExpressionKind::Bool`; only a literal
+   `if true:` folds. The static-if owner must read the condition through the folded-value
+   authority rather than pattern-matching the expression kind, otherwise it will only specialise
+   literal conditions. `hir_static_bool_if_nodes` therefore counts the literal case only, and its
+   baseline is `0` on every fixture except hand-written probes.
+2. **Inactive generic work is materialised today.** A generic call reachable only through a
+   compile-time-false branch still emits a generated function (`__moth_generated_fn_1` in the
+   `static_if_inactive_branch_generic_call` artefact). The pruning mechanism already exists:
+   `ScopeContext::generic_request_checkpoint` / `discard_generic_requests_since`, used by static
+   `assert(true)` message discarding in `src/compiler_frontend/ast/statements/asserts.rs`. The
+   static-if owner should reuse it rather than inventing a second boundary.
+3. **`ast_constant_pass_side_table_entries_cloned` is small but wrongly shaped.** The five side
+   tables are cloned once per module, so the count reflects table size, not constant count. The
+   per-constant cost lives in `ast_constant_pass_visibility_entries_cloned` instead.
+4. **Struct and choice member shells are rebuilt after constants** in
+   `AstModuleEnvironmentBuilder::resolve_type_declarations`, which is the cost the nominal
+   capacity fixture isolates.

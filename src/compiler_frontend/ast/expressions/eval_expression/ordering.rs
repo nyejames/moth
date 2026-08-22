@@ -12,6 +12,7 @@
 use crate::compiler_frontend::ast::expressions::expression::Operator;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::compiler_errors::{CompilerError, SourceLocation};
+use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::{eval_log, return_compiler_error};
 
 /// Order a parsed expression fragment into RPN and return the expression source location anchor.
@@ -21,6 +22,8 @@ pub(super) fn order_expression_nodes(
     if nodes.is_empty() {
         return_compiler_error!("No nodes found in expression. This should never happen.");
     }
+
+    add_ast_counter(AstCounter::ExpressionOrderingInputItems, nodes.len());
 
     let mut output_queue: Vec<ExpressionRpnItem> = Vec::new();
     let mut operator_stack: Vec<ExpressionRpnItem> = Vec::new();

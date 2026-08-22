@@ -1,0 +1,19 @@
+-- A compile-time Bool condition selects one already-validated value-producing branch.
+--
+-- Both branches must satisfy the receiving arity and type rules before selection, so the
+-- inactive branch stays frontend-valid source even when it produces no executable work.
+
+enabled #= true
+disabled #= false
+
+active_label = if enabled then "on" else "off"
+inactive_label = if disabled then "on" else "off"
+literal_label = if true then "yes" else "no"
+
+pick |flag Bool| -> Int:
+    return if flag then 10 else 20
+;
+
+constant_pick = pick(enabled)
+
+[:value_if active=[active_label] inactive=[inactive_label] literal=[literal_label] call=[constant_pick]]

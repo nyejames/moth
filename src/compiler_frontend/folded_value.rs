@@ -22,6 +22,7 @@ use crate::compiler_frontend::canonical_type_identity::{
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
+use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 // ===========================================================================
@@ -259,6 +260,8 @@ pub(crate) fn convert_expression_to_folded_value(
     string_table: &StringTable,
     projection_context: &CanonicalTypeProjectionContext,
 ) -> Result<PublicFoldedValue, CompilerError> {
+    increment_frontend_counter(FrontendCounter::PublicFoldedValueConversions);
+
     match &expression.kind {
         ExpressionKind::Int(value) => Ok(PublicFoldedValue::Int(*value)),
         ExpressionKind::Float(value) => Ok(PublicFoldedValue::Float(FiniteFloat::new(*value)?)),

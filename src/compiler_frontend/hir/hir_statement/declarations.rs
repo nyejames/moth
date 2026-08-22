@@ -26,6 +26,7 @@ use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::hir::structs::{HirField, HirStruct};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
@@ -106,6 +107,8 @@ impl<'a> HirBuilder<'a> {
         expression: &Expression,
         location: &SourceLocation,
     ) -> Result<Option<HirConstValue>, CompilerError> {
+        increment_frontend_counter(FrontendCounter::HirConstValueConversions);
+
         match &expression.kind {
             ExpressionKind::Int(value) => Ok(Some(HirConstValue::Int(*value))),
             ExpressionKind::Float(value) => Ok(Some(HirConstValue::Float(*value))),

@@ -1,0 +1,45 @@
+-- constant-chain-32.moth
+-- Constant-count scaling fixture: 32 dependency-ordered constants.
+--
+-- Every constant uses the same tiny initializer shape `c<i> #= c<i-1> + 1`, so the
+-- only variable across the 32/128/512 fixtures is how many constants the module
+-- constant pass has to set up and fold. Per-constant setup cost is therefore visible
+-- as curvature between the three sizes rather than as fold complexity.
+--
+-- Deterministic pattern; regenerate by repeating the initializer line, do not hand edit.
+
+
+c000 #= 1
+c001 #= c000 + 1
+c002 #= c001 + 1
+c003 #= c002 + 1
+c004 #= c003 + 1
+c005 #= c004 + 1
+c006 #= c005 + 1
+c007 #= c006 + 1
+c008 #= c007 + 1
+c009 #= c008 + 1
+c010 #= c009 + 1
+c011 #= c010 + 1
+c012 #= c011 + 1
+c013 #= c012 + 1
+c014 #= c013 + 1
+c015 #= c014 + 1
+c016 #= c015 + 1
+c017 #= c016 + 1
+c018 #= c017 + 1
+c019 #= c018 + 1
+c020 #= c019 + 1
+c021 #= c020 + 1
+c022 #= c021 + 1
+c023 #= c022 + 1
+c024 #= c023 + 1
+c025 #= c024 + 1
+c026 #= c025 + 1
+c027 #= c026 + 1
+c028 #= c027 + 1
+c029 #= c028 + 1
+c030 #= c029 + 1
+c031 #= c030 + 1
+
+[:constant-chain-32 last=[c031]]

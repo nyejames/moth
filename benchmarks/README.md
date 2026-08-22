@@ -29,7 +29,7 @@ just bench-frontend
 
 `just bench-frontend` records the focused frontend suite through the same local history and monthly summary flow, but under a separate suite kind.
 
-Every mode preflights its selected cases before measurement. That successful preflight provides the one warmup. Full check and recording modes then run ten measured iterations per case. `bench-ci` preflights all 60 cases before it selects 8 quick CLI cases and 10 quick frontend cases for three measured iterations.
+Every mode preflights its selected cases before measurement. That successful preflight provides the one warmup. Full check and recording modes then run ten measured iterations per case. `bench-ci` preflights all 68 cases before it selects 8 quick CLI cases and 10 quick frontend cases for three measured iterations.
 
 Non-recording commands never append local JSONL history or change tracked summaries.
 
@@ -37,7 +37,7 @@ Recorded runs (`just bench` and `just bench-frontend`) require a clean committed
 
 ## Manifest And Stable Identity
 
-`benchmarks/manifest.toml` owns the ordered workload and case inventory. It currently declares 33 workloads and 60 cases.
+`benchmarks/manifest.toml` owns the ordered workload and case inventory. It currently declares 37 workloads and 68 cases.
 
 A workload names the source inputs that determine one compilation workload:
 
@@ -360,7 +360,7 @@ Groups are public summary labels, not compiler architecture boundaries. The grou
 
 - `core`: baseline check/build cases.
 - `docs`: documentation project checking.
-- `stress`: targeted template, type, fold, pattern, collection, and environment stress fixtures.
+- `stress`: targeted template, type, fold, pattern, collection, and environment stress fixtures, plus the constant-count scaling chains and the capacity-dependent nominal fixture.
 - `module`: module/import/dependency graph and import fanout coverage.
 - `parallelism`: frontend scheduling threshold, source-loading, and module/file fanout coverage.
 - `borrow`: valid borrow and exclusivity coverage.

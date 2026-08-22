@@ -45,6 +45,9 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::instrumentation::{
+    AstCounter, add_ast_counter, increment_ast_counter,
+};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -101,6 +104,8 @@ pub fn constant_fold(
     // Fold individual constant sub-expressions while leaving runtime-dependent operands and
     // operators in place. This keeps RPN ordering while still reporting statically known
     // numeric failures that happen to sit inside a larger runtime expression.
+    add_ast_counter(AstCounter::ExpressionFoldItems, output_stack.len());
+
     let mut stack: Vec<ExpressionRpnItem> = Vec::with_capacity(output_stack.len());
 
     for item in output_stack {
@@ -178,6 +183,7 @@ pub fn constant_fold(
             }
 
             operand @ ExpressionRpnItem::Operand(_) => {
+                increment_ast_counter(AstCounter::ExpressionOperandClones);
                 stack.push(operand.to_owned());
             }
         }

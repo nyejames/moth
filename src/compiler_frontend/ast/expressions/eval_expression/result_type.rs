@@ -16,6 +16,9 @@ use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::instrumentation::{
+    AstCounter, add_ast_counter, increment_ast_counter,
+};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 /// Resolved type facts carried by the operator typing stack.
@@ -31,6 +34,8 @@ pub(super) struct ExpressionResultType {
 
 impl ExpressionResultType {
     pub(super) fn from_type_id(type_id: TypeId, type_environment: &TypeEnvironment) -> Self {
+        increment_ast_counter(AstCounter::DiagnosticDataTypeMaterialisations);
+
         let diagnostic_type = diagnostic_type_spelling(type_id, type_environment);
         Self {
             diagnostic_type: diagnostic_type.to_owned(),
@@ -39,6 +44,8 @@ impl ExpressionResultType {
     }
 
     pub(super) fn from_expression(expression: &Expression) -> Self {
+        increment_ast_counter(AstCounter::DiagnosticDataTypeMaterialisations);
+
         Self {
             diagnostic_type: expression.diagnostic_type.to_owned(),
             type_id: expression.type_id,
@@ -54,6 +61,8 @@ pub(super) fn resolve_expression_result_type(
 ) -> Result<ExpressionResultType, ExpressionTypingError> {
     // Mirror the final RPN evaluation shape with a type-only stack so operator diagnostics fire
     // before constant folding mutates any nodes.
+    add_ast_counter(AstCounter::ExpressionTypedStackItems, output_queue.len());
+
     let mut stack: Vec<ExpressionResultType> = Vec::with_capacity(output_queue.len());
 
     // ------------------------

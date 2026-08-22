@@ -46,6 +46,9 @@ use std::sync::Arc;
 
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
+use crate::compiler_frontend::instrumentation::{
+    AstCounter, add_ast_counter, increment_ast_counter,
+};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
@@ -950,6 +953,15 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         let nominal_type_ids_by_path = Rc::new(self.nominal_type_ids_by_path.clone());
         let trait_environment = Rc::new(trait_environment.clone());
 
+        add_ast_counter(
+            AstCounter::ConstantPassSideTableEntriesCloned,
+            resolved_type_aliases.len()
+                + generic_declarations.len()
+                + resolved_struct_fields_by_path.len()
+                + choice_variant_shells_by_path.len()
+                + nominal_type_ids_by_path.len(),
+        );
+
         for header in sorted_headers {
             let HeaderKind::Constant { .. } = &header.kind else {
                 continue;
@@ -988,6 +1000,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 },
             )
             .map_err(|error| self.expression_error_messages(error, string_table))?;
+
+            increment_ast_counter(AstCounter::ConstantsResolved);
+            increment_ast_counter(AstCounter::ModuleConstantDeclarationClones);
 
             self.replace_declaration(declaration.clone())
                 .map_err(|error| self.error_messages(error, string_table))?;

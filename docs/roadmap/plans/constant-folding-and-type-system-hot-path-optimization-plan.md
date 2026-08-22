@@ -53,19 +53,19 @@ ACTIVE_PLAN:
 - `docs/roadmap/plans/constant-folding-and-type-system-hot-path-optimization-plan.md`
 
 CURRENT_SLICE:
-- Phase: prerequisite gate
-- Goal: rebase onto the accepted timing-schema v2 implementation, establish a reliable performance
-  baseline and freeze the current static-`if` behaviour before any representation change
+- Phase: 1 (consolidate constant-resolution context)
+- Goal: replace the per-constant body-oriented context construction with one module-owned
+  `ConstantResolutionSession`
 - Non-goals: no semantic control-flow change before the explicit Phase 4C gate
 
 LAST_GOOD_COMMIT:
-- `7a3649d2e35668d11b55746835ac1cb2a7c1bb07`
+- `3ba28c5fb907d2ee44e69a58c59d002aa6a2b384` (Phase 0 baseline commit)
 
 PREREQUISITE:
-- module-attributed timings for constant resolution, const-template parse/fold and module-constant
-  finalisation must exist before Phase 0 records its baseline. This was previously delegated to
-  `command-timing-accounting-and-reporting-correction-plan.md`, which was deleted from the roadmap
-  on 2026-08-18; establishing the attribution is now part of this plan's Phase 0.
+- Satisfied. Timing schema `2` already carries the module-attributed
+  `frontend.ast.environment.constant_header_resolution`,
+  `frontend.ast.emit.const_template_parse`, `frontend.ast.emit.const_template_fold` and
+  `frontend.ast.finalise.module_constant` metrics, so no rebase was needed.
 
 RELEVANT_DOCS:
 - `AGENTS.md`
@@ -108,8 +108,95 @@ RELEVANT_CODE:
 - `benchmarks/manifest.toml`
 
 NEXT_ACTION:
-- rebase after timing correction, execute Phase 0 and preserve current semantics until the mandatory
-  Phase 4C review gate
+- execute Phase 1 and preserve current semantics until the mandatory Phase 4C review gate
+
+---
+
+## Phase 0 outcome and implementation notes
+
+Phase 0 completed on 2026-08-22. Evidence lives in
+`benchmarks/frontend-optimization-results.md` under
+`Constant Evaluation And Type-System Plan - Phase 0 Baseline - 2026-08-22`. The facts below change
+how later phases must be implemented, so they are recorded here rather than only in the evidence
+file.
+
+### Measured baseline highlights
+
+- Constant-header resolution is about half of `frontend.ast.total` on `docs` (`566ms` of `1144ms`),
+  `fold_stress` (`17.0ms` of `36.6ms`) and `constant_dag_churn` (`9.7ms` of `17.1ms`).
+- `ast_constant_pass_prior_constant_ids_copied` is exactly `C * (C - 1) / 2`: `496` / `8128` /
+  `130816` for the 32 / 128 / 512 constant chains. `ast_constant_pass_visibility_entries_cloned`
+  is `2208` / `33408` / `526848` for the same chains.
+- `moth check` on the chains costs roughly `7ms` / `40ms` / `350ms` above a `~28ms` floor, so
+  constant setup is clearly superlinear today.
+- `ast_expression_operand_clones` equals `ast_expression_fold_items` on the chains: every folded
+  operand is currently a full `Expression` clone.
+
+### Findings that constrain later phases
+
+1. **A constant-backed Bool condition is not a folded `Bool` at HIR.** `if enabled:` with
+   `enabled #= true` reaches HIR as a reference expression; only a literal `if true:` folds to
+   `ExpressionKind::Bool`. The JavaScript backend resolves the module constant later, which is why
+   the emitted code reads `if (true)`. The Phase 4C specialisation owner must read the condition
+   through the folded-value authority (module constant row / `ConstValueStore`), not by matching
+   `ExpressionKind::Bool`. The `hir_static_bool_if_nodes` counter deliberately measures the literal
+   case only, so it is the post-4C invariant counter, not a candidate census.
+2. **Reuse the existing generic-request pruning boundary.** `ScopeContext::generic_request_checkpoint`
+   and `ScopeContext::discard_generic_requests_since` already exist and are used by static
+   `assert(true)` message discarding in `src/compiler_frontend/ast/statements/asserts.rs`. Phase 4C
+   must reuse that mechanism for inactive branches rather than adding a second boundary.
+   `src/compiler_frontend/ast/statements/branching.rs` already brackets its branch bodies with a
+   checkpoint under `benchmark_counters` for the `ast_branch_local_generic_requests` counter.
+3. **Inactive generic work is materialised today.** A generic call reachable only through a
+   compile-time-false branch still emits a generated function into the artefact. Phase 4C's
+   acceptance must assert its absence.
+4. **`HirBuilder::lower_if_with_body_emitters` in
+   `src/compiler_frontend/hir/hir_statement/control_flow.rs` is the single HIR `if`-diamond owner**
+   for both statement `if` and runtime template `if`. It carries `record_hir_branch_condition_kind`,
+   which is where the "no statically decided `if` reaches HIR" assertion belongs.
+5. **Member shells are rebuilt after constants** in
+   `AstModuleEnvironmentBuilder::resolve_type_declarations`
+   (`src/compiler_frontend/ast/module_ast/environment/type_resolution.rs`), which is the Phase 8
+   target. `benchmarks/nominal-capacity-stress.moth` isolates that cost from constant count.
+6. **`resolve_constant_headers` clones five module side tables once per module**, not per constant,
+   so `ast_constant_pass_side_table_entries_cloned` reflects table size. The genuine per-constant
+   cost is the `Rc::new(file_visibility.clone())` inside
+   `parse_constant_header_declaration`, measured by `ast_constant_pass_visibility_entries_cloned`.
+
+### Assets Phase 0 created
+
+- Benchmark workloads `constant_chain_32`, `constant_chain_128`, `constant_chain_512` and
+  `nominal_capacity_stress`, each with a `_check` and a `_frontend` case. The manifest inventory
+  test in `xtask/src/benchmark_manifest/tests.rs` and the counts in `benchmarks/README.md` were
+  updated in the same change.
+- New `AstCounter` variants: `ConstantResolutionContextsCreated`, `ConstantsResolved`,
+  `ConstantPassPriorConstantIdsCopied`, `ConstantPassVisibilityEntriesCloned`,
+  `ConstantPassSideTableEntriesCloned`, `ModuleConstantDeclarationClones`,
+  `ExpressionOrderingInputItems`, `ExpressionTypedStackItems`, `ExpressionFoldItems`,
+  `ExpressionOperandClones`, `DiagnosticDataTypeMaterialisations`, `BranchLocalGenericRequests`.
+  `DeclarationTableReplacements` was renamed `DeclarationReplacementsByPath`; the by-ID counterpart
+  belongs to Phase 2, which introduces the by-ID replacement path.
+- New `FrontendCounter` variants: `GenericSubstitutionKeyBuilds`,
+  `GenericSubstitutionKeySortedPairs`, `PublicFoldedValueConversions`, `HirConstValueConversions`,
+  `HirStaticBoolIfNodes`, `HirRuntimeIfNodes`.
+- Integration cases `static_if_constant_bool_branch_selection`,
+  `static_if_value_producing_branch_selection`, `static_if_branch_scope_preserved` and
+  `static_if_inactive_branch_generic_call`. `function_partial_if_return_rejected` already froze the
+  current terminality rejection and `dynamic_if_test` already owns runtime-condition execution, so
+  neither was duplicated.
+- Ignored intended-contract tests in `src/compiler_frontend/tests/frontend_pipeline_tests.rs`:
+  `intended_compile_time_true_condition_reaches_hir_without_a_branch`,
+  `intended_compile_time_false_condition_without_else_lowers_no_branch_body` and
+  `intended_terminality_observes_the_selected_branch`, plus the non-ignored freeze
+  `runtime_bool_condition_lowers_one_branch_diamond`. Phase 4C enables the ignored three.
+
+### Measurement protocol note
+
+Recorded runs (`just bench`, `just bench-frontend`) require a clean committed worktree and rewrite
+the tracked monthly summary, so five consecutive recorded invocations need
+`git checkout -- benchmarks/summaries/` between them. Fixed-thread recorded runs
+(`RAYON_NUM_THREADS=1`) never touch the tracked summary. Per-case medians come from
+`benchmarks/local-data/runs.jsonl`, which read-only `bench-check` modes do not write.
 
 ---
 
@@ -572,16 +659,16 @@ changing this plan's semantic stores.
 
 Prerequisite: rebase onto the accepted timing-schema v2 implementation.
 
-- [ ] Record five independent focused frontend and end-to-end runs using the existing benchmark
+- [x] Record five independent focused frontend and end-to-end runs using the existing benchmark
       protocol.
-- [ ] Capture module-attributed constant, const-template and finalisation timings.
-- [ ] Run `docs`, `constant_dag_churn`, `fold_stress`, `expression_rpn_churn`, `type_stress`,
+- [x] Capture module-attributed constant, const-template and finalisation timings.
+- [x] Run `docs`, `constant_dag_churn`, `fold_stress`, `expression_rpn_churn`, `type_stress`,
       `environment_stress` and `one_module_kitchen_sink`.
-- [ ] Add committed clean benchmark workloads with the same tiny initializer repeated across at
+- [x] Add committed clean benchmark workloads with the same tiny initializer repeated across at
       least 32, 128 and 512 dependency-ordered constants. Generate them deterministically if hand
       maintenance would be noisy.
-- [ ] Add a capacity-dependent nominal fixture that separates constant count from member count.
-- [ ] Add or freeze focused static-control-flow cases for:
+- [x] Add a capacity-dependent nominal fixture that separates constant count from member count.
+- [x] Add or freeze focused static-control-flow cases for:
   - literal `true` and `false` statement `if`
   - constant-backed Bool conditions
   - `if` with and without `else`
@@ -591,9 +678,9 @@ Prerequisite: rebase onto the accepted timing-schema v2 implementation.
   - a generic call owned only by the future inactive branch
   - borrow, lifetime, link and target work owned only by the future inactive branch
   - a runtime Bool condition that must continue to lower as CFG
-- [ ] Where the intended Phase 4C behaviour differs from the current compiler, add clearly named
+- [x] Where the intended Phase 4C behaviour differs from the current compiler, add clearly named
       ignored intended-contract tests rather than weakening current assertions early.
-- [ ] Record counters for:
+- [x] Record counters for:
   - constants resolved
   - constant sessions and `ScopeContext`s created
   - previous-constant IDs copied
@@ -608,9 +695,9 @@ Prerequisite: rebase onto the accepted timing-schema v2 implementation.
   - static-Bool `if` candidates
   - runtime `if` nodes reaching HIR
   - generated requests attributed to branch-local call sites
-- [ ] Use `RAYON_NUM_THREADS=1` for local frontend attribution, then repeat the normal thread identity
+- [x] Use `RAYON_NUM_THREADS=1` for local frontend attribution, then repeat the normal thread identity
       to ensure no scheduling regression.
-- [ ] Store concise evidence in `benchmarks/frontend-optimization-results.md`.
+- [x] Store concise evidence in `benchmarks/frontend-optimization-results.md`.
 
 Checkpoint: evidence and intended-contract tests only. No semantic representation or control-flow
 change.

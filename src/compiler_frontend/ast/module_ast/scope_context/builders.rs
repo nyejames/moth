@@ -200,6 +200,11 @@ impl ScopeContext {
         self,
         constants: &[Declaration],
     ) -> ScopeContext {
+        add_ast_counter(
+            AstCounter::ConstantPassPriorConstantIdsCopied,
+            constants.len(),
+        );
+
         self.arena
             .borrow_mut()
             .frame_mut(self.current_frame_id)

@@ -89,6 +89,10 @@ pub(crate) enum FrontendCounter {
     RuntimeTemplateCount,
 
     // HIR and borrow-validation volume.
+    PublicFoldedValueConversions,
+    HirConstValueConversions,
+    HirStaticBoolIfNodes,
+    HirRuntimeIfNodes,
     HirBlockCount,
     HirStatementCount,
     HirFunctionCount,
@@ -126,6 +130,8 @@ pub(crate) enum FrontendCounter {
     TypeEnvironmentVariantsForQueries,
     TypeEnvironmentVariantsReturned,
     TypeEnvironmentSubstituteTypeIdCalls,
+    GenericSubstitutionKeyBuilds,
+    GenericSubstitutionKeySortedPairs,
     TypeEnvironmentSubstitutionCacheLookups,
     TypeEnvironmentSubstitutionCacheHits,
     TypeEnvironmentSubstitutionCacheMisses,
@@ -192,6 +198,12 @@ mod detailed {
     static TYPE_ENVIRONMENT_VARIANTS_FOR_QUERIES: AtomicUsize = AtomicUsize::new(0);
     static TYPE_ENVIRONMENT_VARIANTS_RETURNED: AtomicUsize = AtomicUsize::new(0);
     static TYPE_ENVIRONMENT_SUBSTITUTE_TYPE_ID_CALLS: AtomicUsize = AtomicUsize::new(0);
+    static GENERIC_SUBSTITUTION_KEY_BUILDS: AtomicUsize = AtomicUsize::new(0);
+    static GENERIC_SUBSTITUTION_KEY_SORTED_PAIRS: AtomicUsize = AtomicUsize::new(0);
+    static PUBLIC_FOLDED_VALUE_CONVERSIONS: AtomicUsize = AtomicUsize::new(0);
+    static HIR_CONST_VALUE_CONVERSIONS: AtomicUsize = AtomicUsize::new(0);
+    static HIR_STATIC_BOOL_IF_NODES: AtomicUsize = AtomicUsize::new(0);
+    static HIR_RUNTIME_IF_NODES: AtomicUsize = AtomicUsize::new(0);
     static TYPE_ENVIRONMENT_SUBSTITUTION_CACHE_LOOKUPS: AtomicUsize = AtomicUsize::new(0);
     static TYPE_ENVIRONMENT_SUBSTITUTION_CACHE_HITS: AtomicUsize = AtomicUsize::new(0);
     static TYPE_ENVIRONMENT_SUBSTITUTION_CACHE_MISSES: AtomicUsize = AtomicUsize::new(0);
@@ -445,6 +457,10 @@ mod detailed {
             FrontendCounter::TemplateCount,
             FrontendCounter::ConstTemplateCount,
             FrontendCounter::RuntimeTemplateCount,
+            FrontendCounter::PublicFoldedValueConversions,
+            FrontendCounter::HirConstValueConversions,
+            FrontendCounter::HirStaticBoolIfNodes,
+            FrontendCounter::HirRuntimeIfNodes,
             FrontendCounter::HirBlockCount,
             FrontendCounter::HirStatementCount,
             FrontendCounter::HirFunctionCount,
@@ -475,6 +491,8 @@ mod detailed {
             FrontendCounter::TypeEnvironmentVariantsForQueries,
             FrontendCounter::TypeEnvironmentVariantsReturned,
             FrontendCounter::TypeEnvironmentSubstituteTypeIdCalls,
+            FrontendCounter::GenericSubstitutionKeyBuilds,
+            FrontendCounter::GenericSubstitutionKeySortedPairs,
             FrontendCounter::TypeEnvironmentSubstitutionCacheLookups,
             FrontendCounter::TypeEnvironmentSubstitutionCacheHits,
             FrontendCounter::TypeEnvironmentSubstitutionCacheMisses,
@@ -666,6 +684,14 @@ mod detailed {
 
             FrontendCounter::RuntimeTemplateCount => &RUNTIME_TEMPLATE_COUNT,
 
+            FrontendCounter::PublicFoldedValueConversions => &PUBLIC_FOLDED_VALUE_CONVERSIONS,
+
+            FrontendCounter::HirConstValueConversions => &HIR_CONST_VALUE_CONVERSIONS,
+
+            FrontendCounter::HirStaticBoolIfNodes => &HIR_STATIC_BOOL_IF_NODES,
+
+            FrontendCounter::HirRuntimeIfNodes => &HIR_RUNTIME_IF_NODES,
+
             FrontendCounter::HirBlockCount => &HIR_BLOCK_COUNT,
 
             FrontendCounter::HirStatementCount => &HIR_STATEMENT_COUNT,
@@ -742,6 +768,12 @@ mod detailed {
 
             FrontendCounter::TypeEnvironmentSubstituteTypeIdCalls => {
                 &TYPE_ENVIRONMENT_SUBSTITUTE_TYPE_ID_CALLS
+            }
+
+            FrontendCounter::GenericSubstitutionKeyBuilds => &GENERIC_SUBSTITUTION_KEY_BUILDS,
+
+            FrontendCounter::GenericSubstitutionKeySortedPairs => {
+                &GENERIC_SUBSTITUTION_KEY_SORTED_PAIRS
             }
 
             FrontendCounter::TypeEnvironmentSubstitutionCacheLookups => {
@@ -992,6 +1024,14 @@ mod detailed {
 
             FrontendCounter::RuntimeTemplateCount => "runtime_template_count",
 
+            FrontendCounter::PublicFoldedValueConversions => "public_folded_value_conversions",
+
+            FrontendCounter::HirConstValueConversions => "hir_const_value_conversions",
+
+            FrontendCounter::HirStaticBoolIfNodes => "hir_static_bool_if_nodes",
+
+            FrontendCounter::HirRuntimeIfNodes => "hir_runtime_if_nodes",
+
             FrontendCounter::HirBlockCount => "hir_block_count",
 
             FrontendCounter::HirStatementCount => "hir_statement_count",
@@ -1070,6 +1110,12 @@ mod detailed {
 
             FrontendCounter::TypeEnvironmentSubstituteTypeIdCalls => {
                 "type_environment_substitute_type_id_calls"
+            }
+
+            FrontendCounter::GenericSubstitutionKeyBuilds => "generic_substitution_key_builds",
+
+            FrontendCounter::GenericSubstitutionKeySortedPairs => {
+                "generic_substitution_key_sorted_pairs"
             }
 
             FrontendCounter::TypeEnvironmentSubstitutionCacheLookups => {

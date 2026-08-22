@@ -60,7 +60,7 @@ use crate::compiler_frontend::headers::module_symbols::{
     GenericDeclarationMetadata, ModuleSymbols,
 };
 use crate::compiler_frontend::instrumentation::{
-    AstCounter, increment_ast_counter, record_ast_counter_max,
+    AstCounter, add_ast_counter, increment_ast_counter, record_ast_counter_max,
 };
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;

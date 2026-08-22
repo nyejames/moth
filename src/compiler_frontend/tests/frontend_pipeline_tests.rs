@@ -23,6 +23,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{
 };
 use crate::compiler_frontend::hir::functions::{HirFunctionOrigin, HirFunctionOriginLookup};
 use crate::compiler_frontend::hir::module::HirModule;
+use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::style_directives::{
@@ -522,5 +523,112 @@ fn html_style_directive_available_during_header_parsing() {
         matches!(head.value.kind, ExpressionKind::StringSlice(_)),
         "head should fold to a string slice when $html directive is available, got {:?}",
         head.value.kind
+    );
+}
+
+// ---------------------------------
+//  Static Bool control-flow handoff
+// ---------------------------------
+//
+// Stage 4 owns static Bool `if` specialisation, so the AST that reaches HIR must contain a
+// branch only where the condition is a genuine runtime test. The frozen case below records the
+// runtime shape that must survive specialisation. The `intended_` cases record the accepted
+// contract the current compiler does not implement yet; they are enabled by the phase that adds
+// the Stage 4 specialisation owner.
+
+/// Count the `if` diamonds a lowered module actually contains.
+fn branch_terminator_count(hir: &HirModule) -> usize {
+    hir.blocks
+        .iter()
+        .filter(|block| matches!(block.terminator, HirTerminator::If { .. }))
+        .count()
+}
+
+#[test]
+fn runtime_bool_condition_lowers_one_branch_diamond() {
+    let mut project = FrontendProject::new(
+        &[(
+            "src/@page.moth",
+            "threshold ~= 4\nresult ~= 0\nif threshold > 1:\n    result = 1\nelse\n    result = 2\n;\nio.line([: [result]])\n",
+        )],
+        "src/@page.moth",
+        StyleDirectiveRegistry::built_ins(),
+    );
+
+    let hir = project.hir();
+
+    assert_eq!(
+        branch_terminator_count(&hir),
+        1,
+        "a runtime Bool condition must keep its ordinary branch/merge shape"
+    );
+}
+
+#[test]
+#[ignore = "intended Stage 4 static Bool `if` specialisation; enabled by the static-if phase of \
+            docs/roadmap/plans/constant-folding-and-type-system-hot-path-optimization-plan.md"]
+fn intended_compile_time_true_condition_reaches_hir_without_a_branch() {
+    let mut project = FrontendProject::new(
+        &[(
+            "src/@page.moth",
+            "enabled #= true\nresult ~= 0\nif enabled:\n    result = 1\nelse\n    result = 2\n;\nio.line([: [result]])\n",
+        )],
+        "src/@page.moth",
+        StyleDirectiveRegistry::built_ins(),
+    );
+
+    let hir = project.hir();
+
+    assert_eq!(
+        branch_terminator_count(&hir),
+        0,
+        "a compile-time `true` condition must select the `then` branch before HIR"
+    );
+}
+
+#[test]
+#[ignore = "intended Stage 4 static Bool `if` specialisation; enabled by the static-if phase of \
+            docs/roadmap/plans/constant-folding-and-type-system-hot-path-optimization-plan.md"]
+fn intended_compile_time_false_condition_without_else_lowers_no_branch_body() {
+    let mut project = FrontendProject::new(
+        &[(
+            "src/@page.moth",
+            "disabled #= false\nresult ~= 0\nif disabled:\n    result = 1\n;\nio.line([: [result]])\n",
+        )],
+        "src/@page.moth",
+        StyleDirectiveRegistry::built_ins(),
+    );
+
+    let hir = project.hir();
+
+    assert_eq!(
+        branch_terminator_count(&hir),
+        0,
+        "a compile-time `false` condition with no `else` must produce an empty scoped result"
+    );
+}
+
+#[test]
+#[ignore = "intended Stage 4 terminality over specialised control flow; enabled by the static-if \
+            phase of \
+            docs/roadmap/plans/constant-folding-and-type-system-hot-path-optimization-plan.md"]
+fn intended_terminality_observes_the_selected_branch() {
+    let mut project = FrontendProject::new(
+        &[(
+            "src/@page.moth",
+            "enabled #= true\nchoose || -> Int:\n    if enabled:\n        return 1\n    ;\n;\nio.line([: [choose()]])\n",
+        )],
+        "src/@page.moth",
+        StyleDirectiveRegistry::built_ins(),
+    );
+
+    // Terminality runs over the specialised active AST, so a function whose only active branch
+    // returns is provably terminal and must not be rejected as a partial return.
+    let hir = project.hir();
+
+    assert_eq!(
+        branch_terminator_count(&hir),
+        0,
+        "a compile-time `true` branch return must be terminal without a runtime branch"
     );
 }

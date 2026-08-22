@@ -27,6 +27,9 @@ use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationMetadata;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
+#[cfg(feature = "benchmark_counters")]
+use crate::compiler_frontend::instrumentation::add_ast_counter;
+use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::paths::rendered_path_usage::RenderedPathUsage;
@@ -93,6 +96,9 @@ pub(crate) fn parse_constant_header_declaration(
         string_table,
         trait_environment,
     } = context;
+
+    increment_ast_counter(AstCounter::ConstantResolutionContextsCreated);
+    record_constant_pass_visibility_clone(file_visibility);
 
     let HeaderKind::Constant { declaration, .. } = &header.kind else {
         let error = CompilerError::compiler_error(
@@ -177,3 +183,23 @@ pub(crate) fn parse_constant_header_declaration(
 
     Ok(declaration)
 }
+
+/// Record how many bound visibility entries this constant header copies.
+///
+/// WHY: the per-constant `FileVisibility` clone below is the dominant repeated
+/// module-wide copy in const-heavy modules, and its cost scales with the visible
+/// name set rather than with the constant's own initializer.
+#[cfg(feature = "benchmark_counters")]
+fn record_constant_pass_visibility_clone(file_visibility: &FileVisibility) {
+    let entries = file_visibility.visible_declaration_paths.len()
+        + file_visibility.visible_source_names.len()
+        + file_visibility.visible_type_alias_names.len()
+        + file_visibility.visible_trait_names.len()
+        + file_visibility.visible_external_symbols.len()
+        + file_visibility.visible_namespace_records.len();
+
+    add_ast_counter(AstCounter::ConstantPassVisibilityEntriesCloned, entries);
+}
+
+#[cfg(not(feature = "benchmark_counters"))]
+fn record_constant_pass_visibility_clone(_file_visibility: &FileVisibility) {}

@@ -529,7 +529,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         &mut self,
         declaration: Declaration,
     ) -> Result<(), CompilerError> {
-        increment_ast_counter(AstCounter::DeclarationTableReplacements);
+        increment_ast_counter(AstCounter::DeclarationReplacementsByPath);
 
         if self
             .declaration_table_mut()?

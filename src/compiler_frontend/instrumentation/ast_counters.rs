@@ -23,6 +23,24 @@ pub(crate) enum AstCounter {
     BoundedExpressionTokenWindows,
     BoundedExpressionTokenCopiesAvoided,
 
+    // Module constant-resolution pass pressure.
+    ConstantResolutionContextsCreated,
+    ConstantsResolved,
+    ConstantPassPriorConstantIdsCopied,
+    ConstantPassVisibilityEntriesCloned,
+    ConstantPassSideTableEntriesCloned,
+    ModuleConstantDeclarationClones,
+
+    // Expression ordering, operator typing and constant-folding pressure.
+    ExpressionOrderingInputItems,
+    ExpressionTypedStackItems,
+    ExpressionFoldItems,
+    ExpressionOperandClones,
+    DiagnosticDataTypeMaterialisations,
+
+    // Static Bool control-flow specialisation inputs.
+    BranchLocalGenericRequests,
+
     // Template parsing and folding pressure.
     TemplateWrapperApplications,
     TemplateFoldLoopIterations,
@@ -62,7 +80,7 @@ pub(crate) enum AstCounter {
     VisibleSourceTypeLookupAttempts,
     ReceiverCatalogHeadersScanned,
     ReceiverMethodsRegistered,
-    DeclarationTableReplacements,
+    DeclarationReplacementsByPath,
     PublicSurfaceValidationChecks,
 
     // Field/receiver lowering pressure.
@@ -210,6 +228,18 @@ mod detailed {
             AstCounter::ScopeLocalDeclarationsInserted,
             AstCounter::BoundedExpressionTokenWindows,
             AstCounter::BoundedExpressionTokenCopiesAvoided,
+            AstCounter::ConstantResolutionContextsCreated,
+            AstCounter::ConstantsResolved,
+            AstCounter::ConstantPassPriorConstantIdsCopied,
+            AstCounter::ConstantPassVisibilityEntriesCloned,
+            AstCounter::ConstantPassSideTableEntriesCloned,
+            AstCounter::ModuleConstantDeclarationClones,
+            AstCounter::ExpressionOrderingInputItems,
+            AstCounter::ExpressionTypedStackItems,
+            AstCounter::ExpressionFoldItems,
+            AstCounter::ExpressionOperandClones,
+            AstCounter::DiagnosticDataTypeMaterialisations,
+            AstCounter::BranchLocalGenericRequests,
             AstCounter::TemplateWrapperApplications,
             AstCounter::TemplateFoldLoopIterations,
             AstCounter::TemplateNormalizationNodesVisited,
@@ -239,7 +269,7 @@ mod detailed {
             AstCounter::VisibleSourceTypeLookupAttempts,
             AstCounter::ReceiverCatalogHeadersScanned,
             AstCounter::ReceiverMethodsRegistered,
-            AstCounter::DeclarationTableReplacements,
+            AstCounter::DeclarationReplacementsByPath,
             AstCounter::PublicSurfaceValidationChecks,
             AstCounter::PostfixReceiverNodesCopied,
             AstCounter::TirTemplatesCreated,
@@ -285,6 +315,31 @@ mod detailed {
             AstCounter::BoundedExpressionTokenCopiesAvoided => {
                 "ast_bounded_expression_token_copies_avoided"
             }
+            AstCounter::ConstantResolutionContextsCreated => {
+                "ast_constant_resolution_contexts_created"
+            }
+            AstCounter::ConstantsResolved => "ast_constants_resolved",
+            AstCounter::ConstantPassPriorConstantIdsCopied => {
+                "ast_constant_pass_prior_constant_ids_copied"
+            }
+            AstCounter::ConstantPassVisibilityEntriesCloned => {
+                "ast_constant_pass_visibility_entries_cloned"
+            }
+            AstCounter::ConstantPassSideTableEntriesCloned => {
+                "ast_constant_pass_side_table_entries_cloned"
+            }
+            AstCounter::ModuleConstantDeclarationClones => "ast_module_constant_declaration_clones",
+
+            AstCounter::ExpressionOrderingInputItems => "ast_expression_ordering_input_items",
+            AstCounter::ExpressionTypedStackItems => "ast_expression_typed_stack_items",
+            AstCounter::ExpressionFoldItems => "ast_expression_fold_items",
+            AstCounter::ExpressionOperandClones => "ast_expression_operand_clones",
+            AstCounter::DiagnosticDataTypeMaterialisations => {
+                "ast_diagnostic_data_type_materialisations"
+            }
+
+            AstCounter::BranchLocalGenericRequests => "ast_branch_local_generic_requests",
+
             AstCounter::TemplateWrapperApplications => "ast_template_wrapper_applications",
             AstCounter::TemplateFoldLoopIterations => "ast_template_fold_loop_iterations",
             AstCounter::TemplateNormalizationNodesVisited => {
@@ -345,7 +400,7 @@ mod detailed {
             }
             AstCounter::ReceiverCatalogHeadersScanned => "ast_receiver_catalog_headers_scanned",
             AstCounter::ReceiverMethodsRegistered => "ast_receiver_methods_registered",
-            AstCounter::DeclarationTableReplacements => "ast_declaration_table_replacements",
+            AstCounter::DeclarationReplacementsByPath => "ast_declaration_replacements_by_path",
             AstCounter::PublicSurfaceValidationChecks => "ast_public_surface_validation_checks",
             AstCounter::PostfixReceiverNodesCopied => "ast_postfix_receiver_nodes_copied",
 
