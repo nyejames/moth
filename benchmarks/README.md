@@ -152,6 +152,21 @@ each call.
 ```text
 Scaling series 'nominal_members' — metric frontend.ast.environment — budget n^1.25
         size     metric_ms   size step   time step
+          40         5.125           -           -
+          80        10.037       2.00x       1.96x
+         160        19.609       2.00x       1.95x
+         320        39.147       2.00x       2.00x
+  fitted n^0.98 — within budget
+```
+
+The per-step ratios are what make the verdict readable: doubling the declaration count doubles the
+time. The fitted exponent is the value the budget is checked against.
+
+A failing series looks like this. It is the real output this same lane produced before the fix, and
+it is the clearer teaching example:
+
+```text
+        size     metric_ms   size step   time step
           40        23.125           -           -
           80        79.706       2.00x       3.45x
          160       293.048       2.00x       3.68x
@@ -159,8 +174,8 @@ Scaling series 'nominal_members' — metric frontend.ast.environment — budget 
   fitted n^1.86 — EXCEEDS BUDGET n^1.25
 ```
 
-The per-step ratios carry the finding in a form worth quoting: doubling the declaration count
-nearly quadrupled the time. The fitted exponent is the value the budget is checked against.
+Doubling the declaration count nearly quadrupled the time. Every case here passed every other
+benchmark mode, because each was being compared against its own history and none of them changed.
 
 A series reports `UNMEASURABLE` — and fails — when a metric was not emitted at all, or when the
 largest point is too small to fit. Both are treated as failures rather than as passes, because a

@@ -120,7 +120,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     visible_type_aliases: &visibility.visible_type_alias_names,
                     visible_external_symbols: &visibility.visible_external_symbols,
                     declaration_table: self.declaration_table.as_ref(),
-                    generic_declarations_by_path: &self.module_symbols.generic_declarations_by_path,
+                    generic_declarations_by_path: &self.generic_declarations_by_path,
                     string_table,
                 })
                 .map_err(|diagnostic| self.diagnostic_messages(*diagnostic, string_table))?;
@@ -152,17 +152,15 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 .with_visible_external_symbols(visibility.visible_external_symbols.clone())
                 .with_visible_source_bindings(visibility.visible_source_names.clone())
                 .with_visible_type_aliases(visibility.visible_type_alias_names.clone())
-                .with_resolved_type_aliases(Rc::new(self.resolved_type_aliases_by_path.clone()))
+                .with_resolved_type_aliases(Rc::clone(&self.resolved_type_aliases_by_path))
                 .with_explicit_compile_time_constants(Rc::clone(
                     &self.resolved_module_constant_paths,
                 ))
-                .with_generic_declarations(Rc::new(
-                    self.module_symbols.generic_declarations_by_path.clone(),
+                .with_generic_declarations(Rc::clone(&self.generic_declarations_by_path))
+                .with_resolved_struct_fields_by_path(Rc::clone(
+                    &self.resolved_struct_fields_by_path,
                 ))
-                .with_resolved_struct_fields_by_path(Rc::new(
-                    self.resolved_struct_fields_by_path.clone(),
-                ))
-                .with_nominal_type_ids_by_path(Rc::new(self.nominal_type_ids_by_path.clone()))
+                .with_nominal_type_ids_by_path(Rc::clone(&self.nominal_type_ids_by_path))
                 .with_source_file_scope(source_file_scope);
                 let mut compatibility_cache = TypeCompatibilityCache::new();
                 let mut type_interner =

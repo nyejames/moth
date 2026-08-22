@@ -389,7 +389,10 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
 /// 0x1002e40c8" as a finding. The artifacts stay on disk because they are what
 /// a symbolication problem is debugged from.
 fn fail_on_unsymbolicated_cases(
-    case_summaries: &[(observations::ProfileObservation, Option<HotspotExtractionResult>)],
+    case_summaries: &[(
+        observations::ProfileObservation,
+        Option<HotspotExtractionResult>,
+    )],
 ) -> Result<(), String> {
     let unsymbolicated: Vec<&str> = case_summaries
         .iter()

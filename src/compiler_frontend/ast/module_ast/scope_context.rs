@@ -427,6 +427,7 @@ impl ScopeContext {
             imported_struct_definitions: Vec::new(),
             imported_choice_definitions: Vec::new(),
             module_constants: Vec::new(),
+            module_constant_paths: Rc::new(FxHashSet::default()),
             rendered_path_usages: Rc::new(RefCell::new(Vec::new())),
             builtin_struct_ast_nodes: Vec::new(),
             resolved_struct_fields_by_path: Rc::new(FxHashMap::default()),

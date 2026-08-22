@@ -2013,3 +2013,107 @@ structs, so the quadratic member-shell cost cannot touch it.
    the registry; the larger 196-sample `sip::Hasher::write` is shared across all SipHash users and
    was not attributed. Worth confirming and fixing, but it is a small independent change and not
    evidence for any phase in this plan.
+
+## Constant Evaluation And Type-System Plan - Phase B Copy-On-Write Side Tables - 2026-08-22
+
+Phase B removed the per-header deep clone of the environment builder's side tables. Phase A
+measured that clone at `O(n^2.03)` in module size and `>99%` of the cost of the pass containing it.
+This section records what changed and what it bought.
+
+### What Changed
+
+`AstModuleEnvironmentBuilder` now owns five side tables behind `Rc` instead of by value:
+`resolved_struct_fields_by_path`, `choice_variant_shells_by_path`, `resolved_type_aliases_by_path`,
+`nominal_type_ids_by_path` and `generic_declarations_by_path`. Every `ScopeContext` built during
+environment construction takes an `Rc::clone` handle instead of a `Rc::new(map.clone())` snapshot.
+Writers go through `Rc::make_mut`.
+
+`generic_declarations_by_path` moved out of `ModuleSymbols` into the builder at the start of
+`build`, so it has one owner and one handle rather than a copy taken per header. This also deleted
+a threaded `finish_environment` parameter that existed only because `self` was consumed before the
+map could be moved.
+
+The tables were already `Rc<FxHashMap<..>>` on the `ScopeContext` side. Only the builder held them
+by value, so the entire fix is one ownership change plus nine `Rc::make_mut` write sites.
+
+### Measured Effect
+
+Release binary built with `--features timers`, `MOTH_TIMERS=full`, `RAYON_NUM_THREADS=1`, median of
+7 runs. `before` is commit `b997e593a` built from a clean worktree; `after` is the same tree with
+Phase B applied.
+
+| case | metric | before (ms) | after (ms) | change |
+| --- | --- | --- | --- | --- |
+| `nominal_scaling_320` | `ast.environment` | `470.036` | `12.150` | **`38.7x` faster** |
+| `nominal_scaling_320` | `check.total` | `491.138` | `32.575` | `15.1x` faster |
+| `type_stress` | `ast.environment` | `4.276` | `1.226` | **`3.49x` faster** |
+| `type_stress` | `ast.total` | `6.356` | `3.303` | `1.92x` faster |
+| `environment_stress` | `ast.environment` | `4.268` | `1.647` | **`2.59x` faster** |
+| `environment_stress` | `ast.total` | `5.526` | `3.125` | `1.77x` faster |
+| `constant_chain_512` | `ast.total` | `4.130` | `4.138` | unchanged |
+| `docs` | `ast.environment` | `96.754` | `97.171` | unchanged |
+| `docs` | `check.total` | `263.381` | `265.236` | unchanged |
+
+`docs` is unchanged, and that is the expected result rather than a disappointment. Phase A recorded
+that `docs` has 72 modules, 545 constants and **2** structs, so a cost that scales with the number
+of nominal headers was never its cost. Reporting Phase B as a win for `docs` would have required
+ignoring what Phase A already measured.
+
+`constant_chain_512` is unchanged for the same reason in the other direction: it has no nominal
+headers, so it never paid the per-header snapshot. It is in the table to show the change is inert
+where it should be inert.
+
+### Growth Exponent
+
+`just bench-scaling`, the lane added in the hardening slice, measures the same pass in-process:
+
+| series | metric | before | after |
+| --- | --- | --- | --- |
+| `nominal_members` | `frontend.ast.environment` | `n^1.86` | `n^0.98` |
+| `constant_chain` | `frontend.ast.total` | `n^0.82` | `n^0.86` |
+
+The `nominal_members` points after the change are `5.125 / 10.037 / 19.609 / 39.147 ms` for sizes
+`40 / 80 / 160 / 320`. Each doubling of input now costs almost exactly a doubling of time. The pass
+is linear.
+
+`just bench-scaling` joined `just validate` with this phase. It was deliberately kept out of the
+gate while it failed, because a gate must pass on every commit.
+
+### Findings
+
+1. **`Rc::make_mut` never clones on these paths, and the scaling lane is the proof.** The design
+   depends on every `ScopeContext` handle being dropped before the next write, so the builder is
+   the sole owner at write time. If a handle ever escaped a loop iteration, `make_mut` would clone
+   on every write and the quadratic cost would return silently, with no test failing and no counter
+   moving. `n^0.98` is what rules that out, and the lane in `just validate` is what keeps ruling it
+   out. This is the first defect class in this repository with a standing automated guard.
+2. **The counter that was supposed to instrument this was deleted, not repointed.**
+   `ConstantPassSideTableEntriesCloned` measured the once-per-module session snapshot, which was
+   linear, while the real copy next door was quadratic. Phase B turned that snapshot into an
+   `Rc::clone` as well, so no copy survives for the counter to instrument. A counter reporting a
+   number for work that no longer happens is worse than no counter.
+3. **Hoisting turned out to be unnecessary everywhere, not just at the quadratic site.** The plan
+   held hoisting in reserve for the function-signature and trait-requirement passes, which read
+   tables they never write. Once a handle costs a refcount, a shared handle is strictly better than
+   a hoisted snapshot: same cost, no staleness question to answer. Both passes take handles.
+4. **`generic_declarations_by_path` was not read-only, and assuming it was broke seven tests.**
+   The first version of this change moved the map out of `ModuleSymbols` at the start of `build` on
+   the belief that every environment pass reads it and none writes it. Import projection writes it:
+   it registers metadata for each imported generic nominal, under both the local and the internal
+   path. Taking the map early therefore left that writer filling a map nobody read, and imported
+   generic types lost their parameter metadata - `expected T, found Int` on generic receiver
+   boundaries, and `Type 'Wrapper' does not accept generic arguments` on a generic struct facade.
+   The integration suite caught all seven; no unit test did, because the failure only appears
+   across a module boundary. The fix routes that writer through the same handle, which is the shape
+   the rest of the phase already used.
+5. **The `module_constants` linear scan is gone, and it was a scan of the wrong container.**
+   `is_explicit_compile_time_constant` scanned `Vec<Declaration>` once per fixed-capacity check
+   during body emission. `AstModuleLookups` now carries `module_constant_paths`, the same
+   `Rc<FxHashSet<InternedPath>>` the builder already maintained, and the check is a hash lookup.
+   The two containers are written by one method so they cannot drift. This is not visible in the
+   table above because no committed fixture combines many module constants with many fixed-capacity
+   expressions; `docs` has the constants and not the capacities.
+
+The measurements in this section were taken before finding 4 was fixed. The fix moves two `insert`
+calls between two maps and changes no allocation on any measured path, so the numbers stand; the
+scaling lane was re-run afterwards and reports the same `n^0.98`.

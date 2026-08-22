@@ -175,14 +175,29 @@ pub(crate) struct AstModuleEnvironmentBuilder<'context, 'services> {
     pub(crate) resolved_module_constant_paths: Rc<FxHashSet<InternedPath>>,
     pub(crate) rendered_path_usages: Rc<RefCell<Vec<RenderedPathUsage>>>,
     pub(crate) builtin_struct_ast_nodes: Vec<AstNode>,
-    pub(crate) resolved_struct_fields_by_path: FxHashMap<InternedPath, Vec<Declaration>>,
+
+    // Copy-on-write side tables shared with every environment-time `ScopeContext`.
+    //
+    // WHY: nominal member and constant parsing build one `ScopeContext` per header, and each one
+    // needs to read these tables. Owning them behind `Rc` makes taking a handle free, so the cost
+    // of the member passes follows the number of headers instead of headers times module size.
+    // Writers go through `Rc::make_mut`: the scope that borrowed a handle is always dropped before
+    // the next write, so the builder is the sole owner at write time and no copy is made.
+    pub(crate) resolved_struct_fields_by_path: Rc<FxHashMap<InternedPath, Vec<Declaration>>>,
+    pub(crate) choice_variant_shells_by_path: Rc<FxHashMap<InternedPath, Vec<ChoiceVariant>>>,
+    pub(crate) resolved_type_aliases_by_path: Rc<FxHashMap<InternedPath, ResolvedTypeAnnotation>>,
+    /// Generic declaration metadata, moved out of `module_symbols` when the builder starts.
+    ///
+    /// WHY: it is read by every environment pass and written by none of them, so the builder owns
+    /// the single shared handle rather than copying the map out of `module_symbols` per header.
+    pub(crate) generic_declarations_by_path:
+        Rc<FxHashMap<InternedPath, GenericDeclarationMetadata>>,
+
     pub(crate) struct_source_by_path: FxHashMap<InternedPath, InternedPath>,
     pub(crate) choice_source_by_path: FxHashMap<InternedPath, InternedPath>,
-    pub(crate) choice_variant_shells_by_path: FxHashMap<InternedPath, Vec<ChoiceVariant>>,
     pub(crate) resolved_function_signatures_by_path:
         FxHashMap<InternedPath, ResolvedFunctionSignature>,
     pub(crate) generic_function_templates_by_path: FxHashMap<InternedPath, GenericFunctionTemplate>,
-    pub(crate) resolved_type_aliases_by_path: FxHashMap<InternedPath, ResolvedTypeAnnotation>,
     pub(crate) generic_parameter_lists_by_path:
         FxHashMap<InternedPath, RegisteredGenericParameterList>,
 
@@ -191,7 +206,8 @@ pub(crate) struct AstModuleEnvironmentBuilder<'context, 'services> {
     pub(crate) type_environment: TypeEnvironment,
 
     // Canonical TypeId for each nominal struct/choice registered in type_environment.
-    pub(crate) nominal_type_ids_by_path: FxHashMap<InternedPath, TypeId>,
+    // Copy-on-write for the same reason as the side tables above.
+    pub(crate) nominal_type_ids_by_path: Rc<FxHashMap<InternedPath, TypeId>>,
     imported_type_ids_by_origin: FxHashMap<OriginTypeId, TypeId>,
     imported_generic_parameter_type_ids: FxHashMap<
         crate::compiler_frontend::canonical_type_identity::ExportedGenericParameterIdentity,
@@ -223,16 +239,17 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             resolved_module_constant_paths: Rc::new(FxHashSet::default()),
             rendered_path_usages: Rc::new(RefCell::new(Vec::new())),
             builtin_struct_ast_nodes: Vec::new(),
-            resolved_struct_fields_by_path: FxHashMap::default(),
+            resolved_struct_fields_by_path: Rc::new(FxHashMap::default()),
+            choice_variant_shells_by_path: Rc::new(FxHashMap::default()),
+            resolved_type_aliases_by_path: Rc::new(FxHashMap::default()),
+            generic_declarations_by_path: Rc::new(FxHashMap::default()),
             struct_source_by_path: FxHashMap::default(),
             choice_source_by_path: FxHashMap::default(),
-            choice_variant_shells_by_path: FxHashMap::default(),
             resolved_function_signatures_by_path: FxHashMap::default(),
             generic_function_templates_by_path: FxHashMap::default(),
-            resolved_type_aliases_by_path: FxHashMap::default(),
             generic_parameter_lists_by_path: FxHashMap::default(),
             type_environment: TypeEnvironment::new(),
-            nominal_type_ids_by_path: FxHashMap::default(),
+            nominal_type_ids_by_path: Rc::new(FxHashMap::default()),
             imported_type_ids_by_origin: FxHashMap::default(),
             imported_generic_parameter_type_ids: FxHashMap::default(),
             imported_generic_parameter_registrations: Vec::new(),
@@ -261,13 +278,20 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         let resolved_struct_fields_by_path =
             std::mem::take(&mut module_symbols.resolved_struct_fields_by_path);
         let struct_source_by_path = std::mem::take(&mut module_symbols.struct_source_by_path);
+        // Generic declaration metadata has one owner from here on. Import projection adds imported
+        // generic nominals to it and every environment pass reads it, so taking it now keeps one
+        // map behind one handle: the per-header scopes borrow it instead of copying it, and no
+        // writer is left holding a different map from the readers.
+        let generic_declarations_by_path =
+            std::mem::take(&mut module_symbols.generic_declarations_by_path);
 
         self.module_symbols = module_symbols;
         self.binding_environment = binding_environment;
         self.warnings = self.binding_environment.warnings.clone();
         self.declaration_table = Rc::new(TopLevelDeclarationTable::new(declarations));
         self.builtin_struct_ast_nodes = builtin_struct_ast_nodes;
-        self.resolved_struct_fields_by_path = resolved_struct_fields_by_path;
+        self.resolved_struct_fields_by_path = Rc::new(resolved_struct_fields_by_path);
+        self.generic_declarations_by_path = Rc::new(generic_declarations_by_path);
         self.struct_source_by_path = struct_source_by_path;
 
         timing_scope_attributed!(
@@ -438,15 +462,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         )
         .map_err(|error| self.error_messages(error, string_table))?;
 
-        // Extract generic declarations before `self` is consumed by `finish_environment`.
-        let generic_declarations_by_path =
-            std::mem::take(&mut self.module_symbols.generic_declarations_by_path);
-
         self.finish_environment(
             receiver_methods,
             trait_environment,
             trait_evidence_environment,
-            generic_declarations_by_path,
             ResolvedPublicSurfaceOutputs {
                 type_roots: resolved_public_type_roots,
                 trait_roots: resolved_public_trait_roots,
@@ -466,7 +485,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         receiver_methods: Rc<ReceiverMethodCatalog>,
         trait_environment: TraitEnvironment,
         trait_evidence_environment: TraitEvidenceEnvironment,
-        generic_declarations_by_path: FxHashMap<InternedPath, GenericDeclarationMetadata>,
         resolved_public_surface_outputs: ResolvedPublicSurfaceOutputs,
         string_table: &StringTable,
     ) -> Result<AstModuleEnvironment, CompilerMessages> {
@@ -500,23 +518,24 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 imported_struct_definitions: self.imported_struct_definitions,
                 imported_choice_definitions: self.imported_choice_definitions,
                 module_constants: self.module_constants,
+                module_constant_paths: self.resolved_module_constant_paths,
                 rendered_path_usages: self.rendered_path_usages,
                 builtin_struct_ast_nodes: self.builtin_struct_ast_nodes,
 
-                resolved_struct_fields_by_path: Rc::new(self.resolved_struct_fields_by_path),
+                resolved_struct_fields_by_path: self.resolved_struct_fields_by_path,
                 resolved_function_signatures_by_path: Rc::new(
                     self.resolved_function_signatures_by_path,
                 ),
                 generic_function_templates_by_path: self.generic_function_templates_by_path,
-                resolved_type_aliases_by_path: Rc::new(self.resolved_type_aliases_by_path),
-                choice_variant_shells_by_path: Rc::new(self.choice_variant_shells_by_path),
+                resolved_type_aliases_by_path: self.resolved_type_aliases_by_path,
+                choice_variant_shells_by_path: self.choice_variant_shells_by_path,
                 declaration_semantics: Rc::new(declaration_semantics),
 
                 receiver_methods,
                 trait_environment: Rc::new(trait_environment),
                 trait_evidence_environment: Rc::new(trait_evidence_environment),
-                generic_declarations_by_path: Rc::new(generic_declarations_by_path),
-                nominal_type_ids_by_path: Rc::new(self.nominal_type_ids_by_path),
+                generic_declarations_by_path: self.generic_declarations_by_path,
+                nominal_type_ids_by_path: self.nominal_type_ids_by_path,
                 source_nominal_paths: Rc::new(source_nominal_paths),
 
                 external_package_registry: Arc::clone(&self.context.external_package_registry),
@@ -608,8 +627,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     struct_type_id,
                 )
                 .map_err(|error| self.error_messages(error, string_table))?;
-            self.nominal_type_ids_by_path
-                .insert(path.clone(), struct_type_id);
+            Rc::make_mut(&mut self.nominal_type_ids_by_path).insert(path.clone(), struct_type_id);
 
             // Build a placeholder declaration so the builtin struct is reachable
             // through the declaration table during body parsing.
@@ -660,7 +678,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             visible_source_bindings: Some(&visibility.visible_source_names),
             visible_type_aliases: Some(&visibility.visible_type_alias_names),
             resolved_type_aliases: Some(&self.resolved_type_aliases_by_path),
-            generic_declarations_by_path: Some(&self.module_symbols.generic_declarations_by_path),
+            generic_declarations_by_path: Some(&self.generic_declarations_by_path),
             resolved_struct_fields_by_path: Some(&self.resolved_struct_fields_by_path),
             type_environment: &mut self.type_environment,
             visible_namespace_records: Some(&visibility.visible_namespace_records),

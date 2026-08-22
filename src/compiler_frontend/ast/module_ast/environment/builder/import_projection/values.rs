@@ -67,7 +67,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 continue;
             };
             let type_id = self.intern_imported_canonical_type(&alias.target_type_identity)?;
-            self.resolved_type_aliases_by_path.insert(
+            Rc::make_mut(&mut self.resolved_type_aliases_by_path).insert(
                 local_path,
                 ResolvedTypeAnnotation {
                     source_ref: ParsedTypeRef::Inferred,

@@ -57,18 +57,19 @@ COMPLETED:
 - Phase A (re-baseline and attribution) - see **Phase A outcome** below
 - Benchmark scaling lane (hardening slice, taken out of sequence) - see **Benchmark scaling lane**
   below
+- Phase B (shared environment side tables) - see **Phase B outcome** below
 
 CURRENT_SLICE:
-- Phase: B (shared environment side tables)
-- Goal: remove the per-header deep clone of five whole-module side tables in
-  `constant_header_scope_context`, measured in Phase A as `O(n^2.03)` in module size and `>99%`
-  of the cost of the pass that contains it
-- Non-goals: no semantic change, no control-flow change, no member-shell restructuring (that is
-  Phase E, and it must be re-measured after this phase lands)
+- Phase: C (module-local folded-value authority)
+- Goal: give each module constant one folded-value owner and delete the three representations of
+  one already-folded fact
+- Non-goals: no control-flow change, no member-shell restructuring (Phase E), no new fold rules
 
 NEXT_ACTION:
-- execute Phase B against the copy-on-write design recorded in that phase, until
-  `just bench-scaling` reports `nominal_members` within budget, then re-measure before Phase E
+- re-measure before starting Phase C. Phase B changed the frontend profile: `docs` is now the only
+  large workload whose cost the plan has not moved, and its `97.2ms` environment is unchanged. Take
+  a fresh attribution of `docs` before committing to Phase C's target list, because Phase A's
+  ranking was taken against a tree that still contained the quadratic clone
 
 PHASE_ORDER:
 - A (re-baseline) -> B (shared side tables) -> C (folded-value authority) -> D (move-only folding
@@ -158,9 +159,11 @@ Assets it created, all still in use:
   `nominal_capacity_stress` has since been replaced by the four-point `nominal_members` scaling
   series; measuring that path at a single size is what hid the quadratic cost Phase A found.
 - `AstCounter` variants `ConstantResolutionContextsCreated`, `ConstantsResolved`,
-  `ConstantPassSideTableEntriesCloned`, `ModuleConstantDeclarationClones`,
+  `ModuleConstantDeclarationClones`,
   `ExpressionOrderingInputItems`, `ExpressionTypedStackItems`, `ExpressionFoldItems`,
   `ExpressionOperandClones`, `DiagnosticDataTypeMaterialisations`, `BranchLocalGenericRequests`.
+  `ConstantPassSideTableEntriesCloned` was deleted in Phase B: it instrumented a copy that no
+  longer happens.
 - `FrontendCounter` variants `GenericSubstitutionKeyBuilds`, `GenericSubstitutionKeySortedPairs`,
   `PublicFoldedValueConversions`, `HirConstValueConversions`, `HirStaticBoolIfNodes`,
   `HirRuntimeIfNodes`.
@@ -523,7 +526,8 @@ later phase must not rediscover:
    number of times - the cost per call is what grew.
 4. **`ast_constant_pass_side_table_entries_cloned` is pointed at the wrong copy.** It instruments
    the once-per-module snapshot Phase 1 hoisted into `resolve_constant_headers`, which is correct
-   and linear. It has never seen the per-header snapshot that is actually quadratic.
+   and linear. It has never seen the per-header snapshot that is actually quadratic. *Resolved in
+   Phase B by deletion: that snapshot became an `Rc::clone`, so no copy survives to instrument.*
 5. **`docs` and the nominal fixtures need different phases and neither substitutes for the other.**
    `docs` is 72 modules, 545 constants, 5162 const templates and **2** structs, so Phase B cannot
    help it. Its `87.1ms` of constant header resolution sits alongside `ast_expression_fold_items =
@@ -575,7 +579,7 @@ found by hand-regenerating a fixture at four sizes.
 largest point too small to fit. A series that cannot answer the question must not look like one
 that answered it favourably.
 
-**What it reports today:**
+**What it reported when it was built**, before Phase B:
 
 ```text
 Scaling series 'nominal_members' — metric frontend.ast.environment — budget n^1.25
@@ -590,6 +594,9 @@ Scaling series 'constant_chain' — metric frontend.ast.total — budget n^1.25
   fitted n^0.82 — within budget
 ```
 
+Phase B moved `nominal_members` to `n^0.98` and its `320` point to `39.147ms`. The lane is now in
+`just validate`.
+
 Findings worth keeping:
 
 1. **The lane reproduces the Phase A finding independently.** Phase A measured `n^2.03` through the
@@ -599,9 +606,9 @@ Findings worth keeping:
    never milliseconds.
 2. **The constant chain is confirmed fixed, by budget rather than by eye.** `n^0.82` against a
    `n^1.25` budget. Phase 0's chain superlinearity is gone and there is now a command that says so.
-3. **`just bench-scaling` is deliberately not in `just validate` yet.** It fails today because the
-   defect is real. The gate must pass on every commit, so the lane joins it as part of Phase B,
-   when `nominal_members` comes within budget.
+3. **`just bench-scaling` was deliberately kept out of `just validate` until it passed.** It failed
+   when it was built, because the defect was real, and a gate must pass on every commit. It joined
+   `just validate` and the CI gate list in Phase B, once `nominal_members` came within budget.
 4. **A Detailed metric cannot be used by a series.** The benchmark compiler is built with
    `--features timers`, not `detailed_timers`, so `constant_header_resolution` and its siblings are
    never emitted to the suite. This is why both series fit Basic metrics.
@@ -650,28 +657,63 @@ Known constraints:
 
 Work items:
 
-- [ ] Establish, per pass, which side tables it writes while iterating.
-- [ ] Move the five tables behind copy-on-write builder handles and take handles in
+- [x] Establish, per pass, which side tables it writes while iterating.
+- [x] Move the five tables behind copy-on-write builder handles and take handles in
       `constant_header_scope_context`.
-- [ ] Hoist the snapshots that are provably read-only for their loop.
-- [ ] Replace the `module_constants` linear scan with the existing
+- [x] Hoist the snapshots that are provably read-only for their loop. *Not needed: once a handle
+      costs a refcount, a shared handle is strictly better than a hoisted snapshot. The
+      function-signature and trait-requirement passes take handles.*
+- [x] Replace the `module_constants` linear scan with the existing
       `resolved_module_constant_paths` set or its Phase H successor.
-- [ ] Re-point `ConstantPassSideTableEntriesCloned` at the per-header copy, which is the one that
-      matters, or delete it if no copy survives. It currently measures the once-per-module
-      snapshot and reads linear while the real copy is quadratic.
-- [ ] Wire `just bench-scaling` into `just validate` once `nominal_members` is within budget. The
+- [x] Re-point `ConstantPassSideTableEntriesCloned` at the per-header copy, which is the one that
+      matters, or delete it if no copy survives. *Deleted: no copy survives.*
+- [x] Wire `just bench-scaling` into `just validate` once `nominal_members` is within budget. The
       lane is deliberately not in the gate while it fails, because the gate must pass for every
       commit.
 
 Acceptance:
 
-- [ ] `just bench-scaling` reports `nominal_members` within its `n^1.25` budget, replacing the
-      `n^1.86` it reports today
-- [ ] `environment_stress` and `type_stress` improve
-- [ ] no pass reads a side table snapshot taken before a write it depends on
-- [ ] diagnostics, warning order and emitted artefacts are byte-for-byte equivalent
+- [x] `just bench-scaling` reports `nominal_members` within its `n^1.25` budget, replacing the
+      `n^1.86` it reports today - it now reports `n^0.98`
+- [x] `environment_stress` and `type_stress` improve - `ast.environment` `2.59x` and `3.49x`
+- [x] no pass reads a side table snapshot taken before a write it depends on
+- [x] diagnostics, warning order and emitted artefacts are byte-for-byte equivalent
 
 Checkpoint: ownership only. No value representation or control-flow change.
+
+### Phase B outcome
+
+Landed. Full measurements in `benchmarks/frontend-optimization-results.md`, section
+**Phase B Copy-On-Write Side Tables**. Durable findings:
+
+1. **The quadratic cost is gone and the pass is linear.** `nominal_members` moved from `n^1.86` to
+   `n^0.98`; the `320`-declaration point moved from `470.036ms` to `12.150ms` of `ast.environment`,
+   a `38.7x` reduction. `type_stress` improved `3.49x` and `environment_stress` `2.59x` on the same
+   metric.
+2. **The whole fix was one ownership change.** The `ScopeContext` side already held these tables as
+   `Rc<FxHashMap<..>>`; only the builder held them by value, so every call site was already asking
+   for a handle and being handed a fresh copy. Five field types and nine `Rc::make_mut` write sites.
+   No pass, signature or diagnostic changed.
+3. **`Rc::make_mut` clones nothing here, and only the scaling lane can keep proving that.** The
+   design depends on every `ScopeContext` handle being dropped before the next write. If one ever
+   escaped its loop iteration the quadratic cost would return in full, with no test failing and no
+   counter moving - which is exactly how it survived unnoticed until Phase A. `just bench-scaling`
+   is now in `just validate`, so this is the first defect class in the repository with a standing
+   automated guard.
+4. **`docs` did not move, as Phase A predicted.** `96.754ms` to `97.171ms` of `ast.environment`.
+   `docs` has 2 structs, so a per-nominal-header cost was never its cost. Phase C now owns the only
+   large workload the plan has not improved, and its target list should be re-measured against the
+   post-Phase-B tree rather than inherited from Phase A's ranking.
+5. **`generic_declarations_by_path` had two owners and now has one - and the first attempt got its
+   read-only claim wrong.** The map was copied out of `ModuleSymbols` per header, so it moved into
+   the builder as a handle, which also deleted a `finish_environment` parameter that existed only to
+   thread the map past a consuming `self`. The first version assumed no environment pass writes it.
+   Import projection does, for every imported generic nominal, so the early move left that writer
+   filling a map nobody read and seven cross-module generic tests failed. Routing the writer through
+   the same handle fixed it. The lesson is narrow and worth keeping: *"read by everything, written
+   by nothing"* is a claim to verify by grepping the writers, not to infer from the passes you
+   happen to be reading. Only the integration suite caught it, because the failure needs a module
+   boundary to appear.
 
 ## Phase C - Module-local folded-value authority
 

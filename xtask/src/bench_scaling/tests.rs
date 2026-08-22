@@ -79,7 +79,10 @@ fn a_non_positive_measurement_is_not_fittable() {
 
 #[test]
 fn quadratic_growth_exceeds_a_near_linear_budget() {
-    let outcome = evaluate_series(&series(1.25), measured([(40, 10.0), (80, 40.0), (160, 160.0)]));
+    let outcome = evaluate_series(
+        &series(1.25),
+        measured([(40, 10.0), (80, 40.0), (160, 160.0)]),
+    );
 
     match outcome.verdict {
         ScalingVerdict::ExceedsBudget { exponent } => {
@@ -92,7 +95,10 @@ fn quadratic_growth_exceeds_a_near_linear_budget() {
 
 #[test]
 fn linear_growth_stays_within_a_near_linear_budget() {
-    let outcome = evaluate_series(&series(1.25), measured([(40, 10.0), (80, 20.0), (160, 40.0)]));
+    let outcome = evaluate_series(
+        &series(1.25),
+        measured([(40, 10.0), (80, 20.0), (160, 40.0)]),
+    );
 
     match outcome.verdict {
         ScalingVerdict::WithinBudget { exponent } => {
@@ -105,7 +111,10 @@ fn linear_growth_stays_within_a_near_linear_budget() {
 
 #[test]
 fn a_missing_metric_is_reported_as_unmeasurable_and_fails() {
-    let outcome = evaluate_series(&series(1.25), measured([(40, 10.0), (80, 0.0), (160, 40.0)]));
+    let outcome = evaluate_series(
+        &series(1.25),
+        measured([(40, 10.0), (80, 0.0), (160, 40.0)]),
+    );
 
     match &outcome.verdict {
         ScalingVerdict::Unmeasurable { reason } => {
@@ -135,11 +144,17 @@ fn timings_below_the_noise_floor_are_refused_rather_than_fitted() {
 
 #[test]
 fn the_report_shows_per_step_ratios_and_the_verdict() {
-    let outcome = evaluate_series(&series(1.25), measured([(40, 10.0), (80, 40.0), (160, 160.0)]));
+    let outcome = evaluate_series(
+        &series(1.25),
+        measured([(40, 10.0), (80, 40.0), (160, 160.0)]),
+    );
 
     let report = format_series_report(&outcome);
 
     assert!(report.contains("2.00x"), "missing size step: {report}");
     assert!(report.contains("4.00x"), "missing time step: {report}");
-    assert!(report.contains("EXCEEDS BUDGET"), "missing verdict: {report}");
+    assert!(
+        report.contains("EXCEEDS BUDGET"),
+        "missing verdict: {report}"
+    );
 }

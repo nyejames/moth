@@ -61,6 +61,12 @@ pub(crate) struct AstModuleLookups {
         Vec<crate::compiler_frontend::ast::AstImportedStructDefinition>,
     pub(crate) imported_choice_definitions: Vec<crate::compiler_frontend::ast::AstChoiceDefinition>,
     pub(crate) module_constants: Vec<Declaration>,
+    /// Paths of every authored module constant, kept in lockstep with `module_constants`.
+    ///
+    /// WHY: fixed-capacity type syntax asks whether a visible declaration is an explicit `#`
+    /// constant, once per capacity expression. Answering from a set makes that a hash lookup
+    /// instead of a scan of every module constant.
+    pub(crate) module_constant_paths: Rc<FxHashSet<InternedPath>>,
     pub(crate) rendered_path_usages: Rc<RefCell<Vec<RenderedPathUsage>>>,
     pub(crate) builtin_struct_ast_nodes: Vec<AstNode>,
 
@@ -115,6 +121,18 @@ pub(crate) struct AstModuleLookups {
     pub(crate) build_profile: FrontendBuildProfile,
     pub(crate) project_path_resolver: Option<ProjectPathResolver>,
     pub(crate) path_format_config: PathStringFormatConfig,
+}
+
+impl AstModuleLookups {
+    /// Append one module constant and record its path.
+    ///
+    /// WHY: `module_constants` and `module_constant_paths` describe the same set and must not
+    /// drift, because explicit-constant classification reads the set and every other consumer
+    /// reads the vector. One writer is the only way to keep that true.
+    pub(crate) fn push_module_constant(&mut self, declaration: Declaration) {
+        Rc::make_mut(&mut self.module_constant_paths).insert(declaration.id.to_owned());
+        self.module_constants.push(declaration);
+    }
 }
 
 /// Final AST module environment paired with its canonical TypeEnvironment.

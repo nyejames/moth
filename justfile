@@ -25,6 +25,9 @@ validate-common:
     @echo "benchmark sanity"
     cargo run --package xtask --bin xtask -- bench-ci
 
+    @echo "complexity budgets"
+    cargo run --package xtask --bin xtask -- bench-scaling
+
     @echo "timers erasure"
     just timers-erasure-check
 
@@ -126,6 +129,9 @@ ci-gate-docs:
 
 ci-gate-benchmarks:
     just bench-ci
+
+ci-gate-scaling:
+    just bench-scaling
 
 ci-gate-timers-erasure:
     just timers-erasure-check

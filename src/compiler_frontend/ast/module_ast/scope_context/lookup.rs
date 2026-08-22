@@ -152,9 +152,8 @@ impl ScopeContext {
             || self
                 .shared
                 .lookups
-                .module_constants
-                .iter()
-                .any(|constant| constant.id == declaration.id)
+                .module_constant_paths
+                .contains(&declaration.id)
     }
 
     pub(crate) fn lookup_generic_function_template(

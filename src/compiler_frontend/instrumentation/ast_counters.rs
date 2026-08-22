@@ -26,7 +26,6 @@ pub(crate) enum AstCounter {
     // Module constant-resolution pass pressure.
     ConstantResolutionContextsCreated,
     ConstantsResolved,
-    ConstantPassSideTableEntriesCloned,
     ModuleConstantDeclarationClones,
 
     // Expression ordering, operator typing and constant-folding pressure.
@@ -228,7 +227,6 @@ mod detailed {
             AstCounter::BoundedExpressionTokenCopiesAvoided,
             AstCounter::ConstantResolutionContextsCreated,
             AstCounter::ConstantsResolved,
-            AstCounter::ConstantPassSideTableEntriesCloned,
             AstCounter::ModuleConstantDeclarationClones,
             AstCounter::ExpressionOrderingInputItems,
             AstCounter::ExpressionTypedStackItems,
@@ -315,9 +313,6 @@ mod detailed {
                 "ast_constant_resolution_contexts_created"
             }
             AstCounter::ConstantsResolved => "ast_constants_resolved",
-            AstCounter::ConstantPassSideTableEntriesCloned => {
-                "ast_constant_pass_side_table_entries_cloned"
-            }
             AstCounter::ModuleConstantDeclarationClones => "ast_module_constant_declaration_clones",
 
             AstCounter::ExpressionOrderingInputItems => "ast_expression_ordering_input_items",

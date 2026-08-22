@@ -27,6 +27,7 @@ use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::syntax::TraitIncompatibilitySyntax;
 
 use rustc_hash::FxHashSet;
+use std::rc::Rc;
 use std::sync::Arc;
 
 impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
@@ -158,7 +159,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             // the alias target a second time. The entry was proven present
                             // above; an absent entry here is an internal invariant failure.
                             let Some(alias_annotation) =
-                                self.resolved_type_aliases_by_path.get_mut(&alias_path)
+                                Rc::make_mut(&mut self.resolved_type_aliases_by_path)
+                                    .get_mut(&alias_path)
                             else {
                                 return Err(self.error_messages(
                                     CompilerError::compiler_error(

@@ -1376,7 +1376,7 @@ impl GenericTemplateArtefact {
                 if lookups.declaration_table.get_by_path(&local_path).is_none() {
                     append_materialised_declaration(lookups, declaration.clone())?;
                 }
-                lookups.module_constants.push(declaration);
+                lookups.push_module_constant(declaration);
                 Rc::make_mut(&mut lookups.declaration_semantics)
                     .register_materialised_constant(local_path);
                 continue;
@@ -4939,6 +4939,12 @@ impl ModuleMaterialisationPreparation {
             imported_functions_by_local_path: self.imported_functions_by_local_path.clone(),
             imported_struct_definitions: self.imported_struct_definitions.clone(),
             imported_choice_definitions: self.imported_choice_definitions.clone(),
+            module_constant_paths: Rc::new(
+                module_constants
+                    .iter()
+                    .map(|declaration| declaration.id.to_owned())
+                    .collect(),
+            ),
             module_constants,
             rendered_path_usages: Rc::new(RefCell::new(Vec::new())),
             builtin_struct_ast_nodes: self.builtin_struct_ast_nodes.clone(),

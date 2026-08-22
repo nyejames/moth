@@ -15,10 +15,10 @@ use crate::benchmark_execution::{
     BenchmarkExecutionContext, format_case_failures, preflight_cases,
 };
 use crate::benchmark_manifest::{BenchmarkCase, BenchmarkScalingSeries};
+use crate::benchmark_repository::verify_after_operation;
 use crate::benchmark_run::PreparedBenchmarkRun;
 use crate::benchmark_suite::measure_cases;
 use crate::benchmark_workspace::{BenchmarkExecutionWorkspace, finalise_workspace};
-use crate::benchmark_repository::verify_after_operation;
 use std::collections::BTreeSet;
 use std::num::NonZeroUsize;
 
@@ -47,10 +47,16 @@ pub(crate) struct ScalingPointMeasurement {
 /// The conclusion drawn about one series.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum ScalingVerdict {
-    WithinBudget { exponent: f64 },
-    ExceedsBudget { exponent: f64 },
+    WithinBudget {
+        exponent: f64,
+    },
+    ExceedsBudget {
+        exponent: f64,
+    },
     /// The series ran but the numbers cannot support a conclusion.
-    Unmeasurable { reason: String },
+    Unmeasurable {
+        reason: String,
+    },
 }
 
 /// One series, its measured points and its verdict.
