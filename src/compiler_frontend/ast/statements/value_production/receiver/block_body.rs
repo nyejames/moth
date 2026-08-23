@@ -2,8 +2,8 @@
 //!
 //! WHAT: consumes `:`, installs the active value target on caller-supplied then
 //! and else parents, parses both statement bodies, and requires `else`.
-//! WHY: block Bool `if`, later block match, and inferred multi-bind must not
-//! duplicate warning forwarding or `else` checking.
+//! WHY: block Bool `if`, block single-predicate match, and inferred multi-bind
+//! must not duplicate warning forwarding or `else` checking.
 
 use super::emit_collected_warnings;
 use crate::compiler_frontend::ast::ContextKind;

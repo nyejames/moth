@@ -36,7 +36,7 @@ use crate::compiler_frontend::type_coercion::parse_context::CastTargetContext;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
 
-/// Parsed pattern header shared by full match arms and inline single-predicate value `if`.
+/// Parsed pattern header shared by full match arms and single-predicate value `if`.
 ///
 /// WHAT: carries the normalized pattern plus any arm-local scope introduced by
 /// captures.
@@ -195,12 +195,13 @@ pub(crate) fn parse_match_arm_header(
     })
 }
 
-/// Parse one pattern after `if <scrutinee> is` for inline value-producing `if`.
+/// Parse one pattern after `if <scrutinee> is` for value-producing single-predicate `if`.
 ///
 /// WHAT: reuses the same pattern resolution as full match arms, including choice
-/// variant qualification and capture scope construction.
-/// WHY: inline single-predicate value `if` must not resolve variant names as
-/// ordinary values; full match parsing is the owner of that semantics.
+/// variant qualification and capture scope construction, and leaves the body
+/// delimiter (`then` or `:`) for the caller.
+/// WHY: inline and block single-predicate value `if` must not resolve variant
+/// names as ordinary values; full match parsing is the owner of that semantics.
 pub(crate) fn parse_single_predicate_match_pattern(
     scrutinee: &Expression,
     token_stream: &mut FileTokens,
@@ -216,7 +217,11 @@ pub(crate) fn parse_single_predicate_match_pattern(
         string_table,
     )?;
 
-    reject_invalid_pattern_suffix(token_stream)?;
+    // Colon starts the block body of a single-predicate value match. Full match
+    // arms still reject it as legacy `pattern:` syntax through `parse_match_arm_header`.
+    if token_stream.current_token_kind() != &TokenKind::Colon {
+        reject_invalid_pattern_suffix(token_stream)?;
+    }
 
     Ok(ParsedSinglePredicatePattern {
         pattern: parsed.pattern,

@@ -2,7 +2,7 @@
 //!
 //! WHAT: consumes `if` at closed receiver sites and routes through the shared
 //! `if_headers` classifier to inline bool, inline single-predicate match, block
-//! if, or full match forms.
+//! bool, block single-predicate match, or full match forms.
 //! WHY: this is the only place where `if` is permitted in expression position;
 //! general expression parsing continues to reject bare `if` everywhere else.
 //!
@@ -34,6 +34,7 @@ use crate::compiler_frontend::value_mode::ValueMode;
 
 mod block_body;
 mod block_if;
+mod block_match;
 mod full_match;
 mod inline_if;
 mod inline_match;
@@ -150,7 +151,22 @@ pub fn try_parse_value_block_at_receiver(
             ))
         }
 
-        IfHeaderShape::OrdinaryBool | IfHeaderShape::PotentialBlockSinglePredicate => {
+        IfHeaderShape::PotentialBlockSinglePredicate => {
+            if let Some(result) = block_match::try_parse_block_single_predicate_value_match(
+                block_match::BlockSinglePredicateParseInput {
+                    token_stream,
+                    context,
+                    type_interner,
+                    expected_result_type_ids,
+                    receiver_kind,
+                    string_table,
+                    location: location.clone(),
+                    classification,
+                },
+            ) {
+                return Some(result);
+            }
+
             Some(parse_bool_value_if_after_condition(
                 token_stream,
                 context,
@@ -161,6 +177,16 @@ pub fn try_parse_value_block_at_receiver(
                 location,
             ))
         }
+
+        IfHeaderShape::OrdinaryBool => Some(parse_bool_value_if_after_condition(
+            token_stream,
+            context,
+            type_interner,
+            expected_result_type_ids,
+            receiver_kind,
+            string_table,
+            location,
+        )),
     }
 }
 

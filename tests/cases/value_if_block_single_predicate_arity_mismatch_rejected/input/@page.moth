@@ -1,0 +1,8 @@
+pair_for |maybe_name String?| -> String, Int:
+    label String, count Int = if maybe_name is |name|:
+        then name
+    else
+        then "guest"
+    ;
+    return label, count
+;

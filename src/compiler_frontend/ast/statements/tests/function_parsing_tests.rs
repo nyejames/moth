@@ -749,6 +749,93 @@ fn parses_inline_option_present_capture_receiver_as_value_match() {
 }
 
 #[test]
+fn parses_block_option_present_capture_receiver_as_value_match() {
+    let (ast, string_table) = parse_single_file_ast(
+        "display |maybe_name String?| -> String:\n\
+             name = if maybe_name is |name|:\n\
+                 then name\n\
+             else\n\
+                 then \"guest\"\n\
+             ;\n\
+             return name\n\
+         ;\n",
+    );
+
+    let body = function_body_by_name(&ast, &string_table, "display");
+    let NodeKind::VariableDeclaration(name_decl) = &body[0].kind else {
+        panic!("expected name declaration in display()");
+    };
+    let ExpressionKind::ValueBlock { block } = &name_decl.value.kind else {
+        panic!("expected block option unwrap to parse as a value block");
+    };
+    let ValueBlock::Match(value_match) = block.as_ref() else {
+        panic!("expected block option unwrap to lower through value match");
+    };
+
+    assert_eq!(value_match.arms.len(), 1);
+    assert!(
+        value_match.arms[0].guard.is_none(),
+        "single-predicate block match must not invent a guard"
+    );
+    assert!(
+        matches!(
+            value_match.arms[0].pattern,
+            MatchPattern::OptionPresentCapture { .. }
+        ),
+        "the block option unwrap predicate should bind a present payload"
+    );
+    assert!(
+        value_match.default.is_some(),
+        "block else branch should remain outside the present-capture scope"
+    );
+    assert_eq!(value_match.exhaustiveness, MatchExhaustiveness::HasDefault);
+}
+
+#[test]
+fn parses_block_choice_predicate_receiver_as_value_match() {
+    let (ast, string_table) = parse_single_file_ast(
+        "Status :: Ready, Waiting;\n\
+         score_for |status Status| -> Int:\n\
+             score = if status is Ready:\n\
+                 then 1\n\
+             else\n\
+                 then 0\n\
+             ;\n\
+             return score\n\
+         ;\n",
+    );
+
+    let body = function_body_by_name(&ast, &string_table, "score_for");
+    let NodeKind::VariableDeclaration(score_decl) = &body[0].kind else {
+        panic!("expected score declaration in score_for()");
+    };
+    let ExpressionKind::ValueBlock { block } = &score_decl.value.kind else {
+        panic!("expected block choice predicate to parse as a value block");
+    };
+    let ValueBlock::Match(value_match) = block.as_ref() else {
+        panic!("expected block choice predicate to lower through value match");
+    };
+
+    assert_eq!(value_match.arms.len(), 1);
+    assert!(
+        value_match.arms[0].guard.is_none(),
+        "single-predicate block match must not invent a guard"
+    );
+    assert!(
+        matches!(
+            value_match.arms[0].pattern,
+            MatchPattern::ChoiceVariant { tag: 0, .. }
+        ),
+        "Ready should resolve as the first Status variant, not as an ordinary value name"
+    );
+    assert!(
+        value_match.default.is_some(),
+        "block else branch should become the value-match default"
+    );
+    assert_eq!(value_match.exhaustiveness, MatchExhaustiveness::HasDefault);
+}
+
+#[test]
 fn parses_option_equality_receiver_as_bool_value_if() {
     let (ast, string_table) = parse_single_file_ast(
         "compare |left String?, right String?| -> String:\n\

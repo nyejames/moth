@@ -81,27 +81,28 @@ PARENT_STATE_AT_SNAPSHOT:
 - Static Bool `if` specialisation remains the later Phase G semantic gate.
 
 CURRENT_SCOPE:
-- Phase 5 block single-predicate matches for explicit and known receivers.
+- Phase 6 partially inferred multi-bind parity and remaining parser deletion.
 
 COMPLETED:
 - Phase 0 `43c3e7ac6`. Phase 1 `2f442425b`. Phase 2 `25bc9963f`. Phase 3 `2fc56a0b3`.
+  Phase 4 `be9935a20`.
 - Shared `receiver/block_body.rs` parses both bodies. `value_production/expression_build.rs`
   is the only `ValueIfBlock`/`ValueMatchBlock` construction owner.
+- `receiver/block_match.rs` assembles one-arm block option/choice matches at known receivers.
 
 NEXT_ACTION:
-- After this Phase 4 checkpoint, add `receiver/block_match.rs` for option-capture and choice
-  predicates at known closed receivers.
+- After this Phase 5 checkpoint, give partially inferred multi-bind the same inline and
+  block single-predicate feature set, then delete remaining parser duplication.
 
 VALIDATION:
-- statement lib tests 290 passed; value_block_lowering_tests 2 passed. Focused HTML block
-  declaration/return/multi-bind/fallthrough cases passed. `cargo fmt --all -- --check` passed.
-  `just validate` passed: clippy `-D warnings`, source-audit 0, workspace tests 4466 passed /
-  3 ignored, xtask 17, integration 1868/1868.
+- statement lib tests 292 passed; value_block_lowering_tests 2 passed. New AST shape tests
+  and HTML block-predicate cases passed. `cargo fmt --all -- --check` passed.
+  `just validate` passed: clippy `-D warnings`, source-audit 0, workspace tests 4468 passed /
+  3 ignored, xtask 17, integration 1878/1878.
 
 AUDITS:
-- Phase 0-3 auditor cycles accepted.
-- Phase 4 interim auditor handoff was clean; launcher reported a refs-only contract_violation
-  with no source edits.
+- Phase 0-4 auditor cycles accepted.
+- Phase 5 interim auditor `audit_clean` (`20260823T083028Z-47afcf8d`).
 
 BLOCKERS:
 - none
@@ -1207,57 +1208,57 @@ multi-bind slots.
 
 ### Work items
 
-- [ ] Add `receiver/block_match.rs` with file-level ownership and exclusion documentation.
-- [ ] Route a shared single-predicate header followed by `:` to the block match parser.
-- [ ] Reuse the parsed scrutinee, pattern and capture scope from Phase 3.
-- [ ] Parse the matched body with the capture scope as its parent.
-- [ ] Parse the default body from the outer receiver context so captures cannot leak.
-- [ ] Require `else` before building any `ValueMatchBlock`.
-- [ ] Build one `MatchArm` with `guard: None`.
-- [ ] Store `Some(else_body)` and `MatchExhaustiveness::HasDefault`.
-- [ ] Reuse the shared all-path completeness validator.
-- [ ] Reuse value-match result inference and final slot construction.
-- [ ] Reuse the shared value-block expression builder.
-- [ ] Keep option `none`, literal/relational and guarded forms outside this route.
-- [ ] Add no new HIR, borrow or backend operation.
+- [x] Add `receiver/block_match.rs` with file-level ownership and exclusion documentation.
+- [x] Route a shared single-predicate header followed by `:` to the block match parser.
+- [x] Reuse the parsed scrutinee, pattern and capture scope from Phase 3.
+- [x] Parse the matched body with the capture scope as its parent.
+- [x] Parse the default body from the outer receiver context so captures cannot leak.
+- [x] Require `else` before building any `ValueMatchBlock`.
+- [x] Build one `MatchArm` with `guard: None`.
+- [x] Store `Some(else_body)` and `MatchExhaustiveness::HasDefault`.
+- [x] Reuse the shared all-path completeness validator.
+- [x] Reuse value-match result inference and final slot construction.
+- [x] Reuse the shared value-block expression builder.
+- [x] Keep option `none`, literal/relational and guarded forms outside this route.
+- [x] Add no new HIR, borrow or backend operation.
 
 ### Required integration coverage
 
 Prefer one strong primary success case with several functions over many tiny duplicate fixtures.
 Cover at least:
 
-- [ ] option present and absent runtime paths
-- [ ] choice unit predicate
-- [ ] qualified choice unit predicate
-- [ ] choice payload capture
-- [ ] capture alias where already supported
-- [ ] declaration initialiser
-- [ ] assignment right-hand side
-- [ ] return receiver
-- [ ] fully known multi-bind receiver
-- [ ] ordinary statements before `then`
-- [ ] nested produce/terminate branch paths
+- [x] option present and absent runtime paths
+- [x] choice unit predicate
+- [x] qualified choice unit predicate
+- [x] choice payload capture
+- [x] capture alias where already supported
+- [x] declaration initialiser
+- [x] assignment right-hand side
+- [x] return receiver
+- [x] fully known multi-bind receiver
+- [x] ordinary statements before `then`
+- [x] nested produce/terminate branch paths
 
 Add focused failure coverage for:
 
-- [ ] missing `else`
-- [ ] matched branch fallthrough
-- [ ] default branch fallthrough
-- [ ] no producing path
-- [ ] wrong arity
-- [ ] incompatible result type
-- [ ] capture shadowing
-- [ ] unknown or cross-choice variant
-- [ ] capture use in the default branch
+- [x] missing `else`
+- [x] matched branch fallthrough
+- [x] default branch fallthrough
+- [x] no producing path
+- [x] wrong arity
+- [x] incompatible result type
+- [x] capture shadowing
+- [x] unknown or cross-choice variant
+- [x] capture use in the default branch
 
 Protect statement and template semantics with existing cases rather than creating redundant copies.
 
 ### HIR boundary proof
 
-- [ ] Extend an existing value-block lowering test or add one focused AST fixture showing that the
+- [x] Extend an existing value-block lowering test or add one focused AST fixture showing that the
       new block syntax produces the existing one-arm `ValueMatchBlock` shape.
-- [ ] Confirm HIR still lowers through `lower_value_block_match` and statement match lowering.
-- [ ] Confirm no HIR production file changed unless an invariant comment or bug fix in existing
+- [x] Confirm HIR still lowers through `lower_value_block_match` and statement match lowering.
+- [x] Confirm no HIR production file changed unless an invariant comment or bug fix in existing
       input validation is strictly required.
 
 ### Focused validation
@@ -1278,22 +1279,41 @@ just validate
 
 ### Mandatory audit and style review
 
-- [ ] Confirm `block_match.rs` owns no header scan, pattern parser or independent completeness logic.
-- [ ] Confirm the capture scope is branch-local and the default branch uses the outer context.
-- [ ] Confirm `else` is checked before AST construction.
-- [ ] Confirm no downstream representation changed.
-- [ ] Complete the mandatory phase workflow.
+- [x] Confirm `block_match.rs` owns no header scan, pattern parser or independent completeness logic.
+- [x] Confirm the capture scope is branch-local and the default branch uses the outer context.
+- [x] Confirm `else` is checked before AST construction.
+- [x] Confirm no downstream representation changed.
+- [x] Complete the mandatory phase workflow.
 
 ### Acceptance
 
-- [ ] Block option capture and choice predicates compile and run at known receivers.
-- [ ] Inline and block forms use one pattern/capture authority.
-- [ ] Every invalid branch shape receives the established diagnostic family.
-- [ ] HIR consumes the existing `ValueMatchBlock` unchanged.
+- [x] Block option capture and choice predicates compile and run at known receivers.
+- [x] Inline and block forms use one pattern/capture authority.
+- [x] Every invalid branch shape receives the established diagnostic family.
+- [x] HIR consumes the existing `ValueMatchBlock` unchanged.
 
 ### Outcome
 
-_To be completed by the implementing agent._
+`receiver/block_match.rs` is a body-assembly adapter. `PotentialBlockSinglePredicate` at a closed
+receiver now tries the shared single-predicate header; a committed option/choice predicate with
+`:` becomes one-arm `ValueMatchBlock`. Capture scope is the then parent; the outer receiver
+context is the else parent. `else` is still required by `parse_value_block_bodies` before
+construction. Completeness, result inference, slot IDs and expression construction are reused.
+
+`parse_single_predicate_match_pattern` allows `:` as the block-body delimiter. Full match arms
+still reject `pattern:` through `parse_match_arm_header`. Bool fallback remains only before a
+match shape is committed. Option `none`/literal/relational and guarded forms stay out of this
+route. Statement and template choice matching is unchanged. No HIR, borrow or backend file
+changed.
+
+Parser AST tests prove the new syntax is one arm, `guard: None`, `HasDefault`. Existing
+`value_block_lowering_tests` still lower `ValueMatchBlock` through `lower_value_block_match`.
+Primary case `value_if_block_single_predicate` covers option, choice, qualified choice, payload
+capture, alias, declaration, assignment, return, known multi-bind, pre-`then` statements and
+nested produce/terminate. Focused failure cases cover the required diagnostic families.
+
+`just validate` passed: clippy `-D warnings`, source-audit 0, 4468 unit tests passed / 3 ignored,
+xtask 17, integration 1878/1878.
 
 ---
 

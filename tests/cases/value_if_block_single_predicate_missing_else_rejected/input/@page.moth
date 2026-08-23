@@ -1,0 +1,6 @@
+display |maybe_name String?| -> String:
+    name = if maybe_name is |name|:
+        then name
+    ;
+    return name
+;

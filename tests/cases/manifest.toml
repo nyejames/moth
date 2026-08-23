@@ -10500,6 +10500,76 @@ contract = "language.options.value_if_inline_unwrap_acceptance"
 role = "primary"
 
 [[case]]
+id = "value_if_block_single_predicate"
+path = "value_if_block_single_predicate"
+tags = ["integration", "language", "value-blocks", "if", "choice", "match", "optionals"]
+contract = "language.expressions.value_if_block_single_predicate_acceptance"
+role = "primary"
+
+[[case]]
+id = "value_if_block_single_predicate_missing_else_rejected"
+path = "value_if_block_single_predicate_missing_else_rejected"
+tags = ["integration", "diagnostics", "value-blocks", "if", "match"]
+contract = "language.expressions.value_if_missing_else_rejected"
+role = "boundary"
+
+[[case]]
+id = "value_if_block_single_predicate_matched_fallthrough_rejected"
+path = "value_if_block_single_predicate_matched_fallthrough_rejected"
+tags = ["integration", "diagnostics", "value-blocks", "if", "match"]
+contract = "language.expressions.value_if_branch_must_produce_value_rejected"
+role = "boundary"
+
+[[case]]
+id = "value_if_block_single_predicate_default_fallthrough_rejected"
+path = "value_if_block_single_predicate_default_fallthrough_rejected"
+tags = ["integration", "diagnostics", "value-blocks", "if", "match"]
+contract = "language.expressions.value_if_branch_must_produce_value_rejected"
+role = "boundary"
+
+[[case]]
+id = "value_if_block_single_predicate_no_producing_path_rejected"
+path = "value_if_block_single_predicate_no_producing_path_rejected"
+tags = ["integration", "diagnostics", "value-blocks", "if", "match"]
+contract = "language.expressions.value_if_no_producing_path_rejected"
+role = "primary"
+
+[[case]]
+id = "value_if_block_single_predicate_arity_mismatch_rejected"
+path = "value_if_block_single_predicate_arity_mismatch_rejected"
+tags = ["integration", "diagnostics", "value-blocks", "if", "match", "multi-bind"]
+contract = "language.functions.multi_bind_wrong_arity_rejected"
+role = "boundary"
+
+[[case]]
+id = "value_if_block_single_predicate_type_mismatch_rejected"
+path = "value_if_block_single_predicate_type_mismatch_rejected"
+tags = ["integration", "diagnostics", "value-blocks", "if", "match"]
+contract = "language.expressions.value_if_type_mismatch_rejected"
+role = "primary"
+
+[[case]]
+id = "value_if_block_single_predicate_capture_shadowing_rejected"
+path = "value_if_block_single_predicate_capture_shadowing_rejected"
+tags = ["integration", "diagnostics", "value-blocks", "if", "match", "optionals"]
+contract = "language.choices.match_capture_shadowing_rejected"
+role = "boundary"
+
+[[case]]
+id = "value_if_block_single_predicate_unknown_variant_rejected"
+path = "value_if_block_single_predicate_unknown_variant_rejected"
+tags = ["integration", "diagnostics", "value-blocks", "if", "choice", "match"]
+contract = "language.choices.match_unknown_variant_rejected"
+role = "boundary"
+
+[[case]]
+id = "value_if_block_single_predicate_capture_in_default_rejected"
+path = "value_if_block_single_predicate_capture_in_default_rejected"
+tags = ["integration", "diagnostics", "value-blocks", "if", "match", "optionals"]
+contract = "language.bindings.undefined_variable_reference_rejected"
+role = "boundary"
+
+[[case]]
 id = "value_match_declaration_init"
 path = "value_match_declaration_init"
 tags = ["integration", "language", "value-blocks", "match", "declaration"]

@@ -92,8 +92,9 @@ pub struct ValueIfBlock {
 
 /// Full value-producing match block.
 ///
-/// WHAT: `if value is:` used at a closed receiving site, with each reachable arm
-/// producing values via `then` or terminating.
+/// WHAT: `if value is:` or a one-arm option/choice predicate used at a closed
+/// receiving site, with each reachable arm producing values via `then` or
+/// terminating.
 /// WHY: this reuses statement match parsing and HIR match CFG lowering while keeping
 /// value-block result slots explicit for hidden result-local allocation.
 #[derive(Clone, Debug)]
