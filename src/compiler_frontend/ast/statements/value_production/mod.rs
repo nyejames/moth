@@ -14,6 +14,7 @@
 //! - template control flow.
 
 pub(crate) mod completeness;
+pub(crate) mod expression_build;
 pub(crate) mod multi_bind;
 pub(crate) mod parse_values;
 pub(crate) mod receiver;

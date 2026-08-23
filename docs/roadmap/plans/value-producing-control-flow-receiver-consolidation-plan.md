@@ -81,27 +81,27 @@ PARENT_STATE_AT_SNAPSHOT:
 - Static Bool `if` specialisation remains the later Phase G semantic gate.
 
 CURRENT_SCOPE:
-- Phase 4 shared block-body parsing and value-block construction.
+- Phase 5 block single-predicate matches for explicit and known receivers.
 
 COMPLETED:
-- Phase 0 checkpoint `43c3e7ac6`. Phase 1 checkpoint `2f442425b`. Phase 2 checkpoint `25bc9963f`.
-- Phase 3 deletes `receiver/detect.rs`. Closed receivers and inferred multi-bind classify through
-  `classify_if_header`. `receiver/single_predicate.rs` owns type-aware header parsing.
+- Phase 0 `43c3e7ac6`. Phase 1 `2f442425b`. Phase 2 `25bc9963f`. Phase 3 `2fc56a0b3`.
+- Shared `receiver/block_body.rs` parses both bodies. `value_production/expression_build.rs`
+  is the only `ValueIfBlock`/`ValueMatchBlock` construction owner.
 
 NEXT_ACTION:
-- After this Phase 3 checkpoint, add the shared block-body owner and move value-block construction
-  out of duplicated receiver/multi-bind paths.
+- After this Phase 4 checkpoint, add `receiver/block_match.rs` for option-capture and choice
+  predicates at known closed receivers.
 
 VALIDATION:
-- statement lib tests 290 passed. Focused HTML inline option/choice, cross-choice, option none,
-  option literal and full match cases passed. `cargo fmt --all -- --check` passed. `just validate`
-  passed: clippy `-D warnings`, source-audit 0, workspace tests 4466 passed / 3 ignored, xtask 17,
-  integration 1868/1868.
+- statement lib tests 290 passed; value_block_lowering_tests 2 passed. Focused HTML block
+  declaration/return/multi-bind/fallthrough cases passed. `cargo fmt --all -- --check` passed.
+  `just validate` passed: clippy `-D warnings`, source-audit 0, workspace tests 4466 passed /
+  3 ignored, xtask 17, integration 1868/1868.
 
 AUDITS:
-- Phase 0, Phase 1 and Phase 2 auditor cycles accepted.
-- Phase 3 pass 1 required same-line `then` for option-literal diagnostics; covered by
-  `multiline_option_literal_predicate_stays_inline_value_if_multiline`. Pass 2 `audit_clean`.
+- Phase 0-3 auditor cycles accepted.
+- Phase 4 interim auditor handoff was clean; launcher reported a refs-only contract_violation
+  with no source edits.
 
 BLOCKERS:
 - none
@@ -1115,34 +1115,34 @@ adding the new block match.
 
 ### Work items
 
-- [ ] Add a narrow shared block-body owner under `receiver/`.
-- [ ] Give it explicit then and else parent contexts rather than a boolean capture flag.
-- [ ] Install the supplied `ActiveValueProductionTarget` in both body contexts.
-- [ ] Parse both bodies through `parse_function_body_statements`.
-- [ ] Forward warnings exactly once to the outer receiver context.
-- [ ] Require `else` and preserve `ValueIfMissingElse` unless a typed diagnostic review proves a
+- [x] Add a narrow shared block-body owner under `receiver/`.
+- [x] Give it explicit then and else parent contexts rather than a boolean capture flag.
+- [x] Install the supplied `ActiveValueProductionTarget` in both body contexts.
+- [x] Parse both bodies through `parse_function_body_statements`.
+- [x] Forward warnings exactly once to the outer receiver context.
+- [x] Require `else` and preserve `ValueIfMissingElse` unless a typed diagnostic review proves a
       distinct reason is required.
-- [ ] Return both bodies and their all-path exit summaries.
-- [ ] Migrate `block_if.rs` to the shared body owner.
-- [ ] Migrate partially inferred multi-bind block Bool parsing to the shared body owner.
-- [ ] Move value-block construction helpers to the narrow `value_production` owner so receiver and
+- [x] Return both bodies and their all-path exit summaries.
+- [x] Migrate `block_if.rs` to the shared body owner.
+- [x] Migrate partially inferred multi-bind block Bool parsing to the shared body owner.
+- [x] Move value-block construction helpers to the narrow `value_production` owner so receiver and
       multi-bind share them.
-- [ ] Make builders accept final result slot IDs rather than copying pre-parse expected IDs.
-- [ ] Delete multi-bind's inline-build-then-overwrite-body path.
-- [ ] Delete duplicate multi-bind `ValueIfBlock` and `ValueMatchBlock` expression builders.
-- [ ] Reuse the all-path produced-value traversal for partial slot inference and coercion.
-- [ ] Keep multi-bind-specific slot inference local and readable.
-- [ ] Remove stale comments which describe block value `if` as correct under the old tri-state
+- [x] Make builders accept final result slot IDs rather than copying pre-parse expected IDs.
+- [x] Delete multi-bind's inline-build-then-overwrite-body path.
+- [x] Delete duplicate multi-bind `ValueIfBlock` and `ValueMatchBlock` expression builders.
+- [x] Reuse the all-path produced-value traversal for partial slot inference and coercion.
+- [x] Keep multi-bind-specific slot inference local and readable.
+- [x] Remove stale comments which describe block value `if` as correct under the old tri-state
       model.
 
 ### Required tests
 
-- [ ] Strengthen declaration, assignment, return and multi-bind block success coverage.
-- [ ] Cover inferred single-result block declarations through HIR and runtime output.
-- [ ] Cover multi-result return and multi-bind result slot allocation.
-- [ ] Cover mixed produce/terminate nested paths.
-- [ ] Preserve missing `else`, branch fallthrough, arity and type mismatch diagnostics.
-- [ ] Add a focused AST construction test only where integration output cannot prove final
+- [x] Strengthen declaration, assignment, return and multi-bind block success coverage.
+- [x] Cover inferred single-result block declarations through HIR and runtime output.
+- [x] Cover multi-result return and multi-bind result slot allocation.
+- [x] Cover mixed produce/terminate nested paths.
+- [x] Preserve missing `else`, branch fallthrough, arity and type mismatch diagnostics.
+- [x] Add a focused AST construction test only where integration output cannot prove final
       `result_type_ids`.
 
 ### Focused validation
@@ -1164,23 +1164,36 @@ just validate
 
 ### Mandatory audit and style review
 
-- [ ] Confirm one block-body parser exists.
-- [ ] Confirm one value-block construction owner exists.
-- [ ] Search for temporary AST construction followed by body replacement.
-- [ ] Search for duplicated warning forwarding, `else` checks and active-target setup.
-- [ ] Review parameter lists and use an input struct where it improves data flow.
-- [ ] Complete the mandatory phase workflow.
+- [x] Confirm one block-body parser exists.
+- [x] Confirm one value-block construction owner exists.
+- [x] Search for temporary AST construction followed by body replacement.
+- [x] Search for duplicated warning forwarding, `else` checks and active-target setup.
+- [x] Review parameter lists and use an input struct where it improves data flow.
+- [x] Complete the mandatory phase workflow.
 
 ### Acceptance
 
-- [ ] Existing block Bool value `if` follows the accepted all-path contract.
-- [ ] Inferred block results carry correct HIR result slots.
-- [ ] Multi-bind no longer builds and mutates a fake inline block.
-- [ ] Block body and construction duplication is removed.
+- [x] Existing block Bool value `if` follows the accepted all-path contract.
+- [x] Inferred block results carry correct HIR result slots.
+- [x] Multi-bind no longer builds and mutates a fake inline block.
+- [x] Block body and construction duplication is removed.
 
 ### Outcome
 
-_To be completed by the implementing agent._
+`receiver/block_body.rs` parses both bodies from caller-supplied then/else parents, installs
+the active target, forwards warnings once, requires `else`, and returns bodies plus exit
+summaries. `block_if.rs` and inferred multi-bind block Bool parsing consume it.
+`validate_closed_branch_pair` uses those summaries.
+
+Construction lives in `value_production/expression_build.rs`. Multi-bind's duplicate builders
+and the empty-body-then-overwrite path are deleted. Slot inference and post-inference coercion
+stay in `multi_bind.rs`. `receiver/expression_build.rs` is gone.
+
+Existing block declaration, return, multi-bind and fallthrough cases still pass.
+`inferred_block_value_if_stores_non_empty_result_type_ids` still proves final slot IDs.
+
+`just validate` passed: clippy `-D warnings`, source-audit 0, 4466 unit tests passed / 3 ignored,
+xtask 17, integration 1868/1868.
 
 ---
 

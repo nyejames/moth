@@ -5,19 +5,21 @@
 //! WHY: multi-bind inference is specific to closed assignment/declaration receivers and would make
 //! the ordinary declaration/assignment value-block parser harder to follow if left inline.
 
+use super::expression_build::{
+    build_value_if_expression, build_value_match_expression, then_value_node,
+};
 use super::parse_values::is_missing_produced_value_boundary;
 use super::receiver::{
-    emit_collected_warnings, same_logical_line, try_parse_value_block_at_receiver,
-    validate_value_match_completeness,
+    BlockBodyParseInput, emit_collected_warnings, parse_value_block_bodies, same_logical_line,
+    try_parse_value_block_at_receiver, validate_value_match_completeness,
 };
-use crate::compiler_frontend::ast::ast_nodes::{AstNode, MatchExhaustiveness, NodeKind};
+use crate::compiler_frontend::ast::ast_nodes::AstNode;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::parse_expression::create_expression_until;
 use crate::compiler_frontend::ast::expressions::parse_expression_input::{
     ExpressionParseInput, ExpressionParseResources,
 };
-use crate::compiler_frontend::ast::statements::body_dispatch::parse_function_body_statements;
 use crate::compiler_frontend::ast::statements::branching::parse_match_block;
 use crate::compiler_frontend::ast::statements::condition_validation::{
     ensure_if_statement_condition, if_condition_is_missing,
@@ -26,12 +28,11 @@ use crate::compiler_frontend::ast::statements::if_headers::{IfHeaderShape, class
 use crate::compiler_frontend::ast::statements::match_headers::parse_scrutinee_until_is;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchArm;
 use crate::compiler_frontend::ast::statements::value_production::completeness::{
-    validate_value_if_completeness, visit_reachable_then_values, visit_reachable_then_values_mut,
+    validate_closed_branch_pair, visit_reachable_then_values, visit_reachable_then_values_mut,
 };
 use crate::compiler_frontend::ast::statements::value_production::parse_values::parse_fixed_arity_inferred_values;
 use crate::compiler_frontend::ast::statements::value_production::types::{
-    ActiveValueProductionTarget, ProducedValues, ValueBlock, ValueIfBlock, ValueMatchBlock,
-    ValueReceiverKind,
+    ActiveValueProductionTarget, ValueIfBlock, ValueMatchBlock, ValueReceiverKind,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
@@ -39,7 +40,6 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidControlFlowStatementReason, InvalidReturnShapeReason,
     TypeMismatchContext,
 };
-use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -300,15 +300,21 @@ fn parse_inferred_multi_bind_value_match(
         )?;
     }
 
-    build_multi_bind_value_match_expression(
-        parsed_match.scrutinee,
-        parsed_match.arms,
-        parsed_match.default,
-        parsed_match.exhaustiveness,
+    let result_type_id = intern_multi_bind_result_type(&result_type_ids, type_interner);
+    let value_match = ValueMatchBlock {
+        scrutinee: parsed_match.scrutinee,
+        arms: parsed_match.arms,
+        default: parsed_match.default,
+        exhaustiveness: parsed_match.exhaustiveness,
+        location: location.clone(),
         result_type_ids,
-        type_interner,
-        location,
-    )
+    };
+
+    Ok(build_value_match_expression(
+        value_match,
+        result_type_id,
+        type_interner.environment(),
+    ))
 }
 
 fn parse_inferred_inline_multi_bind_value_if(
@@ -415,15 +421,28 @@ fn parse_inferred_inline_multi_bind_value_if(
     let coerced_else =
         apply_coercion_to_values(else_values, &result_type_ids, type_interner.environment());
 
-    build_multi_bind_value_if_expression(
+    let result_type_id = intern_multi_bind_result_type(&result_type_ids, type_interner);
+    let value_if = ValueIfBlock {
         condition,
-        coerced_then,
-        coerced_else,
+        then_body: vec![then_value_node(
+            coerced_then,
+            location.clone(),
+            context.scope.clone(),
+        )],
+        else_body: vec![then_value_node(
+            coerced_else,
+            location.clone(),
+            context.scope.clone(),
+        )],
+        location: location.clone(),
         result_type_ids,
-        type_interner,
-        location,
-        context,
-    )
+    };
+
+    Ok(build_value_if_expression(
+        value_if,
+        result_type_id,
+        type_interner.environment(),
+    ))
 }
 
 fn parse_inferred_block_multi_bind_value_if(
@@ -440,51 +459,24 @@ fn parse_inferred_block_multi_bind_value_if(
         location,
     } = input;
 
-    token_stream.advance(); // consume `:`
-
-    let active_target = ActiveValueProductionTarget {
-        result_type_ids: vec![],
-        receiver_kind: ValueReceiverKind::MultiBind,
-        expected_arity: Some(target_count),
-    };
-
-    let mut then_context = context.new_child_control_flow(ContextKind::Branch, string_table);
-    then_context.active_value_target = Some(active_target.clone());
-    let mut then_warnings = Vec::new();
-    let mut then_body = parse_function_body_statements(
+    let mut bodies = parse_value_block_bodies(BlockBodyParseInput {
         token_stream,
-        then_context,
+        outer_context: context,
+        then_parent: context,
+        else_parent: context,
         type_interner,
-        &mut then_warnings,
         string_table,
-    )?;
-    emit_collected_warnings(context, then_warnings);
+        active_target: ActiveValueProductionTarget {
+            result_type_ids: vec![],
+            receiver_kind: ValueReceiverKind::MultiBind,
+            expected_arity: Some(target_count),
+        },
+    })?;
 
-    if token_stream.current_token_kind() != &TokenKind::Else {
-        return Err(CompilerDiagnostic::invalid_control_flow_statement(
-            InvalidControlFlowStatementReason::ValueIfMissingElse,
-            token_stream.current_location(),
-        )
-        .into());
-    }
-    token_stream.advance(); // consume `else`
+    validate_closed_branch_pair(bodies.then_exits, bodies.else_exits, &location)?;
 
-    let mut else_context = context.new_child_control_flow(ContextKind::Branch, string_table);
-    else_context.active_value_target = Some(active_target);
-    let mut else_warnings = Vec::new();
-    let mut else_body = parse_function_body_statements(
-        token_stream,
-        else_context,
-        type_interner,
-        &mut else_warnings,
-        string_table,
-    )?;
-    emit_collected_warnings(context, else_warnings);
-
-    validate_value_if_completeness(&then_body, &else_body, &location)?;
-
-    let mut produced_value_sets = collect_reachable_produced_groups(&then_body);
-    produced_value_sets.extend(collect_reachable_produced_groups(&else_body));
+    let mut produced_value_sets = collect_reachable_produced_groups(&bodies.then_body);
+    produced_value_sets.extend(collect_reachable_produced_groups(&bodies.else_body));
     if produced_value_sets.is_empty() {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ValueIfNoProducingPath,
@@ -505,35 +497,30 @@ fn parse_inferred_block_multi_bind_value_if(
     )?;
 
     coerce_produced_values_in_body(
-        &mut then_body,
+        &mut bodies.then_body,
         &result_type_ids,
         type_interner.environment(),
     )?;
     coerce_produced_values_in_body(
-        &mut else_body,
+        &mut bodies.else_body,
         &result_type_ids,
         type_interner.environment(),
     )?;
 
-    build_multi_bind_value_if_expression(
+    let result_type_id = intern_multi_bind_result_type(&result_type_ids, type_interner);
+    let value_if = ValueIfBlock {
         condition,
-        vec![], // not used for block form
-        vec![], // not used for block form
+        then_body: bodies.then_body,
+        else_body: bodies.else_body,
+        location: location.clone(),
         result_type_ids,
-        type_interner,
-        location,
-        context,
-    )
-    .map(|mut expr| {
-        // Replace the inline-constructed bodies with the real parsed bodies.
-        if let ExpressionKind::ValueBlock { block } = &mut expr.kind
-            && let ValueBlock::If(value_if) = block.as_mut()
-        {
-            value_if.then_body = then_body;
-            value_if.else_body = else_body;
-        }
-        expr
-    })
+    };
+
+    Ok(build_value_if_expression(
+        value_if,
+        result_type_id,
+        type_interner.environment(),
+    ))
 }
 
 /// Derives slot types from branch expressions and validates them against known slots.
@@ -806,86 +793,11 @@ fn coerce_produced_values_in_body(
     })
 }
 
-/// Builds the final `ValueBlock::If` expression for multi-bind.
-fn build_multi_bind_value_if_expression(
-    condition: Expression,
-    then_values: Vec<Expression>,
-    else_values: Vec<Expression>,
-    result_type_ids: Vec<TypeId>,
+fn intern_multi_bind_result_type(
+    result_type_ids: &[TypeId],
     type_interner: &mut AstTypeInterner<'_>,
-    location: SourceLocation,
-    context: &ScopeContext,
-) -> MultiBindValueResult<Expression> {
-    let result_type_id = type_interner
+) -> TypeId {
+    type_interner
         .environment_mut_for_derived_types()
-        .intern_tuple(result_type_ids.clone());
-
-    let then_body = vec![AstNode {
-        kind: NodeKind::ThenValue(ProducedValues {
-            expressions: then_values,
-            location: location.clone(),
-        }),
-        location: location.clone(),
-        scope: context.scope.clone(),
-    }];
-
-    let else_body = vec![AstNode {
-        kind: NodeKind::ThenValue(ProducedValues {
-            expressions: else_values,
-            location: location.clone(),
-        }),
-        location: location.clone(),
-        scope: context.scope.clone(),
-    }];
-
-    let value_if = ValueIfBlock {
-        condition,
-        then_body,
-        else_body,
-        location: location.clone(),
-        result_type_ids,
-    };
-
-    Ok(Expression::new(
-        ExpressionKind::ValueBlock {
-            block: Box::new(ValueBlock::If(value_if)),
-        },
-        location,
-        result_type_id,
-        diagnostic_type_spelling(result_type_id, type_interner.environment()),
-        ValueMode::ImmutableOwned,
-    ))
-}
-
-fn build_multi_bind_value_match_expression(
-    scrutinee: Expression,
-    arms: Vec<MatchArm>,
-    default: Option<Vec<AstNode>>,
-    exhaustiveness: MatchExhaustiveness,
-    result_type_ids: Vec<TypeId>,
-    type_interner: &mut AstTypeInterner<'_>,
-    location: SourceLocation,
-) -> MultiBindValueResult<Expression> {
-    let result_type_id = type_interner
-        .environment_mut_for_derived_types()
-        .intern_tuple(result_type_ids.clone());
-
-    let value_match = ValueMatchBlock {
-        scrutinee,
-        arms,
-        default,
-        exhaustiveness,
-        location: location.clone(),
-        result_type_ids,
-    };
-
-    Ok(Expression::new(
-        ExpressionKind::ValueBlock {
-            block: Box::new(ValueBlock::Match(value_match)),
-        },
-        location,
-        result_type_id,
-        diagnostic_type_spelling(result_type_id, type_interner.environment()),
-        ValueMode::ImmutableOwned,
-    ))
+        .intern_tuple(result_type_ids.to_vec())
 }

@@ -10,7 +10,7 @@ use super::{ProducedValues, analyze_branch_exits};
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, MatchExhaustiveness, NodeKind};
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::statements::match_patterns::{MatchArm, MatchPattern};
-use crate::compiler_frontend::ast::statements::value_production::completeness::validate_value_if_completeness;
+use crate::compiler_frontend::ast::statements::value_production::completeness::validate_closed_branch_pair;
 use crate::compiler_frontend::ast::statements::value_production::types::{
     ValueBlock, ValueIfBlock,
 };
@@ -369,9 +369,9 @@ fn inferred_block_value_if_stores_non_empty_result_type_ids() {
 
 #[test]
 fn shared_validator_rejects_all_terminating_value_if() {
-    let error = validate_value_if_completeness(
-        &[return_value(1)],
-        &[return_value(2)],
+    let error = validate_closed_branch_pair(
+        analyze_branch_exits(&[return_value(1)]),
+        analyze_branch_exits(&[return_value(2)]),
         &test_source_location(1),
     )
     .expect_err("a value-if whose every path terminates has no value to provide");

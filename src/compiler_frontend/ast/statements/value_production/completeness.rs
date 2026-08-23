@@ -38,23 +38,6 @@ pub fn analyze_branch_exits(body: &[AstNode]) -> BranchExitSummary {
     summary
 }
 
-/// Validates a value-producing `if` against the shared all-path contract.
-///
-/// WHAT: rejects any fallthrough branch and requires at least one producing path.
-/// WHY: missing `else` is a parser concern; this validator only owns flow and
-/// value production.
-pub fn validate_value_if_completeness(
-    then_body: &[AstNode],
-    else_body: &[AstNode],
-    location: &SourceLocation,
-) -> Result<(), ExpressionParseError> {
-    validate_closed_branch_pair(
-        analyze_branch_exits(then_body),
-        analyze_branch_exits(else_body),
-        location,
-    )
-}
-
 /// Validates every value-match arm and optional default against the shared contract.
 pub fn validate_value_match_completeness(
     arms: &[MatchArm],
@@ -244,7 +227,7 @@ fn visit_statement_then_values_mut<E>(
     }
 }
 
-fn validate_closed_branch_pair(
+pub(crate) fn validate_closed_branch_pair(
     then_exits: BranchExitSummary,
     else_exits: BranchExitSummary,
     location: &SourceLocation,

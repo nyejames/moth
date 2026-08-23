@@ -5,10 +5,12 @@
 //! then/else structural validation to `inline_then_else.rs`.
 
 use super::ValueIfParseInput;
-use super::expression_build::{build_value_if_expression, then_value_node};
 use super::inline_then_else::{InlineThenElseInput, parse_inline_then_else};
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::statements::value_production::expression_build::{
+    build_value_if_expression, then_value_node,
+};
 use crate::compiler_frontend::ast::statements::value_production::types::ValueIfBlock;
 
 /// Inline branch expression parsing can encounter a retained-data lifecycle failure, so this

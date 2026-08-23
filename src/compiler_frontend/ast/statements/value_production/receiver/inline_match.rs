@@ -5,7 +5,6 @@
 //! WHY: header classification, scrutinee parsing and pattern eligibility live
 //! in the shared single-predicate owner so this file does not rescan `if`.
 
-use super::expression_build::{build_value_match_expression, then_value_node};
 use super::inline_then_else::{InlineThenElseInput, parse_inline_then_else, same_logical_line};
 use super::single_predicate::{SinglePredicateHeaderInput, try_parse_single_predicate_header};
 use crate::compiler_frontend::ast::ScopeContext;
@@ -16,6 +15,9 @@ use crate::compiler_frontend::ast::statements::if_headers::{
     IfHeaderClassification, IfHeaderDelimiter,
 };
 use crate::compiler_frontend::ast::statements::match_patterns::{MatchArm, MatchPattern};
+use crate::compiler_frontend::ast::statements::value_production::expression_build::{
+    build_value_match_expression, then_value_node,
+};
 use crate::compiler_frontend::ast::statements::value_production::types::{
     ValueMatchBlock, ValueReceiverKind,
 };

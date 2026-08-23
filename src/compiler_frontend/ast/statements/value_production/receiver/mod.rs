@@ -32,8 +32,8 @@ use crate::compiler_frontend::type_coercion::parse_context::CastTargetContext;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
 
+mod block_body;
 mod block_if;
-mod expression_build;
 mod full_match;
 mod inline_if;
 mod inline_match;
@@ -44,6 +44,7 @@ mod token_checkpoint;
 
 // Shared receiver helpers consumed by sibling value-production parsers.
 pub(super) use crate::compiler_frontend::ast::statements::value_production::completeness::validate_value_match_completeness;
+pub(super) use block_body::{BlockBodyParseInput, parse_value_block_bodies};
 pub(super) use inline_then_else::same_logical_line;
 
 /// Forwards accumulated parser warnings into the outer scope.

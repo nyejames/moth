@@ -6,7 +6,6 @@
 //! statement match parsing itself.
 
 use super::emit_collected_warnings;
-use super::expression_build::build_value_match_expression;
 use super::result_type::infer_value_match_result_type;
 use crate::compiler_frontend::ast::ContextKind;
 use crate::compiler_frontend::ast::ScopeContext;
@@ -15,6 +14,7 @@ use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::statements::branching::parse_match_block;
 use crate::compiler_frontend::ast::statements::match_headers::parse_scrutinee_until_is;
 use crate::compiler_frontend::ast::statements::value_production::completeness::validate_value_match_completeness;
+use crate::compiler_frontend::ast::statements::value_production::expression_build::build_value_match_expression;
 use crate::compiler_frontend::ast::statements::value_production::types::{
     ActiveValueProductionTarget, ValueMatchBlock, ValueReceiverKind,
 };
