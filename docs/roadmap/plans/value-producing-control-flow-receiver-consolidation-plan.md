@@ -210,14 +210,18 @@ need one syntactically final top-level `then`.
 A branch that mixes producing paths and terminating paths is complete. For example, this is valid:
 
 ```moth
-label = if ready:
-    if use_fallback:
-        then "fallback"
+choose_label |ready Bool, use_fallback Bool| -> String:
+    label = if ready:
+        if use_fallback:
+            then "fallback"
+        else
+            return "returned"
+        ;
     else
-        return "returned"
+        then "waiting"
     ;
-else
-    then "waiting"
+
+    return label
 ;
 ```
 
@@ -898,12 +902,10 @@ cargo run --quiet -- tests --case value_if_inline_choice_predicate --backend htm
 cargo run --quiet -- tests --case value_if_cross_choice_predicate_rejected --backend html
 cargo run --quiet -- tests --case option_value_if_none_predicate_rejected --backend html
 cargo run --quiet -- tests --case option_value_if_literal_predicate_rejected --backend html
-cargo run --quiet -- tests --contract language.expressions.value_match_declaration_or_assignment_acceptance
+cargo run --quiet -- tests --case value_match_declaration_init --backend html
 cargo fmt --all -- --check
 just validate
 ```
-
-Use the actual manifest contract ID if it differs from the illustrative command above.
 
 ### Mandatory audit and style review
 
