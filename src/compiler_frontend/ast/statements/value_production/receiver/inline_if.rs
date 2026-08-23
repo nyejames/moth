@@ -30,8 +30,7 @@ pub(super) fn parse_inline_value_if(
         token_stream,
         context,
         type_interner,
-        expected_result_type_ids,
-        receiver_kind,
+        target,
         string_table,
         condition,
         location,
@@ -42,8 +41,7 @@ pub(super) fn parse_inline_value_if(
         then_context: context,
         else_context: context,
         type_interner,
-        expected_result_type_ids,
-        receiver_kind,
+        target,
         string_table,
     })?;
 

@@ -40,6 +40,42 @@ pub struct ActiveValueProductionTarget {
     /// number of produced values (e.g. multi-bind with some inferred slots), this
     /// tells `parse_produced_values_typed` how many expressions to read after `then`.
     pub expected_arity: Option<usize>,
+    /// Per-slot expected types for mixed known/inferred multi-bind.
+    ///
+    /// WHAT: empty when every slot is already in `result_type_ids`. Otherwise one
+    /// entry per target, with `Some` for slots that must be parsed in a known
+    /// receiving context such as `none`.
+    /// WHY: inferred multi-bind still has to type known optional slots at parse
+    /// time, even though unknown siblings are inferred later.
+    pub known_slot_types: Vec<Option<TypeId>>,
+}
+
+impl ActiveValueProductionTarget {
+    pub fn known(result_type_ids: Vec<TypeId>, receiver_kind: ValueReceiverKind) -> Self {
+        Self {
+            result_type_ids,
+            receiver_kind,
+            expected_arity: None,
+            known_slot_types: Vec::new(),
+        }
+    }
+
+    pub fn mixed(slot_types: &[Option<TypeId>], receiver_kind: ValueReceiverKind) -> Self {
+        if let Some(known) = slot_types.iter().copied().collect::<Option<Vec<_>>>() {
+            return Self::known(known, receiver_kind);
+        }
+
+        Self {
+            result_type_ids: Vec::new(),
+            receiver_kind,
+            expected_arity: Some(slot_types.len()),
+            known_slot_types: slot_types.to_vec(),
+        }
+    }
+
+    pub fn needs_slot_inference(&self) -> bool {
+        self.result_type_ids.is_empty() && self.expected_arity.is_some()
+    }
 }
 
 /// Classification of the site that receives produced values.

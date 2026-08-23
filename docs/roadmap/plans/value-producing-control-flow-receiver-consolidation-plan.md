@@ -81,29 +81,35 @@ PARENT_STATE_AT_SNAPSHOT:
 - Static Bool `if` specialisation remains the later Phase G semantic gate.
 
 CURRENT_SCOPE:
-- Phase 6 partially inferred multi-bind parity and remaining parser deletion.
+- Phase 6 complete. Next is Phase 7 diagnostics, docs, status and ownership closeout.
 
 COMPLETED:
 - Phase 0 `43c3e7ac6`. Phase 1 `2f442425b`. Phase 2 `25bc9963f`. Phase 3 `2fc56a0b3`.
   Phase 4 `be9935a20`. Phase 5 `349db0e30`.
 - Shared `receiver/block_body.rs` parses both bodies. `value_production/expression_build.rs`
-  is the only `ValueIfBlock`/`ValueMatchBlock` construction owner.
+  wraps completed `ValueIfBlock`/`ValueMatchBlock` values.
 - `receiver/block_match.rs` assembles one-arm block option/choice matches at known receivers.
 - Receiver option capture uses the same raw `|` adjacency fact as statements.
+- Partially inferred multi-bind uses `try_parse_value_block_at_receiver_with_target`.
+  Known optional slots keep parse-time expected types. Slot inference stays in
+  `value_production/multi_bind.rs`. `multi_bind.rs` is 427 lines versus Phase 0 1049.
 
 NEXT_ACTION:
-- After this audit-correction checkpoint, give partially inferred multi-bind the same
-  inline and block single-predicate feature set, then delete remaining parser duplication.
+- After this Phase 6 checkpoint, begin Phase 7 diagnostics, docs, status and ownership closeout.
 
 VALIDATION:
-- statement lib tests 294 passed. Receiver newline-adjacency regressions passed.
-  `cargo fmt --all -- --check` passed. `just validate` passed: clippy `-D warnings`,
-  source-audit 0, workspace tests 4470 passed / 3 ignored, xtask 17, integration 1878/1878.
+- statement lib tests 296 passed. Inferred AST and HTML cases passed, including optional
+  `none` in a known slot. `cargo fmt --all -- --check` passed. `just validate` passed:
+  clippy `-D warnings`, source-audit 0, workspace tests 4472 passed / 3 ignored, xtask 17,
+  integration 1882/1882.
 
 AUDITS:
 - Phase 0-5 per-phase auditor cycles accepted.
 - User-requested Phases 0-5 accumulated auditor pass 1 `20260823T084130Z-5703e64c`
   found one required adjacency defect. Pass 2 `20260823T085501Z-a058583f` `audit_clean`.
+- Phase 6 auditor pass 1 `20260823T092733Z-0ca2b945` required mixed-slot `none` context
+  and shared-receiver routing. Construction-owner finding rejected as the Phase 4 wrap
+  contract. Pass 2 `20260823T095300Z-34b593f8` required stale helper names/comments only.
 
 BLOCKERS:
 - none
@@ -1327,35 +1333,35 @@ other closed receiver, then remove the remaining parser and construction duplica
 
 ### Work items
 
-- [ ] Route partially inferred multi-bind through the shared `if` header classification.
-- [ ] Support existing inline option and choice single predicates for partially inferred slots.
-- [ ] Support new block option and choice single predicates for partially inferred slots.
-- [ ] Reuse the shared single-predicate scrutinee and pattern parser.
-- [ ] Reuse the shared block-body parser.
-- [ ] Set `ActiveValueProductionTarget.expected_arity` from the multi-bind target count.
-- [ ] Collect every produced value group across nested paths.
-- [ ] Infer each unknown slot from every producing path.
-- [ ] Validate every known slot against every producing path.
-- [ ] Apply contextual coercion to every `ThenValue` group after final slot inference.
-- [ ] Preserve terminating paths as valid non-producing paths.
-- [ ] Keep actual slot inference and mismatch diagnostics under the multi-bind owner.
-- [ ] Delete old multi-bind parsing functions whose only role is now shared.
-- [ ] Split multi-bind-specific inference/coercion into a narrow submodule only if the final file
+- [x] Route partially inferred multi-bind through the shared `if` header classification.
+- [x] Support existing inline option and choice single predicates for partially inferred slots.
+- [x] Support new block option and choice single predicates for partially inferred slots.
+- [x] Reuse the shared single-predicate scrutinee and pattern parser.
+- [x] Reuse the shared block-body parser.
+- [x] Set `ActiveValueProductionTarget.expected_arity` from the multi-bind target count.
+- [x] Collect every produced value group across nested paths.
+- [x] Infer each unknown slot from every producing path.
+- [x] Validate every known slot against every producing path.
+- [x] Apply contextual coercion to every `ThenValue` group after final slot inference.
+- [x] Preserve terminating paths as valid non-producing paths.
+- [x] Keep actual slot inference and mismatch diagnostics under the multi-bind owner.
+- [x] Delete old multi-bind parsing functions whose only role is now shared.
+- [x] Split multi-bind-specific inference/coercion into a narrow submodule only if the final file
       remains hard to review. Do not create a generic parser framework or another receiver path.
-- [ ] Re-measure source lines and symbol inventory against Phase 0 and record the deleted paths.
+- [x] Re-measure source lines and symbol inventory against Phase 0 and record the deleted paths.
 
 ### Required tests
 
-- [ ] Partially inferred inline option capture.
-- [ ] Partially inferred block option capture.
-- [ ] Partially inferred inline choice unit or payload predicate.
-- [ ] Partially inferred block choice payload predicate.
-- [ ] A mix of known and unknown slots.
-- [ ] Nested producing paths with the same inferred slot types.
-- [ ] Nested producing paths with a type mismatch.
-- [ ] A terminating path plus producing paths.
-- [ ] Arity mismatch at a nested `then`.
-- [ ] Capture scope use in produced values and no leakage into default.
+- [x] Partially inferred inline option capture.
+- [x] Partially inferred block option capture.
+- [x] Partially inferred inline choice unit or payload predicate.
+- [x] Partially inferred block choice payload predicate.
+- [x] A mix of known and unknown slots.
+- [x] Nested producing paths with the same inferred slot types.
+- [x] Nested producing paths with a type mismatch.
+- [x] A terminating path plus producing paths.
+- [x] Arity mismatch at a nested `then`.
+- [x] Capture scope use in produced values and no leakage into default.
 
 ### Focused validation
 
@@ -1374,24 +1380,42 @@ just validate
 
 ### Mandatory audit and style review
 
-- [ ] Search `multi_bind.rs` for copied Bool, match, inline and block parser logic.
-- [ ] Confirm it owns only slot-specific inference, validation and coercion.
-- [ ] Confirm all produced-value traversal uses the Phase 1 owner.
-- [ ] Confirm no old builders or body-overwrite paths survive.
-- [ ] Review file size and split only along a real remaining responsibility boundary.
-- [ ] Complete the mandatory phase workflow.
+- [x] Search `multi_bind.rs` for copied Bool, match, inline and block parser logic.
+- [x] Confirm it owns only slot-specific inference, validation and coercion.
+- [x] Confirm all produced-value traversal uses the Phase 1 owner.
+- [x] Confirm no old builders or body-overwrite paths survive.
+- [x] Review file size and split only along a real remaining responsibility boundary.
+- [x] Complete the mandatory phase workflow.
 
 ### Acceptance
 
-- [ ] Known and partially inferred multi-bind accept the same value-control-flow forms.
-- [ ] Every produced path participates in slot inference and coercion.
-- [ ] Multi-bind has no independent header or body grammar.
-- [ ] The receiver and multi-bind subsystem is materially smaller than the Phase 0 baseline after
+- [x] Known and partially inferred multi-bind accept the same value-control-flow forms.
+- [x] Every produced path participates in slot inference and coercion.
+- [x] Multi-bind has no independent header or body grammar.
+- [x] The receiver and multi-bind subsystem is materially smaller than the Phase 0 baseline after
       accounting for `block_match.rs`.
 
 ### Outcome
 
-_To be completed by the implementing agent._
+Partially inferred multi-bind now uses the same structural receiver as known slots.
+`try_parse_multi_bind_value_block` always calls `try_parse_value_block_at_receiver_with_target`
+with `ActiveValueProductionTarget::mixed`. Known slots keep parse-time expected types so `none`
+parses. After a mixed parse, `finalize_inferred_value_block` infers and coerces every producing
+path, including nested `then` groups. Terminating paths remain valid non-producing paths.
+
+Deleted the inferred Bool/match/inline/block dispatcher, `unify_and_validate_inferred_slots`,
+`apply_coercion_to_values` and the independent inline inferred parser. `multi_bind.rs` is 427
+lines versus Phase 0 1049. File split was not needed.
+
+Primary case `value_if_multi_bind_inferred_single_predicate` covers inline and block option
+and choice forms, mixed known/unknown slots, optional `none`, nested same-type production,
+mixed produce/terminate and capture use. Diagnostic cases cover nested type mismatch, nested
+arity mismatch and capture leakage into default. AST tests confirm inferred option and choice
+payload forms become `ValueBlock::Match`.
+
+Phase 6 auditor pass 1 required mixed-slot `none` context and shared-receiver routing. The
+construction-owner finding was rejected as the accepted Phase 4 wrap contract. Pass 2 required
+stale helper names and comments only.
 
 ---
 

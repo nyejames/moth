@@ -878,6 +878,77 @@ fn parses_block_choice_predicate_receiver_as_value_match() {
 }
 
 #[test]
+fn parses_inferred_multi_bind_inline_option_capture_as_value_match() {
+    let (ast, string_table) = parse_single_file_ast(
+        "display |maybe_name String?| -> String, Int:\n\
+             label, count = if maybe_name is |name| then name, 1 else \"guest\", 0\n\
+             return label, count\n\
+         ;\n",
+    );
+
+    let body = function_body_by_name(&ast, &string_table, "display");
+    let NodeKind::MultiBind { value, .. } = &body[0].kind else {
+        panic!("expected inferred multi-bind statement");
+    };
+    let ExpressionKind::ValueBlock { block } = &value.kind else {
+        panic!("expected inferred multi-bind option unwrap to parse as a value block");
+    };
+    let ValueBlock::Match(value_match) = block.as_ref() else {
+        panic!("expected inferred inline option unwrap to lower through value match");
+    };
+
+    assert_eq!(value_match.arms.len(), 1);
+    assert!(value_match.arms[0].guard.is_none());
+    assert!(
+        matches!(
+            value_match.arms[0].pattern,
+            MatchPattern::OptionPresentCapture { .. }
+        ),
+        "partially inferred inline option capture should bind a present payload"
+    );
+    assert!(value_match.default.is_some());
+    assert_eq!(value_match.exhaustiveness, MatchExhaustiveness::HasDefault);
+}
+
+#[test]
+fn parses_inferred_multi_bind_block_choice_payload_as_value_match() {
+    let (ast, string_table) = parse_single_file_ast(
+        "Response :: Complete, Failed | message String |;\n\
+         label_for |response Response| -> String, Int:\n\
+             text, code = if response is Failed(message):\n\
+                 then message, 1\n\
+             else\n\
+                 then \"complete\", 0\n\
+             ;\n\
+             return text, code\n\
+         ;\n",
+    );
+
+    let body = function_body_by_name(&ast, &string_table, "label_for");
+    let NodeKind::MultiBind { value, .. } = &body[0].kind else {
+        panic!("expected inferred multi-bind statement");
+    };
+    let ExpressionKind::ValueBlock { block } = &value.kind else {
+        panic!("expected inferred block choice payload to parse as a value block");
+    };
+    let ValueBlock::Match(value_match) = block.as_ref() else {
+        panic!("expected inferred block choice payload to lower through value match");
+    };
+
+    assert_eq!(value_match.arms.len(), 1);
+    assert!(value_match.arms[0].guard.is_none());
+    assert!(
+        matches!(
+            value_match.arms[0].pattern,
+            MatchPattern::ChoiceVariant { tag: 1, .. }
+        ),
+        "Failed should resolve as a choice payload arm, not as an ordinary value name"
+    );
+    assert!(value_match.default.is_some());
+    assert_eq!(value_match.exhaustiveness, MatchExhaustiveness::HasDefault);
+}
+
+#[test]
 fn parses_option_equality_receiver_as_bool_value_if() {
     let (ast, string_table) = parse_single_file_ast(
         "compare |left String?, right String?| -> String:\n\

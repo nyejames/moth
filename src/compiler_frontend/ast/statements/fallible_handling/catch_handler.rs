@@ -212,11 +212,10 @@ fn parse_catch_fallible_handler_body(
     let mut handler_context =
         context.new_child_control_flow(ContextKind::CatchHandler, string_table);
     if site.value_required {
-        handler_context.active_value_target = Some(ActiveValueProductionTarget {
-            result_type_ids: site.success_result_type_ids.to_vec(),
-            receiver_kind: ValueReceiverKind::CatchHandler,
-            expected_arity: None,
-        });
+        handler_context.active_value_target = Some(ActiveValueProductionTarget::known(
+            site.success_result_type_ids.to_vec(),
+            ValueReceiverKind::CatchHandler,
+        ));
     }
 
     if let Some(error_binding) = &error {
@@ -369,11 +368,10 @@ fn parse_inline_catch_handler_body(
 
     let mut handler_context =
         context.new_child_control_flow(ContextKind::CatchHandler, string_table);
-    let active_target = ActiveValueProductionTarget {
-        result_type_ids: site.success_result_type_ids.to_vec(),
-        receiver_kind: ValueReceiverKind::CatchHandler,
-        expected_arity: None,
-    };
+    let active_target = ActiveValueProductionTarget::known(
+        site.success_result_type_ids.to_vec(),
+        ValueReceiverKind::CatchHandler,
+    );
     handler_context.active_value_target = Some(active_target.clone());
 
     if let Some(error_binding) = &error {

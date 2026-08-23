@@ -92,6 +92,8 @@ pub fn parse_produced_values_typed<'a, 'b>(
                 type_interner,
                 arity,
                 string_table,
+                &target.known_slot_types,
+                target.receiver_kind,
             );
         }
 
@@ -216,23 +218,29 @@ fn parse_single_inferred_declaration_value(
     Ok(vec![expression])
 }
 
-/// Parses a fixed number of expressions after `then` when no expected types are known.
+/// Parses a fixed number of expressions after `then` for mixed or fully inferred slots.
 ///
-/// WHAT: reads exactly `arity` expressions, validating only that the count matches.
-/// WHY: multi-bind with inferred slot types needs to know how many values to read
-/// without knowing their types upfront.
+/// WHAT: reads exactly `arity` expressions. Known slots use their receiving type so
+/// forms such as `none` still parse; unknown slots stay inferred.
+/// WHY: mixed multi-bind must keep known-slot context at parse time even though
+/// unknown siblings are inferred later from every producing path.
 pub(crate) fn parse_fixed_arity_inferred_values(
     token_stream: &mut FileTokens,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     arity: usize,
     string_table: &mut StringTable,
+    slot_expected_types: &[Option<TypeId>],
+    receiver_kind: ValueReceiverKind,
 ) -> Result<Vec<Expression>, ExpressionParseError> {
     let expression_context = context.new_child_expression(vec![]);
     let mut values = Vec::with_capacity(arity);
 
     for index in 0..arity {
-        let mut expected_type = ExpectedType::Infer;
+        let known_slot_type = slot_expected_types.get(index).copied().flatten();
+        let mut expected_type = known_slot_type
+            .map(ExpectedType::Known)
+            .unwrap_or(ExpectedType::Infer);
         let mut none_cast_target = CastTargetContext::None;
         let input = ExpressionParseInput::new(
             ExpressionParseResources {
@@ -251,7 +259,16 @@ pub(crate) fn parse_fixed_arity_inferred_values(
                 allow_expected_result_evidence: false,
             },
         );
-        let expression = create_expression_with_trailing_newline_policy(input)?;
+        let mut expression = create_expression_with_trailing_newline_policy(input)?;
+        if let Some(expected_type_id) = known_slot_type {
+            expression = coerce_expression_to_explicit_type_boundary(
+                expression,
+                expected_type_id,
+                type_interner.environment(),
+                context,
+                mismatch_context_for_receiver(receiver_kind),
+            )?;
+        }
         values.push(expression);
 
         if index + 1 < arity {

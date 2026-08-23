@@ -1,0 +1,12 @@
+choose |maybe_name String?, use_fallback Bool| -> String, Int:
+    first, second = if maybe_name is |name|:
+        if use_fallback:
+            then name, 1, "extra"
+        else
+            then name, 1
+        ;
+    else
+        then "guest", 0
+    ;
+    return first, second
+;

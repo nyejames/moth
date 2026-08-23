@@ -19,13 +19,12 @@ use crate::compiler_frontend::ast::statements::value_production::expression_buil
     build_value_match_expression, then_value_node,
 };
 use crate::compiler_frontend::ast::statements::value_production::types::{
-    ValueMatchBlock, ValueReceiverKind,
+    ActiveValueProductionTarget, ValueMatchBlock,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidControlFlowStatementReason,
 };
-use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
 
@@ -34,8 +33,7 @@ pub(super) struct InlineSinglePredicateParseInput<'a, 'b> {
     pub(super) token_stream: &'a mut FileTokens,
     pub(super) context: &'a ScopeContext,
     pub(super) type_interner: &'a mut AstTypeInterner<'b>,
-    pub(super) expected_result_type_ids: &'a [TypeId],
-    pub(super) receiver_kind: ValueReceiverKind,
+    pub(super) target: ActiveValueProductionTarget,
     pub(super) string_table: &'a mut StringTable,
     pub(super) location: SourceLocation,
     pub(super) classification: IfHeaderClassification,
@@ -53,8 +51,7 @@ pub(super) fn try_parse_inline_single_predicate_value_match(
         token_stream,
         context,
         type_interner,
-        expected_result_type_ids,
-        receiver_kind,
+        target,
         string_table,
         location,
         classification,
@@ -95,8 +92,7 @@ pub(super) fn try_parse_inline_single_predicate_value_match(
         context,
         then_context: &header.then_context,
         type_interner,
-        expected_result_type_ids,
-        receiver_kind,
+        target,
         string_table,
         scrutinee: header.scrutinee,
         pattern: header.pattern,
@@ -109,8 +105,7 @@ struct InlineValueMatchParseInput<'a, 'b> {
     context: &'a ScopeContext,
     then_context: &'a ScopeContext,
     type_interner: &'a mut AstTypeInterner<'b>,
-    expected_result_type_ids: &'a [TypeId],
-    receiver_kind: ValueReceiverKind,
+    target: ActiveValueProductionTarget,
     string_table: &'a mut StringTable,
     scrutinee: Expression,
     pattern: MatchPattern,
@@ -129,8 +124,7 @@ fn parse_inline_value_match(
         context,
         then_context,
         type_interner,
-        expected_result_type_ids,
-        receiver_kind,
+        target,
         string_table,
         scrutinee,
         pattern,
@@ -142,8 +136,7 @@ fn parse_inline_value_match(
         then_context,
         else_context: context,
         type_interner,
-        expected_result_type_ids,
-        receiver_kind,
+        target,
         string_table,
     })?;
 

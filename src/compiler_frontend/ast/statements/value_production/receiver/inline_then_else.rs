@@ -18,9 +18,7 @@ use crate::compiler_frontend::ast::expressions::parse_expression_input::{
 use crate::compiler_frontend::ast::statements::value_production::parse_values::{
     ProducedValuesParseInput, is_missing_produced_value_boundary, parse_produced_values_typed,
 };
-use crate::compiler_frontend::ast::statements::value_production::types::{
-    ActiveValueProductionTarget, ValueReceiverKind,
-};
+use crate::compiler_frontend::ast::statements::value_production::types::ActiveValueProductionTarget;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidControlFlowStatementReason,
@@ -41,8 +39,7 @@ pub(super) struct InlineThenElseInput<'a, 'b> {
     pub(super) then_context: &'a ScopeContext,
     pub(super) else_context: &'a ScopeContext,
     pub(super) type_interner: &'a mut AstTypeInterner<'b>,
-    pub(super) expected_result_type_ids: &'a [TypeId],
-    pub(super) receiver_kind: ValueReceiverKind,
+    pub(super) target: ActiveValueProductionTarget,
     pub(super) string_table: &'a mut StringTable,
 }
 
@@ -68,25 +65,20 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn same_logi
 /// converting a retained-token lifecycle fault into a source diagnostic mid-parse.
 type InlineThenElseResult<T> = Result<T, ExpressionParseError>;
 
-/// Parses the shared `then <branch> else <branch>` inline shape.
+/// Parses inline `then` / `else` values against an active production target.
 ///
-/// WHAT: assumes the current token is `then`. Consumes it, parses then and else
-/// branches, validates same-line constraints, infers/coerces the result type.
-/// WHY: consolidates duplicated logic from inline Bool value-if and inline
-/// single-predicate value-match.
-pub(super) fn parse_inline_then_else(
-    input: InlineThenElseInput<'_, '_>,
-) -> InlineThenElseResult<InlineThenElseOutput> {
-    let InlineThenElseInput {
-        token_stream,
-        then_context,
-        else_context,
-        type_interner,
-        expected_result_type_ids,
-        receiver_kind,
-        string_table,
-    } = input;
-
+/// WHAT: assumes the current token is `then`. Consumes the shared one-line shape
+/// and reads each branch through `parse_produced_values_typed`.
+/// WHY: known multi-value receivers and inferred multi-bind share this grammar;
+/// slot inference stays with the multi-bind owner after these values are collected.
+pub(in crate::compiler_frontend::ast::statements::value_production) fn parse_inline_then_else_with_target(
+    token_stream: &mut FileTokens,
+    then_context: &ScopeContext,
+    else_context: &ScopeContext,
+    type_interner: &mut AstTypeInterner<'_>,
+    target: &ActiveValueProductionTarget,
+    string_table: &mut StringTable,
+) -> InlineThenElseResult<(Vec<Expression>, Vec<Expression>)> {
     let then_location = token_stream.current_location();
     token_stream.advance(); // consume `then`
 
@@ -108,51 +100,103 @@ pub(super) fn parse_inline_then_else(
         .into());
     }
 
-    if expected_result_type_ids.len() > 1 {
-        // Multi-value inline form: reuse the shared produced-values parser so arity
-        // and coercion are validated identically to block-form `then` statements.
-        let target = ActiveValueProductionTarget {
-            result_type_ids: expected_result_type_ids.to_vec(),
-            receiver_kind,
-            expected_arity: None,
+    let then_values = parse_produced_values_typed(ProducedValuesParseInput {
+        token_stream,
+        context: then_context,
+        type_interner,
+        target,
+        label: "then branch",
+        string_table,
+    })?;
+
+    require_else_inline(token_stream, &then_location)?;
+    token_stream.advance(); // consume `else`
+
+    reject_else_then(token_stream)?;
+    reject_newline_after_else(token_stream)?;
+    reject_empty_value_after_else(token_stream)?;
+
+    let else_values = parse_produced_values_typed(ProducedValuesParseInput {
+        token_stream,
+        context: else_context,
+        type_interner,
+        target,
+        label: "else branch",
+        string_table,
+    })?;
+
+    Ok((then_values, else_values))
+}
+
+/// Parses the shared `then <branch> else <branch>` inline shape.
+///
+/// WHAT: assumes the current token is `then`. Consumes it, parses then and else
+/// branches, validates same-line constraints, infers/coerces the result type.
+/// WHY: consolidates duplicated logic from inline Bool value-if and inline
+/// single-predicate value-match.
+pub(super) fn parse_inline_then_else(
+    input: InlineThenElseInput<'_, '_>,
+) -> InlineThenElseResult<InlineThenElseOutput> {
+    let InlineThenElseInput {
+        token_stream,
+        then_context,
+        else_context,
+        type_interner,
+        target,
+        string_table,
+    } = input;
+
+    let expected_result_type_ids = target.result_type_ids.clone();
+    let receiver_kind = target.receiver_kind;
+
+    if expected_result_type_ids.len() > 1 || target.expected_arity.is_some_and(|arity| arity > 1) {
+        let (then_values, else_values) = parse_inline_then_else_with_target(
+            token_stream,
+            then_context,
+            else_context,
+            type_interner,
+            &target,
+            string_table,
+        )?;
+        let result_type_ids = if expected_result_type_ids.is_empty() {
+            then_values
+                .iter()
+                .map(|expression| expression.type_id)
+                .collect()
+        } else {
+            expected_result_type_ids
         };
-
-        let then_values = parse_produced_values_typed(ProducedValuesParseInput {
-            token_stream,
-            context: then_context,
-            type_interner,
-            target: &target,
-            label: "then branch",
-            string_table,
-        })?;
-
-        require_else_inline(token_stream, &then_location)?;
-        token_stream.advance(); // consume `else`
-
-        reject_else_then(token_stream)?;
-        reject_newline_after_else(token_stream)?;
-
-        reject_empty_value_after_else(token_stream)?;
-
-        let else_values = parse_produced_values_typed(ProducedValuesParseInput {
-            token_stream,
-            context: else_context,
-            type_interner,
-            target: &target,
-            label: "else branch",
-            string_table,
-        })?;
-
         let result_type_id = type_interner
             .environment_mut_for_derived_types()
-            .intern_tuple(expected_result_type_ids.to_vec());
+            .intern_tuple(result_type_ids.clone());
 
         return Ok(InlineThenElseOutput {
             then_values,
             else_values,
             result_type_id,
-            result_type_ids: expected_result_type_ids.to_vec(),
+            result_type_ids,
         });
+    }
+
+    let then_location = token_stream.current_location();
+    token_stream.advance(); // consume `then`
+
+    if token_stream.current_token_kind() == &TokenKind::Newline {
+        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+            InvalidControlFlowStatementReason::InlineValueIfMultiline,
+            token_stream.current_location(),
+        )
+        .into());
+    }
+
+    // A retained newline is a multiline form. Every other definite boundary means
+    // the branch has no value and must not reach expression evaluation.
+    if is_missing_produced_value_boundary(token_stream.current_token_kind()) {
+        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+            InvalidControlFlowStatementReason::ExpectedValueAfterThen,
+            token_stream.current_location(),
+        )
+        .into());
     }
 
     // Single-value inline form (preserves existing single-result behavior).

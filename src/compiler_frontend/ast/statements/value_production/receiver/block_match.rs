@@ -20,13 +20,12 @@ use crate::compiler_frontend::ast::statements::match_patterns::{MatchArm, MatchP
 use crate::compiler_frontend::ast::statements::value_production::completeness::validate_value_match_completeness;
 use crate::compiler_frontend::ast::statements::value_production::expression_build::build_value_match_expression;
 use crate::compiler_frontend::ast::statements::value_production::types::{
-    ActiveValueProductionTarget, ValueMatchBlock, ValueReceiverKind,
+    ActiveValueProductionTarget, ValueMatchBlock,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidControlFlowStatementReason,
 };
-use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
 
@@ -35,8 +34,7 @@ pub(super) struct BlockSinglePredicateParseInput<'a, 'b> {
     pub(super) token_stream: &'a mut FileTokens,
     pub(super) context: &'a ScopeContext,
     pub(super) type_interner: &'a mut AstTypeInterner<'b>,
-    pub(super) expected_result_type_ids: &'a [TypeId],
-    pub(super) receiver_kind: ValueReceiverKind,
+    pub(super) target: ActiveValueProductionTarget,
     pub(super) string_table: &'a mut StringTable,
     pub(super) location: SourceLocation,
     pub(super) classification: IfHeaderClassification,
@@ -54,8 +52,7 @@ pub(super) fn try_parse_block_single_predicate_value_match(
         token_stream,
         context,
         type_interner,
-        expected_result_type_ids,
-        receiver_kind,
+        target,
         string_table,
         location,
         classification,
@@ -90,8 +87,7 @@ pub(super) fn try_parse_block_single_predicate_value_match(
         context,
         then_parent: &header.then_context,
         type_interner,
-        expected_result_type_ids,
-        receiver_kind,
+        target,
         string_table,
         scrutinee: header.scrutinee,
         pattern: header.pattern,
@@ -104,8 +100,7 @@ struct BlockValueMatchParseInput<'a, 'b> {
     context: &'a ScopeContext,
     then_parent: &'a ScopeContext,
     type_interner: &'a mut AstTypeInterner<'b>,
-    expected_result_type_ids: &'a [TypeId],
-    receiver_kind: ValueReceiverKind,
+    target: ActiveValueProductionTarget,
     string_table: &'a mut StringTable,
     scrutinee: Expression,
     pattern: MatchPattern,
@@ -122,14 +117,15 @@ fn parse_block_value_match(
         context,
         then_parent,
         type_interner,
-        expected_result_type_ids,
-        receiver_kind,
+        target,
         string_table,
         scrutinee,
         pattern,
         location,
     } = input;
 
+    let receiver_kind = target.receiver_kind;
+    let expected_result_type_ids = target.result_type_ids.clone();
     let bodies = parse_value_block_bodies(BlockBodyParseInput {
         token_stream,
         outer_context: context,
@@ -137,11 +133,7 @@ fn parse_block_value_match(
         else_parent: context,
         type_interner,
         string_table,
-        active_target: ActiveValueProductionTarget {
-            result_type_ids: expected_result_type_ids.to_vec(),
-            receiver_kind,
-            expected_arity: None,
-        },
+        active_target: target,
     })?;
 
     let arms = vec![MatchArm {
@@ -156,12 +148,12 @@ fn parse_block_value_match(
     let result_type_id = infer_value_match_result_type(
         &arms,
         default.as_deref(),
-        expected_result_type_ids,
+        &expected_result_type_ids,
         type_interner,
         &location,
         receiver_kind,
     )?;
-    let result_type_ids = final_slot_type_ids(expected_result_type_ids, result_type_id);
+    let result_type_ids = final_slot_type_ids(&expected_result_type_ids, result_type_id);
 
     let value_match = ValueMatchBlock {
         scrutinee,

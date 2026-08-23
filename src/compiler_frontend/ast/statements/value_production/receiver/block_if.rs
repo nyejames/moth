@@ -12,9 +12,7 @@ use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::statements::value_production::completeness::validate_closed_branch_pair;
 use crate::compiler_frontend::ast::statements::value_production::expression_build::build_value_if_expression;
-use crate::compiler_frontend::ast::statements::value_production::types::{
-    ActiveValueProductionTarget, ValueIfBlock,
-};
+use crate::compiler_frontend::ast::statements::value_production::types::ValueIfBlock;
 
 /// Block value-if bodies recurse into the AST body parser and therefore preserve its two lanes.
 type BlockIfResult<T> = Result<T, ExpressionParseError>;
@@ -25,13 +23,14 @@ pub(super) fn parse_block_value_if(input: ValueIfParseInput<'_, '_>) -> BlockIfR
         token_stream,
         context,
         type_interner,
-        expected_result_type_ids,
-        receiver_kind,
+        target,
         string_table,
         condition,
         location,
     } = input;
 
+    let receiver_kind = target.receiver_kind;
+    let expected_result_type_ids = target.result_type_ids.clone();
     let bodies = parse_value_block_bodies(BlockBodyParseInput {
         token_stream,
         outer_context: context,
@@ -39,11 +38,7 @@ pub(super) fn parse_block_value_if(input: ValueIfParseInput<'_, '_>) -> BlockIfR
         else_parent: context,
         type_interner,
         string_table,
-        active_target: ActiveValueProductionTarget {
-            result_type_ids: expected_result_type_ids.to_vec(),
-            receiver_kind,
-            expected_arity: None,
-        },
+        active_target: target,
     })?;
 
     validate_closed_branch_pair(bodies.then_exits, bodies.else_exits, &location)?;
@@ -51,12 +46,12 @@ pub(super) fn parse_block_value_if(input: ValueIfParseInput<'_, '_>) -> BlockIfR
     let result_type_id = infer_block_if_result_type(
         &bodies.then_body,
         &bodies.else_body,
-        expected_result_type_ids,
+        &expected_result_type_ids,
         type_interner,
         &location,
         receiver_kind,
     )?;
-    let result_type_ids = final_slot_type_ids(expected_result_type_ids, result_type_id);
+    let result_type_ids = final_slot_type_ids(&expected_result_type_ids, result_type_id);
 
     let value_if = ValueIfBlock {
         condition,

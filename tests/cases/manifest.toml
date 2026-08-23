@@ -10479,6 +10479,34 @@ contract = "language.expressions.value_if_mixed_produce_terminate_acceptance"
 role = "boundary"
 
 [[case]]
+id = "value_if_multi_bind_inferred_single_predicate"
+path = "value_if_multi_bind_inferred_single_predicate"
+tags = ["integration", "language", "value-blocks", "if", "choice", "match", "optionals", "multi-bind"]
+contract = "language.expressions.value_if_multi_bind_inferred_single_predicate_acceptance"
+role = "primary"
+
+[[case]]
+id = "value_if_multi_bind_inferred_nested_type_mismatch"
+path = "value_if_multi_bind_inferred_nested_type_mismatch"
+tags = ["integration", "diagnostics", "value-blocks", "if", "match", "multi-bind"]
+contract = "language.functions.multi_bind_type_mismatch_rejected"
+role = "boundary"
+
+[[case]]
+id = "value_if_multi_bind_inferred_arity_mismatch"
+path = "value_if_multi_bind_inferred_arity_mismatch"
+tags = ["integration", "diagnostics", "value-blocks", "if", "match", "multi-bind"]
+contract = "language.functions.multi_bind_wrong_arity_rejected"
+role = "boundary"
+
+[[case]]
+id = "value_if_multi_bind_inferred_capture_in_default_rejected"
+path = "value_if_multi_bind_inferred_capture_in_default_rejected"
+tags = ["integration", "diagnostics", "value-blocks", "if", "match", "optionals", "multi-bind"]
+contract = "language.bindings.undefined_variable_reference_rejected"
+role = "boundary"
+
+[[case]]
 id = "value_if_inline_choice_predicate"
 path = "value_if_inline_choice_predicate"
 tags = ["integration", "language", "value-blocks", "if", "choice", "match"]

@@ -30,26 +30,30 @@ use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 /// that starts the authored body.
 /// WHY: inline and block match parsers own only their body grammar after this
 /// point.
-pub(super) struct ParsedSinglePredicateHeader {
-    pub(super) scrutinee: Expression,
-    pub(super) pattern: MatchPattern,
-    pub(super) then_context: ScopeContext,
-    pub(super) body_delimiter: IfHeaderDelimiter,
+pub(in crate::compiler_frontend::ast::statements::value_production) struct ParsedSinglePredicateHeader
+{
+    pub scrutinee: Expression,
+    pub pattern: MatchPattern,
+    pub then_context: ScopeContext,
+    pub body_delimiter: IfHeaderDelimiter,
 }
 
-pub(super) struct SinglePredicateHeaderInput<'a, 'b> {
-    pub(super) token_stream: &'a mut FileTokens,
-    pub(super) context: &'a ScopeContext,
-    pub(super) type_interner: &'a mut AstTypeInterner<'b>,
-    pub(super) string_table: &'a mut StringTable,
-    pub(super) classification: IfHeaderClassification,
+pub(in crate::compiler_frontend::ast::statements::value_production) struct SinglePredicateHeaderInput<
+    'a,
+    'b,
+> {
+    pub token_stream: &'a mut FileTokens,
+    pub context: &'a ScopeContext,
+    pub type_interner: &'a mut AstTypeInterner<'b>,
+    pub string_table: &'a mut StringTable,
+    pub classification: IfHeaderClassification,
 }
 
 /// Attempts to parse a type-eligible single-predicate header after `if`.
 ///
 /// Returns `None` only when an authored diagnostic still allows Bool fallback
 /// before the match shape is committed. Infrastructure errors never fall back.
-pub(super) fn try_parse_single_predicate_header(
+pub(in crate::compiler_frontend::ast::statements::value_production) fn try_parse_single_predicate_header(
     input: SinglePredicateHeaderInput<'_, '_>,
 ) -> Option<Result<ParsedSinglePredicateHeader, ExpressionParseError>> {
     let SinglePredicateHeaderInput {
@@ -122,7 +126,7 @@ pub(super) fn try_parse_single_predicate_header(
 /// WHAT: rejects `if maybe is none then ...` and literal predicates on optionals
 /// because inline optional recovery must use present capture (`|value|`).
 /// WHY: these diagnostics stay receiver-only and must not rescan the header.
-pub(super) fn unsupported_optional_single_predicate_reason(
+pub(in crate::compiler_frontend::ast::statements::value_production) fn unsupported_optional_single_predicate_reason(
     token_stream: &FileTokens,
     context: &ScopeContext,
     type_environment: &TypeEnvironment,

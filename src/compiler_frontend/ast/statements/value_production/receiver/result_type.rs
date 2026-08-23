@@ -130,6 +130,12 @@ pub(super) fn infer_block_if_result_type(
         return Ok(expected);
     }
 
+    if let Some(slot_types) = first_multi_slot_produced_types(&[then_body, else_body]) {
+        return Ok(type_interner
+            .environment_mut_for_derived_types()
+            .intern_tuple(slot_types));
+    }
+
     unify_single_produced_types(
         [
             collect_reachable_single_produced_types(then_body),
@@ -162,6 +168,19 @@ pub(super) fn infer_value_match_result_type(
 
     if let Some(expected) = expected_result_type_ids.first().copied() {
         return Ok(expected);
+    }
+
+    let mut match_bodies = arms
+        .iter()
+        .map(|arm| arm.body.as_slice())
+        .collect::<Vec<_>>();
+    if let Some(default_body) = default {
+        match_bodies.push(default_body);
+    }
+    if let Some(slot_types) = first_multi_slot_produced_types(&match_bodies) {
+        return Ok(type_interner
+            .environment_mut_for_derived_types()
+            .intern_tuple(slot_types));
     }
 
     unify_single_produced_types(
@@ -216,6 +235,26 @@ fn unify_single_produced_types(
     }
 
     Ok(first_type)
+}
+
+fn first_multi_slot_produced_types(bodies: &[&[AstNode]]) -> Option<Vec<TypeId>> {
+    let mut slot_types = None;
+
+    for body in bodies {
+        visit_reachable_then_values(body, &mut |produced_values| {
+            if slot_types.is_none() && produced_values.expressions.len() > 1 {
+                slot_types = Some(
+                    produced_values
+                        .expressions
+                        .iter()
+                        .map(|expression| expression.type_id)
+                        .collect(),
+                );
+            }
+        });
+    }
+
+    slot_types
 }
 
 fn collect_reachable_single_produced_types(body: &[AstNode]) -> Vec<(TypeId, SourceLocation)> {

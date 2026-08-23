@@ -20,7 +20,9 @@ use crate::compiler_frontend::ast::statements::condition_validation::{
     ensure_if_statement_condition, if_condition_is_missing,
 };
 use crate::compiler_frontend::ast::statements::if_headers::{IfHeaderShape, classify_if_header};
-use crate::compiler_frontend::ast::statements::value_production::types::ValueReceiverKind;
+use crate::compiler_frontend::ast::statements::value_production::types::{
+    ActiveValueProductionTarget, ValueReceiverKind,
+};
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidControlFlowStatementReason,
@@ -43,10 +45,7 @@ mod result_type;
 mod single_predicate;
 mod token_checkpoint;
 
-// Shared receiver helpers consumed by sibling value-production parsers.
-pub(super) use crate::compiler_frontend::ast::statements::value_production::completeness::validate_value_match_completeness;
-pub(super) use block_body::{BlockBodyParseInput, parse_value_block_bodies};
-pub(super) use inline_then_else::same_logical_line;
+use inline_then_else::same_logical_line;
 
 /// Forwards accumulated parser warnings into the outer scope.
 ///
@@ -66,8 +65,7 @@ pub(super) struct ValueIfParseInput<'a, 'b> {
     pub(super) token_stream: &'a mut FileTokens,
     pub(super) context: &'a ScopeContext,
     pub(super) type_interner: &'a mut AstTypeInterner<'b>,
-    pub(super) expected_result_type_ids: &'a [TypeId],
-    pub(super) receiver_kind: ValueReceiverKind,
+    pub(super) target: ActiveValueProductionTarget,
     pub(super) string_table: &'a mut StringTable,
     pub(super) condition: Expression,
     pub(super) location: SourceLocation,
@@ -87,6 +85,27 @@ pub fn try_parse_value_block_at_receiver(
     type_interner: &mut AstTypeInterner<'_>,
     expected_result_type_ids: &[TypeId],
     receiver_kind: ValueReceiverKind,
+    string_table: &mut StringTable,
+) -> Option<Result<Expression, ExpressionParseError>> {
+    try_parse_value_block_at_receiver_with_target(
+        token_stream,
+        context,
+        type_interner,
+        ActiveValueProductionTarget::known(expected_result_type_ids.to_vec(), receiver_kind),
+        string_table,
+    )
+}
+
+/// Parses a value-producing `if` at a closed receiver using an explicit production target.
+///
+/// WHAT: the shared structural dispatcher for known and mixed inferred slots.
+/// WHY: multi-bind must not keep a second header/body grammar. Known callers keep
+/// `try_parse_value_block_at_receiver`; mixed slots pass `ActiveValueProductionTarget::mixed`.
+pub fn try_parse_value_block_at_receiver_with_target(
+    token_stream: &mut FileTokens,
+    context: &ScopeContext,
+    type_interner: &mut AstTypeInterner<'_>,
+    target: ActiveValueProductionTarget,
     string_table: &mut StringTable,
 ) -> Option<Result<Expression, ExpressionParseError>> {
     if token_stream.current_token_kind() != &TokenKind::If {
@@ -117,8 +136,7 @@ pub fn try_parse_value_block_at_receiver(
                 token_stream,
                 context,
                 type_interner,
-                expected_result_type_ids,
-                receiver_kind,
+                target,
                 string_table,
                 location,
             },
@@ -130,8 +148,7 @@ pub fn try_parse_value_block_at_receiver(
                     token_stream,
                     context,
                     type_interner,
-                    expected_result_type_ids,
-                    receiver_kind,
+                    target: target.clone(),
                     string_table,
                     location: location.clone(),
                     classification,
@@ -144,8 +161,7 @@ pub fn try_parse_value_block_at_receiver(
                 token_stream,
                 context,
                 type_interner,
-                expected_result_type_ids,
-                receiver_kind,
+                target,
                 string_table,
                 location,
             ))
@@ -157,8 +173,7 @@ pub fn try_parse_value_block_at_receiver(
                     token_stream,
                     context,
                     type_interner,
-                    expected_result_type_ids,
-                    receiver_kind,
+                    target: target.clone(),
                     string_table,
                     location: location.clone(),
                     classification,
@@ -171,8 +186,7 @@ pub fn try_parse_value_block_at_receiver(
                 token_stream,
                 context,
                 type_interner,
-                expected_result_type_ids,
-                receiver_kind,
+                target,
                 string_table,
                 location,
             ))
@@ -182,8 +196,7 @@ pub fn try_parse_value_block_at_receiver(
             token_stream,
             context,
             type_interner,
-            expected_result_type_ids,
-            receiver_kind,
+            target,
             string_table,
             location,
         )),
@@ -203,8 +216,7 @@ fn parse_bool_value_if_after_condition(
     token_stream: &mut FileTokens,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
-    expected_result_type_ids: &[TypeId],
-    receiver_kind: ValueReceiverKind,
+    target: ActiveValueProductionTarget,
     string_table: &mut StringTable,
     location: SourceLocation,
 ) -> ReceiverResult<Expression> {
@@ -245,8 +257,7 @@ fn parse_bool_value_if_after_condition(
             token_stream,
             context,
             type_interner,
-            expected_result_type_ids,
-            receiver_kind,
+            target,
             string_table,
             condition,
             location,
@@ -258,8 +269,7 @@ fn parse_bool_value_if_after_condition(
             token_stream,
             context,
             type_interner,
-            expected_result_type_ids,
-            receiver_kind,
+            target,
             string_table,
             condition,
             location,

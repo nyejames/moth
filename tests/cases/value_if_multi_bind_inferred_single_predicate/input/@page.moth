@@ -1,0 +1,123 @@
+Status ::
+    Ready,
+    Waiting,
+;
+
+Response ::
+    Complete,
+    Failed |
+        message String,
+    |,
+;
+
+inline_option |maybe_name String?| -> String, Int:
+    label, count = if maybe_name is |name| then name, 1 else "guest", 0
+    return label, count
+;
+
+block_option |maybe_name String?| -> String, Int:
+    label, count Int = if maybe_name is |name|:
+        then name, 1
+    else
+        then "guest", 0
+    ;
+    return label, count
+;
+
+inline_choice |status Status| -> Int, String:
+    score, tag = if status is Ready then 1, "ready" else 0, "other"
+    return score, tag
+;
+
+block_payload |response Response| -> String, Int:
+    text, code = if response is Failed(message):
+        then message, 1
+    else
+        then "complete", 0
+    ;
+    return text, code
+;
+
+nested_same |maybe_name String?, use_fallback Bool| -> String, Int:
+    label, count = if maybe_name is |name|:
+        if use_fallback:
+            then name, 1
+        else
+            then name, 2
+        ;
+    else
+        then "guest", 0
+    ;
+    return label, count
+;
+
+mixed_terminate |maybe_name String?, use_fallback Bool| -> String, Int:
+    label, count = if maybe_name is |name|:
+        if use_fallback:
+            then name, 1
+        else
+            return "returned", 9
+        ;
+    else
+        then "guest", 0
+    ;
+    return label, count
+;
+
+optional_none |ready Bool| -> String?, Int:
+    label String?, count = if ready then none, 1 else none, 2
+    return label, count
+;
+
+optional_none_block |maybe_name String?| -> String?, Int:
+    label String?, count = if maybe_name is |name|:
+        then name, 1
+    else
+        then none, 0
+    ;
+    return label, count
+;
+
+maybe_missing String? = none
+
+io.line("value_if_multi_bind_inferred_single_predicate")
+
+present_label, present_count = inline_option("Priya")
+io.line([:inline present [present_label] [present_count]])
+
+missing_label, missing_count = inline_option(maybe_missing)
+io.line([:inline missing [missing_label] [missing_count]])
+
+block_label, block_count = block_option("Ada")
+io.line([:block option [block_label] [block_count]])
+
+ready_score, ready_tag = inline_choice(Status::Ready)
+io.line([:inline ready [ready_score] [ready_tag]])
+
+waiting_score, waiting_tag = inline_choice(Status::Waiting)
+io.line([:inline waiting [waiting_score] [waiting_tag]])
+
+failed_text, failed_code = block_payload(Response::Failed("bad"))
+io.line([:payload [failed_text] [failed_code]])
+
+ok_text, ok_code = block_payload(Response::Complete)
+io.line([:payload else [ok_text] [ok_code]])
+
+nested_label, nested_count = nested_same("Priya", false)
+io.line([:nested [nested_label] [nested_count]])
+
+kept_label, kept_count = mixed_terminate("Priya", true)
+io.line([:kept [kept_label] [kept_count]])
+
+returned_label, returned_count = mixed_terminate("Priya", false)
+io.line([:early [returned_label] [returned_count]])
+
+absent_label, absent_count = optional_none(true)
+io.line([:optional none [absent_count]])
+
+present_optional, present_optional_count = optional_none_block("Priya")
+present_text = if present_optional is |name| then name else "missing"
+io.line([:optional present [present_text] [present_optional_count]])
+
+missing_optional, missing_optional_count = optional_none_block(maybe_missing)
+io.line([:optional missing [missing_optional_count]])

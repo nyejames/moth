@@ -16,13 +16,12 @@ use crate::compiler_frontend::ast::statements::match_headers::parse_scrutinee_un
 use crate::compiler_frontend::ast::statements::value_production::completeness::validate_value_match_completeness;
 use crate::compiler_frontend::ast::statements::value_production::expression_build::build_value_match_expression;
 use crate::compiler_frontend::ast::statements::value_production::types::{
-    ActiveValueProductionTarget, ValueMatchBlock, ValueReceiverKind,
+    ActiveValueProductionTarget, ValueMatchBlock,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidControlFlowStatementReason,
 };
-use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
 
@@ -35,8 +34,7 @@ pub(super) struct ValueMatchParseInput<'a, 'b> {
     pub(super) token_stream: &'a mut FileTokens,
     pub(super) context: &'a ScopeContext,
     pub(super) type_interner: &'a mut AstTypeInterner<'b>,
-    pub(super) expected_result_type_ids: &'a [TypeId],
-    pub(super) receiver_kind: ValueReceiverKind,
+    pub(super) target: ActiveValueProductionTarget,
     pub(super) string_table: &'a mut StringTable,
     pub(super) location: SourceLocation,
 }
@@ -52,8 +50,7 @@ pub(super) fn parse_value_match_at_receiver(
         token_stream,
         context,
         type_interner,
-        expected_result_type_ids,
-        receiver_kind,
+        target,
         string_table,
         location,
     } = input;
@@ -75,11 +72,8 @@ pub(super) fn parse_value_match_at_receiver(
     }
     token_stream.advance();
 
-    let active_target = ActiveValueProductionTarget {
-        result_type_ids: expected_result_type_ids.to_vec(),
-        receiver_kind,
-        expected_arity: None,
-    };
+    let receiver_kind = target.receiver_kind;
+    let expected_result_type_ids = target.result_type_ids.clone();
     let mut warnings = Vec::new();
     let parsed_match = parse_match_block(
         scrutinee,
@@ -87,7 +81,7 @@ pub(super) fn parse_value_match_at_receiver(
         context,
         type_interner,
         &mut warnings,
-        Some(active_target),
+        Some(target),
         string_table,
     )?;
     emit_collected_warnings(context, warnings);
@@ -101,7 +95,7 @@ pub(super) fn parse_value_match_at_receiver(
     let result_type_id = infer_value_match_result_type(
         &parsed_match.arms,
         parsed_match.default.as_deref(),
-        expected_result_type_ids,
+        &expected_result_type_ids,
         type_interner,
         &location,
         receiver_kind,
@@ -109,7 +103,7 @@ pub(super) fn parse_value_match_at_receiver(
     let result_type_ids = if expected_result_type_ids.is_empty() {
         vec![result_type_id]
     } else {
-        expected_result_type_ids.to_vec()
+        expected_result_type_ids
     };
 
     let value_match = ValueMatchBlock {
