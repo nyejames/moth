@@ -51,6 +51,15 @@ validation code than the current tree even after adding `receiver/block_match.rs
 
 ## Active context capsule
 
+WORK_ID:
+- `receiver-consolidation`
+
+WORK_SOURCE:
+- `docs/roadmap/plans/value-producing-control-flow-receiver-consolidation-plan.md`
+
+STATUS:
+- `active`
+
 ACTIVE_PLAN:
 - `docs/roadmap/plans/value-producing-control-flow-receiver-consolidation-plan.md`
 
@@ -60,6 +69,9 @@ BRANCH:
 BASE_COMMIT:
 - `e782e79d8c4113de4dd835f777bc51b773cffe40`
 
+BASE_REVISION:
+- `702216c7787cf0234d14ac9849dd9da459e617a2`
+
 PARENT_BRANCH:
 - `const-folding-and-types-optimisation`
 
@@ -68,12 +80,33 @@ PARENT_STATE_AT_SNAPSHOT:
 - Phase C, module-local folded-value authority, is active.
 - Static Bool `if` specialisation remains the later Phase G semantic gate.
 
-CURRENT_SLICE:
-- Phase 0, re-anchor and semantic freeze, after this plan is accepted.
+CURRENT_SCOPE:
+- Phase 0 re-anchor, baseline inventory and semantic freeze. No production-code change.
+
+COMPLETED:
+- Clean worktree on `value-producing-control-flow-receiver-consolidation` at `702216c77`.
+- Implementation branch contains only the two plan-document commits after `e782e79d8`.
+- Owner table, call inventory, file sizes and known-gap reproductions recorded in Phase 0 Outcome.
 
 NEXT_ACTION:
-- Establish the baseline on this branch, record current passing and failing receiver cases, then
-  implement Phase 1 without changing header routing.
+- After this Phase 0 checkpoint, start Phase 1 all-path exit summaries without changing header
+  routing.
+
+VALIDATION:
+- Focused unit and HTML cases passed. `cargo fmt --all -- --check` passed. `just validate` passed:
+  clippy `-D warnings`, source-audit 0 findings, workspace tests 4446 passed / 3 ignored, xtask 17
+  passed, integration 1866/1866, docs check clean, bench-ci and scaling budgets within limits,
+  timers-erasure-check clean.
+
+AUDITS:
+- Interim `auditor` pass 1 accepted: `audit_clean`. No required findings.
+
+BLOCKERS:
+- none
+
+NOTES:
+- Work only in this worktree. Do not rebase onto the parent branch during implementation.
+- Phase 8 remains blocked until the parent squash exists on `main`.
 
 INTEGRATION_MODEL:
 - Work only on this branch while the parent optimisation branch continues independently.
@@ -613,30 +646,30 @@ freeze current statement, template, full-match and inline-predicate behaviour be
 
 ### Work items
 
-- [ ] Verify the worktree is on `value-producing-control-flow-receiver-consolidation` and records
+- [x] Verify the worktree is on `value-producing-control-flow-receiver-consolidation` and records
       base commit `e782e79d8c4113de4dd835f777bc51b773cffe40`.
-- [ ] Confirm no implementation commit from the parent branch was accidentally mixed into this
+- [x] Confirm no implementation commit from the parent branch was accidentally mixed into this
       branch after creation.
-- [ ] Re-read every file named in `Current repository shape and root causes`.
-- [ ] Inventory all calls to `parse_if_header`, `find_expression_end_index` used for `if` routing,
+- [x] Re-read every file named in `Current repository shape and root causes`.
+- [x] Inventory all calls to `parse_if_header`, `find_expression_end_index` used for `if` routing,
       `analyze_branch_flow`, `extract_single_produced_type`,
       `extract_first_multi_produced_values`, `build_value_if_expression` and
       `build_value_match_expression`.
-- [ ] Record current file sizes and symbol ownership for `receiver/`, `completeness.rs` and
+- [x] Record current file sizes and symbol ownership for `receiver/`, `completeness.rs` and
       `multi_bind.rs`. These are deletion evidence, not performance benchmarks.
-- [ ] Use untracked `tmp/` snippets to reproduce:
-  - [ ] a block Bool branch whose nested paths mix `then` and `return`
-  - [ ] a partially inferred multi-bind using an inline option capture
-  - [ ] a partially inferred multi-bind using a block choice predicate
-  - [ ] the new option-capture and choice-predicate block forms
-- [ ] Record the exact current diagnostic or failure for each reproduction in this phase's
+- [x] Use untracked `tmp/` snippets to reproduce:
+  - [x] a block Bool branch whose nested paths mix `then` and `return`
+  - [x] a partially inferred multi-bind using an inline option capture
+  - [x] a partially inferred multi-bind using a block choice predicate
+  - [x] the new option-capture and choice-predicate block forms
+- [x] Record the exact current diagnostic or failure for each reproduction in this phase's
       `Outcome`.
-- [ ] Confirm current statement and template option capture still work.
-- [ ] Confirm statement/template choice comparison keeps its current Bool meaning.
-- [ ] Confirm full value matches and existing inline option/choice predicates still pass.
-- [ ] Confirm optional `none` and literal inline predicate rejection cases retain their current
+- [x] Confirm current statement and template option capture still work.
+- [x] Confirm statement/template choice comparison keeps its current Bool meaning.
+- [x] Confirm full value matches and existing inline option/choice predicates still pass.
+- [x] Confirm optional `none` and literal inline predicate rejection cases retain their current
       diagnostic codes.
-- [ ] Make no semantic or production-code change in this phase.
+- [x] Make no semantic or production-code change in this phase.
 
 ### Focused validation
 
@@ -658,20 +691,101 @@ just validate
 
 ### Mandatory audit and style review
 
-- [ ] Confirm the plan's current-owner table still matches the branch.
-- [ ] Confirm no later parent commit has already solved or moved one of these owners.
-- [ ] Review the baseline test inventory for redundant or misleading ownership.
-- [ ] Complete the mandatory phase workflow.
+- [x] Confirm the plan's current-owner table still matches the branch.
+- [x] Confirm no later parent commit has already solved or moved one of these owners.
+- [x] Review the baseline test inventory for redundant or misleading ownership.
+- [x] Complete the mandatory phase workflow.
 
 ### Acceptance
 
-- [ ] The baseline is green except for deliberately untracked reproductions of the known gaps.
-- [ ] Current diagnostic identities and contextual syntax precedence are recorded.
-- [ ] No semantic code changed.
+- [x] The baseline is green except for deliberately untracked reproductions of the known gaps.
+- [x] Current diagnostic identities and contextual syntax precedence are recorded.
+- [x] No semantic code changed.
 
 ### Outcome
 
-_To be completed by the implementing agent._
+Branch `value-producing-control-flow-receiver-consolidation` is at `702216c77`. The only commits
+after planning snapshot `e782e79d8` are the two plan-document commits. No parent-branch
+implementation work is mixed in. The current-owner table still matches this tree.
+
+File sizes (lines):
+
+- `if_headers.rs` 343
+- `match_headers.rs` 454
+- `completeness.rs` 184
+- `multi_bind.rs` 1049
+- `receiver/mod.rs` 239
+- `receiver/detect.rs` 183
+- `receiver/block_if.rs` 153
+- `receiver/inline_if.rs` 72
+- `receiver/inline_match.rs` 216
+- `receiver/inline_then_else.rs` 406
+- `receiver/full_match.rs` 196
+- `receiver/expression_build.rs` 76
+- `receiver/result_type.rs` 214
+- `receiver/token_checkpoint.rs` 33
+- `hir/hir_statement/value_blocks.rs` 334
+
+Call inventory:
+
+- `parse_if_header`: `branching.rs`, `template_body_parser.rs`,
+  `template_head_parser/control_flow_suffix.rs`
+- `find_expression_end_index` for `if` routing: `if_headers.rs` option-capture scan;
+  `receiver/detect.rs` full-match, inline-predicate and unsupported-optional scans
+- `analyze_branch_flow`: `completeness.rs`, `block_if.rs`, `full_match.rs`, `multi_bind.rs`,
+  `fallible_handling/validation.rs`, `value_production_tests.rs`
+- `extract_single_produced_type`: `completeness.rs`, `receiver/result_type.rs`
+- `extract_first_multi_produced_values`: `multi_bind.rs` only
+- `build_value_if_expression` / `build_value_match_expression`: receiver `inline_if.rs`,
+  `block_if.rs`, `inline_match.rs`, `full_match.rs`. Multi-bind still has its own builders and the
+  block path that constructs an inline `ValueIfBlock` then overwrites bodies.
+
+Symbol ownership that later phases must delete or move: `BranchFlow`;
+`classify_value_if_header`; `current_if_header_is_full_match`;
+`build_option_present_capture_scope_and_pattern` in `if_headers.rs`;
+`extract_first_multi_produced_values`; `extract_single_produced_type`;
+`ValueReceiverKind::NestedThen`. `match_headers.rs` still imports option-capture construction from
+`if_headers.rs`. Completeness does not recurse into `NodeKind::ScopedBlock`.
+
+Untracked `tmp/phase0-repros` diagnostics:
+
+- mixed produce/terminate nested Bool block: `MOTH-RULE-0042` /
+  `ValueIfBranchFallsThrough` at the outer `if`
+- partially inferred multi-bind inline option capture: `MOTH-SYNTAX-0002` unexpected `/` at `|name|`
+- partially inferred multi-bind block choice predicate: `MOTH-RULE-0034` unknown value `Ready`
+- new block option capture: `MOTH-SYNTAX-0002` unexpected `/` at `|name|`
+- new block choice predicate: `MOTH-RULE-0034` unknown value `Ready`
+
+Frozen current meaning:
+
+- statement option capture and statement `is none` succeed
+- statement `if status is Ready:` stays a Bool comparison and reports `MOTH-RULE-0034`
+- statement `if status is Status::Ready:` succeeds as choice equality
+- template option capture remains owned by `template_if_option_present_capture` and
+  `template_if_option_capture_not_visible_in_else`
+- inline option/choice predicates and full value matches pass
+- inline option `none` predicate: `MOTH-RULE-0042` /
+  `invalid_control_flow_statement.value_if_option_none_predicate`
+- inline option literal predicate: `MOTH-RULE-0042` /
+  `invalid_control_flow_statement.value_if_option_literal_predicate`
+
+The listed `cargo test --lib compiler_frontend::ast::statements::tests::*` filters match no tests.
+The live owners are
+`compiler_frontend::ast::statements::value_production::value_production_tests` (6 passed) and
+`compiler_frontend::ast::statements::branching::branching_tests` (40 passed).
+`compiler_frontend::ast::templates::` 688 passed.
+`compiler_frontend::hir::tests::value_block_lowering_tests` 2 passed.
+Focused HTML cases named in this phase all behaved as expected.
+`cargo fmt --all -- --check` passed. `just validate` passed: clippy `-D warnings`, source-audit 0
+findings, workspace tests 4446 passed / 3 ignored, xtask 17 passed, integration 1866/1866, docs
+check clean, bench-ci and scaling budgets within limits, timers-erasure-check clean.
+
+No production Rust changed. The only tracked edit is this plan record. Untracked reproductions stay
+under gitignored `tmp/`.
+
+The unit test
+`branch_flow_combines_match_arms_and_default` currently asserts mixed produce/terminate is
+`FallsThrough`. That test is the hidden-invariant owner Phase 1 must rewrite.
 
 ---
 
