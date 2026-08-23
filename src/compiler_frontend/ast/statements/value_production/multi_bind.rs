@@ -7,8 +7,8 @@
 
 use super::parse_values::is_missing_produced_value_boundary;
 use super::receiver::{
-    current_if_header_is_full_match, emit_collected_warnings, same_logical_line,
-    try_parse_value_block_at_receiver, validate_value_match_completeness,
+    emit_collected_warnings, same_logical_line, try_parse_value_block_at_receiver,
+    validate_value_match_completeness,
 };
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, MatchExhaustiveness, NodeKind};
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
@@ -22,6 +22,8 @@ use crate::compiler_frontend::ast::statements::branching::parse_match_block;
 use crate::compiler_frontend::ast::statements::condition_validation::{
     ensure_if_statement_condition, if_condition_is_missing,
 };
+use crate::compiler_frontend::ast::statements::if_headers::{IfHeaderShape, classify_if_header};
+use crate::compiler_frontend::ast::statements::match_headers::parse_scrutinee_until_is;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchArm;
 use crate::compiler_frontend::ast::statements::value_production::completeness::{
     validate_value_if_completeness, visit_reachable_then_values, visit_reachable_then_values_mut,
@@ -108,7 +110,9 @@ fn parse_inferred_multi_bind_value_block(
     let location = token_stream.current_location();
     token_stream.advance(); // consume `if`
 
-    if current_if_header_is_full_match(token_stream) {
+    let classification = classify_if_header(token_stream);
+
+    if classification.shape == IfHeaderShape::FullMatch {
         return parse_inferred_multi_bind_value_match(InferredMultiBindValueMatchInput {
             token_stream,
             context,
@@ -220,19 +224,13 @@ fn parse_inferred_multi_bind_value_match(
         location,
     } = input;
 
-    let mut scrutinee_type = ExpectedType::Infer;
     let scrutinee_context = context.new_child_control_flow(ContextKind::Condition, string_table);
-    let mut cast_target_context = CastTargetContext::None;
-    let input = ExpressionParseInput::until(ExpressionParseResources {
+    let scrutinee = parse_scrutinee_until_is(
         token_stream,
-        scope_context: &scrutinee_context,
+        &scrutinee_context,
         type_interner,
-        expected_type: &mut scrutinee_type,
-        cast_target_context: &mut cast_target_context,
-        value_mode: &ValueMode::ImmutableOwned,
         string_table,
-    });
-    let scrutinee = create_expression_until(input, &[TokenKind::Is])?;
+    )?;
 
     if token_stream.current_token_kind() != &TokenKind::Is {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(

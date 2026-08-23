@@ -1,8 +1,8 @@
 //! Receiving-site parser entrypoint for value-producing control flow.
 //!
-//! WHAT: detects `if` at closed receiver sites (declaration initialisers, assignment
-//! RHS, and return expressions) and routes to the correct parser for inline bool,
-//! inline single-predicate match, block if, or full match forms.
+//! WHAT: consumes `if` at closed receiver sites and routes through the shared
+//! `if_headers` classifier to inline bool, inline single-predicate match, block
+//! if, or full match forms.
 //! WHY: this is the only place where `if` is permitted in expression position;
 //! general expression parsing continues to reject bare `if` everywhere else.
 //!
@@ -19,6 +19,7 @@ use crate::compiler_frontend::ast::expressions::parse_expression_input::{
 use crate::compiler_frontend::ast::statements::condition_validation::{
     ensure_if_statement_condition, if_condition_is_missing,
 };
+use crate::compiler_frontend::ast::statements::if_headers::{IfHeaderShape, classify_if_header};
 use crate::compiler_frontend::ast::statements::value_production::types::ValueReceiverKind;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
@@ -32,18 +33,17 @@ use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 mod block_if;
-mod detect;
 mod expression_build;
 mod full_match;
 mod inline_if;
 mod inline_match;
 mod inline_then_else;
 mod result_type;
+mod single_predicate;
 mod token_checkpoint;
 
 // Shared receiver helpers consumed by sibling value-production parsers.
 pub(super) use crate::compiler_frontend::ast::statements::value_production::completeness::validate_value_match_completeness;
-pub(super) use detect::current_if_header_is_full_match;
 pub(super) use inline_then_else::same_logical_line;
 
 /// Forwards accumulated parser warnings into the outer scope.
@@ -94,10 +94,13 @@ pub fn try_parse_value_block_at_receiver(
     let location = token_stream.current_location();
     token_stream.advance();
 
-    if let Some(reason) = detect::unsupported_optional_single_predicate_reason(
+    let classification = classify_if_header(token_stream);
+
+    if let Some(reason) = single_predicate::unsupported_optional_single_predicate_reason(
         token_stream,
         context,
         type_interner.environment(),
+        classification,
     ) {
         return Some(Err(CompilerDiagnostic::invalid_control_flow_statement(
             reason,
@@ -106,8 +109,8 @@ pub fn try_parse_value_block_at_receiver(
         .into()));
     }
 
-    match detect::classify_value_if_header(token_stream) {
-        detect::ValueIfHeaderKind::FullMatch => Some(full_match::parse_value_match_at_receiver(
+    match classification.shape {
+        IfHeaderShape::FullMatch => Some(full_match::parse_value_match_at_receiver(
             full_match::ValueMatchParseInput {
                 token_stream,
                 context,
@@ -119,15 +122,18 @@ pub fn try_parse_value_block_at_receiver(
             },
         )),
 
-        detect::ValueIfHeaderKind::InlineSinglePredicate => {
+        IfHeaderShape::PotentialInlineSinglePredicate => {
             if let Some(result) = inline_match::try_parse_inline_single_predicate_value_match(
-                token_stream,
-                context,
-                type_interner,
-                expected_result_type_ids,
-                receiver_kind,
-                string_table,
-                location.clone(),
+                inline_match::InlineSinglePredicateParseInput {
+                    token_stream,
+                    context,
+                    type_interner,
+                    expected_result_type_ids,
+                    receiver_kind,
+                    string_table,
+                    location: location.clone(),
+                    classification,
+                },
             ) {
                 return Some(result);
             }
@@ -143,15 +149,17 @@ pub fn try_parse_value_block_at_receiver(
             ))
         }
 
-        detect::ValueIfHeaderKind::BoolCondition => Some(parse_bool_value_if_after_condition(
-            token_stream,
-            context,
-            type_interner,
-            expected_result_type_ids,
-            receiver_kind,
-            string_table,
-            location,
-        )),
+        IfHeaderShape::OrdinaryBool | IfHeaderShape::PotentialBlockSinglePredicate => {
+            Some(parse_bool_value_if_after_condition(
+                token_stream,
+                context,
+                type_interner,
+                expected_result_type_ids,
+                receiver_kind,
+                string_table,
+                location,
+            ))
+        }
     }
 }
 

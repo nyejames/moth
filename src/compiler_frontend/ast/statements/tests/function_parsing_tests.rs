@@ -749,6 +749,27 @@ fn parses_inline_option_present_capture_receiver_as_value_match() {
 }
 
 #[test]
+fn parses_option_equality_receiver_as_bool_value_if() {
+    let (ast, string_table) = parse_single_file_ast(
+        "compare |left String?, right String?| -> String:\n\
+             result = if left is right then \"yes\" else \"no\"\n\
+             return result\n\
+         ;\n",
+    );
+
+    let body = function_body_by_name(&ast, &string_table, "compare");
+    let NodeKind::VariableDeclaration(result_decl) = &body[0].kind else {
+        panic!("expected result declaration in compare()");
+    };
+    let ExpressionKind::ValueBlock { block } = &result_decl.value.kind else {
+        panic!("expected option equality to parse as a value block");
+    };
+    let ValueBlock::If(_) = block.as_ref() else {
+        panic!("non-pattern option equality must fall back to Bool value-if, not a match");
+    };
+}
+
+#[test]
 fn parses_catch_handler_with_fallback_scope_in_declaration_rhs() {
     let (ast, string_table) = parse_single_file_ast(
         "can_error |value String| -> String, Error!:\n    return value\n;\n\nrecover |value String| -> String:\n    output = can_error(value) catch |err|:\n        io.line([: [err.message]])\n        then \"fallback\"\n    ;\n    return output\n;\n",

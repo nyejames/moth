@@ -1,9 +1,10 @@
-//! Structural `if` header classification shared by statements and templates.
+//! Structural `if` header classification shared by statements, templates and
+//! value receivers.
 //!
 //! WHAT: one nesting-aware scan after `if`, plus statement/template header parsing
 //! into Bool, option present-capture, or full-match `is:`.
-//! WHY: value receivers must reuse these structural facts rather than scanning
-//! `is` again. This file does not own choice-predicate value matching.
+//! WHY: value receivers reuse these structural facts rather than scanning `is`
+//! again. This file does not own choice-predicate value matching.
 
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
@@ -73,9 +74,37 @@ pub(crate) struct IfHeaderClassification {
     pub is_index: Option<usize>,
     pub token_after_is: Option<usize>,
     pub body_delimiter: IfHeaderDelimiter,
+    pub delimiter_index: Option<usize>,
 }
 
 impl IfHeaderClassification {
+    /// Returns true when the classified `then` sits on the same logical line as
+    /// `token_index`.
+    ///
+    /// WHY: receiver option-literal diagnostics must not fire when `then` is on
+    /// a later line; that malformed form stays `InlineValueIfMultiline`.
+    pub(crate) fn inline_then_is_on_same_line_as(
+        self,
+        token_stream: &FileTokens,
+        token_index: usize,
+    ) -> bool {
+        if self.body_delimiter != IfHeaderDelimiter::InlineThen {
+            return false;
+        }
+
+        let Some(delimiter_index) = self.delimiter_index else {
+            return false;
+        };
+        let Some(token) = token_stream.tokens.get(token_index) else {
+            return false;
+        };
+        let Some(delimiter) = token_stream.tokens.get(delimiter_index) else {
+            return false;
+        };
+
+        token.location.start_pos.line_number == delimiter.location.start_pos.line_number
+    }
+
     fn option_present_capture_candidate(self, token_stream: &FileTokens) -> bool {
         let Some(is_index) = self.is_index else {
             return false;
@@ -165,16 +194,16 @@ pub(crate) fn classify_if_header(token_stream: &FileTokens) -> IfHeaderClassific
             match token_kind {
                 TokenKind::Is => return classify_from_is(token_stream, index),
                 TokenKind::Colon => {
-                    return ordinary_bool_header(IfHeaderDelimiter::Colon);
+                    return ordinary_bool_header(IfHeaderDelimiter::Colon, Some(index));
                 }
                 TokenKind::Then => {
-                    return ordinary_bool_header(IfHeaderDelimiter::InlineThen);
+                    return ordinary_bool_header(IfHeaderDelimiter::InlineThen, Some(index));
                 }
                 TokenKind::StartTemplateBody => {
-                    return ordinary_bool_header(IfHeaderDelimiter::TemplateBody);
+                    return ordinary_bool_header(IfHeaderDelimiter::TemplateBody, Some(index));
                 }
                 TokenKind::TemplateClose => {
-                    return ordinary_bool_header(IfHeaderDelimiter::TemplateClose);
+                    return ordinary_bool_header(IfHeaderDelimiter::TemplateClose, Some(index));
                 }
                 TokenKind::Eof => break,
                 _ => {}
@@ -185,7 +214,7 @@ pub(crate) fn classify_if_header(token_stream: &FileTokens) -> IfHeaderClassific
         index += 1;
     }
 
-    ordinary_bool_header(IfHeaderDelimiter::None)
+    ordinary_bool_header(IfHeaderDelimiter::None, None)
 }
 
 fn classify_from_is(token_stream: &FileTokens, is_index: usize) -> IfHeaderClassification {
@@ -196,6 +225,7 @@ fn classify_from_is(token_stream: &FileTokens, is_index: usize) -> IfHeaderClass
             is_index: Some(is_index),
             token_after_is: None,
             body_delimiter: IfHeaderDelimiter::None,
+            delimiter_index: None,
         };
     };
 
@@ -205,6 +235,7 @@ fn classify_from_is(token_stream: &FileTokens, is_index: usize) -> IfHeaderClass
             is_index: Some(is_index),
             token_after_is: Some(after_is),
             body_delimiter: delimiter,
+            delimiter_index: Some(after_is),
         };
     }
 
@@ -238,6 +269,7 @@ fn classify_single_predicate_after_pattern(
                 is_index: Some(is_index),
                 token_after_is: Some(pattern_start),
                 body_delimiter: delimiter,
+                delimiter_index: Some(index),
             };
         }
 
@@ -250,6 +282,7 @@ fn classify_single_predicate_after_pattern(
         is_index: Some(is_index),
         token_after_is: Some(pattern_start),
         body_delimiter: IfHeaderDelimiter::None,
+        delimiter_index: None,
     }
 }
 
@@ -269,12 +302,16 @@ fn predicate_body_delimiter(token_kind: &TokenKind) -> Option<IfHeaderDelimiter>
     }
 }
 
-fn ordinary_bool_header(body_delimiter: IfHeaderDelimiter) -> IfHeaderClassification {
+fn ordinary_bool_header(
+    body_delimiter: IfHeaderDelimiter,
+    delimiter_index: Option<usize>,
+) -> IfHeaderClassification {
     IfHeaderClassification {
         shape: IfHeaderShape::OrdinaryBool,
         is_index: None,
         token_after_is: None,
         body_delimiter,
+        delimiter_index,
     }
 }
 

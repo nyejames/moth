@@ -12,11 +12,8 @@ use crate::compiler_frontend::ast::ContextKind;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
-use crate::compiler_frontend::ast::expressions::parse_expression::create_expression_until;
-use crate::compiler_frontend::ast::expressions::parse_expression_input::{
-    ExpressionParseInput, ExpressionParseResources,
-};
 use crate::compiler_frontend::ast::statements::branching::parse_match_block;
+use crate::compiler_frontend::ast::statements::match_headers::parse_scrutinee_until_is;
 use crate::compiler_frontend::ast::statements::value_production::completeness::validate_value_match_completeness;
 use crate::compiler_frontend::ast::statements::value_production::types::{
     ActiveValueProductionTarget, ValueMatchBlock, ValueReceiverKind,
@@ -28,9 +25,6 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
-use crate::compiler_frontend::type_coercion::parse_context::CastTargetContext;
-use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
-use crate::compiler_frontend::value_mode::ValueMode;
 
 /// Full value matches recurse into statement match bodies, so their result retains internal
 /// frozen-token-table failures for the expression parser boundary.
@@ -64,19 +58,13 @@ pub(super) fn parse_value_match_at_receiver(
         location,
     } = input;
 
-    let mut scrutinee_type = ExpectedType::Infer;
     let scrutinee_context = context.new_child_control_flow(ContextKind::Condition, string_table);
-    let mut cast_target_context = CastTargetContext::None;
-    let input = ExpressionParseInput::until(ExpressionParseResources {
+    let scrutinee = parse_scrutinee_until_is(
         token_stream,
-        scope_context: &scrutinee_context,
+        &scrutinee_context,
         type_interner,
-        expected_type: &mut scrutinee_type,
-        cast_target_context: &mut cast_target_context,
-        value_mode: &ValueMode::ImmutableOwned,
         string_table,
-    });
-    let scrutinee = create_expression_until(input, &[TokenKind::Is])?;
+    )?;
 
     if token_stream.current_token_kind() != &TokenKind::Is {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(

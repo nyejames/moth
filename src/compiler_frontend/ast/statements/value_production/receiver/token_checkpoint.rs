@@ -1,8 +1,12 @@
-//! Token stream rollback helper for speculative value-block parsing.
+//! Token stream rollback for uncommitted single-predicate speculation.
 //!
-//! WHAT: captures the current token index before trying an optional parse branch.
-//! WHY: inline single-predicate value matches are syntax-selected after parsing
-//! a possible scrutinee; failed speculation must restore the token stream exactly.
+//! WHAT: snapshots `token_stream.index` before parsing a possible scrutinee.
+//! WHY: `classify_if_header` can mark a header as a potential single predicate
+//! while the scrutinee is not option/choice-eligible. Authored diagnostics from
+//! that uncommitted parse restore the stream so Bool parsing can proceed.
+//! Infrastructure errors never restore and never fall back.
+//!
+//! Rollback is valid only before `is` is consumed and the pattern parser starts.
 
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 

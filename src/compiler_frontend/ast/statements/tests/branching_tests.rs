@@ -998,6 +998,17 @@ fn preserves_inline_multiline_when_newline_precedes_an_authored_else() {
 }
 
 #[test]
+fn multiline_option_literal_predicate_stays_inline_value_if_multiline() {
+    // A return receiver keeps `then` in the same expression window, so a
+    // newline before `then` must stay the multiline diagnostic rather than
+    // the option-literal predicate reason.
+    assert_inline_control_flow_reason(
+        "choose |maybe String?| -> String:\n    return if maybe is \"Priya\"\nthen \"hi\" else \"guest\"\n;\nvalue = choose(none)\n",
+        InvalidControlFlowStatementReason::InlineValueIfMultiline,
+    );
+}
+
+#[test]
 fn ignores_else_owned_by_a_later_statement() {
     assert_inline_control_flow_reason(
         "choose |condition Bool| -> Int:\n    result ~= 0\n    result = if condition then 10\n    if condition:\n        result = 1\n    else\n        result = 2\n    ;\n    return result\n;\nvalue = choose(false)\n",

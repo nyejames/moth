@@ -81,28 +81,27 @@ PARENT_STATE_AT_SNAPSHOT:
 - Static Bool `if` specialisation remains the later Phase G semantic gate.
 
 CURRENT_SCOPE:
-- Phase 2 one structural `if` classifier and one match-header capture owner.
+- Phase 4 shared block-body parsing and value-block construction.
 
 COMPLETED:
-- Phase 0 checkpoint `43c3e7ac6`. Phase 1 checkpoint `2f442425b`.
-- `classify_if_header` owns the structural `if` scan. `match_headers.rs` owns option capture
-  construction and `parse_scrutinee_until_is`.
-- Statement and template semantics are unchanged. Receiver `detect.rs` still exists for Phase 3.
+- Phase 0 checkpoint `43c3e7ac6`. Phase 1 checkpoint `2f442425b`. Phase 2 checkpoint `25bc9963f`.
+- Phase 3 deletes `receiver/detect.rs`. Closed receivers and inferred multi-bind classify through
+  `classify_if_header`. `receiver/single_predicate.rs` owns type-aware header parsing.
 
 NEXT_ACTION:
-- After this Phase 2 checkpoint, delete `receiver/detect.rs` and unify single-predicate header
-  parsing.
+- After this Phase 3 checkpoint, add the shared block-body owner and move value-block construction
+  out of duplicated receiver/multi-bind paths.
 
 VALIDATION:
-- branching_tests 44 passed; templates 688 passed; focused HTML inline option/choice, full match
-  and template option-capture cases passed. `cargo fmt --all -- --check` passed. `just validate`
-  passed: clippy `-D warnings`, source-audit 0, workspace tests 4464 passed / 3 ignored, xtask 17,
+- statement lib tests 290 passed. Focused HTML inline option/choice, cross-choice, option none,
+  option literal and full match cases passed. `cargo fmt --all -- --check` passed. `just validate`
+  passed: clippy `-D warnings`, source-audit 0, workspace tests 4466 passed / 3 ignored, xtask 17,
   integration 1868/1868.
 
 AUDITS:
-- Phase 0 and Phase 1 auditor cycles accepted.
-- Phase 2 interim auditor pass 1 required restoring `|` adjacency after `is`; that regression is
-  covered. Remaining extra classifier cases are optional.
+- Phase 0, Phase 1 and Phase 2 auditor cycles accepted.
+- Phase 3 pass 1 required same-line `then` for option-literal diagnostics; covered by
+  `multiline_option_literal_predicate_stays_inline_value_if_multiline`. Pass 2 `audit_clean`.
 
 BLOCKERS:
 - none
@@ -1020,37 +1019,37 @@ full and inferred multi-bind callers consume shared scrutinee and pattern facts.
 
 ### Work items
 
-- [ ] Replace `detect::classify_value_if_header` in `receiver/mod.rs` with the shared
+- [x] Replace `detect::classify_value_if_header` in `receiver/mod.rs` with the shared
       `if_headers.rs` classification.
-- [ ] Replace multi-bind's `current_if_header_is_full_match` dependency with the same classification
+- [x] Replace multi-bind's `current_if_header_is_full_match` dependency with the same classification
       result.
-- [ ] Preserve the existing receiver-only option `none` and literal-predicate diagnostics without
+- [x] Preserve the existing receiver-only option `none` and literal-predicate diagnostics without
       another token scan.
-- [ ] Create one shared type-aware single-predicate header parser which:
-  - [ ] parses the scrutinee once
-  - [ ] confirms option present-capture or choice eligibility
-  - [ ] consumes `is`
-  - [ ] calls the shared match-pattern parser
-  - [ ] returns scrutinee, pattern, capture scope and authored body form
-- [ ] Preserve Bool fallback only where the existing contextual grammar allows it.
-- [ ] Preserve infrastructure errors during speculative parsing.
-- [ ] Refactor `inline_match.rs` to own only inline body parsing and final match assembly.
-- [ ] Refactor `full_match.rs` to reuse the shared scrutinee parser.
-- [ ] Refactor the partially inferred multi-bind entry so it receives shared classification facts,
+- [x] Create one shared type-aware single-predicate header parser which:
+  - [x] parses the scrutinee once
+  - [x] confirms option present-capture or choice eligibility
+  - [x] consumes `is`
+  - [x] calls the shared match-pattern parser
+  - [x] returns scrutinee, pattern, capture scope and authored body form
+- [x] Preserve Bool fallback only where the existing contextual grammar allows it.
+- [x] Preserve infrastructure errors during speculative parsing.
+- [x] Refactor `inline_match.rs` to own only inline body parsing and final match assembly.
+- [x] Refactor `full_match.rs` to reuse the shared scrutinee parser.
+- [x] Refactor the partially inferred multi-bind entry so it receives shared classification facts,
       even before predicate support is added in Phase 6.
-- [ ] Delete `receiver/detect.rs` and remove its `mod` declaration, re-exports, tests and comments.
-- [ ] Audit `receiver/token_checkpoint.rs`. Delete it if classification and committed parsing make it
+- [x] Delete `receiver/detect.rs` and remove its `mod` declaration, re-exports, tests and comments.
+- [x] Audit `receiver/token_checkpoint.rs`. Delete it if classification and committed parsing make it
       obsolete. Otherwise document its exact rollback invariant.
 
 ### Required tests
 
-- [ ] Protect inline option capture and choice unit/payload predicates.
-- [ ] Protect qualified choice predicates.
-- [ ] Protect cross-choice and unknown-variant diagnostics.
-- [ ] Protect Bool equality fallback for non-pattern subjects.
-- [ ] Protect full match routing.
-- [ ] Protect optional inline unsupported-predicate diagnostics.
-- [ ] Add a focused infrastructure-error test only if the refactor changes the retained-token path.
+- [x] Protect inline option capture and choice unit/payload predicates.
+- [x] Protect qualified choice predicates.
+- [x] Protect cross-choice and unknown-variant diagnostics.
+- [x] Protect Bool equality fallback for non-pattern subjects.
+- [x] Protect full match routing.
+- [x] Protect optional inline unsupported-predicate diagnostics.
+- [x] Add a focused infrastructure-error test only if the refactor changes the retained-token path.
 
 ### Focused validation
 
@@ -1070,22 +1069,40 @@ just validate
 
 ### Mandatory audit and style review
 
-- [ ] Confirm `receiver/detect.rs` is deleted.
-- [ ] Search for duplicate `next_non_newline_index`, same-line `then` and full-match scans.
-- [ ] Confirm inline, full and multi-bind entry paths parse a scrutinee through one owner.
-- [ ] Review rollback code for diagnostic versus infrastructure error handling.
-- [ ] Complete the mandatory phase workflow.
+- [x] Confirm `receiver/detect.rs` is deleted.
+- [x] Search for duplicate `next_non_newline_index`, same-line `then` and full-match scans.
+- [x] Confirm inline, full and multi-bind entry paths parse a scrutinee through one owner.
+- [x] Review rollback code for diagnostic versus infrastructure error handling.
+- [x] Complete the mandatory phase workflow.
 
 ### Acceptance
 
-- [ ] No receiver-local header classifier remains.
-- [ ] One single-predicate semantic header parser serves inline and future block bodies.
-- [ ] Existing inline/full/Bool behaviour and diagnostics remain stable.
-- [ ] The net parser routing code has decreased.
+- [x] No receiver-local header classifier remains.
+- [x] One single-predicate semantic header parser serves inline and future block bodies.
+- [x] Existing inline/full/Bool behaviour and diagnostics remain stable.
+- [x] The net parser routing code has decreased.
 
 ### Outcome
 
-_To be completed by the implementing agent._
+`classify_if_header` is the only `if` header scan at closed receivers. `receiver/detect.rs` is
+deleted. `receiver/single_predicate.rs` parses the scrutinee once, confirms option-present or
+choice eligibility, consumes `is`, and returns pattern, capture scope and body delimiter.
+`inline_match.rs` owns only same-line `then`/`else` assembly. `full_match.rs` and inferred
+multi-bind reuse `parse_scrutinee_until_is`. Inferred multi-bind classifies through
+`IfHeaderShape::FullMatch` and still only commits full match versus Bool.
+
+Option `none`/literal diagnostics consume classification facts. Literal predicates require the
+classified `then` to share the pattern's logical line, via `delimiter_index`. A newline before
+`then` stays `InlineValueIfMultiline`. Bool fallback remains only before a match shape is
+committed. Infrastructure errors never restore. `token_checkpoint.rs` stays with that rollback
+invariant. The retained-token path is unchanged, so no new infrastructure-error test was added.
+
+Existing inline option/choice, qualified choice, cross-choice, option none/literal and full-match
+cases still pass. `parses_option_equality_receiver_as_bool_value_if` protects non-pattern Bool
+fallback. Block single-predicate shapes still follow the Bool path until Phase 5.
+
+`just validate` passed: clippy `-D warnings`, source-audit 0, 4466 unit tests passed / 3 ignored,
+xtask 17, integration 1868/1868.
 
 ---
 
