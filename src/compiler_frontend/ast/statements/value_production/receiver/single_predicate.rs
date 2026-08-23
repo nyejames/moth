@@ -166,9 +166,7 @@ fn scrutinee_is_single_predicate_eligible(
     let is_option_present_capture = type_environment
         .option_inner_type(scrutinee.type_id)
         .is_some()
-        && classification.token_after_is.is_some_and(|index| {
-            token_stream.tokens[index].kind == TokenKind::TypeParameterBracket
-        });
+        && classification.option_present_capture_candidate(token_stream);
     let is_choice_predicate = type_environment.variants_for(scrutinee.type_id).is_some();
 
     is_option_present_capture || is_choice_predicate

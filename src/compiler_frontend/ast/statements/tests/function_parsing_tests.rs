@@ -749,6 +749,25 @@ fn parses_inline_option_present_capture_receiver_as_value_match() {
 }
 
 #[test]
+fn newline_between_is_and_option_capture_is_not_committed_at_inline_receiver() {
+    let diagnostic = parse_single_file_ast_diagnostic(
+        "display |maybe_name String?| -> String:\n\
+             name = if maybe_name is\n|name| then name else \"guest\"\n\
+             return name\n\
+         ;\n",
+    );
+
+    assert!(
+        !matches!(
+            diagnostic.payload,
+            DiagnosticPayload::InvalidMatchPattern { .. }
+        ),
+        "newline-separated receiver pipes must not commit option capture, got {:?}",
+        diagnostic.payload
+    );
+}
+
+#[test]
 fn parses_block_option_present_capture_receiver_as_value_match() {
     let (ast, string_table) = parse_single_file_ast(
         "display |maybe_name String?| -> String:\n\
@@ -789,6 +808,29 @@ fn parses_block_option_present_capture_receiver_as_value_match() {
         "block else branch should remain outside the present-capture scope"
     );
     assert_eq!(value_match.exhaustiveness, MatchExhaustiveness::HasDefault);
+}
+
+#[test]
+fn newline_between_is_and_option_capture_is_not_committed_at_block_receiver() {
+    let diagnostic = parse_single_file_ast_diagnostic(
+        "display |maybe_name String?| -> String:\n\
+             name = if maybe_name is\n|name|:\n\
+                 then name\n\
+             else\n\
+                 then \"guest\"\n\
+             ;\n\
+             return name\n\
+         ;\n",
+    );
+
+    assert!(
+        !matches!(
+            diagnostic.payload,
+            DiagnosticPayload::InvalidMatchPattern { .. }
+        ),
+        "newline-separated receiver pipes must not commit option capture, got {:?}",
+        diagnostic.payload
+    );
 }
 
 #[test]

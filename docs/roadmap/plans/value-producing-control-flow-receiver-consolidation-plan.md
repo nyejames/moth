@@ -85,24 +85,25 @@ CURRENT_SCOPE:
 
 COMPLETED:
 - Phase 0 `43c3e7ac6`. Phase 1 `2f442425b`. Phase 2 `25bc9963f`. Phase 3 `2fc56a0b3`.
-  Phase 4 `be9935a20`.
+  Phase 4 `be9935a20`. Phase 5 `349db0e30`.
 - Shared `receiver/block_body.rs` parses both bodies. `value_production/expression_build.rs`
   is the only `ValueIfBlock`/`ValueMatchBlock` construction owner.
 - `receiver/block_match.rs` assembles one-arm block option/choice matches at known receivers.
+- Receiver option capture uses the same raw `|` adjacency fact as statements.
 
 NEXT_ACTION:
-- After this Phase 5 checkpoint, give partially inferred multi-bind the same inline and
-  block single-predicate feature set, then delete remaining parser duplication.
+- After this audit-correction checkpoint, give partially inferred multi-bind the same
+  inline and block single-predicate feature set, then delete remaining parser duplication.
 
 VALIDATION:
-- statement lib tests 292 passed; value_block_lowering_tests 2 passed. New AST shape tests
-  and HTML block-predicate cases passed. `cargo fmt --all -- --check` passed.
-  `just validate` passed: clippy `-D warnings`, source-audit 0, workspace tests 4468 passed /
-  3 ignored, xtask 17, integration 1878/1878.
+- statement lib tests 294 passed. Receiver newline-adjacency regressions passed.
+  `cargo fmt --all -- --check` passed. `just validate` passed: clippy `-D warnings`,
+  source-audit 0, workspace tests 4470 passed / 3 ignored, xtask 17, integration 1878/1878.
 
 AUDITS:
-- Phase 0-4 auditor cycles accepted.
-- Phase 5 interim auditor `audit_clean` (`20260823T083028Z-47afcf8d`).
+- Phase 0-5 per-phase auditor cycles accepted.
+- User-requested Phases 0-5 accumulated auditor pass 1 `20260823T084130Z-5703e64c`
+  found one required adjacency defect. Pass 2 `20260823T085501Z-a058583f` `audit_clean`.
 
 BLOCKERS:
 - none

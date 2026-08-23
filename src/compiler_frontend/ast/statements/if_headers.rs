@@ -105,13 +105,16 @@ impl IfHeaderClassification {
         token.location.start_pos.line_number == delimiter.location.start_pos.line_number
     }
 
-    fn option_present_capture_candidate(self, token_stream: &FileTokens) -> bool {
+    /// Returns true when `|` is the raw next token after `is`.
+    ///
+    /// WHY: statement, template and value-receiver option capture all commit
+    /// only on that adjacency. `token_after_is` skips newlines and must not be
+    /// used for this commitment.
+    pub(crate) fn option_present_capture_candidate(self, token_stream: &FileTokens) -> bool {
         let Some(is_index) = self.is_index else {
             return false;
         };
 
-        // `|name|` is committed only when the pipe is the next token after `is`.
-        // A newline between them stays the pre-Phase-2 diagnostic path.
         token_stream
             .tokens
             .get(is_index + 1)
