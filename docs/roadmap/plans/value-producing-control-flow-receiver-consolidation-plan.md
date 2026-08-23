@@ -81,25 +81,28 @@ PARENT_STATE_AT_SNAPSHOT:
 - Static Bool `if` specialisation remains the later Phase G semantic gate.
 
 CURRENT_SCOPE:
-- Phase 0 re-anchor, baseline inventory and semantic freeze. No production-code change.
+- Phase 1 all-path exit summaries, produced-value traversal and inferred result slots.
 
 COMPLETED:
-- Clean worktree on `value-producing-control-flow-receiver-consolidation` at `702216c77`.
-- Implementation branch contains only the two plan-document commits after `e782e79d8`.
-- Owner table, call inventory, file sizes and known-gap reproductions recorded in Phase 0 Outcome.
+- Phase 0 baseline freeze is checkpointed at `43c3e7ac6`.
+- `BranchFlow` is replaced by `BranchExitSummary`. Mixed produce/terminate paths are complete.
+- Reachable `ThenValue` traversal owns inference and multi-bind coercion.
+- Inferred block `result_type_ids` are stored for HIR.
 
 NEXT_ACTION:
-- After this Phase 0 checkpoint, start Phase 1 all-path exit summaries without changing header
-  routing.
+- After this Phase 1 checkpoint, start Phase 2 header classification without changing accepted
+  source behaviour.
 
 VALIDATION:
-- Focused unit and HTML cases passed. `cargo fmt --all -- --check` passed. `just validate` passed:
-  clippy `-D warnings`, source-audit 0 findings, workspace tests 4446 passed / 3 ignored, xtask 17
-  passed, integration 1866/1866, docs check clean, bench-ci and scaling budgets within limits,
-  timers-erasure-check clean.
+- Focused unit, catch, HIR and HTML value-block cases passed. `cargo fmt --all -- --check` passed.
+  `just validate` passed after the pass-1 coverage correction: clippy `-D warnings`, source-audit 0
+  findings, workspace tests 4460 passed / 3 ignored, xtask 17 passed, integration 1868/1868, docs
+  check clean, bench-ci and scaling budgets within limits, timers-erasure-check clean.
 
 AUDITS:
-- Interim `auditor` pass 1 accepted: `audit_clean`. No required findings.
+- Phase 0 interim auditor `audit_clean`.
+- Phase 1 interim auditor pass 1 reported a required coverage gap; later-path type-conflict and
+  all-terminating validator tests were added. Pass 2 accepted: `audit_clean`.
 
 BLOCKERS:
 - none
@@ -804,54 +807,54 @@ foundation.
 
 ### Work items
 
-- [ ] Replace `BranchFlow` with a small all-path exit summary that independently records
+- [x] Replace `BranchFlow` with a small all-path exit summary that independently records
       fallthrough, value production and termination.
-- [ ] Implement statement-sequence composition so only surviving fallthrough paths execute the next
+- [x] Implement statement-sequence composition so only surviving fallthrough paths execute the next
       statement.
-- [ ] Implement alternative composition for `if` and exhaustive `match`.
-- [ ] Audit every compound `NodeKind` and recurse where its language semantics require it.
-- [ ] Preserve the current conservative handling of loops and blocked constructs unless exact proof
+- [x] Implement alternative composition for `if` and exhaustive `match`.
+- [x] Audit every compound `NodeKind` and recurse where its language semantics require it.
+- [x] Preserve the current conservative handling of loops and blocked constructs unless exact proof
       already exists.
-- [ ] Preserve current literal-`false` assertion terminality. Do not add constant evaluation or
+- [x] Preserve current literal-`false` assertion terminality. Do not add constant evaluation or
       Phase G behaviour here.
-- [ ] Replace the current value-if and value-match completeness checks with one shared validator
+- [x] Replace the current value-if and value-match completeness checks with one shared validator
       over exit summaries.
-- [ ] Keep explicit `else` validation outside that completeness validator.
-- [ ] Update catch-handler value-required validation to accept mixed produce/terminate paths and
+- [x] Keep explicit `else` validation outside that completeness validator.
+- [x] Update catch-handler value-required validation to accept mixed produce/terminate paths and
       reject every real fallthrough path.
-- [ ] Add a complete read traversal for every reachable `ThenValue` group.
-- [ ] Add the narrow mutable traversal needed for post-inference coercion, or defer the mutable half
+- [x] Add a complete read traversal for every reachable `ThenValue` group.
+- [x] Add the narrow mutable traversal needed for post-inference coercion, or defer the mutable half
       to Phase 4 only if no Phase 1 caller needs it.
-- [ ] Replace first-produced-value inference for inferred single declarations with all-produced-path
+- [x] Replace first-produced-value inference for inferred single declarations with all-produced-path
       inference.
-- [ ] Replace first-produced-value collection in partially inferred multi-bind with all produced
+- [x] Replace first-produced-value collection in partially inferred multi-bind with all produced
       groups.
-- [ ] Diagnose mismatched types from the actual conflicting produced value location where the
+- [x] Diagnose mismatched types from the actual conflicting produced value location where the
       current diagnostic model permits it.
-- [ ] Ensure every final `ValueIfBlock` and `ValueMatchBlock` stores the final inferred or explicit
+- [x] Ensure every final `ValueIfBlock` and `ValueMatchBlock` stores the final inferred or explicit
       `result_type_ids` used by HIR.
-- [ ] Delete `BranchFlow`, `extract_first_multi_produced_values` and superseded first-result helpers
+- [x] Delete `BranchFlow`, `extract_first_multi_produced_values` and superseded first-result helpers
       when no caller remains.
 
 ### Required tests
 
-- [ ] Rewrite the unit test that currently expects produce plus terminate to become fallthrough.
-- [ ] Add unit coverage for:
-  - [ ] direct production
-  - [ ] direct termination
-  - [ ] true fallthrough
-  - [ ] mixed produce/terminate alternatives
-  - [ ] produce/fallthrough alternatives
-  - [ ] terminate/fallthrough alternatives
-  - [ ] nested `if` and match composition
-  - [ ] sequential statements after partial fallthrough
-  - [ ] statements after every path has exited
-- [ ] Add an integration regression where one branch contains nested produce and terminate paths and
+- [x] Rewrite the unit test that currently expects produce plus terminate to become fallthrough.
+- [x] Add unit coverage for:
+  - [x] direct production
+  - [x] direct termination
+  - [x] true fallthrough
+  - [x] mixed produce/terminate alternatives
+  - [x] produce/fallthrough alternatives
+  - [x] terminate/fallthrough alternatives
+  - [x] nested `if` and match composition
+  - [x] sequential statements after partial fallthrough
+  - [x] statements after every path has exited
+- [x] Add an integration regression where one branch contains nested produce and terminate paths and
       the other branch produces normally.
-- [ ] Add the equivalent partially inferred multi-bind regression if the bug reaches that owner.
-- [ ] Add or update catch coverage only when it protects the shared summary at a distinct consumer
+- [x] Add the equivalent partially inferred multi-bind regression if the bug reaches that owner.
+- [x] Add or update catch coverage only when it protects the shared summary at a distinct consumer
       boundary.
-- [ ] Add an AST or HIR invariant test proving inferred block value `result_type_ids` are non-empty
+- [x] Add an AST or HIR invariant test proving inferred block value `result_type_ids` are non-empty
       and match the expression result slots.
 
 ### Focused validation
@@ -870,24 +873,53 @@ just validate
 
 ### Mandatory audit and style review
 
-- [ ] Confirm one exit-summary owner and one produced-value traversal policy remain.
-- [ ] Search for every old `BranchFlow` match and first-produced-value helper.
-- [ ] Review the sequence algorithm for unreachable-code contamination and conservative loop
+- [x] Confirm one exit-summary owner and one produced-value traversal policy remain.
+- [x] Search for every old `BranchFlow` match and first-produced-value helper.
+- [x] Review the sequence algorithm for unreachable-code contamination and conservative loop
       behaviour.
-- [ ] Review diagnostics for source location and typed payload preservation.
-- [ ] Complete the mandatory phase workflow.
+- [x] Review diagnostics for source location and typed payload preservation.
+- [x] Complete the mandatory phase workflow.
 
 ### Acceptance
 
-- [ ] Mixed produce/terminate paths are complete.
-- [ ] Any real fallthrough path is rejected.
-- [ ] At least one producing path is still required for a value construct.
-- [ ] Every producing path participates in inferred type and arity validation.
-- [ ] HIR receives final non-empty result slot IDs for inferred value blocks.
+- [x] Mixed produce/terminate paths are complete.
+- [x] Any real fallthrough path is rejected.
+- [x] At least one producing path is still required for a value construct.
+- [x] Every producing path participates in inferred type and arity validation.
+- [x] HIR receives final non-empty result slot IDs for inferred value blocks.
 
 ### Outcome
 
-_To be completed by the implementing agent._
+`completeness.rs` now owns `analyze_branch_exits`, `BranchExitSummary` composition,
+`validate_value_if_completeness`, `validate_value_match_completeness`,
+`visit_reachable_then_values` and `visit_reachable_then_values_mut`. Sequence composition only
+feeds the next statement to remaining fallthrough paths. `if`/`else` and match arms union their
+exits. `NodeKind::ScopedBlock` recurses. Loops, `break` and `continue` stay conservative
+fallthrough. Literal-`false` assertions still terminate; other asserts do not.
+
+Deleted `BranchFlow`, `extract_single_produced_type` and `extract_first_multi_produced_values`.
+Block Bool `if`, full match, catch handlers and partially inferred multi-bind consume the shared
+validators and traversal. Missing `else` remains a parser check. Inferred block `ValueIfBlock`
+stores `result_type_ids` through `final_slot_type_ids` so HIR can allocate result locals. Type
+mismatches from later producing paths use the conflicting produced-value location.
+
+Tests:
+
+- unit owner `value_production_tests` rewritten for independent exit facts, including scoped
+  blocks and statements after all paths have exited
+- `inferred_block_value_if_stores_non_empty_result_type_ids` proves inferred slots
+- later nested ThenValue type conflicts fail inferred single-result and partially inferred
+  multi-bind at the conflicting produced-value location
+- shared validator rejects an all-terminating value-if with `ValueIfNoProducingPath`
+- catch mixed produce/return accepted; true fallthrough still rejected
+- `value_if_block_nested_produce_and_return` primary integration case
+- `value_if_multi_bind_nested_produce_and_return` boundary case for partial inference
+
+The Phase 0 mixed-produce `tmp/` repro now checks clean. Header routing is unchanged.
+
+`cargo fmt --all -- --check` passed. HTML `--tag value-blocks` 63/63 and `--tag results --tag
+value-blocks` 12/12. `just validate` passed: clippy `-D warnings`, source-audit 0, 4457 unit tests
+passed / 3 ignored, xtask 17, integration 1868/1868.
 
 ---
 

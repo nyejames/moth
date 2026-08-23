@@ -1,7 +1,7 @@
 //! Core types for the value-production subsystem.
 //!
 //! WHAT: defines the shapes that represent produced values, active production targets,
-//! and the results of branch-flow analysis.
+//! and all-path branch exit summaries.
 //! WHY: these types cross parser boundaries (dispatcher, catch handler, future value-block
 //! receivers) and need one canonical definition.
 
@@ -119,18 +119,61 @@ pub struct ValueCatchBlock {
     pub result_type_ids: Vec<TypeId>,
 }
 
-/// Result of analyzing a body's control flow for value production.
+/// Independent all-path exit facts for a statement sequence.
 ///
-/// WHAT: tells a caller whether a sequence of AST nodes falls through, produces values,
-/// or terminates on all reachable paths.
-/// WHY: value-producing blocks require every path to either produce or terminate;
-/// `FallsThrough` indicates a completeness error.
+/// WHAT: records whether any reachable path can fall through, produce values, or
+/// terminate. These facts are independent: a body may produce on one path and
+/// terminate on another without falling through.
+/// WHY: a tri-state enum cannot represent mixed produce/terminate completeness,
+/// which the value-producing contract accepts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BranchFlow {
-    /// Body can reach the end without producing values or terminating.
-    FallsThrough,
-    /// Body contains at least one `then` on a reachable path.
-    ProducesValue,
-    /// Body guarantees termination (return, return!, panic) on all reachable paths.
-    Terminates,
+pub struct BranchExitSummary {
+    pub can_fall_through: bool,
+    pub produces_value: bool,
+    pub terminates: bool,
+}
+
+impl BranchExitSummary {
+    /// Empty or ordinary statement sequence: control continues.
+    pub const FALLS_THROUGH: Self = Self {
+        can_fall_through: true,
+        produces_value: false,
+        terminates: false,
+    };
+
+    /// `then` produces values and does not continue.
+    pub const PRODUCES: Self = Self {
+        can_fall_through: false,
+        produces_value: true,
+        terminates: false,
+    };
+
+    /// `return`, `return!` or a literal-false assertion stops the path.
+    pub const TERMINATES: Self = Self {
+        can_fall_through: false,
+        produces_value: false,
+        terminates: true,
+    };
+
+    /// Unions alternative branches such as `if`/`else` or match arms.
+    pub fn union(self, other: Self) -> Self {
+        Self {
+            can_fall_through: self.can_fall_through || other.can_fall_through,
+            produces_value: self.produces_value || other.produces_value,
+            terminates: self.terminates || other.terminates,
+        }
+    }
+
+    /// Sequences the next statement onto paths that still fall through.
+    pub fn then_sequence(self, next: Self) -> Self {
+        if !self.can_fall_through {
+            return self;
+        }
+
+        Self {
+            can_fall_through: next.can_fall_through,
+            produces_value: self.produces_value || next.produces_value,
+            terminates: self.terminates || next.terminates,
+        }
+    }
 }

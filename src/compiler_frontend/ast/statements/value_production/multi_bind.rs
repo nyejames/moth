@@ -23,11 +23,13 @@ use crate::compiler_frontend::ast::statements::condition_validation::{
     ensure_if_statement_condition, if_condition_is_missing,
 };
 use crate::compiler_frontend::ast::statements::match_patterns::MatchArm;
-use crate::compiler_frontend::ast::statements::value_production::completeness::analyze_branch_flow;
+use crate::compiler_frontend::ast::statements::value_production::completeness::{
+    validate_value_if_completeness, visit_reachable_then_values, visit_reachable_then_values_mut,
+};
 use crate::compiler_frontend::ast::statements::value_production::parse_values::parse_fixed_arity_inferred_values;
 use crate::compiler_frontend::ast::statements::value_production::types::{
-    ActiveValueProductionTarget, BranchFlow, ProducedValues, ValueBlock, ValueIfBlock,
-    ValueMatchBlock, ValueReceiverKind,
+    ActiveValueProductionTarget, ProducedValues, ValueBlock, ValueIfBlock, ValueMatchBlock,
+    ValueReceiverKind,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
@@ -481,29 +483,11 @@ fn parse_inferred_block_multi_bind_value_if(
     )?;
     emit_collected_warnings(context, else_warnings);
 
-    let then_flow = analyze_branch_flow(&then_body);
-    let else_flow = analyze_branch_flow(&else_body);
+    validate_value_if_completeness(&then_body, &else_body, &location)?;
 
-    let then_produces = matches!(then_flow, BranchFlow::ProducesValue);
-    let then_terminates = matches!(then_flow, BranchFlow::Terminates);
-    let else_produces = matches!(else_flow, BranchFlow::ProducesValue);
-    let else_terminates = matches!(else_flow, BranchFlow::Terminates);
-
-    if !then_produces && !then_terminates {
-        return Err(CompilerDiagnostic::invalid_control_flow_statement(
-            InvalidControlFlowStatementReason::ValueIfBranchFallsThrough,
-            location.clone(),
-        )
-        .into());
-    }
-    if !else_produces && !else_terminates {
-        return Err(CompilerDiagnostic::invalid_control_flow_statement(
-            InvalidControlFlowStatementReason::ValueIfBranchFallsThrough,
-            location.clone(),
-        )
-        .into());
-    }
-    if !then_produces && !else_produces {
+    let mut produced_value_sets = collect_reachable_produced_groups(&then_body);
+    produced_value_sets.extend(collect_reachable_produced_groups(&else_body));
+    if produced_value_sets.is_empty() {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ValueIfNoProducingPath,
             location.clone(),
@@ -511,15 +495,12 @@ fn parse_inferred_block_multi_bind_value_if(
         .into());
     }
 
-    let then_values = extract_first_multi_produced_values(&then_body);
-    let else_values = extract_first_multi_produced_values(&else_body);
+    for values in &produced_value_sets {
+        validate_optional_produced_arity(Some(values), target_count, &location)?;
+    }
 
-    validate_optional_produced_arity(then_values.as_deref(), target_count, &location)?;
-    validate_optional_produced_arity(else_values.as_deref(), target_count, &location)?;
-
-    let result_type_ids = infer_multi_bind_result_slots(
-        then_values.as_deref(),
-        else_values.as_deref(),
+    let result_type_ids = infer_multi_bind_match_result_slots(
+        &produced_value_sets,
         known_slot_types,
         type_interner.environment(),
         &location,
@@ -614,47 +595,6 @@ fn unify_and_validate_inferred_slots(
     Ok(result_types)
 }
 
-/// Infers block-form multi-bind result slots from whichever branch paths produce values.
-///
-/// WHAT: combines first produced values from the true and false branch, while allowing either
-/// branch to terminate instead of producing values.
-/// WHY: value-producing blocks are complete when every path either produces or terminates;
-/// inferred multi-bind must not require both top-level branches to produce just to learn a type.
-fn infer_multi_bind_result_slots(
-    then_values: Option<&[Expression]>,
-    else_values: Option<&[Expression]>,
-    known_slot_types: &[Option<TypeId>],
-    type_environment: &TypeEnvironment,
-    location: &SourceLocation,
-) -> MultiBindValueResult<Vec<TypeId>> {
-    if then_values.is_none() && else_values.is_none() {
-        return Err(CompilerDiagnostic::invalid_control_flow_statement(
-            InvalidControlFlowStatementReason::ValueIfNoProducingPath,
-            location.clone(),
-        )
-        .into());
-    }
-
-    let mut result_types = Vec::with_capacity(known_slot_types.len());
-
-    for (slot_index, known_type) in known_slot_types.iter().enumerate() {
-        let then_expr = then_values.and_then(|values| values.get(slot_index));
-        let else_expr = else_values.and_then(|values| values.get(slot_index));
-
-        let slot_type = if let Some(known_type) = known_type {
-            validate_expression_against_slot(then_expr, *known_type, type_environment, location)?;
-            validate_expression_against_slot(else_expr, *known_type, type_environment, location)?;
-            *known_type
-        } else {
-            infer_unknown_slot_type(then_expr, else_expr, location)?
-        };
-
-        result_types.push(slot_type);
-    }
-
-    Ok(result_types)
-}
-
 fn collect_match_multi_produced_values(
     arms: &[MatchArm],
     default: Option<&[AstNode]>,
@@ -662,16 +602,22 @@ fn collect_match_multi_produced_values(
     let mut produced_value_sets = Vec::new();
 
     for arm in arms {
-        if let Some(values) = extract_first_multi_produced_values(&arm.body) {
-            produced_value_sets.push(values);
-        }
+        produced_value_sets.extend(collect_reachable_produced_groups(&arm.body));
     }
 
-    if let Some(default_body) = default
-        && let Some(values) = extract_first_multi_produced_values(default_body)
-    {
-        produced_value_sets.push(values);
+    if let Some(default_body) = default {
+        produced_value_sets.extend(collect_reachable_produced_groups(default_body));
     }
+
+    produced_value_sets
+}
+
+fn collect_reachable_produced_groups(body: &[AstNode]) -> Vec<Vec<Expression>> {
+    let mut produced_value_sets = Vec::new();
+
+    visit_reachable_then_values(body, &mut |produced_values| {
+        produced_value_sets.push(produced_values.expressions.clone());
+    });
 
     produced_value_sets
 }
@@ -691,7 +637,6 @@ fn infer_multi_bind_match_result_slots(
                     values.get(slot_index),
                     *known_type,
                     type_environment,
-                    location,
                 )?;
             }
             *known_type
@@ -727,7 +672,7 @@ fn infer_unknown_match_slot_type(
                     existing,
                     expression.type_id,
                     TypeMismatchContext::Assignment,
-                    location.clone(),
+                    expression.location.clone(),
                 )
                 .into());
             }
@@ -745,41 +690,10 @@ fn infer_unknown_match_slot_type(
     })
 }
 
-fn infer_unknown_slot_type(
-    then_expr: Option<&Expression>,
-    else_expr: Option<&Expression>,
-    location: &SourceLocation,
-) -> MultiBindValueResult<TypeId> {
-    match (then_expr, else_expr) {
-        (Some(then_expr), Some(else_expr)) => {
-            if then_expr.type_id != else_expr.type_id {
-                return Err(CompilerDiagnostic::type_mismatch(
-                    then_expr.type_id,
-                    else_expr.type_id,
-                    TypeMismatchContext::Assignment,
-                    location.clone(),
-                )
-                .into());
-            }
-
-            Ok(then_expr.type_id)
-        }
-
-        (Some(expression), None) | (None, Some(expression)) => Ok(expression.type_id),
-
-        (None, None) => Err(CompilerDiagnostic::invalid_control_flow_statement(
-            InvalidControlFlowStatementReason::ValueIfNoProducingPath,
-            location.clone(),
-        )
-        .into()),
-    }
-}
-
 fn validate_expression_against_slot(
     expression: Option<&Expression>,
     expected_type: TypeId,
     type_environment: &TypeEnvironment,
-    location: &SourceLocation,
 ) -> MultiBindValueResult<()> {
     let Some(expression) = expression else {
         return Ok(());
@@ -795,7 +709,7 @@ fn validate_expression_against_slot(
         expected_type,
         expression.type_id,
         TypeMismatchContext::Assignment,
-        location.clone(),
+        expression.location.clone(),
     )
     .into())
 }
@@ -853,115 +767,45 @@ fn apply_coercion_to_values(
         .collect()
 }
 
-/// Extracts the first multi-value `ThenValue` found on a reachable path.
-fn extract_first_multi_produced_values(body: &[AstNode]) -> Option<Vec<Expression>> {
-    for statement in body {
-        match &statement.kind {
-            NodeKind::ThenValue(produced_values) => {
-                return Some(produced_values.expressions.clone());
-            }
-
-            NodeKind::If(_, then_body, Some(else_body)) => {
-                if let Some(then_values) = extract_first_multi_produced_values(then_body) {
-                    return Some(then_values);
-                }
-                return extract_first_multi_produced_values(else_body);
-            }
-
-            NodeKind::If(_, then_body, None) => {
-                return extract_first_multi_produced_values(then_body);
-            }
-
-            NodeKind::Match { arms, default, .. } => {
-                for arm in arms {
-                    if let Some(arm_values) = extract_first_multi_produced_values(&arm.body) {
-                        return Some(arm_values);
-                    }
-                }
-                if let Some(default_body) = default {
-                    return extract_first_multi_produced_values(default_body);
-                }
-                return None;
-            }
-
-            NodeKind::Return(_) | NodeKind::ReturnError(_) => return None,
-
-            _ => {}
-        }
-    }
-
-    None
-}
-
-/// Mutates `ThenValue` expressions in a body to apply coercion when needed.
+/// Mutates reachable `ThenValue` expressions in a body to apply coercion when needed.
 fn coerce_produced_values_in_body(
     body: &mut [AstNode],
     expected_types: &[TypeId],
     type_environment: &TypeEnvironment,
 ) -> MultiBindValueResult<()> {
-    for node in body {
-        match &mut node.kind {
-            NodeKind::ThenValue(produced_values) => {
-                if produced_values.expressions.len() != expected_types.len() {
-                    return validate_optional_produced_arity(
-                        Some(&produced_values.expressions),
-                        expected_types.len(),
-                        &produced_values.location,
-                    );
-                }
-
-                for (expr, expected_type) in produced_values
-                    .expressions
-                    .iter_mut()
-                    .zip(expected_types.iter())
-                {
-                    if expr.type_id == *expected_type {
-                        continue;
-                    }
-
-                    if !is_declaration_compatible(*expected_type, expr.type_id, type_environment) {
-                        return Err(CompilerDiagnostic::type_mismatch(
-                            *expected_type,
-                            expr.type_id,
-                            TypeMismatchContext::Assignment,
-                            expr.location.clone(),
-                        )
-                        .into());
-                    }
-
-                    *expr = Expression::coerced(expr.clone(), *expected_type);
-                }
-            }
-
-            NodeKind::If(_, then_body, Some(else_body)) => {
-                coerce_produced_values_in_body(then_body, expected_types, type_environment)?;
-                coerce_produced_values_in_body(else_body, expected_types, type_environment)?;
-            }
-
-            NodeKind::If(_, then_body, None) => {
-                coerce_produced_values_in_body(then_body, expected_types, type_environment)?;
-            }
-
-            NodeKind::Match { arms, default, .. } => {
-                for arm in arms.iter_mut() {
-                    coerce_produced_values_in_body(
-                        &mut arm.body,
-                        expected_types,
-                        type_environment,
-                    )?;
-                }
-                if let Some(default_body) = default {
-                    coerce_produced_values_in_body(default_body, expected_types, type_environment)?;
-                }
-            }
-
-            NodeKind::Return(_) | NodeKind::ReturnError(_) => {}
-
-            _ => {}
+    visit_reachable_then_values_mut(body, &mut |produced_values| {
+        if produced_values.expressions.len() != expected_types.len() {
+            return validate_optional_produced_arity(
+                Some(&produced_values.expressions),
+                expected_types.len(),
+                &produced_values.location,
+            );
         }
-    }
 
-    Ok(())
+        for (expr, expected_type) in produced_values
+            .expressions
+            .iter_mut()
+            .zip(expected_types.iter())
+        {
+            if expr.type_id == *expected_type {
+                continue;
+            }
+
+            if !is_declaration_compatible(*expected_type, expr.type_id, type_environment) {
+                return Err(CompilerDiagnostic::type_mismatch(
+                    *expected_type,
+                    expr.type_id,
+                    TypeMismatchContext::Assignment,
+                    expr.location.clone(),
+                )
+                .into());
+            }
+
+            *expr = Expression::coerced(expr.clone(), *expected_type);
+        }
+
+        Ok(())
+    })
 }
 
 /// Builds the final `ValueBlock::If` expression for multi-bind.

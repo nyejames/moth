@@ -10374,6 +10374,13 @@ contract = "language.expressions.value_if_declaration_or_assignment_acceptance"
 role = "boundary"
 
 [[case]]
+id = "value_if_block_nested_produce_and_return"
+path = "value_if_block_nested_produce_and_return"
+tags = ["integration", "language", "value-blocks", "if", "regression"]
+contract = "language.expressions.value_if_mixed_produce_terminate_acceptance"
+role = "primary"
+
+[[case]]
 id = "value_if_return_inline"
 path = "value_if_return_inline"
 tags = ["integration", "language", "value-blocks", "if", "return"]
@@ -10462,6 +10469,13 @@ id = "value_if_multi_bind_block_terminating_branch"
 path = "value_if_multi_bind_block_terminating_branch"
 tags = ["integration", "language", "value-blocks", "if", "multi-bind"]
 contract = "language.expressions.value_if_multi_bind_acceptance"
+role = "boundary"
+
+[[case]]
+id = "value_if_multi_bind_nested_produce_and_return"
+path = "value_if_multi_bind_nested_produce_and_return"
+tags = ["integration", "language", "value-blocks", "if", "multi-bind"]
+contract = "language.expressions.value_if_mixed_produce_terminate_acceptance"
 role = "boundary"
 
 [[case]]

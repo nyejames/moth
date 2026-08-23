@@ -1,31 +1,285 @@
-//! Branch-body control-flow completeness analysis.
+//! All-path value-production exit analysis and produced-value traversal.
 //!
-//! WHAT: determines whether a sequence of AST nodes falls through, produces values,
-//! or terminates on all reachable paths.
-//! WHY: value-producing blocks require every reachable path to end with `then`,
-//! `return`, `return!`, or another guaranteed terminator. This helper gives catch
-//! and future value blocks one shared branch-flow vocabulary.
+//! WHAT: summarises whether a statement sequence can fall through, produce values
+//! or terminate, and visits every reachable `ThenValue` group.
+//! WHY: value-producing `if`, match and catch share one completeness contract.
+//! Mixed produce/terminate paths are complete; any real fallthrough is not.
+//!
+//! This module does not own missing-`else` syntax checks.
 
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-use crate::compiler_frontend::ast::statements::value_production::types::BranchFlow;
-use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::ast::statements::match_patterns::MatchArm;
+use crate::compiler_frontend::ast::statements::value_production::types::{
+    BranchExitSummary, ProducedValues,
+};
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, InvalidControlFlowStatementReason,
+};
+use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
-/// Analyzes a body to determine its value-production or termination behavior.
+/// Analyses a body into independent fallthrough, produce and terminate facts.
 ///
-/// WHAT: scans statements in order and returns the first non-fallthrough flow found.
-/// WHY: this preserves the old catch-handler behavior where a single terminating
-/// statement anywhere in the body was considered sufficient to prevent fallthrough.
-/// Future value-block completeness may require stricter all-paths analysis.
-pub fn analyze_branch_flow(body: &[AstNode]) -> BranchFlow {
+/// WHAT: walks statements in order and only sequences the next statement onto
+/// paths that still fall through.
+/// WHY: nested `if`/`match` can produce on one path and terminate on another;
+/// later statements must not run on those exited paths.
+pub fn analyze_branch_exits(body: &[AstNode]) -> BranchExitSummary {
+    let mut summary = BranchExitSummary::FALLS_THROUGH;
+
     for statement in body {
-        let flow = statement_flow(statement);
-        if flow != BranchFlow::FallsThrough {
-            return flow;
+        summary = summary.then_sequence(statement_exits(statement));
+        if !summary.can_fall_through {
+            break;
         }
     }
 
-    BranchFlow::FallsThrough
+    summary
+}
+
+/// Validates a value-producing `if` against the shared all-path contract.
+///
+/// WHAT: rejects any fallthrough branch and requires at least one producing path.
+/// WHY: missing `else` is a parser concern; this validator only owns flow and
+/// value production.
+pub fn validate_value_if_completeness(
+    then_body: &[AstNode],
+    else_body: &[AstNode],
+    location: &SourceLocation,
+) -> Result<(), ExpressionParseError> {
+    validate_closed_branch_pair(
+        analyze_branch_exits(then_body),
+        analyze_branch_exits(else_body),
+        location,
+    )
+}
+
+/// Validates every value-match arm and optional default against the shared contract.
+pub fn validate_value_match_completeness(
+    arms: &[MatchArm],
+    default: Option<&[AstNode]>,
+    location: &SourceLocation,
+) -> Result<(), ExpressionParseError> {
+    let mut combined: Option<BranchExitSummary> = None;
+
+    for arm in arms {
+        let arm_exits = analyze_branch_exits(&arm.body);
+        reject_fallthrough(arm_exits, location)?;
+        combined = Some(match combined {
+            Some(existing) => existing.union(arm_exits),
+            None => arm_exits,
+        });
+    }
+
+    if let Some(default_body) = default {
+        let default_exits = analyze_branch_exits(default_body);
+        reject_fallthrough(default_exits, location)?;
+        combined = Some(match combined {
+            Some(existing) => existing.union(default_exits),
+            None => default_exits,
+        });
+    }
+
+    let Some(combined) = combined else {
+        return Err(no_producing_path(location));
+    };
+
+    if combined.produces_value {
+        Ok(())
+    } else {
+        Err(no_producing_path(location))
+    }
+}
+
+/// Visits every reachable `ThenValue` group without entering unreachable tails.
+pub fn visit_reachable_then_values(body: &[AstNode], visitor: &mut impl FnMut(&ProducedValues)) {
+    let mut reachable = true;
+
+    for statement in body {
+        if !reachable {
+            break;
+        }
+
+        visit_statement_then_values(statement, visitor);
+        reachable = statement_exits(statement).can_fall_through;
+    }
+}
+
+/// Mutably visits every reachable `ThenValue` group for post-inference coercion.
+pub fn visit_reachable_then_values_mut<E>(
+    body: &mut [AstNode],
+    visitor: &mut impl FnMut(&mut ProducedValues) -> Result<(), E>,
+) -> Result<(), E> {
+    let mut reachable = true;
+
+    for statement in body {
+        if !reachable {
+            break;
+        }
+
+        visit_statement_then_values_mut(statement, visitor)?;
+        reachable = statement_exits(statement).can_fall_through;
+    }
+
+    Ok(())
+}
+
+fn statement_exits(statement: &AstNode) -> BranchExitSummary {
+    match &statement.kind {
+        NodeKind::ThenValue(_) => BranchExitSummary::PRODUCES,
+
+        NodeKind::Return(_) | NodeKind::ReturnError(_) => BranchExitSummary::TERMINATES,
+
+        NodeKind::If(_, then_body, Some(else_body)) => {
+            analyze_branch_exits(then_body).union(analyze_branch_exits(else_body))
+        }
+
+        NodeKind::If(_, then_body, None) => {
+            analyze_branch_exits(then_body).union(BranchExitSummary::FALLS_THROUGH)
+        }
+
+        NodeKind::Match {
+            arms,
+            default: maybe_default_body,
+            ..
+        } => match_exits(arms, maybe_default_body.as_deref()),
+
+        NodeKind::ScopedBlock { body } => analyze_branch_exits(body),
+
+        NodeKind::Assert { condition, .. } if assert_condition_is_statically_false(condition) => {
+            BranchExitSummary::TERMINATES
+        }
+
+        // Loops, break, continue and other compounds stay conservative.
+        _ => BranchExitSummary::FALLS_THROUGH,
+    }
+}
+
+fn match_exits(arms: &[MatchArm], default_body: Option<&[AstNode]>) -> BranchExitSummary {
+    let mut combined: Option<BranchExitSummary> = None;
+
+    for arm in arms {
+        let arm_exits = analyze_branch_exits(&arm.body);
+        combined = Some(match combined {
+            Some(existing) => existing.union(arm_exits),
+            None => arm_exits,
+        });
+    }
+
+    if let Some(default_body) = default_body {
+        let default_exits = analyze_branch_exits(default_body);
+        combined = Some(match combined {
+            Some(existing) => existing.union(default_exits),
+            None => default_exits,
+        });
+    }
+
+    combined.unwrap_or(BranchExitSummary::FALLS_THROUGH)
+}
+
+fn visit_statement_then_values(statement: &AstNode, visitor: &mut impl FnMut(&ProducedValues)) {
+    match &statement.kind {
+        NodeKind::ThenValue(produced_values) => visitor(produced_values),
+
+        NodeKind::If(_, then_body, Some(else_body)) => {
+            visit_reachable_then_values(then_body, visitor);
+            visit_reachable_then_values(else_body, visitor);
+        }
+
+        NodeKind::If(_, then_body, None) => {
+            visit_reachable_then_values(then_body, visitor);
+        }
+
+        NodeKind::Match {
+            arms,
+            default: maybe_default_body,
+            ..
+        } => {
+            for arm in arms {
+                visit_reachable_then_values(&arm.body, visitor);
+            }
+            if let Some(default_body) = maybe_default_body {
+                visit_reachable_then_values(default_body, visitor);
+            }
+        }
+
+        NodeKind::ScopedBlock { body } => visit_reachable_then_values(body, visitor),
+
+        _ => {}
+    }
+}
+
+fn visit_statement_then_values_mut<E>(
+    statement: &mut AstNode,
+    visitor: &mut impl FnMut(&mut ProducedValues) -> Result<(), E>,
+) -> Result<(), E> {
+    match &mut statement.kind {
+        NodeKind::ThenValue(produced_values) => visitor(produced_values),
+
+        NodeKind::If(_, then_body, Some(else_body)) => {
+            visit_reachable_then_values_mut(then_body, visitor)?;
+            visit_reachable_then_values_mut(else_body, visitor)
+        }
+
+        NodeKind::If(_, then_body, None) => visit_reachable_then_values_mut(then_body, visitor),
+
+        NodeKind::Match {
+            arms,
+            default: maybe_default_body,
+            ..
+        } => {
+            for arm in arms {
+                visit_reachable_then_values_mut(&mut arm.body, visitor)?;
+            }
+            if let Some(default_body) = maybe_default_body {
+                visit_reachable_then_values_mut(default_body, visitor)?;
+            }
+            Ok(())
+        }
+
+        NodeKind::ScopedBlock { body } => visit_reachable_then_values_mut(body, visitor),
+
+        _ => Ok(()),
+    }
+}
+
+fn validate_closed_branch_pair(
+    then_exits: BranchExitSummary,
+    else_exits: BranchExitSummary,
+    location: &SourceLocation,
+) -> Result<(), ExpressionParseError> {
+    reject_fallthrough(then_exits, location)?;
+    reject_fallthrough(else_exits, location)?;
+
+    if then_exits.produces_value || else_exits.produces_value {
+        Ok(())
+    } else {
+        Err(no_producing_path(location))
+    }
+}
+
+fn reject_fallthrough(
+    exits: BranchExitSummary,
+    location: &SourceLocation,
+) -> Result<(), ExpressionParseError> {
+    if exits.can_fall_through {
+        Err(CompilerDiagnostic::invalid_control_flow_statement(
+            InvalidControlFlowStatementReason::ValueIfBranchFallsThrough,
+            location.clone(),
+        )
+        .into())
+    } else {
+        Ok(())
+    }
+}
+
+fn no_producing_path(location: &SourceLocation) -> ExpressionParseError {
+    CompilerDiagnostic::invalid_control_flow_statement(
+        InvalidControlFlowStatementReason::ValueIfNoProducingPath,
+        location.clone(),
+    )
+    .into()
 }
 
 /// Detects whether an assert condition is statically known to be `false`.
@@ -35,150 +289,4 @@ pub fn analyze_branch_flow(body: &[AstNode]) -> BranchFlow {
 ///      and must stay aligned with HIR's direct assertion-failure lowering.
 fn assert_condition_is_statically_false(condition: &Expression) -> bool {
     matches!(&condition.kind, ExpressionKind::Bool(false))
-}
-
-/// Determines the control-flow effect of a single statement.
-///
-/// WHAT: inspects the AST node kind and delegates to recursive analysis for
-/// compound statements (`if`, `match`).
-/// WHY: simple statements have fixed behavior, but nested control flow requires
-/// recursive analysis so that every path is checked.
-fn statement_flow(statement: &AstNode) -> BranchFlow {
-    match &statement.kind {
-        NodeKind::ThenValue(_) => BranchFlow::ProducesValue,
-
-        NodeKind::Return(_) | NodeKind::ReturnError(_) => BranchFlow::Terminates,
-
-        NodeKind::If(_, then_body, Some(else_body)) => combine_branch_flows(
-            analyze_branch_flow(then_body),
-            analyze_branch_flow(else_body),
-        ),
-
-        // Without an `else`, the false path falls through even when the true path
-        // produces or terminates.
-        NodeKind::If(_, _, None) => BranchFlow::FallsThrough,
-
-        NodeKind::Match {
-            arms,
-            default: maybe_default_body,
-            ..
-        } => {
-            // Match parsing already enforces exhaustiveness for supported statement matches.
-            // Fold from the first arm's real flow so all-producing matches stay producing.
-            let mut arm_flows = arms.iter().map(|arm| analyze_branch_flow(&arm.body));
-            let all_arms_flow = match arm_flows.next() {
-                Some(first_flow) => arm_flows.fold(first_flow, combine_branch_flows),
-                None => BranchFlow::FallsThrough,
-            };
-
-            match maybe_default_body {
-                Some(default_body) => {
-                    combine_branch_flows(all_arms_flow, analyze_branch_flow(default_body))
-                }
-                None => all_arms_flow,
-            }
-        }
-
-        NodeKind::Assert { condition, .. } if assert_condition_is_statically_false(condition) => {
-            BranchFlow::Terminates
-        }
-
-        _ => BranchFlow::FallsThrough,
-    }
-}
-
-/// Merges the flow of two branches into a single result.
-///
-/// WHAT: given the flow of a left and right branch, returns the unified flow.
-/// WHY: branches only agree when they are both Terminates or both ProducesValue;
-/// any mismatch means control can fall through on at least one path.
-fn combine_branch_flows(left: BranchFlow, right: BranchFlow) -> BranchFlow {
-    match (left, right) {
-        // Both paths terminate → the combined construct terminates.
-        (BranchFlow::Terminates, BranchFlow::Terminates) => BranchFlow::Terminates,
-
-        // Both paths produce values → the combined construct produces values.
-        (BranchFlow::ProducesValue, BranchFlow::ProducesValue) => BranchFlow::ProducesValue,
-
-        // Any mismatch or fallthrough means the combined construct falls through.
-        _ => BranchFlow::FallsThrough,
-    }
-}
-
-/// Extracts the type of a single produced value from a body, if one exists.
-///
-/// WHAT: recursively scans for `ThenValue` on reachable paths, handling nested `if`.
-/// WHY: inferred declarations need to determine the result type from value-producing
-/// block bodies before the declaration's type is known.
-///
-/// Returns `None` if the body terminates without producing or if no `ThenValue` is found.
-/// For nested `if`, returns the type only when all producing paths agree.
-pub fn extract_single_produced_type(body: &[AstNode]) -> Option<TypeId> {
-    for statement in body {
-        match &statement.kind {
-            NodeKind::ThenValue(produced_values) => {
-                if produced_values.expressions.len() == 1 {
-                    return Some(produced_values.expressions[0].type_id);
-                }
-                return None;
-            }
-
-            NodeKind::If(_, then_body, Some(else_body)) => {
-                let then_type = extract_single_produced_type(then_body);
-                let else_type = extract_single_produced_type(else_body);
-
-                return match (then_type, else_type) {
-                    (Some(t), Some(e)) => {
-                        if t == e {
-                            Some(t)
-                        } else {
-                            // Type mismatch between branches.
-                            // Return one so the caller can diagnose.
-                            Some(t)
-                        }
-                    }
-                    (Some(t), None) => Some(t),
-                    (None, Some(e)) => Some(e),
-                    (None, None) => None,
-                };
-            }
-
-            NodeKind::If(_, then_body, None) => {
-                return extract_single_produced_type(then_body);
-            }
-
-            NodeKind::Match { arms, default, .. } => {
-                let mut found_type: Option<TypeId> = None;
-                for arm in arms {
-                    if let Some(arm_type) = extract_single_produced_type(&arm.body) {
-                        if let Some(existing) = found_type {
-                            if existing != arm_type {
-                                return Some(existing);
-                            }
-                        } else {
-                            found_type = Some(arm_type);
-                        }
-                    }
-                }
-                if let Some(default_body) = default
-                    && let Some(default_type) = extract_single_produced_type(default_body)
-                {
-                    if let Some(existing) = found_type {
-                        if existing != default_type {
-                            return Some(existing);
-                        }
-                    } else {
-                        found_type = Some(default_type);
-                    }
-                }
-                return found_type;
-            }
-
-            NodeKind::Return(_) | NodeKind::ReturnError(_) => return None,
-
-            _ => {}
-        }
-    }
-
-    None
 }

@@ -42,8 +42,8 @@ mod result_type;
 mod token_checkpoint;
 
 // Shared receiver helpers consumed by sibling value-production parsers.
+pub(super) use crate::compiler_frontend::ast::statements::value_production::completeness::validate_value_match_completeness;
 pub(super) use detect::current_if_header_is_full_match;
-pub(super) use full_match::validate_value_match_completeness;
 pub(super) use inline_then_else::same_logical_line;
 
 /// Forwards accumulated parser warnings into the outer scope.

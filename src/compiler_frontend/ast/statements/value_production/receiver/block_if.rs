@@ -1,28 +1,26 @@
-//! Block-form value-if parser and branch-flow validator.
+//! Block-form value-if parser.
 //!
 //! WHAT: parses `if <condition>: <then-body> else <else-body>` at a closed receiver,
-//! validates that every branch either produces values or terminates, and infers
-//! the result type from the branch bodies.
+//! validates all-path completeness, and infers the result type from every producing path.
 //! WHY: block form is the most general value-producing `if`; it uses
 //! `function_body_to_ast` so nested control flow and multiple statements are
 //! permitted inside each branch.
 
 use super::expression_build::build_value_if_expression;
-use super::result_type::infer_block_if_result_type;
+use super::result_type::{final_slot_type_ids, infer_block_if_result_type};
 use super::{ValueIfParseInput, emit_collected_warnings};
 use crate::compiler_frontend::ast::ContextKind;
-use crate::compiler_frontend::ast::ast_nodes::AstNode;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::statements::body_dispatch::parse_function_body_statements;
-use crate::compiler_frontend::ast::statements::value_production::completeness::analyze_branch_flow;
+use crate::compiler_frontend::ast::statements::value_production::completeness::validate_value_if_completeness;
 use crate::compiler_frontend::ast::statements::value_production::types::{
-    ActiveValueProductionTarget, BranchFlow, ValueIfBlock,
+    ActiveValueProductionTarget, ValueIfBlock,
 };
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidControlFlowStatementReason,
 };
-use crate::compiler_frontend::tokenizer::tokens::{SourceLocation, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 
 /// Block value-if bodies recurse into the AST body parser and therefore preserve its two lanes.
 type BlockIfResult<T> = Result<T, ExpressionParseError>;
@@ -84,7 +82,7 @@ pub(super) fn parse_block_value_if(input: ValueIfParseInput<'_, '_>) -> BlockIfR
     )?;
     emit_collected_warnings(context, else_warnings);
 
-    validate_value_if_branch_flow(&then_body, &else_body, &location)?;
+    validate_value_if_completeness(&then_body, &else_body, &location)?;
 
     let result_type_id = infer_block_if_result_type(
         &then_body,
@@ -94,13 +92,14 @@ pub(super) fn parse_block_value_if(input: ValueIfParseInput<'_, '_>) -> BlockIfR
         &location,
         receiver_kind,
     )?;
+    let result_type_ids = final_slot_type_ids(expected_result_type_ids, result_type_id);
 
     let value_if = ValueIfBlock {
         condition,
         then_body,
         else_body,
         location: location.clone(),
-        result_type_ids: expected_result_type_ids.to_vec(),
+        result_type_ids,
     };
 
     Ok(build_value_if_expression(
@@ -108,46 +107,4 @@ pub(super) fn parse_block_value_if(input: ValueIfParseInput<'_, '_>) -> BlockIfR
         result_type_id,
         type_interner.environment(),
     ))
-}
-
-/// Validates that a block value-if has at least one producing path and no branch
-/// falls through without producing or terminating.
-fn validate_value_if_branch_flow(
-    then_body: &[AstNode],
-    else_body: &[AstNode],
-    location: &SourceLocation,
-) -> BlockIfResult<()> {
-    let then_flow = analyze_branch_flow(then_body);
-    let else_flow = analyze_branch_flow(else_body);
-
-    let then_produces = matches!(then_flow, BranchFlow::ProducesValue);
-    let then_terminates = matches!(then_flow, BranchFlow::Terminates);
-    let else_produces = matches!(else_flow, BranchFlow::ProducesValue);
-    let else_terminates = matches!(else_flow, BranchFlow::Terminates);
-
-    if !then_produces && !then_terminates {
-        return Err(CompilerDiagnostic::invalid_control_flow_statement(
-            InvalidControlFlowStatementReason::ValueIfBranchFallsThrough,
-            location.clone(),
-        )
-        .into());
-    }
-
-    if !else_produces && !else_terminates {
-        return Err(CompilerDiagnostic::invalid_control_flow_statement(
-            InvalidControlFlowStatementReason::ValueIfBranchFallsThrough,
-            location.clone(),
-        )
-        .into());
-    }
-
-    if !then_produces && !else_produces {
-        return Err(CompilerDiagnostic::invalid_control_flow_statement(
-            InvalidControlFlowStatementReason::ValueIfNoProducingPath,
-            location.clone(),
-        )
-        .into());
-    }
-
-    Ok(())
 }

@@ -1,0 +1,18 @@
+choose_label |ready Bool, use_fallback Bool| -> String:
+    label = if ready:
+        if use_fallback:
+            then "fallback"
+        else
+            return "returned"
+        ;
+    else
+        then "waiting"
+    ;
+
+    return label
+;
+
+io.line("value_if_block_nested_produce_and_return")
+io.line(choose_label(true, false))
+io.line(choose_label(true, true))
+io.line(choose_label(false, true))

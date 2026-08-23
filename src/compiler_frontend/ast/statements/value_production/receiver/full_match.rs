@@ -10,7 +10,6 @@ use super::expression_build::build_value_match_expression;
 use super::result_type::infer_value_match_result_type;
 use crate::compiler_frontend::ast::ContextKind;
 use crate::compiler_frontend::ast::ScopeContext;
-use crate::compiler_frontend::ast::ast_nodes::AstNode;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::parse_expression::create_expression_until;
@@ -18,10 +17,9 @@ use crate::compiler_frontend::ast::expressions::parse_expression_input::{
     ExpressionParseInput, ExpressionParseResources,
 };
 use crate::compiler_frontend::ast::statements::branching::parse_match_block;
-use crate::compiler_frontend::ast::statements::match_patterns::MatchArm;
-use crate::compiler_frontend::ast::statements::value_production::completeness::analyze_branch_flow;
+use crate::compiler_frontend::ast::statements::value_production::completeness::validate_value_match_completeness;
 use crate::compiler_frontend::ast::statements::value_production::types::{
-    ActiveValueProductionTarget, BranchFlow, ValueMatchBlock, ValueReceiverKind,
+    ActiveValueProductionTarget, ValueMatchBlock, ValueReceiverKind,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
@@ -140,57 +138,4 @@ pub(super) fn parse_value_match_at_receiver(
         result_type_id,
         type_interner.environment(),
     ))
-}
-
-/// Validates that every arm in a value-producing match either produces a value
-/// or terminates, and that at least one path produces.
-///
-/// WHAT: checks branch flow for every arm and the optional default.
-/// WHY: value-producing matches must not have fallthrough arms.
-pub(in crate::compiler_frontend::ast::statements::value_production) fn validate_value_match_completeness(
-    arms: &[MatchArm],
-    default: Option<&[AstNode]>,
-    location: &SourceLocation,
-) -> FullMatchResult<()> {
-    let mut has_producing_path = false;
-
-    for arm in arms {
-        let flow = analyze_branch_flow(&arm.body);
-        match flow {
-            BranchFlow::ProducesValue => has_producing_path = true,
-            BranchFlow::Terminates => {}
-            BranchFlow::FallsThrough => {
-                return Err(CompilerDiagnostic::invalid_control_flow_statement(
-                    InvalidControlFlowStatementReason::ValueIfBranchFallsThrough,
-                    location.clone(),
-                )
-                .into());
-            }
-        }
-    }
-
-    if let Some(default_body) = default {
-        let flow = analyze_branch_flow(default_body);
-        match flow {
-            BranchFlow::ProducesValue => has_producing_path = true,
-            BranchFlow::Terminates => {}
-            BranchFlow::FallsThrough => {
-                return Err(CompilerDiagnostic::invalid_control_flow_statement(
-                    InvalidControlFlowStatementReason::ValueIfBranchFallsThrough,
-                    location.clone(),
-                )
-                .into());
-            }
-        }
-    }
-
-    if has_producing_path {
-        return Ok(());
-    }
-
-    Err(CompilerDiagnostic::invalid_control_flow_statement(
-        InvalidControlFlowStatementReason::ValueIfNoProducingPath,
-        location.clone(),
-    )
-    .into())
 }

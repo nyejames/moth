@@ -278,6 +278,18 @@ fn rejects_catch_handler_if_without_else_even_when_then_branch_returns() {
 }
 
 #[test]
+fn accepts_catch_handler_with_mixed_produce_and_return_paths() {
+    let (ast, string_table) = parse_single_file_ast(
+        "can_error |value String| -> String, Error!:\n    return! Error(\"boom\")\n;\n\nrecover |value String, route Bool| -> String:\n    return can_error(value) catch |err|:\n        if route:\n            then \"fallback\"\n        else\n            return \"returned\"\n        ;\n    ;\n;\n",
+    );
+    let body = function_body_by_name(&ast, &string_table, "recover");
+    assert!(
+        matches!(body[0].kind, NodeKind::Return(_)),
+        "mixed produce/terminate catch handlers must parse as a value-producing return"
+    );
+}
+
+#[test]
 fn rejects_assignment_target_read_inside_catch_fallback() {
     assert_invalid_assignment_target(
         "can_error || -> Int, Error!:\n    return 1\n;\n\nrecover || -> Int:\n    value ~= 0\n    value = can_error() catch:\n        then value\n    ;\n    return value\n;\n",
