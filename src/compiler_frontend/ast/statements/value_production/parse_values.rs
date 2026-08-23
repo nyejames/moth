@@ -34,7 +34,7 @@ use crate::compiler_frontend::value_mode::ValueMode;
 ///
 /// WHAT: avoids a long parameter list by grouping everything the parser needs.
 /// WHY: the caller already has all of these values on hand; a struct keeps call sites
-/// readable and makes future extension easier.
+/// readable.
 pub struct ProducedValuesParseInput<'a, 'b> {
     pub token_stream: &'a mut FileTokens,
     pub context: &'a ScopeContext,
@@ -61,7 +61,7 @@ pub(crate) fn is_missing_produced_value_boundary(kind: &TokenKind) -> bool {
 ///
 /// WHAT: reads one or more expressions after `then`, validates that the count matches
 /// `target.result_type_ids`, and applies contextual coercion per position.
-/// WHY: every value-producing site (catch, future value `if`, match) needs identical
+/// WHY: every value-producing site (value `if`, match and catch) needs identical
 /// arity and coercion validation.
 pub fn parse_produced_values_typed<'a, 'b>(
     input: ProducedValuesParseInput<'a, 'b>,
@@ -332,7 +332,6 @@ fn mismatch_context_for_receiver(receiver_kind: ValueReceiverKind) -> TypeMismat
         ValueReceiverKind::Return => TypeMismatchContext::ReturnValue,
         ValueReceiverKind::Assignment
         | ValueReceiverKind::MultiBind
-        | ValueReceiverKind::NestedThen
         | ValueReceiverKind::CatchHandler => TypeMismatchContext::General,
     }
 }

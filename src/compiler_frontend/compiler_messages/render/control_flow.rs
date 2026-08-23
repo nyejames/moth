@@ -67,7 +67,7 @@ pub(crate) fn invalid_control_flow_statement_message(
             "Value-producing 'if' has no reachable path that produces a value.".to_string()
         }
         InvalidControlFlowStatementReason::ValueBlockOutsideReceiver => {
-            "Value-producing blocks are only valid at declaration, assignment, return, multi-bind, catch, or `then` receiving sites.".to_string()
+            "Value-producing blocks are only valid at declaration, assignment, return, multi-bind, or catch receiving sites.".to_string()
         }
         InvalidControlFlowStatementReason::ValueIfOptionNonePredicate => {
             "Optional `none` checks are statement-only here. Use `if option is |value| ... else ...` for value recovery.".to_string()

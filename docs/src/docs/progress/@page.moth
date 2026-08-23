@@ -221,9 +221,9 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: Pattern matching]
             [: Partial]
-            [: Broad literal, choice-match, payload-capture, relational pattern, guard, exhaustiveness, warning, and diagnostics coverage.]
+            [: Broad literal, choice-match, payload-capture, relational pattern, guard, exhaustiveness, warning, diagnostics, and single-predicate value-if coverage.]
             [: JS / HTML]
-            [: Literal patterns, choice variants, payload extraction, relational patterns, guards, and [$html:<code>else =&gt;</code>] arms are supported. General bare-name capture has been removed from full-match positions, and [$html:<code>String</code>] relational subjects are rejected. Option [$html:<code>|name|</code>] and declared choice payload captures remain valid. Full relational overlap analysis and nested choice payload patterns remain deferred. Relational subjects are limited to [$html:<code>Int</code>], [$html:<code>Float</code>] and [$html:<code>Char</code>].]
+            [: Literal patterns, choice variants, payload extraction, relational patterns, guards, and [$html:<code>else =&gt;</code>] arms are supported. General bare-name capture has been removed from full-match positions, and [$html:<code>String</code>] relational subjects are rejected. Option [$html:<code>|name|</code>] and declared choice payload captures remain valid. Inline and block option-present and choice-predicate single-predicate value matches are supported at closed receivers, with focused coverage. Full relational overlap analysis and nested choice payload patterns remain deferred. Relational subjects are limited to [$html:<code>Int</code>], [$html:<code>Float</code>] and [$html:<code>Char</code>].]
         ]
 
         [data:
@@ -247,7 +247,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Supported]
             [: Broad option, fallible return, postfix propagation, catch, value-producing block, multi-return, multi-bind, and diagnostic coverage.]
             [: JS / HTML]
-            [: [$html:<code>Error!</code>], postfix [$html:<code>!</code>], [$html:<code>catch</code>], value-producing blocks, options, multiple returns and multi-bind are supported.]
+            [: [$html:<code>Error!</code>], postfix [$html:<code>!</code>], [$html:<code>catch</code>], value-producing blocks, options, multiple returns and multi-bind are supported. Value-producing [$html:<code>if</code>] and match work at declaration, assignment, return and multi-bind receivers. Nested [$html:<code>then</code>] receivers remain deferred.]
         ]
 
         [data:

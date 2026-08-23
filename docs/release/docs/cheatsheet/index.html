@@ -465,6 +465,12 @@ name, count = pair()
 <p>Inspect options explicitly:</p>
 <pre><code class="language-moth">label = if maybe_name is |name| then name else "guest"
 
+label = if maybe_name is |name|:
+    then name
+else
+    then "guest"
+;
+
 if maybe_name is none:
     io.line("missing")
 ;
@@ -557,6 +563,12 @@ if response is:
 <p>Value-producing forms send values with <code>then</code>:</p>
 <pre><code class="language-moth">label = if ready then "ready" else "waiting"
 
+label = if maybe_name is |name|:
+    then name
+else
+    then "guest"
+;
+
 status = "ready"
 label = if status is:
     "ready" =&gt; then "ready"
@@ -564,7 +576,7 @@ label = if status is:
     else =&gt; then "other"
 ;
 </code></pre>
-<p>They work only at closed receiving declarations, assignments, multi-binds, returns or nested <code>then</code>. They are not general call, operator, constructor, collection or template expressions. Every producing path matches the receiver's arity and types.</p>
+<p>They work only at closed receiving declarations, assignments, multi-binds and returns. Nested <code>then</code> receivers are deferred. They are not general call, operator, constructor, collection or template expressions. Every producing path matches the receiver's arity and types. Mixed producing and terminating paths are complete; a real fallthrough path is rejected.</p>
 <h2>Loops</h2>
 <p>Moth uses one <code>loop</code> keyword.</p>
 <p>Conditional loop:</p>

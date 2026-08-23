@@ -111,3 +111,10 @@ for current backend and coverage status.
 - Payload exhaustiveness is tag-level. One valid payload capture arm covers every value of that variant.
 - A statement match may use bodyless `else =>`.
 - A value-producing match must produce the required values on every selected path.
+
+### Single-predicate value matches
+
+Inline and block single-predicate value matches are a narrower subset: one
+option-present capture or one choice variant, plus a required `else`. They are
+not exhaustive full matches. They cannot omit `else` even when the predicate
+looks total.

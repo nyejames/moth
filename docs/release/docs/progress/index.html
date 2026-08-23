@@ -600,9 +600,9 @@ td {
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Pattern matching</td>
  <td style="padding: 0.1em 0.5em; "> Partial</td>
- <td style="padding: 0.1em 0.5em; "> Broad literal, choice-match, payload-capture, relational pattern, guard, exhaustiveness, warning, and diagnostics coverage.</td>
+ <td style="padding: 0.1em 0.5em; "> Broad literal, choice-match, payload-capture, relational pattern, guard, exhaustiveness, warning, diagnostics, and single-predicate value-if coverage.</td>
  <td style="padding: 0.1em 0.5em; "> JS / HTML</td>
- <td style="padding: 0.1em 0.5em; "> Literal patterns, choice variants, payload extraction, relational patterns, guards, and <code>else =&gt;</code> arms are supported. General bare-name capture has been removed from full-match positions, and <code>String</code> relational subjects are rejected. Option <code>|name|</code> and declared choice payload captures remain valid. Full relational overlap analysis and nested choice payload patterns remain deferred. Relational subjects are limited to <code>Int</code>, <code>Float</code> and <code>Char</code>.</td>
+ <td style="padding: 0.1em 0.5em; "> Literal patterns, choice variants, payload extraction, relational patterns, guards, and <code>else =&gt;</code> arms are supported. General bare-name capture has been removed from full-match positions, and <code>String</code> relational subjects are rejected. Option <code>|name|</code> and declared choice payload captures remain valid. Inline and block option-present and choice-predicate single-predicate value matches are supported at closed receivers, with focused coverage. Full relational overlap analysis and nested choice payload patterns remain deferred. Relational subjects are limited to <code>Int</code>, <code>Float</code> and <code>Char</code>.</td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">
@@ -626,7 +626,7 @@ td {
  <td style="padding: 0.1em 0.5em; "> Supported</td>
  <td style="padding: 0.1em 0.5em; "> Broad option, fallible return, postfix propagation, catch, value-producing block, multi-return, multi-bind, and diagnostic coverage.</td>
  <td style="padding: 0.1em 0.5em; "> JS / HTML</td>
- <td style="padding: 0.1em 0.5em; "> <code>Error!</code>, postfix <code>!</code>, <code>catch</code>, value-producing blocks, options, multiple returns and multi-bind are supported.</td>
+ <td style="padding: 0.1em 0.5em; "> <code>Error!</code>, postfix <code>!</code>, <code>catch</code>, value-producing blocks, options, multiple returns and multi-bind are supported. Value-producing <code>if</code> and match work at declaration, assignment, return and multi-bind receivers. Nested <code>then</code> receivers remain deferred.</td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">

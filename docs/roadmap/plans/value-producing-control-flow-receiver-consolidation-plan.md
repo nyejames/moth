@@ -81,11 +81,11 @@ PARENT_STATE_AT_SNAPSHOT:
 - Static Bool `if` specialisation remains the later Phase G semantic gate.
 
 CURRENT_SCOPE:
-- Phase 6 complete. Next is Phase 7 diagnostics, docs, status and ownership closeout.
+- Phase 7 complete. Phase 8 remains blocked until the parent squash exists on `main`.
 
 COMPLETED:
 - Phase 0 `43c3e7ac6`. Phase 1 `2f442425b`. Phase 2 `25bc9963f`. Phase 3 `2fc56a0b3`.
-  Phase 4 `be9935a20`. Phase 5 `349db0e30`.
+  Phase 4 `be9935a20`. Phase 5 `349db0e30`. Phase 6 `d6771f2f6`.
 - Shared `receiver/block_body.rs` parses both bodies. `value_production/expression_build.rs`
   wraps completed `ValueIfBlock`/`ValueMatchBlock` values.
 - `receiver/block_match.rs` assembles one-arm block option/choice matches at known receivers.
@@ -93,15 +93,23 @@ COMPLETED:
 - Partially inferred multi-bind uses `try_parse_value_block_at_receiver_with_target`.
   Known optional slots keep parse-time expected types. Slot inference stays in
   `value_production/multi_bind.rs`. `multi_bind.rs` is 427 lines versus Phase 0 1049.
+- Phase 7 reused existing diagnostic reasons. `ValueBlockOutsideReceiver` text no
+  longer lists deferred nested `then`. `ValueReceiverKind::NestedThen` is deleted.
+  Canonical docs, cheatsheet and progress matrix describe implemented receivers and
+  the nested-`then` gap. `index.md` and `docs/compiler-design-overview.md` unchanged.
 
 NEXT_ACTION:
-- After this Phase 6 checkpoint, begin Phase 7 diagnostics, docs, status and ownership closeout.
+- Begin Phase 8 only after `const-folding-and-types-optimisation` squash-merges to `main`.
 
 VALIDATION:
-- statement lib tests 296 passed. Inferred AST and HTML cases passed, including optional
-  `none` in a known slot. `cargo fmt --all -- --check` passed. `just validate` passed:
-  clippy `-D warnings`, source-audit 0, workspace tests 4472 passed / 3 ignored, xtask 17,
-  integration 1882/1882.
+- `cargo test --lib compiler_frontend::ast::statements`: 296 passed.
+- `cargo run --quiet -- tests --tag value-blocks --backend html`: 77/77.
+- `cargo run --quiet -- tests --audit`: inventory 1728 cases, exit 0.
+- `cargo run --quiet -- check docs --terse`: no errors or warnings.
+- `cargo run --quiet -- build docs --release`: 70 output files.
+- `cargo fmt --all -- --check` passed. `just validate` passed: clippy `-D warnings`,
+  source-audit 0, workspace tests 4472 passed / 3 ignored, xtask 17, integration
+  1882/1882.
 
 AUDITS:
 - Phase 0-5 per-phase auditor cycles accepted.
@@ -110,9 +118,12 @@ AUDITS:
 - Phase 6 auditor pass 1 `20260823T092733Z-0ca2b945` required mixed-slot `none` context
   and shared-receiver routing. Construction-owner finding rejected as the Phase 4 wrap
   contract. Pass 2 `20260823T095300Z-34b593f8` required stale helper names/comments only.
+- Phase 7 auditor pass 1 `20260823T102222Z-351f1b8b` required rewriting stale
+  future-work comments on implemented value-if/match/catch paths. Comments updated.
+  Pass 2 `20260823T102818Z-d8e3ef82` `audit_clean`.
 
 BLOCKERS:
-- none
+- Phase 8 until the parent squash exists on `main`.
 
 NOTES:
 - Work only in this worktree. Do not rebase onto the parent branch during implementation.
@@ -1428,73 +1439,73 @@ the completed architecture without touching the roadmap.
 
 ### Diagnostics
 
-- [ ] Reuse `ValueIfMissingElse`, `ValueIfBranchFallsThrough`, `ValueIfNoProducingPath`, existing
+- [x] Reuse `ValueIfMissingElse`, `ValueIfBranchFallsThrough`, `ValueIfNoProducingPath`, existing
       return-shape reasons and existing type mismatch contexts where they accurately describe the
       new form.
-- [ ] Preserve option unsupported-predicate and match-pattern diagnostics.
-- [ ] Add a new typed reason only if no existing payload accurately describes a real source error.
-- [ ] If a new reason is added, update reason keys, renderer coverage, diagnostic model tests and
+- [x] Preserve option unsupported-predicate and match-pattern diagnostics.
+- [x] Add a new typed reason only if no existing payload accurately describes a real source error.
+- [x] If a new reason is added, update reason keys, renderer coverage, diagnostic model tests and
       integration expectations in the same phase.
-- [ ] Confirm infrastructure errors remain distinct from authored diagnostics through speculative
+- [x] Confirm infrastructure errors remain distinct from authored diagnostics through speculative
       and recursive body parsing.
 
 ### Test ownership and pruning
 
-- [ ] Audit every new integration contract and role in `tests/cases/manifest.toml`.
-- [ ] Keep one primary contract owner for block single-predicate value matching.
-- [ ] Keep one unit-test owner for the hidden exit-summary invariant.
-- [ ] Remove superseded or implementation-shaped tests made redundant by stronger end-to-end cases.
-- [ ] Run the integration suite audit and resolve hard findings.
+- [x] Audit every new integration contract and role in `tests/cases/manifest.toml`.
+- [x] Keep one primary contract owner for block single-predicate value matching.
+- [x] Keep one unit-test owner for the hidden exit-summary invariant.
+- [x] Remove superseded or implementation-shaped tests made redundant by stronger end-to-end cases.
+- [x] Run the integration suite audit and resolve hard findings.
 
 ### Canonical documentation
 
 Update the accepted language contract and teaching surface:
 
-- [ ] `docs/src/docs/branching/value-producing-if.mtf`
-  - [ ] document inline and block option/choice predicates
-  - [ ] document mixed produce/terminate completeness
-  - [ ] list only implemented closed receivers
-  - [ ] state nested `then` is deferred
-- [ ] `docs/src/docs/branching/value-producing-if-basic.mtf`
-  - [ ] add the smallest useful block option example
-  - [ ] keep the Basic page focused
-- [ ] `docs/src/docs/errors/options.mtf`
-  - [ ] show block present-value inspection
-  - [ ] keep full option-match rules separate
-- [ ] `docs/src/docs/branching/pattern-matching.mtf`
-  - [ ] explain single-predicate value matches beside full value matches
-- [ ] `docs/src/docs/branching/patterns-and-exhaustiveness.mtf`
-  - [ ] state the narrower single-predicate subset and required `else`
-- [ ] `docs/src/docs/choices/payload-patterns.mtf`
-  - [ ] mention payload captures work in inline and block single predicates where helpful
-- [ ] `docs/src/docs/cheatsheet/moth-language-cheatsheet.md`
-  - [ ] add the block form
-  - [ ] remove or correct nested-`then` overstatement
-- [ ] Review `docs/compiler-design-overview.md`. Change it only if implementation altered the Stage 4
+- [x] `docs/src/docs/branching/value-producing-if.mtf`
+  - [x] document inline and block option/choice predicates
+  - [x] document mixed produce/terminate completeness
+  - [x] list only implemented closed receivers
+  - [x] state nested `then` is deferred
+- [x] `docs/src/docs/branching/value-producing-if-basic.mtf`
+  - [x] add the smallest useful block option example
+  - [x] keep the Basic page focused
+- [x] `docs/src/docs/errors/options.mtf`
+  - [x] show block present-value inspection
+  - [x] keep full option-match rules separate
+- [x] `docs/src/docs/branching/pattern-matching.mtf`
+  - [x] explain single-predicate value matches beside full value matches
+- [x] `docs/src/docs/branching/patterns-and-exhaustiveness.mtf`
+  - [x] state the narrower single-predicate subset and required `else`
+- [x] `docs/src/docs/choices/payload-patterns.mtf`
+  - [x] mention payload captures work in inline and block single predicates where helpful
+- [x] `docs/src/docs/cheatsheet/moth-language-cheatsheet.md`
+  - [x] add the block form
+  - [x] remove or correct nested-`then` overstatement
+- [x] Review `docs/compiler-design-overview.md`. Change it only if implementation altered the Stage 4
       ownership contract, which is not expected.
 
 ### Progress matrix and deferred work
 
-- [ ] Update the Pattern matching row to mention inline and block option/choice single predicates
+- [x] Update the Pattern matching row to mention inline and block option/choice single predicates
       and their focused coverage.
-- [ ] Update the Results, options, multiple returns and multi-bind row to list the supported closed
+- [x] Update the Results, options, multiple returns and multi-bind row to list the supported closed
       receivers and the remaining nested-`then` gap.
-- [ ] Keep Pattern matching `Partial` while unrelated deferred pattern features remain.
-- [ ] Do not invent a new status label.
-- [ ] Record nested `then` as an existing deferred implementation gap, not a new language proposal.
-- [ ] Do not add a roadmap item for nested `then` in this plan.
-- [ ] Do not change status for full relational overlap, nested payload patterns or other unrelated
+- [x] Keep Pattern matching `Partial` while unrelated deferred pattern features remain.
+- [x] Do not invent a new status label.
+- [x] Record nested `then` as an existing deferred implementation gap, not a new language proposal.
+- [x] Do not add a roadmap item for nested `then` in this plan.
+- [x] Do not change status for full relational overlap, nested payload patterns or other unrelated
       deferred work.
 
 ### Codebase navigation and dead scaffolding
 
-- [ ] Remove `ValueReceiverKind::NestedThen` and its dead-code allowance unless a real current caller
+- [x] Remove `ValueReceiverKind::NestedThen` and its dead-code allowance unless a real current caller
       requires the marker after the refactor.
-- [ ] Update `index.md` only if the final owner boundary is materially unclear without it. Do not add
+- [x] Update `index.md` only if the final owner boundary is materially unclear without it. Do not add
       a noisy line merely because `detect.rs` was deleted or `block_match.rs` was added.
-- [ ] Update file-level documentation for every moved or deleted owner.
-- [ ] Confirm `docs/roadmap/roadmap.md` has no diff.
-- [ ] Do not edit `docs/release/**` directly.
+- [x] Update file-level documentation for every moved or deleted owner.
+- [x] Confirm `docs/roadmap/roadmap.md` has no diff.
+- [x] Do not edit `docs/release/**` directly.
 
 ### Focused validation
 
@@ -1511,24 +1522,44 @@ just validate
 
 ### Mandatory audit and style review
 
-- [ ] Review every changed diagnostic constructor and renderer.
-- [ ] Review integration contract ownership and remove redundant fixtures.
-- [ ] Read every changed canonical page directly and through the docs build.
-- [ ] Confirm progress status matches implementation and tests.
-- [ ] Confirm roadmap and generated release sources were untouched.
-- [ ] Complete the mandatory phase workflow.
+- [x] Review every changed diagnostic constructor and renderer.
+- [x] Review integration contract ownership and remove redundant fixtures.
+- [x] Read every changed canonical page directly and through the docs build.
+- [x] Confirm progress status matches implementation and tests.
+- [x] Confirm roadmap and generated release sources were untouched.
+- [x] Complete the mandatory phase workflow.
 
 ### Acceptance
 
-- [ ] Documentation describes the implemented syntax and no broader surface.
-- [ ] Nested `then` is truthfully deferred.
-- [ ] Progress notes and coverage are current.
-- [ ] Diagnostic identities are stable or deliberately extended through typed owners.
-- [ ] The roadmap has no change.
+- [x] Documentation describes the implemented syntax and no broader surface.
+- [x] Nested `then` is truthfully deferred.
+- [x] Progress notes and coverage are current.
+- [x] Diagnostic identities are stable or deliberately extended through typed owners.
+- [x] The roadmap has no change.
 
 ### Outcome
 
-_To be completed by the implementing agent._
+Phase 7 closed the user-facing contract to the implemented architecture.
+
+Diagnostics reuse `ValueIfMissingElse`, `ValueIfBranchFallsThrough`,
+`ValueIfNoProducingPath`, existing return-shape reasons and existing type-mismatch
+contexts. Option unsupported-predicate and match-pattern diagnostics are unchanged.
+No new typed reason was added. `ValueBlockOutsideReceiver` still uses the same
+reason; its renderer no longer lists deferred nested `then` as a valid site.
+
+`value_if_block_single_predicate` remains the primary integration owner for block
+single-predicate matching. `value_production_tests.rs` remains the unit-test owner
+for the hidden exit-summary invariant. AST ValueMatch-versus-ValueIf tests stay as
+representation invariants. No redundant fixture was deleted. `tests --audit` reported
+no hard findings.
+
+Canonical pages and the cheatsheet document inline and block option/choice
+predicates, mixed produce/terminate completeness, implemented closed receivers and
+the nested-`then` gap. Pattern matching stays `Partial`. `index.md` and
+`docs/compiler-design-overview.md` are unchanged. `docs/roadmap/roadmap.md` has no
+diff. Generated `docs/release/**` HTML was rebuilt from source, not hand-edited.
+
+`ValueReceiverKind::NestedThen` and its dead-code allowance are deleted.
 
 ---
 

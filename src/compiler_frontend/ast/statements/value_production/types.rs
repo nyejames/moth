@@ -2,7 +2,7 @@
 //!
 //! WHAT: defines the shapes that represent produced values, active production targets,
 //! and all-path branch exit summaries.
-//! WHY: these types cross parser boundaries (dispatcher, catch handler, future value-block
+//! WHY: these types cross parser boundaries (dispatcher, catch handler and value
 //! receivers) and need one canonical definition.
 
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
@@ -81,22 +81,20 @@ impl ActiveValueProductionTarget {
 /// Classification of the site that receives produced values.
 ///
 /// WHAT: identifies why a value-production target was activated.
-/// WHY: future diagnostics and lowering may need to distinguish declarations from returns
-/// from nested `then` sites; keeping the kind explicit avoids boolean flags.
+/// WHY: type-mismatch diagnostics distinguish declarations and returns from
+/// assignment, multi-bind and catch receivers without boolean flags.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(dead_code)] // NestedThen is planned but not yet constructed.
 pub enum ValueReceiverKind {
     Declaration,
     Assignment,
     Return,
     MultiBind,
-    NestedThen,
     CatchHandler,
 }
 
 /// A value-producing control-flow block used as an expression at closed receiving sites.
 ///
-/// WHAT: represents `if` and future `match` / `catch` shapes that produce values instead
+/// WHAT: represents `if`, `match` and `catch` shapes that produce values instead
 /// of executing statements for side effects.
 /// WHY: receiving sites need to distinguish value blocks from ordinary expressions so
 /// they can validate arity, type, and completeness before HIR lowering.

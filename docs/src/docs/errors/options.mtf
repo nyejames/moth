@@ -24,6 +24,16 @@ Inline inspection:
     display_name = if maybe_name is |name| then name else "guest"
 ]
 
+Block inspection:
+
+[codeblock, $code("moth"):
+    display_name = if maybe_name is |name|:
+        then name
+    else
+        then "guest"
+    ;
+]
+
 Statement inspection:
 
 [codeblock, $code("moth"):

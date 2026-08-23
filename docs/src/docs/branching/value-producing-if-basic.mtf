@@ -22,6 +22,16 @@ Use block form when a branch needs more room:
     ;
 ]
 
+Block form also inspects a present option:
+
+[codeblock, $code("moth"):
+    label = if maybe_name is |name|:
+        then name
+    else
+        then "guest"
+    ;
+]
+
 `then` provides the value for the surrounding assignment.
 
 Both branches must provide the value or leave the function through another valid path.
