@@ -11,6 +11,7 @@ use crate::compiler_frontend::ast::expressions::expression::{
 use crate::compiler_frontend::ast::expressions::expression_rpn::{
     ExpressionRpn, ExpressionRpnItem,
 };
+use crate::compiler_frontend::ast::statements::if_headers::{IfHeaderShape, classify_if_header};
 use crate::compiler_frontend::ast::statements::match_exhaustiveness::MatchArmCoverageTracker;
 use crate::compiler_frontend::ast::statements::match_patterns::{
     MatchPattern, RelationalPatternOp,
@@ -27,6 +28,7 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 #[test]
@@ -1000,5 +1002,121 @@ fn ignores_else_owned_by_a_later_statement() {
     assert_inline_control_flow_reason(
         "choose |condition Bool| -> Int:\n    result ~= 0\n    result = if condition then 10\n    if condition:\n        result = 1\n    else\n        result = 2\n    ;\n    return result\n;\nvalue = choose(false)\n",
         InvalidControlFlowStatementReason::ValueIfMissingElse,
+    );
+}
+
+fn classify_header_after_if(source: &str) -> IfHeaderShape {
+    let mut string_table = StringTable::new();
+    let style_directives =
+        crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins();
+    let interned_path =
+        crate::compiler_frontend::symbols::interned_path::InternedPath::from_single_str(
+            "test.moth",
+            &mut string_table,
+        );
+    let mut tokens = crate::compiler_frontend::tokenizer::lexer::tokenize(
+        source,
+        &interned_path,
+        crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode::SourceFile,
+        &style_directives,
+        &mut string_table,
+        Some(crate::compiler_frontend::symbols::identity::FileId(0)),
+    )
+    .expect("classifier fixture should tokenize");
+
+    while tokens.index < tokens.length && tokens.current_token_kind() != &TokenKind::If {
+        tokens.advance();
+    }
+    assert_eq!(tokens.current_token_kind(), &TokenKind::If);
+    tokens.advance();
+    classify_if_header(&tokens).shape
+}
+
+#[test]
+fn classifies_ordinary_bool_and_nested_is_inside_parentheses() {
+    assert_eq!(
+        classify_header_after_if("if ready:\n    io.line(\"x\")\n;\n"),
+        IfHeaderShape::OrdinaryBool
+    );
+    assert_eq!(
+        classify_header_after_if("if f(a is b):\n    io.line(\"x\")\n;\n"),
+        IfHeaderShape::OrdinaryBool
+    );
+}
+
+#[test]
+fn classifies_full_match_and_single_predicate_shapes() {
+    assert_eq!(
+        classify_header_after_if("if value is:\n    else =>\n;\n"),
+        IfHeaderShape::FullMatch
+    );
+    assert_eq!(
+        classify_header_after_if("if maybe is |name|:\n    io.line(name)\n;\n"),
+        IfHeaderShape::PotentialBlockSinglePredicate
+    );
+    assert_eq!(
+        classify_header_after_if("if maybe is |name| then name else \"guest\"\n"),
+        IfHeaderShape::PotentialInlineSinglePredicate
+    );
+}
+
+#[test]
+fn classifies_newlines_around_is_without_changing_full_match() {
+    assert_eq!(
+        classify_header_after_if("if value is\n:\n    else =>\n;\n"),
+        IfHeaderShape::FullMatch
+    );
+}
+
+#[test]
+fn newline_between_is_and_option_capture_is_not_committed_as_option_capture() {
+    let classification = {
+        let mut string_table = StringTable::new();
+        let style_directives =
+            crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins();
+        let interned_path =
+            crate::compiler_frontend::symbols::interned_path::InternedPath::from_single_str(
+                "test.moth",
+                &mut string_table,
+            );
+        let mut tokens = crate::compiler_frontend::tokenizer::lexer::tokenize(
+            "if name is\n|value|:\n    io.line(\"x\")\n;\n",
+            &interned_path,
+            crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode::SourceFile,
+            &style_directives,
+            &mut string_table,
+            Some(crate::compiler_frontend::symbols::identity::FileId(0)),
+        )
+        .expect("classifier fixture should tokenize");
+        while tokens.index < tokens.length && tokens.current_token_kind() != &TokenKind::If {
+            tokens.advance();
+        }
+        tokens.advance();
+        classify_if_header(&tokens)
+    };
+
+    assert_eq!(
+        classification.shape,
+        IfHeaderShape::PotentialBlockSinglePredicate
+    );
+    assert_ne!(
+        classification.token_after_is,
+        classification.is_index.map(|index| index + 1),
+        "the pipe is not adjacent to is when a newline separates them"
+    );
+
+    let diagnostic = parse_single_file_ast_diagnostic(
+        "name = \"Priya\"\nif name is\n|value|:\n    io.line(\"x\")\n;\n",
+    );
+    assert!(
+        !matches!(
+            diagnostic.payload,
+            DiagnosticPayload::InvalidMatchPattern {
+                reason: InvalidMatchPatternReason::OptionPresentCaptureOnNonOptional,
+                ..
+            }
+        ),
+        "newline-separated pipes must not take the option-capture commitment path, got {:?}",
+        diagnostic.payload
     );
 }

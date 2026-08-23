@@ -81,28 +81,28 @@ PARENT_STATE_AT_SNAPSHOT:
 - Static Bool `if` specialisation remains the later Phase G semantic gate.
 
 CURRENT_SCOPE:
-- Phase 1 all-path exit summaries, produced-value traversal and inferred result slots.
+- Phase 2 one structural `if` classifier and one match-header capture owner.
 
 COMPLETED:
-- Phase 0 baseline freeze is checkpointed at `43c3e7ac6`.
-- `BranchFlow` is replaced by `BranchExitSummary`. Mixed produce/terminate paths are complete.
-- Reachable `ThenValue` traversal owns inference and multi-bind coercion.
-- Inferred block `result_type_ids` are stored for HIR.
+- Phase 0 checkpoint `43c3e7ac6`. Phase 1 checkpoint `2f442425b`.
+- `classify_if_header` owns the structural `if` scan. `match_headers.rs` owns option capture
+  construction and `parse_scrutinee_until_is`.
+- Statement and template semantics are unchanged. Receiver `detect.rs` still exists for Phase 3.
 
 NEXT_ACTION:
-- After this Phase 1 checkpoint, start Phase 2 header classification without changing accepted
-  source behaviour.
+- After this Phase 2 checkpoint, delete `receiver/detect.rs` and unify single-predicate header
+  parsing.
 
 VALIDATION:
-- Focused unit, catch, HIR and HTML value-block cases passed. `cargo fmt --all -- --check` passed.
-  `just validate` passed after the pass-1 coverage correction: clippy `-D warnings`, source-audit 0
-  findings, workspace tests 4460 passed / 3 ignored, xtask 17 passed, integration 1868/1868, docs
-  check clean, bench-ci and scaling budgets within limits, timers-erasure-check clean.
+- branching_tests 44 passed; templates 688 passed; focused HTML inline option/choice, full match
+  and template option-capture cases passed. `cargo fmt --all -- --check` passed. `just validate`
+  passed: clippy `-D warnings`, source-audit 0, workspace tests 4464 passed / 3 ignored, xtask 17,
+  integration 1868/1868.
 
 AUDITS:
-- Phase 0 interim auditor `audit_clean`.
-- Phase 1 interim auditor pass 1 reported a required coverage gap; later-path type-conflict and
-  all-terminating validator tests were added. Pass 2 accepted: `audit_clean`.
+- Phase 0 and Phase 1 auditor cycles accepted.
+- Phase 2 interim auditor pass 1 required restoring `|` adjacency after `is`; that regression is
+  covered. Remaining extra classifier cases are optional.
 
 BLOCKERS:
 - none
@@ -932,33 +932,33 @@ option/choice pattern and capture-scope owner, without changing accepted source 
 
 ### Work items
 
-- [ ] Design one narrow classification result in `if_headers.rs` that retains the structural facts
+- [x] Design one narrow classification result in `if_headers.rs` that retains the structural facts
       needed by statement, template, receiver and multi-bind callers.
-- [ ] Perform one nesting-aware scan for top-level `is` and the following body delimiter.
-- [ ] Distinguish full-match `is:` from potential inline and block single predicates.
-- [ ] Preserve template body boundary recognition without importing template construction into
+- [x] Perform one nesting-aware scan for top-level `is` and the following body delimiter.
+- [x] Distinguish full-match `is:` from potential inline and block single predicates.
+- [x] Preserve template body boundary recognition without importing template construction into
       `if_headers.rs`.
-- [ ] Keep classification syntax-only. Do not inspect `TypeEnvironment` in the scanner.
-- [ ] Rewrite `parse_if_header` to consume the classifier while preserving its current
+- [x] Keep classification syntax-only. Do not inspect `TypeEnvironment` in the scanner.
+- [x] Rewrite `parse_if_header` to consume the classifier while preserving its current
       `ParsedIfHeader` semantics or a cleaner equivalent API.
-- [ ] Move option present-capture parsing and scope construction into `match_headers.rs`.
-- [ ] Remove `match_headers.rs`'s import of
+- [x] Move option present-capture parsing and scope construction into `match_headers.rs`.
+- [x] Remove `match_headers.rs`'s import of
       `build_option_present_capture_scope_and_pattern` from `if_headers.rs`.
-- [ ] Factor one shared scrutinee parser that stops at the top-level `is` token and preserves the
+- [x] Factor one shared scrutinee parser that stops at the top-level `is` token and preserves the
       two-lane expression error boundary.
-- [ ] Keep full match-arm guard parsing under `match_headers.rs`.
-- [ ] Update file-level documentation to state exact ownership and exclusions.
-- [ ] Add no new accepted source form in this phase.
+- [x] Keep full match-arm guard parsing under `match_headers.rs`.
+- [x] Update file-level documentation to state exact ownership and exclusions.
+- [x] Add no new accepted source form in this phase.
 
 ### Required tests
 
-- [ ] Add focused classifier tests for nested parentheses, calls and other expressions containing
+- [x] Add focused classifier tests for nested parentheses, calls and other expressions containing
       nested tokens.
-- [ ] Protect full match, option capture, ordinary Bool and malformed header classification.
-- [ ] Protect newline handling around `is`, pattern and delimiter.
-- [ ] Protect statement `if` and template option-capture behaviour.
-- [ ] Protect statement/template choice equality from accidental pattern reclassification.
-- [ ] Protect precise diagnostics for missing conditions and malformed pattern suffixes.
+- [x] Protect full match, option capture, ordinary Bool and malformed header classification.
+- [x] Protect newline handling around `is`, pattern and delimiter.
+- [x] Protect statement `if` and template option-capture behaviour.
+- [x] Protect statement/template choice equality from accidental pattern reclassification.
+- [x] Protect precise diagnostics for missing conditions and malformed pattern suffixes.
 
 ### Focused validation
 
@@ -977,22 +977,37 @@ just validate
 
 ### Mandatory audit and style review
 
-- [ ] Search the AST statement tree for every remaining top-level `if`/`is` header scan.
-- [ ] Confirm `match_headers.rs` no longer depends on `if_headers.rs` for pattern or capture work.
-- [ ] Confirm statement and template consumers have no knowledge of value-receiver-only semantics.
-- [ ] Review the classification enum for meaningful states rather than boolean flags.
-- [ ] Complete the mandatory phase workflow.
+- [x] Search the AST statement tree for every remaining top-level `if`/`is` header scan.
+- [x] Confirm `match_headers.rs` no longer depends on `if_headers.rs` for pattern or capture work.
+- [x] Confirm statement and template consumers have no knowledge of value-receiver-only semantics.
+- [x] Review the classification enum for meaningful states rather than boolean flags.
+- [x] Complete the mandatory phase workflow.
 
 ### Acceptance
 
-- [ ] `if_headers.rs` owns one structural classification pass.
-- [ ] `match_headers.rs` owns both option and choice capture scopes.
-- [ ] Existing source acceptance and diagnostics are unchanged.
-- [ ] No broad utility module or copied token authority was added.
+- [x] `if_headers.rs` owns one structural classification pass.
+- [x] `match_headers.rs` owns both option and choice capture scopes.
+- [x] Existing source acceptance and diagnostics are unchanged.
+- [x] No broad utility module or copied token authority was added.
 
 ### Outcome
 
-_To be completed by the implementing agent._
+`classify_if_header` is the structural owner. It returns `IfHeaderShape` plus `is_index`,
+`token_after_is` and `IfHeaderDelimiter`. Classification is syntax-only. Statement
+`parse_if_header` commits option present-capture only when `|` is the next token after `is`,
+matching the previous adjacency rule. A newline between `is` and `|` stays off that path.
+Choice-shaped headers stay Bool for statements and templates.
+
+`match_headers.rs` now owns `parse_scrutinee_until_is` and
+`build_option_present_capture_scope_and_pattern`. It no longer imports `if_headers.rs`.
+Receiver `detect.rs` still duplicates a scan; Phase 3 deletes it.
+
+Classifier tests cover nested `is` inside calls, full match, inline and block option-capture
+shapes, and newlines around `is:`. Existing statement option capture, missing-condition and
+template option-capture cases still pass. No new source form was added.
+
+`just validate` passed: clippy `-D warnings`, source-audit 0, 4463 unit tests passed / 3 ignored,
+xtask 17, integration 1868/1868.
 
 ---
 

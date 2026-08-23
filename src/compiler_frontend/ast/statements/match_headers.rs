@@ -1,10 +1,9 @@
 //! Shared match-arm header parsing for AST match syntax.
 //!
-//! WHAT: parses the reusable `<pattern> [if guard]` portion of a match arm,
-//! resolves arm-local capture bindings, and leaves body parsing to the caller.
-//! WHY: full statement matches and inline single-predicate value forms need
-//! identical pattern, guard, and capture-scope semantics without sharing
-//! statement-body parsing or constructing temporary `MatchArm` bodies.
+//! WHAT: parses scrutinees through `is`, reusable `<pattern> [if guard]` headers,
+//! and option/choice capture scopes. Body parsing stays with the caller.
+//! WHY: statement, template, full match and value single-predicate forms share
+//! pattern and capture construction. This file does not own `if` header scanning.
 
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
@@ -14,7 +13,7 @@ use crate::compiler_frontend::ast::expressions::parse_expression_input::{
     ExpressionParseInput, ExpressionParseResources,
 };
 use crate::compiler_frontend::ast::statements::condition_validation::ensure_match_guard_condition;
-use crate::compiler_frontend::ast::statements::if_headers::build_option_present_capture_scope_and_pattern;
+
 use crate::compiler_frontend::ast::statements::match_patterns::{
     ChoicePayloadCapture, MatchPattern, ParsedChoicePattern, parse_choice_variant_pattern,
     parse_non_choice_pattern, parse_option_pattern,
@@ -70,6 +69,87 @@ struct ParsedMatchPatternHeader {
 /// WHY: guard expressions and option capture parsing can consume a frozen prepared-file stream,
 /// so an invalid retained table must reach the module boundary as `CompilerError`.
 type MatchHeaderResult<T> = Result<T, ExpressionParseError>;
+
+/// Parse a scrutinee expression that stops at the top-level `is` token.
+///
+/// WHAT: shared two-lane expression parse used by statement, template and value
+/// receivers before they consume `is`.
+/// WHY: each consumer previously reconstructed this `until([Is])` boundary.
+pub(crate) fn parse_scrutinee_until_is(
+    token_stream: &mut FileTokens,
+    scope_context: &ScopeContext,
+    type_interner: &mut AstTypeInterner<'_>,
+    string_table: &mut StringTable,
+) -> MatchHeaderResult<Expression> {
+    let mut scrutinee_type = ExpectedType::Infer;
+    let mut cast_target_context = CastTargetContext::None;
+    let input = ExpressionParseInput::until(ExpressionParseResources {
+        token_stream,
+        scope_context,
+        type_interner,
+        expected_type: &mut scrutinee_type,
+        cast_target_context: &mut cast_target_context,
+        value_mode: &ValueMode::ImmutableOwned,
+        string_table,
+    });
+    create_expression_until(input, &[TokenKind::Is])
+}
+
+/// Build an option-present capture arm scope and pattern.
+///
+/// WHAT: clones the parent context and adds a `Declaration` for the inner payload
+/// binding so the matched branch can reference the unwrapped value.
+/// WHY: statement `if`, template `if`, full matches and value single predicates
+/// share one capture-scope construction rule.
+pub(crate) fn build_option_present_capture_scope_and_pattern(
+    match_context: &ScopeContext,
+    capture_name: StringId,
+    binding_location: &SourceLocation,
+    inner_type_id: TypeId,
+    pattern_location: &SourceLocation,
+    type_interner: &mut AstTypeInterner<'_>,
+    string_table: &mut StringTable,
+) -> MatchHeaderResult<(ScopeContext, MatchPattern)> {
+    let mut arm_scope = match_context.clone();
+
+    if arm_scope.get_reference(&capture_name).is_some() {
+        return Err(CompilerDiagnostic::invalid_match_pattern(
+            InvalidMatchPatternReason::CaptureBindingShadowsVariable,
+            None,
+            None,
+            binding_location.clone(),
+        )
+        .into());
+    }
+
+    let binding_name_str = string_table.resolve(capture_name).to_owned();
+    let binding_path = arm_scope.scope.join_str(&binding_name_str, string_table);
+
+    let capture_data_type = diagnostic_type_spelling(inner_type_id, type_interner.environment());
+    let declaration = Declaration {
+        id: binding_path.clone(),
+        value: Expression::new(
+            ExpressionKind::NoValue,
+            binding_location.clone(),
+            inner_type_id,
+            capture_data_type,
+            ValueMode::ImmutableOwned,
+        ),
+    };
+
+    let binding_location = declaration.value.location.clone();
+    arm_scope.add_var(declaration, binding_location.clone());
+
+    let pattern = MatchPattern::OptionPresentCapture {
+        name: capture_name,
+        binding_path,
+        inner_type_id,
+        location: pattern_location.clone(),
+        binding_location,
+    };
+
+    Ok((arm_scope, pattern))
+}
 
 /// Parse one reusable match-arm header.
 ///
