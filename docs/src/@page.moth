@@ -7,6 +7,7 @@ page_head #= theme_head
 #[navbar]
 #[section, $md:
     # What is Moth?
+
     Moth is a new programming language and toolchain.
 
     [highlight, $md: *This website was created using Moth!*]
@@ -17,9 +18,8 @@ page_head #= theme_head
     The source code for this whole website can be found on @https://github.com/nyejames/moth/tree/main/docs/src (Github).
 
     ## Documentation
+    
     The @./docs (Alpha language docs) explains everything about the language, compiler and making Moth projects.
-
-    There's also a @./docs/cheatsheet (quick single page cheatsheet for the basic semantics).
 
     This compiler is in early alpha and is undergoing rapid development, so not everything is exactly up to date with the current compiler.
     [highlight, $md: *You can already use Moth for web projects, but be aware of the early alpha status*]
