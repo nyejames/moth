@@ -1,0 +1,6 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = [
+    "loop_generated_arithmetic_in_fallible_function collection=10 ascending=4 descending=30 custom=3 overflow=301",
+]

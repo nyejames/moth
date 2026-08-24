@@ -1,0 +1,63 @@
+-- Loop heads whose own expressions change the current block. A propagating `!` call ends the
+-- pre-header with an error branch and continues in a success block, so the loop entry edge is
+-- not allowed to start from the block that was current before the head was lowered.
+
+load_items || -> {Int}, Error!:
+    return {2, 4, 6}
+;
+
+load_start || -> Int, Error!:
+    return 1
+;
+
+load_end || -> Int, Error!:
+    return 4
+;
+
+load_step || -> Int, Error!:
+    return 2
+;
+
+sum_fallible_iterable || -> Int, Error!:
+    total ~= 0
+    loop load_items()! |item|:
+        total = total + item
+    ;
+    return total
+;
+
+sum_fallible_bounds || -> Int, Error!:
+    total ~= 0
+    loop load_start()! to load_end()! |i|:
+        total = total + i
+    ;
+    return total
+;
+
+sum_fallible_step || -> Int, Error!:
+    total ~= 0
+    loop 0 to & 6 by load_step()! |i|:
+        total = total + i
+    ;
+    return total
+;
+
+-- A failing head leaves the loop unentered and returns through the head's own error edge.
+count_failed_iterable || -> Int, Error!:
+    return! Error("iterable unavailable")
+;
+
+sum_unreachable_loop || -> Int, Error!:
+    total ~= 0
+    loop 0 to count_failed_iterable()! |i|:
+        total = total + i
+    ;
+    return total
+;
+
+iterable_total = sum_fallible_iterable() catch then -1
+bounds_total = sum_fallible_bounds() catch then -1
+step_total = sum_fallible_step() catch then -1
+unreachable_total = sum_unreachable_loop() catch then -1
+
+[:loop_fallible_iterable_and_bounds iterable=[iterable_total] bounds=[bounds_total] step=[step_total] unreachable=[unreachable_total]]

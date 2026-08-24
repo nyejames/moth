@@ -1,0 +1,65 @@
+-- Loop CFG lowering inside builtin `Error!` functions. No loop body below contains an authored
+-- fallible operation, so the compiler-generated iteration-index and range-value updates are the
+-- only recoverable arithmetic. Those updates end the block they start in and continue in a fresh
+-- success block, so every loop edge has to leave the block lowering actually finished in.
+
+LoopFault = |
+    reason String,
+|
+
+sum_items |items {Int}| -> Int, Error!:
+    total ~= 0
+    loop items |item|:
+        total = total + item
+    ;
+    return total
+;
+
+count_ascending |limit Int| -> Int, Error!:
+    seen ~= 0
+    loop 0 to limit |i|:
+        seen = seen + 1
+    ;
+    return seen
+;
+
+-- Negative `by` is normalised to a magnitude and then negated again for the descending
+-- direction. Both of those are generated checked subtractions.
+sum_descending || -> Int, Error!:
+    total ~= 0
+    loop 10 to & 0 by -2 |i|:
+        total = total + i
+    ;
+    return total
+;
+
+-- The generated range increment overflows once past the final iteration, so the loop's own
+-- arithmetic is what takes the recoverable error edge out of the function.
+walk_to_int_max || -> Int, Error!:
+    visited ~= 0
+    loop 2147483645 to & 2147483647 |i|:
+        visited = visited + 1
+    ;
+    return visited
+;
+
+-- A custom error slot cannot carry a numeric failure, so the same generated updates keep the
+-- trapping path and the step block stays unsplit.
+count_with_custom_error |items {Int}| -> Int, LoopFault!:
+    seen ~= 0
+    loop items |item|:
+        seen = seen + 1
+    ;
+    return seen
+;
+
+collection_total = sum_items({1, 2, 3, 4}) catch then -1
+ascending_count = count_ascending(4) catch then -1
+descending_total = sum_descending() catch then -1
+custom_error_count = count_with_custom_error({5, 6, 7}) catch then -1
+
+overflow_code = walk_to_int_max() catch |err|:
+    then err.code
+;
+
+[:loop_generated_arithmetic_in_fallible_function collection=[collection_total] ascending=[ascending_count] descending=[descending_total] custom=[custom_error_count] overflow=[overflow_code]]

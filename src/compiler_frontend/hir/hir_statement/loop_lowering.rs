@@ -4,6 +4,11 @@
 //! semantics.
 //! WHY: loop lowering is the densest control-flow transformation in HIR and benefits from one
 //! dedicated module boundary.
+//!
+//! Every preallocated block id here names a jump *target*. Jump *sources* are always the live
+//! continuation block, read through `emit_jump_from_current_block`. Lowering an iterable, a range
+//! bound, or a compiler-generated checked update can split the block it started in, so a remembered
+//! block id is only valid until the next helper that may emit control flow.
 
 use crate::compiler_frontend::ast::ast_nodes::{
     AstNode, LoopBindings, RangeEndKind, RangeLoopSpec, SourceLocation,
@@ -26,9 +31,10 @@ use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::return_hir_transformation_error;
 
+/// Jump targets of the range-loop CFG pipeline. These are destinations only. The module header
+/// explains why the source of each edge is read live instead of stored here.
 #[derive(Clone, Copy)]
 struct RangeLoopBlocks {
-    pre_header: BlockId,
     step_zero_check: BlockId,
     step_zero_failure: BlockId,
     step_abs_check: BlockId,
@@ -91,7 +97,6 @@ impl<'a> HirBuilder<'a> {
         location: &SourceLocation,
         emit_body: impl FnOnce(&mut HirBuilder<'_>) -> Result<(), CompilerError>,
     ) -> Result<(), CompilerError> {
-        let pre_header_block = self.current_block_id_or_error(location)?;
         let parent_region = self.current_region_or_error(location)?;
 
         let header_block = self.create_block(parent_region, location, "while-header")?;
@@ -99,7 +104,7 @@ impl<'a> HirBuilder<'a> {
         let body_block = self.create_block(body_region, location, "while-body")?;
         let exit_block = self.create_block(parent_region, location, "while-exit")?;
 
-        self.emit_jump_to(pre_header_block, header_block, location, "while.enter")?;
+        self.emit_jump_from_current_block(header_block, location, "while.enter")?;
 
         self.set_current_block(header_block, location)?;
         let condition_value = self.lower_expression_value_to_current_block(condition)?;
@@ -175,12 +180,7 @@ impl<'a> HirBuilder<'a> {
         self.initialize_range_loop_state(range, runtime, location)?;
 
         // Dynamic `by` expressions still need a runtime zero check before entering the loop.
-        self.emit_jump_to(
-            runtime.blocks.pre_header,
-            runtime.blocks.step_zero_check,
-            location,
-            "for.enter",
-        )?;
+        self.emit_jump_from_current_block(runtime.blocks.step_zero_check, location, "for.enter")?;
 
         self.emit_range_loop_zero_step_guard(runtime, location)?;
         self.emit_range_loop_step_magnitude_normalization(runtime, location)?;
@@ -200,7 +200,6 @@ impl<'a> HirBuilder<'a> {
         parent_region: RegionId,
         location: &SourceLocation,
     ) -> Result<RangeLoopBlocks, CompilerError> {
-        let pre_header = self.current_block_id_or_error(location)?;
         let step_zero_check = self.create_block(parent_region, location, "for-step-zero-check")?;
         let step_zero_failure =
             self.create_block(parent_region, location, "for-step-zero-failure")?;
@@ -219,7 +218,6 @@ impl<'a> HirBuilder<'a> {
         let exit = self.create_block(parent_region, location, "for-exit")?;
 
         Ok(RangeLoopBlocks {
-            pre_header,
             step_zero_check,
             step_zero_failure,
             step_abs_check,
@@ -533,12 +531,7 @@ impl<'a> HirBuilder<'a> {
             abs_step_current,
             location,
         )?;
-        self.emit_jump_to(
-            blocks.step_abs_negate,
-            blocks.direction_check,
-            location,
-            "for.step.abs.done",
-        )
+        self.emit_jump_from_current_block(blocks.direction_check, location, "for.step.abs.done")
     }
 
     fn emit_range_loop_direction_dispatch(
@@ -604,12 +597,7 @@ impl<'a> HirBuilder<'a> {
             desc_step_current,
             location,
         )?;
-        self.emit_jump_to(
-            blocks.descending_negate,
-            blocks.header_selector,
-            location,
-            "for.direction.done",
-        )
+        self.emit_jump_from_current_block(blocks.header_selector, location, "for.direction.done")
     }
 
     fn emit_range_loop_header_checks(
@@ -871,12 +859,7 @@ impl<'a> HirBuilder<'a> {
             index_delta,
             location,
         )?;
-        self.emit_jump_to(
-            blocks.step,
-            blocks.header_selector,
-            location,
-            "for.backedge",
-        )
+        self.emit_jump_from_current_block(blocks.header_selector, location, "for.backedge")
     }
 
     fn range_loop_zero_literal(
@@ -923,7 +906,6 @@ impl<'a> HirBuilder<'a> {
         location: &SourceLocation,
         mut emit_body: impl FnMut(&mut HirBuilder<'_>) -> Result<(), CompilerError>,
     ) -> Result<(), CompilerError> {
-        let pre_header_block = self.current_block_id_or_error(location)?;
         let parent_region = self.current_region_or_error(location)?;
 
         let header_block = self.create_block(parent_region, location, "loop-collection-header")?;
@@ -981,12 +963,7 @@ impl<'a> HirBuilder<'a> {
             location,
         )?;
 
-        self.emit_jump_to(
-            pre_header_block,
-            header_block,
-            location,
-            "loop.collection.enter",
-        )?;
+        self.emit_jump_from_current_block(header_block, location, "loop.collection.enter")?;
 
         self.set_current_block(header_block, location)?;
         let header_region = self.current_region_or_error(location)?;
@@ -1121,12 +1098,7 @@ impl<'a> HirBuilder<'a> {
             step_delta,
             location,
         )?;
-        self.emit_jump_to(
-            step_block,
-            header_block,
-            location,
-            "loop.collection.backedge",
-        )?;
+        self.emit_jump_from_current_block(header_block, location, "loop.collection.backedge")?;
 
         self.set_current_block(exit_block, location)
     }

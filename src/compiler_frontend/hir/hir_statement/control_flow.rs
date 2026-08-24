@@ -1098,6 +1098,23 @@ impl<'a> HirBuilder<'a> {
         self.emit_jump_with_args(from_block, target, vec![], location, edge_label)
     }
 
+    /// Jumps to `target` from the block lowering is currently in.
+    ///
+    /// WHAT: reads the live continuation block, then terminates that block with a jump.
+    /// WHY: expression and checked-operation lowering may split the block it started in. A `!`
+    /// propagation, or compiler-generated checked arithmetic inside a builtin `Error!` function,
+    /// ends the current block with a `FallibleBranch` and continues in a fresh success block.
+    /// A caller that remembered the earlier block id would try to give it a second terminator.
+    pub(crate) fn emit_jump_from_current_block(
+        &mut self,
+        target: BlockId,
+        location: &SourceLocation,
+        edge_label: &str,
+    ) -> Result<(), CompilerError> {
+        let continuation_block = self.current_block_id_or_error(location)?;
+        self.emit_jump_to(continuation_block, target, location, edge_label)
+    }
+
     pub(crate) fn emit_jump_with_args(
         &mut self,
         from_block: BlockId,

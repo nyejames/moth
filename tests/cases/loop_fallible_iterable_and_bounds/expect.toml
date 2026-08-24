@@ -1,0 +1,6 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = [
+    "loop_fallible_iterable_and_bounds iterable=12 bounds=6 step=12 unreachable=-1",
+]

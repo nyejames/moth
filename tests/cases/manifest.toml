@@ -4213,6 +4213,13 @@ contract = "language.loops.conditional_and_range_acceptance"
 role = "primary"
 
 [[case]]
+id = "loop_fallible_iterable_and_bounds"
+path = "loop_fallible_iterable_and_bounds"
+tags = ["integration", "control-flow", "errors"]
+contract = "language.loops.fallible_function_loop_cfg_acceptance"
+role = "boundary"
+
+[[case]]
 id = "loop_float_range_requires_by"
 path = "loop_float_range_requires_by"
 tags = ["integration", "control-flow", "diagnostics"]
@@ -4224,6 +4231,13 @@ id = "loop_float_range_with_by"
 path = "loop_float_range_with_by"
 tags = ["integration", "control-flow"]
 contract = "language.loops.float_range_with_by_acceptance"
+role = "primary"
+
+[[case]]
+id = "loop_generated_arithmetic_in_fallible_function"
+path = "loop_generated_arithmetic_in_fallible_function"
+tags = ["integration", "control-flow", "errors"]
+contract = "language.loops.fallible_function_loop_cfg_acceptance"
 role = "primary"
 
 [[case]]
