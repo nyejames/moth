@@ -1467,3 +1467,1346 @@ F1 deleted `Ast::remap_template_ir_store_string_ids` (dead code; TIR store is al
 before the module-wide StringId remap boundary). `TemplateIrStore::remap_string_ids` remains as a
 store-level capability for tests. The `template_ir_store` field on `Ast` carries
 `#[allow(dead_code)]` until Phases F2-F8 wire production TIR consumers. No behavior change.
+
+## Constant Evaluation And Type-System Plan - Phase 0 Baseline - 2026-08-22
+
+Baseline freeze for
+`docs/roadmap/plans/constant-folding-and-type-system-hot-path-optimization-plan.md` on the
+`const-folding-and-types-optimisation` branch. Evidence only: no semantic representation or
+control-flow change.
+
+### Baseline Environment
+
+- Commit: `3ba28c5fb907d2ee44e69a58c59d002aa6a2b384` (`prep for const optimisation`)
+- Branch: `const-folding-and-types-optimisation` (identical to `main` at the time of measurement)
+- Machine: macOS Apple Silicon benchmark host `6D851D`, Darwin `23.6.0` ARM64
+- Timing schema: `2`. The prerequisite module-attributed constant timers already exist:
+  `frontend.ast.environment.constant_header_resolution`,
+  `frontend.ast.emit.const_template_parse`, `frontend.ast.emit.const_template_fold` and
+  `frontend.ast.finalise.module_constant`. No rebase onto a newer timing schema was required.
+
+### Commands Run
+
+- `just bench-frontend` five recorded invocations, default thread identity
+- `just bench` five recorded invocations, default thread identity
+- `RAYON_NUM_THREADS=1 just bench-frontend` five recorded invocations
+- `just bench-validate` after adding the four new workloads
+- counter capture with a `timers,benchmark_counters` release binary and `MOTH_COUNTERS=summary`
+
+The tracked monthly summary was restored between recorded runs so each invocation started from a
+clean committed worktree. The raw per-case medians below come from
+`benchmarks/local-data/runs.jsonl`.
+
+### Suite Medians Across Five Runs
+
+| Suite | Thread identity | Median suite average |
+|---|---|---:|
+| `frontend_phases` | default | `85.15ms` |
+| `frontend_phases` | fixed 1 | `84.89ms` |
+| `end_to_end_cli` | default | `24.49ms` |
+
+Single-thread and default-thread frontend medians agree within noise on the constant-heavy cases,
+so constant setup cost is not a scheduling artefact.
+
+### Per-Case Medians (median of five run medians)
+
+| Case | frontend wall | CLI wall |
+|---|---:|---:|
+| `docs` | `1540.55ms` | `286.07ms` |
+| `type_stress` | `59.03ms` | `21.03ms` |
+| `fold_stress` | `56.04ms` | `17.99ms` |
+| `environment_stress` | `44.92ms` | `17.20ms` |
+| `one_module_kitchen_sink` | `36.92ms` | `12.47ms` |
+| `expression_rpn_churn` | `34.14ms` | `11.68ms` |
+| `constant_dag_churn` | `29.45ms` | `10.86ms` |
+
+### Module-Attributed Constant Timings (frontend suite, median ms)
+
+| Case | `ast.total` | `constant_header_resolution` | `const_template_parse` | `const_template_fold` | `finalise.module_constant` |
+|---|---:|---:|---:|---:|---:|
+| `docs` | `1143.87` | `566.28` | `317.16` | `44.17` | `104.37` |
+| `fold_stress` | `36.57` | `17.04` | `0.00` | `0.00` | `0.97` |
+| `type_stress` | `33.55` | `8.53` | `0.00` | `0.00` | `0.73` |
+| `environment_stress` | `28.16` | `7.30` | `0.00` | `0.00` | `0.73` |
+| `constant_dag_churn` | `17.07` | `9.70` | `0.00` | `0.00` | `0.64` |
+| `one_module_kitchen_sink` | `10.97` | `1.70` | `0.00` | `0.00` | `0.43` |
+| `expression_rpn_churn` | `5.05` | `0.16` | `0.00` | `0.00` | `0.22` |
+
+Constant-header resolution is about half of `frontend.ast.total` on `docs`, `fold_stress` and
+`constant_dag_churn`. That confirms the plan's priority ordering without relying on the deleted
+legacy detailed channel.
+
+### New Scaling Fixtures
+
+Four workloads and eight cases were added (`37` workloads, `68` cases total):
+
+- `benchmarks/constant-scaling/constant-chain-32.moth`
+- `benchmarks/constant-scaling/constant-chain-128.moth`
+- `benchmarks/constant-scaling/constant-chain-512.moth`
+- `benchmarks/nominal-capacity-stress.moth`
+
+The chains repeat one tiny initializer (`c<i> #= c<i-1> + 1`) so constant count is the only
+variable. The nominal fixture holds constant count at four while driving `240` fixed-capacity
+struct fields and `36` capacity-dependent choice payload variants, separating member-shell cost
+from constant cost.
+
+`moth check` wall time on the chains, single measurement each: `32` -> `~35ms`, `128` -> `~68ms`,
+`512` -> `~378ms`. Against a `~28ms` fixed floor that is roughly `7ms`, `40ms` and `350ms` of
+constant work for a `4x` and `4x` growth in constant count: clearly superlinear.
+
+### Counter Baseline
+
+New counters added in this phase are listed with their baseline values. `ast_declaration_table_replacements`
+was renamed `ast_declaration_replacements_by_path`; a by-ID replacement path does not exist yet and
+arrives with the dense declaration-identity phase.
+
+| Counter | `chain_32` | `chain_128` | `chain_512` | `nominal_capacity` | `constant_dag_churn` | `fold_stress` | `docs` |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `ast_constants_resolved` | `32` | `128` | `512` | `4` | `88` | `120` | `545` |
+| `ast_constant_resolution_contexts_created` | `32` | `128` | `512` | `4` | `88` | `120` | `545` |
+| `ast_constant_pass_prior_constant_ids_copied` | `496` | `8128` | `130816` | `310` | `4092` | `7860` | `17337` |
+| `ast_constant_pass_visibility_entries_cloned` | `2208` | `33408` | `526848` | `468` | `16456` | `30840` | `24816` |
+| `ast_constant_pass_side_table_entries_cloned` | `2` | `2` | `2` | `106` | `6` | `10` | `150` |
+| `ast_module_constant_declaration_clones` | `32` | `128` | `512` | `4` | `88` | `120` | `545` |
+| `ast_scope_contexts_created` | `65` | `257` | `1025` | `161` | `197` | `299` | `1904` |
+| `ast_expression_ordering_input_items` | `95` | `383` | `1535` | `8` | `459` | `1120` | `1322` |
+| `ast_expression_typed_stack_items` | `93` | `381` | `1533` | `0` | `392` | `960` | `0` |
+| `ast_expression_fold_items` | `93` | `381` | `1533` | `0` | `392` | `960` | `0` |
+| `ast_expression_operand_clones` | `93` | `381` | `1533` | `0` | `334` | `780` | `0` |
+| `ast_diagnostic_data_type_materialisations` | `93` | `381` | `1533` | `0` | `392` | `960` | `0` |
+| `ast_declaration_replacements_by_path` | `33` | `129` | `513` | `69` | `91` | `125` | `620` |
+| `ast_module_constant_normalization_expressions_visited` | `32` | `128` | `512` | `4` | `108` | `142` | `2089` |
+| `hir_const_value_conversions` | `32` | `128` | `512` | `4` | `108` | `142` | `2076` |
+| `public_folded_value_conversions` | `0` | `0` | `0` | `0` | `0` | `0` | `6` |
+| `ast_branch_local_generic_requests` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
+| `hir_static_bool_if_nodes` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
+| `hir_runtime_if_nodes` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
+| `generic_substitution_key_builds` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
+
+`ast_constant_pass_prior_constant_ids_copied` is exactly `C * (C - 1) / 2` on the chains. The
+cumulative prior-constant copy and the per-constant `FileVisibility` clone are the two quadratic
+terms the dense-identity and session phases must drive to zero.
+
+`ast_expression_operand_clones` equals `ast_expression_fold_items` on the chains: every folded
+operand is a full `Expression` clone today.
+
+`generic_trait_churn` is the workload that will move the substitution-key counters; the constant
+fixtures build no substitution keys at all.
+
+### Static Control-Flow Freeze
+
+Four integration cases freeze the current accepted behaviour that specialisation must preserve:
+
+- `static_if_constant_bool_branch_selection`
+- `static_if_value_producing_branch_selection`
+- `static_if_branch_scope_preserved`
+- `static_if_inactive_branch_generic_call`
+
+`function_partial_if_return_rejected` already froze the current terminality rejection for
+`if true: return 1 ;`, and `dynamic_if_test` already owns runtime-condition execution, so neither
+was duplicated.
+
+Three ignored intended-contract tests in `src/compiler_frontend/tests/frontend_pipeline_tests.rs`
+record the accepted behaviour the current compiler does not implement. All three fail today for the
+right reasons:
+
+- `intended_compile_time_true_condition_reaches_hir_without_a_branch`: `1` branch terminator, `0`
+  expected
+- `intended_compile_time_false_condition_without_else_lowers_no_branch_body`: `1` branch
+  terminator, `0` expected
+- `intended_terminality_observes_the_selected_branch`:
+  `InvalidReturnShape { reason: FunctionMayFallThrough }`
+
+`runtime_bool_condition_lowers_one_branch_diamond` is the matching non-ignored freeze.
+
+### Findings That Change Later Phases
+
+1. **A constant-backed Bool condition is not a folded `Bool` at HIR.** `if enabled:` with
+   `enabled #= true` reaches HIR as a reference, not `ExpressionKind::Bool`; only a literal
+   `if true:` folds. The static-if owner must read the condition through the folded-value
+   authority rather than pattern-matching the expression kind, otherwise it will only specialise
+   literal conditions. `hir_static_bool_if_nodes` therefore counts the literal case only, and its
+   baseline is `0` on every fixture except hand-written probes.
+2. **Inactive generic work is materialised today.** A generic call reachable only through a
+   compile-time-false branch still emits a generated function (`__moth_generated_fn_1` in the
+   `static_if_inactive_branch_generic_call` artefact). The pruning mechanism already exists:
+   `ScopeContext::generic_request_checkpoint` / `discard_generic_requests_since`, used by static
+   `assert(true)` message discarding in `src/compiler_frontend/ast/statements/asserts.rs`. The
+   static-if owner should reuse it rather than inventing a second boundary.
+3. **`ast_constant_pass_side_table_entries_cloned` is small but wrongly shaped.** The five side
+   tables are cloned once per module, so the count reflects table size, not constant count. The
+   per-constant cost lives in `ast_constant_pass_visibility_entries_cloned` instead.
+4. **Struct and choice member shells are rebuilt after constants** in
+   `AstModuleEnvironmentBuilder::resolve_type_declarations`, which is the cost the nominal
+   capacity fixture isolates.
+
+## Constant Evaluation And Type-System Plan - Phase 1 Consolidated Constant Session - 2026-08-22
+
+Phase 1 replaced the per-constant context construction in
+`src/compiler_frontend/ast/module_ast/environment/constant_resolution.rs` with one module-owned
+`ConstantResolutionSession`.
+
+### Measurement Protocol
+
+Wall times are the compiler-reported `Done in` figure from `moth check`, three consecutive runs
+after one warm-up, `--release` without `benchmark_counters`. The baseline column is the same
+measurement taken from a `--release` build of the stashed pre-Phase-1 tree on the same machine in
+the same session, so the two columns differ only by this change. Counters come from a separate
+`--release --features benchmark_counters` build with `MOTH_COUNTERS=summary`. `docs` counter
+totals are summed across its per-module AST counter resets.
+
+These are single-machine attribution measurements, not the recorded five-run benchmark protocol.
+
+### Wall Time
+
+| Workload | Baseline | Phase 1 | Change |
+|---|---:|---:|---:|
+| `constant_chain_32` | `4.73ms` | `3.58ms` | `-24%` |
+| `constant_chain_128` | `12.38ms` | `8.27ms` | `-33%` |
+| `constant_chain_512` | `128.10ms` | `68.69ms` | `-46%` |
+| `constant_dag_churn` | `8.35ms` | `6.43ms` | `-23%` |
+| `fold_stress` | `15.19ms` | `11.16ms` | `-27%` |
+| `nominal_capacity_stress` | `20.27ms` | `21.21ms` | flat |
+| `docs` | `274.57ms` | `274.73ms` | flat |
+
+Growth across the chains is now `3.58 / 8.27 / 68.69` for `32 / 128 / 512` constants, against
+`4.73 / 12.38 / 128.10` before. The `512` case is still superlinear: the remaining quadratic term
+is not in context construction.
+
+### Counter Movement
+
+| Counter | `chain_32` | `chain_128` | `chain_512` | `constant_dag_churn` | `fold_stress` | `docs` |
+|---|---:|---:|---:|---:|---:|---:|
+| `ast_constant_pass_visibility_entries_cloned` before | `2208` | `33408` | `526848` | `16456` | `30840` | `24816` |
+| `ast_constant_pass_visibility_entries_cloned` after | `69` | `261` | `1029` | `187` | `257` | `17548` |
+| `ast_constant_pass_prior_constant_ids_copied` before | `496` | `8128` | `130816` | `4092` | `7860` | `17337` |
+| `ast_constant_pass_prior_constant_ids_copied` after | removed | removed | removed | removed | removed | removed |
+
+`ast_constants_resolved`, `ast_constant_resolution_contexts_created`,
+`ast_module_constant_declaration_clones`, `ast_declaration_replacements_by_path` and
+`ast_scope_contexts_created` are unchanged on every fixture, which is the intended result: the
+same scopes are still created per constant, but they no longer rebuild module-wide state.
+
+`ast_constant_pass_prior_constant_ids_copied` was deleted rather than reported as zero. The
+cumulative copy it measured no longer exists: the environment builder owns one
+`resolved_module_constant_paths` set that constant-header, nominal-member and function-signature
+scopes share by handle. A counter that can only ever read zero is noise, so the Phase 2 scaling
+acceptance item it belonged to is satisfied structurally instead.
+
+### Findings That Change Later Phases
+
+1. **Context construction was not the `docs` cost.** `docs` is flat despite `-29%` visibility
+   copying, because its constants are one or two per file and its AST time is dominated by
+   const-template parsing and folding rather than by constant setup. The `docs` share of
+   `frontend.ast.environment.constant_header_resolution` recorded in the Phase 0 baseline is
+   therefore mostly fold work, and only Phases 3 and 4 can move it.
+2. **The remaining `chain_512` superlinearity is downstream of the session.** With per-constant
+   context construction now `O(1)` in module state, `68.69ms` for `512` trivial constants is still
+   far above `4x` the `128` case. The next candidates are declaration-table replacement by path,
+   the module-constant declaration clone, and constant normalisation, all of which Phases 2 and 3
+   own.
+3. **`nominal_capacity_stress` is unmoved, as designed.** Member-shell reconstruction builds its
+   own contexts in `AstModuleEnvironmentBuilder::unresolved_member_syntax_to_declarations` and
+   still clones all five side tables per struct or choice header. That pass belongs to Phase 8.
+4. **The declaration table blocks a longer-lived scope tree.** `replace_declaration` commits each
+   folded constant through `Rc::get_mut`, so no scope may hold the table across a commit. A
+   session that keeps one root scope alive for the whole pass, with per-constant child frames, is
+   only possible once the table has ID-based replacement that does not require sole `Rc`
+   ownership. Phase 2 should decide that shape deliberately rather than discovering it again.
+
+## Constant Evaluation And Type-System Plan - Shared File Visibility - 2026-08-22
+
+The Phase 1 evidence recorded that `constant_chain_512` was still superlinear and named
+declaration-table replacement, the module-constant declaration clone and constant normalisation as
+the likely causes. Profiling found none of those. The remaining quadratic term was one full
+`FileVisibility` copy per header, taken in two unrelated passes.
+
+### How It Was Found
+
+A `--profile profiling` build was sampled with `sample` over a local 4096-constant chain. Every one
+of the 1619 samples in the window landed inside `AstModuleEnvironmentBuilder::build`, 954 of them in
+`validate_nominal_generic_bound_surfaces` and 953 of those in `FileVisibility::clone`. A further 663
+samples were the matching drop at the end of the same loop iteration. The pass was spending
+essentially all of its time copying and freeing a visibility package it read one `TypeId` from.
+
+`AstEmitter::emit` had the same shape: a `Rc::new(visibility_for(..)?.clone())` at the top of the
+header loop, taken for every header including constants, which need no scope at all.
+
+`FileVisibility` holds eight maps keyed off the whole module's declarations, so a module with `C`
+declarations in one file paid `O(C)` per header in each pass, twice.
+
+### Change
+
+`HeaderBindingEnvironment::file_visibility_by_source` now stores `Arc<FileVisibility>` and
+`visibility_for` returns the handle. `FileVisibility::visible_declaration_paths` is itself an
+`Arc<FxHashSet<InternedPath>>`, so `ScopeContext::with_file_visibility` takes one argument and
+shares both the package and its declaration gate. Binding construction writes the gate through
+`FileVisibility::visible_declaration_paths_mut`, which holds the sole reference and never copies.
+
+`Arc` rather than `Rc` because the package is header-stage data that AST, dependency sorting and
+trait-evidence validation all read, and the header stage has no module-local ownership rule to
+lean on.
+
+### Wall Time
+
+`frontend.ast.total`, median of five runs, `RAYON_NUM_THREADS=1`, `--release` with
+`detailed_timers`, both binaries built from the same tree in the same session and measured
+interleaved.
+
+| Workload | Phase 1 | Shared visibility | Change |
+|---|---:|---:|---:|
+| `constant_chain_32` | `0.82ms` | `0.64ms` | `-22%` |
+| `constant_chain_128` | `5.09ms` | `1.31ms` | `-74%` |
+| `constant_chain_512` | `61.73ms` | `4.23ms` | `-93%` |
+| local `constant_chain_2048` | `875.44ms` | `17.06ms` | `-98%` |
+| `fold_stress` | `7.24ms` | `2.89ms` | `-60%` |
+| `type_stress` | `11.90ms` | `6.44ms` | `-46%` |
+| `environment_stress` | `10.66ms` | `4.97ms` | `-53%` |
+| `nominal_capacity_stress` | `15.43ms` | `11.11ms` | `-28%` |
+| `pattern_stress` | `4.63ms` | `3.78ms` | `-18%` |
+| `template_stress` | `3.80ms` | `3.12ms` | `-18%` |
+| `collection_stress` | `3.44ms` | `3.26ms` | `-5%` |
+| `docs` | `180.92ms` | `169.44ms` | `-6%` |
+
+Nothing measured got slower. The 2048-constant chain is a local ad-hoc fixture under `./tmp`, not a
+committed benchmark case; it exists to show the curve past the committed `512` point.
+
+### Stage Split
+
+| Metric | `chain_512` before | after | `chain_2048` before | after |
+|---|---:|---:|---:|---:|
+| `frontend.ast.total` | `68.99ms` | `4.68ms` | `902.96ms` | `17.30ms` |
+| `frontend.ast.environment` | `39.19ms` | `3.28ms` | `455.50ms` | `11.88ms` |
+| `frontend.ast.emit` | `28.79ms` | `0.52ms` | `442.88ms` | `1.69ms` |
+| `frontend.ast.finalise` | `0.96ms` | `0.83ms` | `4.42ms` | `3.57ms` |
+
+Constant setup now scales linearly across the committed chain fixtures: `0.64 / 1.31 / 4.23ms` for
+`32 / 128 / 512`, and `17.06ms` at `2048`.
+
+### Counters
+
+`ast_constant_pass_visibility_entries_cloned` was deleted with the copy it measured, as
+`ast_constant_pass_prior_constant_ids_copied` was in Phase 1. It only ever attributed the constant
+pass's own copy, which no longer exists, and it never saw the two larger copies this change
+removed. No other counter moves: the same scopes are created, they just no longer rebuild
+module-wide visibility.
+
+### Findings That Change Later Phases
+
+1. **The Phase 1 candidate list for the remaining superlinearity was wrong on all three counts.**
+   `TopLevelDeclarationTable::replace_by_path` is already one hash lookup plus an indexed store,
+   the module-constant declaration clone is `O(1)` per constant, and
+   `ast_module_constant_normalization_expressions_visited` is exactly one per constant. Phase 2
+   should treat the by-ID replacement work as a clarity and ownership change, not as a scaling fix,
+   and re-measure before claiming a scaling result from it.
+2. **Profile before choosing the next representation change.** Every counter in the constant pass
+   was already linear when this cost was found. Counters proved the pass they instrument was clean
+   and said nothing about the two passes that dominated the module. The remaining plan phases
+   should confirm their target with a profile, not with the absence of a counter.
+3. **The same clone-to-satisfy-borrow shape survives elsewhere.** The function-signature pass and
+   `unresolved_member_syntax_to_declarations` still rebuild `Rc::new(map.clone())` snapshots of
+   `resolved_type_aliases_by_path`, `generic_declarations_by_path`, `resolved_struct_fields_by_path`
+   and `nominal_type_ids_by_path` per header. That is `O(declarations)` per function, struct and
+   choice. Phases 8 and 9 own it, and `nominal_capacity_stress` and `environment_stress` are the
+   fixtures that will show it.
+4. **`docs` moved for the first time in this plan.** `-6%` with no constant-pass change confirms
+   the copy was in shared header-loop machinery, not in constant-specific code.
+
+## Constant Evaluation And Type-System Plan - Phase A Re-Baseline And Attribution - 2026-08-22
+
+Evidence-only phase. The single source change is the `constant_header_resolution` timing-guard
+scope. Everything else here is measurement.
+
+Binaries: `cargo build --release --features detailed_timers,benchmark_counters` for timing and
+counters, and `RUSTFLAGS="-C force-frame-pointers=yes" cargo build --profile profiling` with the
+same features for sampling. All timings are the median of five independent runs at
+`RAYON_NUM_THREADS=1`.
+
+### Why This Phase Existed
+
+The Phase 0 baseline was measured when per-declaration `FileVisibility` copying dominated every AST
+workload. That cost was removed in `917f7e81c`, which moved AST time by between `6%` and `98%`
+depending on the fixture. No share in the old baseline survived that, so no priority in the plan was
+evidence-backed any more.
+
+### Wall Time Baseline
+
+All values in milliseconds. `-` means the metric did not fire for that workload.
+
+| Case | `check.total` | `ast.total` | `ast.environment` | `env.constant_header_resolution` | `ast.emit` | `emit.const_template_parse` | `ast.finalise` | `finalise.module_constant` |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `docs` | 266.634 | 171.868 | 98.064 | 87.137 | 54.314 | 37.539 | 19.261 | 18.948 |
+| `one_module_kitchen_sink` | 8.507 | 2.083 | 0.770 | 0.144 | 0.830 | - | 0.475 | 0.143 |
+| `type_stress` | 12.204 | 6.452 | 4.337 | 0.000 | 1.325 | - | 0.780 | 0.269 |
+| `environment_stress` | 8.702 | 4.958 | 3.795 | 0.000 | 0.688 | - | 0.450 | 0.257 |
+| `nominal_capacity_stress` | 14.915 | 11.244 | 10.710 | 0.124 | 0.201 | - | 0.327 | 0.199 |
+| `fold_stress` | 7.078 | 2.927 | 1.545 | 1.331 | 0.638 | - | 0.712 | 0.320 |
+| `expression_rpn_churn` | 8.710 | 1.290 | 0.247 | 0.000 | 0.845 | - | 0.190 | 0.063 |
+| `template_stress` | 8.252 | 2.962 | 1.096 | 0.887 | 1.046 | - | 0.820 | 0.271 |
+| `constant_dag_churn` | 4.352 | 1.574 | 1.090 | 0.949 | 0.189 | - | 0.288 | 0.226 |
+| `constant_chain_32` | 2.289 | 0.464 | 0.285 | 0.241 | 0.071 | - | 0.101 | 0.077 |
+| `constant_chain_128` | 3.829 | 1.278 | 0.825 | 0.765 | 0.145 | - | 0.283 | 0.258 |
+| `constant_chain_512` | 9.698 | 4.212 | 2.868 | 2.733 | 0.474 | - | 0.811 | 0.779 |
+
+Repeating `docs`, `nominal_capacity_stress`, `type_stress`, `environment_stress` at the default
+thread count reproduced every figure within run-to-run noise. These are single-module or
+module-parallel workloads whose AST cost does not move with the scheduler, so no separate
+fixed-thread identity is needed for later phases.
+
+The constant chains are now close to linear in constant count. `constant_header_resolution` across
+`32 -> 128 -> 512` is `0.241 -> 0.765 -> 2.733`, so a `4x` input costs `3.2x` then `3.6x`. The
+chain superlinearity that opened this plan is gone.
+
+### The Timing Guard Was Mis-Scoped, And It Mattered
+
+The guard was declared before `resolve_constant_headers` and dropped at the end of
+`resolve_nominal_members_and_constants`, so it also billed the struct-field and choice-variant
+loops to a metric named for constant resolution. Measured on both scopes:
+
+| Case | wide guard | narrow guard | `ast.environment` |
+| --- | --- | --- | --- |
+| `docs` | 87.336 | 87.533 | 98.340 |
+| `nominal_capacity_stress` | 6.344 | 0.127 | 10.661 |
+| `type_stress` | 1.940 | 0.000 | 4.458 |
+| `environment_stress` | 1.434 | 0.000 | 3.862 |
+| `one_module_kitchen_sink` | 0.338 | 0.154 | 0.796 |
+| `constant_chain_512` | 2.712 | 2.699 | 2.917 |
+
+For `type_stress` and `environment_stress` the metric was reporting entirely borrowed time: the
+true constant cost is zero and every millisecond it showed belonged to the member-shell loops. For
+`nominal_capacity_stress` `98%` of the metric was borrowed. `docs` and the constant chains were
+unaffected, which is why the mis-scoping survived Phase 0 unnoticed - the fixtures that would have
+exposed it were read as constant-heavy precisely because this metric said so.
+
+### Nominal Member Resolution Is Quadratic
+
+`nominal-capacity-stress.moth` documents itself as a deterministic generated pattern, so the same
+pattern was regenerated at four sizes to get a scaling curve. The generator and fixtures are
+untracked under `tmp/phaseA/`. `cap-40` reproduces the committed fixture's shape and cost.
+
+| Buckets | `check.total` | `ast.total` | `ast.environment` | `env.constant_header_resolution` |
+| --- | --- | --- | --- | --- |
+| 40 | 13.363 | 9.761 | 9.295 | 0.126 |
+| 160 | 136.246 | 126.726 | 124.922 | 0.343 |
+| 640 | 1991.782 | 1955.258 | 1947.223 | 1.415 |
+| 2560 | 44010.615 | 43853.843 | 43816.283 | 6.776 |
+
+A `64x` input costs `4714x` in `ast.environment`, which is `O(n^2.03)`. Constant resolution over the
+same range is `54x`, so it is linear and is not the cause. At 2560 nominal declarations - a large
+but unremarkable module - the environment pass takes **43.8 seconds**.
+
+### Every Counter Is Linear
+
+Across the same four sizes, no counter in the frontend grows faster than input. The closest
+candidates are exactly linear:
+
+| Counter | n=40 | n=160 | n=640 | n=2560 | growth |
+| --- | --- | --- | --- | --- | --- |
+| `ast_type_resolution_calls` | 1744 | 6964 | 27844 | 111364 | `63.9x` |
+| `ast_constant_pass_side_table_entries_cloned` | 102 | 402 | 1602 | 6402 | `62.8x` |
+| `ast_scope_contexts_created` | 149 | 569 | 2249 | 8969 | `60.2x` |
+| `ast_declaration_replacements_by_path` | 65 | 245 | 965 | 3845 | `59.2x` |
+
+Type resolution is called a linear number of times. What grew is the cost of each call.
+
+`ast_constant_pass_side_table_entries_cloned` deserves its own note. It instruments the
+**once-per-module** snapshot Phase 1 hoisted into `resolve_constant_headers`, which is correct and
+linear. It has never seen the **per-header** snapshot in `constant_header_scope_context`, which is
+the quadratic one. A counter reading linear beside a quadratic wall time is not a contradiction
+when the counter is pointed at the wrong copy.
+
+### Function-Level Attribution
+
+Sampled with macOS `sample` at 1ms against the `profiling` binary, aggregated across runs.
+`samply` was tried first, through `just profile-case` and `just profile-case-symbolicated`, and
+reported `failed_raw_addresses` in both modes, matching the AUD-0002 note. `sample` attaches by
+process name and cannot catch a workload shorter than roughly 100ms, which is why the scaled
+fixture was needed rather than the committed one.
+
+**`cap-640`, call graph, one representative run.** Line numbers are post-guard-fix
+`type_resolution.rs`.
+
+| Path | inclusive samples |
+| --- | --- |
+| `resolve_nominal_members_and_constants:308` - struct-field loop | 613 |
+| ... `unresolved_member_syntax_to_declarations:1053` - build scope context | 316 |
+| ... `unresolved_member_syntax_to_declarations:1096` - drop it at function return | 293 |
+| `resolve_nominal_members_and_constants:425` - choice-variant loop | 449 |
+| ... `unresolved_member_syntax_to_declarations:1053` | 231 |
+| ... `unresolved_member_syntax_to_declarations:1096` | 216 |
+
+`609` of `613` samples in the struct-field loop, and `447` of `449` in the choice-variant loop, are
+the construction and destruction of one `ScopeContext`. Actual member parsing is in the noise.
+
+`constant_header_scope_context` deep-clones five whole-module side tables per call:
+
+```rust
+.with_resolved_type_aliases(Rc::new(self.resolved_type_aliases_by_path.clone()))
+.with_generic_declarations(Rc::new(self.module_symbols.generic_declarations_by_path.clone()))
+.with_resolved_struct_fields_by_path(Rc::new(self.resolved_struct_fields_by_path.clone()))
+.with_choice_variant_shells_by_path(Rc::new(self.choice_variant_shells_by_path.clone()))
+.with_nominal_type_ids_by_path(Rc::new(self.nominal_type_ids_by_path.clone()))
+```
+
+`resolved_struct_fields_by_path` is `FxHashMap<InternedPath, Vec<Declaration>>`, and `Declaration`
+owns an `Expression` and a `DataType`, both recursive. So the clone is deep, it is `O(module)`, and
+it happens once per nominal header. Self time confirms it:
+
+| Symbol | samples |
+| --- | --- |
+| malloc / free family, combined | ~6565 |
+| `<DataType as Clone>::clone` | 535 |
+| `_platform_memmove` | 337 |
+| `<Expression as Clone>::clone` | 308 |
+| `_platform_memset` | 137 |
+| `drop_glue<HashMap<InternedPath, Vec<Declaration>, FxBuildHasher>>` | 120 |
+| `<Vec<Declaration> as Clone>::clone` | 111 |
+| `<ExpressionKind as Clone>::clone` | 93 |
+| `drop_glue<DataType>` | 84 |
+| `drop_glue<ExpressionKind>` | 42 |
+
+Roughly `79%` of non-idle self time is the allocator and `memmove`/`memset`. The named Rust
+functions above it are the clone and drop of that snapshot.
+
+**`docs`, 25 aggregated runs.** A different shape entirely:
+
+| Symbol | samples |
+| --- | --- |
+| malloc / free family, combined | ~1988 |
+| `_platform_memmove` | 240 |
+| `core::hash::sip::Hasher::write` | 196 |
+| `_platform_memset` | 143 |
+| `hashbrown::HashMap<&_, TraitId, FxBuildHasher>::get` | 76 |
+| `ast::templates::tir::summary::accumulate_nodes` | 71 |
+| `BuildHasher::hash_one<ExternalTypeId>` (`RandomState`) | 58 |
+
+`87%` of non-idle self time is allocation, deallocation and copying, but none of the callers above
+it are the nominal path. `docs` has 72 modules, 545 constants, 5162 const templates and **2**
+structs, so the quadratic member-shell cost cannot touch it.
+
+### Findings That Change Later Phases
+
+1. **The per-header side-table snapshot in `constant_header_scope_context` is the largest single
+   defect in the frontend, and it is quadratic.** One call site, five map clones, once per nominal
+   header. It is `>99%` of the cost of the pass that contains it and `O(n^2.03)` in module size.
+   This was already written into the plan as Phase B, sized from code shape alone; the measurement
+   promotes it to first place ahead of every other performance phase.
+2. **The fix must be copy-on-write, not hoisting.** `resolve_type_declarations` writes
+   `resolved_struct_fields_by_path` and `choice_variant_shells_by_path` inside the same loop that
+   snapshots them, and headers are dependency-sorted so a later struct's fields can read an earlier
+   struct's resolved fields. A snapshot hoisted out of the loop would go stale silently. Holding
+   the tables behind `Rc` and writing through `Rc::make_mut` gives free reads, and the scope context
+   is dropped before the next write, so the builder is the sole owner at write time and the clone
+   does not happen.
+3. **`docs` and the nominal fixtures need different phases, and neither substitutes for the
+   other.** `docs` spends `87.1ms` of its `98.1ms` environment in constant header resolution with
+   `ast_expression_fold_items = 0` and `constant_fold_attempt_count = 0`. Its constant cost is
+   const-template work, not arithmetic folding. Phase D's move-only folding cannot be validated on
+   `docs`, and Phase B cannot be validated on it either.
+4. **Counters cannot find this class of defect, and this is the second time.** Every counter was
+   linear while wall time was quadratic. The rule already in the plan is now proven twice; the
+   counter that looked closest to the defect was measuring a different copy in a different pass.
+5. **`ExternalPackageRegistry` hashes with SipHash.** All fifteen of its maps use
+   `std::collections::HashMap` with the default `RandomState`, next door to
+   `datatypes/environment.rs:92` which uses `FxHashMap` for the same key type. Only the
+   `hash_one<ExternalTypeId>` samples (58, about `2%` of `docs` moth self time) are confirmed to be
+   the registry; the larger 196-sample `sip::Hasher::write` is shared across all SipHash users and
+   was not attributed. Worth confirming and fixing, but it is a small independent change and not
+   evidence for any phase in this plan.
+
+## Constant Evaluation And Type-System Plan - Phase B Copy-On-Write Side Tables - 2026-08-22
+
+Phase B removed the per-header deep clone of the environment builder's side tables. Phase A
+measured that clone at `O(n^2.03)` in module size and `>99%` of the cost of the pass containing it.
+This section records what changed and what it bought.
+
+### What Changed
+
+`AstModuleEnvironmentBuilder` now owns five side tables behind `Rc` instead of by value:
+`resolved_struct_fields_by_path`, `choice_variant_shells_by_path`, `resolved_type_aliases_by_path`,
+`nominal_type_ids_by_path` and `generic_declarations_by_path`. Every `ScopeContext` built during
+environment construction takes an `Rc::clone` handle instead of a `Rc::new(map.clone())` snapshot.
+Writers go through `Rc::make_mut`.
+
+`generic_declarations_by_path` moved out of `ModuleSymbols` into the builder at the start of
+`build`, so it has one owner and one handle rather than a copy taken per header. This also deleted
+a threaded `finish_environment` parameter that existed only because `self` was consumed before the
+map could be moved.
+
+The tables were already `Rc<FxHashMap<..>>` on the `ScopeContext` side. Only the builder held them
+by value, so the entire fix is one ownership change plus nine `Rc::make_mut` write sites.
+
+### Measured Effect
+
+Release binary built with `--features timers`, `MOTH_TIMERS=full`, `RAYON_NUM_THREADS=1`, median of
+7 runs. `before` is commit `b997e593a` built from a clean worktree; `after` is the same tree with
+Phase B applied.
+
+| case | metric | before (ms) | after (ms) | change |
+| --- | --- | --- | --- | --- |
+| `nominal_scaling_320` | `ast.environment` | `470.036` | `12.150` | **`38.7x` faster** |
+| `nominal_scaling_320` | `check.total` | `491.138` | `32.575` | `15.1x` faster |
+| `type_stress` | `ast.environment` | `4.276` | `1.226` | **`3.49x` faster** |
+| `type_stress` | `ast.total` | `6.356` | `3.303` | `1.92x` faster |
+| `environment_stress` | `ast.environment` | `4.268` | `1.647` | **`2.59x` faster** |
+| `environment_stress` | `ast.total` | `5.526` | `3.125` | `1.77x` faster |
+| `constant_chain_512` | `ast.total` | `4.130` | `4.138` | unchanged |
+| `docs` | `ast.environment` | `96.754` | `97.171` | unchanged |
+| `docs` | `check.total` | `263.381` | `265.236` | unchanged |
+
+`docs` is unchanged, and that is the expected result rather than a disappointment. Phase A recorded
+that `docs` has 72 modules, 545 constants and **2** structs, so a cost that scales with the number
+of nominal headers was never its cost. Reporting Phase B as a win for `docs` would have required
+ignoring what Phase A already measured.
+
+`constant_chain_512` is unchanged for the same reason in the other direction: it has no nominal
+headers, so it never paid the per-header snapshot. It is in the table to show the change is inert
+where it should be inert.
+
+### Growth Exponent
+
+`just bench-scaling`, the lane added in the hardening slice, measures the same pass in-process:
+
+| series | metric | before | after |
+| --- | --- | --- | --- |
+| `nominal_members` | `frontend.ast.environment` | `n^1.86` | `n^0.98` |
+| `constant_chain` | `frontend.ast.total` | `n^0.82` | `n^0.86` |
+
+The `nominal_members` points after the change are `5.125 / 10.037 / 19.609 / 39.147 ms` for sizes
+`40 / 80 / 160 / 320`. Each doubling of input now costs almost exactly a doubling of time. The pass
+is linear.
+
+`just bench-scaling` joined `just validate` with this phase. It was deliberately kept out of the
+gate while it failed, because a gate must pass on every commit.
+
+### Findings
+
+1. **`Rc::make_mut` never clones on these paths, and the scaling lane is the proof.** The design
+   depends on every `ScopeContext` handle being dropped before the next write, so the builder is
+   the sole owner at write time. If a handle ever escaped a loop iteration, `make_mut` would clone
+   on every write and the quadratic cost would return silently, with no test failing and no counter
+   moving. `n^0.98` is what rules that out, and the lane in `just validate` is what keeps ruling it
+   out. This is the first defect class in this repository with a standing automated guard.
+2. **The counter that was supposed to instrument this was deleted, not repointed.**
+   `ConstantPassSideTableEntriesCloned` measured the once-per-module session snapshot, which was
+   linear, while the real copy next door was quadratic. Phase B turned that snapshot into an
+   `Rc::clone` as well, so no copy survives for the counter to instrument. A counter reporting a
+   number for work that no longer happens is worse than no counter.
+3. **Hoisting turned out to be unnecessary everywhere, not just at the quadratic site.** The plan
+   held hoisting in reserve for the function-signature and trait-requirement passes, which read
+   tables they never write. Once a handle costs a refcount, a shared handle is strictly better than
+   a hoisted snapshot: same cost, no staleness question to answer. Both passes take handles.
+4. **`generic_declarations_by_path` was not read-only, and assuming it was broke seven tests.**
+   The first version of this change moved the map out of `ModuleSymbols` at the start of `build` on
+   the belief that every environment pass reads it and none writes it. Import projection writes it:
+   it registers metadata for each imported generic nominal, under both the local and the internal
+   path. Taking the map early therefore left that writer filling a map nobody read, and imported
+   generic types lost their parameter metadata - `expected T, found Int` on generic receiver
+   boundaries, and `Type 'Wrapper' does not accept generic arguments` on a generic struct facade.
+   The integration suite caught all seven; no unit test did, because the failure only appears
+   across a module boundary. The fix routes that writer through the same handle, which is the shape
+   the rest of the phase already used.
+5. **The `module_constants` linear scan is gone, and it was a scan of the wrong container.**
+   `is_explicit_compile_time_constant` scanned `Vec<Declaration>` once per fixed-capacity check
+   during body emission. `AstModuleLookups` now carries `module_constant_paths`, the same
+   `Rc<FxHashSet<InternedPath>>` the builder already maintained, and the check is a hash lookup.
+   The two containers are written by one method so they cannot drift. This is not visible in the
+   table above because no committed fixture combines many module constants with many fixed-capacity
+   expressions; `docs` has the constants and not the capacities.
+
+The measurements in this section were taken before finding 4 was fixed. The fix moves two `insert`
+calls between two maps and changes no allocation on any measured path, so the numbers stand; the
+scaling lane was re-run afterwards and reports the same `n^0.98`.
+
+## Constant Evaluation And Type-System Plan - Phase C Folded-Value Authority - 2026-08-23
+
+### What changed
+
+Phase C (commit `6aa8aa513`) replaced `AstModuleLookups::module_constants: Vec<Declaration>` and
+`Ast::module_constants` with one module-local `ConstValueStore`: an indexed value graph plus one
+row per authored module constant. Public-interface projection, HIR constant lowering, HIR
+references and const-record field access, generated materialisation, project-config extraction and
+`.mtf` content extraction all read that store through one borrowed postorder visitor. The recursive
+production normalizer, the AST-expression-to-HIR constant walker, the string-keyed
+`const_templates_by_name` side channel and the duplicate declaration ownership are gone. The TIR
+reducer now produces the scalar emission and the structured projection from the same fold, so a
+template-valued constant is folded once instead of twice.
+
+This review slice removed three test-only parallel paths the phase left behind, restored one
+diagnostic boundary it had changed, and deleted a dead row field. Details below.
+
+### Measured
+
+Release `--features timers`, `RAYON_NUM_THREADS=1`, median of 7, isolated `CARGO_TARGET_DIR` for
+each side. Before is `e782e79d8` (Phase B), after is `6aa8aa513` (Phase C).
+
+| workload | metric | before | after | change |
+| --- | --- | --- | --- | --- |
+| `docs` | `frontend.ast.total` | 170.271ms | 167.950ms | -1.4% |
+| `docs` | `finalise.module_constant` | 18.536ms | 17.607ms | -5.0% |
+| `docs` | `public_interface.project` | 1.152ms | 0.533ms | **-53.7%** |
+| `docs` | `frontend.hir` | 2.814ms | 3.349ms | +19.0% |
+| `docs` | `command.check.total` | 265.293ms | 262.741ms | -1.0% |
+| `constant_chain_512` | `frontend.ast.total` | 4.416ms | 4.216ms | -4.5% |
+| `constant_chain_512` | `frontend.hir` | 0.467ms | 0.395ms | -15.4% |
+| `constant_chain_512` | `command.check.total` | 10.216ms | 9.810ms | -4.0% |
+| `fold_stress` | `frontend.ast.total` | 2.999ms | 2.887ms | -3.7% |
+| `template_stress` | `frontend.ast.total` | 3.059ms | 3.008ms | -1.7% |
+
+The Phase C checkpoint recorded no wall-time claim because the stored benchmark comparison set had
+changed. That was the right call for `just bench-check`, but it left the phase unmeasured. Measured
+directly against a rebuilt `e782e79d8`, Phase C is a small consistent win everywhere and a large one
+in public-interface projection, which no longer walks an expression tree or consults a
+string-keyed template map.
+
+`docs` `frontend.hir` is the one metric that moved the wrong way: `+0.5ms` on a `263ms` compile.
+`lower_module_constants` collected `(InternedPath, ConstValueId)` pairs into a vector before the
+loop to release the store borrow, so it cloned each path twice where the old code cloned each
+declaration once. It is real and it is recorded rather than rounded away.
+
+**Partially recovered before Phase D.** The store now leaves `HirBuilder` once for the whole pass
+instead of once per value, and the loop reads borrowed rows, so the owned `Vec` and its path clones
+are gone. Measured the same way, median of 7 against a rebuilt `28ab27f0a`:
+
+| workload | metric | before | after | change |
+| --- | --- | --- | --- | --- |
+| `docs` | `frontend.hir` | 3.36ms | 3.20ms | -4.8% |
+
+That is `-0.16ms` of the `+0.535ms`. The path clones were about a third of the regression; the rest
+is elsewhere in the new lowering path and is not worth chasing at `3ms` on a `260ms` compile. The
+point of measuring was to find out how much the clones actually cost, and the answer is: less than
+the attribution implied.
+
+### Findings
+
+1. **The phase's own acceptance box was measurable and was not measured.** `each module constant
+   has exactly one folded-value owner` is a structural claim and it holds. But every other box in
+   the phase - public projection consuming the store without deep intermediate clones, the deleted
+   conversion walkers - has a wall-time consequence, and a rebuilt before-binary answers it in
+   about twenty minutes. A changed `bench-check` comparison set is a reason not to quote
+   `bench-check`, not a reason to leave a deletion phase unquantified.
+
+2. **A user diagnostic became an internal compiler error, and only a deleted test knew.**
+   Preparation returns a `final_value_kind` and an `outcome` independently: a `RenderableString` or
+   `WrapperTemplate` template can still carry `TemplatePreparationOutcome::Runtime`. The old
+   `normalize_module_constant_template_expression` branched on the outcome and rejected the runtime
+   case with `InvalidTemplateStructureReason::NonFoldableConstTemplate`. Phase C's replacement
+   branched on the kind alone, so a runtime-dependent renderable or wrapper constant fell into the
+   "must have folded" arm and produced `CompilerError` - an internal invariant failure where a
+   structured source diagnostic belongs. The regression was invisible because the only test that
+   covered it had been retargeted at a retained `#[cfg(test)]` copy of the old function, whose own
+   assertion message names the regression: *"must not report the old internal fold transformation
+   error"*. Rejection now keys off whether preparation published the template at all, which is the
+   fact that actually distinguishes a constant value from a runtime one.
+
+3. **Three test-only parallel paths were retained in production files instead of the dead code
+   being deleted.** Each has the same shape: production drops a path, its unit tests would fail, so
+   the path survives under `#[cfg(test)]` and the tests keep passing against code nothing ships.
+   - `HirBuilder::module_constant_expressions_by_name` plus `lower_test_module_constant_expression`
+     - a second module-constant lowering path that chases references between constants and carries
+     its own cycle guard. Production module constants reach HIR as an already-folded acyclic value
+     graph containing no references. Its one test, `rejects_cyclic_module_constant_dependencies`,
+     asserted a rule that Stage 3 owns and rejects as `MOTH-RULE-0053` (*"Constant initializer
+     references same-file constant 'b' before it is declared"*), with 23 committed integration
+     cases. Deleted; the rule keeps its real owner.
+   - `finalization/normalize_constants.rs` - an entire module retained as, in its own words, a
+     "Test-only template normalization compatibility helper". Its two tests now drive the
+     production owner, and finding 2 is what that retargeting immediately exposed.
+   - `ConstValueResolver::resolve_explicit_top_level_constant` - the production explicit-constant
+     fact builder, superseded by store-derived facts and kept `#[cfg(test)]` for two tests. One
+     asserted a rule the store now satisfies structurally; the other moved next to the projection
+     owner it actually tests.
+
+4. **The compact row carried a field no consumer read.** `ConstValueRow` was specified as
+   `{ declaration: DeclarationId, value: ConstValueId }` and built as such, but every consumer -
+   config extraction, public projection, HIR, generated materialisation, `.mtf` extraction - joins
+   a module constant by its defining `InternedPath`, so the store also kept a parallel
+   `row_paths: Vec<InternedPath>`. Nothing ever read the `DeclarationId`. Removing one dead
+   `declaration_table.get_by_path(path).is_some()` guard in const-fact collection made the whole
+   chain visible to `-D warnings` at once: the row field, `iter_module_constant_rows`,
+   `TopLevelDeclarationTable::iter_with_ids` and a `#[cfg(test)] DeclarationId::from_index`, all
+   added by the phase and all unread. The row is now `{ path, value }` and
+   `environment/declaration_table.rs` is byte-identical to its pre-Phase-C state.
+
+5. **A whole `TypeEnvironment` was deep-cloned on the success path to be available in an error
+   closure.** `let materialisation_type_environment = type_environment.clone();` ran for every
+   module so that a `map_err` arm could attach type context to a diagnostic. Cloning inside the
+   closure costs the same on the error path and nothing on the success path. In a phase whose
+   purpose is deleting duplicate representations, an unconditional deep clone of the module type
+   environment is the wrong direction.
+
+6. **A `RefCell` guard outlived its use by roughly 250 lines.** The `template_ir_store.borrow()`
+   taken for store construction was a bare `let` in `AstFinalizer::build`, so the `Ref` lived to the
+   end of the function - across const-fact collection and generated-materialisation preparation,
+   both of which hold the same `Rc<RefCell<TemplateIrStore>>`. Neither takes it mutably today, so
+   nothing panicked, but the guard is now scoped to the block that needs it.
+
+### Attribution: what neither B nor C moved
+
+`docs` remains the only large real workload, and its cost is now sharply concentrated:
+
+| stage | ms | share of `ast.total` |
+| --- | --- | --- |
+| `ast.environment.constant_header_resolution` | 86.135 | 51.3% |
+| `ast.emit.const_template_parse` | 36.772 | 21.9% |
+| `ast.finalise.module_constant` | 17.607 | 10.5% |
+| `ast.total` | 167.950 | - |
+
+Phase A finding 5 already recorded the `87.1ms`; this confirms it survived both Phase B and Phase C
+essentially untouched (`-0.2%` across C), and quantifies its share: **constant header resolution is
+half of the AST time and a third of the whole `docs` check.** Phase A also already established that
+Phase D cannot be validated on `docs`, because `docs` has `ast_expression_fold_items = 0` - its
+constant cost is const-template work, not arithmetic folding. Taken together those two facts mean
+the plan's remaining phases do not target the single largest frontend cost in the repository. That
+is a sequencing decision, not an implementation defect, and it is recorded here so the next phase
+starts from it rather than rediscovering it.
+
+---
+
+## Constant Evaluation And Type-System Plan - Phase D Attribution And Fold-Cache Deletion - 2026-08-23
+
+Phase D opened by attributing the `86ms` `constant_header_resolution` cost the previous section left
+standing, rather than proceeding on the plan's assumed weighting. The attribution changed what the
+phase should do, so it is recorded before the work.
+
+### Method
+
+Release `profiling` profile with `detailed_timers`, `RAYON_NUM_THREADS=1`, `moth check docs`.
+Attribution came from direct `Instant` probes around the three regions of
+`ConstantResolutionSession::resolve_constant_header`, accumulated across all `545` module constants
+in `docs`. The probes were temporary and are not in the tree. Timing deltas come from interleaved
+A/B runs of two binaries built in isolated target directories - a `git worktree` at the before
+commit and the working tree - alternating one run each, median of 9.
+
+### Reading counters: one line per module, not one per project
+
+`AstCounter` storage is a thread-local. `Ast::build` resets it at the start of every module and
+publishes it at the end, and `collector::record_counter` *pushes* each publication rather than
+accumulating it. `MOTH_BENCH counter` therefore emits one line per counter **per module**. On
+`docs` that is 73 blocks. Reading the first block reads one module: it reports
+`ast_constants_resolved = 13` where the project total is `545`, and `ast_tir_nodes_created = 0` for
+a documentation site built entirely from templates.
+
+Every counter figure quoted for a multi-module workload must be summed across its lines. The
+single-module stress fixtures are unaffected, so the `960/960` and `392/392` fold ratios recorded in
+the Phase A section stand as written.
+
+### Where the 86ms goes
+
+| region | total | share |
+| --- | --- | --- |
+| `constant_header_scope` (`ScopeContext::new` + synthetic `AstModuleLookups`) | 6.23ms | 7.3% |
+| `resolve_declaration_syntax` (parse and fold the initializer) | 71.60ms | 83.8% |
+| `const_value_kind_with_template_classifier` | 0.055ms | 0.06% |
+| unattributed (warning drain, loop, timing guard) | ~7.5ms | ~8.8% |
+
+Three consequences:
+
+1. **The synthetic-context candidate is 7%.** The Phase C section named `ScopeContext::new` - which
+   builds a complete `AstModuleLookups` of empty maps that the constant session then overwrites - as
+   a visible candidate, and said to measure it rather than assume it accounted for the `86ms`. It
+   accounts for `6.2ms`. It remains worth deleting for clarity; it is not a performance phase.
+
+2. **This is not type-resolution or diagnostic-spelling cost.** `docs` runs
+   `ast_type_resolution_calls = 605` against `545` constants - one per constant. Phase D's
+   lazy-diagnostic block stands on its own merits, but the claim that it was "the only part of the
+   remaining plan that touches the code this cost runs through" was wrong. The code this cost runs
+   through is the template parser and the TIR fold reducer.
+
+3. **The remaining 71.6ms is template output amplification.** `docs` parses `894KB` of template text
+   and folds it into `9.88MB` of output over `10853` folds, interning once per fold. Nested
+   templates re-emit and re-intern their whole subtree at each enclosing level, so the innermost
+   text is copied once per level of nesting - an 11x amplification from parsed text to folded
+   output. That belongs to the template plan, not this one.
+
+### The TIR fold cache never hit
+
+`tir/fold_cache.rs` memoised `fold_exact_view` on `(TirViewIdentity, loop iteration limit,
+bindings-empty)`. Hit rates across every committed template workload:
+
+| workload | fold attempts | hits |
+| --- | --- | --- |
+| `docs` | 10853 | 0 |
+| `speed_test` | 285 | 1 |
+| `template_stress` | 78 | 0 |
+| `template_render_plan_churn` | 51 | 0 |
+| `one_module_kitchen_sink` | 7 | 0 |
+| `code_highlighter_stress` | 1 | 0 |
+| **total** | **11275** | **1** |
+
+The cache was not broken. A repeated child reference inside one template does hit, and a unit test
+proved exactly that. Real source simply almost never folds the same exact view twice. What it cost
+on every fold was a `HashMap` allocation per fold context at three construction sites, a key
+construction, a hash and probe, and a `TemplateFoldResult` clone on insert.
+
+One intermediate experiment is worth not repeating: widening the cache to process lifetime aborts
+the compiler with an absurd allocation request. `TirViewIdentity` is **module-local**, so a root id
+minted in one module resolves against another module's store. Any cache on this key is bounded by
+one `TemplateIrStore`. Rerunning the experiment at module lifetime still produced `0` hits on
+`docs`, which is what settled the deletion.
+
+The cache, its key, its module, its two counters and the per-fold result clone are deleted.
+
+### Measured
+
+Interleaved A/B against a rebuilt `bed00e0bf`, isolated target directories, median of 9,
+`RAYON_NUM_THREADS=1`.
+
+`docs`:
+
+| metric | before | after | delta | pct |
+| --- | --- | --- | --- | --- |
+| `ast.total` | 168.273 | 166.712 | -1.562 | -0.93% |
+| `ast.environment` | 96.472 | 95.330 | -1.141 | -1.18% |
+| `ast.environment.constant_header_resolution` | 86.289 | 85.169 | -1.119 | -1.30% |
+| `ast.emit` | 54.102 | 53.444 | -0.658 | -1.22% |
+| `ast.emit.const_template_fold` | 3.087 | 2.666 | -0.422 | -13.66% |
+| `ast.finalise` | 17.613 | 17.644 | +0.031 | +0.18% |
+
+`template-stress.moth`: `ast.total` `3.043 -> 2.875ms` (`-5.53%`), `ast.environment` `-3.49%`,
+`ast.emit` `-3.27%`.
+
+A caution on method, learned here: two sequential builds of the same tree in the same target
+directory produced `docs` `ast.total` readings `2ms` apart, enough to invert the sign of this
+result. Only the interleaved two-binary comparison is trustworthy at this magnitude.
+
+### Found and not fixed
+
+`TemplateIrSummary::estimated_output_bytes` under-predicts by about `3x`, structurally.
+`record_text_node` adds the node's own bytes; `record_child_template` adds nothing, so a parent's
+estimate excludes every child's output. On `docs`: estimated `3.24MB`, actual `9.88MB`, recorded
+miss `6.63MB`. `FoldOutputState::with_capacity` sizes the fold buffer from that number, so
+template-heavy folds regrow their buffers. Propagating child estimates is template-plan work, and
+the win is bounded by the reallocation cost rather than by the `6.63MB` itself. Recorded so it is
+not re-derived from the counters.
+
+### The advisory constant environment is not a hot path
+
+The Phase C review raised `ConstFactCollector` as a Phase D target: it reconstructs every
+substitutable module constant into a rich `Expression`, keeps those in `module_explicit_env`, and
+clones the whole environment for every function body and every nested `if`, block and scope. The
+plan gained a work block for it. It was instrumented before being changed, and the instrumentation
+retired it.
+
+`docs`, 545 module constants across 73 modules:
+
+| region | total |
+| --- | --- |
+| `collect_explicit_top_level_facts` | 0.497ms |
+| of which `expression_for_store_value` rebuilds (545) | 0.090ms |
+| `collect_private_and_body_local_facts` (every scope clone) | 0.105ms |
+| **`ConstFactCollector::collect`** | **0.60ms of a 168ms AST build - 0.36%** |
+
+Environment copying across committed fixtures, from the two durable counters added for this
+checkbox:
+
+| workload | env clones | entries copied |
+| --- | --- | --- |
+| `docs` | 78 | 640 |
+| `speed_test` | 55 | 2654 |
+| `deep_scope_churn` | 26 | 260 |
+| `one_module_kitchen_sink` | 18 | 136 |
+| `constant_dag_churn` | 2 | 176 |
+
+The reason the pathological shape does not appear is that `module_explicit_env` is **per module**.
+`docs` has 545 constants but 73 modules, so an environment averages 8 entries, not 545. The
+*many visible constants x many lexical scopes* shape needs both in one module, and no committed
+fixture has it. Manufacturing one would prove a cost the compiler does not pay.
+
+The block stays in the plan as a single-representation deletion - two representations of one
+already-folded value is still worth removing - but it is no longer a performance item, and the
+counters keep that claim re-verifiable instead of resting on this paragraph.
+
+### Move-only folding: the `1:1` diagnostic waste is gone, and the control run refuses the wall-time claim
+
+Method: counters from a `profiling` build with `benchmark_counters`, summed across every module
+line. Timings interleaved against a rebuilt `a1cc58cf2` in isolated `CARGO_TARGET_DIR`s from a
+`git worktree`, `RAYON_NUM_THREADS=1`, median of 9 runs (7 for `docs`).
+
+Three deletions in the AST expression path:
+
+- `constant_fold` takes `Vec<ExpressionRpnItem>` by value. Every operand and operator either moves
+  onto the fold stack or moves back into the runtime result; the `to_owned()` per item is gone.
+- `evaluate_expression` pops the sole folded operand instead of cloning `stack[0]`.
+- `ExpressionResultType` is deleted. It paired a `TypeId` with a `DataType` spelling and was built
+  once per RPN item. Every operator policy already decided on `TypeId` alone, and the spelling had
+  exactly one consumer - the partial-fold runtime node, which now builds its own. The typing stack
+  is `Vec<TypeId>`.
+
+| workload | fold items | operand clones before | after | materialisations before | after |
+| --- | --- | --- | --- | --- | --- |
+| `fold_stress` | 960 | 780 | 0 | 960 | 0 |
+| `speed_test` | 804 | 613 | 0 | 780 | 41 |
+| `type_stress` | 81 | 54 | 0 | 75 | 25 |
+| `template_stress` | 21 | 13 | 0 | 21 | 5 |
+| `constant_chain_512` | 1533 | - | 0 | - | 0 |
+
+`ast_expression_operand_clones` was kept rather than deleted, with its meaning narrowed to "RPN
+items copied whole so a caller can keep its pre-fold input". Two template callers still do that,
+because their non-folding outcome rebuilds a runtime node from the items as they stood before the
+fold. Both are `0` on every committed fixture, and both now return the surviving expression by
+move rather than cloning it.
+
+**The wall-time A/B is reported and then withdrawn, on the strength of its own control.**
+
+| case | metric | before | after | delta |
+| --- | --- | --- | --- | --- |
+| `constant_chain_512` | `ast.total` | 4.088ms | 4.025ms | -1.55% |
+| `constant_chain_512` | `constant_header_resolution` | 2.619ms | 2.506ms | -4.31% |
+| `speed_test` | `ast.total` | 12.092ms | 12.128ms | +0.30% |
+| `docs` (control) | `ast.total` | 166.441ms | 165.474ms | -0.58% |
+
+`docs` executes none of the changed code. Its `ast_expression_fold_items`,
+`ast_expression_typed_stack_items` and `ast_diagnostic_data_type_materialisations` are all `0`,
+before and after. It still moved `-0.58%`, a third of the effect measured on the fixture that
+exercises the change hardest. A control that cannot move, moving by that much, means the treatment
+effect is below the noise floor of these fixtures. The improvement is therefore **counter-verified
+only**, which is what the plan permitted for this phase from the start. The table above is kept
+because a reader who re-runs it will get these numbers and should know they were not the basis of
+the claim.
+
+**Found while measuring: every `docs` expression is a single-operand fast path.**
+`ast_expression_typed_stack_items` is `0` across all 73 modules while
+`ast_expression_ordering_input_items` is `1322`. Operator typing and constant folding never run on
+the largest real workload. This bounds what is left of the typed-postfix work: deleting the second
+RPN walk cannot help `docs`, and the fixtures where it would help are the sub-5ms ones the control
+run just showed are unmeasurable.
+
+### The advisory constant environment now holds one representation
+
+Follow-on to the section above, which measured this path at 0.6ms of a 168ms `docs` AST build and
+demoted it from a performance item to a deletion. No wall-time claim is attached to this change,
+and none should be.
+
+`ConstValueEnvironment` was `FxHashMap<InternedPath, Expression>`, rebuilt from the store for every
+module constant before any function body was walked, then copied whole into every nested lexical
+scope. It is now a shared `Rc` module base of `ConstValueId` plus a per-scope overlay holding only
+the bindings that scope introduced itself. A module constant therefore has exactly one
+representation - the store's - until a reference actually materialises one.
+
+| workload | env clones | entries copied before | after |
+| --- | --- | --- | --- |
+| `docs` | 78 | 640 | 0 |
+| `speed_test` | 55 | 2654 | 14 |
+| `deep_scope_churn` | 26 | 260 | 0 |
+| `constant_dag_churn` | 2 | 176 | 0 |
+
+The eager rebuild goes with it. `docs` built 545 throwaway `Expression`s per module finalization
+and now builds one per reference that needs one. `ConstValueResolver::expression_for_store_value`,
+the pass-through wrapper that existed only for that eager loop, is deleted.
+
+`expression_for_resolution` itself could not be deleted, and the reason is structural rather than
+incidental: the advisory resolver substitutes constants into `ExpressionRpnItem::Operand` and hands
+them to `constant_fold`, which is an `Expression` interface. Making the fold evaluator consume
+store values directly is a store-lifecycle change the plan puts outside this phase.
+
+Coverage gap found and closed: no test covered a body-local declaration that references a module
+constant - exactly the path this change reroutes. There are now two, a bare reference and an
+arithmetic expression that folds over one.
+
+### Type resolution is not a hot path, including on the fixture that calls it 13,924 times
+
+The lazy-diagnostics block was the last part of the Phase D plan still described as performance
+work, so `resolve_type` was instrumented before any of it was started. The probe is
+reentrancy-safe - it accumulates only non-nested entries - so the recursive calls a generic
+instance makes are counted once, inside their top-level entry.
+
+| fixture | `ast_type_resolution_calls` | `resolve_type` total | enclosing stage |
+| --- | --- | --- | --- |
+| `nominal_scaling_320` | 13924 | 489µs | 38.68ms `ast.environment` (1.3%) |
+| `docs` | 605 | ~20µs summed over 73 modules | 168ms `ast.total` |
+| `type_stress` | 698 | 21.7µs | ~3ms `ast.total` |
+
+About 35ns a call. `nominal_scaling_320` was the promising case: it is the fixture the
+`nominal_members` scaling series budgets, and it makes 23x the calls `docs` does. It still comes
+out at 1.3% of the stage it runs in. Whatever makes `ast.environment` cost 38.68ms there, it is
+not `resolve_type`.
+
+> **Corrected below — see "Phase E attribution".** The `nominal_scaling_320` row is probe-inflated.
+> That stage is 12.28ms, not 38.68ms: the probe producing the 489µs cost roughly three times the
+> function it measured and inflated its own denominator. `resolve_type` is up to 4.0% of the stage
+> there, not 1.3%. The conclusion holds; the number does not. The `docs` and `type_stress` rows are
+> unaffected, because their denominators are thousands of times the probe cost.
+
+One deletion from the block did land, because it was named concretely and was a representation
+mismatch rather than a guess: `TypeResolutionContextInputs` carried `visible_declaration_ids` as a
+borrowed set, so entering field-default evaluation had to copy every visible path into a fresh
+`Arc`. It now carries the handle the scope already stores, and shares it.
+
+The rest of the block - splitting the broad optional inputs shape into explicit views, named
+constructors, `TypeId`-first returns, borrowing resolved aliases and signatures - is left open and
+marked for re-proposal rather than execution. There are 59 clone sites across `type_resolution/`,
+and auditing them for read-only borrows is an unbounded refactor with nothing measured behind it.
+
+**The pattern across this plan's measurements is worth stating on its own.** Every candidate
+identified by reading the code - the synthetic constant scope, the TIR fold cache, the advisory
+constant environment, the diagnostic materialisations, type resolution - came in small or at zero.
+The one cost that is large, template output amplification at 71.6ms of an 86ms pass, was found only
+by measuring. A future phase should instrument before it plans, not after.
+
+## Phase E attribution: `ast.environment` on `nominal_scaling_320`
+
+Method: `--profile profiling`, `RAYON_NUM_THREADS=1`, median of nine for stage timings, mean of the
+warm runs of seven for probe attribution (the first run of each series is discarded as cold; it runs
+about `1.5ms` high on this stage). Probes were temporary and are not in the committed tree.
+
+### Correction: the `38.68ms` figure was the measuring probe
+
+The Phase D results section recorded `ast.environment = 38.68ms` on this fixture and pointed Phase E
+at it. That number does not reproduce. On a clean tree the stage is **`12.28ms`** and
+`frontend.ast.total` is `15.51ms`.
+
+Three candidate explanations were tested before the probe was accepted as the cause:
+
+| hypothesis | test | result |
+| --- | --- | --- |
+| counters build inflates it | rebuilt with `detailed_timers,benchmark_counters`, isolated target dir | `12.33ms` - not it |
+| the Phase D visibility-set change landed after the measurement | interleaved A/B, nine pairs, worktree built at the parent commit `8f4c01b88` | before `12.28ms`, after `12.28ms` - not it |
+| the temporary `resolve_type` probe was compiled into that binary | the only remaining difference; `13924` calls at roughly `1.9us` of probe cost accounts for the missing `26ms` | accepted |
+
+The `489us` and the `38.68ms` in the finding-8 table came from the same instrumented binary, so the
+probe inflated its own denominator. `resolve_type` is up to `4.0%` of the stage, not `1.3%`. The
+conclusion - type resolution is not a hot path - survives; the number Phase E was aimed at does not.
+
+The rule this earns: **an attribution probe must be cheap relative to the function it measures, or
+it corrupts the denominator as well as the numerator.** Place probes per-pass, not per-call, unless
+per-call cost has been shown negligible. The Phase E probe below runs 24 marks per module.
+
+### Where the `12.28ms` goes
+
+Probe total reconciles with the stage to within `0.5%`, so nothing is unattributed.
+
+| step | ms | share |
+| --- | --- | --- |
+| `resolve_nominal_members_and_constants` | 7.39 | 58.1% |
+| `register_nominal_shells` | 4.61 | 36.3% |
+| `validate_nominal_generic_bound_surfaces` | 0.58 | 4.6% |
+| the other 21 steps combined | 0.11 | 0.9% |
+
+Every import projection, alias resolution, trait-definition pass, function-signature pass,
+receiver-catalog build, trait-evidence validation and public-surface build in this stage is together
+under one percent of it.
+
+One level down. The choice rows contain the payload rows, because
+`unresolved_choice_variants_for_header` calls `unresolved_member_syntax_to_declarations` for record
+payloads - an overlap that first showed up as an unreconcilable total and was resolved by splitting
+the slots on member context.
+
+| | ms | calls |
+| --- | --- | --- |
+| `member_shells:Allow:StructField` | 3.09 | 320 |
+| `member_shells:Strict:StructField` | 2.36 | 320 |
+| `choice_shells:Allow` *(contains the row below)* | 1.33 | 80 |
+| `member_shells:Allow:ChoicePayload` | 1.32 | 240 |
+| `choice_shells:Strict` *(contains the row below)* | 1.16 | 80 |
+| `member_shells:Strict:ChoicePayload` | 1.15 | 240 |
+| `resolve_constructor_shells_for_constants` | 1.27 | 1 |
+| `resolve_struct_field_types` | 0.64 | 320 |
+| `resolve_choice_variant_payload_types` | 0.18 | 160 |
+| `resolve_constant_headers` | 0.05 | 1 |
+| `build_generic_parameter_scope` | 0.015 | 800 |
+
+**Member-shell construction across both passes is `7.94ms` of `12.70ms` - `62.5%`.** The type
+resolution those shells exist to feed is `0.82ms`, `6.5%`. The scaffolding costs `9.7x` what the
+work costs.
+
+This is the first candidate in this plan that measuring has confirmed rather than retired. Every
+earlier one - the synthetic constant scope, the TIR fold cache, the advisory environment, the
+diagnostic materialisations, type resolution - came in small or at zero.
+
+### A second target, not in the phase's work items
+
+`constant_header_scope_context` is `2.82ms` over `1120` calls - `2.5us` each, `22%` of the whole
+stage - called once per member-shell entry, so twice per header.
+
+| | ms | share of the 2.82ms |
+| --- | --- | --- |
+| `ScopeContext::new` | 1.19 | 42% |
+| the 17-call `with_*` builder chain | 1.13 | 40% |
+| `header.canonical_source_file` | 0.37 | 13% |
+
+The chain is `~59ns` per `with_*`, which is a large-struct move rather than the `Rc::clone` each
+method nominally performs: `ScopeContext` carries two `FxHashSet`s, three `Vec`s and a dozen handles
+inline, and every `with_*` takes it by value and returns it.
+
+Retaining one shell per member halves the call count but does not touch the per-construction cost,
+and the two passes cannot trivially share one context because the tables it clones
+(`resolved_struct_fields_by_path`, `choice_variant_shells_by_path`) are rewritten between them. This
+needs its own before/after.
+
+## Phase E first slice: the per-scope lookup scaffold
+
+Commit `19340ca29`. `ScopeContext::new` built a synthetic empty `AstModuleLookups` on every call -
+roughly thirty heap allocations, including a fresh `StyleDirectiveRegistry::built_ins()` with eight
+owned directive names - and every field it seeded into `ScopeShared` was overwritten by the `with_*`
+chain the caller ran next. One shared empty package now serves every scope.
+
+Interleaved A/B against a worktree build of `3b811906a`, isolated `CARGO_TARGET_DIR` per side,
+`--profile profiling`, `RAYON_NUM_THREADS=1`, median of ten alternating runs.
+
+### `nominal_scaling_320`
+
+| metric | before | after | delta | ratio |
+| --- | --- | --- | --- | --- |
+| `frontend.ast.environment` | 12.319 | 9.373 | -2.946 | 1.31x |
+| `frontend.ast.total` | 15.504 | 12.677 | -2.827 | 1.22x |
+| `frontend.ast.emit` | 1.119 | 1.133 | +0.014 | 0.99x |
+| `frontend.ast.finalise` | 2.030 | 2.103 | +0.073 | 0.97x |
+| `frontend.bind_headers` (control) | 1.156 | 1.151 | -0.005 | 1.00x |
+| `frontend.order_declarations` (control) | 2.018 | 2.050 | +0.031 | 0.98x |
+
+`bind_headers` and `order_declarations` build no scope contexts. They are the only control
+available for a change to a universal constructor: no fixture avoids executing one.
+
+### `docs`
+
+| metric | before | after | delta | ratio |
+| --- | --- | --- | --- | --- |
+| `frontend.ast.environment` | 95.514 | 93.922 | -1.592 | 1.02x |
+| `frontend.ast.total` | 166.374 | 163.883 | -2.490 | 1.02x |
+| `frontend.module.semantic_total` | 211.102 | 208.943 | -2.159 | 1.01x |
+
+The gap between `1.31x` and `1.02x` is the reason for the attribution below.
+
+### A withdrawn intermediate figure
+
+The first reading of this change was `12.25ms` to `4.55ms`. It was measured on a binary with `53`
+failing unit tests: the fixture was erroring out on `CapacityNotConstant` and skipping most of the
+stage. The figure above is from the green build. A large unexplained win is evidence of a bug
+before it is evidence of a win.
+
+## Real-project attribution: `ast.environment` on `docs`
+
+`73` modules, `545` constant headers. Per-pass probe, `34` marks, measured overhead `0.25%` of the
+stage (`94.15ms` probed against `93.92ms` unprobed). The top row is independently confirmed by the
+pre-existing `frontend.ast.environment.constant_header_resolution` detailed timer at `83.89ms`.
+
+| | ms | share of the 94ms stage |
+| --- | --- | --- |
+| `resolve_nominal_members_and_constants` | 84.16 | 89.5% |
+| ↳ `resolve_declaration_syntax` (545 calls) | 71.27 | 75.8% |
+| ↳ initializer expression parse | 69.47 | 73.9% |
+| ↳ `parse_template_expression` (331 calls) | 69.13 | 73.5% |
+| ↳ `Template::new_const_required_with_type_interner` | 62.99 | 67.0% |
+| ↳ `prepare_tir_view` in `Value` mode (325) | 3.13 | 3.3% |
+| ↳ `fold_prepared_template` (284) | 2.89 | 3.1% |
+| constant-header scope build (545 calls) | 5.25 | 5.6% |
+| every import projection combined | 6.65 | 7.1% |
+| `finish_environment` | 2.19 | 2.3% |
+| `register_nominal_shells` | 0.095 | 0.1% |
+
+`190us` per template constant, in TIR construction. `parse_template_expression` documents its
+`Value`-mode re-preparation as deliberate duplication of the const-required preparation; that
+re-preparation is `3.3%`, so the documented double-prepare is not the cost. That was the hypothesis
+going in and measuring retired it.
+
+The same two rows, side by side, are the point:
+
+| | `nominal_scaling_320` | `docs` |
+| --- | --- | --- |
+| member-shell construction | 62.5% | 0.1% |
+| template TIR construction | ~0% | 67.0% |
+
+`nominal_scaling_320` is `100%` fixed-capacity struct fields driven by four constants. It isolates
+exactly what it claims to and its number is not wrong - but a scaling fixture can only say what a
+cost is, not what share of a real stage that cost holds. Both numbers from here on.
+
+### Cross-checks on other multi-module fixtures
+
+`resolve_nominal_members_and_constants` as a share of the probed environment total, with the
+per-constant cost of `resolve_declaration_syntax`:
+
+| fixture | modules | constants | share of stage | per constant |
+| --- | --- | --- | --- | --- |
+| `docs` | 73 | 545 | 89% | 130us |
+| `module-graph` | 3 | 40 | 45% | 20.5us |
+| `import-fanout` | 3 | 42 | 45% | 14.5us |
+
+The shape is the same everywhere; `docs` constants cost `7-9x` more each because they are
+templates.
+
+## Generic instantiation: the Phase F fixture and what it found (2026-08-24)
+
+Phase F of the constant-folding plan had no measurable target - every counter it was written
+against was near zero on every committed fixture. The plan offered two options and this is
+option one: commit a fixture that actually exercises generic instantiation at scale, re-measure,
+and proceed only against what it shows.
+
+### The fixture
+
+`benchmarks/generic-scaling/generic-scaling-{20,40,80,160}.moth`, wired as the
+`generic_instantiation` scaling series. `n` distinct concrete types, each driven through the same
+seven generic call sites, so every site presents a substitution mapping and a generated-function
+identity nothing else in the module shares.
+
+Two design decisions that matter:
+
+- **One small driver per type, not one growing body.** The first version grew the instantiation
+  count and one function's body together. `frontend.borrow.initial` fitted `n^2.28` on it and
+  `n^1.14` on the split version at the same instantiation count. That quadratic is body size, not
+  generics. Any future generics fixture has to hold body size fixed or it measures the wrong thing.
+- **Structural nesting, not nested applications.** `MOTH-SYNTAX-0015` forbids nested generic
+  applications, so `Cell of Cell of T` is not a program. Depth comes from `{Cell of T}`,
+  `{{Cell of T}}` and `Pair of A, B` instead.
+
+### Release measurement
+
+`profiling` profile, `RAYON_NUM_THREADS=1`, `MOTH_TIMERS=bench`, median of seven per point.
+
+| metric | `n=20` | `n=40` | `n=80` | `n=160` | fitted |
+| --- | --- | --- | --- | --- | --- |
+| `build.frontend.total` | 46.30 | 131.74 | 423.08 | 1500.16 | `n^1.67` |
+| `frontend.generated.materialise` | 41.20 | - | - | 1403.99 | `n^1.70` |
+| `frontend.ast.total` | 5.53 | - | - | 27.77 | `n^0.78` |
+| `frontend.borrow.initial` | 2.04 | - | - | 12.48 | `n^0.87` |
+| `frontend.hir` | 1.76 | - | - | 10.44 | `n^0.86` |
+| `frontend.ast.environment` | 0.574 | - | - | 1.609 | `n^0.50` |
+
+Times in ms. At `n=160`, `frontend.generated.materialise` is `94.1%` of the frontend and
+`frontend.ast.environment` - Phase F's entire target - is `0.11%`. The total's step ratios rise
+across the series (`2.85x`, `3.21x`, `3.55x`), so the curve is still steepening at the largest
+point.
+
+Phase F was closed on this. Every conversion it proposed targets a component measured sublinear
+and immaterial on a fixture purpose-built to be its worst case.
+
+### The mechanism, from counters rather than timings
+
+| `n` | `string_table_full_clones` | `string_table_merge_source_entries_scanned` | entries per clone |
+| --- | --- | --- | --- |
+| 20 | 201 | 40,476 | 201 |
+| 40 | 401 | 120,896 | 302 |
+| 80 | 801 | 401,736 | 502 |
+| 160 | 1,601 | 1,443,416 | 902 |
+
+Clones are exactly `10n + 1` - one per generated function, linear. Entries scanned per clone is
+`~5n + 101` - linear in module size. The product is quadratic; measured `n^1.72`, matching
+`frontend.generated.materialise` at `n^1.70`. Two independent measures, one curve.
+
+`GenericTemplateArtefact::materialise_ast` opens with `StringTable::new()` then
+`merge_from(&requester_context.string_table)`. `MaterialisationPreparation::materialise_ast` opens
+with `self.string_table.clone()` then the same `merge_from`. `merge_from` re-interns every string
+in the source table and allocates a remap `Vec` of the same length.
+
+`merge_delta_from` and `fork_source` / `fork_for_module` already exist for exactly this and module
+compilation already uses them - `string_table_delta_merge_calls` and
+`string_table_fork_source_base_copies` are both `3` at every size on this fixture. Generated-function
+materialisation uses neither.
+
+### Real-project share
+
+These are **debug-build** numbers, taken together in one pass so the shares are comparable to each
+other. Do not read the absolute ms against the release table above.
+
+| project | frontend total | `generated.materialise` | share |
+| --- | --- | --- | --- |
+| `docs` | 1605.8ms | 0.03ms | 0.002% |
+| `module-graph` | 24.9ms | 0.001ms | ~0% |
+| `type-stress` | 32.7ms | 0.003ms | ~0% |
+| `generic-trait-churn` | 32.9ms | 11.80ms | 35.9% |
+| `generic-scaling-160` | 4665.6ms | 4265.3ms | 91.4% |
+
+`docs` barely uses generics, so its `0.002%` says nothing about this cost either way. The number
+that should decide priority is `generic-trait-churn`: 181 lines, a handful of instantiations,
+nothing adversarial about it, already `35.9%`. A project that uses generics at all pays this
+immediately - it does not wait for `n=160`.

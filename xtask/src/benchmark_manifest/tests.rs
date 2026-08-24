@@ -26,7 +26,7 @@ fn create_directory_entry(repository_root: &Path, relative_path: &str) {
 
 fn minimal_manifest(entry: &str, case_id: &str) -> String {
     format!(
-        r#"schema = 3
+        r#"schema = 4
 
 [[workload]]
 id = "workload"
@@ -52,7 +52,7 @@ args = []
 
 fn two_workload_manifest(first_entry: &str, second_entry: &str) -> String {
     format!(
-        r#"schema = 3
+        r#"schema = 4
 
 [[workload]]
 id = "first_workload"
@@ -105,7 +105,7 @@ fn directory_build_manifest(entry: &str, roots: &[&str], excludes: &[&str]) -> S
         .collect::<Vec<_>>()
         .join(", ");
     format!(
-        r#"schema = 3
+        r#"schema = 4
 
 [[workload]]
 id = "workload"
@@ -156,7 +156,7 @@ fn unknown_group_fails_manifest_loading() {
     let directory = tempdir().expect("temporary repository should exist");
     create_entry(directory.path(), "fixture.moth");
 
-    let contents = r#"schema = 3
+    let contents = r#"schema = 4
 
 [[workload]]
 id = "workload"
@@ -375,7 +375,7 @@ fn valid_manifest_preserves_source_order_and_resolves_workloads() {
     let directory = tempdir().expect("temporary repository should exist");
     create_entry(directory.path(), "first.moth");
     create_entry(directory.path(), "second.moth");
-    let contents = r#"schema = 3
+    let contents = r#"schema = 4
 
 [[workload]]
 id = "first_workload"
@@ -615,6 +615,105 @@ fn repository_manifest_has_complete_ordered_authority() {
             entry_kind: BenchmarkEntryKind::File,
             fingerprint_mode: BenchmarkFingerprintMode::FullTree,
             roots: &["benchmarks/environment-stress.moth"],
+            excludes: &[],
+            generated_roots: &[],
+        },
+        ExpectedWorkload {
+            id: "constant_chain_32",
+            entry: "benchmarks/constant-scaling/constant-chain-32.moth",
+            entry_kind: BenchmarkEntryKind::File,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
+            roots: &["benchmarks/constant-scaling/constant-chain-32.moth"],
+            excludes: &[],
+            generated_roots: &[],
+        },
+        ExpectedWorkload {
+            id: "constant_chain_128",
+            entry: "benchmarks/constant-scaling/constant-chain-128.moth",
+            entry_kind: BenchmarkEntryKind::File,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
+            roots: &["benchmarks/constant-scaling/constant-chain-128.moth"],
+            excludes: &[],
+            generated_roots: &[],
+        },
+        ExpectedWorkload {
+            id: "constant_chain_512",
+            entry: "benchmarks/constant-scaling/constant-chain-512.moth",
+            entry_kind: BenchmarkEntryKind::File,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
+            roots: &["benchmarks/constant-scaling/constant-chain-512.moth"],
+            excludes: &[],
+            generated_roots: &[],
+        },
+        ExpectedWorkload {
+            id: "nominal_scaling_40",
+            entry: "benchmarks/nominal-scaling/nominal-scaling-40.moth",
+            entry_kind: BenchmarkEntryKind::File,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
+            roots: &["benchmarks/nominal-scaling/nominal-scaling-40.moth"],
+            excludes: &[],
+            generated_roots: &[],
+        },
+        ExpectedWorkload {
+            id: "nominal_scaling_80",
+            entry: "benchmarks/nominal-scaling/nominal-scaling-80.moth",
+            entry_kind: BenchmarkEntryKind::File,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
+            roots: &["benchmarks/nominal-scaling/nominal-scaling-80.moth"],
+            excludes: &[],
+            generated_roots: &[],
+        },
+        ExpectedWorkload {
+            id: "nominal_scaling_160",
+            entry: "benchmarks/nominal-scaling/nominal-scaling-160.moth",
+            entry_kind: BenchmarkEntryKind::File,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
+            roots: &["benchmarks/nominal-scaling/nominal-scaling-160.moth"],
+            excludes: &[],
+            generated_roots: &[],
+        },
+        ExpectedWorkload {
+            id: "nominal_scaling_320",
+            entry: "benchmarks/nominal-scaling/nominal-scaling-320.moth",
+            entry_kind: BenchmarkEntryKind::File,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
+            roots: &["benchmarks/nominal-scaling/nominal-scaling-320.moth"],
+            excludes: &[],
+            generated_roots: &[],
+        },
+        ExpectedWorkload {
+            id: "generic_scaling_20",
+            entry: "benchmarks/generic-scaling/generic-scaling-20.moth",
+            entry_kind: BenchmarkEntryKind::File,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
+            roots: &["benchmarks/generic-scaling/generic-scaling-20.moth"],
+            excludes: &[],
+            generated_roots: &[],
+        },
+        ExpectedWorkload {
+            id: "generic_scaling_40",
+            entry: "benchmarks/generic-scaling/generic-scaling-40.moth",
+            entry_kind: BenchmarkEntryKind::File,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
+            roots: &["benchmarks/generic-scaling/generic-scaling-40.moth"],
+            excludes: &[],
+            generated_roots: &[],
+        },
+        ExpectedWorkload {
+            id: "generic_scaling_80",
+            entry: "benchmarks/generic-scaling/generic-scaling-80.moth",
+            entry_kind: BenchmarkEntryKind::File,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
+            roots: &["benchmarks/generic-scaling/generic-scaling-80.moth"],
+            excludes: &[],
+            generated_roots: &[],
+        },
+        ExpectedWorkload {
+            id: "generic_scaling_160",
+            entry: "benchmarks/generic-scaling/generic-scaling-160.moth",
+            entry_kind: BenchmarkEntryKind::File,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
+            roots: &["benchmarks/generic-scaling/generic-scaling-160.moth"],
             excludes: &[],
             generated_roots: &[],
         },
@@ -950,6 +1049,83 @@ fn repository_manifest_has_complete_ordered_authority() {
             runner: CHECK,
         },
         ExpectedCase {
+            id: "constant_chain_32_check",
+            workload_id: "constant_chain_32",
+            group: "stress",
+            quick: false,
+            runner: CHECK,
+        },
+        ExpectedCase {
+            id: "constant_chain_128_check",
+            workload_id: "constant_chain_128",
+            group: "stress",
+            quick: false,
+            runner: CHECK,
+        },
+        ExpectedCase {
+            id: "constant_chain_512_check",
+            workload_id: "constant_chain_512",
+            group: "stress",
+            quick: false,
+            runner: CHECK,
+        },
+        ExpectedCase {
+            id: "nominal_scaling_40_check",
+            workload_id: "nominal_scaling_40",
+            group: "stress",
+            quick: false,
+            runner: CHECK,
+        },
+        ExpectedCase {
+            id: "nominal_scaling_80_check",
+            workload_id: "nominal_scaling_80",
+            group: "stress",
+            quick: false,
+            runner: CHECK,
+        },
+        ExpectedCase {
+            id: "nominal_scaling_160_check",
+            workload_id: "nominal_scaling_160",
+            group: "stress",
+            quick: false,
+            runner: CHECK,
+        },
+        ExpectedCase {
+            id: "nominal_scaling_320_check",
+            workload_id: "nominal_scaling_320",
+            group: "stress",
+            quick: false,
+            runner: CHECK,
+        },
+        ExpectedCase {
+            id: "generic_scaling_20_check",
+            workload_id: "generic_scaling_20",
+            group: "stress",
+            quick: false,
+            runner: CHECK,
+        },
+        ExpectedCase {
+            id: "generic_scaling_40_check",
+            workload_id: "generic_scaling_40",
+            group: "stress",
+            quick: false,
+            runner: CHECK,
+        },
+        ExpectedCase {
+            id: "generic_scaling_80_check",
+            workload_id: "generic_scaling_80",
+            group: "stress",
+            quick: false,
+            runner: CHECK,
+        },
+        ExpectedCase {
+            id: "generic_scaling_160_check",
+            workload_id: "generic_scaling_160",
+            group: "stress",
+            quick: false,
+            runner: CHECK,
+        },
+        ExpectedCase {
             id: "one_module_kitchen_sink_check",
             workload_id: "one_module_kitchen_sink",
             group: "stress",
@@ -1127,6 +1303,83 @@ fn repository_manifest_has_complete_ordered_authority() {
         ExpectedCase {
             id: "environment_stress_frontend",
             workload_id: "environment_stress",
+            group: "stress",
+            quick: false,
+            runner: FRONTEND,
+        },
+        ExpectedCase {
+            id: "constant_chain_32_frontend",
+            workload_id: "constant_chain_32",
+            group: "stress",
+            quick: false,
+            runner: FRONTEND,
+        },
+        ExpectedCase {
+            id: "constant_chain_128_frontend",
+            workload_id: "constant_chain_128",
+            group: "stress",
+            quick: false,
+            runner: FRONTEND,
+        },
+        ExpectedCase {
+            id: "constant_chain_512_frontend",
+            workload_id: "constant_chain_512",
+            group: "stress",
+            quick: false,
+            runner: FRONTEND,
+        },
+        ExpectedCase {
+            id: "nominal_scaling_40_frontend",
+            workload_id: "nominal_scaling_40",
+            group: "stress",
+            quick: false,
+            runner: FRONTEND,
+        },
+        ExpectedCase {
+            id: "nominal_scaling_80_frontend",
+            workload_id: "nominal_scaling_80",
+            group: "stress",
+            quick: false,
+            runner: FRONTEND,
+        },
+        ExpectedCase {
+            id: "nominal_scaling_160_frontend",
+            workload_id: "nominal_scaling_160",
+            group: "stress",
+            quick: false,
+            runner: FRONTEND,
+        },
+        ExpectedCase {
+            id: "nominal_scaling_320_frontend",
+            workload_id: "nominal_scaling_320",
+            group: "stress",
+            quick: false,
+            runner: FRONTEND,
+        },
+        ExpectedCase {
+            id: "generic_scaling_20_frontend",
+            workload_id: "generic_scaling_20",
+            group: "stress",
+            quick: false,
+            runner: FRONTEND,
+        },
+        ExpectedCase {
+            id: "generic_scaling_40_frontend",
+            workload_id: "generic_scaling_40",
+            group: "stress",
+            quick: false,
+            runner: FRONTEND,
+        },
+        ExpectedCase {
+            id: "generic_scaling_80_frontend",
+            workload_id: "generic_scaling_80",
+            group: "stress",
+            quick: false,
+            runner: FRONTEND,
+        },
+        ExpectedCase {
+            id: "generic_scaling_160_frontend",
+            workload_id: "generic_scaling_160",
             group: "stress",
             quick: false,
             runner: FRONTEND,
@@ -1755,7 +2008,7 @@ fn workload_path_io_error_renders_complete_context() {
 
 fn full_tree_manifest(entry: &str, case_id: &str) -> String {
     format!(
-        r#"schema = 3
+        r#"schema = 4
 
 [[workload]]
 id = "workload"
@@ -1786,7 +2039,7 @@ fn partitioned_manifest(entry: &str, roots: &[&str], case_id: &str) -> String {
         .collect::<Vec<_>>()
         .join(", ");
     format!(
-        r#"schema = 3
+        r#"schema = 4
 
 [[workload]]
 id = "workload"

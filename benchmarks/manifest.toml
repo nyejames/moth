@@ -1,4 +1,4 @@
-schema = 3
+schema = 4
 
 [[workload]]
 id = "root_single_file"
@@ -68,6 +68,83 @@ id = "environment_stress"
 entry = "benchmarks/environment-stress.moth"
 fingerprint_mode = "full_tree"
 fingerprint_roots = ["benchmarks/environment-stress.moth"]
+fingerprint_excludes = []
+
+[[workload]]
+id = "constant_chain_32"
+entry = "benchmarks/constant-scaling/constant-chain-32.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/constant-scaling/constant-chain-32.moth"]
+fingerprint_excludes = []
+
+[[workload]]
+id = "constant_chain_128"
+entry = "benchmarks/constant-scaling/constant-chain-128.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/constant-scaling/constant-chain-128.moth"]
+fingerprint_excludes = []
+
+[[workload]]
+id = "constant_chain_512"
+entry = "benchmarks/constant-scaling/constant-chain-512.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/constant-scaling/constant-chain-512.moth"]
+fingerprint_excludes = []
+
+[[workload]]
+id = "nominal_scaling_40"
+entry = "benchmarks/nominal-scaling/nominal-scaling-40.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/nominal-scaling/nominal-scaling-40.moth"]
+fingerprint_excludes = []
+
+[[workload]]
+id = "nominal_scaling_80"
+entry = "benchmarks/nominal-scaling/nominal-scaling-80.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/nominal-scaling/nominal-scaling-80.moth"]
+fingerprint_excludes = []
+
+[[workload]]
+id = "nominal_scaling_160"
+entry = "benchmarks/nominal-scaling/nominal-scaling-160.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/nominal-scaling/nominal-scaling-160.moth"]
+fingerprint_excludes = []
+
+[[workload]]
+id = "nominal_scaling_320"
+entry = "benchmarks/nominal-scaling/nominal-scaling-320.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/nominal-scaling/nominal-scaling-320.moth"]
+fingerprint_excludes = []
+
+[[workload]]
+id = "generic_scaling_20"
+entry = "benchmarks/generic-scaling/generic-scaling-20.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/generic-scaling/generic-scaling-20.moth"]
+fingerprint_excludes = []
+
+[[workload]]
+id = "generic_scaling_40"
+entry = "benchmarks/generic-scaling/generic-scaling-40.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/generic-scaling/generic-scaling-40.moth"]
+fingerprint_excludes = []
+
+[[workload]]
+id = "generic_scaling_80"
+entry = "benchmarks/generic-scaling/generic-scaling-80.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/generic-scaling/generic-scaling-80.moth"]
+fingerprint_excludes = []
+
+[[workload]]
+id = "generic_scaling_160"
+entry = "benchmarks/generic-scaling/generic-scaling-160.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/generic-scaling/generic-scaling-160.moth"]
 fingerprint_excludes = []
 
 [[workload]]
@@ -358,6 +435,127 @@ command = "check"
 args = []
 
 [[case]]
+id = "constant_chain_32_check"
+workload = "constant_chain_32"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "constant_chain_128_check"
+workload = "constant_chain_128"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "constant_chain_512_check"
+workload = "constant_chain_512"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "nominal_scaling_40_check"
+workload = "nominal_scaling_40"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "nominal_scaling_80_check"
+workload = "nominal_scaling_80"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "nominal_scaling_160_check"
+workload = "nominal_scaling_160"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "nominal_scaling_320_check"
+workload = "nominal_scaling_320"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "generic_scaling_20_check"
+workload = "generic_scaling_20"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "generic_scaling_40_check"
+workload = "generic_scaling_40"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "generic_scaling_80_check"
+workload = "generic_scaling_80"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "generic_scaling_160_check"
+workload = "generic_scaling_160"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
 id = "one_module_kitchen_sink_check"
 workload = "one_module_kitchen_sink"
 group = "stress"
@@ -636,6 +834,116 @@ kind = "frontend"
 profile = "dev"
 
 [[case]]
+id = "constant_chain_32_frontend"
+workload = "constant_chain_32"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "constant_chain_128_frontend"
+workload = "constant_chain_128"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "constant_chain_512_frontend"
+workload = "constant_chain_512"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "nominal_scaling_40_frontend"
+workload = "nominal_scaling_40"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "nominal_scaling_80_frontend"
+workload = "nominal_scaling_80"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "nominal_scaling_160_frontend"
+workload = "nominal_scaling_160"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "nominal_scaling_320_frontend"
+workload = "nominal_scaling_320"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "generic_scaling_20_frontend"
+workload = "generic_scaling_20"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "generic_scaling_40_frontend"
+workload = "generic_scaling_40"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "generic_scaling_80_frontend"
+workload = "generic_scaling_80"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "generic_scaling_160_frontend"
+workload = "generic_scaling_160"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
 id = "one_module_kitchen_sink_frontend"
 workload = "one_module_kitchen_sink"
 group = "stress"
@@ -864,3 +1172,57 @@ expectation = "clean"
 [case.runner]
 kind = "frontend"
 profile = "dev"
+
+# Scaling series.
+#
+# Each series measures one compiler cost against a declared input size across
+# fixtures that differ only in that size. `just bench-scaling` fits the growth
+# exponent of `metric` against `size` and fails when it exceeds `max_exponent`.
+#
+# This is the lane that catches a cost which has always been superlinear. The
+# normal suites compare against recorded history, so they only ever report a
+# change; a pass that has been quadratic since it was written never looks like
+# a regression to them.
+#
+# `metric` must be a Basic timing metric. The benchmark compiler is built with
+# `--features timers`, so Detailed metrics are not emitted.
+
+[[scaling]]
+id = "nominal_members"
+metric = "frontend.ast.environment"
+max_exponent = 1.25
+points = [
+    { case = "nominal_scaling_40_frontend", size = 40 },
+    { case = "nominal_scaling_80_frontend", size = 80 },
+    { case = "nominal_scaling_160_frontend", size = 160 },
+    { case = "nominal_scaling_320_frontend", size = 320 },
+]
+
+[[scaling]]
+id = "constant_chain"
+metric = "frontend.ast.total"
+max_exponent = 1.25
+points = [
+    { case = "constant_chain_32_frontend", size = 32 },
+    { case = "constant_chain_128_frontend", size = 128 },
+    { case = "constant_chain_512_frontend", size = 512 },
+]
+
+# Generic instantiation. The budget here is a RATCHET AROUND A KNOWN DEFECT, not
+# an accepted shape: generated-function materialisation is measured at n^1.70 and
+# is 94% of this fixture's frontend at the largest point. Every generated function
+# builds a fresh string table and merges the whole requester table into it, so the
+# cost is O(instantiations x module string count). See the Phase F outcome in
+# docs/roadmap/plans/constant-folding-and-type-system-hot-path-optimization-plan.md.
+# Tighten this budget when that is fixed; do not raise it.
+
+[[scaling]]
+id = "generic_instantiation"
+metric = "frontend.generated.materialise"
+max_exponent = 1.80
+points = [
+    { case = "generic_scaling_20_frontend", size = 20 },
+    { case = "generic_scaling_40_frontend", size = 40 },
+    { case = "generic_scaling_80_frontend", size = 80 },
+    { case = "generic_scaling_160_frontend", size = 160 },
+]

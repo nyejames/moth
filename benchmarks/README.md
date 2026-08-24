@@ -13,6 +13,7 @@ just bench-ci
 just bench-validate
 just bench-check
 just bench-frontend-check
+just bench-scaling
 just bench
 just bench-frontend
 ```
@@ -20,6 +21,8 @@ just bench-frontend
 `just bench-ci` runs the bounded development gate used by `just validate`. It preflights every manifest case once, then measures the quick subset with three iterations. The command never writes local history or tracked summaries.
 
 `just bench-validate` preflights every case without measuring it. Use this when you only need to check the benchmark inventory and execution contracts.
+
+`just bench-scaling` runs only the cases named by the manifest's scaling series and reports the fitted growth exponent of each. It answers a question the other modes cannot: not "did this change" but "how does this grow". See **Scaling Series** below.
 
 `just bench-check` runs the full end-to-end CLI suite without writing local history or tracked summaries.
 
@@ -29,7 +32,7 @@ just bench-frontend
 
 `just bench-frontend` records the focused frontend suite through the same local history and monthly summary flow, but under a separate suite kind.
 
-Every mode preflights its selected cases before measurement. That successful preflight provides the one warmup. Full check and recording modes then run ten measured iterations per case. `bench-ci` preflights all 60 cases before it selects 8 quick CLI cases and 10 quick frontend cases for three measured iterations.
+Every mode preflights its selected cases before measurement. That successful preflight provides the one warmup. Full check and recording modes then run ten measured iterations per case. `bench-ci` preflights all 68 cases before it selects 8 quick CLI cases and 10 quick frontend cases for three measured iterations.
 
 Non-recording commands never append local JSONL history or change tracked summaries.
 
@@ -37,7 +40,7 @@ Recorded runs (`just bench` and `just bench-frontend`) require a clean committed
 
 ## Manifest And Stable Identity
 
-`benchmarks/manifest.toml` owns the ordered workload and case inventory. It currently declares 33 workloads and 60 cases.
+`benchmarks/manifest.toml` owns the ordered workload and case inventory. It currently declares 40 workloads, 74 cases and 2 scaling series.
 
 A workload names the source inputs that determine one compilation workload:
 
@@ -52,7 +55,7 @@ fingerprint_excludes = []
 
 `id` gives the workload a stable authored identity. `entry` selects the file or project passed to the runner. `fingerprint_mode` selects how source identity is computed: `full_tree` uses one root equal to the entry, while `partitioned` uses disjoint strict-descendant roots under a directory entry. `fingerprint_roots` list every authored input boundary that affects compilation. `fingerprint_excludes` remove generated output trees inside those roots, such as `dev` and `release`.
 
-Directory-entry workloads declare `fingerprint_mode = "full_tree"` with the entry as the sole root, or `fingerprint_mode = "partitioned"` with disjoint roots under the entry. Schema 3 validates that full-tree roots equal the entry, partitioned roots are strict descendants, and no root or exclude overlaps another.
+Directory-entry workloads declare `fingerprint_mode = "full_tree"` with the entry as the sole root, or `fingerprint_mode = "partitioned"` with disjoint roots under the entry. Schema 4 validates that full-tree roots equal the entry, partitioned roots are strict descendants, and no root or exclude overlaps another.
 
 Each case connects a workload to one typed runner:
 
@@ -87,6 +90,97 @@ profile = "dev"
 
 Case IDs identify measurements and reports. CLI profiling also selects cases by this ID. They don't derive from paths, commands or compiler names, so moving a fixture doesn't rename its history. Workload IDs let CLI and frontend cases share the same source identity.
 
+## Scaling Series
+
+A scaling series measures one compiler cost across fixtures that differ only in a declared input
+size, then fits how that cost grows.
+
+```toml
+[[scaling]]
+id = "nominal_members"
+metric = "frontend.ast.environment"
+max_exponent = 1.25
+points = [
+    { case = "nominal_scaling_40_frontend", size = 40 },
+    { case = "nominal_scaling_80_frontend", size = 80 },
+    { case = "nominal_scaling_160_frontend", size = 160 },
+    { case = "nominal_scaling_320_frontend", size = 320 },
+]
+```
+
+`just bench-scaling` runs every member case, fits the slope of `ln(metric)` against `ln(size)` by
+least squares, and fails when the fitted exponent exceeds `max_exponent`.
+
+### Why this lane exists
+
+Every other benchmark mode compares a case against its own recorded history. That detects a
+*change*: something got slower than it used to be. It cannot detect a cost that has been
+superlinear since the day it was written, because such a cost never changes — it is equally
+quadratic in every run, so every comparison reports "no measurable change".
+
+This is not hypothetical. A per-header deep clone of five whole-module side tables made AST
+environment construction `O(n^2)` in module size. It survived the full suite, a dedicated stress
+fixture, a complete counter inventory and a recorded optimisation baseline, because nothing ever
+asked how the cost grew. It was found by hand-regenerating a fixture at four sizes. This lane makes
+that question a command.
+
+Counters do not close this gap either. Every frontend counter was exactly linear while wall time
+was quadratic: the counters correctly counted a linear number of calls, and the cost was inside
+each call.
+
+### Authoring a series
+
+- **Every point must differ only in size.** Generate the fixtures from one pattern. A series whose
+  members differ in shape measures the difference in shape and calls it growth. Manifest validation
+  enforces that all points share one runner, but it cannot check that the sources are the same
+  shape — that is the author's responsibility.
+- **At least three points**, strictly increasing in size. Two points give a single ratio that one
+  disturbed run can dominate.
+- **Span an order of magnitude if you can.** An `8x` size range separates linear from quadratic
+  unmistakably; a `2x` range does not.
+- **`metric` must be a Basic timing metric.** The benchmark compiler is built with `--features
+  timers`, so Detailed metrics such as `frontend.ast.environment.constant_header_resolution` are
+  never emitted and the series will report `UNMEASURABLE`.
+- **Size the largest point above a millisecond.** Below that the lane refuses to fit rather than
+  report an exponent derived from scheduler noise.
+- **`max_exponent` is a budget, not an observation.** Set it to the complexity the pass is supposed
+  to have. Do not raise it to accommodate a measurement; a series that exceeds its budget is the
+  lane working.
+
+### Reading the output
+
+```text
+Scaling series 'nominal_members' — metric frontend.ast.environment — budget n^1.25
+        size     metric_ms   size step   time step
+          40         5.125           -           -
+          80        10.037       2.00x       1.96x
+         160        19.609       2.00x       1.95x
+         320        39.147       2.00x       2.00x
+  fitted n^0.98 — within budget
+```
+
+The per-step ratios are what make the verdict readable: doubling the declaration count doubles the
+time. The fitted exponent is the value the budget is checked against.
+
+A failing series looks like this. It is the real output this same lane produced before the fix, and
+it is the clearer teaching example:
+
+```text
+        size     metric_ms   size step   time step
+          40        23.125           -           -
+          80        79.706       2.00x       3.45x
+         160       293.048       2.00x       3.68x
+         320      1111.980       2.00x       3.79x
+  fitted n^1.86 — EXCEEDS BUDGET n^1.25
+```
+
+Doubling the declaration count nearly quadrupled the time. Every case here passed every other
+benchmark mode, because each was being compared against its own history and none of them changed.
+
+A series reports `UNMEASURABLE` — and fails — when a metric was not emitted at all, or when the
+largest point is too small to fit. Both are treated as failures rather than as passes, because a
+series that cannot answer the question must not look like one that answered it favourably.
+
 ## Source and Measurement Identity
 
 The source workload fingerprint covers the source fingerprint format version, manifest schema version, workload ID, entry logical path, entry kind, fingerprint mode, normalised root and exclude sets, and every included file path and byte. It does not hash runner declarations, `group` or `quick`. Changing source bytes invalidates every case attached to that workload.
@@ -100,7 +194,7 @@ Comparison output distinguishes four states for each matching case ID:
 - **measurement changed**: source and timing schema match but measurement fingerprint differs — no speed delta is reported.
 - **timing comparable**: both match — speed deltas and stage movement are computed.
 
-Schema 3 accepts only `expectation = "clean"`. A clean case must compile without errors or warnings. Negative diagnostic coverage belongs under `tests/cases/`, not in this manifest.
+Schema 4 accepts only `expectation = "clean"`. A clean case must compile without errors or warnings. Negative diagnostic coverage belongs under `tests/cases/`, not in this manifest.
 
 ## Execution Contract
 
@@ -360,14 +454,14 @@ Groups are public summary labels, not compiler architecture boundaries. The grou
 
 - `core`: baseline check/build cases.
 - `docs`: documentation project checking.
-- `stress`: targeted template, type, fold, pattern, collection, and environment stress fixtures.
+- `stress`: targeted template, type, fold, pattern, collection, and environment stress fixtures, plus the constant-count and nominal-member scaling series.
 - `module`: module/import/dependency graph and import fanout coverage.
 - `parallelism`: frontend scheduling threshold, source-loading, and module/file fanout coverage.
 - `borrow`: valid borrow and exclusivity coverage.
 
 ## Protocol And Format Versions
 
-- Benchmark manifest schema: 3
+- Benchmark manifest schema: 4
 - Source workload fingerprint version: 3
 - Timing observation schema version: 1
 - Benchmark protocol version: 4
@@ -463,6 +557,8 @@ materialize `target/profiling/moth.dSYM` with `dsymutil` and reports whether its
 UUID matches the binary when `dwarfdump` is available. Do not commit the binary
 or `.dSYM` bundle.
 
+A profiling run whose hot functions came back as raw addresses fails the command. Artifacts are still written, because they are what a symbolication problem is diagnosed from, but the run reports no attribution and must not be read as if it had. On macOS, `sample <pid>` against `target/profiling/moth` symbolicates this binary correctly and is the working fallback; it attaches by process name, so it needs a workload that runs long enough to catch.
+
 `--presymbolicate` remains an explicit profiling option. Use `just profile-symbolicated` or `just profile-case-symbolicated <case-id>` when a normal profile reports raw-address function names. xtask maps that request to the Samply flag supported by the installed CLI (`--presymbolicate` or `--unstable-presymbolicate`) and warns when neither flag is available.
 
 ### Filter modes
@@ -553,6 +649,12 @@ allocation, lookup, folding, import, and lowering pressure.
 - `pattern-stress.moth`: pattern and match coverage including exhaustive choice arms, guards, payload capture, and relational patterns.
 - `collection-stress.moth`: collection operations and loop coverage with mutations, range loops, nested iteration, and fallible fallback patterns.
 - `environment-stress.moth`: AST environment building, type alias expansion, nominal structs and choices, receiver catalog construction, generic declarations and instantiations, and body validation/type resolution.
+- `nominal-scaling/nominal-scaling-{40,80,160,320}.moth`: the `nominal_members` scaling series.
+  One generated pattern at four sizes, with a fixed count of four constants at every size, so
+  member-shell and capacity-fixup cost scales independently of constant resolution. Regenerate the
+  whole series from one pattern; never hand edit a single point.
+- `constant-scaling/constant-chain-{32,128,512}.moth`: the `constant_chain` scaling series, a
+  dependency chain of compile-time constants at three lengths.
 - `module-graph/`: small multi-file project with cross-file imports, constants and templates.
 - `import-fanout/`: multi-file project with repeated imports, aliases, wrapper declarations and cross-file constants for string-table interning and module-graph resolution.
 - `module-root-stress/`: directory project with config parsing, multiple
@@ -596,3 +698,6 @@ allocation, lookup, folding, import, and lowering pressure.
 - Do not derive new case IDs from paths or commands.
 - Do not compare changed workload fingerprints as speed movement.
 - Do not add many fixtures that stress the same path in slightly different ways.
+- Do not raise a scaling series' `max_exponent` to make it pass. The budget states the complexity the pass should have.
+- Do not hand edit one point of a scaling series. Regenerate every point from the same pattern, or the fit measures the edit.
+- Do not read a profiling run whose symbolication failed. That command now fails; raw addresses are not attribution.

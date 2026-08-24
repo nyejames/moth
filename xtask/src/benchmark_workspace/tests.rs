@@ -58,6 +58,7 @@ fn make_manifest(
     BenchmarkManifest {
         workloads,
         cases,
+        scaling_series: Vec::new(),
         manifest_path: repository_root.join("manifest.toml"),
         repository_root: repository_root.to_path_buf(),
     }

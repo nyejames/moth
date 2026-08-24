@@ -377,7 +377,49 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
         run_paths.root.display()
     );
 
-    Ok(())
+    fail_on_unsymbolicated_cases(&case_summaries)
+}
+
+/// Refuse to report a profiling run whose hot functions are raw addresses.
+///
+/// WHAT: fails the command when any case's symbolication was address-only,
+/// after every artifact has been written.
+/// WHY: an address-only profile is not attribution, it is a list of numbers.
+/// Returning success alongside it invites a reader to treat "hot function
+/// 0x1002e40c8" as a finding. The artifacts stay on disk because they are what
+/// a symbolication problem is debugged from.
+fn fail_on_unsymbolicated_cases(
+    case_summaries: &[(
+        observations::ProfileObservation,
+        Option<HotspotExtractionResult>,
+    )],
+) -> Result<(), String> {
+    let unsymbolicated: Vec<&str> = case_summaries
+        .iter()
+        .filter(|(_, hotspots)| {
+            hotspots
+                .as_ref()
+                .is_some_and(|result| result.symbolication.is_failed())
+        })
+        .map(|(observation, _)| observation.case_id.as_str())
+        .collect();
+
+    if unsymbolicated.is_empty() {
+        return Ok(());
+    }
+
+    Err(format!(
+        "Symbolication failed for {} case(s): {}.\n\
+         Hot function names are raw addresses, so this run carries no attribution.\n\
+         The artifacts above are kept for diagnosing the symbolication itself.\n\
+         Remedies, in order: retry with 'just profile-symbolicated' or \n\
+         'just profile-case-symbolicated <case-id>'; confirm the dSYM UUID line in the smoke \n\
+         diagnostic above matches the binary; on macOS fall back to 'sample <pid>' against \n\
+         target/profiling/moth, which symbolicates this binary correctly but needs a workload \n\
+         that runs long enough to attach to.",
+        unsymbolicated.len(),
+        unsymbolicated.join(", ")
+    ))
 }
 
 /// Collect one profile run: preflight, observations, Samply recordings and

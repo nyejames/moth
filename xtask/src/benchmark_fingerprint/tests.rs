@@ -69,6 +69,7 @@ fn manifest(
             generated_output_roots: Vec::new(),
         }],
         cases,
+        scaling_series: Vec::new(),
         manifest_path: repository_root.join("benchmarks/manifest.toml"),
         repository_root: repository_root.to_owned(),
     }
@@ -741,6 +742,7 @@ fn bulk_api_preserves_manifest_workload_order() {
                 runner: first_runner.clone(),
             },
         ],
+        scaling_series: Vec::new(),
         manifest_path: repository.path().join("benchmarks/manifest.toml"),
         repository_root: repository.path().to_owned(),
     };
@@ -789,6 +791,6 @@ fn versioned_fingerprint_has_stable_hex_encoding() {
 
     assert_eq!(
         source_fingerprint(&manifest).to_string(),
-        "f4fb277385e7758c6a24f95ddc645637"
+        "5701e0ef02e5543b2d24713209ebd7a0"
     );
 }

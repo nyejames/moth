@@ -125,6 +125,7 @@ fn frontend_case_uses_typed_dev_profile_and_workload_entry() {
             generated_output_roots: Vec::new(),
         }],
         cases: vec![],
+        scaling_series: Vec::new(),
         manifest_path: "manifest.toml".into(),
         repository_root: "repository-root".into(),
     };

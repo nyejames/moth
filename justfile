@@ -25,6 +25,9 @@ validate-common:
     @echo "benchmark sanity"
     cargo run --package xtask --bin xtask -- bench-ci
 
+    @echo "complexity budgets"
+    cargo run --package xtask --bin xtask -- bench-scaling
+
     @echo "timers erasure"
     just timers-erasure-check
 
@@ -58,6 +61,10 @@ bench-frontend-check:
 
 bench-validate:
     cargo run --package xtask --bin xtask -- bench-validate
+
+# Fit the growth exponent of every declared scaling series and hold it to budget.
+bench-scaling:
+    cargo run --package xtask --bin xtask -- bench-scaling
 
 # Build a no-timer release binary and prove no timer-only marker survives into its bytes.
 # The timer *source* rules are applied by `just source-audit`, which owns the single walk.
@@ -122,6 +129,9 @@ ci-gate-docs:
 
 ci-gate-benchmarks:
     just bench-ci
+
+ci-gate-scaling:
+    just bench-scaling
 
 ci-gate-timers-erasure:
     just timers-erasure-check

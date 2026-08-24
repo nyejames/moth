@@ -1,0 +1,466 @@
+-- generic-scaling-20.moth
+-- Generic instantiation scaling fixture.
+--
+-- Declares 20 distinct concrete types and drives each through the same seven
+-- generic call sites, so every site presents a substitution mapping and a
+-- generated-function identity nothing else in the module shares.
+--
+-- One driver per concrete type, each with the same statement count, so the
+-- series grows the instantiation count and holds function body size fixed.
+-- That separation matters: a single growing body makes borrow validation
+-- quadratic on its own and hides what generics cost.
+--
+-- The language forbids nested generic applications (MOTH-SYNTAX-0015), so
+-- substitution depth is reached with structural wrappers around a single
+-- application instead: {Cell of T}, {{Cell of T}}, Pair of A, B.
+--
+-- One point in the `generic_instantiation` scaling series declared in
+-- benchmarks/manifest.toml. Every point uses this identical generated
+-- pattern so the series measures size alone.
+-- Deterministic pattern; regenerate the whole series rather than hand editing.
+
+-- Generic constructors: one parameter and two parameters.
+Cell type T = |
+    value T,
+|
+
+Pair type A, B = |
+    first A,
+    second B,
+|
+
+-- Generic functions. Each parameter shape wraps one generic application in a
+-- different structural nest, so substitution recurses to a different depth.
+unwrap type T |cell Cell of T| -> T:
+    return cell.value
+;
+
+count_cells type T |cells {Cell of T}| -> Int:
+    return cells.length()
+;
+
+count_nested type T |cells {{Cell of T}}| -> Int:
+    return cells.length()
+;
+
+left type A, B |pair Pair of A, B| -> A:
+    return pair.first
+;
+
+right type A, B |pair Pair of A, B| -> B:
+    return pair.second
+;
+
+-- 20 distinct concrete types: each one is a distinct type argument, so
+-- every generic call site below presents a mapping the substitution cache
+-- has not seen.
+Kind0000 = |
+    slot Int,
+|
+
+Kind0001 = |
+    slot Int,
+|
+
+Kind0002 = |
+    slot Int,
+|
+
+Kind0003 = |
+    slot Int,
+|
+
+Kind0004 = |
+    slot Int,
+|
+
+Kind0005 = |
+    slot Int,
+|
+
+Kind0006 = |
+    slot Int,
+|
+
+Kind0007 = |
+    slot Int,
+|
+
+Kind0008 = |
+    slot Int,
+|
+
+Kind0009 = |
+    slot Int,
+|
+
+Kind0010 = |
+    slot Int,
+|
+
+Kind0011 = |
+    slot Int,
+|
+
+Kind0012 = |
+    slot Int,
+|
+
+Kind0013 = |
+    slot Int,
+|
+
+Kind0014 = |
+    slot Int,
+|
+
+Kind0015 = |
+    slot Int,
+|
+
+Kind0016 = |
+    slot Int,
+|
+
+Kind0017 = |
+    slot Int,
+|
+
+Kind0018 = |
+    slot Int,
+|
+
+Kind0019 = |
+    slot Int,
+|
+
+-- Instantiation churn: one small driver per concrete type, so statements
+-- per function stay constant and only the type count grows.
+drive0000 || -> Int:
+    sum ~= 0
+    v = Kind0000(0)
+    c = Cell(v)
+    sum += unwrap(c).slot
+    p = Pair(v, Kind0001(0))
+    sum += left(p).slot
+    sum += right(p).slot
+    cells ~{Cell of Kind0000} = {}
+    sum += count_cells(cells)
+    nest ~{{Cell of Kind0000}} = {}
+    sum += count_nested(nest)
+    return sum
+;
+
+drive0001 || -> Int:
+    sum ~= 0
+    v = Kind0001(1)
+    c = Cell(v)
+    sum += unwrap(c).slot
+    p = Pair(v, Kind0002(1))
+    sum += left(p).slot
+    sum += right(p).slot
+    cells ~{Cell of Kind0001} = {}
+    sum += count_cells(cells)
+    nest ~{{Cell of Kind0001}} = {}
+    sum += count_nested(nest)
+    return sum
+;
+
+drive0002 || -> Int:
+    sum ~= 0
+    v = Kind0002(2)
+    c = Cell(v)
+    sum += unwrap(c).slot
+    p = Pair(v, Kind0003(2))
+    sum += left(p).slot
+    sum += right(p).slot
+    cells ~{Cell of Kind0002} = {}
+    sum += count_cells(cells)
+    nest ~{{Cell of Kind0002}} = {}
+    sum += count_nested(nest)
+    return sum
+;
+
+drive0003 || -> Int:
+    sum ~= 0
+    v = Kind0003(3)
+    c = Cell(v)
+    sum += unwrap(c).slot
+    p = Pair(v, Kind0004(3))
+    sum += left(p).slot
+    sum += right(p).slot
+    cells ~{Cell of Kind0003} = {}
+    sum += count_cells(cells)
+    nest ~{{Cell of Kind0003}} = {}
+    sum += count_nested(nest)
+    return sum
+;
+
+drive0004 || -> Int:
+    sum ~= 0
+    v = Kind0004(4)
+    c = Cell(v)
+    sum += unwrap(c).slot
+    p = Pair(v, Kind0005(4))
+    sum += left(p).slot
+    sum += right(p).slot
+    cells ~{Cell of Kind0004} = {}
+    sum += count_cells(cells)
+    nest ~{{Cell of Kind0004}} = {}
+    sum += count_nested(nest)
+    return sum
+;
+
+drive0005 || -> Int:
+    sum ~= 0
+    v = Kind0005(5)
+    c = Cell(v)
+    sum += unwrap(c).slot
+    p = Pair(v, Kind0006(5))
+    sum += left(p).slot
+    sum += right(p).slot
+    cells ~{Cell of Kind0005} = {}
+    sum += count_cells(cells)
+    nest ~{{Cell of Kind0005}} = {}
+    sum += count_nested(nest)
+    return sum
+;
+
+drive0006 || -> Int:
+    sum ~= 0
+    v = Kind0006(6)
+    c = Cell(v)
+    sum += unwrap(c).slot
+    p = Pair(v, Kind0007(6))
+    sum += left(p).slot
+    sum += right(p).slot
+    cells ~{Cell of Kind0006} = {}
+    sum += count_cells(cells)
+    nest ~{{Cell of Kind0006}} = {}
+    sum += count_nested(nest)
+    return sum
+;
+
+drive0007 || -> Int:
+    sum ~= 0
+    v = Kind0007(7)
+    c = Cell(v)
+    sum += unwrap(c).slot
+    p = Pair(v, Kind0008(7))
+    sum += left(p).slot
+    sum += right(p).slot
+    cells ~{Cell of Kind0007} = {}
+    sum += count_cells(cells)
+    nest ~{{Cell of Kind0007}} = {}
+    sum += count_nested(nest)
+    return sum
+;
+
+drive0008 || -> Int:
+    sum ~= 0
+    v = Kind0008(8)
+    c = Cell(v)
+    sum += unwrap(c).slot
+    p = Pair(v, Kind0009(8))
+    sum += left(p).slot
+    sum += right(p).slot
+    cells ~{Cell of Kind0008} = {}
+    sum += count_cells(cells)
+    nest ~{{Cell of Kind0008}} = {}
+    sum += count_nested(nest)
+    return sum
+;
+
+drive0009 || -> Int:
+    sum ~= 0
+    v = Kind0009(9)
+    c = Cell(v)
+    sum += unwrap(c).slot
+    p = Pair(v, Kind0010(9))
+    sum += left(p).slot
+    sum += right(p).slot
+    cells ~{Cell of Kind0009} = {}
+    sum += count_cells(cells)
+    nest ~{{Cell of Kind0009}} = {}
+    sum += count_nested(nest)
+    return sum
+;
+
+drive0010 || -> Int:
+    sum ~= 0
+    v = Kind0010(10)
+    c = Cell(v)
+    sum += unwrap(c).slot
+    p = Pair(v, Kind0011(10))
+    sum += left(p).slot
+    sum += right(p).slot
+    cells ~{Cell of Kind0010} = {}
+    sum += count_cells(cells)
+    nest ~{{Cell of Kind0010}} = {}
+    sum += count_nested(nest)
+    return sum
+;
+
+drive0011 || -> Int:
+    sum ~= 0
+    v = Kind0011(11)
+    c = Cell(v)
+    sum += unwrap(c).slot
+    p = Pair(v, Kind0012(11))
+    sum += left(p).slot
+    sum += right(p).slot
+    cells ~{Cell of Kind0011} = {}
+    sum += count_cells(cells)
+    nest ~{{Cell of Kind0011}} = {}
+    sum += count_nested(nest)
+    return sum
+;
+
+drive0012 || -> Int:
+    sum ~= 0
+    v = Kind0012(12)
+    c = Cell(v)
+    sum += unwrap(c).slot
+    p = Pair(v, Kind0013(12))
+    sum += left(p).slot
+    sum += right(p).slot
+    cells ~{Cell of Kind0012} = {}
+    sum += count_cells(cells)
+    nest ~{{Cell of Kind0012}} = {}
+    sum += count_nested(nest)
+    return sum
+;
+
+drive0013 || -> Int:
+    sum ~= 0
+    v = Kind0013(13)
+    c = Cell(v)
+    sum += unwrap(c).slot
+    p = Pair(v, Kind0014(13))
+    sum += left(p).slot
+    sum += right(p).slot
+    cells ~{Cell of Kind0013} = {}
+    sum += count_cells(cells)
+    nest ~{{Cell of Kind0013}} = {}
+    sum += count_nested(nest)
+    return sum
+;
+
+drive0014 || -> Int:
+    sum ~= 0
+    v = Kind0014(14)
+    c = Cell(v)
+    sum += unwrap(c).slot
+    p = Pair(v, Kind0015(14))
+    sum += left(p).slot
+    sum += right(p).slot
+    cells ~{Cell of Kind0014} = {}
+    sum += count_cells(cells)
+    nest ~{{Cell of Kind0014}} = {}
+    sum += count_nested(nest)
+    return sum
+;
+
+drive0015 || -> Int:
+    sum ~= 0
+    v = Kind0015(15)
+    c = Cell(v)
+    sum += unwrap(c).slot
+    p = Pair(v, Kind0016(15))
+    sum += left(p).slot
+    sum += right(p).slot
+    cells ~{Cell of Kind0015} = {}
+    sum += count_cells(cells)
+    nest ~{{Cell of Kind0015}} = {}
+    sum += count_nested(nest)
+    return sum
+;
+
+drive0016 || -> Int:
+    sum ~= 0
+    v = Kind0016(16)
+    c = Cell(v)
+    sum += unwrap(c).slot
+    p = Pair(v, Kind0017(16))
+    sum += left(p).slot
+    sum += right(p).slot
+    cells ~{Cell of Kind0016} = {}
+    sum += count_cells(cells)
+    nest ~{{Cell of Kind0016}} = {}
+    sum += count_nested(nest)
+    return sum
+;
+
+drive0017 || -> Int:
+    sum ~= 0
+    v = Kind0017(17)
+    c = Cell(v)
+    sum += unwrap(c).slot
+    p = Pair(v, Kind0018(17))
+    sum += left(p).slot
+    sum += right(p).slot
+    cells ~{Cell of Kind0017} = {}
+    sum += count_cells(cells)
+    nest ~{{Cell of Kind0017}} = {}
+    sum += count_nested(nest)
+    return sum
+;
+
+drive0018 || -> Int:
+    sum ~= 0
+    v = Kind0018(18)
+    c = Cell(v)
+    sum += unwrap(c).slot
+    p = Pair(v, Kind0019(18))
+    sum += left(p).slot
+    sum += right(p).slot
+    cells ~{Cell of Kind0018} = {}
+    sum += count_cells(cells)
+    nest ~{{Cell of Kind0018}} = {}
+    sum += count_nested(nest)
+    return sum
+;
+
+drive0019 || -> Int:
+    sum ~= 0
+    v = Kind0019(19)
+    c = Cell(v)
+    sum += unwrap(c).slot
+    p = Pair(v, Kind0000(19))
+    sum += left(p).slot
+    sum += right(p).slot
+    cells ~{Cell of Kind0019} = {}
+    sum += count_cells(cells)
+    nest ~{{Cell of Kind0019}} = {}
+    sum += count_nested(nest)
+    return sum
+;
+
+run_generic_scaling ||:
+    io.line("generic scaling start")
+    sum ~= 0
+    sum += drive0000()
+    sum += drive0001()
+    sum += drive0002()
+    sum += drive0003()
+    sum += drive0004()
+    sum += drive0005()
+    sum += drive0006()
+    sum += drive0007()
+    sum += drive0008()
+    sum += drive0009()
+    sum += drive0010()
+    sum += drive0011()
+    sum += drive0012()
+    sum += drive0013()
+    sum += drive0014()
+    sum += drive0015()
+    sum += drive0016()
+    sum += drive0017()
+    sum += drive0018()
+    sum += drive0019()
+    io.line([: total=[sum] ])
+    io.line("generic scaling complete")
+;
+
+run_generic_scaling()
